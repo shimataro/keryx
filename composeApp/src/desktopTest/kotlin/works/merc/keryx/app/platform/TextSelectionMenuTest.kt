@@ -85,7 +85,7 @@ class TextSelectionMenuTest {
      * @return The backend, already relabelled the way [LazyNativePopup] relabels it before a show.
      */
     private fun backendFor(textManager: TextContextMenu.TextManager, macOs: Boolean): NativePopupHandle {
-        val entries = textSelectionMenuEntries(textManager, copyLabel = "コピー")
+        val entries = textSelectionMenuEntries(textManager, copyLabel = "Copy")
         return defaultPopupHandle(entries, { entries }, macOs = macOs).also { it.sync(entries) }
     }
 
@@ -101,16 +101,16 @@ class TextSelectionMenuTest {
 
     @Test
     fun theEntryCarriesTheLabelAndEnabledStateOfTheCopyAction() {
-        val entries = textSelectionMenuEntries(managerWithCopy(enabled = false), copyLabel = "コピー")
+        val entries = textSelectionMenuEntries(managerWithCopy(enabled = false), copyLabel = "Copy")
 
-        assertEquals(listOf(LeafSignature("コピー", checked = null, enabled = false)), menuSignature(entries))
+        assertEquals(listOf(LeafSignature("Copy", checked = null, enabled = false)), menuSignature(entries))
     }
 
     @Test
     fun aTextManagerWithNoCopyActionProducesNoEntries() {
         // Defensive: only a `SelectionContainer` reaches this today, and its copy action is always
         // present. An empty menu must still build rather than throw.
-        val entries = textSelectionMenuEntries(FakeTextManager(copy = null), copyLabel = "コピー")
+        val entries = textSelectionMenuEntries(FakeTextManager(copy = null), copyLabel = "Copy")
 
         assertTrue(entries.isEmpty())
     }
@@ -118,7 +118,7 @@ class TextSelectionMenuTest {
     @Test
     fun clickingCopyRunsTheSelectionsOwnCopyAction() {
         var copied = false
-        val entries = textSelectionMenuEntries(managerWithCopy(enabled = true) { copied = true }, copyLabel = "コピー")
+        val entries = textSelectionMenuEntries(managerWithCopy(enabled = true) { copied = true }, copyLabel = "Copy")
 
         assertIs<NativeMenuLeaf>(entries.single()).onClick()
 
@@ -136,7 +136,7 @@ class TextSelectionMenuTest {
         val handle = assertIs<AwtPopupHandle>(backendFor(managerWithCopy(enabled = true), macOs = true))
 
         assertEquals(1, handle.popupMenu.itemCount)
-        assertEquals("コピー", handle.popupMenu.getItem(0).label)
+        assertEquals("Copy", handle.popupMenu.getItem(0).label)
         assertTrue(handle.popupMenu.getItem(0).isEnabled)
     }
 
@@ -146,7 +146,7 @@ class TextSelectionMenuTest {
 
         assertEquals(1, handle.popupMenu.componentCount)
         val item = assertIs<JMenuItem>(handle.popupMenu.getComponent(0))
-        assertEquals("コピー", item.text)
+        assertEquals("Copy", item.text)
         assertTrue(item.isEnabled)
         // Same as every other native menu in the app: a lightweight popup would be drawn behind
         // the article reader's native WebView.
@@ -196,14 +196,14 @@ class TextSelectionMenuTest {
     fun openingTheMenuBuildsItFromTheSelectionAndShowsItWhereItWasAsked() {
         val built = mutableListOf<FakeHandle>()
         val representation = representationOver(
-            entries = { textSelectionMenuEntries(managerWithCopy(enabled = true), copyLabel = "コピー") },
+            entries = { textSelectionMenuEntries(managerWithCopy(enabled = true), copyLabel = "Copy") },
             built = built,
         )
 
         representation.showAt(12, 34)
 
         val handle = built.single()
-        assertEquals(listOf(LeafSignature("コピー", checked = null, enabled = true)), menuSignature(handle.builtFrom))
+        assertEquals(listOf(LeafSignature("Copy", checked = null, enabled = true)), menuSignature(handle.builtFrom))
         assertEquals(listOf(12 to 34), handle.shownAt)
     }
 
@@ -214,7 +214,7 @@ class TextSelectionMenuTest {
         val built = mutableListOf<FakeHandle>()
         var selectionEnabled = false
         val representation = representationOver(
-            entries = { textSelectionMenuEntries(managerWithCopy(enabled = selectionEnabled), copyLabel = "コピー") },
+            entries = { textSelectionMenuEntries(managerWithCopy(enabled = selectionEnabled), copyLabel = "Copy") },
             built = built,
         )
 
@@ -225,7 +225,7 @@ class TextSelectionMenuTest {
         assertEquals(1, built.size, "the widgets are reused rather than rebuilt for the same menu shape")
         val handle = built.single()
         assertEquals(
-            listOf(LeafSignature("コピー", checked = null, enabled = true)),
+            listOf(LeafSignature("Copy", checked = null, enabled = true)),
             menuSignature(handle.synced.last()),
         )
     }
@@ -236,7 +236,7 @@ class TextSelectionMenuTest {
         // `SelectionContainer` always offers copy — but it must not build one if it ever is.
         val built = mutableListOf<FakeHandle>()
         val representation = representationOver(
-            entries = { textSelectionMenuEntries(FakeTextManager(copy = null), copyLabel = "コピー") },
+            entries = { textSelectionMenuEntries(FakeTextManager(copy = null), copyLabel = "Copy") },
             built = built,
         )
 
@@ -249,7 +249,7 @@ class TextSelectionMenuTest {
     fun disposingReleasesTheNativeWidgets() {
         val built = mutableListOf<FakeHandle>()
         val representation = representationOver(
-            entries = { textSelectionMenuEntries(managerWithCopy(enabled = true), copyLabel = "コピー") },
+            entries = { textSelectionMenuEntries(managerWithCopy(enabled = true), copyLabel = "Copy") },
             built = built,
         )
         representation.showAt(1, 2)
