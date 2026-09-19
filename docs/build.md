@@ -244,7 +244,8 @@ directly from `snap/snapcraft.yaml`, which `dump`s the same `createDistributable
 ```bash
 ./gradlew :composeApp:createDistributable
 sudo snap install snapcraft --classic   # if not already installed
-sudo env "PATH=$PATH" snapcraft pack --destructive-mode
+platform=amd64   # arm64 on an arm64 host
+sudo env "PATH=$PATH" snapcraft pack --destructive-mode --platform "$platform"
 ```
 
 Unlike deb/rpm (see "Linux package metadata" above), `snap/snapcraft.yaml` needs no Gradle-side
@@ -257,10 +258,13 @@ exact key types).
 
 `--destructive-mode` builds directly on the host with no sandboxing, so the host itself
 must match `snap/snapcraft.yaml`'s `base: core24` (Ubuntu 24.04) and the command needs
-root access — and it can modify the host environment. CI (`release.yml`) already runs it
-in a dedicated `package-snap` job pinned to `ubuntu-24.04` — not `ubuntu-latest`, which
-would silently drift away from `base: core24` whenever GitHub retargets that label to a
-newer LTS. Bump `base:` and that `runs-on:` together. For a local build on a different
+root access — and it can modify the host environment. `platforms:` declares more than one
+entry (`amd64` and `arm64`), and destructive mode can only ever produce one snap per run, so
+`--platform` above must name the one matching the host's own architecture. CI (`release.yml`) already runs it
+in a dedicated `package-snap` job pinned to `ubuntu-24.04`/`ubuntu-24.04-arm` (one matrix
+leg per architecture — not `ubuntu-latest`, which would silently drift away from
+`base: core24` whenever GitHub retargets that label to a newer LTS). Bump `base:` and
+both `runs-on:` values together. For a local build on a different
 host, use `snapcraft pack --use-lxd` instead, which builds inside an isolated LXD
 container — this needs LXD installed, initialized, and accessible to the current user first:
 
@@ -580,34 +584,47 @@ per platform:
 ## Release (CD)
 
 `.github/workflows/release.yml` builds the packages and attaches them to the GitHub Release.
-**macOS, Linux, Windows (x86_64, plus macOS arm64), and Android (universal APK/AAB)** (cross-compilation is not
-supported, so each platform needs its own runner).
+**macOS (arm64), Linux (x86_64 and arm64), Windows (x86_64), and Android (universal APK/AAB)**
+(cross-compilation is not supported, so each architecture needs its own runner).
 
-Linux arm64 is deliberately absent from that list. The article reader's web-view library ships no
-`linux-aarch64` binary, so the reader itself cannot run there; a build made on such a machine falls
-back to a Compose-drawn simplified reader instead of freezing — see `known-issues.md`.
+Linux arm64 ships with the same caveat noted in `known-issues.md`: the article reader's web-view
+library ships no `linux-aarch64` binary, so on that architecture the reader falls back to a
+Compose-drawn simplified view instead of using the native web view (never a freeze — the fallback
+covers block structure, inline decorations, and images).
 
 Flow:
 
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Five independent jobs run in parallel:
+3. Six job definitions run in parallel — eight actual runs, since `package-linux` and `package-snap`
+   are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
+   `ubuntu-24.04`/`ubuntu-24.04-arm` respectively; the arm64 legs run `android-actions/setup-android@v3`
+   first, since `:composeApp`'s Android target needs `ANDROID_HOME` merely to configure, and the
+   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all):
 
    - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
-   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-x86_64.deb`, `Keryx-<version>-linux-x86_64.rpm` **and `Keryx-<version>-linux-x86_64.zip`**. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below).
-   - `package-snap`, a separate job so a `snapcraft` failure can never block the deb/rpm/zip job above
-     from reaching the release (see "Linux Snap package" above for why it also needs its own
-     `ubuntu-24.04`-pinned runner rather than `ubuntu-latest`).
+   - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, once per architecture, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-<arch>.deb`, `Keryx-<version>-linux-<arch>.rpm` **and `Keryx-<version>-linux-<arch>.zip`** for `<arch>` in `x86_64`, `arm64`. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). A failure on one architecture's leg (`fail-fast: false`) does not withhold the other's assets.
+   - `package-snap`, a separate job (also an `x86_64`/`arm64` matrix, `ubuntu-24.04`/`ubuntu-24.04-arm`)
+     so a `snapcraft` failure on either architecture can never block the deb/rpm/zip job above from
+     reaching the release (see "Linux Snap package" above for why it also needs its own
+     `ubuntu-24.04`-family runner rather than `ubuntu-latest`).
      - **Build and attach.** It runs
-       `sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"` against
-       `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches the
-       resulting `Keryx-<version>-linux-x86_64.snap` — unlike `.deb`/`.rpm`, this **is** attached for
+       `sudo snapcraft pack --destructive-mode --platform <platform> --output "Keryx-$VERSION-linux-<arch>.snap"`
+       against `snap/snapcraft.yaml` (after `sudo snap install snapcraft --classic`) and attaches the
+       resulting `Keryx-<version>-linux-<arch>.snap` — unlike `.deb`/`.rpm`, this **is** attached for
        pre-release tags too, since snapcraft's `version:` field isn't restricted to
-       `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is.
+       `MAJOR.MINOR.PATCH` the way jpackage's packaging metadata is. `--platform` (`amd64` or `arm64`,
+       snapcraft's own vocabulary — `<arch>` in the output filename spells it `x86_64`/`arm64` to
+       match the `.zip`/`.deb`/`.rpm` convention instead) is required as soon as `snapcraft.yaml`
+       declares more than one entry under `platforms:` (core24's replacement for the old
+       `architectures:` key): `--destructive-mode` builds directly on the unsandboxed host and
+       refuses to produce more than one snap per invocation, so each matrix leg must say which
+       declared platform it is building.
      - **Snap Store publish.** After the GitHub Release attachment, the same job also **publishes
        the snap to the Snap Store** (`snapcraft upload --release=<channel>`, gated on the
-       `SNAPCRAFT_STORE_CREDENTIALS` secret below being set at all).
+       `SNAPCRAFT_STORE_CREDENTIALS` secret below being set at all) — once per architecture, each
+       creating its own revision under that channel.
      - **Channel selection.** The channel is `edge` when the tag carries a pre-release suffix **or**
        the GitHub Release itself is marked as a pre-release, and `stable` otherwise (the deb/rpm/msi
        skip checks above key on the tag suffix alone; only the Snap Store channel also honours the

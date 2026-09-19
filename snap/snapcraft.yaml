@@ -14,6 +14,15 @@ contact: keryx@merc.works
 issues: https://github.com/shimataro/keryx/issues
 source-code: https://github.com/shimataro/keryx
 
+# core24 replaces the old `architectures:` key with `platforms:`. Declaring both here means
+# `snapcraft pack --destructive-mode` (which builds directly on the host, unsandboxed) requires an
+# explicit `--platform amd64`/`--platform arm64` to pick one — see release.yml's package-snap job,
+# which passes it per matrix leg. Each entry maps directly to a build: no cross-compilation, so
+# every platform here needs its own runner in that job.
+platforms:
+  amd64:
+  arm64:
+
 apps:
   keryx:
     extensions: [gnome]

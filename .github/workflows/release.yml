@@ -104,11 +104,21 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
 
   package-linux:
-    name: Package (Linux x86_64)
-    runs-on: ubuntu-latest
+    name: Package (Linux ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: write
+    strategy:
+      # One failing leg must not stop the other's assets from reaching the release — an arm64
+      # packaging failure, say, should not withhold the x86_64 deb/rpm/zip that already succeeded.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
 
     steps:
       - name: Checkout
@@ -151,8 +161,20 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      # :composeApp is an android.kotlin.multiplatform.library (see its `android { compileSdk }`
+      # block), so AGP needs ANDROID_HOME to resolve the *configuration* phase alone, even though
+      # this job never builds :androidApp. ubuntu-latest already ships the Android SDK, but the
+      # ubuntu-24.04-arm image used for the arm64 leg does not, so this step is load-bearing there
+      # (unlike the same step in the package-android job below, kept only as a guard against a
+      # future ubuntu-latest image change).
+      - name: Set up Android SDK
+        if: matrix.arch == 'arm64'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
       # jpackage shells out to fakeroot for .deb and rpmbuild (package "rpm") for .rpm; neither
-      # is guaranteed present on the ubuntu-latest image.
+      # is guaranteed present on the runner image.
       - name: Install Linux packaging tools
         run: sudo apt-get update && sudo apt-get install -y fakeroot rpm
 
@@ -174,8 +196,8 @@ jobs:
           GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
 
-      # ubuntu-latest runners are x86_64, so the artifact name records the architecture to leave
-      # room for an arm64 build alongside it later (same reasoning as the macOS arm64 tag).
+      # The artifact name records the architecture so the x86_64 and arm64 legs of this matrix
+      # never collide on the same release asset name (same reasoning as the macOS arm64 tag).
       - name: Rename artifacts
         id: artifact
         if: steps.version.outputs.is_prerelease != 'true'
@@ -190,8 +212,8 @@ jobs:
             echo "::error::No rpm produced under composeApp/build/compose/binaries/main/rpm."
             exit 1
           fi
-          deb_dest="Keryx-${{ steps.version.outputs.version }}-linux-x86_64.deb"
-          rpm_dest="Keryx-${{ steps.version.outputs.version }}-linux-x86_64.rpm"
+          deb_dest="Keryx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.deb"
+          rpm_dest="Keryx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.rpm"
           mv "$deb_src" "$deb_dest"
           mv "$rpm_src" "$rpm_dest"
           echo "paths=$deb_dest $rpm_dest" >> "$GITHUB_OUTPUT"
@@ -199,12 +221,12 @@ jobs:
       - name: Zip non-packaged app image
         run: |
           src="composeApp/build/compose/binaries/main/app/Keryx"
-          dest="Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip"
+          dest="Keryx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.zip"
           (cd "$(dirname "$src")" && zip -ry "$OLDPWD/$dest" "$(basename "$src")")
 
       - name: Attach to release
         run: |
-          assets=("Keryx-${{ steps.version.outputs.version }}-linux-x86_64.zip")
+          assets=("Keryx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.zip")
           if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
             assets+=(${{ steps.artifact.outputs.paths }})
           fi
@@ -219,13 +241,28 @@ jobs:
   # runner with no sandboxing, so the runner OS must match `snap/snapcraft.yaml`'s `base: core24`
   # (Ubuntu 24.04) exactly; pinning that requirement to this job alone means a future
   # `ubuntu-latest` bump doesn't silently break deb/rpm packaging along with it. Bump `base:` and
-  # this `runs-on:` together.
+  # both `runs-on:` values below together.
   package-snap:
-    name: Package + publish Snap
-    runs-on: ubuntu-24.04
+    name: Package + publish Snap (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: write
+    strategy:
+      # A Store publish failure or delay on one architecture must not hold back the other, same
+      # reasoning as package-linux's own fail-fast: false.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            # snapcraft's own platform name, passed to `--platform` below — distinct from `arch`
+            # (which matches the `.zip`/`.deb`/`.rpm` asset-naming convention elsewhere in this
+            # workflow) purely because snapcraft's own vocabulary says "amd64", not "x86_64".
+            platform: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: arm64
 
     steps:
       - name: Checkout
@@ -273,6 +310,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      # :composeApp is an android.kotlin.multiplatform.library, so AGP needs ANDROID_HOME to
+      # resolve the configuration phase alone, even though this job only ever runs
+      # createDistributable — see the identical step (and its comment) in package-linux above.
+      - name: Set up Android SDK
+        if: matrix.arch == 'arm64'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
       # snap/snapcraft.yaml's `keryx` part `dump`s this app image directly rather than rebuilding
       # anything, so createDistributable alone is enough — packageDeb/packageRpm are not needed here.
       - name: Package App image
@@ -297,10 +343,14 @@ jobs:
             echo "::error::Failed to stamp the version into snap/snapcraft.yaml."
             exit 1
           fi
-          sudo snapcraft pack --destructive-mode --output "Keryx-$VERSION-linux-x86_64.snap"
+          # --platform is required as soon as snapcraft.yaml declares more than one entry under
+          # `platforms:` (see below): core24's --destructive-mode builds directly on the host with
+          # no sandboxing, so it refuses to produce more than one snap per invocation and needs to
+          # be told which of the declared platforms this runner is building.
+          sudo snapcraft pack --destructive-mode --platform ${{ matrix.platform }} --output "Keryx-$VERSION-linux-${{ matrix.arch }}.snap"
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" "Keryx-${{ steps.version.outputs.version }}-linux-x86_64.snap" --clobber
+        run: gh release upload "$RELEASE_TAG" "Keryx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.snap" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -317,7 +367,7 @@ jobs:
             echo "SNAPCRAFT_STORE_CREDENTIALS not configured, skipping publish"
             exit 0
           fi
-          snapcraft upload --release="${{ steps.version.outputs.channel }}" "Keryx-${{ steps.version.outputs.version }}-linux-x86_64.snap"
+          snapcraft upload --release="${{ steps.version.outputs.channel }}" "Keryx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.snap"
 
   package-windows:
     name: Package (Windows x86_64)
@@ -549,6 +599,10 @@ jobs:
     name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # package-linux is now a matrix (x86_64 + arm64); `needs` waits on every matrix leg to
+    # succeed, so the page is only updated once both architectures' installers are live. Unlike
+    # package-snap (deliberately excluded below), a matrix leg failing here withholds the page
+    # update entirely, same as any other job in this list failing.
     needs:
       - package-macos
       - package-linux

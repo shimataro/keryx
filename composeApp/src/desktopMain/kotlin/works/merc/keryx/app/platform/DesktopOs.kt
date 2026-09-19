@@ -59,3 +59,21 @@ private const val KERYX_SNAP_NAME = "keryx"
  * which keys on `SNAP_NAME`, not with that unrelated install-location check).
  */
 internal val isSnap = System.getenv("SNAP_NAME") == KERYX_SNAP_NAME
+
+/** The lowercased `os.arch` system property, shared so [hostArchitecture] reads it once. */
+private val osArch = System.getProperty("os.arch")?.lowercase() ?: ""
+
+/**
+ * Maps a lowercased `os.arch` value to [HostArchitecture]. Pulled out as a pure function (rather
+ * than inlined into [hostArchitecture]) so it can be unit-tested against every JVM-reported spelling
+ * without touching the real system property.
+ */
+internal fun hostArchitectureFor(archProperty: String): HostArchitecture = when (archProperty) {
+    "amd64", "x86_64" -> HostArchitecture.X86_64
+    "aarch64", "arm64" -> HostArchitecture.ARM64
+    // 32-bit x86/arm and anything else genuinely have no matching release asset — see
+    // works.merc.keryx.app.domain.UpdateAsset.
+    else -> HostArchitecture.UNKNOWN
+}
+
+actual val hostArchitecture: HostArchitecture = hostArchitectureFor(osArch)
