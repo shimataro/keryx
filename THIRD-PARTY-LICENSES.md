@@ -35,3 +35,4 @@ its respective license.
 | AndroidX Core | Apache-2.0 | <https://github.com/androidx/androidx> |
 | AndroidX Activity | Apache-2.0 | <https://github.com/androidx/androidx> |
 | AndroidX WorkManager | Apache-2.0 | <https://github.com/androidx/androidx> |
+| Google Play services (Auth) | Android Software Development Kit License | <https://developer.android.com/studio/terms.html> |
