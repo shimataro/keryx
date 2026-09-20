@@ -72,7 +72,7 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
                 Box(modifier, contentAlignment = Alignment.Center) {
                     Text(
                         text = notice,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = bodyTextStyle(),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(16.dp),
@@ -127,7 +127,7 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
                             val fontSize = ARTICLE_BODY_FONT_SIZE.value * META_FONT_SCALE
                             Text(
                                 text = meta,
-                                style = MaterialTheme.typography.bodyMedium.copy(
+                                style = TextStyle(
                                     fontSize = fontSize.sp,
                                     lineHeight = (fontSize * ARTICLE_LINE_HEIGHT_RATIO).sp,
                                 ),
