@@ -52,6 +52,8 @@ composeApp/src/
     appmenu/   KDE Global Menu / D-Bus アプリケーションメニュー連携（AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar）— external-spec.ja.md §9 参照
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
+  androidMain/composeResources/drawable/  Android の `KeryxIcons` actual 自身のアイコンセット
+    — Material Symbols Outlined（Apache-2.0）、ベクター drawable 43 個 — 下記「アイコンセット」参照
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
@@ -739,7 +741,8 @@ KDE/GNOME 純正のダイアログ（かつサンドボックスに適合した�
 でプラットフォームごとに分割されている — 2つのターゲットが意図的に異なるアイコンセットを
 バンドルしているため。デスクトップ側の `actual` は Tabler Icons（MIT）を使用する
 （デスクトップ3OS共通で macOS 寄りの見た目に近づけるための選択。詳細は `ui-guidelines` skill）。
-Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用し、Android 自身のネイティブな
+Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用し
+（`androidMain/composeResources/drawable/` にバンドル）、Android 自身のネイティブな
 視覚言語に合わせている。`KeryxIcon(...)`（`Icon` のラッパー composable）は引き続き単一の
 `commonMain` 定義のままで、`KeryxIcons` オブジェクトが選ぶアイコンだけがプラットフォームごとに
 異なる。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合（`external-spec.md` §2 の

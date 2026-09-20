@@ -55,6 +55,8 @@ composeApp/src/
     appmenu/   KDE Global Menu / D-Bus application-menu integration (AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar) — see external-spec.md §9
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
+  androidMain/composeResources/drawable/  the Android `KeryxIcons` actual's own icon set — Material
+    Symbols Outlined (Apache-2.0), 43 vector drawables — see "Icon set" below
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
@@ -730,7 +732,8 @@ bundled Android Vector Drawable XML under `composeResources/drawable/`), and it 
 per platform since the two targets intentionally bundle different icon sets: the desktop `actual`
 uses Tabler Icons (MIT) — chosen for a thin-stroke, rounded-terminal look closer to macOS's own
 iconography than Material Design's (see the `ui-guidelines` skill for the full rationale) — while the
-Android `actual` uses Material Symbols Outlined (Apache-2.0), matching Android's own native visual
+Android `actual` uses Material Symbols Outlined (Apache-2.0), bundled under
+`androidMain/composeResources/drawable/`, matching Android's own native visual
 language. `KeryxIcon(...)` (the `Icon` wrapper composable) stays a single `commonMain` definition;
 only the `KeryxIcons` object's icon selection differs per platform. If iOS/iPadOS/macOS is ever
 rewritten as native SwiftUI (per `external-spec.md` §2's plan), that becomes a separate codebase
