@@ -569,10 +569,6 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
   一緒に消えるため、スクリーンリーダー利用者が記事間を移動する手段は
   `articleSwipeAccessibilityActions` のカスタムアクションだけになる。
 
-（本節の以前の版は、隣接ページの先読みが既読化を引き起こすことを理由に `HorizontalPager` を
-却下していた。これは誤りで — 既読化は `getArticleById` ではなく `selectArticle` にある —
-その却下は撤回した。）
-
 **ネイティブ WebView をそもそも生成できない環境**では、リーダーは記事を Compose で描画する
 フォールバックに切り替わる。`platform/NativeWebViewSupport.kt` の `isNativeWebViewSupported()` が
 ライブラリのネイティブエントリポイントを 1 回だけプローブする — ライブラリはプラットフォーム／

@@ -559,10 +559,6 @@ navigation events bypass that tree entirely —
   leaving `articleSwipeAccessibilityActions`'s custom actions as the only way a screen-reader user
   can move between articles.
 
-(An earlier version of this section rejected `HorizontalPager` on the grounds that preloading
-adjacent pages would mark them read. That was wrong — read marking lives in `selectArticle`, not in
-`getArticleById` — and the rejection has been reversed.)
-
 **Where the native web view cannot be created at all**, the reader falls back to drawing the
 article with Compose. `platform/NativeWebViewSupport.kt`'s `isNativeWebViewSupported()` probes the
 library's own native entry point once — the library ships one prebuilt binary per platform/
