@@ -63,7 +63,7 @@ private val BULLET_GLYPHS = listOf("•", "◦", "▪")
 @Composable
 internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier) {
     when (block) {
-        is ArticleBlock.Paragraph -> Text(
+        is ArticleBlock.Paragraph -> LinkText(
             text = block.text.annotated(),
             style = bodyTextStyle(),
             color = if (block.muted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
@@ -71,7 +71,7 @@ internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier
             modifier = modifier,
         )
 
-        is ArticleBlock.Caption -> Text(
+        is ArticleBlock.Caption -> LinkText(
             text = block.text.annotated(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -79,8 +79,8 @@ internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier
             modifier = modifier,
         )
 
-        is ArticleBlock.Heading -> Text(
-            block.text.annotated(),
+        is ArticleBlock.Heading -> LinkText(
+            text = block.text.annotated(),
             style = headingStyle(block.level),
             textAlign = block.align,
             modifier = modifier,
@@ -201,8 +201,8 @@ private fun FigureView(block: ArticleBlock.Figure, modifier: Modifier) {
 @Composable
 private fun DefinitionView(block: ArticleBlock.Definition, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(text = block.term.annotated(), style = bodyTextStyle().copy(fontWeight = FontWeight.Bold))
-        Text(text = block.description.annotated(), style = bodyTextStyle(), modifier = Modifier.padding(start = DEFINITION_INDENT))
+        LinkText(text = block.term.annotated(), style = bodyTextStyle().copy(fontWeight = FontWeight.Bold))
+        LinkText(text = block.description.annotated(), style = bodyTextStyle(), modifier = Modifier.padding(start = DEFINITION_INDENT))
     }
 }
 
@@ -236,7 +236,7 @@ private fun TableView(block: ArticleBlock.Table, modifier: Modifier) {
         content = {
             block.rows.forEach { row ->
                 row.cells.forEach { cell ->
-                    Text(
+                    LinkText(
                         text = cell.annotated(),
                         style = if (row.isHeader) headerStyle else cellStyle,
                         textAlign = if (row.isHeader) TextAlign.Center else null,

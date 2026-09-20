@@ -179,7 +179,7 @@ private fun ArticleTitle(title: String, titleUrl: String?, modifier: Modifier = 
             }
         }
     }
-    Text(annotated, style = style, modifier = modifier)
+    LinkText(annotated, style = style, modifier = modifier)
 }
 
 /** `bodyMedium` at the reader document's own base size (see [ARTICLE_BODY_FONT_SIZE]'s KDoc). */
