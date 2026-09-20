@@ -245,7 +245,13 @@
   デバイスが独立購読した同一フィードが別 id になっていると URL 衝突ガードにスキップされて収束しない
   （feed が収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
   [db-schema.ja.md](db-schema.ja.md) の `feeds` 節。
-- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ。`search_text` は
+- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、`content` は OR マージ
+  （`COALESCE(c.content, l.content)`）。`summary` は独立して OR マージされる**わけではない**——
+  どちらか一方に非 NULL の `content` があれば `summary` は引き継がず NULL に落とす。`content` が同じ
+  テキストをカバーする以上 `summary` は不要な残骸であり（`ArticleRepository.prepareParsed` 参照）、
+  `content` が残ったマージ後の行がどちらか片方に残っていた古い `summary` を復活させてはならないため。
+  `cached_at` は両側に値があれば新しい方を採用し、どちらか片方にしかなければその値を採用する。
+  `search_text` は
   再計算せず、勝った側の `content`/`summary` に対応するほうの、既に格納されている `search_text` を選ぶ
   （どちらの `content` が非 NULL かによる `CASE`）。削除は `deleted_at` / `deleted_updated_at` の後勝ち
   （既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より

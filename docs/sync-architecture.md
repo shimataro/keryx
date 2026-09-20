@@ -151,7 +151,12 @@ Merge SQL (`MergeSql`) key points:
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
   The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
   feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices — otherwise the URL collision guard below would skip independently-subscribed duplicates and they'd never converge (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
-- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, body is OR merge; `search_text` is not
+- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, `content` is OR merge (`COALESCE(c.content,
+  l.content)`); `summary` is *not* independently OR-merged — once either side has a non-NULL `content`, `summary` is
+  dropped to NULL rather than carried over, since it's dead weight once `content` covers the same text (see
+  `ArticleRepository.prepareParsed`) and a merged row that ends up with `content` must not resurrect a stale
+  `summary` left over on either side; `cached_at` takes the newer of the two when both sides have a value, else
+  whichever side has one. `search_text` is not
   recomputed — the merge selects whichever side's already-stored `search_text` matches the winning `content`/`summary`
   (a `CASE` on which side's `content` is non-NULL). Deletion is last-write-wins on `deleted_at` / `deleted_updated_at`
   (field-specific, like read/star), so a cache-cleanup soft-delete propagates instead of being resurrected from the
