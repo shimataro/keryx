@@ -55,7 +55,7 @@ private fun assetSuffix(kind: UpdateAssetKind, arch: HostArchitecture): String? 
  * Full-match pattern the asset name for ([kind], [arch]) must satisfy — not just the prefix/suffix
  * [selectUpdateAsset] used to check alone. [UpdateAsset.name] ends up as a path component
  * ([works.merc.keryx.app.domain.UpdateRepository]'s `updateDownloadDir`/`destPath`), so this rejects
- * anything a path shouldn't see (`/`, `\`, `..`, shell metacharacters) rather than sanitizing it —
+ * anything a path shouldn't see (`/`, `\`, shell metacharacters) rather than sanitizing it —
  * a release whose asset name doesn't match this exactly is treated the same as one with no matching
  * asset at all: [selectUpdateAsset] returns `null`, and no in-app update is offered. `null` when
  * [assetSuffix] itself is `null` (no asset exists for this [kind]/[arch] pair).

@@ -174,7 +174,7 @@ each a separate, explicit click (Updates tab button, or that menu item).
   `hostArchitecture`. Two more guards in `selectUpdateAsset` exist purely for hardening against a
   malformed or hostile release response, not for any legitimate release GitHub would ever serve: its
   `assetNamePattern` requires an **exact** match (`^Keryx-[A-Za-z0-9._+-]+<suffix>$`), rejecting
-  rather than sanitizing a name containing `/`, `\`, or `..` — load-bearing because
+  rather than sanitizing a name containing `/` or `\` — load-bearing because
   `UpdateAsset.name` becomes a path element under `<cacheDir>/updates/<version>/`, so an unchecked
   name would be a path-traversal vector; and `sizeBytes` must fall in
   `1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES` (1 GiB), guarding the free-space arithmetic above

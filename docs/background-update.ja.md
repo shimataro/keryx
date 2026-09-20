@@ -175,7 +175,7 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   （arm64 専用）と Windows（x86_64 専用）のアセット名は `hostArchitecture` に関わらず固定のまま。
   `selectUpdateAsset` にはさらに2つのガードがある——正当な GitHub リリースが返すことはあり得ないが、
   破損または悪意あるレスポンスへの耐性として存在するものだ: `assetNamePattern` は**完全一致**
-  （`^Keryx-[A-Za-z0-9._+-]+<suffix>$`）を要求し、`/`、`\`、`..` を含む名前を無害化するのではなく
+  （`^Keryx-[A-Za-z0-9._+-]+<suffix>$`）を要求し、`/` や `\` を含む名前を無害化するのではなく
   拒否する——これは `UpdateAsset.name` が `<cacheDir>/updates/<version>/` 配下のパス要素になるため、
   チェックしない名前はパストラバーサルの経路になり得るという意味で本質的な安全策である。また
   `sizeBytes` は `1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES`（1 GiB）の範囲でなければならず、
