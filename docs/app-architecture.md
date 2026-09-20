@@ -875,8 +875,8 @@ string for the same reason: the filter can change while the pane is unmounted (a
 the new filter on remount, leaving the restored position pointing into the previous filter's list
 with no reset to the top.
 
-This is why the article reader's WebView being unconditionally composed (see "Article Reader"
-below) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
+This is why the article reader's WebView being unconditionally composed (see "Article Reader
+(native WebView)" above) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
 panes — including the one hosting the WebView — stay mounted for the app's whole lifetime. `Dual`
 now never unmounts it either (the article detail pane is always one of the two shown), and only
 `Single`'s depth 2↔3 transition unmounts it, which is fine on Android (no heavyweight AWT interop
