@@ -167,7 +167,7 @@ The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
 Multiplatform source-set layout above), holds `AndroidManifest.xml`, `KeryxApplication`
 (process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
-an `ensureIndexedIfTableAbsent()` FTS backfill (the cheaper, every-process-start variant — see
+`ensureIndexedIfTableAbsent()` FTS backfill (the cheaper, every-process-start variant — see
 db-schema.md's `articles_fts` section), `startBackgroundRefresh`), and `MainActivity`
 (`setContent { App() }`, then `runAndroidStartupTasks`) — plus its own `res/` (launcher icon,
 `values/strings.xml`, `backup_rules.xml`, `data_extraction_rules.xml`), a `github`-flavor
