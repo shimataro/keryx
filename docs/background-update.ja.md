@@ -445,35 +445,42 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
 
 ## 起動時タスク（`runStartupTasks` / `runAndroidStartupTasks`）
 
-`runStartupTasks` 自体はデスクトップ専用のオーケストレーション（`desktopMain/StartupTasks.kt`）—
-macOS の translocated インストールの警告（デスクトップ固有の関心事）はこの中で行っている — だが、
-キャッシュ削除・フィード更新通知・アップデート通知・FTS 再構築（下記のステップ1・3）は commonMain の
-`domain/StartupMaintenanceTasks.kt` にあるプラットフォーム非依存の関数に委譲する。Android の
-`runAndroidStartupTasks`（前述）は同じステップ1・3の関数を直接呼び、ステップ2もデスクトップと同じ
-やり方で自ら実行する — どちらも `StartupMaintenanceTasks` の関数を経由せず、
-`CloudSession.isConnected()` でガードしたうえで `SyncRepository.sync()` を直接呼ぶ:
+共有の5ステップからなるメンテナンスシーケンス——キャッシュ削除・初回クラウド同期・フィード更新・
+アップデート確認・FTS heal——は1か所にまとまっており、commonMain の `domain/StartupMaintenanceTasks.kt`
+の `runStartupMaintenance` がそれで、プラットフォームごとに重複実装されているわけではない。デスクトップの
+`runStartupTasks`（`desktopMain/StartupTasks.kt`）はその前にデスクトップ固有の2ステップ——macOS の
+translocated インストールの警告と、前回のアプリ内アップデートインストールが残した stale な
+self-replace 成果物の掃除——を足すだけで、残りは `runStartupMaintenance` を呼ぶ。Android の
+`runAndroidStartupTasks`（前述）にはデスクトップ固有のステップに相当するものは無く、代わりに同じ
+`runStartupMaintenance` 呼び出しを `startupMaintenanceMutex` / プロセスにつき1回限りのガードで
+包むだけである（理由はそのファイル自身の KDoc を参照）:
 
 1. キャッシュ削除（`cleanUpArticleCacheIfDue`。前回から 24 時間以上経過時）。
 2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
    デスクトップは Dropbox / Google Drive / OneDrive、Android も同じ 3 種（ただし Google Drive は
    Play 開発者サービスが利用できる環境のみ）。
-3. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
-4. FTS の初回作成・未索引行の増分投入:
-   - **デスクトップ。** `FtsManager.ensureIndexed()` が担う: `application {}` の前に `runBlocking`
-     でブロックして待つ（最初のウィンドウ表示が遅れるだけで済み、かつ `main.kt` はプロセスにつき
-     一度しか走らないので許容できる）。
-   - **Android。** `KeryxApplication.onCreate` はこれを共有のアプリスコープ `CoroutineScope` 上で
-     fire-and-forget で起動する — `Application.onCreate` をブロックすると Android の全コールド
-     スタートが遅延してしまうため。完了前の短い間に検索が実行された場合は、失敗するのではなく
-     ヒット件数が少なめ（0件を含む）になるだけである。
-   - **より軽量な版を呼ぶ理由。** ここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
-     `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker`
-     を走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
-     1日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()`
-     の `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` は
-     テーブルが一度作成・バックフィルされた後は `sqlite_master` を1回引くだけの no-op になる。
-   - 新着記事の索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
-     下記の日次再構築 heal で通常どおり継続される。
+3. フィード更新とその新着記事通知（`refreshFeedsAndNotify`）。
+4. 自動/バックグラウンドのスケジュールでのアップデート確認（`checkForUpdateAndNotify`）。
+5. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
+
+この5ステップのシーケンスとは別に、FTS の初回作成・未索引行の増分投入は、`runStartupTasks` /
+`runAndroidStartupTasks` に到達するより前に、プロセスにつき一度だけ実行される:
+
+- **デスクトップ。** `FtsManager.ensureIndexed()` が担う: `application {}` の前に `runBlocking`
+  でブロックして待つ（最初のウィンドウ表示が遅れるだけで済み、かつ `main.kt` はプロセスにつき
+  一度しか走らないので許容できる）。
+- **Android。** `KeryxApplication.onCreate` はこれを共有のアプリスコープ `CoroutineScope` 上で
+  fire-and-forget で起動する — `Application.onCreate` をブロックすると Android の全コールド
+  スタートが遅延してしまうため。完了前の短い間に検索が実行された場合は、失敗するのではなく
+  ヒット件数が少なめ（0件を含む）になるだけである。
+- **より軽量な版を呼ぶ理由。** ここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
+  `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker`
+  を走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
+  1日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()`
+  の `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` は
+  テーブルが一度作成・バックフィルされた後は `sqlite_master` を1回引くだけの no-op になる。
+- 新着記事の索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
+  下記の日次再構築 heal で通常どおり継続される。
 
 ## FTS 全再構築の日次 heal（`maybeRebuildFtsIndex`）
 

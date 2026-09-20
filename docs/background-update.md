@@ -437,34 +437,41 @@ nothing changed now writes nothing and triggers no re-query.
 
 ## Startup Tasks (`runStartupTasks` / `runAndroidStartupTasks`)
 
-`runStartupTasks` itself is desktop-only orchestration (`desktopMain/StartupTasks.kt`) — it also warns
-about a macOS-translocated app install, a desktop-specific concern — but cache cleanup, feed refresh
-notification, update notification, and FTS rebuilding (steps 1 and 3 below) delegate to the
-platform-independent functions in commonMain's `domain/StartupMaintenanceTasks.kt`. Android's
-`runAndroidStartupTasks` (see above) calls the same step 1 and step 3 functions directly and runs
-step 2 itself too, the same way desktop does — both call `SyncRepository.sync()` inline, guarded on
-`CloudSession.isConnected()`, rather than through a `StartupMaintenanceTasks` function:
+The shared five-step maintenance sequence itself — cache cleanup, initial cloud sync, feed refresh,
+update check, FTS heal — lives in one place, commonMain's `domain/StartupMaintenanceTasks.kt`'s
+`runStartupMaintenance`, not duplicated per platform. Desktop's `runStartupTasks`
+(`desktopMain/StartupTasks.kt`) just adds two desktop-specific steps ahead of it — warning about a
+macOS-translocated app install, and cleaning up stale self-replace artifacts left behind by a
+previous in-app update install — then calls `runStartupMaintenance` for the rest. Android's
+`runAndroidStartupTasks` (see above) has no desktop-specific steps of its own to add; it wraps the
+same `runStartupMaintenance` call in a `startupMaintenanceMutex`/once-per-process guard instead (see
+its own KDoc for why):
 
 1. Cache cleanup (`cleanUpArticleCacheIfDue`, if 24+ hours since last run).
 2. If a cloud provider is connected, initial sync (`SyncRepository.sync(SyncTrigger.AUTOMATIC)`) —
    Dropbox / Google Drive / OneDrive on desktop; on Android the same three, with Google Drive
    only where Play services is available.
-3. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
-4. FTS initial creation + unindexed row incremental insertion:
-   - **Desktop.** `FtsManager.ensureIndexed()`, blocked on with `runBlocking` before `application {}`
-     (acceptable there, since it only delays showing the first window, and `main.kt` runs exactly
-     once per process).
-   - **Android.** `KeryxApplication.onCreate` instead launches `FtsManager.ensureIndexedIfTableAbsent()`
-     fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would
-     delay every Android cold start instead of just the first window, and a search performed in the
-     brief window before it completes just returns fewer/no hits rather than failing.
-   - **Why the cheaper variant.** `Application.onCreate` also runs on every `WorkManager` wakeup that
-     starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute
-     minimum interval, see "Android Implementation" above) — `ensureIndexed()`'s `indexMissing()`
-     call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single
-     `sqlite_master` lookup) once the table has already been created and backfilled once.
-   - New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in
-     `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
+3. Feed refresh and its new-article notification (`refreshFeedsAndNotify`).
+4. Update check on the automatic/background schedule (`checkForUpdateAndNotify`).
+5. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
+
+Separately from that five-step sequence, FTS initial creation + unindexed row incremental insertion
+runs once per process, before `runStartupTasks`/`runAndroidStartupTasks` is even reached:
+
+- **Desktop.** `FtsManager.ensureIndexed()`, blocked on with `runBlocking` before `application {}`
+  (acceptable there, since it only delays showing the first window, and `main.kt` runs exactly
+  once per process).
+- **Android.** `KeryxApplication.onCreate` instead launches `FtsManager.ensureIndexedIfTableAbsent()`
+  fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would
+  delay every Android cold start instead of just the first window, and a search performed in the
+  brief window before it completes just returns fewer/no hits rather than failing.
+- **Why the cheaper variant.** `Application.onCreate` also runs on every `WorkManager` wakeup that
+  starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute
+  minimum interval, see "Android Implementation" above) — `ensureIndexed()`'s `indexMissing()`
+  call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single
+  `sqlite_master` lookup) once the table has already been created and backfilled once.
+- New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in
+  `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
 
 ## Daily FTS Rebuild Heal (`maybeRebuildFtsIndex`)
 
