@@ -264,7 +264,11 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 ## 10. Privacy & Security
 
-- No data sent to external servers, no account registration required. Keryx's own communication
+- No server operated by the developer, no account registration required. Keryx contacts only
+  servers directly relevant to the feature in use (each subscribed feed and its favicon, GitHub
+  for update checks/downloads, and — only if connected — Dropbox/Google Drive/OneDrive), always
+  straight from the device; see [PRIVACY.md](../PRIVACY.md)'s "Network requests this app makes"
+  for the full list. Keryx's own communication
   (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched
   over plain HTTP if its URL explicitly says `http://` (or redirects there) — a feed URL with no
   scheme at all is upgraded to HTTPS, but an explicit `http://` is not overridden. Note that the
