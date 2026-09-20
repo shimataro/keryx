@@ -26,7 +26,7 @@ while (true) {
     delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動」（minutes <= 0）は 1 分ごとに起床
     if (minutes > 0) {
         refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
-                                  // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
+                                  // 有効なら NewArticleNotifier.notifyIfEnabled(...)
         sync()                    // クラウド同期
     }
     maybeRebuildFtsIndex()        // FTS 全再構築の日次 heal（後述）

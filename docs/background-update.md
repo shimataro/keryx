@@ -27,7 +27,7 @@ while (true) {
     delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // "Manual only" (minutes <= 0) wakes every minute
     if (minutes > 0) {
         refreshFeedsAndNotify()   // Refresh all feeds (ETag / Last-Modified differential fetch), then
-                                  // NewArticleNotifier.notifyBackground(newArticles(newCount)) when
+                                  // NewArticleNotifier.notifyIfEnabled(...) when
                                   // new articles arrived and notifications are enabled
         sync()                    // Cloud sync
     }
