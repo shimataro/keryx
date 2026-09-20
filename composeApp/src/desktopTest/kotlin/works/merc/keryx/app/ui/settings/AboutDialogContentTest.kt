@@ -40,6 +40,26 @@ class AboutDialogContentTest {
     }
 
     @Test
+    fun rendersPrivacyPolicyLink() = runDesktopComposeUiTest {
+        setContent { AboutDialogContent() }
+        waitForIdle()
+
+        // The privacy policy link (settings_privacy_policy) opens the locale-specific
+        // privacy_policy_url, required by Google Play's User Data policy ("a privacy policy
+        // link or text within the app itself").
+        onNodeWithText("プライバシーポリシー").assertIsDisplayed()
+    }
+
+    @Test
+    fun rendersTermsLink() = runDesktopComposeUiTest {
+        setContent { AboutDialogContent() }
+        waitForIdle()
+
+        // The terms of service link (settings_terms) opens the locale-specific terms_url.
+        onNodeWithText("利用規約").assertIsDisplayed()
+    }
+
+    @Test
     fun licensesUrlPointsAtTheDefaultBranchNotAHardcodedName() {
         // The repository's default branch is not necessarily named "master" (this project's is
         // "v0"), so a hardcoded branch name in the link would 404 once it diverges. "HEAD" always

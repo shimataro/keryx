@@ -19,10 +19,14 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.common_ok
+import works.merc.keryx.app.resources.privacy_policy_url
 import works.merc.keryx.app.resources.settings_licenses
+import works.merc.keryx.app.resources.settings_privacy_policy
 import works.merc.keryx.app.resources.settings_project_page
+import works.merc.keryx.app.resources.settings_terms
 import works.merc.keryx.app.resources.settings_version
 import works.merc.keryx.app.resources.settings_website
+import works.merc.keryx.app.resources.terms_url
 import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 
@@ -80,6 +84,16 @@ internal fun AboutDialogContent() {
         LinkRow(
             label = stringResource(Res.string.settings_licenses),
             url = LICENSES_URL,
+        )
+        Spacer(Modifier.height(4.dp))
+        LinkRow(
+            label = stringResource(Res.string.settings_privacy_policy),
+            url = stringResource(Res.string.privacy_policy_url),
+        )
+        Spacer(Modifier.height(4.dp))
+        LinkRow(
+            label = stringResource(Res.string.settings_terms),
+            url = stringResource(Res.string.terms_url),
         )
         // Extra breathing room before the shared button row so the OK button doesn't feel crammed.
         Spacer(Modifier.height(8.dp))
