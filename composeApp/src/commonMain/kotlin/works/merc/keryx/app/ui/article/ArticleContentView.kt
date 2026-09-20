@@ -30,6 +30,7 @@ import works.merc.keryx.app.platform.NativeTextSelectionContextMenu
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_reader_simple_notice
+import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 /** `.article-title { margin: 0 0 4px }` — a fixed physical gap, not em-relative (see ArticleTextStyles.kt). */
 private val TITLE_BOTTOM_MARGIN = 4.dp
@@ -177,7 +178,7 @@ private fun ArticleTitle(title: String, titleUrl: String?, modifier: Modifier = 
     // title's look alone too (`.article-title a { color: inherit; text-decoration: none }`).
     val annotated = remember(title, titleUrl) {
         buildAnnotatedString {
-            withLink(LinkAnnotation.Clickable(tag = titleUrl, linkInteractionListener = { BrowserOpener.open(titleUrl) })) {
+            withLink(LinkAnnotation.Clickable(tag = titleUrl, linkInteractionListener = { if (isHttpOrHttpsUrl(titleUrl)) BrowserOpener.open(titleUrl) })) {
                 append(title)
             }
         }

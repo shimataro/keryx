@@ -35,6 +35,7 @@ import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.menu_copy_link_address
 import works.merc.keryx.app.resources.menu_open_link
+import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 /**
  * A [Text] wrapper that adds a hover tooltip showing link URLs and a context menu
@@ -70,7 +71,7 @@ internal fun LinkText(
                 listOf(
                     NativeMenuItem(
                         label = menuOpenLink,
-                        onClick = { BrowserOpener.open(url) },
+                        onClick = { if (isHttpOrHttpsUrl(url)) BrowserOpener.open(url) },
                     ),
                     NativeMenuItem(
                         label = menuCopyLinkAddress,

@@ -53,6 +53,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_embed_open
 import works.merc.keryx.app.resources.menu_open_link
 import works.merc.keryx.app.ui.common.FlatTonalButton
+import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 private val QUOTE_BAR_WIDTH = 3.dp
 private val NESTED_SPACING = 6.dp
@@ -189,8 +190,10 @@ private fun PictureView(block: ArticleBlock.Picture, modifier: Modifier = Modifi
     }
     val imageModifier = modifier.fillMaxWidth()
     val linkedModifier = block.link?.let { link ->
-        imageModifier
-            .clickable(onClickLabel = stringResource(Res.string.menu_open_link)) { BrowserOpener.open(link) }
+        if (isHttpOrHttpsUrl(link)) {
+            imageModifier
+                .clickable(onClickLabel = stringResource(Res.string.menu_open_link)) { BrowserOpener.open(link) }
+        } else imageModifier
     } ?: imageModifier
     AsyncImage(
         model = block.src,
@@ -299,7 +302,7 @@ private fun TableView(block: ArticleBlock.Table, modifier: Modifier) {
 @Composable
 private fun EmbedView(block: ArticleBlock.Embed, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        FlatTonalButton(onClick = { BrowserOpener.open(block.url) }) {
+        FlatTonalButton(onClick = { if (isHttpOrHttpsUrl(block.url)) BrowserOpener.open(block.url) }) {
             Text(stringResource(Res.string.article_embed_open))
         }
         Text(
@@ -358,7 +361,7 @@ private fun ArticleInline.buildInlineString(linkColor: Color, baseFontSizeSp: Fl
             // being forced to the theme's link color; the underline stays regardless, since that
             // comes from the UA default `text-decoration` on `<a>`, which the reader's CSS never
             // overrides either.
-            withLink(LinkAnnotation.Clickable(tag = link, linkInteractionListener = { BrowserOpener.open(link) })) {
+            withLink(LinkAnnotation.Clickable(tag = link, linkInteractionListener = { if (isHttpOrHttpsUrl(link)) BrowserOpener.open(link) })) {
                 val linkStyle = if (span.color != null) style else style.copy(color = linkColor)
                 withStyle(linkStyle) { append(span.text) }
             }
