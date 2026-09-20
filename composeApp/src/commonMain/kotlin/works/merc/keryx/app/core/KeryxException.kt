@@ -54,10 +54,6 @@ enum class UpdateStage { CHECK, DOWNLOAD, VERIFY, INSTALL }
  * treatment [works.merc.keryx.app.domain.NotificationCenter] already gives [SyncConflictException]. */
 class UpdateException(val stage: UpdateStage, message: String) : KeryxException(message)
 
-// --- User input ---
-
-class InvalidFeedUrlException(message: String) : KeryxException(message)
-
 enum class DiscoveredFeedType { Rss, Atom }
 
 /** A feed link discovered on an HTML page during subscription. */
