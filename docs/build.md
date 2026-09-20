@@ -597,11 +597,14 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Six job definitions run in parallel — eight actual runs, since `package-linux` and `package-snap`
-   are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
+3. Six job definitions in total, five of which (`package-macos`, `package-linux`, `package-snap`,
+   `package-windows`, `package-android`) run in parallel — seven actual runs, since `package-linux`
+   and `package-snap` are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
    `ubuntu-24.04`/`ubuntu-24.04-arm` respectively; the arm64 legs run `android-actions/setup-android@v3`
    first, since `:composeApp`'s Android target needs `ANDROID_HOME` merely to configure, and the
-   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all):
+   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all). The sixth,
+   `deploy-pages`, is gated on the other four non-Snap jobs and so is not part of that parallel set
+   (eight actual runs in total; see below):
 
    - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, once per architecture, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-<arch>.deb`, `Keryx-<version>-linux-<arch>.rpm` **and `Keryx-<version>-linux-<arch>.zip`** for `<arch>` in `x86_64`, `arm64`. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). A failure on one architecture's leg (`fail-fast: false`) does not withhold the other's assets.

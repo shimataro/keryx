@@ -611,12 +611,14 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. ジョブ定義は6つだが、実行数は8つになる — `package-linux` と `package-snap` はそれぞれ
-   `x86_64`/`arm64` の matrix になっているため（前者は `ubuntu-latest`/`ubuntu-24.04-arm`、
-   後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは先に
-   `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
+3. ジョブ定義は全部で6つ、そのうち並列に走るのは5つ（`package-macos`、`package-linux`、
+   `package-snap`、`package-windows`、`package-android`）——実行数は7つになる。`package-linux` と
+   `package-snap` はそれぞれ `x86_64`/`arm64` の matrix になっているため（前者は
+   `ubuntu-latest`/`ubuntu-24.04-arm`、後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは
+   先に `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
    *設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは
-   `ubuntu-latest` と違って Android SDK を同梱していないため）:
+   `ubuntu-latest` と違って Android SDK を同梱していないため）。6つ目の `deploy-pages` は他の
+   Snap 以外の4ジョブにゲートされておりこの並列集合には含まれない（合計の実行数は8つ。後述）:
 
    - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - Linux ランナーで（アーキテクチャごとに、jpackage 用の `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`x86_64`・`arm64` それぞれについて `Keryx-<version>-linux-<arch>.deb` と `Keryx-<version>-linux-<arch>.rpm` に加えて **`Keryx-<version>-linux-<arch>.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。片方のアーキテクチャの失敗（`fail-fast: false`）はもう片方の成果物を道連れにしない。
