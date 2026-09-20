@@ -328,7 +328,8 @@ private fun ArticleInline.buildInlineString(linkColor: Color, baseFontSizeSp: Fl
                 InlineBaseline.Normal -> null
             },
             color = span.color ?: Color.Unspecified,
-            background = if (span.highlight) HIGHLIGHT_COLOR else (span.background ?: Color.Unspecified),
+            background = span.background
+                ?: if (span.highlight) HIGHLIGHT_COLOR else Color.Unspecified,
         )
         val link = span.link
         if (link == null) {
