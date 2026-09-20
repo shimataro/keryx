@@ -1,11 +1,16 @@
 package works.merc.keryx.app.ui.article
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+
 /** Where an inline run sits relative to the baseline — `<sub>`/`<sup>`. */
 internal enum class InlineBaseline { Normal, Sub, Super }
 
 /**
  * A run of text sharing one set of inline decorations. [link], when non-null, is an
- * already-resolved absolute URL.
+ * already-resolved absolute URL. [color]/[background] come from the element's own `style=""`
+ * attribute (see [InlineCss]) — see [InlineStyle]'s KDoc for why these are trusted at face value
+ * even against the app's own theme.
  */
 internal data class InlineSpan(
     val text: String,
@@ -17,6 +22,8 @@ internal data class InlineSpan(
     val highlight: Boolean = false,
     val sizeScale: Float = 1f,
     val baseline: InlineBaseline = InlineBaseline.Normal,
+    val color: Color? = null,
+    val background: Color? = null,
     val link: String? = null,
 )
 
@@ -27,9 +34,9 @@ internal data class ArticleInline(val spans: List<InlineSpan>) {
 
 /** A block-level piece of an article, in the order it appears. */
 internal sealed interface ArticleBlock {
-    data class Paragraph(val text: ArticleInline) : ArticleBlock
-    data class Caption(val text: ArticleInline) : ArticleBlock
-    data class Heading(val level: Int, val text: ArticleInline) : ArticleBlock
+    data class Paragraph(val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
+    data class Caption(val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
+    data class Heading(val level: Int, val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
     data class Bullets(val ordered: Boolean, val items: List<List<ArticleBlock>>) : ArticleBlock
     data class Quote(val children: List<ArticleBlock>) : ArticleBlock
     data class Code(val text: String) : ArticleBlock
@@ -51,4 +58,32 @@ internal data class ArticleContent(
     val meta: String? = null,
     val blocks: List<ArticleBlock> = emptyList(),
     val centeredNotice: String? = null,
+)
+
+/**
+ * Decorations in force at a point in the inline tree, inherited by nested elements. [color]/
+ * [background]/[sizeScale]/[bold]/[underline] can be set either by a tag (`<b>`, `<mark>`, …) or
+ * by that element's own `style=""` attribute (see [InlineCss]) — the two are merged, with `style`
+ * taking precedence since it is the more specific of the two (matching CSS's own cascade: an
+ * inline `style` attribute always wins over a UA-default tag mapping).
+ *
+ * A feed's own inline color/background is honored even against the app's dark theme (e.g.
+ * `color:#000` stays black text on a dark background) — this matches what the WebView reader
+ * itself does: its `!important` rules only cover the reader's *chrome* (`.article-title`,
+ * `.article-meta`, …), never a generic `<span style="color:...">` inside the body, so an inline
+ * style there already beats the reader's own theme colors in the real WebView too. Reproducing
+ * that here is a deliberate fidelity choice, not an oversight.
+ */
+internal data class InlineStyle(
+    val bold: Boolean = false,
+    val italic: Boolean = false,
+    val code: Boolean = false,
+    val strikethrough: Boolean = false,
+    val underline: Boolean = false,
+    val highlight: Boolean = false,
+    val sizeScale: Float = 1f,
+    val baseline: InlineBaseline = InlineBaseline.Normal,
+    val color: Color? = null,
+    val background: Color? = null,
+    val link: String? = null,
 )

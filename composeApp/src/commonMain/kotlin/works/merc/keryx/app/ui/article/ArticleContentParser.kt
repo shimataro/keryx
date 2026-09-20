@@ -1,5 +1,7 @@
 package works.merc.keryx.app.ui.article
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.nodes.Element
 import com.fleeksoft.ksoup.nodes.Node
@@ -18,7 +20,7 @@ private val DROPPED_TAGS = setOf("script", "style", "link", "noscript", "templat
  */
 private val FORCED_BLOCK_TAGS = setOf(
     "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "blockquote", "pre", "img", "table",
-    "figcaption", "hr", "iframe", "embed", "object", "video", "audio",
+    "figcaption", "hr", "iframe", "embed", "object", "video", "audio", "center",
 )
 
 /**
@@ -102,10 +104,18 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
         if (tag in FORCED_BLOCK_TAGS) {
             flushPending()
             when (tag) {
-                "p" -> inlineBlock(node, base)?.let { blocks += ArticleBlock.Paragraph(it) }
-                "figcaption" -> inlineBlock(node, base)?.let { blocks += ArticleBlock.Caption(it) }
-                "h1", "h2", "h3", "h4", "h5", "h6" ->
-                    inlineBlock(node, base)?.let { blocks += ArticleBlock.Heading(tag.substring(1).toInt(), it) }
+                "p" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
+                    blocks += ArticleBlock.Paragraph(it, align = resolveBlockAlign(node))
+                }
+                "figcaption" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
+                    // A caption defaults to centered under its picture unless the markup says
+                    // otherwise — the reader document never sets this itself, so there is nothing
+                    // this would override.
+                    blocks += ArticleBlock.Caption(it, align = resolveBlockAlign(node) ?: TextAlign.Center)
+                }
+                "h1", "h2", "h3", "h4", "h5", "h6" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
+                    blocks += ArticleBlock.Heading(tag.substring(1).toInt(), it, align = resolveBlockAlign(node))
+                }
                 "ul", "ol" -> blocks += bullets(node, base, ordered = tag == "ol")
                 "blockquote" -> parseBlocks(node, base).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Quote(it) }
                 // wholeText(), not text(): a code block's own line breaks and indentation are its content.
@@ -114,6 +124,10 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
                 "table" -> table(node, base)?.let { blocks += it }
                 "iframe", "embed", "object", "video", "audio" -> embed(node, base)?.let { blocks += it }
                 "hr" -> blocks += ArticleBlock.Rule
+                // <center> has no decoration of its own beyond forcing every block under it to
+                // center — applied as a post-pass rather than threaded through parseBlocks, since
+                // only three block kinds actually carry an align field.
+                "center" -> blocks += parseBlocks(node, base).map(::forceCenterAlign)
             }
             continue
         }
@@ -132,21 +146,35 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
 }
 
 /** The inline content of [element] as one block, or null when it carries no visible text. */
-private fun inlineBlock(element: Element, base: String): ArticleInline? =
-    ArticleInline(inlineSpans(element, base, InlineStyle())).trimEdges().takeIf { !it.isBlank }
+private fun inlineBlock(element: Element, base: String, baseStyle: InlineStyle = InlineStyle()): ArticleInline? =
+    ArticleInline(inlineSpans(element, base, baseStyle)).trimEdges().takeIf { !it.isBlank }
 
-/** Decorations in force at a point in the inline tree, inherited by nested elements. */
-private data class InlineStyle(
-    val bold: Boolean = false,
-    val italic: Boolean = false,
-    val code: Boolean = false,
-    val strikethrough: Boolean = false,
-    val underline: Boolean = false,
-    val highlight: Boolean = false,
-    val sizeScale: Float = 1f,
-    val baseline: InlineBaseline = InlineBaseline.Normal,
-    val link: String? = null,
-)
+/** [element]'s own `style=""` attribute as a starting [InlineStyle], for a tag with no decoration of its own. */
+private fun blockBaseStyle(element: Element): InlineStyle {
+    val style = element.attr("style")
+    return if (style.isBlank()) InlineStyle() else InlineStyle().mergedWithCss(style)
+}
+
+/** [element]'s own text alignment, from `style="text-align:..."` first, then the deprecated `align=""`. */
+private fun resolveBlockAlign(element: Element): TextAlign? {
+    InlineCss.parseDeclarations(element.attr("style"))["text-align"]?.let { InlineCss.parseTextAlign(it) }?.let { return it }
+    return when (element.attr("align").trim().lowercase()) {
+        "center" -> TextAlign.Center
+        "right" -> TextAlign.End
+        "left" -> TextAlign.Start
+        "justify" -> TextAlign.Justify
+        else -> null
+    }
+}
+
+/** Forces every block under a `<center>` to center, unless it already names its own alignment. */
+private fun forceCenterAlign(block: ArticleBlock): ArticleBlock = when (block) {
+    is ArticleBlock.Paragraph -> if (block.align == null) block.copy(align = TextAlign.Center) else block
+    is ArticleBlock.Caption -> if (block.align == null) block.copy(align = TextAlign.Center) else block
+    is ArticleBlock.Heading -> if (block.align == null) block.copy(align = TextAlign.Center) else block
+    is ArticleBlock.Quote -> block.copy(children = block.children.map(::forceCenterAlign))
+    else -> block
+}
 
 private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<InlineSpan> = buildList {
     for (child in node.childNodes()) {
@@ -162,6 +190,8 @@ private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<Inli
                     highlight = style.highlight,
                     sizeScale = style.sizeScale,
                     baseline = style.baseline,
+                    color = style.color,
+                    background = style.background,
                     link = style.link,
                 ),
             )
@@ -186,21 +216,30 @@ private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<Inli
     }
 }
 
-private fun InlineStyle.extendedBy(tag: String, element: Element, base: String): InlineStyle = when (tag) {
-    "b", "strong" -> copy(bold = true)
-    "i", "em", "cite", "q" -> copy(italic = true)
-    "code", "kbd", "samp", "var", "tt" -> copy(code = true)
-    "s", "del", "strike" -> copy(strikethrough = true)
-    "u", "ins" -> copy(underline = true)
-    "mark" -> copy(highlight = true)
-    "small" -> copy(sizeScale = sizeScale * 0.83f)
-    "big" -> copy(sizeScale = sizeScale * 1.2f)
-    "sub" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Sub)
-    "sup" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Super)
-    // An unresolvable href leaves the text in place without a link, rather than offering a tap
-    // that could go nowhere.
-    "a" -> copy(link = resolveAttr(element, "href", base) ?: link)
-    else -> this
+/**
+ * [tag]'s UA-default decoration mapping, then [element]'s own `style=""` merged on top (matching
+ * CSS's cascade — an inline style always wins over a tag's own default look). See [InlineStyle]'s
+ * KDoc for why a feed's own colors are trusted even against the app's theme.
+ */
+private fun InlineStyle.extendedBy(tag: String, element: Element, base: String): InlineStyle {
+    val tagStyle = when (tag) {
+        "b", "strong" -> copy(bold = true)
+        "i", "em", "cite", "q" -> copy(italic = true)
+        "code", "kbd", "samp", "var", "tt" -> copy(code = true)
+        "s", "del", "strike" -> copy(strikethrough = true)
+        "u", "ins" -> copy(underline = true)
+        "mark" -> copy(highlight = true)
+        "small" -> copy(sizeScale = sizeScale * 0.83f)
+        "big" -> copy(sizeScale = sizeScale * 1.2f)
+        "sub" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Sub)
+        "sup" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Super)
+        // An unresolvable href leaves the text in place without a link, rather than offering a
+        // tap that could go nowhere.
+        "a" -> copy(link = resolveAttr(element, "href", base) ?: link)
+        else -> this
+    }
+    val style = element.attr("style")
+    return if (style.isBlank()) tagStyle else tagStyle.mergedWithCss(style)
 }
 
 private fun bullets(element: Element, base: String, ordered: Boolean): List<ArticleBlock> {

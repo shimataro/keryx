@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
@@ -57,16 +58,22 @@ private val BULLET_MARKER_WIDTH = 24.dp
 @Composable
 internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier) {
     when (block) {
-        is ArticleBlock.Paragraph -> Text(block.text.annotated(), style = bodyTextStyle(), modifier = modifier)
+        is ArticleBlock.Paragraph -> Text(block.text.annotated(), style = bodyTextStyle(), textAlign = block.align, modifier = modifier)
 
         is ArticleBlock.Caption -> Text(
             text = block.text.annotated(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = block.align,
             modifier = modifier,
         )
 
-        is ArticleBlock.Heading -> Text(block.text.annotated(), style = headingStyle(block.level), modifier = modifier)
+        is ArticleBlock.Heading -> Text(
+            block.text.annotated(),
+            style = headingStyle(block.level),
+            textAlign = block.align,
+            modifier = modifier,
+        )
 
         is ArticleBlock.Bullets -> BulletsView(block, modifier)
 
@@ -220,18 +227,22 @@ private fun ArticleInline.buildInlineString(linkColor: Color, baseFontSizeSp: Fl
                 InlineBaseline.Sub -> BaselineShift.Subscript
                 InlineBaseline.Normal -> null
             },
-            background = if (span.highlight) HIGHLIGHT_COLOR else Color.Unspecified,
+            color = span.color ?: Color.Unspecified,
+            background = if (span.highlight) HIGHLIGHT_COLOR else (span.background ?: Color.Unspecified),
         )
         val link = span.link
         if (link == null) {
             withStyle(style) { append(span.text) }
         } else {
             // Every tap here is unambiguously a link tap, so there is none of the web view's
-            // request-interception guesswork — just open the browser.
+            // request-interception guesswork — just open the browser. A link's own inline color
+            // (rare, but a real CSS cascade winner — see InlineStyle's KDoc) is kept instead of
+            // being forced to the theme's link color; the underline stays regardless, since that
+            // comes from the UA default `text-decoration` on `<a>`, which the reader's CSS never
+            // overrides either.
             withLink(LinkAnnotation.Clickable(tag = link, linkInteractionListener = { BrowserOpener.open(link) })) {
-                withStyle(style.copy(color = linkColor, textDecoration = TextDecoration.Underline)) {
-                    append(span.text)
-                }
+                val linkStyle = if (span.color != null) style else style.copy(color = linkColor, textDecoration = TextDecoration.Underline)
+                withStyle(linkStyle) { append(span.text) }
             }
         }
     }

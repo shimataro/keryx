@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -268,5 +269,30 @@ class ArticleContentParserTest {
 
         assertTrue(spans.any { it.text == "2" && it.baseline == InlineBaseline.Sub })
         assertTrue(spans.any { it.text == "3" && it.baseline == InlineBaseline.Super })
+    }
+
+    @Test
+    fun honorsInlineStyleColorSizeAndWeight() {
+        val spans = (parseBody("""<p><span style="color:#ff0000; font-size:2em; font-weight:bold">red</span></p>""").single() as ArticleBlock.Paragraph)
+            .text.spans
+
+        val span = spans.single { it.text == "red" }
+        assertEquals(Color(0xFF, 0x00, 0x00), span.color)
+        assertEquals(2.0f, span.sizeScale)
+        assertTrue(span.bold)
+    }
+
+    @Test
+    fun honorsBlockLevelTextAlign() {
+        val paragraph = parseBody("""<p style="text-align:center">centered</p>""").single() as ArticleBlock.Paragraph
+        assertEquals(TextAlign.Center, paragraph.align)
+    }
+
+    @Test
+    fun centerTagForcesAlignOnItsBlocks() {
+        val blocks = parseBody("<center><p>a</p><h2>b</h2></center>")
+
+        assertEquals(TextAlign.Center, (blocks[0] as ArticleBlock.Paragraph).align)
+        assertEquals(TextAlign.Center, (blocks[1] as ArticleBlock.Heading).align)
     }
 }
