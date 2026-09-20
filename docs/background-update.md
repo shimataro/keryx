@@ -241,7 +241,11 @@ each a separate, explicit click (Updates tab button, or that menu item).
   still match before treating a fresh `Available` status as "the same download already in hand" —
   otherwise a release rebuilt under the same tag (a failed upload redone by hand) could hand a
   stale, already-verified file to the installer instead of fetching the rebuilt one.
-- **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
+- **Downloading.** Before fetching a single byte, `hasEnoughFreeSpaceForUpdate` (`UpdateRepository.kt`)
+  checks the cache directory's usable space against the asset's size times `REQUIRED_FREE_SPACE_MULTIPLE`
+  (3, for headroom); if it doesn't clear that bar the state goes straight to
+  `Failed(UpdateException(UpdateStage.DOWNLOAD, "Not enough free disk space"))` with no network request
+  made at all. `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
   has no redirect plugin at all) against a small host allowlist — exact-match `github.com` and
   `api.github.com` (where the Releases API itself answers), plus a leading-dot-required suffix
   match against `.githubusercontent.com` (the signed-asset redirect target, e.g.

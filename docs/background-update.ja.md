@@ -245,7 +245,11 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   扱い続ける条件に、バージョンだけでなくアセットの digest 一致も要求するようになった——さもないと、
   同じタグの下でリリースが作り直された場合（手作業でのアップロードやり直しなど）、古い、
   検証済みのファイルをインストーラーに渡してしまい、作り直された方を取りに行かなくなる。
-- **ダウンロード。** `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
+- **ダウンロード。** 1バイトも取得する前に、`hasEnoughFreeSpaceForUpdate`（`UpdateRepository.kt`）が
+  キャッシュディレクトリの空き容量を、アセットサイズに `REQUIRED_FREE_SPACE_MULTIPLE`（余裕を見て 3）を
+  掛けた値と比較する。これを満たさなければ、ネットワークリクエストを一切行わずに
+  `Failed(UpdateException(UpdateStage.DOWNLOAD, "Not enough free disk space"))` へ直行する。
+  `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
   クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist——
   完全一致の `github.com` と `api.github.com`（Releases API 自身が応答するホスト）、および
   先頭ドット必須のサフィックス一致 `.githubusercontent.com`（署名付きアセットのリダイレクト先。
