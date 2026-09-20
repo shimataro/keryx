@@ -125,7 +125,11 @@ internal object InlineCss {
         }
     }
 
-    fun isItalic(value: String): Boolean = value.trim().lowercase().let { it == "italic" || it == "oblique" }
+    fun parseItalic(value: String): Boolean? = when (value.trim().lowercase()) {
+        "italic", "oblique" -> true
+        "normal" -> false
+        else -> null
+    }
 
     fun parseTextDecoration(value: String): TextDecoration? {
         val v = value.trim().lowercase()
@@ -201,7 +205,9 @@ internal fun InlineStyle.mergedWithCss(style: String): InlineStyle {
     declarations["background-color"]?.let { InlineCss.parseColor(it) }?.let { result = result.copy(background = it) }
     declarations["font-size"]?.let { InlineCss.parseLengthScale(it) }?.let { result = result.copy(sizeScale = it) }
     declarations["font-weight"]?.let { InlineCss.parseFontWeight(it) }?.let { result = result.copy(bold = it >= FontWeight.Bold) }
-    declarations["font-style"]?.let { if (InlineCss.isItalic(it)) result = result.copy(italic = true) }
+    declarations["font-style"]?.let(InlineCss::parseItalic)?.let {
+        result = result.copy(italic = it)
+    }
     declarations["text-decoration"]?.let { raw ->
         InlineCss.parseTextDecoration(raw)?.let { decoration ->
             result = result.copy(
