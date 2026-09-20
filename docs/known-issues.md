@@ -715,9 +715,9 @@ becomes a button that opens it externally. Its type scale and block margins are 
 the document's own UA-default sizing (`ArticleTextStyles.kt`), not this app's `MaterialTheme
 .typography` — see "Article Reader (native WebView)" in `app-architecture.md` for the reasoning.
 
-`-Dkeryx.reader.webview=false` forces the fallback on any desktop machine — which is the only
-practical way to work on its appearance, since it otherwise appears on no platform this project
-builds on. `-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library
+`-Dkeryx.reader.webview=false` forces the fallback on any desktop machine — the practical way to
+work on its appearance on machines where the native web view is available. Linux arm64 uses the
+fallback by default because no native web view is available for that target. `-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library
 upgrade ever renames the probed class and turns the probe into a permanent false negative (that
 case logs a distinct warning). Both properties are read only by the desktop (JVM) `actual`
 (`NativeWebViewSupport.desktop.kt`), relayed there from `./gradlew :composeApp:run`'s own JVM by a

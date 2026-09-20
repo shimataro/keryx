@@ -722,8 +722,9 @@ UA 既定の等幅スケール（`ArticleTextStyles.kt`）から導く——理�
 Reader (native WebView)」を参照。
 
 `-Dkeryx.reader.webview=false` を渡すと任意のデスクトップ環境でフォールバックを強制できる。
-本プロジェクトがビルドできるどのプラットフォームでも通常は発動しない経路なので、見た目を作り込む
-には事実上これしか手段がない。逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。
+ネイティブ WebView が利用できる環境で見た目を作り込むには事実上これが最も手軽な手段である。
+なお Linux arm64 はネイティブ WebView がないため、デフォルトでフォールバックが使われる。
+逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。
 ライブラリ更新でプローブ対象のクラス名が変わり、プローブが恒常的な偽陰性になった場合に効く（その
 ケースは専用の警告をログに出す）。どちらのプロパティもデスクトップ（JVM）側の `actual`
 （`NativeWebViewSupport.desktop.kt`）でしか読まれず、`./gradlew :composeApp:run` 自身の JVM から
