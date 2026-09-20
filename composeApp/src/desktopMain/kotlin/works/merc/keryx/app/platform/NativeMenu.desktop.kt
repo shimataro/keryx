@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
@@ -481,6 +482,7 @@ internal class LazyNativePopup(
 actual fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,
     onOpen: () -> Unit,
+    hitTest: ((Offset) -> Boolean)?,
 ): Modifier {
     val window = LocalNativeWindow.current
     val density = LocalDensity.current
@@ -513,6 +515,8 @@ actual fun Modifier.nativeContextMenu(
                         event.buttons.isSecondaryPressed &&
                         event.changes.none { it.isConsumed }
                     ) {
+                        val localPosition = event.changes.first().position
+                        if (hitTest?.invoke(localPosition) == false) continue
                         event.changes.forEach { it.consume() }
                         currentOnOpen()
                         val entries = currentItems()

@@ -68,6 +68,7 @@ import works.merc.keryx.app.ui.i18n.uncheckedStateDescription
 actual fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,
     onOpen: () -> Unit,
+    hitTest: ((Offset) -> Boolean)?,
 ): Modifier {
     var expanded by remember { mutableStateOf(false) }
     var menuItems by remember { mutableStateOf<List<NativeMenuEntry>>(emptyList()) }
@@ -96,6 +97,9 @@ actual fun Modifier.nativeContextMenu(
                 }
             } == null
             if (stillDownAtTimeout) {
+                if (hitTest?.invoke(down.position) == false) {
+                    return@awaitEachGesture
+                }
                 val resolvedItems = currentItems()
                 if (resolvedItems.isNotEmpty()) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)

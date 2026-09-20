@@ -763,6 +763,32 @@ clamping CSS to it.
 When the leading half is optional, the separator travels with the **trailing** `Text`
 (`" · $timestamp"`), so it can never dangle after an ellipsized or absent leading value.
 
+## Compose fallback article reader (no native web view)
+
+`ui/article/ArticleContentView.kt` + `ArticleBlockViews.kt` (the reader used where no native web
+view can be created — see "Article Reader (native WebView)" in `app-architecture.md`) is the one
+place in `ui/article/` where reaching for `MaterialTheme.typography` is *wrong*. This reader is
+reconstructing a browser's rendering of the article — not this app's own UI chrome — so its type
+scale and block margins are plain functions of the article document's own UA-default sizing
+(`ArticleTextStyles.kt`: heading ratios and block margins as multiples of the document's own base
+size, converted through `sp` so they scale with the font-size setting the same way the WebView's
+`font-size: N%` does), not this app's `bodyMedium`/`headlineSmall`/etc. scale. Basing a heading or
+body style on `MaterialTheme.typography` here would leave the fallback's text visibly smaller (M3's
+14sp default vs. the WebView's 16px) and its heading ratios wrong relative to the *article*, even
+though it would look perfectly normal by this app's own UI conventions elsewhere.
+
+A handful of decorations are the deliberate exception — kept as this app's own choice rather than
+reverted to a browser's plainer UA default: the blockquote's vertical bar, the code block's tinted
+background, and the table's row rule. The table's column widths, by contrast, are measured from
+content via a custom `Layout` rather than fixed, so a narrow or wide column doesn't waste space or
+clip — see that composable's own KDoc before changing its cell/row index math.
+
+A feed's own `style=""` attribute is honored (color, size, weight, decoration, `text-align`,
+monospace `font-family` — `ui/article/InlineCss.kt`), merged over a tag's own UA-default decoration
+the way an inline style outranks a plain element selector in a real CSS cascade. This includes a
+feed's own color winning even against the app's dark theme — see `InlineStyle`'s KDoc for why that
+is the faithful behavior, not a bug to "fix" by forcing every span through the theme's own colors.
+
 ## Context menus
 
 Right-click menus use a real OS-native menu, not Material3's

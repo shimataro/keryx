@@ -575,16 +575,27 @@ That fallback takes the *same assembled document string* the web view would have
 re-parses it with ksoup (`ui/article/ArticleContentParser.kt`), rather than taking the raw article
 body: the four reader states (placeholder, "no content", header-only while the body loads, full
 article) are already decided by the document builders above, so re-deriving them would duplicate
-that logic and let the two readers drift. It reproduces block structure, inline decorations and
-images; content that genuinely needs a browser engine — iframes, script-driven widgets, video —
-becomes a button that opens it externally. The whole body is wrapped in a `SelectionContainer`, so
-its text stays selectable/copyable the way the web view's own document text is, coexisting with the
-title/inline links (`LinkAnnotation.Clickable`, not a competing `Modifier.clickable`). Note that
-almost none of the reader's own CSS is what
-has to be ported: the document declares only five content rules, and everything else a browser
-contributes implicitly (paragraph spacing, heading sizes, list markers, `pre` monospacing,
-blockquote indent) is what the Compose renderer has to state outright, mapped onto
-`MaterialTheme.typography`.
+that logic and let the two readers drift. It reproduces block structure (including `<figure>`/
+`<figcaption>` grouping and `<dl>`/`<dt>`/`<dd>` definition lists), inline decorations (including a
+feed's own `style=""` color/size/weight/decoration — see `ui/article/InlineCss.kt` — merged the same
+way an inline style wins in a real CSS cascade), and images (including `srcset`/lazy-load
+attributes, and an image-only paragraph or link promoted to a real block image rather than
+collapsing to nothing); content that genuinely needs a browser engine — iframes, script-driven
+widgets, video — becomes a button that opens it externally. The whole body is wrapped in a
+`SelectionContainer`, so its text stays selectable/copyable the way the web view's own document text
+is, coexisting with the title/inline links (`LinkAnnotation.Clickable`, not a competing
+`Modifier.clickable`). Note that almost none of the reader's own CSS is what has to be ported: the
+document declares only five content rules, and everything else a browser contributes implicitly
+(paragraph spacing, heading sizes, list markers, `pre` monospacing, blockquote indent) is what the
+Compose renderer has to state outright — as plain functions of the *document's own* type scale
+(`ui/article/ArticleTextStyles.kt`: UA-default heading ratios and block margins, converted through
+`sp` so they still scale with the font-size setting the same way the web view's `font-size: N%`
+does), deliberately **not** `MaterialTheme.typography`, since this reader is reconstructing a
+browser's rendering of the article rather than this app's own UI chrome. A handful of decisions stay
+the app's own rather than the UA default's, by design: the quote's vertical bar, the code block's
+tinted background, and the table's row rule are all kept rather than reverted to a browser's plainer
+defaults, and the table's column widths are measured from content (a custom `Layout` in
+`ArticleBlockViews.kt`) rather than fixed.
 
 None of the heavyweight-interop rules above apply on that path, because no AWT surface is created:
 nothing repaints the whole window, and Compose can draw freely over the pane. The branch sits
@@ -592,6 +603,17 @@ inside the `reader` lambda, so the pane's own structure stays unconditional eith
 platform this exists for today is Linux on arm64 — see `known-issues.md` for the evidence, the
 `-Dkeryx.reader.webview` override, and why moving to a backend that does ship an arm64 Linux binary
 is a much larger change.
+
+Unlike the native WebView, this fallback has no scrolling of its own to inherit from a browser
+engine, so `ui/home/KeyboardNav.kt`'s shared handler drives its `LazyListState` directly: ↑/↓ move
+by a fixed line amount, Space/Page Down (Shift+Space/Page Up to reverse) move by most of a
+viewport, and Home/End jump straight to the article's top/bottom, matching an ordinary browser.
+`ArticleContentView.kt`'s `FallbackReaderScrollHost`, a
+`staticCompositionLocalOf` provided once in `HomeScreen.kt`, is what lets that handler reach the
+currently active reader instance without threading a callback down through
+`ArticleDetailPane`/`ArticleWebViewCarousel`/the `reader` lambda — the same pattern
+`LocalSnackbarHostState` already uses for a different cross-cutting concern. None of this affects
+the native WebView reader, which keeps handling its own scrolling whenever it holds real focus.
 
 ### Desktop Tray (platform branch)
 

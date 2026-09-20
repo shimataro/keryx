@@ -706,17 +706,29 @@ Recorded so they are not retried:
 
 `isNativeWebViewSupported()` probes the library's own UniFFI entry point once, before the reader
 would have loaded it anyway, and `ArticleWebView` renders the article with Compose when the probe
-fails. That fallback reproduces block structure, inline decorations and images; embedded content
-that genuinely needs a browser engine (iframes, script-driven widgets, video) becomes a button that
-opens it externally.
+fails. That fallback (`ui/article/ArticleContentView.kt` + `ArticleBlockViews.kt`) reproduces block
+structure (including `<figure>`/`<figcaption>` and `<dl>`/`<dt>`/`<dd>`), inline decorations
+(including a feed's own `style=""` color/size/weight — `ui/article/InlineCss.kt`), and images
+(`srcset`/lazy-load attributes, and an image-only paragraph or link promoted to a real block image);
+embedded content that genuinely needs a browser engine (iframes, script-driven widgets, video)
+becomes a button that opens it externally. Its type scale and block margins are plain functions of
+the document's own UA-default sizing (`ArticleTextStyles.kt`), not this app's `MaterialTheme
+.typography` — see "Article Reader (native WebView)" in `app-architecture.md` for the reasoning.
 
-`-Dkeryx.reader.webview=false` forces the fallback on any desktop machine — which is the only
-practical way to work on its appearance, since it otherwise appears on no platform this project
-builds on. `-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library
+`-Dkeryx.reader.webview=false` forces the fallback on any desktop machine — the practical way to
+work on its appearance on machines where the native web view is available. Linux arm64 uses the
+fallback by default because no native web view is available for that target. `-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library
 upgrade ever renames the probed class and turns the probe into a permanent false negative (that
-case logs a distinct warning). Both properties are read only by the desktop (JVM) `actual`
-(`NativeWebViewSupport.desktop.kt`); Android's `actual` always reports the web view as available —
-`android.webkit.WebView` comes from the OS itself — so neither property has any effect there.
+case logs a distinct warning) — but it does so by skipping the probe entirely rather than re-running
+it, so it is only safe where a native binary actually exists; passed on Linux arm64, it reaches the
+same native initialization and reproduces the `UnsatisfiedLinkError`/frozen-looking modal dialog
+documented above. Both properties are read only by the desktop (JVM) `actual`
+(`NativeWebViewSupport.desktop.kt`), relayed there from `./gradlew :composeApp:run`'s own JVM by a
+`tasks.withType<JavaExec>().configureEach` block in `composeApp/build.gradle.kts` (a `JavaExec` task
+does not otherwise inherit the launching JVM's system properties, so this relay is what makes
+`-Dkeryx.reader.webview` reach the running app rather than being silently swallowed by Gradle
+itself). Android's `actual` always reports the web view as available — `android.webkit.WebView`
+comes from the OS itself — so neither property has any effect there.
 
 ### What a real fix would need
 

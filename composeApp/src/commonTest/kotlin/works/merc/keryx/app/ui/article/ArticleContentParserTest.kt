@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -186,8 +187,9 @@ class ArticleContentParserTest {
             """<figure><img src="https://example.com/i.png"><figcaption>cap</figcaption></figure>""",
         )
 
-        assertTrue(blocks[0] is ArticleBlock.Picture)
-        assertEquals("cap", (blocks[1] as ArticleBlock.Caption).text.plain())
+        val figure = blocks.single() as ArticleBlock.Figure
+        assertTrue(figure.children[0] is ArticleBlock.Picture)
+        assertEquals("cap", (figure.children[1] as ArticleBlock.Caption).text.plain())
     }
 
     @Test
@@ -210,7 +212,11 @@ class ArticleContentParserTest {
             "<table><thead><tr><th>h1</th><th>h2</th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table>",
         ).single() as ArticleBlock.Table
 
-        assertEquals(listOf(listOf("h1", "h2"), listOf("a", "b")), table.rows.map { row -> row.map { it.plain() } })
+        assertEquals(
+            listOf(listOf("h1", "h2"), listOf("a", "b")),
+            table.rows.map { row -> row.cells.map { it.plain() } },
+        )
+        assertEquals(listOf(true, false), table.rows.map { it.isHeader })
     }
 
     @Test
@@ -236,5 +242,128 @@ class ArticleContentParserTest {
     @Test
     fun ignoresEmptyBlocks() {
         assertTrue(parseBody("<p></p><p>   </p><ul></ul><blockquote></blockquote>").isEmpty())
+    }
+
+    @Test
+    fun unknownInlineTagsDoNotSplitAParagraph() {
+        // ksoup has no entry for <ruby> or an inline <svg> icon, so both default to a generic,
+        // non-block tag — exactly like a browser's own UA stylesheet treats an unrecognized element.
+        val blocks = parseBody("<p>before <ruby>漢字<rt>かんじ</rt></ruby> middle <svg></svg> after</p>")
+
+        assertEquals(1, blocks.size)
+        val text = (blocks.single() as ArticleBlock.Paragraph).text.plain()
+        assertTrue(text.contains("before"))
+        assertTrue(text.contains("middle"))
+        assertTrue(text.contains("after"))
+    }
+
+    @Test
+    fun carriesUnderlineHighlightAndSizeDecorations() {
+        val spans = (parseBody("<p><u>under</u> <mark>hi</mark> <small>sm</small> <big>bg</big></p>").single() as ArticleBlock.Paragraph)
+            .text.spans
+
+        assertTrue(spans.any { it.text == "under" && it.underline })
+        assertTrue(spans.any { it.text == "hi" && it.highlight })
+        assertTrue(spans.any { it.text == "sm" && it.sizeScale < 1f })
+        assertTrue(spans.any { it.text == "bg" && it.sizeScale > 1f })
+    }
+
+    @Test
+    fun carriesSubAndSuperscriptBaseline() {
+        val spans = (parseBody("<p>x<sub>2</sub> and y<sup>3</sup></p>").single() as ArticleBlock.Paragraph).text.spans
+
+        assertTrue(spans.any { it.text == "2" && it.baseline == InlineBaseline.Sub })
+        assertTrue(spans.any { it.text == "3" && it.baseline == InlineBaseline.Super })
+    }
+
+    @Test
+    fun honorsInlineStyleColorSizeAndWeight() {
+        val spans = (parseBody("""<p><span style="color:#ff0000; font-size:2em; font-weight:bold">red</span></p>""").single() as ArticleBlock.Paragraph)
+            .text.spans
+
+        val span = spans.single { it.text == "red" }
+        assertEquals(Color(0xFF, 0x00, 0x00), span.color)
+        assertEquals(2.0f, span.sizeScale)
+        assertTrue(span.bold)
+    }
+
+    @Test
+    fun honorsBlockLevelTextAlign() {
+        val paragraph = parseBody("""<p style="text-align:center">centered</p>""").single() as ArticleBlock.Paragraph
+        assertEquals(TextAlign.Center, paragraph.align)
+    }
+
+    @Test
+    fun centerTagForcesAlignOnItsBlocks() {
+        val blocks = parseBody("<center><p>a</p><h2>b</h2></center>")
+
+        assertEquals(TextAlign.Center, (blocks[0] as ArticleBlock.Paragraph).align)
+        assertEquals(TextAlign.Center, (blocks[1] as ArticleBlock.Heading).align)
+    }
+
+    @Test
+    fun resolvesSrcsetAndLazyLoadAttributes() {
+        val fromSrcset = parseBody(
+            """<img data-srcset="/a.jpg 1x, /b.jpg 2x">""",
+            baseUrl = "https://example.com/x",
+        ).single() as ArticleBlock.Picture
+        assertEquals("https://example.com/a.jpg", fromSrcset.src)
+
+        val fromDataSrc = parseBody(
+            """<img data-src="/lazy.jpg">""",
+            baseUrl = "https://example.com/x",
+        ).single() as ArticleBlock.Picture
+        assertEquals("https://example.com/lazy.jpg", fromDataSrc.src)
+    }
+
+    @Test
+    fun promotesAnImageOnlyParagraphToABlockPicture() {
+        val blocks = parseBody(
+            """<p><img src="/img.png"></p>""",
+            baseUrl = "https://example.com/a",
+        )
+
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.single() is ArticleBlock.Picture)
+    }
+
+    @Test
+    fun promotesALinkWrappedImageWithNoTextToABlockPicture() {
+        val blocks = parseBody(
+            """<a href="https://example.com/full"><img src="/img.png"></a>""",
+            baseUrl = "https://example.com/a",
+        )
+
+        assertEquals(1, blocks.size)
+        val picture = blocks.single() as ArticleBlock.Picture
+        assertEquals("https://example.com/full", picture.link)
+    }
+
+    @Test
+    fun honorsOrderedListStart() {
+        val bullets = parseBody("""<ol start="5"><li>a</li></ol>""").single() as ArticleBlock.Bullets
+        assertEquals(5, bullets.start)
+    }
+
+    @Test
+    fun parsesDefinitionListsPairingEachTermWithItsDescription() {
+        val blocks = parseBody("<dl><dt>Term</dt><dd>Def one</dd><dd>Def two</dd></dl>")
+
+        assertEquals(2, blocks.size)
+        val first = blocks[0] as ArticleBlock.Definition
+        val second = blocks[1] as ArticleBlock.Definition
+        assertEquals("Term", first.term.plain())
+        assertEquals("Def one", first.description.plain())
+        assertEquals("Term", second.term.plain())
+        assertEquals("Def two", second.description.plain())
+    }
+
+    @Test
+    fun noContentDocumentIsMarkedMuted() {
+        val paragraph = parseArticleContent(
+            articleNoContentHtml(theme, title = "T", meta = "M", message = "本文がありません"),
+        ).blocks.single() as ArticleBlock.Paragraph
+
+        assertTrue(paragraph.muted)
     }
 }
