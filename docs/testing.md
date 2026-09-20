@@ -274,7 +274,7 @@ level, but only this manual pass catches wording that reads oddly in context.
 - A drag now shows an in-app, Compose-drawn chip ghost (icon + title) that follows the pointer,
   identical on macOS/Windows/Linux — **Linux gets a ghost for the first time** (X11 AWT never
   supported one at all, even before Wayland's own cursor limitation, both now moot since the drag no
-  longer touches OS-level DnD; see the "Linux Wayland/XWayland" entry in `docs/known-issues.md`).
+  longer touches OS-level DnD at all).
   Confirm the chip is legible over both light and dark content, and that it never shows the OS's own
   forbidden/no-drop cursor — the pointer just stays the ordinary arrow throughout, on every platform.
 - The chip is semi-transparent (`DRAG_GHOST_ALPHA` in `FeedListDragController.kt`) so the row/highlight
@@ -349,8 +349,9 @@ level, but only this manual pass catches wording that reads oddly in context.
 - **(Linux, X11 and Wayland)** The drag ghost and drop behavior should now be indistinguishable
   between the two session types — repeat the reorder/folder-drop/tag-drop checks above on both a
   Plasma X11 session and a Plasma Wayland (XWayland) session and confirm they behave identically
-  (see the "Linux Wayland/XWayland" entry in `docs/known-issues.md` for the OS-level DnD bugs this
-  no longer has any exposure to).
+  (the hand-rolled Compose-native drag means no XDnD/XWayland cursor negotiation happens at all on
+  either session type, unlike the OS's forbidden "no-drop" cursor that used to show throughout a
+  drag on Wayland despite the drop completing successfully).
 
 The parallel feed refresh's core concurrency (overlapping fetches + complete per-feed writes) is covered automatically by `refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite`, and the no-revert guarantee by `refreshAllDoesNotRevertConcurrentUnsubscribe` / `refreshAllDoesNotRevertConcurrentReorder`. The genuinely visual / end-to-end parts still need eyeballs, so with a multi-feed subscription visually confirm:
 
@@ -389,7 +390,10 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   reader in the new theme/scale immediately (scroll resets to the top — expected).
 - (Windows) On startup, the reader renders in its correct pane position (no stray blank/misplaced
   rectangle) and clicking anywhere in the window never freezes the app — the regression check for
-  the WebView2 `dataDirectory` Access Denied bug in `known-issues.md`. Running with
+  WebView2's `dataDirectory` Access Denied failure when left at its default (an uncaught exception
+  from the failed creation used to leave the library's own creation-retry timer running forever,
+  freezing the app on the next click; see "Article Reader (native WebView)" in
+  [app-architecture.md](app-architecture.md)). Running with
   `WRYWEBVIEW_LOG=1` set should show no `WebViewException` in the console.
 
 Native context menus (`nativeContextMenu`, backed by a real `JPopupMenu` on Windows/Linux and
@@ -590,9 +594,10 @@ on a device or emulator:
   while the app is running does not reopen the drawer on its own.
 
 **Display scaling.** Every check above must also be run at a **non-100% display scale**, on Windows
-in particular — 200% first, then 150%. The AWT menu backend was mispositioning menus and painting
-their labels on top of each other at exactly those settings while looking perfect at 100%, and
-nothing in this list would have caught it (see `known-issues.md`). Change it in Windows Settings →
+in particular — 200% first, then 150%. The JDK's AWT menu peer never converts between Java user
+space and device pixels: at those settings a menu opened away from the cursor and its rows drew
+their labels overlapping, while looking perfect at 100% (`1 / scale` still equals 1 there). Nothing
+in this list at 100% scale would have caught it. Change it in Windows Settings →
 System → Display → Scale, and restart the app so AWT re-reads it. Confirm for each menu that it
 opens **at the cursor** and that no two labels overlap, and do the same for the tray menu below.
 
@@ -603,9 +608,9 @@ Linux SNI), so confirm by hand:
 - Right-clicking the tray icon opens the menu **at the cursor**, sitting above the taskbar — not
   pinned to a screen edge or clipped off it. Check this from both an icon shown directly in the
   notification area and one inside the overflow flyout, since the two sit at very different
-  distances from the screen's right edge. This is the regression check for the tray's own
-  device-pixel coordinates (see `known-issues.md`); with more than one monitor at different scale
-  factors, check it on each.
+  distances from the screen's right edge. This is the regression check for the same AWT device-pixel
+  bug above, since `WindowsTray`'s menu is the same `JPopupMenu` peer; with more than one monitor at
+  different scale factors, check it on each.
 - Right-clicking the tray icon opens the menu with the show/hide entry reflecting the window's
   current visibility, and both entries do what they say.
 - Clicking outside the open tray menu dismisses it, leaving no stray window behind and no entry in
@@ -622,7 +627,8 @@ Linux is the platform this backend split exists for — do these on a **packaged
 session, and on GNOME:
 
 - **Select an article first** so the reader's WebKitGTK WebView is live in-process (the condition
-  under which the old GTK file-dialog peer crashed the JVM — see `known-issues.md`), then Settings ▸
+  under which the old AWT `GtkFileDialogPeer` crashed the JVM with a SIGSEGV — see "Native file
+  dialogs (platform branch)" in [app-architecture.md](app-architecture.md)), then Settings ▸
   データ管理 ▸ OPML をインポート. A Swing chooser opens — not a GTK one — the app does not crash, and
   the chosen file imports. Repeat for エクスポート. Nothing in `<appDataDir>/logs/keryx.0.log` and no
   `hs_err_pid*.log` next to the launcher.
@@ -688,8 +694,11 @@ Dialog auto-sizing (`DialogWindow` OS window behavior) cannot be auto-tested, so
   (notifications) tab. **The window must not resize at all** — same height on every tab, no movement
   of any edge, and no frame where the tab labels or the card sit displaced within the window before
   snapping back. The dialog's tab-content area is a fixed height precisely so this cannot happen; a
-  resize reappearing here means something has reintroduced per-tab sizing (see `known-issues.md`,
-  where forcing the resize to paint correctly is recorded as having made it permanently worse).
+  resize reappearing here means something has reintroduced per-tab sizing — do not "fix" it by
+  forcing a layout pass right after the resize (`window.validate()`/`renderImmediately()`); on
+  Metal that is what skiko itself avoids doing outside Direct3D, and doing it anyway turns a
+  transient flicker into a permanent Δ-tall offset (`KeryxTabDialog`'s fixed-height tab-content
+  area, `KERYX_TAB_DIALOG_CONTENT_HEIGHT` in `ui/common/KeryxDialogs.desktop.kt`, is the actual fix).
 - Settings, tallest tab: the general tab's content must fit **without scrolling** at font size
   "中"（1.0）. If it scrolls, `KERYX_TAB_DIALOG_CONTENT_HEIGHT` needs bumping — cosmetic, not a
   correctness bug. At "大"/"特大" the taller tabs are expected to scroll.
