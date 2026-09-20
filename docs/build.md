@@ -809,7 +809,7 @@ Overview:
    `compose.desktop.mac.signing.identity`.
 3. For distribution notarization only, prepare an app-specific password and set `macOS { notarization { appleID/password/teamId } }`, then run `./gradlew :composeApp:notarizeDmg`. Notarization is not required for local testing.
 
-No special entitlements are required for Keychain access (just ensure `get-task-allow` is not added; jpackage's Developer ID signing uses hardened runtime, which satisfies the requirement). See [sync-architecture.md](sync-architecture.md) "Dropbox Authentication > Token Storage" for token storage details.
+No special entitlements are required for Keychain access (just ensure `get-task-allow` is not added; jpackage's Developer ID signing uses hardened runtime, which satisfies the requirement). See [sync-architecture.md](sync-architecture.md) "Cloud Authentication (OAuth PKCE + Offline Access) > Token Storage" for token storage details, which covers all three providers, not just Dropbox.
 
 ## Notes
 
