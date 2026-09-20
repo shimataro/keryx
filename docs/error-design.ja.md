@@ -30,11 +30,13 @@ sealed class KeryxException(message: String) : Exception(message) {
 }
 ```
 
-主なサブクラス（いずれも先頭に `message: String` を取るが、以下では省略）: `FeedFetchException(statusCode)`,
-`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
-`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
-`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
-`UpdateException(stage)`。
+主なサブクラス。多くは先頭に `message: String` を取る（以下では省略）: `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
+`CloudDataIncompatibleException`, `InvalidFeedUrlException`。一部は `message` を一切取らず固定メッセージを持つ:
+`FeedDiscoveryException(candidates)`（"Feed links found on page"）、`FeedTimeoutException`
+（"Feed request timed out"）、`SyncConflictException`（"Sync conflict detected"）、
+`SchemaVersionException(localVersion, cloudVersion)`。`UpdateException(stage, message)` だけは例外的に、
+`message` が他の引数より*後*に来る。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 

@@ -30,11 +30,13 @@ sealed class KeryxException(message: String) : Exception(message) {
 }
 ```
 
-Main subclasses (each also takes a leading `message: String`, omitted below): `FeedFetchException(statusCode)`,
-`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
-`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
-`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
-`UpdateException(stage)`.
+Main subclasses. Most take a leading `message: String` (omitted below): `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
+`CloudDataIncompatibleException`, `InvalidFeedUrlException`. A few take no `message` at all and carry a fixed
+message text instead: `FeedDiscoveryException(candidates)` ("Feed links found on page"), `FeedTimeoutException`
+("Feed request timed out"), `SyncConflictException` ("Sync conflict detected"),
+`SchemaVersionException(localVersion, cloudVersion)`. `UpdateException(stage, message)` is the one exception with
+a `message` parameter that comes *after* its other argument rather than before it.
 
 Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
