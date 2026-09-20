@@ -79,10 +79,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   imported by opening it directly from another app — file-association double-click on desktop,
   "open with Keryx" from a file manager or mail attachment on Android
 - With no feeds subscribed yet, the article list shows an empty-state message with an "Add feed"
-  button rather than the ordinary "no articles" message; on Android's narrower widths, where the
-  feed list's own "+" button lives inside a navigation drawer closed by default (see §9), the
-  drawer also opens automatically the first time the app has no feeds and no cloud account
-  configured, so the button is reachable without the user having to find the drawer themselves
+  button rather than the ordinary "no articles" message; on Android's narrower widths, the
+  navigation drawer holding the feed list's own "+" button auto-opens the first time this happens
+  (see §9's "Narrower widths" for the exact rule), so the button is reachable without the user
+  having to find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update (download and install, not just a link to the release page): supported for a macOS
   `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
@@ -235,13 +235,13 @@ back to the article list, or rotating the device between phone and tablet width 
 article from the top again, as does reopening it later. A swipe whose vertical travel isn't clearly
 smaller than its horizontal travel is treated as a scroll rather than a page turn (a horizontal-
 dominant diagonal drag still turns the page), and a swipe is ignored for a moment after scrolling,
-so a flick meant to scroll does not change the article. This is
-available whenever the reader is on screen at all at a narrower-than-desktop width — a phone-width
-screen drilled into an article, and a tablet-width screen (in portrait, and in landscape on any
-tablet not wide enough for all three panes), where the reader is a permanent neighbor of the article
-list with no back control of its own, the same as the tablet's own reading pane in Gmail — since the
-same reader, the same list order, and the same next/previous action apply regardless of whether the
-reader happens to have a back button beside it. At the desktop-width 3-pane layout — which a large
+so a flick meant to scroll does not change the article. This applies whenever the reader is on
+screen at all at a narrower-than-desktop width, since the same reader, the same list order, and the
+same next/previous action apply regardless of whether the reader happens to have a back button
+beside it. That covers two cases: a phone-width screen drilled into an article, and a tablet-width
+screen (in portrait, and in landscape on any tablet not wide enough for all three panes) where the
+reader is a permanent neighbor of the article list with no back control of its own, the same as the
+tablet's own reading pane in Gmail. At the desktop-width 3-pane layout — which a large
 tablet in landscape also reaches — the reader is a permanent, keyboard-driven pane instead (J/K —
 see `app-architecture.md`), and the swipe gesture does not apply there.
 
