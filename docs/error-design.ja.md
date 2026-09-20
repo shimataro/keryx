@@ -73,7 +73,9 @@ sealed class KeryxException(message: String) : Exception(message) {
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
-  既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
+  既に把握できるため。この OS 通知は、バックグラウンド/起動時の更新と手動の「すべて更新」の
+  **両方**で発火する。共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ
+  `notificationEnabled` 設定）を経由する。
 - ベルアイコンにバッジ（件数）。ベルは幅を問わず（デスクトップの3ペイン定常状態を含む）
   `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
