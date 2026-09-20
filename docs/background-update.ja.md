@@ -472,7 +472,9 @@ self-replace 成果物の掃除——を足すだけで、残りは `runStartupM
 1. キャッシュ削除（`cleanUpArticleCacheIfDue`。前回から 24 時間以上経過時）。
 2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
    デスクトップは Dropbox / Google Drive / OneDrive、Android も同じ 3 種（ただし Google Drive は
-   Play 開発者サービスが利用できる環境のみ）。
+   Play 開発者サービスが利用できる環境のみ）。起動時であっても前述の
+   `SyncTrigger.AUTOMATIC` のゲートを迂回するわけではなく、`autoSyncSuspended` が真の間は、
+   この呼び出しでダウンロードもマージもアップロードも行われない。
 3. フィード更新とその新着記事通知（`refreshFeedsAndNotify`）。
 4. 自動/バックグラウンドのスケジュールでのアップデート確認（`checkForUpdateAndNotify`）。
 5. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
