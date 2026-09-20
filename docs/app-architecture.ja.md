@@ -153,8 +153,10 @@ composeApp/src/
     必要な Android リソース（例: `NotificationCompat.Builder.setSmallIcon`）はここに置く必要がある
     — 現状は `drawable/ic_stat_keryx.xml`（`AndroidNotificationSink.kt` が投稿するステータスバー/
     通知ドットのアイコン。background-update.ja.md 参照）のみ
-  commonTest/ + desktopTest/ + androidDeviceTest/（DatabaseMerger/DatabaseSnapshot の Android 実装向け
-    計装テスト — バンドル SQLite ネイティブライブラリの読み込みに実機/エミュレータが必要。
+  commonTest/ + desktopTest/ + androidDeviceTest/（実機/エミュレータが必要な Android 実装向け計装テスト
+    — DatabaseMerger/DatabaseSnapshot のバンドル SQLite ネイティブライブラリだけでなく、Android Keystore
+    （`KeystoreTokenStorageDeviceTest`）、Play 開発者サービス（`PlayServicesGoogleDriveAuthDeviceTest`、
+    `AndroidAuthorizationHostDeviceTest`）、Storage Access Framework（`FilePickerDeviceTest`）も含む。
     testing.ja.md 参照）
 ```
 

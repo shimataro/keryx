@@ -154,9 +154,11 @@ composeApp/src/
     `@DrawableRes Int` is needed for (e.g. `NotificationCompat.Builder.setSmallIcon`) has to live
     here instead — currently just `drawable/ic_stat_keryx.xml`, the status-bar/notification-dot
     icon `AndroidNotificationSink.kt` posts with (see background-update.md)
-  commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for DatabaseMerger/
-    DatabaseSnapshot's Android actuals — needs a real device/emulator to load the bundled SQLite
-    native library; see testing.md)
+  commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for the Android actuals that
+    need a real device/emulator — not just DatabaseMerger/DatabaseSnapshot's bundled-SQLite native
+    library, but also the Android Keystore (`KeystoreTokenStorageDeviceTest`), Play services
+    (`PlayServicesGoogleDriveAuthDeviceTest`, `AndroidAuthorizationHostDeviceTest`), and the Storage
+    Access Framework (`FilePickerDeviceTest`); see testing.md)
 ```
 
 The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
