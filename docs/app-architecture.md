@@ -348,8 +348,12 @@ onto a classic, layout-consuming one instead, narrowing the article body — see
 skill's "Scroll indicators". (Windows' WebView2 already renders a classic scrollbar by default, so
 the rule has nothing to switch off there, but is kept the same across all four engines rather than
 carved out as a per-platform exception.) The toolbar above the reader is likewise always present,
-with actions disabled rather than hidden when nothing is selected, keeping its Compose structure —
-and therefore the reader's measured bounds — identical across states.
+with actions disabled rather than hidden when nothing is selected. It also shows the selected
+article's feed name and favicon (`FeedAvatar`) when one is selected, swapped in for the empty title
+slot via `KeryxPaneTopBar`'s `titleContent` — so the toolbar's Compose structure does change between
+states, but its *measured height* does not: the always-present row of `TooltipIconButton` actions is
+what actually pins it, keeping the reader's own measured bounds identical across states regardless
+of which title-slot content is composed.
 
 **`color-scheme` alone is not enough on Android.** `android.webkit.WebView`'s default style,
 `Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
