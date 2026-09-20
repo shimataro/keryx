@@ -237,4 +237,17 @@ class ArticleContentParserTest {
     fun ignoresEmptyBlocks() {
         assertTrue(parseBody("<p></p><p>   </p><ul></ul><blockquote></blockquote>").isEmpty())
     }
+
+    @Test
+    fun unknownInlineTagsDoNotSplitAParagraph() {
+        // ksoup has no entry for <ruby> or an inline <svg> icon, so both default to a generic,
+        // non-block tag — exactly like a browser's own UA stylesheet treats an unrecognized element.
+        val blocks = parseBody("<p>before <ruby>漢字<rt>かんじ</rt></ruby> middle <svg></svg> after</p>")
+
+        assertEquals(1, blocks.size)
+        val text = (blocks.single() as ArticleBlock.Paragraph).text.plain()
+        assertTrue(text.contains("before"))
+        assertTrue(text.contains("middle"))
+        assertTrue(text.contains("after"))
+    }
 }

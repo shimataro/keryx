@@ -9,11 +9,29 @@ import works.merc.keryx.app.data.remote.UrlResolver
 /** Tags whose content is machinery rather than prose, and must not leak into the body text. */
 private val DROPPED_TAGS = setOf("script", "style", "link", "noscript", "template")
 
-/** Tags handled as decorations on surrounding text rather than as blocks of their own. */
-private val INLINE_TAGS = setOf(
-    "a", "b", "strong", "i", "em", "u", "s", "del", "strike", "code", "span", "small",
-    "sub", "sup", "mark", "abbr", "cite", "q", "time", "label", "font",
+/**
+ * Tags always drawn as their own block, regardless of how ksoup itself classifies them — checked
+ * before the general inline/block split below, since ksoup classifies several of these
+ * (`img`/`iframe`/`embed`/`object`) as *inline* (phrasing content that merely happens to replace
+ * itself with an external resource), which would otherwise route them into [inlineSpans] and
+ * reduce an image to alt text instead of a real block.
+ */
+private val FORCED_BLOCK_TAGS = setOf(
+    "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "blockquote", "pre", "img", "table",
+    "figcaption", "hr", "iframe", "embed", "object", "video", "audio",
 )
+
+/**
+ * Tags ksoup classifies as block-level (its own [com.fleeksoft.ksoup.parser.Tag.isBlock]) but whose
+ * HTML5 content model is "transparent"/phrasing — they render inline by default in every browser.
+ * Every other inline/block decision defers entirely to ksoup's own [com.fleeksoft.ksoup.parser.Tag
+ * .isInline], including for a tag ksoup has never heard of (an unknown tag defaults to a generic,
+ * non-block [com.fleeksoft.ksoup.parser.Tag], so it is treated as inline the same way a browser's
+ * own UA stylesheet defaults an unrecognized element to `display: inline`) — this is what stops an
+ * unfamiliar tag (`<ruby>`, an inline `<svg>` icon, a CMS-specific wrapper) from splitting a
+ * paragraph in two the way the previous hardcoded inline-tag allowlist did.
+ */
+private val FORCED_INLINE_TAGS = setOf("ins", "del", "button")
 
 private val WHITESPACE = Regex("\\s+")
 
@@ -81,29 +99,33 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
             pending += InlineSpan("\n")
             continue
         }
-        if (tag in INLINE_TAGS) {
+        if (tag in FORCED_BLOCK_TAGS) {
+            flushPending()
+            when (tag) {
+                "p" -> inlineBlock(node, base)?.let { blocks += ArticleBlock.Paragraph(it) }
+                "figcaption" -> inlineBlock(node, base)?.let { blocks += ArticleBlock.Caption(it) }
+                "h1", "h2", "h3", "h4", "h5", "h6" ->
+                    inlineBlock(node, base)?.let { blocks += ArticleBlock.Heading(tag.substring(1).toInt(), it) }
+                "ul", "ol" -> blocks += bullets(node, base, ordered = tag == "ol")
+                "blockquote" -> parseBlocks(node, base).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Quote(it) }
+                // wholeText(), not text(): a code block's own line breaks and indentation are its content.
+                "pre" -> node.wholeText().trimEnd().takeIf { it.isNotBlank() }?.let { blocks += ArticleBlock.Code(it) }
+                "img" -> picture(node, base)?.let { blocks += it }
+                "table" -> table(node, base)?.let { blocks += it }
+                "iframe", "embed", "object", "video", "audio" -> embed(node, base)?.let { blocks += it }
+                "hr" -> blocks += ArticleBlock.Rule
+            }
+            continue
+        }
+        if (tag in FORCED_INLINE_TAGS || node.tag().isInline()) {
             pending += inlineSpans(node, base, InlineStyle())
             continue
         }
 
+        // Anything else — div, section, article, figure, unknown block-level markup — is a
+        // container: recurse so its content is kept rather than flattened or dropped.
         flushPending()
-        when (tag) {
-            "p" -> inlineBlock(node, base)?.let { blocks += ArticleBlock.Paragraph(it) }
-            "figcaption" -> inlineBlock(node, base)?.let { blocks += ArticleBlock.Caption(it) }
-            "h1", "h2", "h3", "h4", "h5", "h6" ->
-                inlineBlock(node, base)?.let { blocks += ArticleBlock.Heading(tag.substring(1).toInt(), it) }
-            "ul", "ol" -> blocks += bullets(node, base, ordered = tag == "ol")
-            "blockquote" -> parseBlocks(node, base).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Quote(it) }
-            // wholeText(), not text(): a code block's own line breaks and indentation are its content.
-            "pre" -> node.wholeText().trimEnd().takeIf { it.isNotBlank() }?.let { blocks += ArticleBlock.Code(it) }
-            "img" -> picture(node, base)?.let { blocks += it }
-            "table" -> table(node, base)?.let { blocks += it }
-            "iframe", "embed", "object", "video", "audio" -> embed(node, base)?.let { blocks += it }
-            "hr" -> blocks += ArticleBlock.Rule
-            // Anything else — div, section, article, figure, unknown feed markup — is a container:
-            // recurse so its content is kept rather than flattened or dropped.
-            else -> blocks += parseBlocks(node, base)
-        }
+        blocks += parseBlocks(node, base)
     }
     flushPending()
     return blocks
