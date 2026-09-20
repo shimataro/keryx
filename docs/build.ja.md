@@ -322,7 +322,7 @@ snapd のポリシー上自動接続されないうえ、Snapcraft のレビュ�
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
 アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
-明示的に除外されるため、上述の`keryx://` URIスキームと`.opml`関連付けの自己登録
+明示的に除外されるため、後述の`keryx://` URIスキームと`.opml`関連付けの自己登録
 （`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`）がホスト側の
 `~/.local/share/applications`や`~/.config/mimeapps.list`へ届くことは、そもそもあり得ない。
 さらにsnap内ではそれらのパスに手を伸ばすことすらない — 両レジストラは書き込み先を

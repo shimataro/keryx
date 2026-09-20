@@ -325,7 +325,7 @@ libsecret failed to resolve, `stage-packages: [libsecret-1-0]` under `parts.kery
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
 explicitly excludes hidden files and directories, so it could never let the `keryx://` URI scheme
-and `.opml` association self-registration described above
+and `.opml` association self-registration described below
 (`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`) reach the host's
 `~/.local/share/applications` and `~/.config/mimeapps.list`. In the snap they never even reach for
 them: both registrars resolve their targets from `XDG_DATA_HOME` / `XDG_CONFIG_HOME`, and under
