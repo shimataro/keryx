@@ -719,7 +719,10 @@ the document's own UA-default sizing (`ArticleTextStyles.kt`), not this app's `M
 work on its appearance on machines where the native web view is available. Linux arm64 uses the
 fallback by default because no native web view is available for that target. `-Dkeryx.reader.webview=true` forces the web view back on, which matters if a library
 upgrade ever renames the probed class and turns the probe into a permanent false negative (that
-case logs a distinct warning). Both properties are read only by the desktop (JVM) `actual`
+case logs a distinct warning) — but it does so by skipping the probe entirely rather than re-running
+it, so it is only safe where a native binary actually exists; passed on Linux arm64, it reaches the
+same native initialization and reproduces the `UnsatisfiedLinkError`/frozen-looking modal dialog
+documented above. Both properties are read only by the desktop (JVM) `actual`
 (`NativeWebViewSupport.desktop.kt`), relayed there from `./gradlew :composeApp:run`'s own JVM by a
 `tasks.withType<JavaExec>().configureEach` block in `composeApp/build.gradle.kts` (a `JavaExec` task
 does not otherwise inherit the launching JVM's system properties, so this relay is what makes

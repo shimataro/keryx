@@ -726,7 +726,10 @@ Reader (native WebView)」を参照。
 なお Linux arm64 はネイティブ WebView がないため、デフォルトでフォールバックが使われる。
 逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。
 ライブラリ更新でプローブ対象のクラス名が変わり、プローブが恒常的な偽陰性になった場合に効く（その
-ケースは専用の警告をログに出す）。どちらのプロパティもデスクトップ（JVM）側の `actual`
+ケースは専用の警告をログに出す）——ただしこれはプローブを再実行するのではなく完全に迂回するため、
+実際にネイティブバイナリが存在する環境でしか安全ではない。Linux arm64 で渡した場合は同じネイティブ
+初期化に到達し、上記で説明した `UnsatisfiedLinkError` とフリーズに見えるモーダルダイアログを再現する。
+どちらのプロパティもデスクトップ（JVM）側の `actual`
 （`NativeWebViewSupport.desktop.kt`）でしか読まれず、`./gradlew :composeApp:run` 自身の JVM から
 そこへは `composeApp/build.gradle.kts` の `tasks.withType<JavaExec>().configureEach` ブロックが
 中継している（`JavaExec` タスクは起動元 JVM のシステムプロパティを自動では引き継がないため、この
