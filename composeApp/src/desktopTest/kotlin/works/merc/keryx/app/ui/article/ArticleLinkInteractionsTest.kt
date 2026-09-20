@@ -1,6 +1,11 @@
 package works.merc.keryx.app.ui.article
 
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
@@ -8,6 +13,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.text.LinkAnnotation
@@ -49,6 +55,50 @@ class ArticleLinkInteractionsTest {
         waitForIdle()
 
         onNodeWithText("https://example.com").assertExists()
+    }
+
+    @Test
+    fun `hovered tooltip clears when text changes while pointer stays put`() = runDesktopComposeUiTest {
+        fun linkTextWithUrl(url: String) = buildAnnotatedString {
+            append("Visit ")
+            withLink(
+                LinkAnnotation.Clickable(
+                    tag = url,
+                    linkInteractionListener = {},
+                )
+            ) {
+                append("example")
+            }
+        }
+
+        setContent {
+            var text by remember { mutableStateOf(linkTextWithUrl("https://example.com")) }
+            Text(
+                text = "swap",
+                modifier = Modifier
+                    .testTag("swap-button")
+                    .clickable { text = linkTextWithUrl("https://other.example.com") },
+            )
+            LinkText(
+                text = text,
+                style = TextStyle.Default,
+                modifier = Modifier.testTag("link-text"),
+            )
+        }
+
+        val bounds = onNodeWithTag("link-text").fetchSemanticsNode().boundsInRoot
+        onNodeWithTag("link-text").performMouseInput {
+            moveTo(Offset(bounds.width / 2f, bounds.height / 2f))
+        }
+        waitForIdle()
+        onNodeWithText("https://example.com").assertExists()
+
+        // Swap the underlying text without moving the pointer — no new Move/Exit event fires on
+        // link-text, so only the remember(text) keying on hoveredLinkUrl can clear the stale tooltip.
+        onNodeWithTag("swap-button").performClick()
+        waitForIdle()
+
+        onNodeWithText("https://example.com").assertDoesNotExist()
     }
 
     @Test

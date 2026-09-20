@@ -55,7 +55,10 @@ internal fun LinkText(
     softWrap: Boolean = true,
 ) {
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-    var hoveredLinkUrl by remember { mutableStateOf<String?>(null) }
+    // Keyed on the text: a block-level slot here is reused across articles (the reader's LazyColumn
+    // items are not keyed), so a pointer resting over a link while the content changes underneath it
+    // would otherwise keep showing the previous article's URL until the next pointer event.
+    var hoveredLinkUrl by remember(text) { mutableStateOf<String?>(null) }
     var pointerPosition by remember { mutableStateOf(Offset.Zero) }
 
     val clipboard = LocalClipboard.current
