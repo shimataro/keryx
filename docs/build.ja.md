@@ -128,8 +128,8 @@ Android OAuth クライアント種別に対してカスタム URI とループ�
    「クライアントを作成」からアプリケーションの種類 **「Android」** を選ぶ。
 2. パッケージ名: `works.merc.keryx`。
 3. 署名証明書の SHA-1。**実際に動かす署名鍵ごとにクライアントを 1 つずつ**登録する:
-   - リリース鍵（本ドキュメントの Android 署名の節を参照 — GitHub 配布の APK と Play へのアップロードは
-     同じ鍵なので、1 エントリで両チャネルをカバーする）
+   - リリース鍵（後述の「リリース（CD）」の `ANDROID_RELEASE_KEYSTORE_BASE64` ほかを参照 — GitHub 配布の
+     APK と Play へのアップロードは同じ鍵なので、1 エントリで両チャネルをカバーする）
    - ローカルの **debug** キーストア。登録しないと `installGithubDebug` ビルドでは認可がまったく通らない
      （`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`）
 4. クライアント ID もシークレットもプロジェクトには取り込まない — Play 開発者サービスが実行時に

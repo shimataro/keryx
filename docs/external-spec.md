@@ -136,7 +136,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
 a flat, SF-leaning look; Android gets Material 3's own components, shapes, and ripple feedback; iOS
 will eventually get native SwiftUI. **Windows and Linux are the deliberate exception**: Java/Swing's
 own platform integration is too limited to give either OS a comparably native treatment (see the
-Look & Feel, context-menu, and file-dialog specifics below, and `docs/known-issues.md`), so both
+Look & Feel, context-menu, and file-dialog specifics below, and `known-issues.md`), so both
 share macOS's flat look instead of getting one of their own. Material 3 is Android's concrete
 instantiation of this principle — where this document says "Material 3", read it as Android-specific
 unless stated otherwise. Android's own color scheme is not always the app's fixed teal palette:
@@ -280,7 +280,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
   java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
   desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
   unavailable. On Android: an AES-256/GCM key held in the Android Keystore, per provider. See
-  `docs/sync-architecture.md`'s "Token Storage" for both.
+  `sync-architecture.md`'s "Token Storage" for both.
 
 ## 11. Technology Choices
 

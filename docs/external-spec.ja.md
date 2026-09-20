@@ -141,7 +141,7 @@ macOS はフラットで SF 寄りの見た目、Android は Material 3 自身�
 フィードバック、iOS は将来的にネイティブ SwiftUI になる。**Windows と Linux は意図的な例外**である —
 Java/Swing 自身のプラットフォーム統合機能は両 OS を同程度にネイティブ化するには力不足なため
 （後述の Look & Feel・コンテキストメニュー・ファイルダイアログの詳細、および
-`docs/known-issues.ja.md` を参照）、両者は独自のネイティブ化を持つ代わりに macOS のフラットな
+`known-issues.ja.md` を参照）、両者は独自のネイティブ化を持つ代わりに macOS のフラットな
 見た目を共用する。Material 3 はこの原則の Android における具体的な実装である——
 本ドキュメントで「Material 3」と書かれている箇所は、特に断りが無い限り Android 固有の記述として
 読むこと。Android 自体の配色は、常にアプリ固定のティールパレットとは限らない: Android 12+（API 31+）
@@ -275,7 +275,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
   Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけはデスクトップの Secret portal から
   得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。java-keyring は使わない）——利用不可時は
   データディレクトリのファイルにフォールバック。Android: プロバイダーごとに Android Keystore が保持する
-  AES-256/GCM 鍵。両方の詳細は `docs/sync-architecture.ja.md`「Token Storage」参照。
+  AES-256/GCM 鍵。両方の詳細は `sync-architecture.ja.md`「Token Storage」参照。
 
 ## 11. 技術選定
 

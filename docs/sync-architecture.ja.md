@@ -597,7 +597,7 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   して保存する。スナップは `password-manager-service` プラグを一切宣言していない（Snapcraft の
   レビュアーはこのインターフェースの auto-connect を原則却下するうえ、手動で接続したところで
   使い道もない——`KeyringTokenStorage` はスナップ内からは意図的に到達不能）。詳しい理由は
-  `docs/build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
+  `build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
   deb/rpm 利用者の Secret Service アイテムには影響しない。
 - **フォールバックファイルと結果報告**:
   - 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は

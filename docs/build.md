@@ -128,8 +128,8 @@ is an OAuth client registered against this app's identity:
    "Google Auth Platform" → "Clients" → "Create client" and choose application type **"Android"**.
 2. Package name: `works.merc.keryx`.
 3. SHA-1 of the signing certificate. Register **one client per signing key you actually run**:
-   - the release key (`docs/build.md`'s Android signing section — the same key backs both the GitHub
-     APK and the Play upload, so one entry covers both channels);
+   - the release key (see "Release (CD)" below for `ANDROID_RELEASE_KEYSTORE_BASE64` and friends —
+     the same key backs both the GitHub APK and the Play upload, so one entry covers both channels);
    - your local **debug** keystore, or `installGithubDebug` builds cannot authorize at all
      (`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`).
 4. No client ID or secret is copied into the project — Play services matches the app by package name

@@ -572,7 +572,7 @@ blockquote indent) is what the Compose renderer has to state outright, mapped on
 None of the heavyweight-interop rules above apply on that path, because no AWT surface is created:
 nothing repaints the whole window, and Compose can draw freely over the pane. The branch sits
 inside the `reader` lambda, so the pane's own structure stays unconditional either way. The concrete
-platform this exists for today is Linux on arm64 — see `docs/known-issues.md` for the evidence, the
+platform this exists for today is Linux on arm64 — see `known-issues.md` for the evidence, the
 `-Dkeryx.reader.webview` override, and why moving to a backend that does ship an arm64 Linux binary
 is a much larger change.
 

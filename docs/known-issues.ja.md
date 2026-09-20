@@ -431,7 +431,7 @@ read を行っている箇所:
 `<item>` を持たないフィードを購読するようにした。`articleRepository.upsertParsed` が挿入する
 記事が無くなるため、1 本目の呼び出しが mutex 解放後に行う処理は読み取りのみになり、
 昇格と競合し得る 2 本目の書き込み側が存在しなくなる。並行書き込みテストの一般的な指針は
-`docs/testing.md` の該当箇所を参照。
+`testing.ja.md` の該当箇所を参照。
 
 ## CI でのみ `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` がタイムアウトする
 

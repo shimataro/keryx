@@ -430,7 +430,7 @@ transaction (`FeedRepository.kt`, around `applyFetch`), which only writes.
 `FeedRepositoryTest.subscribeFeedSerializesSortOrderAllocationAcrossConcurrentCalls` now subscribes
 a feed with no `<item>`s. With nothing for `articleRepository.upsertParsed` to insert, the first
 call's post-mutex work is read-only, so there is no longer a second writer left to race the upgrade.
-See `docs/testing.md`'s note on concurrent-write tests for the general pattern.
+See `testing.md`'s note on concurrent-write tests for the general pattern.
 
 ## CI-only: `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` times out
 
