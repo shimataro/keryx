@@ -1,5 +1,8 @@
 package works.merc.keryx.app.ui.article
 
+/** Where an inline run sits relative to the baseline — `<sub>`/`<sup>`. */
+internal enum class InlineBaseline { Normal, Sub, Super }
+
 /**
  * A run of text sharing one set of inline decorations. [link], when non-null, is an
  * already-resolved absolute URL.
@@ -10,6 +13,10 @@ internal data class InlineSpan(
     val italic: Boolean = false,
     val code: Boolean = false,
     val strikethrough: Boolean = false,
+    val underline: Boolean = false,
+    val highlight: Boolean = false,
+    val sizeScale: Float = 1f,
+    val baseline: InlineBaseline = InlineBaseline.Normal,
     val link: String? = null,
 )
 

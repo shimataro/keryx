@@ -30,10 +30,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.BrowserOpener
@@ -188,19 +191,36 @@ private fun headingStyle(level: Int): TextStyle = when (level) {
     else -> MaterialTheme.typography.titleSmall
 }
 
+/** Approximates `<mark>`'s UA-default yellow highlight without hardcoding a jarring pure yellow. */
+private val HIGHLIGHT_COLOR = Color(0xFFFFEB3B).copy(alpha = 0.5f)
+
 @Composable
 private fun ArticleInline.annotated(): AnnotatedString {
     val linkColor = MaterialTheme.colorScheme.primary
-    return remember(this, linkColor) { buildInlineString(linkColor) }
+    val baseFontSizeSp = MaterialTheme.typography.bodyMedium.fontSize.value
+    return remember(this, linkColor, baseFontSizeSp) { buildInlineString(linkColor, baseFontSizeSp) }
 }
 
-private fun ArticleInline.buildInlineString(linkColor: Color): AnnotatedString = buildAnnotatedString {
+private fun ArticleInline.buildInlineString(linkColor: Color, baseFontSizeSp: Float): AnnotatedString = buildAnnotatedString {
     for (span in spans) {
+        val decoration = when {
+            span.underline && span.strikethrough -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+            span.underline -> TextDecoration.Underline
+            span.strikethrough -> TextDecoration.LineThrough
+            else -> null
+        }
         val style = SpanStyle(
             fontWeight = if (span.bold) FontWeight.Bold else null,
             fontStyle = if (span.italic) FontStyle.Italic else null,
             fontFamily = if (span.code) FontFamily.Monospace else null,
-            textDecoration = if (span.strikethrough) TextDecoration.LineThrough else null,
+            textDecoration = decoration,
+            fontSize = if (span.sizeScale != 1f) (baseFontSizeSp * span.sizeScale).sp else TextUnit.Unspecified,
+            baselineShift = when (span.baseline) {
+                InlineBaseline.Super -> BaselineShift.Superscript
+                InlineBaseline.Sub -> BaselineShift.Subscript
+                InlineBaseline.Normal -> null
+            },
+            background = if (span.highlight) HIGHLIGHT_COLOR else Color.Unspecified,
         )
         val link = span.link
         if (link == null) {

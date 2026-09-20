@@ -250,4 +250,23 @@ class ArticleContentParserTest {
         assertTrue(text.contains("middle"))
         assertTrue(text.contains("after"))
     }
+
+    @Test
+    fun carriesUnderlineHighlightAndSizeDecorations() {
+        val spans = (parseBody("<p><u>under</u> <mark>hi</mark> <small>sm</small> <big>bg</big></p>").single() as ArticleBlock.Paragraph)
+            .text.spans
+
+        assertTrue(spans.any { it.text == "under" && it.underline })
+        assertTrue(spans.any { it.text == "hi" && it.highlight })
+        assertTrue(spans.any { it.text == "sm" && it.sizeScale < 1f })
+        assertTrue(spans.any { it.text == "bg" && it.sizeScale > 1f })
+    }
+
+    @Test
+    fun carriesSubAndSuperscriptBaseline() {
+        val spans = (parseBody("<p>x<sub>2</sub> and y<sup>3</sup></p>").single() as ArticleBlock.Paragraph).text.spans
+
+        assertTrue(spans.any { it.text == "2" && it.baseline == InlineBaseline.Sub })
+        assertTrue(spans.any { it.text == "3" && it.baseline == InlineBaseline.Super })
+    }
 }

@@ -141,6 +141,10 @@ private data class InlineStyle(
     val italic: Boolean = false,
     val code: Boolean = false,
     val strikethrough: Boolean = false,
+    val underline: Boolean = false,
+    val highlight: Boolean = false,
+    val sizeScale: Float = 1f,
+    val baseline: InlineBaseline = InlineBaseline.Normal,
     val link: String? = null,
 )
 
@@ -154,6 +158,10 @@ private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<Inli
                     italic = style.italic,
                     code = style.code,
                     strikethrough = style.strikethrough,
+                    underline = style.underline,
+                    highlight = style.highlight,
+                    sizeScale = style.sizeScale,
+                    baseline = style.baseline,
                     link = style.link,
                 ),
             )
@@ -181,8 +189,14 @@ private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<Inli
 private fun InlineStyle.extendedBy(tag: String, element: Element, base: String): InlineStyle = when (tag) {
     "b", "strong" -> copy(bold = true)
     "i", "em", "cite", "q" -> copy(italic = true)
-    "code", "kbd", "samp", "var" -> copy(code = true)
+    "code", "kbd", "samp", "var", "tt" -> copy(code = true)
     "s", "del", "strike" -> copy(strikethrough = true)
+    "u", "ins" -> copy(underline = true)
+    "mark" -> copy(highlight = true)
+    "small" -> copy(sizeScale = sizeScale * 0.83f)
+    "big" -> copy(sizeScale = sizeScale * 1.2f)
+    "sub" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Sub)
+    "sup" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Super)
     // An unresolvable href leaves the text in place without a link, rather than offering a tap
     // that could go nowhere.
     "a" -> copy(link = resolveAttr(element, "href", base) ?: link)
