@@ -13,9 +13,6 @@ coroutines = "1.11.0"
 serialization = "1.11.0"
 datetime = "0.8.0"
 kotlinx-io = "0.9.1"
-# 1.0.2.1 is newer than 1.0.2 (published 2026-08-25 vs 2026-08-08); Maven metadata lists
-# 1.0.2 last, which is publication order, not version order.
-xmlutil = "1.0.2.1"
 coil = "3.5.0"
 lifecycle = "2.11.0"
 ksoup = "0.2.6"
@@ -133,10 +130,6 @@ kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.
 # materialising it in memory. Already on the classpath transitively via Ktor 3; declared
 # explicitly because production code depends on it directly.
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
-
-# --- XML / OPML ---
-xmlutil-serialization = { module = "io.github.pdvrieze.xmlutil:serialization", version.ref = "xmlutil" }
-xmlutil-core = { module = "io.github.pdvrieze.xmlutil:core", version.ref = "xmlutil" }
 
 # --- HTML parsing (feed discovery / reader view) ---
 ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }

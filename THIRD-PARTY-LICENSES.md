@@ -20,7 +20,6 @@ its respective license.
 | SQLDelight | Apache-2.0 | <https://github.com/sqldelight/sqldelight> |
 | SQLite JDBC | Apache-2.0 | <https://github.com/xerial/sqlite-jdbc> |
 | Ktor | Apache-2.0 | <https://github.com/ktorio/ktor> |
-| xmlutil | Apache-2.0 | <https://github.com/pdvrieze/xmlutil> |
 | Ksoup | Apache-2.0 | <https://github.com/fleeksoft/ksoup> |
 | Coil | Apache-2.0 | <https://github.com/coil-kt/coil> |
 | java-keyring | MIT | <https://github.com/javakeyring/java-keyring> |
