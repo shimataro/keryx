@@ -212,7 +212,11 @@ class ArticleContentParserTest {
             "<table><thead><tr><th>h1</th><th>h2</th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table>",
         ).single() as ArticleBlock.Table
 
-        assertEquals(listOf(listOf("h1", "h2"), listOf("a", "b")), table.rows.map { row -> row.map { it.plain() } })
+        assertEquals(
+            listOf(listOf("h1", "h2"), listOf("a", "b")),
+            table.rows.map { row -> row.cells.map { it.plain() } },
+        )
+        assertEquals(listOf(true, false), table.rows.map { it.isHeader })
     }
 
     @Test

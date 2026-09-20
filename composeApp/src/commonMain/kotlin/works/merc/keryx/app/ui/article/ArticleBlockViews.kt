@@ -22,9 +22,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,9 +49,6 @@ import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_embed_open
 import works.merc.keryx.app.ui.common.FlatTonalButton
-
-/** Fixed column width for the simplified table rendering, which does no column measurement. */
-private val TABLE_COLUMN_WIDTH = 160.dp
 
 private val QUOTE_BAR_WIDTH = 3.dp
 private val NESTED_SPACING = 6.dp
@@ -182,21 +182,75 @@ private fun FigureView(block: ArticleBlock.Figure, modifier: Modifier) {
     }
 }
 
+private data class TableCellInfo(val row: Int, val col: Int, val isHeader: Boolean)
+
+private fun buildCellInfos(rows: List<TableRow>): List<TableCellInfo> = buildList {
+    rows.forEachIndexed { r, row -> row.cells.forEachIndexed { c, _ -> add(TableCellInfo(r, c, row.isHeader)) } }
+}
+
+/**
+ * Deliberately simple: no colspan/rowspan handling — a real table layout is out of scope for a
+ * fallback reader. Column widths *are* measured from content (unlike a fixed-width column, which
+ * either wasted space on narrow columns or clipped wide ones): every cell is measured unconstrained,
+ * each column takes the widest cell in it, and the whole table sits inside [horizontalScroll] for
+ * when that natural width overflows the pane. Row separators are kept (see [ArticleContentView]'s
+ * "keep the app's own decoration" policy) by painting them at the row boundaries this layout already
+ * computes, rather than interleaving separate `HorizontalDivider` composables between rows the way a
+ * plain `Column` of rows could — a single [Layout] spanning every cell is what lets columns actually
+ * line up across rows in the first place.
+ */
 @Composable
 private fun TableView(block: ArticleBlock.Table, modifier: Modifier) {
-    // Deliberately simple: fixed-width columns and no colspan/rowspan handling. A real table
-    // layout is out of scope for a fallback reader; keeping the columns aligned is not.
-    Column(modifier.horizontalScroll(rememberScrollState())) {
-        block.rows.forEachIndexed { index, row ->
-            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row {
-                row.forEach { cell ->
+    val columnCount = remember(block) { block.rows.maxOf { it.cells.size } }
+    val cellInfos = remember(block) { buildCellInfos(block.rows) }
+    var rowBoundaries by remember(block) { mutableStateOf(IntArray(0)) }
+    val dividerColor = MaterialTheme.colorScheme.outlineVariant
+    val headerStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+    val cellStyle = MaterialTheme.typography.bodySmall
+
+    Layout(
+        content = {
+            block.rows.forEach { row ->
+                row.cells.forEach { cell ->
                     Text(
                         text = cell.annotated(),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.width(TABLE_COLUMN_WIDTH).padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = if (row.isHeader) headerStyle else cellStyle,
+                        textAlign = if (row.isHeader) TextAlign.Center else null,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
+            }
+        },
+        modifier = modifier
+            .horizontalScroll(rememberScrollState())
+            .drawBehind {
+                val boundaries = rowBoundaries
+                if (boundaries.size <= 1) return@drawBehind
+                for (i in 1 until boundaries.size - 1) {
+                    val y = boundaries[i].toFloat()
+                    drawLine(dividerColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+                }
+            },
+    ) { measurables, _ ->
+        val loose = Constraints()
+        val placeables = measurables.map { it.measure(loose) }
+        val columnWidths = IntArray(columnCount)
+        val rowHeights = IntArray(block.rows.size)
+        cellInfos.forEachIndexed { i, info ->
+            columnWidths[info.col] = maxOf(columnWidths[info.col], placeables[i].width)
+            rowHeights[info.row] = maxOf(rowHeights[info.row], placeables[i].height)
+        }
+        val columnStarts = IntArray(columnCount + 1)
+        for (c in 0 until columnCount) columnStarts[c + 1] = columnStarts[c] + columnWidths[c]
+        val boundaries = IntArray(rowHeights.size + 1)
+        for (r in rowHeights.indices) boundaries[r + 1] = boundaries[r] + rowHeights[r]
+        rowBoundaries = boundaries
+
+        layout(columnStarts.last(), boundaries.last()) {
+            cellInfos.forEachIndexed { i, info ->
+                val columnStart = columnStarts[info.col]
+                val x = if (info.isHeader) columnStart + (columnWidths[info.col] - placeables[i].width) / 2 else columnStart
+                placeables[i].placeRelative(x, boundaries[info.row])
             }
         }
     }

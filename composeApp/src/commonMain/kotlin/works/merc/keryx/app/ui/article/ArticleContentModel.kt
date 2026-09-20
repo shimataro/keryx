@@ -32,6 +32,9 @@ internal data class ArticleInline(val spans: List<InlineSpan>) {
     val isBlank: Boolean get() = spans.all { it.text.isBlank() }
 }
 
+/** A single `<tr>`, keeping `<th>` cells distinguishable from `<td>` ones for UA-default bolding/centering. */
+internal data class TableRow(val cells: List<ArticleInline>, val isHeader: Boolean)
+
 /** A block-level piece of an article, in the order it appears. */
 internal sealed interface ArticleBlock {
     data class Paragraph(val text: ArticleInline, val align: TextAlign? = null, val muted: Boolean = false) : ArticleBlock
@@ -42,7 +45,7 @@ internal sealed interface ArticleBlock {
     data class Code(val text: String) : ArticleBlock
     data class Picture(val src: String, val alt: String?) : ArticleBlock
     data class Figure(val children: List<ArticleBlock>) : ArticleBlock
-    data class Table(val rows: List<List<ArticleInline>>) : ArticleBlock
+    data class Table(val rows: List<TableRow>) : ArticleBlock
     data class Embed(val url: String) : ArticleBlock
     data object Rule : ArticleBlock
 }

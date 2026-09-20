@@ -210,6 +210,20 @@ class ArticleContentViewTest {
         val titleTop = onNodeWithText("Article title").fetchSemanticsNode().boundsInRoot.top
         assertTrue(noticeTop < titleTop)
     }
+
+    // Regression test for the custom table Layout (ArticleBlockViews.kt): a cell-index mistake in
+    // its column/row math would either crash or silently drop cells rather than fail a type check.
+    @Test
+    fun rendersTableHeaderAndDataCells() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(document("<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr></table>"))
+        }
+
+        onNodeWithText("Name").assertIsDisplayed()
+        onNodeWithText("Age").assertIsDisplayed()
+        onNodeWithText("Alice").assertIsDisplayed()
+        onNodeWithText("30").assertIsDisplayed()
+    }
 }
 
 /** Enough paragraphs to overflow the test window, so the reader's LazyColumn really can scroll. */

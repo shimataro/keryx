@@ -299,10 +299,13 @@ private fun bullets(element: Element, base: String, ordered: Boolean): List<Arti
 
 private fun table(element: Element, base: String): ArticleBlock.Table? {
     val rows = element.select("tr").mapNotNull { row ->
-        row.children()
-            .filter { it.normalName() == "td" || it.normalName() == "th" }
-            .map { cell -> ArticleInline(inlineSpans(cell, base, InlineStyle(), mutableListOf())).trimEdges() }
-            .takeIf { it.isNotEmpty() }
+        val cellElements = row.children().filter { it.normalName() == "td" || it.normalName() == "th" }
+        if (cellElements.isEmpty()) return@mapNotNull null
+        val isHeader = cellElements.all { it.normalName() == "th" }
+        val cells = cellElements.map { cell ->
+            ArticleInline(inlineSpans(cell, base, blockBaseStyle(cell), mutableListOf())).trimEdges()
+        }
+        TableRow(cells, isHeader)
     }
     return if (rows.isEmpty()) null else ArticleBlock.Table(rows)
 }
