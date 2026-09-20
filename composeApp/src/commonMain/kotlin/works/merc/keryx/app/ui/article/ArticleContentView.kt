@@ -110,7 +110,10 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
                     item {
                         Text(
                             text = stringResource(Res.string.article_reader_simple_notice),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = TextStyle(
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = NOTICE_BOTTOM_GAP),
                         )
@@ -159,7 +162,7 @@ private fun blockGapDp(gapEm: Float): Dp {
 @Composable
 private fun ArticleTitle(title: String, titleUrl: String?, modifier: Modifier = Modifier) {
     val fontSize = ARTICLE_BODY_FONT_SIZE.value * TITLE_FONT_SCALE
-    val style: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+    val style = TextStyle(
         fontSize = fontSize.sp,
         fontWeight = FontWeight.SemiBold,
         lineHeight = (fontSize * TITLE_LINE_HEIGHT_RATIO).sp,
@@ -186,7 +189,7 @@ private fun ArticleTitle(title: String, titleUrl: String?, modifier: Modifier = 
 @Composable
 internal fun bodyTextStyle(): TextStyle {
     val size = ARTICLE_BODY_FONT_SIZE.value
-    return MaterialTheme.typography.bodyMedium.copy(
+    return TextStyle(
         fontSize = size.sp,
         lineHeight = (size * ARTICLE_LINE_HEIGHT_RATIO).sp,
     )
@@ -196,7 +199,7 @@ internal fun bodyTextStyle(): TextStyle {
 @Composable
 internal fun headingStyle(level: Int): TextStyle {
     val size = ARTICLE_BODY_FONT_SIZE.value * headingFontScale(level)
-    return MaterialTheme.typography.bodyMedium.copy(
+    return TextStyle(
         fontSize = size.sp,
         fontWeight = FontWeight.Bold,
         lineHeight = (size * ARTICLE_LINE_HEIGHT_RATIO).sp,

@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -76,7 +77,10 @@ internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier
 
         is ArticleBlock.Caption -> LinkText(
             text = block.text.annotated(),
-            style = MaterialTheme.typography.bodySmall,
+            style = TextStyle(
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = block.align,
             modifier = modifier,
@@ -238,8 +242,11 @@ private fun TableView(block: ArticleBlock.Table, modifier: Modifier) {
     val cellInfos = remember(block) { buildCellInfos(block.rows) }
     var rowBoundaries by remember(block) { mutableStateOf(IntArray(0)) }
     val dividerColor = MaterialTheme.colorScheme.outlineVariant
-    val headerStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-    val cellStyle = MaterialTheme.typography.bodySmall
+    val cellStyle = TextStyle(
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+    )
+    val headerStyle = cellStyle.copy(fontWeight = FontWeight.Bold)
 
     Layout(
         content = {
@@ -297,7 +304,10 @@ private fun EmbedView(block: ArticleBlock.Embed, modifier: Modifier) {
         }
         Text(
             text = block.url,
-            style = MaterialTheme.typography.labelSmall,
+            style = TextStyle(
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

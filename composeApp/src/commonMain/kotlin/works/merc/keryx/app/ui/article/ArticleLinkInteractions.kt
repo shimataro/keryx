@@ -25,6 +25,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.BrowserOpener
@@ -128,7 +129,10 @@ internal fun LinkText(
                     Text(
                         text = tooltipUrl,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = TextStyle(
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        ),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
