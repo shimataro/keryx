@@ -1,5 +1,8 @@
--- Cloud sync metadata (KVS, device-local — NOT synced). Known keys:
--- last_synced_at (Unix ms), cloud_file_rev (Dropbox rev for conflict detection).
+-- Cloud sync metadata (KVS, device-local — NOT synced). Known keys are the
+-- core/Constants.kt SYNC_STATE_* values: SYNC_STATE_LAST_SYNCED_AT ("last_synced_at", Unix ms),
+-- SYNC_STATE_CLOUD_FILE_REV ("cloud_file_rev" — provider-specific: Dropbox rev / Google Drive
+-- version / OneDrive eTag, used for conflict detection), SYNC_STATE_LAST_UPLOADED_DIGEST
+-- ("last_uploaded_snapshot_digest").
 
 CREATE TABLE sync_state (
     key   TEXT NOT NULL PRIMARY KEY,
