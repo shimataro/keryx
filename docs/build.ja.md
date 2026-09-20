@@ -312,7 +312,7 @@ snapd のポリシー上自動接続されないうえ、Snapcraft のレビュ�
 
 **手動検証（CI ではカバーされない——`ci.yml` は Snap を一切ビルドしない）**: `gnome` 拡張機能の
 プラットフォーム snap が実行時に `libsecret-1.so.0` を実際に解決できるかは、実行時のみ検証可能な
-前提である（lint ステップは `dlopen` を検知できない。上記 `lint.ignore` のコメント参照）。
+前提である（lint ステップは `dlopen` を検知できない。後述の `lint.ignore` のコメント参照）。
 リリース前に `snapcraft pack --destructive-mode`（または `--use-lxd`）→ `snap install --dangerous`
 した結果でクラウド連携を接続し、(a) 通知センターに平文フォールバック警告が出ないこと、
 (b) それが `snap connect keryx:password-manager-service` を一度も実行せずに成立すること

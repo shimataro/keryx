@@ -315,7 +315,7 @@ warning's own detail text says.
 
 **Manual verification (no CI coverage — `ci.yml` never builds the Snap):** that the `gnome`
 extension's platform snap actually resolves `libsecret-1.so.0` at runtime is a runtime-only
-assumption (the lint step can't see a `dlopen`, see the `lint.ignore` comment above). Before a
+assumption (the lint step can't see a `dlopen`, see the `lint.ignore` comment below). Before a
 release, `snapcraft pack --destructive-mode` (or `--use-lxd`) → `snap install --dangerous` the
 result, connect a cloud provider, and confirm (a) no plaintext-fallback warning appears in the
 notification center, and (b) that this holds **without** ever running
