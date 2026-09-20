@@ -31,7 +31,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - The sync file is a gzip-compressed `VACUUM INTO` snapshot of `keryx.db` (excluding the local-only
   `articles_fts` search index, the four `idx_articles_*` indexes, and the `sync_state` table) — see
   [sync-architecture.md](sync-architecture.md).
-- Sync targets: subscription list, read state, stars, tag structure, global settings.
+- Sync targets: subscription list, folders, read state, stars, tag structure, article body, global
+  settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
 - While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its current
@@ -78,10 +79,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   imported by opening it directly from another app — file-association double-click on desktop,
   "open with Keryx" from a file manager or mail attachment on Android
 - With no feeds subscribed yet, the article list shows an empty-state message with an "Add feed"
-  button rather than the ordinary "no articles" message; on Android's narrower widths, where the
-  feed list's own "+" button lives inside a navigation drawer closed by default (see §9), the
-  drawer also opens automatically the first time the app has no feeds and no cloud account
-  configured, so the button is reachable without the user having to find the drawer themselves
+  button rather than the ordinary "no articles" message; on Android's narrower widths, the
+  navigation drawer holding the feed list's own "+" button can auto-open here as well (§9's
+  "Narrower widths" has the exact condition), so the button is reachable without the user having to
+  find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update (download and install, not just a link to the release page): supported for a macOS
   `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
@@ -135,7 +136,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
 a flat, SF-leaning look; Android gets Material 3's own components, shapes, and ripple feedback; iOS
 will eventually get native SwiftUI. **Windows and Linux are the deliberate exception**: Java/Swing's
 own platform integration is too limited to give either OS a comparably native treatment (see the
-Look & Feel, context-menu, and file-dialog specifics below, and `docs/known-issues.md`), so both
+Look & Feel, context-menu, and file-dialog specifics below, and `known-issues.md`), so both
 share macOS's flat look instead of getting one of their own. Material 3 is Android's concrete
 instantiation of this principle — where this document says "Material 3", read it as Android-specific
 unless stated otherwise. Android's own color scheme is not always the app's fixed teal palette:
@@ -234,13 +235,13 @@ back to the article list, or rotating the device between phone and tablet width 
 article from the top again, as does reopening it later. A swipe whose vertical travel isn't clearly
 smaller than its horizontal travel is treated as a scroll rather than a page turn (a horizontal-
 dominant diagonal drag still turns the page), and a swipe is ignored for a moment after scrolling,
-so a flick meant to scroll does not change the article. This is
-available whenever the reader is on screen at all at a narrower-than-desktop width — a phone-width
-screen drilled into an article, and a tablet-width screen (in portrait, and in landscape on any
-tablet not wide enough for all three panes), where the reader is a permanent neighbor of the article
-list with no back control of its own, the same as the tablet's own reading pane in Gmail — since the
-same reader, the same list order, and the same next/previous action apply regardless of whether the
-reader happens to have a back button beside it. At the desktop-width 3-pane layout — which a large
+so a flick meant to scroll does not change the article. This applies whenever the reader is on
+screen at all at a narrower-than-desktop width, since the same reader, the same list order, and the
+same next/previous action apply regardless of whether the reader happens to have a back button
+beside it. That covers two cases: a phone-width screen drilled into an article, and a tablet-width
+screen (in portrait, and in landscape on any tablet not wide enough for all three panes) where the
+reader is a permanent neighbor of the article list with no back control of its own, the same as the
+tablet's own reading pane in Gmail. At the desktop-width 3-pane layout — which a large
 tablet in landscape also reaches — the reader is a permanent, keyboard-driven pane instead (J/K —
 see `app-architecture.md`), and the swipe gesture does not apply there.
 
@@ -263,7 +264,14 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 ## 10. Privacy & Security
 
-- No data sent to external servers, no account registration required, HTTPS only. Note that the
+- No server operated by the developer, no account registration required. Keryx contacts only
+  servers directly relevant to the feature in use (each subscribed feed and its favicon, GitHub
+  for update checks/downloads, and — only if connected — Dropbox/Google Drive/OneDrive), always
+  straight from the device; see [PRIVACY.md](../PRIVACY.md)'s "Network requests this app makes"
+  for the full list. Keryx's own communication
+  (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched
+  over plain HTTP if its URL explicitly says `http://` (or redirects there) — a feed URL with no
+  scheme at all is upgraded to HTTPS, but an explicit `http://` is not overridden. Note that the
   reader keeps the articles either side of the one on screen ready to swipe to (§9), so their
   content — including any images or embedded content they contain — is fetched before they are
   opened, exactly as it would be on opening them. Nothing about them is marked read.
@@ -272,7 +280,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
   java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
   desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
   unavailable. On Android: an AES-256/GCM key held in the Android Keystore, per provider. See
-  `docs/sync-architecture.md`'s "Token Storage" for both.
+  `sync-architecture.md`'s "Token Storage" for both.
 
 ## 11. Technology Choices
 

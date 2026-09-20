@@ -128,8 +128,8 @@ Android OAuth クライアント種別に対してカスタム URI とループ�
    「クライアントを作成」からアプリケーションの種類 **「Android」** を選ぶ。
 2. パッケージ名: `works.merc.keryx`。
 3. 署名証明書の SHA-1。**実際に動かす署名鍵ごとにクライアントを 1 つずつ**登録する:
-   - リリース鍵（本ドキュメントの Android 署名の節を参照 — GitHub 配布の APK と Play へのアップロードは
-     同じ鍵なので、1 エントリで両チャネルをカバーする）
+   - リリース鍵（後述の「リリース（CD）」の `ANDROID_RELEASE_KEYSTORE_BASE64` ほかを参照 — GitHub 配布の
+     APK と Play へのアップロードは同じ鍵なので、1 エントリで両チャネルをカバーする）
    - ローカルの **debug** キーストア。登録しないと `installGithubDebug` ビルドでは認可がまったく通らない
      （`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`）
 4. クライアント ID もシークレットもプロジェクトには取り込まない — Play 開発者サービスが実行時に
@@ -312,7 +312,7 @@ snapd のポリシー上自動接続されないうえ、Snapcraft のレビュ�
 
 **手動検証（CI ではカバーされない——`ci.yml` は Snap を一切ビルドしない）**: `gnome` 拡張機能の
 プラットフォーム snap が実行時に `libsecret-1.so.0` を実際に解決できるかは、実行時のみ検証可能な
-前提である（lint ステップは `dlopen` を検知できない。上記 `lint.ignore` のコメント参照）。
+前提である（lint ステップは `dlopen` を検知できない。後述の `lint.ignore` のコメント参照）。
 リリース前に `snapcraft pack --destructive-mode`（または `--use-lxd`）→ `snap install --dangerous`
 した結果でクラウド連携を接続し、(a) 通知センターに平文フォールバック警告が出ないこと、
 (b) それが `snap connect keryx:password-manager-service` を一度も実行せずに成立すること
@@ -322,7 +322,7 @@ snapd のポリシー上自動接続されないうえ、Snapcraft のレビュ�
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
 アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
-明示的に除外されるため、上述の`keryx://` URIスキームと`.opml`関連付けの自己登録
+明示的に除外されるため、後述の`keryx://` URIスキームと`.opml`関連付けの自己登録
 （`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`）がホスト側の
 `~/.local/share/applications`や`~/.config/mimeapps.list`へ届くことは、そもそもあり得ない。
 さらにsnap内ではそれらのパスに手を伸ばすことすらない — 両レジストラは書き込み先を
@@ -611,12 +611,14 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. ジョブ定義は6つだが、実行数は8つになる — `package-linux` と `package-snap` はそれぞれ
-   `x86_64`/`arm64` の matrix になっているため（前者は `ubuntu-latest`/`ubuntu-24.04-arm`、
-   後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは先に
-   `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
+3. ジョブ定義は全部で6つ、そのうち並列に走るのは5つ（`package-macos`、`package-linux`、
+   `package-snap`、`package-windows`、`package-android`）——実行数は7つになる。`package-linux` と
+   `package-snap` はそれぞれ `x86_64`/`arm64` の matrix になっているため（前者は
+   `ubuntu-latest`/`ubuntu-24.04-arm`、後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは
+   先に `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
    *設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは
-   `ubuntu-latest` と違って Android SDK を同梱していないため）:
+   `ubuntu-latest` と違って Android SDK を同梱していないため）。6つ目の `deploy-pages` は他の
+   Snap 以外の4ジョブにゲートされておりこの並列集合には含まれない（合計の実行数は8つ。後述）:
 
    - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - Linux ランナーで（アーキテクチャごとに、jpackage 用の `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`x86_64`・`arm64` それぞれについて `Keryx-<version>-linux-<arch>.deb` と `Keryx-<version>-linux-<arch>.rpm` に加えて **`Keryx-<version>-linux-<arch>.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。片方のアーキテクチャの失敗（`fail-fast: false`）はもう片方の成果物を道連れにしない。
@@ -643,7 +645,7 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
        deb/rpm/msi のスキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは
        Release 側のプレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の
        自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。
-   - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
+   - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には互換性のある WiX Toolset（v3/v4/v5）がプリインストール済みのため、別途 WiX のセットアップ手順は不要。[setup.ja.md](setup.ja.md) 参照）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
    - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。
 
      > [!WARNING]

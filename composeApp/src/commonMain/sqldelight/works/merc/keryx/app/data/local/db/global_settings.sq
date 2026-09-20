@@ -1,6 +1,6 @@
 -- Global settings (KVS). Synced across devices. Timestamp-last-wins.
--- value is a JSON string. Known keys: read_timeout_seconds, cache_retention_days,
--- article_list_default_unread_only.
+-- value is a plain string, not JSON (an int/boolean is encoded via its own toString()). Known keys:
+-- read_timeout_seconds, cache_retention_days, article_list_default_unread_only.
 
 CREATE TABLE global_settings (
     key        TEXT    NOT NULL PRIMARY KEY,

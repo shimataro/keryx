@@ -40,9 +40,8 @@ macOS でウインドウをトレイに収納した状態で新着記事の通�
 （`userNotificationCenter:didActivateNotification:`）は、所有アプリに Dock アイコンがない状態
 （`NSApplicationActivationPolicyAccessory`）— まさにこの機能が対象としていたトレイ収納状態そのもの —
 では Java の `ActionListener` へ確実にはブリッジされていないと見られる。これ以上は Kotlin/Java の
-コードを読むだけでは絞り込めなかった。本ファイルの Linux `GtkFileDialogPeer` クラッシュの節で行った
-のと同様に `CTrayIcon` のネイティブ実装をデコンパイルするか、本コードベース外の最小構成の純粋 AWT
-テストアプリで再現させる必要があるが、いずれも行っていない。
+コードを読むだけでは絞り込めなかった。`CTrayIcon` のネイティブ実装をデコンパイルするか、本コードベース
+外の最小構成の純粋 AWT テストアプリで再現させる必要があるが、いずれも行っていない。
 
 ### カスタムの配線はデッドコードだった
 
@@ -85,9 +84,8 @@ Cocoa の `NSUserNotificationCenter`（または非推奨でない現行の `Use
 JNA ベースの Objective-C ブリッジで直接操作する必要がある — `MacActivationPolicy` が既に行っている
 生の `objc_msgSend` 呼び出しと同じ方向性だが、規模はかなり大きい。通知センターのデリゲートとして動作する
 ランタイム Objective-C クラスを生成する必要があり（`objc_allocateClassPair`/`class_addMethod` に JNA の
-`Callback` を実装として渡す）、これは本質的にリスクの高いネイティブ相互運用であり（実装を誤ると JVM が
-クラッシュしうる点は、本ファイルに記録されている Linux の GTK クラッシュと同じ種類のリスク）、実機での
-検証を何度も繰り返す必要がある。
+`Callback` を実装として渡す）、これは本質的にリスクの高いネイティブ相互運用であり
+（実装を誤ると JVM がクラッシュしうる）、実機での検証を何度も繰り返す必要がある。
 
 もっとも、これは着手する価値より先に不要になる可能性が高い。`app-architecture.md` によれば macOS は
 将来的にネイティブ SwiftUI 実装へ移行することが想定されている（`external-spec.md` §2 — Android や iOS
@@ -433,7 +431,7 @@ read を行っている箇所:
 `<item>` を持たないフィードを購読するようにした。`articleRepository.upsertParsed` が挿入する
 記事が無くなるため、1 本目の呼び出しが mutex 解放後に行う処理は読み取りのみになり、
 昇格と競合し得る 2 本目の書き込み側が存在しなくなる。並行書き込みテストの一般的な指針は
-`docs/testing.md` の該当箇所を参照。
+`testing.ja.md` の該当箇所を参照。
 
 ## CI でのみ `UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming` がタイムアウトする
 

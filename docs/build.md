@@ -128,8 +128,8 @@ is an OAuth client registered against this app's identity:
    "Google Auth Platform" → "Clients" → "Create client" and choose application type **"Android"**.
 2. Package name: `works.merc.keryx`.
 3. SHA-1 of the signing certificate. Register **one client per signing key you actually run**:
-   - the release key (`docs/build.md`'s Android signing section — the same key backs both the GitHub
-     APK and the Play upload, so one entry covers both channels);
+   - the release key (see "Release (CD)" below for `ANDROID_RELEASE_KEYSTORE_BASE64` and friends —
+     the same key backs both the GitHub APK and the Play upload, so one entry covers both channels);
    - your local **debug** keystore, or `installGithubDebug` builds cannot authorize at all
      (`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`).
 4. No client ID or secret is copied into the project — Play services matches the app by package name
@@ -315,7 +315,7 @@ warning's own detail text says.
 
 **Manual verification (no CI coverage — `ci.yml` never builds the Snap):** that the `gnome`
 extension's platform snap actually resolves `libsecret-1.so.0` at runtime is a runtime-only
-assumption (the lint step can't see a `dlopen`, see the `lint.ignore` comment above). Before a
+assumption (the lint step can't see a `dlopen`, see the `lint.ignore` comment below). Before a
 release, `snapcraft pack --destructive-mode` (or `--use-lxd`) → `snap install --dangerous` the
 result, connect a cloud provider, and confirm (a) no plaintext-fallback warning appears in the
 notification center, and (b) that this holds **without** ever running
@@ -325,7 +325,7 @@ libsecret failed to resolve, `stage-packages: [libsecret-1-0]` under `parts.kery
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
 explicitly excludes hidden files and directories, so it could never let the `keryx://` URI scheme
-and `.opml` association self-registration described above
+and `.opml` association self-registration described below
 (`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`) reach the host's
 `~/.local/share/applications` and `~/.config/mimeapps.list`. In the snap they never even reach for
 them: both registrars resolve their targets from `XDG_DATA_HOME` / `XDG_CONFIG_HOME`, and under
@@ -597,11 +597,14 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Six job definitions run in parallel — eight actual runs, since `package-linux` and `package-snap`
-   are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
+3. Six job definitions in total, five of which (`package-macos`, `package-linux`, `package-snap`,
+   `package-windows`, `package-android`) run in parallel — seven actual runs, since `package-linux`
+   and `package-snap` are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
    `ubuntu-24.04`/`ubuntu-24.04-arm` respectively; the arm64 legs run `android-actions/setup-android@v3`
    first, since `:composeApp`'s Android target needs `ANDROID_HOME` merely to configure, and the
-   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all):
+   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all). The sixth,
+   `deploy-pages`, is gated on the other four non-Snap jobs and so is not part of that parallel set
+   (eight actual runs in total; see below):
 
    - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, once per architecture, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-<arch>.deb`, `Keryx-<version>-linux-<arch>.rpm` **and `Keryx-<version>-linux-<arch>.zip`** for `<arch>` in `x86_64`, `arm64`. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). A failure on one architecture's leg (`fail-fast: false`) does not withhold the other's assets.
@@ -630,7 +633,7 @@ Flow:
        skip checks above key on the tag suffix alone; only the Snap Store channel also honours the
        Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every
        Store user by snapd's own auto-refresh with no way to recall it).
-   - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships WiX Toolset v3.14.1 preinstalled, so no separate WiX setup step is needed), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
+   - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships a compatible WiX Toolset version (v3/v4/v5) preinstalled, so no separate WiX setup step is needed; see [setup.md](setup.md)), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
    - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK.
 
      > [!WARNING]
@@ -809,7 +812,7 @@ Overview:
    `compose.desktop.mac.signing.identity`.
 3. For distribution notarization only, prepare an app-specific password and set `macOS { notarization { appleID/password/teamId } }`, then run `./gradlew :composeApp:notarizeDmg`. Notarization is not required for local testing.
 
-No special entitlements are required for Keychain access (just ensure `get-task-allow` is not added; jpackage's Developer ID signing uses hardened runtime, which satisfies the requirement). See [sync-architecture.md](sync-architecture.md) "Dropbox Authentication > Token Storage" for token storage details.
+No special entitlements are required for Keychain access (just ensure `get-task-allow` is not added; jpackage's Developer ID signing uses hardened runtime, which satisfies the requirement). See [sync-architecture.md](sync-architecture.md) "Cloud Authentication (OAuth PKCE + Offline Access) > Token Storage" for token storage details, which covers all three providers, not just Dropbox.
 
 ## Notes
 

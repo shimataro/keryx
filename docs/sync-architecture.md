@@ -44,7 +44,7 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
    - The decompressed file is checked against SQLite's 16-byte file header (`core/SqliteFile.kt`'s path-based `looksLikeSqliteFile`, which reads only those bytes) before the merger opens it — symmetric with the same check on the upload side (step 5). A payload that fails it (truncated download, an HTML error page, a 0-byte or otherwise non-SQLite file) is rejected immediately as `CloudDataIncompatibleException`, rather than reaching `DatabaseMerger` and failing deep inside the merge statements with an ambiguous `no such table: cloud.folders`. A `.gz` payload that isn't valid gzip at all (decompression itself throws) is rejected the same way, before ever reaching this check.
 3. **`DatabaseMerger.merge()` to merge** (see below). Immediately after, `ftsManager.indexMissing()` incrementally indexes new articles from merge (without wiping the live index), then `driver.notifyListeners(...)` (all tables touched by merge) is called. Because merge writes via `DatabaseMerger`'s dedicated raw JDBC connection without firing SQLDelight query notifications, `watchAll` flows (and re-search with updated index) must be re-triggered to reflect sync content in the UI without restart.
 4. Record `sync_state.cloud_file_rev`.
-5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts` and `sync_state` on the copy side** (live DB is unchanged), then gzip-compresses it (`platform/Gzip`). Stream the compressed file to `CLOUD_DB_GZ_PATH` specifying `rev` — **skipped when the snapshot's SHA-256 equals `sync_state.last_uploaded_snapshot_digest` and step 2 merged nothing**, i.e. the cloud already holds exactly these bytes (this skip still records `last_synced_at`, same as an actual upload). The digest is always computed on the *uncompressed* snapshot (see "Compressed Upload / Legacy Fallback" below for why).
+5. `DatabaseSnapshot.exportForUpload()` creates a `VACUUM INTO` snapshot, **drops `articles_fts`, `sync_state`, and the four `idx_articles_*` indexes on the copy side, then runs a trailing `VACUUM`** (live DB is unchanged; see `domain/SnapshotSql.kt`'s `cleanupStatements`), then gzip-compresses it (`platform/Gzip`). Stream the compressed file to `CLOUD_DB_GZ_PATH` specifying `rev` — **skipped when the snapshot's SHA-256 equals `sync_state.last_uploaded_snapshot_digest` and step 2 merged nothing**, i.e. the cloud already holds exactly these bytes (this skip still records `last_synced_at`, same as an actual upload). The digest is always computed on the *uncompressed* snapshot (see "Compressed Upload / Legacy Fallback" below for why).
    - If `rev` mismatch (409 → `SyncConflictException`), retry from re-download. `SYNC_MAX_RETRY = 3` bounds the
      total number of attempts (2 retries after the first).
 6. On success, record `last_synced_at`, the uploaded snapshot's (uncompressed) digest, and **the revision the upload itself produced** (`CloudStorage.upload`/`create` return it). It must come from the write's own response, never a follow-up `metadata()` call: a second request could observe another device's newer write, and storing that revision would make the next sync skip a download whose contents were never merged.
@@ -123,7 +123,8 @@ rather than looking stuck — which is the correct ordering anyway.
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
 debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
-path), and Android's `FeedRefreshWorker` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
+path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` — is subject to
+a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
 is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
 spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded
 and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the
@@ -150,7 +151,12 @@ Merge SQL (`MergeSql`) key points:
 - feeds / tags / folders / global_settings: last-write-wins (including logical deletion). However, the `ON CONFLICT` in the feeds statement **does not handle user-edited fields (`folder_id` / `sort_order` / `custom_title` / `deleted_at`) at all** (delegated to dedicated statements below). This prevents these fields from being overwritten just because the content is newer.
   The `ON CONFLICT` only handles content fields (url/title/description/etag etc. + `updated_at`).
   feeds are matched **`id`** so feed ids must be deterministically generated from `url` as **UUIDv5** at subscription time (`IdGenerator.feedId`), ensuring the same feed has the same id on all devices — otherwise the URL collision guard below would skip independently-subscribed duplicates and they'd never converge (and article ids derived from `feed_id` would also diverge). See `feeds` section in [db-schema.md](db-schema.md) for details.
-- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, body is OR merge; `search_text` is not
+- articles: Read (`read_at`) / star (`starred_at`) are last-write-wins, `content` is OR merge (`COALESCE(c.content,
+  l.content)`); `summary` is *not* independently OR-merged — once either side has a non-NULL `content`, `summary` is
+  dropped to NULL rather than carried over, since it's dead weight once `content` covers the same text (see
+  `ArticleRepository.prepareParsed`) and a merged row that ends up with `content` must not resurrect a stale
+  `summary` left over on either side; `cached_at` takes the newer of the two when both sides have a value, else
+  whichever side has one. `search_text` is not
   recomputed — the merge selects whichever side's already-stored `search_text` matches the winning `content`/`summary`
   (a `CASE` on which side's `content` is non-NULL). Deletion is last-write-wins on `deleted_at` / `deleted_updated_at`
   (field-specific, like read/star), so a cache-cleanup soft-delete propagates instead of being resurrected from the
@@ -161,11 +167,15 @@ Merge SQL (`MergeSql`) key points:
   guid collision guard below would skip independently-fetched duplicates and read-state would never propagate. See
   `articles` section in [db-schema.md](db-schema.md) for details.
 - feed_tags: last-write-wins. Only imported if the referenced feed exists in main (FK protection). The tag is
-  resolved more leniently than the feed: if the cloud's `tag_id` also exists in main, it's used as-is; otherwise the
-  tag is looked up **by name** against `main.tags` via a join through `cloud.tags` (so two devices that created the
-  same tag name independently, with different ids, still converge on one tag).
+  resolved more leniently than the feed: if the cloud's `tag_id` also exists **and is alive** in main
+  (`mt.deleted_at IS NULL`), it's used as-is; otherwise the tag is looked up **by name** against `main.tags` via a
+  join through `cloud.tags` (so two devices that created the same tag name independently, with different ids, still
+  converge on one tag) — a row whose tag resolves to neither is skipped.
 - **feeds user-edited fields are merged independently via dedicated statements using field-specific timestamps** (same design as `read_at` / `starred_at` for articles, separated from row-level `updated_at` = content refresh update):
-  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is strictly newer)`), satisfying: propagation not blocked by refresh, no useless writes after convergence, local preserved if newer. `folder_id` is resolved by the dedicated statement (keep if folder exists in main, fall back to same-name resolution, else NULL) and is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).
+  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is strictly newer)`), satisfying: propagation not blocked by refresh, no useless writes after convergence, local preserved if newer. `folder_id` is resolved by the dedicated statement, in four branches: NULL outright if the cloud's own referenced
+folder isn't alive in `cloud.folders` (`deleted_at IS NULL`); else the cloud's `folder_id` as-is if that folder is
+alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both sides' `deleted_at IS NULL`);
+else NULL. It is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).
 - `NOT EXISTS` / `EXISTS` guards skip colliding rows (same URL, different ID, etc.) so UNIQUE / FK violations do not fail the entire transaction.
 - `MergeSql.all` application order:
   `updateFoldersByName, insertFolders, feeds, mergeFeedFolderId, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt, updateTagsByName, insertTags, articles, feedTags, globalSettings`.
@@ -403,7 +413,7 @@ separate files.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
 - macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead.
-- Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `docs/build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.
+- Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.
 - **Fallback file and outcome reporting**:
   - On failure for any of the above, fallback to a file in the data directory
     `.{CloudStorageType.id}_tokens.json` (0600. Dropbox is `.dropbox_tokens.json`). DI selects

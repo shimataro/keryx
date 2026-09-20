@@ -2,7 +2,7 @@
 
 [日本語](PRIVACY.ja.md)
 
-**Effective date:** 2026-07-18 · **Applies to:** Keryx (desktop and Android)
+**Effective date:** 2026-09-20 · **Applies to:** Keryx (desktop and Android)
 
 Keryx is a local-first RSS reader. This document explains, plainly and completely,
 what data the app handles and where it goes. Keryx is open source — every claim
@@ -66,14 +66,20 @@ exact menu path varies by device and Android version).
 Cloud sync is off by default. If you choose to connect Dropbox, Google Drive, or
 OneDrive (one provider active at a time), here is exactly what happens:
 
-- **Availability:** all three providers are supported on desktop. On Android,
-  Dropbox and OneDrive are supported; Google Drive is not — Google's OAuth policy
-  for mobile apps does not allow reusing the desktop client's authentication flow,
-  so Google Drive sync is not offered on Android yet.
-- **Authentication** uses OAuth 2.0 with PKCE, performed **directly between your
-  device and Dropbox's, Google's, or Microsoft's own servers** — Keryx has no
-  server in the middle of this exchange at any point (not for login, not for
-  token refresh, not for the sync traffic itself).
+- **Availability:** all three providers are supported on desktop. On Android, Dropbox
+  and OneDrive are always available; Google Drive is available on any device with
+  Google Play services installed, enabled, and up to date (Google's OAuth policy
+  for mobile apps rules out reusing the desktop client's redirect-based flow, so
+  Android reaches Google Drive through Play services' own authorization API
+  instead — see below).
+- **Authentication** uses OAuth 2.0 with PKCE for Dropbox and OneDrive, performed
+  **directly between your device and Dropbox's or Microsoft's own servers** — Keryx
+  has no server in the middle of this exchange at any point (not for login, not for
+  token refresh, not for the sync traffic itself). On Android, Google Drive instead
+  uses Play services' own `AuthorizationClient`, which likewise runs directly between
+  your device and Google, hands out a short-lived access token, and involves neither
+  a Keryx-operated server nor a stored refresh token. On desktop, Google Drive uses
+  the same direct OAuth 2.0 PKCE flow as Dropbox and OneDrive.
 - **What syncs:** your feed subscriptions, folders, tags, cached articles
   (read/starred status included), and global app settings.
 - **What never syncs:** device-local settings (`local_settings.json`), your OAuth
@@ -91,8 +97,11 @@ OneDrive (one provider active at a time), here is exactly what happens:
   Credential Manager on Windows, Secret Service on Linux — inside the Snap
   package, an encrypted local store keyed by a per-app master secret from your
   desktop's Secret portal). If the OS store is unavailable, tokens fall back to
-  a permission-restricted (`0600`, readable only by your own account) local
-  file instead. On Android, tokens are encrypted with a key held in the
+  a local file instead — on macOS and Linux this file's permissions are
+  explicitly restricted to your own account (`0600`); on Windows, no such
+  permission bit is set, and the file instead relies on Windows' own per-user
+  ACL inheritance on `%APPDATA%`/`%LOCALAPPDATA%` to keep other accounts out.
+  On Android, tokens are encrypted with a key held in the
   Android Keystore before being written to a file in the app's private
   storage; this file is explicitly excluded from Android's automatic backup
   and device transfer. Tokens are never sent anywhere except directly to
@@ -158,7 +167,11 @@ network request.
 
 ## Security
 
-- All network communication the app performs uses HTTPS.
+- Keryx's own communication — cloud sync, update checks, and update downloads — always
+  uses HTTPS. A feed URL you subscribe to is upgraded to HTTPS only if you don't give
+  it an explicit scheme; if you subscribe to a feed at an explicit `http://` address
+  (or one that redirects there), that feed's content is fetched over plain HTTP, as
+  it would be in any other RSS reader.
 - Cloud credentials are stored using your operating system's secure credential
   storage where available, as described above.
 

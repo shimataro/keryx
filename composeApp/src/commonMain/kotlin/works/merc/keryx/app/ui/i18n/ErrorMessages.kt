@@ -9,7 +9,6 @@ import works.merc.keryx.app.core.FeedFetchException
 import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.FeedParseException
 import works.merc.keryx.app.core.FeedTimeoutException
-import works.merc.keryx.app.core.InvalidFeedUrlException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
@@ -24,7 +23,6 @@ import works.merc.keryx.app.resources.error_feed_not_found
 import works.merc.keryx.app.resources.error_feed_parse
 import works.merc.keryx.app.resources.error_feed_timeout
 import works.merc.keryx.app.resources.error_generic
-import works.merc.keryx.app.resources.error_invalid_url
 import works.merc.keryx.app.resources.error_schema_version
 import works.merc.keryx.app.resources.error_sync_conflict
 import works.merc.keryx.app.resources.error_update
@@ -41,7 +39,6 @@ fun userMessage(exception: KeryxException): String = stringResource(
         is CloudStorageException -> Res.string.error_cloud_storage
         is SyncConflictException -> Res.string.error_sync_conflict
         is SchemaVersionException -> Res.string.error_schema_version
-        is InvalidFeedUrlException -> Res.string.error_invalid_url
         is FeedNotFoundException -> if (exception.isGone) Res.string.error_feed_gone else Res.string.error_feed_not_found
         is UpdateException -> Res.string.error_update
         else -> Res.string.error_generic

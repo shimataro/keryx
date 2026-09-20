@@ -69,7 +69,9 @@
    発火しないため、`watchAll` フロー（と索引済みの再検索）を再発火させて同期内容を再起動なしで UI に反映する。
 4. `sync_state.cloud_file_rev` を記録。
 5. `DatabaseSnapshot.exportForUpload()` で `VACUUM INTO` スナップショットを作り、その**コピー側で
-   `articles_fts` と `sync_state` を DROP**（ライブ DB は不変）してから gzip 圧縮する（`platform/Gzip`）。
+   `articles_fts`・`sync_state`・4本の `idx_articles_*` インデックスを DROP し、最後に `VACUUM` を
+   実行する**（ライブ DB は不変。`domain/SnapshotSql.kt` の `cleanupStatements` 参照）。その後
+   gzip 圧縮する（`platform/Gzip`）。
    その圧縮ファイルを `rev` を指定して `CLOUD_DB_GZ_PATH` へストリームアップロード。ただし
    **スナップショットの SHA-256 が `sync_state.last_uploaded_snapshot_digest` と一致し、
    かつ手順2でマージが走らなかった場合はスキップ**する（クラウドに既に同じバイト列があるため。この
@@ -192,8 +194,10 @@
 ### 自動同期の抑制
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` は「誰が呼んでいるか」を受け取る。
-`SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupTasks`、`backgroundUpdateLoop`）は
-ゲートの対象になる — `autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
+`SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupMaintenance`（デスクトップの
+`StartupTasks.kt` と Android の起動経路で共有）、デスクトップの `backgroundUpdateLoop`
+（`StartupTasks.kt`）、Android の `FeedRefreshWorker`）はゲートの対象になる —
+`autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
 ダウンロード／マージ／アップロードのサイクルを一切実行せず `Result.Ok(Unit)` を返す。同期スピナーも
 動かさず、通知センターにも触れないので、既に利用不能と分かっているクラウド DB が書き込みのたびに
 再ダウンロード・再マージされることはない。`SyncTrigger.MANUAL`（デフォルト。UI から呼ばれる同期
@@ -243,7 +247,13 @@
   デバイスが独立購読した同一フィードが別 id になっていると URL 衝突ガードにスキップされて収束しない
   （feed が収束しないと記事 id も `feed_id` 由来で食い違い記事も収束しない）。詳細は
   [db-schema.ja.md](db-schema.ja.md) の `feeds` 節。
-- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、本文は OR マージ。`search_text` は
+- articles: 既読（`read_at`）・スター（`starred_at`）は後勝ち、`content` は OR マージ
+  （`COALESCE(c.content, l.content)`）。`summary` は独立して OR マージされる**わけではない**——
+  どちらか一方に非 NULL の `content` があれば `summary` は引き継がず NULL に落とす。`content` が同じ
+  テキストをカバーする以上 `summary` は不要な残骸であり（`ArticleRepository.prepareParsed` 参照）、
+  `content` が残ったマージ後の行がどちらか片方に残っていた古い `summary` を復活させてはならないため。
+  `cached_at` は両側に値があれば新しい方を採用し、どちらか片方にしかなければその値を採用する。
+  `search_text` は
   再計算せず、勝った側の `content`/`summary` に対応するほうの、既に格納されている `search_text` を選ぶ
   （どちらの `content` が非 NULL かによる `CASE`）。削除は `deleted_at` / `deleted_updated_at` の後勝ち
   （既読・スターと同じフィールド別）で、キャッシュ削除の論理削除がクラウドから復活せず伝播する。削除より
@@ -254,17 +264,21 @@
   独立取得した同一記事が別 ID になっていると下記の guid 衝突ガードにスキップされ、既読が伝播しない。
   詳細は [db-schema.ja.md](db-schema.ja.md) の `articles` 節。
 - feed_tags: 後勝ち。参照先 feed が main に存在する場合のみ取り込む（FK 保護）。タグは feed より
-  緩やかに解決する: クラウド側の `tag_id` が main にも存在すればそのまま使い、無ければ `cloud.tags` を
-  経由した join で **名前で** `main.tags` を検索する（同じ名前のタグを両デバイスが独立に別 id で
-  作った場合でも、1つのタグに収束させるため）。
+  緩やかに解決する: クラウド側の `tag_id` が main にも**生存した状態で**存在すれば（`mt.deleted_at IS
+  NULL`）そのまま使い、無ければ `cloud.tags` を経由した join で **名前で** `main.tags` を検索する
+  （同じ名前のタグを両デバイスが独立に別 id で作った場合でも、1つのタグに収束させるため）。どちらにも
+  解決できなかった行はスキップされる。
 - **feeds のユーザー編集フィールドは専用文でフィールド専用タイムスタンプを使い独立に後勝ちマージする**
   （記事の `read_at` / `starred_at` と同じ設計。行全体の `updated_at`＝内容リフレッシュで更新、とは切り離す）:
   `mergeFeedFolderId`（`folder_id` / `folder_updated_at`）、`mergeFeedSortOrder`（`sort_order` /
   `sort_order_updated_at`）、`mergeFeedCustomTitle`（`custom_title` / `custom_title_updated_at`）、
   `mergeFeedDeletedAt`（`deleted_at` / `deleted_updated_at`）。いずれも NULL 認識の比較
   （`c.<ts> IS NOT NULL AND (main が NULL または cloud が厳密に新しい)`）で、リフレッシュに妨げられない伝播・
-  収束後の無駄書き込み無し・ローカルが新しければ維持、を満たす。`folder_id` は列に値を持たず専用文が解決
-  （main に folder があれば維持、無ければ同名解決、それも無ければ NULL）するため feeds INSERT にも含めない。
+  収束後の無駄書き込み無し・ローカルが新しければ維持、を満たす。`folder_id` は列に値を持たず専用文が
+  次の4分岐で解決する: クラウド側が参照する folder 自体が `cloud.folders` で生存していなければ
+  （`deleted_at IS NULL`）無条件で NULL、そうでなければその folder が main にも生存していればクラウド側
+  の `folder_id` をそのまま採用、それも無ければ `main.folders`/`cloud.folders` を名前で join した
+  同名解決（両側とも `deleted_at IS NULL`）、それも無ければ NULL。feeds INSERT にも含めない。
   `sort_order` / `custom_title` / `deleted_at` は初期値伝播のため feeds INSERT に残す（`ON CONFLICT` のみ除外）。
 - UNIQUE / FK 違反でトランザクション全体が失敗しないよう、`NOT EXISTS` / `EXISTS` ガードで
   衝突する行をスキップする（同一 URL・別 ID など）。
@@ -583,7 +597,7 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
   して保存する。スナップは `password-manager-service` プラグを一切宣言していない（Snapcraft の
   レビュアーはこのインターフェースの auto-connect を原則却下するうえ、手動で接続したところで
   使い道もない——`KeyringTokenStorage` はスナップ内からは意図的に到達不能）。詳しい理由は
-  `docs/build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
+  `build.ja.md` の「Linux Snap パッケージ」参照。スナップ外では適用しないため、既存の
   deb/rpm 利用者の Secret Service アイテムには影響しない。
 - **フォールバックファイルと結果報告**:
   - 上記いずれも失敗時はデータディレクトリの `.{CloudStorageType.id}_tokens.json`（0600。Dropbox は

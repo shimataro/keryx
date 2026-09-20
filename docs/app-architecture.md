@@ -17,14 +17,21 @@
 ```text
 composeApp/src/
   commonMain/kotlin/works/merc/keryx/app/
-    core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
+    core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
+               AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens,
+                  CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
-    di/           AppModule (+ expect platformModule)
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (mostly `expect` declarations, though InstallLocation.kt already mixes its one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below, wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
+    di/           AppModule (+ expect platformModule), HttpClientFactory, ImageLoaderSetup
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+                  BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
+                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
+                  one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
+                  wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
     ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
                   center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
                   FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
@@ -34,7 +41,8 @@ composeApp/src/
   commonMain/composeResources/  values/strings.xml (Japanese, default/fallback), values-en/strings.xml
     (English, same key set), drawable/ (icons are Android Vector Drawable XML,
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
-    runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
+    runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
+    target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
@@ -42,12 +50,14 @@ composeApp/src/
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider),
     domain/OAuthUriParser.kt (parseOAuthUri, shared by desktop's and Android's `keryx://` redirect
     handling)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of each expect not covered by jvmCommonMain (DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI)
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects
     appmenu/   KDE Global Menu / D-Bus application-menu integration (AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar) — see external-spec.md §9
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
+  androidMain/composeResources/drawable/  the Android `KeryxIcons` actual's own icon set — Material
+    Symbols Outlined (Apache-2.0), 43 vector drawables — see "Icon set" below
   androidMain/kotlin/…/  actual implementations not covered by jvmCommonMain: DatabaseDriverFactory
     (bundled SQLite, see below), DatabaseFile (`databaseFilePath()` — `Context.getDatabasePath`,
     a different directory than AppDirs.appDataDir()/`Context.filesDir`; see db-schema.md),
@@ -69,7 +79,7 @@ composeApp/src/
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
-    exists — see Provider/DI below — plus AndroidNotificationSink, see "Background Update" below),
+    exists — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
     CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead
     a once-per-process `GoogleApiAvailability` check, since it goes through Play services rather
     than a build-time client id — see sync-architecture.md's "Google Drive on Android"), KeryxTextField/KeryxAlertDialog/
@@ -130,7 +140,7 @@ composeApp/src/
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
     so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
-    Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
+    Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see [background-update.md](background-update.md)),
     NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
@@ -145,19 +155,26 @@ composeApp/src/
     `@DrawableRes Int` is needed for (e.g. `NotificationCompat.Builder.setSmallIcon`) has to live
     here instead — currently just `drawable/ic_stat_keryx.xml`, the status-bar/notification-dot
     icon `AndroidNotificationSink.kt` posts with (see background-update.md)
-  commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for DatabaseMerger/
-    DatabaseSnapshot's Android actuals — needs a real device/emulator to load the bundled SQLite
-    native library; see testing.md)
+  commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for the Android actuals that
+    need a real device/emulator — not just DatabaseMerger/DatabaseSnapshot's bundled-SQLite native
+    library, but also the Android Keystore (`KeystoreTokenStorageDeviceTest`), Play services
+    (`PlayServicesGoogleDriveAuthDeviceTest`, `AndroidAuthorizationHostDeviceTest`), and the Storage
+    Access Framework (`FilePickerDeviceTest`); see testing.md)
 ```
 
 The package root is `works.merc.keryx.app` (reverse DNS of `keryx.merc.works`).
 
 A separate root-level module, `androidApp` (`com.android.application`, not part of the Kotlin
-Multiplatform source-set layout above), holds only `AndroidManifest.xml`, `KeryxApplication`
+Multiplatform source-set layout above), holds `AndroidManifest.xml`, `KeryxApplication`
 (process-wide setup: `AndroidAppContext.init`, `startKoin`, `configureImageLoader`, an
-an `ensureIndexedIfTableAbsent()` FTS backfill (the cheaper, every-process-start variant — see
+`ensureIndexedIfTableAbsent()` FTS backfill (the cheaper, every-process-start variant — see
 db-schema.md's `articles_fts` section), `startBackgroundRefresh`), and `MainActivity`
-(`setContent { App() }`, then `runAndroidStartupTasks`). It exists because AGP
+(`setContent { App() }`, then `runAndroidStartupTasks`) — plus its own `res/` (launcher icon,
+`values/strings.xml`, `backup_rules.xml`, `data_extraction_rules.xml`), a `github`-flavor
+`AndroidManifest.xml` that separates the sideloadable GitHub build from the Play Store one, and
+`androidTest/` (`KeryxSearchBarAndroidTest`, `NativeMenuAndroidGestureTest`,
+`KeryxSettingRowAndroidGestureTest` — instrumented Compose UI tests that need a real device/emulator,
+unlike `androidDeviceTest` above). It exists because AGP
 9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
 plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
 and `androidApp` depends on it to produce the installable APK.
@@ -331,8 +348,12 @@ onto a classic, layout-consuming one instead, narrowing the article body — see
 skill's "Scroll indicators". (Windows' WebView2 already renders a classic scrollbar by default, so
 the rule has nothing to switch off there, but is kept the same across all four engines rather than
 carved out as a per-platform exception.) The toolbar above the reader is likewise always present,
-with actions disabled rather than hidden when nothing is selected, keeping its Compose structure —
-and therefore the reader's measured bounds — identical across states.
+with actions disabled rather than hidden when nothing is selected. It also shows the selected
+article's feed name and favicon (`FeedAvatar`) when one is selected, swapped in for the empty title
+slot via `KeryxPaneTopBar`'s `titleContent` — so the toolbar's Compose structure does change between
+states, but its *measured height* does not: the always-present row of `TooltipIconButton` actions is
+what actually pins it, keeping the reader's own measured bounds identical across states regardless
+of which title-slot content is composed.
 
 **`color-scheme` alone is not enough on Android.** `android.webkit.WebView`'s default style,
 `Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
@@ -379,9 +400,9 @@ rules (`a`, `img`/`video`/`iframe`, `table`, `td`/`th`) stay plain, so a feed au
 `ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
 `AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
 platforms (no OS branch). Left at its `null` default, WebView2 tries to create its data folder next
-to the host executable, which fails with Access Denied whenever that location isn't user-writable —
-see [known-issues.md](known-issues.md) for the investigation (an uncaught exception from the failed
-creation also left the library's creation-retry timer running forever, which was the cause of an
+to the host executable, which fails with Access Denied whenever that location isn't user-writable
+(an uncaught exception from the failed creation also left the library's creation-retry timer
+running forever, which was the cause of an
 app-wide freeze on click).
 
 **At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
@@ -543,10 +564,6 @@ navigation events bypass that tree entirely —
   leaving `articleSwipeAccessibilityActions`'s custom actions as the only way a screen-reader user
   can move between articles.
 
-(An earlier version of this section rejected `HorizontalPager` on the grounds that preloading
-adjacent pages would mark them read. That was wrong — read marking lives in `selectArticle`, not in
-`getArticleById` — and the rejection has been reversed.)
-
 **Where the native web view cannot be created at all**, the reader falls back to drawing the
 article with Compose. `platform/NativeWebViewSupport.kt`'s `isNativeWebViewSupported()` probes the
 library's own native entry point once — the library ships one prebuilt binary per platform/
@@ -572,7 +589,7 @@ blockquote indent) is what the Compose renderer has to state outright, mapped on
 None of the heavyweight-interop rules above apply on that path, because no AWT surface is created:
 nothing repaints the whole window, and Compose can draw freely over the pane. The branch sits
 inside the `reader` lambda, so the pane's own structure stays unconditional either way. The concrete
-platform this exists for today is Linux on arm64 — see `docs/known-issues.md` for the evidence, the
+platform this exists for today is Linux on arm64 — see `known-issues.md` for the evidence, the
 `-Dkeryx.reader.webview` override, and why moving to a backend that does ship an arm64 Linux binary
 is a much larger change.
 
@@ -609,10 +626,13 @@ well-known name `org.kde.StatusNotifierItem-<pid>-1`):
 - `/StatusNotifierItem` — `SniStatusNotifierItem`, serving `org.kde.StatusNotifierItem`. `IconPixmap`
   carries the badged glyph as big-endian ARGB32 (`TrayPixmap.kt`) at several sizes; `ItemIsMenu = false`
   so a primary click reaches `Activate` instead of opening the menu.
-- `/StatusNotifierItem/menu` — `SniDBusMenu`, serving `com.canonical.dbusmenu` (Show/Hide + Quit).
-  A label/enabled change bumps a revision and emits `ItemsPropertiesUpdated` naming just the item(s)
-  that changed (`changedItemProperties` in `TrayMenuModel.kt`) — **not** `LayoutUpdated`, since the
-  menu's shape never changes and some clients (GNOME Shell's AppIndicator extension) never re-request
+- `/StatusNotifierItem/menu` — `SniDBusMenu`, serving `com.canonical.dbusmenu` (the in-app update
+  entry, then a separator, then Show/Hide, then Quit — `tray/TrayMenuModel.kt`'s `MENU_UPDATE_ID`,
+  `MENU_SEPARATOR_ID`, `MENU_TOGGLE_ID`, `MENU_QUIT_ID`, in that order). A label/enabled change —
+  including the update entry's own `enabled` toggling — bumps a revision and emits
+  `ItemsPropertiesUpdated` naming just the item(s) that changed (`changedItemProperties` in
+  `TrayMenuModel.kt`) — **not** `LayoutUpdated`, since the
+  menu's shape (which items exist) never changes and some clients (GNOME Shell's AppIndicator extension) never re-request
   `label`/`enabled` via `GetLayout` on their own, so a `LayoutUpdated`-only host update would leave an
   already-open menu stuck on stale labels forever. `AboutToShow` still compares the desired labels
   against what `GetLayout` last served, so a dropped signal still heals. GNOME parks the signal until
@@ -670,7 +690,7 @@ one of two implementations, triggered by a right-click instead of a long-press:
 | Platform | Implementation | Why |
 | --- | --- | --- |
 | macOS | `AwtPopupHandle` (`java.awt.PopupMenu`) | AWT maps it onto a genuine `NSMenu`, and AppKit is point-based, so the Dp-space coordinates the modifier computes need no device-pixel conversion. |
-| Windows / Linux | `SwingPopupHandle` (`javax.swing.JPopupMenu`) | On Linux, AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel, keeping a Motif-era appearance. On Windows, the JDK's AWT menu peer never converts between Java user space and device pixels: the menu opens at `windowOrigin + clickOffset / scale`, and its rows measure `1 / scale` as tall as the glyphs drawn into them, so the labels overlap. Both are detailed in `known-issues.md`. |
+| Windows / Linux | `SwingPopupHandle` (`javax.swing.JPopupMenu`) | On Linux, AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel, keeping a Motif-era appearance. On Windows, the JDK's AWT menu peer never converts between Java user space and device pixels: the menu opens at `windowOrigin + clickOffset / scale`, and its rows measure `1 / scale` as tall as the glyphs drawn into them, so the labels overlap above 100% display scaling. |
 
 `macOs` is a parameter of `defaultPopupHandle` (defaulting to the process constant) only so
 `NativeMenuTest` can pin the mapping on any CI host. Two behaviours follow the chosen backend
@@ -692,15 +712,17 @@ file dialog keeps Windows on the AWT side, because `java.awt.FileDialog` there i
 | Platform | Implementation | Why |
 | --- | --- | --- |
 | macOS / Windows | `AwtFilePickerBackend` (`java.awt.FileDialog`) | AWT maps it onto the real native panel (`NSSavePanel` / `GetOpenFileName`), including native overwrite prompting. |
-| Linux | `SwingFilePickerBackend` (`javax.swing.JFileChooser`) | `sun.awt.X11.XToolkit.createFileDialog()` selects `GtkFileDialogPeer`, whose native GTK callbacks dereference a NULL `JNU_GetEnv` result once the article reader's WebView makes WebKitGTK a second GTK consumer in the process — a JVM-crashing SIGSEGV (see `known-issues.md`). `JFileChooser` is pure Swing and never reaches that code, and it picks up FlatLaf like the app's other Linux Swing surfaces. |
+| Linux | `SwingFilePickerBackend` (`javax.swing.JFileChooser`) | `sun.awt.X11.XToolkit.createFileDialog()` selects `GtkFileDialogPeer`, whose native GTK callbacks dereference a NULL `JNU_GetEnv` result once the article reader's WebView makes WebKitGTK a second GTK consumer in the process — a JVM-crashing SIGSEGV. `JFileChooser` is pure Swing on every Look & Feel (including the FlatLaf-failed system-L&F fallback, since `GTKLookAndFeel`'s own `GTKFileChooserUI` is itself pure Swing) and never reaches that native code, and it picks up FlatLaf like the app's other Linux Swing surfaces. |
 
 The dialog's owner window is resolved *inside* the desktop `actual`
 (`KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow`, falling back to any showing
 `Frame`), not threaded in from the caller — `LocalNativeWindow` only ever resolves to the main
 window, which would be the wrong owner for a dialog opened from the modeless Settings window. Since
-`JFileChooser` has no native overwrite-confirmation of its own (unlike the AWT backend, which gets it
-free from the OS), `SwingFilePickerBackend` restores it explicitly — see `known-issues.md` for why
-that specific behavior was restored rather than left as a plain crash fix.
+`JFileChooser` has no native overwrite-confirmation of its own (unlike the AWT `FileDialog` it
+replaced on Linux, which had `gtk_file_chooser_set_do_overwrite_confirmation(dialog, TRUE)` set
+unconditionally for the SAVE action — matching what macOS/Windows still provide natively),
+`SwingFilePickerBackend` restores it explicitly (`resolveSavePath` + a `JOptionPane` confirmation)
+rather than silently regressing Linux relative to its own prior behavior.
 
 **Future work**: an `org.freedesktop.portal.FileChooser` (XDG Desktop Portal) backend could be
 dropped into the same `FilePickerBackend` seam, spoken over the dbus-java connection this app
@@ -718,7 +740,8 @@ bundled Android Vector Drawable XML under `composeResources/drawable/`), and it 
 per platform since the two targets intentionally bundle different icon sets: the desktop `actual`
 uses Tabler Icons (MIT) — chosen for a thin-stroke, rounded-terminal look closer to macOS's own
 iconography than Material Design's (see the `ui-guidelines` skill for the full rationale) — while the
-Android `actual` uses Material Symbols Outlined (Apache-2.0), matching Android's own native visual
+Android `actual` uses Material Symbols Outlined (Apache-2.0), bundled under
+`androidMain/composeResources/drawable/`, matching Android's own native visual
 language. `KeryxIcon(...)` (the `Icon` wrapper composable) stays a single `commonMain` definition;
 only the `KeryxIcons` object's icon selection differs per platform. If iOS/iPadOS/macOS is ever
 rewritten as native SwiftUI (per `external-spec.md` §2's plan), that becomes a separate codebase
@@ -852,8 +875,8 @@ string for the same reason: the filter can change while the pane is unmounted (a
 the new filter on remount, leaving the restored position pointing into the previous filter's list
 with no reset to the top.
 
-This is why the article reader's WebView being unconditionally composed (see "Article Reader"
-below) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
+This is why the article reader's WebView being unconditionally composed (see "Article Reader
+(native WebView)" above) is safe on desktop specifically: desktop can only ever resolve `Triple`, where all three
 panes — including the one hosting the WebView — stay mounted for the app's whole lifetime. `Dual`
 now never unmounts it either (the article detail pane is always one of the two shown), and only
 `Single`'s depth 2↔3 transition unmounts it, which is fine on Android (no heavyweight AWT interop

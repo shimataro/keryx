@@ -16,14 +16,19 @@
 ```text
 composeApp/src/
   commonMain/kotlin/works/merc/keryx/app/
-    core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
+    core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
+               AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource（アプリ内アップデート——後述の「アプリ内アップデート」参照）
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens,
+                  CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
-    di/           AppModule（+ expect platformModule）
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
+    di/           AppModule（+ expect platformModule）, HttpClientFactory, ImageLoaderSetup
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+                  BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
+                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
     ui/           theme/, navigation/, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
                   通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
                   KeryxIcons/FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual
@@ -33,7 +38,8 @@ composeApp/src/
   commonMain/composeResources/  values/strings.xml（日本語、デフォルト/フォールバック）,
     values-en/strings.xml（英語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
-    実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の画像形式）
+    実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
+    *ベクター*形式——ビットマップ資産（`app_icon.png`、`onedrive.png`、トレイの PNG 群）は対象外）
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
     AppInfo（共有生成 BuildConfig を読むだけ）, FileSystemExtras,
@@ -41,12 +47,14 @@ composeApp/src/
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）,
     domain/OAuthUriParser.kt（parseOAuthUri。デスクトップと Android の `keryx://` リダイレクト処理が共有）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない expect の actual（DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, PlatformModule, InstallLocation）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: DatabaseDriverFactory, AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト
     appmenu/   KDE Global Menu / D-Bus アプリケーションメニュー連携（AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar）— external-spec.ja.md §9 参照
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
+  androidMain/composeResources/drawable/  Android の `KeryxIcons` actual 自身のアイコンセット
+    — Material Symbols Outlined（Apache-2.0）、ベクター drawable 43 個 — 下記「アイコンセット」参照
   androidMain/kotlin/…/  jvmCommonMain がカバーしない expect の actual: DatabaseDriverFactory（バンドル
     SQLite、後述）, DatabaseFile（`databaseFilePath()` — `Context.getDatabasePath` で、
     AppDirs.appDataDir()/`Context.filesDir` とは別ディレクトリになる。db-schema.ja.md 参照）,
@@ -68,7 +76,7 @@ composeApp/src/
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
-    Provider/DI 参照。加えて AndroidNotificationSink、下記「バックグラウンド更新」参照）,
+    Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
     CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
     ビルド時のクライアント ID ではなく Play 開発者サービス経由のため、プロセスごとに一度だけ
     `GoogleApiAvailability` で判定する — sync-architecture.ja.md の「Android での Google Drive」参照）,
@@ -131,7 +139,7 @@ composeApp/src/
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
     無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
     Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
-    SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
+    SelfUpdateCheck（インストール元パッケージ名に基づく判定、[background-update.ja.md](background-update.ja.md) 参照）,
     NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
@@ -146,8 +154,10 @@ composeApp/src/
     必要な Android リソース（例: `NotificationCompat.Builder.setSmallIcon`）はここに置く必要がある
     — 現状は `drawable/ic_stat_keryx.xml`（`AndroidNotificationSink.kt` が投稿するステータスバー/
     通知ドットのアイコン。background-update.ja.md 参照）のみ
-  commonTest/ + desktopTest/ + androidDeviceTest/（DatabaseMerger/DatabaseSnapshot の Android 実装向け
-    計装テスト — バンドル SQLite ネイティブライブラリの読み込みに実機/エミュレータが必要。
+  commonTest/ + desktopTest/ + androidDeviceTest/（実機/エミュレータが必要な Android 実装向け計装テスト
+    — DatabaseMerger/DatabaseSnapshot のバンドル SQLite ネイティブライブラリだけでなく、Android Keystore
+    （`KeystoreTokenStorageDeviceTest`）、Play 開発者サービス（`PlayServicesGoogleDriveAuthDeviceTest`、
+    `AndroidAuthorizationHostDeviceTest`）、Storage Access Framework（`FilePickerDeviceTest`）も含む。
     testing.ja.md 参照）
 ```
 
@@ -158,7 +168,12 @@ composeApp/src/
 `AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの
 `ensureIndexedIfTableAbsent()`（プロセス起動のたびに呼ばれる軽量版——db-schema.md の `articles_fts` 節参照）、
 `startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
-`runAndroidStartupTasks`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
+`runAndroidStartupTasks`）に加え、自身の `res/`（ランチャーアイコン、`values/strings.xml`、
+`backup_rules.xml`、`data_extraction_rules.xml`）、サイドロード可能な GitHub ビルドと Play ストア版を
+分ける `github` フレーバー用の `AndroidManifest.xml`、そして `androidTest/`（
+`KeryxSearchBarAndroidTest`、`NativeMenuAndroidGestureTest`、`KeryxSettingRowAndroidGestureTest` ——
+上記の `androidDeviceTest` とは異なり、実機/エミュレータが必要な計装 Compose UI テスト）を持つ。
+これが別モジュールになっているのは、AGP 9 の
 `com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
 ため — `composeApp` は代わりに `com.android.kotlin.multiplatform.library` による Android ライブラリで、
 `androidApp` がそれに依存してインストール可能な APK を生成する。
@@ -346,8 +361,12 @@ WebView、macOS/Linux の WebKit）では、そのいずれか 1 つでも定義
 スキルの「Scroll indicators」参照。（Windows の WebView2 は既定でクラシックなスクロールバーを
 描くため、このルールをやめさせる対象がそもそも無いが、プラットフォームごとの例外にはせず
 4 エンジン共通のルールとして扱う。）リーダー上部のツールバーも
-同様に常時表示し、未選択時はボタンを非表示にせず無効化する — これによりツールバーの Compose
-構造（ひいてはリーダーの計測済みバウンズ）が状態間で常に同一に保たれる。
+同様に常時表示し、未選択時はボタンを非表示にせず無効化する。また、記事が選択されている間は
+その記事のフィード名とファビコン（`FeedAvatar`）を表示し、`KeryxPaneTopBar` の `titleContent`
+として空のタイトル枠に差し替わる——そのためツールバーの Compose 構造は状態によって変わるが、
+*測定される高さ*は変わらない: 実際に高さを固定しているのは常在する `TooltipIconButton` の
+アクション行であり、タイトル枠にどちらのコンテンツが組み込まれているかに関わらず、リーダー自身の
+計測済みバウンズは状態間で常に同一に保たれる。
 
 **Android では `color-scheme` だけでは足りない。** `android.webkit.WebView` の既定スタイル
 `Widget.WebView` は `scrollbars="horizontal|vertical"` を設定しており、そのルートフレームの
@@ -393,9 +412,9 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 `ArticleWebView` は `webSettings.desktopWebSettings.dataDirectory` も明示的に設定しており、
 `AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
 （OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを
-作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する — 調査の詳細は
-[known-issues.ja.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
-生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
+作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する（この生成失敗の例外が uncaught の
+まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
+原因でもあった）。
 
 **狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
 commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
@@ -555,10 +574,6 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
   一緒に消えるため、スクリーンリーダー利用者が記事間を移動する手段は
   `articleSwipeAccessibilityActions` のカスタムアクションだけになる。
 
-（本節の以前の版は、隣接ページの先読みが既読化を引き起こすことを理由に `HorizontalPager` を
-却下していた。これは誤りで — 既読化は `getArticleById` ではなく `selectArticle` にある —
-その却下は撤回した。）
-
 **ネイティブ WebView をそもそも生成できない環境**では、リーダーは記事を Compose で描画する
 フォールバックに切り替わる。`platform/NativeWebViewSupport.kt` の `isNativeWebViewSupported()` が
 ライブラリのネイティブエントリポイントを 1 回だけプローブする — ライブラリはプラットフォーム／
@@ -586,7 +601,7 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
 分岐は `reader` ラムダの内側にあるので、ペイン自体の構造はどちらの経路でも無条件のまま変わらない。
 現時点でこれが必要になる具体的なプラットフォームは Linux arm64 である。根拠、
 `-Dkeryx.reader.webview` による上書き、そして arm64 Linux バイナリを同梱するバックエンドへの
-移行がなぜ大がかりな変更になるのかは `docs/known-issues.ja.md` を参照。
+移行がなぜ大がかりな変更になるのかは `known-issues.ja.md` を参照。
 
 ### デスクトップトレイ（プラットフォーム分岐）
 
@@ -622,10 +637,13 @@ SNI ならパネルへ生の ARGB ピクセルを渡せる。
 - `/StatusNotifierItem` — `SniStatusNotifierItem`（`org.kde.StatusNotifierItem`）。`IconPixmap` は
   バッジ付きグリフをビッグエンディアン ARGB32（`TrayPixmap.kt`）で複数サイズ提供する。`ItemIsMenu = false`
   にすることで、左クリックがメニューではなく `Activate` に届く。
-- `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。表示/非表示 + 終了）。
-  ラベル／enabled 変更時は revision を上げつつ、変化した項目だけを名指しした
+- `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。アプリ内アップデート項目・
+  セパレータ・表示/非表示・終了の順——`tray/TrayMenuModel.kt` の `MENU_UPDATE_ID` /
+  `MENU_SEPARATOR_ID` / `MENU_TOGGLE_ID` / `MENU_QUIT_ID` がこの順）。
+  ラベル／enabled 変更（アップデート項目自身の `enabled` 切り替えを含む）時は revision を上げつつ、
+  変化した項目だけを名指しした
   `ItemsPropertiesUpdated`（`TrayMenuModel.kt` の `changedItemProperties`）を発火する ——
-  `LayoutUpdated` ではない。メニューの形は一切変化せず、かつ一部のクライアント（GNOME Shell の
+  `LayoutUpdated` ではない。メニューの形（存在する項目）は一切変化せず、かつ一部のクライアント（GNOME Shell の
   AppIndicator 拡張）は `label`／`enabled` を `GetLayout` で自発的に再取得しないため、
   `LayoutUpdated` だけを送ると既に開いたメニューが古いラベルのまま固まってしまう。
   `AboutToShow` は引き続き現在のラベルと `GetLayout` が最後に返した内容を比較するため、
@@ -682,7 +700,7 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
 | macOS | `AwtPopupHandle`（`java.awt.PopupMenu`） | AWT が本物の `NSMenu` に写像し、かつ AppKit はポイント基準なので、モディファイアが算出する Dp 空間の座標をデバイスピクセルへ変換する必要がない。 |
-| Windows / Linux | `SwingPopupHandle`（`javax.swing.JPopupMenu`） | Linux では AWT の `PopupMenu` が Swing の Look & Feel を無視する heavyweight な XAWT ウィジェットで、Motif 世代の見た目のままになるため。Windows では JDK の AWT メニューピアが Java のユーザー空間とデバイスピクセルの変換を一切行わず、メニューが `ウィンドウ原点 + クリックオフセット ÷ スケール` に開き、行の高さがそこに描かれる文字の `1 / スケール` にしかならずラベルが重なるため。いずれも `known-issues.md` に詳述。 |
+| Windows / Linux | `SwingPopupHandle`（`javax.swing.JPopupMenu`） | Linux では AWT の `PopupMenu` が Swing の Look & Feel を無視する heavyweight な XAWT ウィジェットで、Motif 世代の見た目のままになるため。Windows では JDK の AWT メニューピアが Java のユーザー空間とデバイスピクセルの変換を一切行わず、メニューが `ウィンドウ原点 + クリックオフセット ÷ スケール` に開き、行の高さがそこに描かれる文字の `1 / スケール` にしかならず、表示スケーリングが 100% を超えるとラベルが重なるため。 |
 
 `defaultPopupHandle` の `macOs` 引数（既定値はプロセス定数）は、`NativeMenuTest` がどの CI ホストでも
 対応関係を固定できるようにするためだけのものである。アプリではなく選択されたバックエンドに追随して
@@ -703,14 +721,17 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
 | macOS / Windows | `AwtFilePickerBackend`（`java.awt.FileDialog`） | AWT が実際のネイティブパネル（`NSSavePanel` / `GetOpenFileName`）に写像し、ネイティブの上書き確認も含めて提供する。 |
-| Linux | `SwingFilePickerBackend`（`javax.swing.JFileChooser`） | `sun.awt.X11.XToolkit.createFileDialog()` は `GtkFileDialogPeer` を選ぶが、そのネイティブ GTK コールバックは、記事リーダーの WebView がプロセス内で WebKitGTK を 2 つ目の GTK コンシューマにした状態だと NULL の `JNU_GetEnv` の返り値を逆参照し、JVM をクラッシュさせる SIGSEGV になる（`known-issues.md` 参照）。`JFileChooser` は純粋な Swing でそのコードには一切到達せず、アプリの他の Linux Swing 画面と同じく FlatLaf にも追従する。 |
+| Linux | `SwingFilePickerBackend`（`javax.swing.JFileChooser`） | `sun.awt.X11.XToolkit.createFileDialog()` は `GtkFileDialogPeer` を選ぶが、そのネイティブ GTK コールバックは、記事リーダーの WebView がプロセス内で WebKitGTK を 2 つ目の GTK コンシューマにした状態だと NULL の `JNU_GetEnv` の返り値を逆参照し、JVM をクラッシュさせる SIGSEGV になる。`JFileChooser` はどの Look & Feel でも純粋な Swing であり（FlatLaf の初期化に失敗した際のシステム L&F フォールバックも含む——`GTKLookAndFeel` 自身の `GTKFileChooserUI` もまた純粋な Swing であるため）、そのネイティブコードには一切到達せず、アプリの他の Linux Swing 画面と同じく FlatLaf にも追従する。 |
 
 ダイアログの親ウィンドウは呼び出し元から渡すのではなく、デスクトップ版 `actual` の**内部**で解決する
 （`KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow`、表示中の `Frame` へのフォール
 バック付き）。`LocalNativeWindow` は常にメインウィンドウにしか解決されず、modeless な設定ウインドウ
-から開いたダイアログの親としては不適切なため。`JFileChooser` にはネイティブな上書き確認が無い（AWT
-バックエンドは OS からタダで得られる）ため、`SwingFilePickerBackend` はそれを明示的に復元している —
-なぜクラッシュ修正に留めずその挙動まで復元したのかは `known-issues.md` を参照。
+から開いたダイアログの親としては不適切なため。`JFileChooser` にはネイティブな上書き確認が無い
+（Linux で置き換える前の AWT `FileDialog` は SAVE アクションに無条件で
+`gtk_file_chooser_set_do_overwrite_confirmation(dialog, TRUE)` が設定されており、macOS/Windows は
+今もネイティブにこれを提供している）ため、`SwingFilePickerBackend` はこれを明示的に
+（`resolveSavePath` + `JOptionPane` による確認）復元しており、Linux の従来動作をクラッシュ修正のついでに
+静かに退行させることはない。
 
 **将来課題**: 同じ `FilePickerBackend` の継ぎ目に `org.freedesktop.portal.FileChooser`（XDG デスクトップ
 ポータル）バックエンドを追加できる。SNI トレイや AppMenu で既に使っている dbus-java 接続経由で、
@@ -728,7 +749,8 @@ KDE/GNOME 純正のダイアログ（かつサンドボックスに適合した�
 でプラットフォームごとに分割されている — 2つのターゲットが意図的に異なるアイコンセットを
 バンドルしているため。デスクトップ側の `actual` は Tabler Icons（MIT）を使用する
 （デスクトップ3OS共通で macOS 寄りの見た目に近づけるための選択。詳細は `ui-guidelines` skill）。
-Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用し、Android 自身のネイティブな
+Android 側の `actual` は Material Symbols Outlined（Apache-2.0）を使用し
+（`androidMain/composeResources/drawable/` にバンドル）、Android 自身のネイティブな
 視覚言語に合わせている。`KeryxIcon(...)`（`Icon` のラッパー composable）は引き続き単一の
 `commonMain` 定義のままで、`KeryxIcons` オブジェクトが選ぶアイコンだけがプラットフォームごとに
 異なる。iOS/iPadOS/macOS がいずれネイティブ SwiftUI 化された場合（`external-spec.md` §2 の
@@ -863,7 +885,7 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 削除）ため、素の `remember` では再マウント時に新しいフィルタで初期化されてしまい、復元された位置が
 前のフィルタの一覧を指したまま先頭へのリセットも起きない。
 
-これが、記事リーダーの WebView を無条件にコンポーズし続けること（下記「記事リーダー」参照）が
+これが、記事リーダーの WebView を無条件にコンポーズし続けること（前述の「記事リーダー（ネイティブ WebView）」参照）が
 デスクトップにおいて安全である理由でもある: デスクトップは常に `Triple` にしか解決されないため、
 WebView をホストするペインを含む3ペインすべてがアプリのライフタイム全体でマウントされ続ける。
 `Dual` も今ではこれを一切アンマウントしない（記事詳細ペインが常に表示される2ペインの一方であるため）。

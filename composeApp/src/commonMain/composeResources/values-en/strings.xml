@@ -325,7 +325,6 @@
     <string name="error_cloud_data_incompatible">The cloud sync data is corrupted or in an unsupported format. Automatic sync is suspended until you reset it. Reset the sync data to rebuild it (the original data will be kept as a backup).</string>
     <string name="error_feed_gone">Feed removed</string>
     <string name="error_feed_not_found">Feed not found</string>
-    <string name="error_invalid_url">Invalid feed URL</string>
     <string name="error_generic">An error occurred</string>
     <string name="error_update">Update failed</string>
 </resources>

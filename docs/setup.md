@@ -197,9 +197,11 @@ additionally needs the Android SDK, per above. The native packaging tasks
     `packageDmg` (sets the DMG volume icon; `hdiutil` itself ships with the OS)
 - **Windows**
   - WiX Toolset v3, v4, or v5, on `PATH` — required for `packageMsi` (jpackage's Windows
-    installer step). GitHub-hosted `windows-latest` runners ship WiX Toolset v3.14.1
-    preinstalled, so both `ci.yml` and `release.yml` build it with no separate install
-    step — see [build.md](build.md).
+    installer step). GitHub-hosted `windows-latest` runners ship a compatible WiX Toolset
+    version preinstalled (check the current one against `actions/runner-images`' Windows
+    image README, since the bundled version can change with the runner image), so both
+    `ci.yml` and `release.yml` build it with no separate install step — see
+    [build.md](build.md).
 
 `fakeroot`/`rpm` are not installed by default on `ubuntu-latest`; both `ci.yml` and `release.yml`
 install them via `apt-get` right before packaging. Xcode Command Line
@@ -359,7 +361,8 @@ until timeout. The reason differs per OS:
   after the Gradle run ends.
 
 **To test or perform linking, build the app with `./gradlew :composeApp:createDistributable` and
-launch it** (terminate the gradle instance first). Saved tokens are stored in the keychain or
+launch it** (under `composeApp/build/compose/binaries/main/app/`; terminate the gradle instance
+first). Saved tokens are stored in the keychain or
 `.dropbox_tokens.json` in the data directory. Google Drive uses loopback reception and links fine
 under `gradlew run`.
 

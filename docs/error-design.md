@@ -30,11 +30,17 @@ sealed class KeryxException(message: String) : Exception(message) {
 }
 ```
 
-Main subclasses (each also takes a leading `message: String`, omitted below): `FeedFetchException(statusCode)`,
-`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
-`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
-`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
-`UpdateException(stage)`.
+Main subclasses. Most take a leading `message: String` (omitted below): `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
+`CloudDataIncompatibleException`. A few take no `message` at all and carry a fixed
+message text instead: `FeedDiscoveryException(candidates)` ("Feed links found on page"), `FeedTimeoutException`
+("Feed request timed out"), `SyncConflictException` ("Sync conflict detected"),
+`SchemaVersionException(localVersion, cloudVersion)`. `UpdateException(stage, message)` is the one exception with
+a `message` parameter that comes *after* its other argument rather than before it.
+
+There is no dedicated "invalid feed URL" exception — the subscribe path never validates a URL's syntax before
+attempting to fetch it, so a malformed or unsupported URL surfaces as a `FeedFetchException` once the fetch
+itself fails, same as any other fetch error.
 
 Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
@@ -98,13 +104,14 @@ When emitting notifications from the Repository, text is localized via `Notifica
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
 \* `FeedFetcher` retries only on an actual timeout, for `FEED_TIMEOUT_RETRY_COUNT` extra attempts — a non-timeout
 `FeedFetchException` (e.g. a 5xx status) is not retried within the same fetch.
+
 \*\* Within one `sync()` call, `repeat(SYNC_MAX_RETRY)` re-loops only on `SyncConflictException`; any other error
 (including `CloudStorageException`) returns immediately. "Auto-retry" here means the next scheduled sync attempt,
 not an in-loop retry.
-| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
 ## Constants (`core/Constants.kt`, excerpt)
 

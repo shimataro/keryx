@@ -30,11 +30,17 @@ sealed class KeryxException(message: String) : Exception(message) {
 }
 ```
 
-主なサブクラス（いずれも先頭に `message: String` を取るが、以下では省略）: `FeedFetchException(statusCode)`,
-`FeedParseException`, `FeedDiscoveryException(candidates)`, `FeedTimeoutException`, `FeedNotFoundException(isGone)`,
-`CloudAuthException`, `CloudStorageException`, `SyncConflictException`,
-`SchemaVersionException(localVersion, cloudVersion)`, `CloudDataIncompatibleException`, `InvalidFeedUrlException`,
-`UpdateException(stage)`。
+主なサブクラス。多くは先頭に `message: String` を取る（以下では省略）: `FeedFetchException(statusCode)`,
+`FeedParseException`, `FeedNotFoundException(isGone)`, `CloudAuthException`, `CloudStorageException`,
+`CloudDataIncompatibleException`。一部は `message` を一切取らず固定メッセージを持つ:
+`FeedDiscoveryException(candidates)`（"Feed links found on page"）、`FeedTimeoutException`
+（"Feed request timed out"）、`SyncConflictException`（"Sync conflict detected"）、
+`SchemaVersionException(localVersion, cloudVersion)`。`UpdateException(stage, message)` だけは例外的に、
+`message` が他の引数より*後*に来る。
+
+「不正なフィード URL」専用の例外は存在しない——購読処理は URL の構文を検証してからフェッチするわけでは
+ないため、不正または非対応の URL は他のフェッチエラーと同様、フェッチ自体が失敗した際に
+`FeedFetchException` として表面化する。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 
@@ -73,7 +79,9 @@ sealed class KeryxException(message: String) : Exception(message) {
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
-  既に把握できるため。手動更新も同様に、一覧・未読バッジの更新で示す。
+  既に把握できるため。この OS 通知は、バックグラウンド/起動時の更新と手動の「すべて更新」の
+  **両方**で発火する。共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ
+  `notificationEnabled` 設定）を経由する。
 - ベルアイコンにバッジ（件数）。ベルは幅を問わず（デスクトップの3ペイン定常状態を含む）
   `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
@@ -123,13 +131,14 @@ Repository から通知を出す際、文言は `NotificationMessages`（`getStr
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
+| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 \* `FeedFetcher` が自動リトライするのは実際のタイムアウト時のみで、`FEED_TIMEOUT_RETRY_COUNT` 回まで追加試行する。
 タイムアウト以外の `FeedFetchException`（5xx ステータス等）は同一フェッチ内では再試行しない。
+
 \*\* `sync()` 1回の中で `repeat(SYNC_MAX_RETRY)` が再ループするのは `SyncConflictException` のみで、それ以外の
 エラー（`CloudStorageException` を含む）は即座に return する。ここでの「自動リトライ」はループ内の再試行では
 なく、次回のスケジュール済み同期試行を指す。
-| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 ## 定数（`core/Constants.kt`、抜粋）
 

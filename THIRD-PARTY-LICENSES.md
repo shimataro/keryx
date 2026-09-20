@@ -20,7 +20,6 @@ its respective license.
 | SQLDelight | Apache-2.0 | <https://github.com/sqldelight/sqldelight> |
 | SQLite JDBC | Apache-2.0 | <https://github.com/xerial/sqlite-jdbc> |
 | Ktor | Apache-2.0 | <https://github.com/ktorio/ktor> |
-| xmlutil | Apache-2.0 | <https://github.com/pdvrieze/xmlutil> |
 | Ksoup | Apache-2.0 | <https://github.com/fleeksoft/ksoup> |
 | Coil | Apache-2.0 | <https://github.com/coil-kt/coil> |
 | java-keyring | MIT | <https://github.com/javakeyring/java-keyring> |
@@ -35,3 +34,4 @@ its respective license.
 | AndroidX Core | Apache-2.0 | <https://github.com/androidx/androidx> |
 | AndroidX Activity | Apache-2.0 | <https://github.com/androidx/androidx> |
 | AndroidX WorkManager | Apache-2.0 | <https://github.com/androidx/androidx> |
+| Google Play services (Auth) | Android Software Development Kit License | <https://developer.android.com/studio/terms.html> |

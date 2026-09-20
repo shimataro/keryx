@@ -229,4 +229,4 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 
 ## favicon・サムネイル
 
-画像バイナリは DB に持たず URL のみ保持（同期対象外）。favicon は表示するが、記事サムネイル（`thumbnail_url`）の表示は α では省略している。
+画像バイナリは DB に持たず URL のみ保持（同期対象外）。favicon は Coil3 の `AsyncImage` で表示するが、記事サムネイル（`thumbnail_url`）の表示は α では省略している。

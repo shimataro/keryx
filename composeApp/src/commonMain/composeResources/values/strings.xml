@@ -321,7 +321,6 @@
     <string name="error_cloud_data_incompatible">クラウドの同期データが壊れているか、非対応の形式です。リセットするまで自動同期は停止します。同期データをリセットして作り直してください（元のデータは退避されます）。</string>
     <string name="error_feed_gone">フィードが削除されました</string>
     <string name="error_feed_not_found">フィードが見つかりませんでした</string>
-    <string name="error_invalid_url">フィード URL が正しくありません</string>
     <string name="error_generic">エラーが発生しました</string>
     <string name="error_update">アップデートに失敗しました</string>
 </resources>

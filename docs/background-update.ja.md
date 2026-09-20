@@ -26,7 +26,7 @@ while (true) {
     delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動」（minutes <= 0）は 1 分ごとに起床
     if (minutes > 0) {
         refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
-                                  // 有効なら NewArticleNotifier.notifyBackground(newArticles(newCount))
+                                  // 有効なら NewArticleNotifier.notifyIfEnabled(...)
         sync()                    // クラウド同期
     }
     maybeRebuildFtsIndex()        // FTS 全再構築の日次 heal（後述）
@@ -35,12 +35,13 @@ while (true) {
 
 - 設定間隔は毎ループ読み直すため、設定変更は次サイクルから反映される（明示的な再スケジュール不要）。
 - 更新中のエラーはクラッシュさせず、通知センターに記録する（`FeedRepository.refreshFeed` 内で処理）。Android ではさらに Snackbar でも通知するが、アプリのウィンドウが実際にフォーカスを持っている間に限る。そのため `FeedRefreshWorker` がバックグラウンドで積んだものは保留され、ユーザーが戻ってきた時点で通知される（見られないままタイムアウトすることがない）。[error-design.ja.md](error-design.ja.md) の「通知センター」を参照。
-- 新着通知は同じ `NewArticleNotifier.trayEvents` を入力として、プラットフォームごとに 3 経路で OS へ渡す
-  （`TrayState` は Compose の `application {}` スコープ内でしか作れないため、`MutableSharedFlow` で
-  橋渡しする）。macOS は `TrayIcon.displayMessage`、StatusNotifierItem ホストがある Linux は
-  `org.freedesktop.Notifications.Notify`、Windows（および SNI ホストの無い Linux）は
-  `TrayState.sendNotification`。詳細は [app-architecture.ja.md](app-architecture.ja.md) の
-  「デスクトップトレイ」を参照。
+- 新着通知は同じ `NewArticleNotifier.trayEvents` を入力として、`KeryxTray` 自身の振り分け順にしたがって
+  プラットフォームごとに 4 経路で OS へ渡す（`TrayState` は Compose の `application {}` スコープ内でしか
+  作れないため、`MutableSharedFlow` で橋渡しする）。macOS の `MacTray` と Windows の `WindowsTray` は
+  どちらも `TrayIcon.displayMessage` を呼び、StatusNotifierItem ホストがある Linux は `LinuxTray` の
+  `org.freedesktop.Notifications.Notify` を使う。残る唯一のケース——SNI ホストの無い Linux——だけが
+  Compose 自体の `Tray()` コンポーザブルにフォールバックし、その `TrayState.sendNotification` を使う。
+  詳細は [app-architecture.ja.md](app-architecture.ja.md) の「デスクトップトレイ」を参照。
 
 ## Android 実装（`androidMain/background/` + `AndroidStartupTasks.kt`）
 
@@ -149,8 +150,11 @@ Play 以外からの実行可能コードのダウンロードであり、この
 （Koin の `single` なので、これ自身も進行中のダウンロードも設定ダイアログを閉じても生き続ける）が
 「リンクを出すだけ」からさらに進めて、実際のダウンロードとインストールまでを、1 本の
 `StateFlow<UpdateState>` の背後で駆動する: `Idle → Checking → (UpToDate | Available) →
-Downloading → Verifying → Ready → Installing`、そして `Checking`/`Downloading`/`Verifying` から
-`Failed` へも遷移しうる。Updates 設定タブ、デスクトップトレイとアプリメニューの Help メニューが
+Downloading → Verifying → Ready → Installing`、そして `Checking`/`Downloading`/`Verifying`/
+`Installing` から `Failed` へも遷移しうる（`retryFailed` は `Installing` 段階での失敗を
+`retryInstall` に分岐させる。これは `UpdateStage` の4つの値 `CHECK`、`DOWNLOAD`、`VERIFY`、
+`INSTALL` と対応する——`Failed` に一切到達しない Android のインストール失敗ケースについては
+後述）。Updates 設定タブ、デスクトップトレイとアプリメニューの Help メニューが
 共有する唯一のアップデートメニュー項目（どちらも `tray/UpdateMenuEntry.kt` の `updateMenuEntry`
 が解決する）、通知センターのベル——すべてが同じこの状態を読むので、いま何が起きているかについて
 食い違うことはありえない。**どの段階も無人では進まない**: 確認が自動的にダウンロードを始めること
@@ -169,6 +173,13 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   アーキテクチャ（`HostArchitecture.UNKNOWN`）では、`selectUpdateAsset` は実際にそのアセットが
   存在しない場合と同じく「見つからない」を返す——一番近いものを推測することはない。macOS
   （arm64 専用）と Windows（x86_64 専用）のアセット名は `hostArchitecture` に関わらず固定のまま。
+  `selectUpdateAsset` にはさらに2つのガードがある——正当な GitHub リリースが返すことはあり得ないが、
+  破損または悪意あるレスポンスへの耐性として存在するものだ: `assetNamePattern` は**完全一致**
+  （`^Keryx-[A-Za-z0-9._+-]+<suffix>$`）を要求し、`/` や `\` を含む名前を無害化するのではなく
+  拒否する——これは `UpdateAsset.name` が `<cacheDir>/updates/<version>/` 配下のパス要素になるため、
+  チェックしない名前はパストラバーサルの経路になり得るという意味で本質的な安全策である。また
+  `sizeBytes` は `1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES`（1 GiB）の範囲でなければならず、
+  ありえない大きさの報告値による、上記の空き容量計算のオーバーフローを防ぐ。
   続いて `domain/UpdateInstallPolicy.kt`
   の `updatePlan` が、そのアセットに対して実際に何をすべきかを、インストール場所
   （`platform/InstallLocation.kt` の `detectInstallLocation()`——macOS の `.app`、Windows/Linux の
@@ -241,7 +252,11 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   扱い続ける条件に、バージョンだけでなくアセットの digest 一致も要求するようになった——さもないと、
   同じタグの下でリリースが作り直された場合（手作業でのアップロードやり直しなど）、古い、
   検証済みのファイルをインストーラーに渡してしまい、作り直された方を取りに行かなくなる。
-- **ダウンロード。** `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
+- **ダウンロード。** 1バイトも取得する前に、`hasEnoughFreeSpaceForUpdate`（`UpdateRepository.kt`）が
+  キャッシュディレクトリの空き容量を、アセットサイズに `REQUIRED_FREE_SPACE_MULTIPLE`（余裕を見て 3）を
+  掛けた値と比較する。これを満たさなければ、ネットワークリクエストを一切行わずに
+  `Failed(UpdateException(UpdateStage.DOWNLOAD, "Not enough free disk space"))` へ直行する。
+  `data/remote/UpdateDownloader` は手動でリダイレクトを追う（共有 HTTP
   クライアントにはリダイレクトプラグイン自体が入っていない）。小さなホスト allowlist——
   完全一致の `github.com` と `api.github.com`（Releases API 自身が応答するホスト）、および
   先頭ドット必須のサフィックス一致 `.githubusercontent.com`（署名付きアセットのリダイレクト先。
@@ -444,35 +459,44 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
 
 ## 起動時タスク（`runStartupTasks` / `runAndroidStartupTasks`）
 
-`runStartupTasks` 自体はデスクトップ専用のオーケストレーション（`desktopMain/StartupTasks.kt`）—
-macOS の translocated インストールの警告（デスクトップ固有の関心事）はこの中で行っている — だが、
-キャッシュ削除・フィード更新通知・アップデート通知・FTS 再構築（下記のステップ1・3）は commonMain の
-`domain/StartupMaintenanceTasks.kt` にあるプラットフォーム非依存の関数に委譲する。Android の
-`runAndroidStartupTasks`（前述）は同じステップ1・3の関数を直接呼び、ステップ2もデスクトップと同じ
-やり方で自ら実行する — どちらも `StartupMaintenanceTasks` の関数を経由せず、
-`CloudSession.isConnected()` でガードしたうえで `SyncRepository.sync()` を直接呼ぶ:
+共有の5ステップからなるメンテナンスシーケンス——キャッシュ削除・初回クラウド同期・フィード更新・
+アップデート確認・FTS heal——は1か所にまとまっており、commonMain の `domain/StartupMaintenanceTasks.kt`
+の `runStartupMaintenance` がそれで、プラットフォームごとに重複実装されているわけではない。デスクトップの
+`runStartupTasks`（`desktopMain/StartupTasks.kt`）はその前にデスクトップ固有の2ステップ——macOS の
+translocated インストールの警告と、前回のアプリ内アップデートインストールが残した stale な
+self-replace 成果物の掃除——を足すだけで、残りは `runStartupMaintenance` を呼ぶ。Android の
+`runAndroidStartupTasks`（前述）にはデスクトップ固有のステップに相当するものは無く、代わりに同じ
+`runStartupMaintenance` 呼び出しを `startupMaintenanceMutex` / プロセスにつき1回限りのガードで
+包むだけである（理由はそのファイル自身の KDoc を参照）:
 
 1. キャッシュ削除（`cleanUpArticleCacheIfDue`。前回から 24 時間以上経過時）。
 2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
    デスクトップは Dropbox / Google Drive / OneDrive、Android も同じ 3 種（ただし Google Drive は
-   Play 開発者サービスが利用できる環境のみ）。
-3. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
-4. FTS の初回作成・未索引行の増分投入:
-   - **デスクトップ。** `FtsManager.ensureIndexed()` が担う: `application {}` の前に `runBlocking`
-     でブロックして待つ（最初のウィンドウ表示が遅れるだけで済み、かつ `main.kt` はプロセスにつき
-     一度しか走らないので許容できる）。
-   - **Android。** `KeryxApplication.onCreate` はこれを共有のアプリスコープ `CoroutineScope` 上で
-     fire-and-forget で起動する — `Application.onCreate` をブロックすると Android の全コールド
-     スタートが遅延してしまうため。完了前の短い間に検索が実行された場合は、失敗するのではなく
-     ヒット件数が少なめ（0件を含む）になるだけである。
-   - **より軽量な版を呼ぶ理由。** ここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
-     `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker`
-     を走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
-     1日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()`
-     の `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` は
-     テーブルが一度作成・バックフィルされた後は `sqlite_master` を1回引くだけの no-op になる。
-   - 新着記事の索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
-     下記の日次再構築 heal で通常どおり継続される。
+   Play 開発者サービスが利用できる環境のみ）。起動時であっても前述の
+   `SyncTrigger.AUTOMATIC` のゲートを迂回するわけではなく、`autoSyncSuspended` が真の間は、
+   この呼び出しでダウンロードもマージもアップロードも行われない。
+3. フィード更新とその新着記事通知（`refreshFeedsAndNotify`）。
+4. 自動/バックグラウンドのスケジュールでのアップデート確認（`checkForUpdateAndNotify`）。
+5. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
+
+この5ステップのシーケンスとは別に、FTS の初回作成・未索引行の増分投入は、`runStartupTasks` /
+`runAndroidStartupTasks` に到達するより前に、プロセスにつき一度だけ実行される:
+
+- **デスクトップ。** `FtsManager.ensureIndexed()` が担う: `application {}` の前に `runBlocking`
+  でブロックして待つ（最初のウィンドウ表示が遅れるだけで済み、かつ `main.kt` はプロセスにつき
+  一度しか走らないので許容できる）。
+- **Android。** `KeryxApplication.onCreate` はこれを共有のアプリスコープ `CoroutineScope` 上で
+  fire-and-forget で起動する — `Application.onCreate` をブロックすると Android の全コールド
+  スタートが遅延してしまうため。完了前の短い間に検索が実行された場合は、失敗するのではなく
+  ヒット件数が少なめ（0件を含む）になるだけである。
+- **より軽量な版を呼ぶ理由。** ここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
+  `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker`
+  を走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
+  1日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()`
+  の `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` は
+  テーブルが一度作成・バックフィルされた後は `sqlite_master` を1回引くだけの no-op になる。
+- 新着記事の索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
+  下記の日次再構築 heal で通常どおり継続される。
 
 ## FTS 全再構築の日次 heal（`maybeRebuildFtsIndex`）
 

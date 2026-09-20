@@ -27,7 +27,7 @@ while (true) {
     delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // "Manual only" (minutes <= 0) wakes every minute
     if (minutes > 0) {
         refreshFeedsAndNotify()   // Refresh all feeds (ETag / Last-Modified differential fetch), then
-                                  // NewArticleNotifier.notifyBackground(newArticles(newCount)) when
+                                  // NewArticleNotifier.notifyIfEnabled(...) when
                                   // new articles arrived and notifications are enabled
         sync()                    // Cloud sync
     }
@@ -37,11 +37,13 @@ while (true) {
 
 - The interval setting is re-read every loop, so changes take effect from the next cycle (no explicit rescheduling needed).
 - Errors during update do not crash the app; they are recorded in the notification center (handled inside `FeedRepository.refreshFeed`). On Android they are additionally announced in a Snackbar — but only while the app's window actually has focus, so one raised by `FeedRefreshWorker` in the background waits and is announced once the user comes back, rather than timing out unseen. See "Notification Center" in [error-design.md](error-design.md).
-- New-article notifications reach the OS through one of three platform paths, all fed by the same
+- New-article notifications reach the OS through one of four platform paths, all fed by the same
   `NewArticleNotifier.trayEvents` flow (`TrayState` can only be created inside Compose's `application {}`
-  scope, so a `MutableSharedFlow` bridges it): macOS uses `TrayIcon.displayMessage`, Linux with a
-  StatusNotifierItem host uses `org.freedesktop.Notifications.Notify`, and Windows (plus Linux without
-  an SNI host) uses `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
+  scope, so a `MutableSharedFlow` bridges it), following `KeryxTray`'s own dispatch order: macOS's
+  `MacTray` and Windows' `WindowsTray` both call `TrayIcon.displayMessage`, Linux with a
+  StatusNotifierItem host uses `LinuxTray`'s `org.freedesktop.Notifications.Notify`, and only the
+  remaining case — Linux without an SNI host — falls through to Compose's own `Tray()` composable and
+  its `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
 
 ## Android Implementation (`androidMain/background/` + `AndroidStartupTasks.kt`)
 
@@ -149,7 +151,10 @@ Where `selfUpdateCheckSupported` offers a check at all, `domain/UpdateRepository
 so it and any in-flight download outlive a closed settings dialog) drives it past a plain
 "here's a link" into an actual download-and-install, behind one `StateFlow<UpdateState>`:
 `Idle → Checking → (UpToDate | Available) → Downloading → Verifying → Ready → Installing`, with
-`Failed` reachable from `Checking`/`Downloading`/`Verifying`. Every surface — the Updates settings
+`Failed` reachable from `Checking`/`Downloading`/`Verifying`/`Installing` (`retryFailed` branches an
+`Installing`-stage failure to `retryInstall`, matching `UpdateStage`'s four values `CHECK`, `DOWNLOAD`,
+`VERIFY`, `INSTALL` — see below for the one Android install failure that never reaches `Failed` at
+all). Every surface — the Updates settings
 tab, the one update menu item the desktop tray and the Help menu share (both resolved by
 `tray/UpdateMenuEntry.kt`'s `updateMenuEntry`), the notification-center bell — reads this same
 state, so they can never disagree about what's currently true. **No step ever runs unattended**: a
@@ -166,7 +171,15 @@ each a separate, explicit click (Updates tab button, or that menu item).
   architecture this project ships no asset for (`HostArchitecture.UNKNOWN`) makes `selectUpdateAsset`
   find nothing, the same as a release genuinely missing that asset — never a guess at the nearest
   one. macOS (arm64-only) and Windows (x86_64-only) asset names stay fixed regardless of
-  `hostArchitecture`. `domain/UpdateInstallPolicy.kt`'s `updatePlan` then decides
+  `hostArchitecture`. Two more guards in `selectUpdateAsset` exist purely for hardening against a
+  malformed or hostile release response, not for any legitimate release GitHub would ever serve: its
+  `assetNamePattern` requires an **exact** match (`^Keryx-[A-Za-z0-9._+-]+<suffix>$`), rejecting
+  rather than sanitizing a name containing `/` or `\` — load-bearing because
+  `UpdateAsset.name` becomes a path element under `<cacheDir>/updates/<version>/`, so an unchecked
+  name would be a path-traversal vector; and `sizeBytes` must fall in
+  `1..MAX_PLAUSIBLE_UPDATE_ASSET_SIZE_BYTES` (1 GiB), guarding the free-space arithmetic above
+  against overflow from an implausible reported size. `domain/UpdateInstallPolicy.kt`'s `updatePlan`
+  then decides
   what an update should actually *do* with that asset, purely from the install location
   (`platform/InstallLocation.kt`'s `detectInstallLocation()` — a macOS `.app`, a Windows/Linux
   portable ZIP, a Windows MSI install, an Android sideload, …) and the already-selected asset (or
@@ -236,7 +249,11 @@ each a separate, explicit click (Updates tab button, or that menu item).
   still match before treating a fresh `Available` status as "the same download already in hand" —
   otherwise a release rebuilt under the same tag (a failed upload redone by hand) could hand a
   stale, already-verified file to the installer instead of fetching the rebuilt one.
-- **Downloading.** `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
+- **Downloading.** Before fetching a single byte, `hasEnoughFreeSpaceForUpdate` (`UpdateRepository.kt`)
+  checks the cache directory's usable space against the asset's size times `REQUIRED_FREE_SPACE_MULTIPLE`
+  (3, for headroom); if it doesn't clear that bar the state goes straight to
+  `Failed(UpdateException(UpdateStage.DOWNLOAD, "Not enough free disk space"))` with no network request
+  made at all. `data/remote/UpdateDownloader` manually follows redirects (the shared HTTP client
   has no redirect plugin at all) against a small host allowlist — exact-match `github.com` and
   `api.github.com` (where the Releases API itself answers), plus a leading-dot-required suffix
   match against `.githubusercontent.com` (the signed-asset redirect target, e.g.
@@ -435,34 +452,43 @@ nothing changed now writes nothing and triggers no re-query.
 
 ## Startup Tasks (`runStartupTasks` / `runAndroidStartupTasks`)
 
-`runStartupTasks` itself is desktop-only orchestration (`desktopMain/StartupTasks.kt`) — it also warns
-about a macOS-translocated app install, a desktop-specific concern — but cache cleanup, feed refresh
-notification, update notification, and FTS rebuilding (steps 1 and 3 below) delegate to the
-platform-independent functions in commonMain's `domain/StartupMaintenanceTasks.kt`. Android's
-`runAndroidStartupTasks` (see above) calls the same step 1 and step 3 functions directly and runs
-step 2 itself too, the same way desktop does — both call `SyncRepository.sync()` inline, guarded on
-`CloudSession.isConnected()`, rather than through a `StartupMaintenanceTasks` function:
+The shared five-step maintenance sequence itself — cache cleanup, initial cloud sync, feed refresh,
+update check, FTS heal — lives in one place, commonMain's `domain/StartupMaintenanceTasks.kt`'s
+`runStartupMaintenance`, not duplicated per platform. Desktop's `runStartupTasks`
+(`desktopMain/StartupTasks.kt`) just adds two desktop-specific steps ahead of it — warning about a
+macOS-translocated app install, and cleaning up stale self-replace artifacts left behind by a
+previous in-app update install — then calls `runStartupMaintenance` for the rest. Android's
+`runAndroidStartupTasks` (see above) has no desktop-specific steps of its own to add; it wraps the
+same `runStartupMaintenance` call in a `startupMaintenanceMutex`/once-per-process guard instead (see
+its own KDoc for why):
 
 1. Cache cleanup (`cleanUpArticleCacheIfDue`, if 24+ hours since last run).
 2. If a cloud provider is connected, initial sync (`SyncRepository.sync(SyncTrigger.AUTOMATIC)`) —
    Dropbox / Google Drive / OneDrive on desktop; on Android the same three, with Google Drive
-   only where Play services is available.
-3. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
-4. FTS initial creation + unindexed row incremental insertion:
-   - **Desktop.** `FtsManager.ensureIndexed()`, blocked on with `runBlocking` before `application {}`
-     (acceptable there, since it only delays showing the first window, and `main.kt` runs exactly
-     once per process).
-   - **Android.** `KeryxApplication.onCreate` instead launches `FtsManager.ensureIndexedIfTableAbsent()`
-     fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would
-     delay every Android cold start instead of just the first window, and a search performed in the
-     brief window before it completes just returns fewer/no hits rather than failing.
-   - **Why the cheaper variant.** `Application.onCreate` also runs on every `WorkManager` wakeup that
-     starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute
-     minimum interval, see "Android Implementation" above) — `ensureIndexed()`'s `indexMissing()`
-     call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single
-     `sqlite_master` lookup) once the table has already been created and backfilled once.
-   - New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in
-     `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
+   only where Play services is available. Startup doesn't bypass the `SyncTrigger.AUTOMATIC` gate
+   described above either: while `autoSyncSuspended` is true, this call downloads, merges and
+   uploads nothing.
+3. Feed refresh and its new-article notification (`refreshFeedsAndNotify`).
+4. Update check on the automatic/background schedule (`checkForUpdateAndNotify`).
+5. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
+
+Separately from that five-step sequence, FTS initial creation + unindexed row incremental insertion
+runs once per process, before `runStartupTasks`/`runAndroidStartupTasks` is even reached:
+
+- **Desktop.** `FtsManager.ensureIndexed()`, blocked on with `runBlocking` before `application {}`
+  (acceptable there, since it only delays showing the first window, and `main.kt` runs exactly
+  once per process).
+- **Android.** `KeryxApplication.onCreate` instead launches `FtsManager.ensureIndexedIfTableAbsent()`
+  fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would
+  delay every Android cold start instead of just the first window, and a search performed in the
+  brief window before it completes just returns fewer/no hits rather than failing.
+- **Why the cheaper variant.** `Application.onCreate` also runs on every `WorkManager` wakeup that
+  starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute
+  minimum interval, see "Android Implementation" above) — `ensureIndexed()`'s `indexMissing()`
+  call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single
+  `sqlite_master` lookup) once the table has already been created and backfilled once.
+- New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in
+  `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
 
 ## Daily FTS Rebuild Heal (`maybeRebuildFtsIndex`)
 
