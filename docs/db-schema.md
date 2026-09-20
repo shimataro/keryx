@@ -123,7 +123,7 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 External content mode keeps only the index, referencing `articles.search_text` for body text.
 
 - **Never DROP `articles_fts` on the live DB.** Exclusion from upload is done by dropping it on the `VACUUM INTO`
-  snapshot copy side instead — see "FTS5 handling" in [sync-architecture.md](sync-architecture.md).
+  snapshot copy side instead — see "FTS5 Handling" in [sync-architecture.md](sync-architecture.md).
 - After feed refresh or sync merge, `FtsManager.indexMissing()` **incrementally indexes only unindexed new
   articles**. Never use a full `'rebuild'` on a hot path — it is `O(total indexed text)` and too heavy to run there.
 - Full rebuild (`rebuildIndex()` = `'rebuild'`) runs only in the daily idle pass (`local_settings.lastFtsRebuiltAt`
