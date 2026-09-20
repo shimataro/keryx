@@ -349,7 +349,7 @@ private fun ArticleInline.buildInlineString(linkColor: Color, baseFontSizeSp: Fl
             // comes from the UA default `text-decoration` on `<a>`, which the reader's CSS never
             // overrides either.
             withLink(LinkAnnotation.Clickable(tag = link, linkInteractionListener = { BrowserOpener.open(link) })) {
-                val linkStyle = if (span.color != null) style else style.copy(color = linkColor, textDecoration = TextDecoration.Underline)
+                val linkStyle = if (span.color != null) style else style.copy(color = linkColor)
                 withStyle(linkStyle) { append(span.text) }
             }
         }

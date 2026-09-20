@@ -285,7 +285,10 @@ private fun InlineStyle.extendedBy(tag: String, element: Element, base: String):
         "sup" -> copy(sizeScale = sizeScale * 0.83f, baseline = InlineBaseline.Super)
         // An unresolvable href leaves the text in place without a link, rather than offering a
         // tap that could go nowhere.
-        "a" -> copy(link = resolveAttr(element, "href", base) ?: link)
+        "a" -> copy(
+            link = resolveAttr(element, "href", base) ?: link,
+            underline = true,
+        )
         else -> this
     }
     val style = element.attr("style")
