@@ -165,7 +165,12 @@ composeApp/src/
 `AndroidAppContext.init`、`startKoin`、`configureImageLoader`、FTS バックフィルの
 `ensureIndexedIfTableAbsent()`（プロセス起動のたびに呼ばれる軽量版——db-schema.md の `articles_fts` 節参照）、
 `startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
-`runAndroidStartupTasks`）のみを持つ。これが別モジュールになっているのは、AGP 9 の
+`runAndroidStartupTasks`）に加え、自身の `res/`（ランチャーアイコン、`values/strings.xml`、
+`backup_rules.xml`、`data_extraction_rules.xml`）、サイドロード可能な GitHub ビルドと Play ストア版を
+分ける `github` フレーバー用の `AndroidManifest.xml`、そして `androidTest/`（
+`KeryxSearchBarAndroidTest`、`NativeMenuAndroidGestureTest`、`KeryxSettingRowAndroidGestureTest` ——
+上記の `androidDeviceTest` とは異なり、実機/エミュレータが必要な計装 Compose UI テスト）を持つ。
+これが別モジュールになっているのは、AGP 9 の
 `com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
 ため — `composeApp` は代わりに `com.android.kotlin.multiplatform.library` による Android ライブラリで、
 `androidApp` がそれに依存してインストール可能な APK を生成する。
