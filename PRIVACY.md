@@ -164,7 +164,11 @@ network request.
 
 ## Security
 
-- All network communication the app performs uses HTTPS.
+- Keryx's own communication — cloud sync, update checks, and update downloads — always
+  uses HTTPS. A feed URL you subscribe to is upgraded to HTTPS only if you don't give
+  it an explicit scheme; if you subscribe to a feed at an explicit `http://` address
+  (or one that redirects there), that feed's content is fetched over plain HTTP, as
+  it would be in any other RSS reader.
 - Cloud credentials are stored using your operating system's secure credential
   storage where available, as described above.
 

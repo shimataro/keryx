@@ -263,7 +263,10 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 ## 10. Privacy & Security
 
-- No data sent to external servers, no account registration required, HTTPS only. Note that the
+- No data sent to external servers, no account registration required. Keryx's own communication
+  (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched
+  over plain HTTP if its URL explicitly says `http://` (or redirects there) — a feed URL with no
+  scheme at all is upgraded to HTTPS, but an explicit `http://` is not overridden. Note that the
   reader keeps the articles either side of the one on screen ready to swipe to (§9), so their
   content — including any images or embedded content they contain — is fetched before they are
   opened, exactly as it would be on opening them. Nothing about them is marked read.
