@@ -55,12 +55,12 @@ private val LINE_SCROLL_DP = 120.dp
 private const val PAGE_SCROLL_OVERLAP_FRACTION = 0.9f
 
 /** Which way a keyboard scroll request moves the reader, and by how much: [Line] is a fixed
- * per-keypress amount (↑/↓); [Page] is most of the viewport (Space/PageDown/PageUp), matching an
- * ordinary browser. */
-internal enum class ArticleScrollUnit { Line, Page }
+ * per-keypress amount (↑/↓); [Page] is most of the viewport (Space/PageDown/PageUp); [Edge] jumps
+ * all the way to the article's top or bottom (Home/End), matching an ordinary browser. */
+internal enum class ArticleScrollUnit { Line, Page, Edge }
 
 /**
- * Lets the article-detail pane's ↑/↓/Space/PageUp/PageDown keys reach this reader's own
+ * Lets the article-detail pane's ↑/↓/Space/PageUp/PageDown/Home/End keys reach this reader's own
  * [LazyListState] from `HomeScreen`, which owns the shared keyboard handler but sits several
  * composable layers above [ArticleContentView] (`HomeScreen` → `ArticleDetailPane` →
  * `ArticleDetailPaneContent` → the `reader` lambda → `ArticleWebView` → here). The currently
@@ -140,11 +140,13 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier, act
         val lineScrollPx = with(LocalDensity.current) { LINE_SCROLL_DP.toPx() }
         DisposableEffect(active, listState, scrollHost) {
             val handler: suspend (Int, ArticleScrollUnit) -> Unit = { direction, unit ->
-                val deltaPx = when (unit) {
-                    ArticleScrollUnit.Line -> lineScrollPx
-                    ArticleScrollUnit.Page -> listState.layoutInfo.viewportSize.height * PAGE_SCROLL_OVERLAP_FRACTION
+                when (unit) {
+                    ArticleScrollUnit.Line -> listState.animateScrollBy(direction * lineScrollPx)
+                    ArticleScrollUnit.Page ->
+                        listState.animateScrollBy(direction * listState.layoutInfo.viewportSize.height * PAGE_SCROLL_OVERLAP_FRACTION)
+                    ArticleScrollUnit.Edge ->
+                        if (direction < 0) listState.animateScrollToItem(0) else listState.scrollToArticleEnd()
                 }
-                listState.animateScrollBy(direction * deltaPx)
             }
             if (active) scrollHost.register(handler)
             onDispose { scrollHost.unregister(handler) }
@@ -208,6 +210,22 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier, act
         }
         VerticalScrollbarIfNeeded(listState)
     }
+}
+
+/**
+ * Scrolls to the very end of the article for the keyboard End key — flush with the bottom, unlike
+ * a plain `animateScrollToItem(lastIndex)`, which only top-aligns the last item and can leave a
+ * gap below it when that item is shorter than the viewport. Same idiom `ui/home/HomeCommon.kt`'s
+ * `scrollToIndexIfNeeded` already uses (comparing an item's measured bottom edge against the
+ * viewport's), reapplied locally since `ui/article` doesn't depend on `ui/home`.
+ */
+private suspend fun LazyListState.scrollToArticleEnd() {
+    val lastIndex = layoutInfo.totalItemsCount - 1
+    if (lastIndex < 0) return
+    animateScrollToItem(lastIndex)
+    val itemInfo = layoutInfo.visibleItemsInfo.find { it.index == lastIndex } ?: return
+    val remaining = (itemInfo.offset + itemInfo.size) - layoutInfo.viewportEndOffset
+    if (remaining > 0) animateScrollBy(remaining.toFloat())
 }
 
 /**

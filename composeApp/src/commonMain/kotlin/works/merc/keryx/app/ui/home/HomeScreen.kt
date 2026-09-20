@@ -379,6 +379,16 @@ fun HomeScreen() {
                             scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Page) }
                         }
                     },
+                    onHome = {
+                        if (keyboardPane == HomePane.ArticleDetail) {
+                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Edge) }
+                        }
+                    },
+                    onEnd = {
+                        if (keyboardPane == HomePane.ArticleDetail) {
+                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Edge) }
+                        }
+                    },
                     onLeft = {
                         // FeedList -> {} covers the drawer-open case too (keyboardPane resolves to
                         // FeedList whenever the drawer is open) — there is nothing further left to

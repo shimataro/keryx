@@ -335,6 +335,86 @@ class ArticleContentViewTest {
         onNodeWithText("First paragraph").assertIsDisplayed()
         onAllNodesWithText("Last paragraph").assertCountEquals(0)
     }
+
+    // Companion to repeatedPageScrollsReachTheEndOfALongArticle: unlike Page, a single Edge request
+    // (direction = 1) reaches the true end in one call, no repetition needed.
+    @Test
+    fun endReachesTheBottomInASingleRequest() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Edge)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        scrollRequests++
+        waitForIdle()
+
+        onNodeWithText("Last paragraph").assertIsDisplayed()
+    }
+
+    // Companion to endReachesTheBottomInASingleRequest: a single Edge request (direction = -1)
+    // reaches the true top in one call from a position scrolled away from it.
+    @Test
+    fun homeReachesTheTopInASingleRequestFromTheBottom() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        var unit by mutableStateOf(ArticleScrollUnit.Edge)
+        var direction by mutableStateOf(1)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(direction, unit)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        // Get to the bottom first, via the same one-shot Edge/direction=1 request.
+        scrollRequests++
+        waitForIdle()
+        onNodeWithText("Last paragraph").assertIsDisplayed()
+        onAllNodesWithText("First paragraph").assertCountEquals(0)
+
+        direction = -1
+        scrollRequests++
+        waitForIdle()
+
+        onNodeWithText("First paragraph").assertIsDisplayed()
+    }
+
+    // The active=false invariant (see anInactiveInstanceNeverRespondsToScrollRequests above), but
+    // for an Edge request: confirms the gating applies uniformly across all three ArticleScrollUnit
+    // cases, not just Page.
+    @Test
+    fun anInactiveInstanceNeverRespondsToEdgeScrollRequests() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Edge)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument(), active = false)
+            }
+        }
+        waitForIdle()
+        onNodeWithText("First paragraph").assertIsDisplayed()
+
+        scrollRequests++
+        waitForIdle()
+
+        onNodeWithText("First paragraph").assertIsDisplayed()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+    }
 }
 
 /** Enough paragraphs to overflow the test window, so the reader's LazyColumn really can scroll. */

@@ -30,10 +30,11 @@ enum class HomeTextInput { SearchField, RowNameEditor }
  * - ↓ / ↑ / ← / → : pane-dependent navigation (selection change, scroll, or focus move —
  *   the caller decides based on which pane is logically focused)
  * - Space / Page Down : scroll the article reader forward by roughly a page,  Shift+Space /
- *   Page Up : scroll it back the same way — matching an ordinary browser's own bindings. Unlike
- *   ↓/↑, these have no meaning outside the article-detail pane, so [onPageUp]/[onPageDown] are
- *   the caller's business alone to route (or ignore) based on which pane is focused; the
- *   Compose-drawn fallback reader is the only thing that currently answers them (see
+ *   Page Up : scroll it back the same way,  Home / End : jump to the very top/bottom of the
+ *   article — matching an ordinary browser's own bindings. Unlike ↓/↑, none of these have any
+ *   meaning outside the article-detail pane, so [onPageUp]/[onPageDown]/[onHome]/[onEnd] are the
+ *   caller's business alone to route (or ignore) based on which pane is focused; the Compose-drawn
+ *   fallback reader is the only thing that currently answers them (see
  *   `ui/article/ArticleContentView.kt`'s `FallbackReaderScrollHost` — the native WebView reader
  *   handles its own scrolling instead).
  * - J : next article,  K : previous article (always operate on the article list, regardless of
@@ -91,6 +92,8 @@ fun Modifier.homeKeyboardShortcuts(
     onSearch: () -> Unit,
     onPageUp: () -> Unit = {},
     onPageDown: () -> Unit = {},
+    onHome: () -> Unit = {},
+    onEnd: () -> Unit = {},
     onKeyboardEngaged: () -> Unit = {},
     isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs,
 ): Modifier = onPreviewKeyEvent { event ->
@@ -116,6 +119,8 @@ fun Modifier.homeKeyboardShortcuts(
         event.key == Key.PageDown -> { onPageDown(); true }
         event.key == Key.Spacebar && event.isShiftPressed -> { onPageUp(); true }
         event.key == Key.Spacebar && !event.isShiftPressed -> { onPageDown(); true }
+        event.key == Key.MoveHome -> { onHome(); true }
+        event.key == Key.MoveEnd -> { onEnd(); true }
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.J -> { onNextArticle(); true }
         !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.K -> { onPreviousArticle(); true }
         !event.isCtrlPressed && !event.isMetaPressed &&

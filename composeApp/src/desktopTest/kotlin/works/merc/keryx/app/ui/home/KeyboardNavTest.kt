@@ -44,6 +44,8 @@ class KeyboardNavTest {
                         onSearch = { fired += "search" },
                         onPageUp = { fired += "pageUp" },
                         onPageDown = { fired += "pageDown" },
+                        onHome = { fired += "home" },
+                        onEnd = { fired += "end" },
                         isMacOs = isMacOs,
                     ),
                 )
@@ -234,5 +236,23 @@ class KeyboardNavTest {
         // homeKeyboardShortcuts' textInputFocused branch, so a space typed into the search field
         // must not be hijacked into a page-scroll request.
         assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.Spacebar) })
+    }
+
+    @Test
+    fun homeFiresOnHomeOnly() {
+        assertEquals(listOf("home"), firedEvents { pressKey(Key.MoveHome) })
+    }
+
+    @Test
+    fun endFiresOnEndOnly() {
+        assertEquals(listOf("end"), firedEvents { pressKey(Key.MoveEnd) })
+    }
+
+    @Test
+    fun homeAndEndDoNotFireAnythingWhileSearchFieldFocused() {
+        // Like Space/PageUp/PageDown, Home/End are not in the ↓/↑-only passthrough allowlist, so
+        // they must not be hijacked into a scroll-to-edge request while the search field is focused.
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.MoveHome) })
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.MoveEnd) })
     }
 }

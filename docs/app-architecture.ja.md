@@ -616,7 +616,8 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
 このフォールバックにはブラウザエンジン由来のスクロールが存在しないため、
 `ui/home/KeyboardNav.kt` の共通ハンドラーがその `LazyListState` を直接駆動する——↑/↓ は
 固定の行分だけ、Space / Page Down（逆方向は Shift+Space / Page Up）はビューポートの
-大部分を、通常のブラウザと同じ挙動で移動する。`ArticleContentView.kt` の
+大部分を移動し、Home / End は記事の先頭/末尾へ直接ジャンプする——いずれも通常のブラウザと
+同じ挙動である。`ArticleContentView.kt` の
 `FallbackReaderScrollHost`（`HomeScreen.kt` で一度だけ提供される `staticCompositionLocalOf`）
 が、`ArticleDetailPane`/`ArticleWebViewCarousel`/`reader` ラムダを介したコールバックの
 引き回しなしに、このハンドラーから現在アクティブなリーダーインスタンスへ到達する手段になって
