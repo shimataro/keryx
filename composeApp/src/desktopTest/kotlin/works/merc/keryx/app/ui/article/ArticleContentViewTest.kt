@@ -1,6 +1,10 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -13,8 +17,10 @@ import androidx.compose.ui.platform.asAwtTransferable
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
@@ -239,6 +245,95 @@ class ArticleContentViewTest {
         onNodeWithText("Term").assertIsDisplayed()
         onNodeWithText("Meaning").assertIsDisplayed()
         onNodeWithText("caption text").assertIsDisplayed()
+    }
+
+    /**
+     * Builds a document long enough to overflow the test window (see [FILLER_PARAGRAPHS]'s own
+     * KDoc), with a distinctive first/last paragraph to assert scroll position against.
+     */
+    private fun longScrollableDocument(): String {
+        val filler = (1..FILLER_PARAGRAPHS).joinToString("") { "<p>Filler paragraph $it</p>" }
+        return document("<p>First paragraph</p>$filler<p>Last paragraph</p>")
+    }
+
+    // Drives FallbackReaderScrollHost.scroll(...) from inside the composition — via a
+    // LaunchedEffect keyed on a counter flipped from the test body — rather than calling the
+    // suspend function directly from the test's own coroutine, which runs on a different
+    // TestCoroutineScheduler than the one driving composition/animation here (see
+    // runDesktopComposeUiTest's own KDoc on effectContext vs runTestContext) and would race the
+    // animateScrollBy call inside the handler instead of reliably awaiting it.
+    @Test
+    fun repeatedPageScrollsReachTheEndOfALongArticle() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Page)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        repeat(20) {
+            scrollRequests++
+            waitForIdle()
+        }
+
+        onNodeWithText("Last paragraph").assertIsDisplayed()
+    }
+
+    // Companion to repeatedPageScrollsReachTheEndOfALongArticle: a single Line scroll is a fixed,
+    // small per-keypress amount (browser-style ↑/↓), not a fraction of the viewport, so it must
+    // move far less than one Page scroll does — nowhere near enough to reach the article's end.
+    @Test
+    fun aSingleLineScrollMovesMuchLessThanAPageScroll() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Line)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        scrollRequests++
+        waitForIdle()
+
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+    }
+
+    // The touch-primary-carousel invariant: an inactive instance (a preloaded, not-yet-shown
+    // neighbour page) never registers with the scroll host at all, so scroll requests reaching the
+    // host while it is the only instance present are simply dropped.
+    @Test
+    fun anInactiveInstanceNeverRespondsToScrollRequests() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Page)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument(), active = false)
+            }
+        }
+        waitForIdle()
+        onNodeWithText("First paragraph").assertIsDisplayed()
+
+        repeat(20) {
+            scrollRequests++
+            waitForIdle()
+        }
+
+        onNodeWithText("First paragraph").assertIsDisplayed()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
     }
 }
 

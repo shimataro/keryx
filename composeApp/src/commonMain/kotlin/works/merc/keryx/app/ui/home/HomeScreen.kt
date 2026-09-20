@@ -69,6 +69,9 @@ import works.merc.keryx.app.resources.notification_snackbar_action
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
+import works.merc.keryx.app.ui.article.ArticleScrollUnit
+import works.merc.keryx.app.ui.article.FallbackReaderScrollHost
+import works.merc.keryx.app.ui.article.LocalFallbackReaderScrollHost
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
@@ -103,6 +106,11 @@ fun HomeScreen() {
     // float across the whole window (past the feed pane's right edge, over the article list), and a
     // composable inside FeedListPane would be painted before — and therefore under — its siblings.
     val dragOverlay = remember { FeedDragOverlayState() }
+    // Lets ↑/↓/Space/PageUp/PageDown reach the Compose-drawn fallback reader's own scroll state
+    // from the keyboard handler below, without threading a callback down through
+    // ArticleDetailPane/ArticleWebViewCarousel/the reader lambda — see KeyboardNav.kt's own KDoc
+    // and FallbackReaderScrollHost's. A no-op wherever the native WebView is showing instead.
+    val fallbackReaderScrollHost = remember { FallbackReaderScrollHost() }
     // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
     // inline ✓ (the keyboard copies the selected article, which that pane already shows).
     var copyPulse by remember { mutableStateOf(0) }
@@ -315,7 +323,10 @@ fun HomeScreen() {
     // this root Box below. This is what lets a narrow layout's modal navigation drawer scrim
     // reach all the way to the status/navigation bars instead of stopping at this padding's edge.
     Scaffold(contentWindowInsets = WindowInsets(0)) { _ ->
-        CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+        CompositionLocalProvider(
+            LocalSnackbarHostState provides snackbarHostState,
+            LocalFallbackReaderScrollHost provides fallbackReaderScrollHost,
+        ) {
         Box(
             Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).fillMaxSize()
                 .focusRequester(focusRequester)
@@ -336,11 +347,13 @@ fun HomeScreen() {
                             null -> when (keyboardPane) {
                                 HomePane.FeedList -> moveFeedSelection(-1)
                                 HomePane.ArticleList -> vm.selectPrevious()
-                                // The article body scrolls inside the native WebView itself now
-                                // (see "Article Reader (native WebView)" in app-architecture.md),
-                                // so there's no Compose ScrollState left here to drive with the
-                                // keyboard.
-                                HomePane.ArticleDetail -> {}
+                                // The native WebView reader handles its own scrolling once it holds
+                                // real focus (see "Article Reader (native WebView)" in
+                                // app-architecture.md); this only reaches the Compose-drawn fallback
+                                // reader, via fallbackReaderScrollHost — see KeyboardNav.kt's own
+                                // KDoc and FallbackReaderScrollHost's.
+                                HomePane.ArticleDetail ->
+                                    scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Line) }
                             }
                         }
                     },
@@ -351,8 +364,19 @@ fun HomeScreen() {
                             null -> when (keyboardPane) {
                                 HomePane.FeedList -> moveFeedSelection(1)
                                 HomePane.ArticleList -> vm.selectNext()
-                                HomePane.ArticleDetail -> {}
+                                HomePane.ArticleDetail ->
+                                    scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Line) }
                             }
+                        }
+                    },
+                    onPageUp = {
+                        if (keyboardPane == HomePane.ArticleDetail) {
+                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Page) }
+                        }
+                    },
+                    onPageDown = {
+                        if (keyboardPane == HomePane.ArticleDetail) {
+                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Page) }
                         }
                     },
                     onLeft = {

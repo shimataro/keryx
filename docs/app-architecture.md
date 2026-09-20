@@ -604,6 +604,16 @@ platform this exists for today is Linux on arm64 — see `known-issues.md` for t
 `-Dkeryx.reader.webview` override, and why moving to a backend that does ship an arm64 Linux binary
 is a much larger change.
 
+Unlike the native WebView, this fallback has no scrolling of its own to inherit from a browser
+engine, so `ui/home/KeyboardNav.kt`'s shared handler drives its `LazyListState` directly: ↑/↓ move
+by a fixed line amount, and Space/Page Down (Shift+Space/Page Up to reverse) move by most of a
+viewport, matching an ordinary browser. `ArticleContentView.kt`'s `FallbackReaderScrollHost`, a
+`staticCompositionLocalOf` provided once in `HomeScreen.kt`, is what lets that handler reach the
+currently active reader instance without threading a callback down through
+`ArticleDetailPane`/`ArticleWebViewCarousel`/the `reader` lambda — the same pattern
+`LocalSnackbarHostState` already uses for a different cross-cutting concern. None of this affects
+the native WebView reader, which keeps handling its own scrolling whenever it holds real focus.
+
 ### Desktop Tray (platform branch)
 
 `tray/KeryxTray.kt` picks one of four implementations:

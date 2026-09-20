@@ -732,7 +732,7 @@ private fun ArticleWebView(html: String, body: String, articleUrl: String?, acti
     // isNativeWebViewSupported). Draw the article with Compose there instead. The value cannot
     // change while the app runs, so returning early never reshapes an existing composition.
     if (!isNativeWebViewSupported()) {
-        ArticleContentView(html = html, modifier = Modifier.fillMaxSize())
+        ArticleContentView(html = html, modifier = Modifier.fillMaxSize(), active = active)
         return
     }
 

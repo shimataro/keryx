@@ -613,6 +613,17 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
 `-Dkeryx.reader.webview` による上書き、そして arm64 Linux バイナリを同梱するバックエンドへの
 移行がなぜ大がかりな変更になるのかは `known-issues.ja.md` を参照。
 
+このフォールバックにはブラウザエンジン由来のスクロールが存在しないため、
+`ui/home/KeyboardNav.kt` の共通ハンドラーがその `LazyListState` を直接駆動する——↑/↓ は
+固定の行分だけ、Space / Page Down（逆方向は Shift+Space / Page Up）はビューポートの
+大部分を、通常のブラウザと同じ挙動で移動する。`ArticleContentView.kt` の
+`FallbackReaderScrollHost`（`HomeScreen.kt` で一度だけ提供される `staticCompositionLocalOf`）
+が、`ArticleDetailPane`/`ArticleWebViewCarousel`/`reader` ラムダを介したコールバックの
+引き回しなしに、このハンドラーから現在アクティブなリーダーインスタンスへ到達する手段になって
+いる——`LocalSnackbarHostState` が別の横断的関心事に対してすでに使っているのと同じパターンで
+ある。これはネイティブ WebView リーダーには一切影響せず、実際にフォーカスを保持している間は
+従来どおり自身でスクロールを処理する。
+
 ### デスクトップトレイ（プラットフォーム分岐）
 
 `tray/KeryxTray.kt` が 4 実装のいずれかを選ぶ。

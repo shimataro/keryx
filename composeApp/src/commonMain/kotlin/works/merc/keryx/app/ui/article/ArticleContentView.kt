@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.article
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,7 +12,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -45,6 +48,45 @@ private const val TITLE_FONT_SCALE = 1.6f
 private const val TITLE_LINE_HEIGHT_RATIO = 1.3f
 private const val META_FONT_SCALE = 0.85f
 
+/** Per-keypress ↑/↓ scroll distance — a fixed physical amount, like a browser's own line scroll. */
+private val LINE_SCROLL_DP = 120.dp
+
+/** Fraction of the viewport a Space/PageDown/PageUp jump covers, leaving a little context on screen — like a browser's own Page Down. */
+private const val PAGE_SCROLL_OVERLAP_FRACTION = 0.9f
+
+/** Which way a keyboard scroll request moves the reader, and by how much: [Line] is a fixed
+ * per-keypress amount (↑/↓); [Page] is most of the viewport (Space/PageDown/PageUp), matching an
+ * ordinary browser. */
+internal enum class ArticleScrollUnit { Line, Page }
+
+/**
+ * Lets the article-detail pane's ↑/↓/Space/PageUp/PageDown keys reach this reader's own
+ * [LazyListState] from `HomeScreen`, which owns the shared keyboard handler but sits several
+ * composable layers above [ArticleContentView] (`HomeScreen` → `ArticleDetailPane` →
+ * `ArticleDetailPaneContent` → the `reader` lambda → `ArticleWebView` → here). The currently
+ * active fallback instance registers its own scroll handler here; nothing is registered — so
+ * [scroll] is a no-op — whenever the native WebView is showing instead, which needs no separate
+ * check at the call site.
+ */
+internal class FallbackReaderScrollHost {
+    private var handler: (suspend (direction: Int, unit: ArticleScrollUnit) -> Unit)? = null
+
+    internal fun register(handler: suspend (Int, ArticleScrollUnit) -> Unit) {
+        this.handler = handler
+    }
+
+    internal fun unregister(handler: suspend (Int, ArticleScrollUnit) -> Unit) {
+        if (this.handler === handler) this.handler = null
+    }
+
+    /** [direction] is -1 toward the article's top, +1 toward its bottom. */
+    suspend fun scroll(direction: Int, unit: ArticleScrollUnit) {
+        handler?.invoke(direction, unit)
+    }
+}
+
+internal val LocalFallbackReaderScrollHost = staticCompositionLocalOf<FallbackReaderScrollHost?> { null }
+
 /**
  * Draws an article with Compose instead of a native web view, for platforms where that web view
  * cannot be created at all (see [works.merc.keryx.app.platform.isNativeWebViewSupported]).
@@ -61,9 +103,14 @@ private const val META_FONT_SCALE = 0.85f
  * reconstructing a browser's rendering of the article, not this app's own UI chrome. Embedded
  * content that needs a real engine — iframes, script-driven widgets, video — degrades to a button
  * that opens it in the browser.
+ *
+ * [active] is whether this is the page actually on screen (mirrors the same flag on
+ * `ArticleWebView`/the `reader` lambda parameter): only the active instance registers with
+ * [LocalFallbackReaderScrollHost], so a touch-primary carousel's preloaded, not-yet-shown
+ * neighbour pages don't fight over which one the keyboard scrolls.
  */
 @Composable
-internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
+internal fun ArticleContentView(html: String, modifier: Modifier = Modifier, active: Boolean = true) {
     val content = remember(html) { parseArticleContent(html) }
 
     content.centeredNotice?.let { notice ->
@@ -87,6 +134,22 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier) {
     // inheriting the previous article's offset. (The web-view reader's own scroll memory works the
     // other way round — it survives precisely because the same native instance is reused.)
     val listState = remember(html) { LazyListState() }
+
+    val scrollHost = LocalFallbackReaderScrollHost.current
+    if (scrollHost != null) {
+        val lineScrollPx = with(LocalDensity.current) { LINE_SCROLL_DP.toPx() }
+        DisposableEffect(active, listState, scrollHost) {
+            val handler: suspend (Int, ArticleScrollUnit) -> Unit = { direction, unit ->
+                val deltaPx = when (unit) {
+                    ArticleScrollUnit.Line -> lineScrollPx
+                    ArticleScrollUnit.Page -> listState.layoutInfo.viewportSize.height * PAGE_SCROLL_OVERLAP_FRACTION
+                }
+                listState.animateScrollBy(direction * deltaPx)
+            }
+            if (active) scrollHost.register(handler)
+            onDispose { scrollHost.unregister(handler) }
+        }
+    }
 
     Box(modifier) {
         // Wraps the whole article body (title, meta, and every block) so its text stays
