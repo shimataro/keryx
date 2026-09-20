@@ -235,6 +235,12 @@ Project-wide, this is on top of the two Android suites above:
   - `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` extended for
     `setExecutable`/`isDirectoryWritable`/`move`, `copyTree` reproducing a symlink (file or
     directory) as a link rather than dereferencing it, and the per-OS `InstallLocation` detection.
+- the shared Compose components and theme under `ui/common/`/`ui/theme/` (e.g. `KeryxTextFieldTest`,
+  `KeryxDialogTabsTest`, `KeryxSearchBarTest`, `ListRowHeightTest`, `SelectionBackgroundTest`,
+  `IconBadgeTest`, `KeryxThemeTest`, `PlatformThemeTest` — roughly twenty files in total)
+- startup/background maintenance orchestration (`StartupMaintenanceTasksTest`,
+  `RunMaintenanceStepTest`, `ActivityCenterTest`) and log/secret hygiene
+  (`SanitizeForLogTest`, `UntrustedTextTest`, `TokenBackupExclusionTest`, `SecretStoreTokenStorageTest`)
 
 Beyond this list, `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` failures specifically indicate a regression in DB schema / merge SQL / sync orchestration and warrant extra attention.
 

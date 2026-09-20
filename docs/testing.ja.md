@@ -262,6 +262,12 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   - `FileSystemExtrasTest.kt`/`InstallLocationDesktopTest.kt` を `setExecutable`/
     `isDirectoryWritable`/`move`、`copyTree` が symlink（ファイル・ディレクトリとも）をたどらず
     リンクのまま複製すること、OS ごとの `InstallLocation` 判定向けに拡張したもの。
+- `ui/common/`／`ui/theme/` 配下の共有 Compose コンポーネントとテーマ（例: `KeryxTextFieldTest`、
+  `KeryxDialogTabsTest`、`KeryxSearchBarTest`、`ListRowHeightTest`、`SelectionBackgroundTest`、
+  `IconBadgeTest`、`KeryxThemeTest`、`PlatformThemeTest` ——全体でおよそ20ファイル）
+- 起動時/バックグラウンドのメンテナンス処理のオーケストレーション（`StartupMaintenanceTasksTest`、
+  `RunMaintenanceStepTest`、`ActivityCenterTest`）と、ログ・秘匿情報の取り扱い
+  （`SanitizeForLogTest`、`UntrustedTextTest`、`TokenBackupExclusionTest`、`SecretStoreTokenStorageTest`）
 
 この一覧を超えて、`SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` の失敗は DB スキーマ・マージ SQL・同期オーケストレーションの退行を意味するので特に注意する。
 
