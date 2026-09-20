@@ -41,9 +41,8 @@ through the deprecated `NSUserNotification` API. The click-through delegate call
 (`userNotificationCenter:didActivateNotification:`) apparently is not reliably bridged back into
 Java's `ActionListener` when the owning app has no Dock icon (`NSApplicationActivationPolicyAccessory`)
 — i.e. exactly the tray-hidden state this feature existed for. This could not be narrowed further
-from Kotlin/Java code alone; it would need decompiling `CTrayIcon`'s native implementation (as was
-done for the Linux `GtkFileDialogPeer` crash elsewhere in this file) or reproducing it in a minimal
-pure-AWT test app outside this codebase, neither of which has been done.
+from Kotlin/Java code alone; it would need decompiling `CTrayIcon`'s native implementation or
+reproducing it in a minimal pure-AWT test app outside this codebase, neither of which has been done.
 
 ### The custom wiring was dead code
 
@@ -87,9 +86,8 @@ non-deprecated `UserNotifications` framework) directly via a JNA-based Objective
 same spirit as `MacActivationPolicy`'s existing raw `objc_msgSend` calls, but substantially larger:
 it requires creating a runtime Objective-C class (`objc_allocateClassPair`/`class_addMethod` with a
 JNA `Callback` as the implementation) to act as the notification center's delegate, which is
-inherently higher-risk native interop (a mistake can crash the JVM, the same class of risk as the
-Linux GTK crash documented elsewhere in this file) and would need several real-hardware
-iterations to get right.
+inherently higher-risk native interop (a mistake here can crash the JVM) and would need several
+real-hardware iterations to get right.
 
 This would very likely become moot rather than worth building, though: `app-architecture.md` notes
 macOS is expected to eventually move to a native SwiftUI implementation (`external-spec.md` §2 — a
