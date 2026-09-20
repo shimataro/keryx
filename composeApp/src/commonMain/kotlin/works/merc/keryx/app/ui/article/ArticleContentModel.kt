@@ -43,7 +43,7 @@ internal sealed interface ArticleBlock {
     data class Bullets(val ordered: Boolean, val start: Int = 1, val depth: Int = 0, val items: List<List<ArticleBlock>>) : ArticleBlock
     data class Quote(val children: List<ArticleBlock>) : ArticleBlock
     data class Code(val text: String) : ArticleBlock
-    data class Picture(val src: String, val alt: String?) : ArticleBlock
+    data class Picture(val src: String, val alt: String?, val link: String? = null) : ArticleBlock
     data class Figure(val children: List<ArticleBlock>) : ArticleBlock
     data class Table(val rows: List<TableRow>) : ArticleBlock
     data class Definition(val term: ArticleInline, val description: ArticleInline) : ArticleBlock

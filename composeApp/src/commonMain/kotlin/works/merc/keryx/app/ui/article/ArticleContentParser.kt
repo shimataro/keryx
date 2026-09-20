@@ -83,7 +83,7 @@ internal fun parseArticleContent(html: String): ArticleContent {
 private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = emptySet(), depth: Int = 0): List<ArticleBlock> {
     val blocks = mutableListOf<ArticleBlock>()
     val pending = mutableListOf<InlineSpan>()
-    val pendingImages = mutableListOf<Element>()
+    val pendingImages = mutableListOf<Pair<Element, String?>>()
 
     fun flushPending() {
         emitInlineOrPictures(pending.toList(), pendingImages.toList(), base, blocks = blocks)
@@ -108,7 +108,7 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
             flushPending()
             when (tag) {
                 "p" -> {
-                    val images = mutableListOf<Element>()
+                    val images = mutableListOf<Pair<Element, String?>>()
                     val spans = inlineSpans(node, base, blockBaseStyle(node), images)
                     emitInlineOrPictures(
                         spans,
@@ -204,7 +204,7 @@ private fun forceCenterAlign(block: ArticleBlock): ArticleBlock = when (block) {
  */
 private fun emitInlineOrPictures(
     spans: List<InlineSpan>,
-    images: List<Element>,
+    images: List<Pair<Element, String?>>,
     base: String,
     align: TextAlign? = null,
     muted: Boolean = false,
@@ -212,7 +212,7 @@ private fun emitInlineOrPictures(
 ) {
     val inline = ArticleInline(spans).trimEdges()
     if (inline.isBlank) {
-        for (image in images) picture(image, base)?.let { blocks += it }
+        for ((image, link) in images) picture(image, base, link)?.let { blocks += it }
         return
     }
     blocks += ArticleBlock.Paragraph(inline, align = align, muted = muted)
@@ -223,7 +223,7 @@ private fun emitInlineOrPictures(
  * into [images] rather than resolving it here — the caller decides whether those images end up as
  * alt text (a textful paragraph) or promoted block pictures (see [emitInlineOrPictures]).
  */
-private fun inlineSpans(node: Node, base: String, style: InlineStyle, images: MutableList<Element>): List<InlineSpan> = buildList {
+private fun inlineSpans(node: Node, base: String, style: InlineStyle, images: MutableList<Pair<Element, String?>>): List<InlineSpan> = buildList {
     for (child in node.childNodes()) {
         when {
             child is TextNode -> add(
@@ -251,7 +251,7 @@ private fun inlineSpans(node: Node, base: String, style: InlineStyle, images: Mu
                     continue
                 }
                 if (tag == "img") {
-                    images.add(child)
+                    images.add(child to style.link)
                     // An inline image inside textful content: keep its alt text rather than
                     // dropping the image silently, since the block-level Picture branch never
                     // sees it (see emitInlineOrPictures for the image-only-paragraph case, which
@@ -333,9 +333,9 @@ private fun table(element: Element, base: String): ArticleBlock.Table? {
     return if (rows.isEmpty()) null else ArticleBlock.Table(rows)
 }
 
-private fun picture(element: Element, base: String): ArticleBlock.Picture? {
+private fun picture(element: Element, base: String, link: String? = null): ArticleBlock.Picture? {
     val src = resolveImageSrc(element, base) ?: return null
-    return ArticleBlock.Picture(src, element.attr("alt").trim().ifEmpty { null })
+    return ArticleBlock.Picture(src, element.attr("alt").trim().ifEmpty { null }, link)
 }
 
 /** Attributes a lazy-loading image commonly carries its real URL under, tried in order after `src`. */

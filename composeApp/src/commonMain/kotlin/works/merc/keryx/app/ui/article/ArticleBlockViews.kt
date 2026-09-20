@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +50,7 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_embed_open
+import works.merc.keryx.app.resources.menu_open_link
 import works.merc.keryx.app.ui.common.FlatTonalButton
 
 private val QUOTE_BAR_WIDTH = 3.dp
@@ -181,6 +183,11 @@ private fun PictureView(block: ArticleBlock.Picture, modifier: Modifier = Modifi
         }
         return
     }
+    val imageModifier = modifier.fillMaxWidth()
+    val linkedModifier = block.link?.let { link ->
+        imageModifier
+            .clickable(onClickLabel = stringResource(Res.string.menu_open_link)) { BrowserOpener.open(link) }
+    } ?: imageModifier
     AsyncImage(
         model = block.src,
         contentDescription = block.alt,
@@ -189,7 +196,7 @@ private fun PictureView(block: ArticleBlock.Picture, modifier: Modifier = Modifi
         contentScale = ContentScale.Inside,
         alignment = Alignment.CenterStart,
         onError = { failed = true },
-        modifier = modifier.fillMaxWidth(),
+        modifier = linkedModifier,
     )
 }
 

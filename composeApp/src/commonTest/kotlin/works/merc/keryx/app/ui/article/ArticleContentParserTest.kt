@@ -335,7 +335,8 @@ class ArticleContentParserTest {
         )
 
         assertEquals(1, blocks.size)
-        assertTrue(blocks.single() is ArticleBlock.Picture)
+        val picture = blocks.single() as ArticleBlock.Picture
+        assertEquals("https://example.com/full", picture.link)
     }
 
     @Test
