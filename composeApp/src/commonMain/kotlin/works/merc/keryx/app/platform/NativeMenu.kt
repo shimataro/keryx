@@ -2,6 +2,7 @@ package works.merc.keryx.app.platform
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 
 /** A single entry of a native context menu shown via [nativeContextMenu]. */
@@ -86,11 +87,24 @@ data object NativeMenuSeparator : NativeMenuEntry {
  * Android (long-press trigger) [onOpen] is intentionally ignored: a long-press
  * opens the menu without selecting the item. If [items] is empty, no menu is
  * shown and [onOpen] is the only desktop effect; on Android it is also ignored.
+ *
+ * [hitTest], when non-null, gates the whole gesture on the triggering position (in this element's
+ * own coordinate space): returning `false` leaves the event **unconsumed**, so it goes on to
+ * whatever handler would have received it had this modifier not been here — neither [onOpen] nor
+ * [items] runs. That is what lets an element claim the gesture for only *part* of itself and leave
+ * the rest to an ancestor: the article reader's fallback attaches this to a whole `Text` but only
+ * answers for the link spans inside it, so right-clicking the plain text around them still reaches
+ * the surrounding `SelectionContainer`'s own copy menu (see `ui/article/ArticleLinkInteractions.kt`).
+ * Left `null` — every other call site — the gesture is always claimed, exactly as before.
+ *
+ * [hitTest] and [items] are invoked synchronously, in that order, within the same pointer event, so
+ * a caller may resolve what was hit once in [hitTest] and read it back when building [items].
  */
 @Composable
 expect fun Modifier.nativeContextMenu(
     items: () -> List<NativeMenuEntry>,
     onOpen: () -> Unit = {},
+    hitTest: ((Offset) -> Boolean)? = null,
 ): Modifier
 
 /**

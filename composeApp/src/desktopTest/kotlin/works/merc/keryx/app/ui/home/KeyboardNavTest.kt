@@ -42,6 +42,10 @@ class KeyboardNavTest {
                         onFeedListRename = { fired += "feedListRename" },
                         onFeedListDelete = { fired += "feedListDelete" },
                         onSearch = { fired += "search" },
+                        onPageUp = { fired += "pageUp" },
+                        onPageDown = { fired += "pageDown" },
+                        onHome = { fired += "home" },
+                        onEnd = { fired += "end" },
                         isMacOs = isMacOs,
                     ),
                 )
@@ -201,5 +205,54 @@ class KeyboardNavTest {
         // function's own KDoc for the full reasoning.
         assertEquals(listOf("down"), firedEvents(textInputFocused = true) { pressKey(Key.DirectionDown) })
         assertEquals(listOf("up"), firedEvents(textInputFocused = true) { pressKey(Key.DirectionUp) })
+    }
+
+    @Test
+    fun pageUpFiresOnPageUpOnly() {
+        assertEquals(listOf("pageUp"), firedEvents { pressKey(Key.PageUp) })
+    }
+
+    @Test
+    fun pageDownFiresOnPageDownOnly() {
+        assertEquals(listOf("pageDown"), firedEvents { pressKey(Key.PageDown) })
+    }
+
+    @Test
+    fun bareSpacebarFiresOnPageDownOnly() {
+        assertEquals(listOf("pageDown"), firedEvents { pressKey(Key.Spacebar) })
+    }
+
+    @Test
+    fun shiftSpacebarFiresOnPageUpOnly() {
+        assertEquals(
+            listOf("pageUp"),
+            firedEvents { withKeyDown(Key.ShiftLeft) { pressKey(Key.Spacebar) } },
+        )
+    }
+
+    @Test
+    fun spacebarDoesNotFireAnythingWhileSearchFieldFocused() {
+        // Space/PageUp/PageDown are not in the ↓/↑-only passthrough allowlist inside
+        // homeKeyboardShortcuts' textInputFocused branch, so a space typed into the search field
+        // must not be hijacked into a page-scroll request.
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.Spacebar) })
+    }
+
+    @Test
+    fun homeFiresOnHomeOnly() {
+        assertEquals(listOf("home"), firedEvents { pressKey(Key.MoveHome) })
+    }
+
+    @Test
+    fun endFiresOnEndOnly() {
+        assertEquals(listOf("end"), firedEvents { pressKey(Key.MoveEnd) })
+    }
+
+    @Test
+    fun homeAndEndDoNotFireAnythingWhileSearchFieldFocused() {
+        // Like Space/PageUp/PageDown, Home/End are not in the ↓/↑-only passthrough allowlist, so
+        // they must not be hijacked into a scroll-to-edge request while the search field is focused.
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.MoveHome) })
+        assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.MoveEnd) })
     }
 }

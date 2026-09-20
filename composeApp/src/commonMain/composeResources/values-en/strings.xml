@@ -135,6 +135,8 @@
     <string name="article_next">Next article</string>
     <string name="article_reader_simple_notice">The web view is unavailable here, so the article is shown in simplified form.</string>
     <string name="article_embed_open">Open embedded content in browser</string>
+    <string name="menu_open_link">Open Link</string>
+    <string name="menu_copy_link_address">Copy Link Address</string>
 
     <!-- settings -->
     <string name="settings_title">Settings</string>

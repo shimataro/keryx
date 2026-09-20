@@ -92,6 +92,11 @@ val appVendor = "Mercury Works"
 // and the AppStream metainfo's <url type="homepage">. Mirrors README.md's "Website" line.
 val appHomepageUrl = "https://keryx.merc.works"
 
+// The desktop `NativeWebViewSupport.desktop.kt` override property (see known-issues.md's "The
+// workaround"). Named once here so the JavaExec relay below and any future reference can't drift
+// out of sync with the actual property name read at runtime.
+val readerWebviewProperty = "keryx.reader.webview"
+
 // jpackage's packaging metadata (CFBundleVersion, RPM %version, MSI ProductVersion) must stay
 // purely numeric MAJOR.MINOR.PATCH — unlike BuildConfig.VERSION, it cannot carry a SemVer
 // pre-release suffix (`-beta.1`, `-rc.2`, ...). Stripped from appVersion by dropping everything
@@ -840,6 +845,13 @@ fun injectDebMetainfo(debFile: java.io.File, metainfoTemplate: java.io.File, pac
 // Covers JavaExec tasks (run) and Test tasks (desktopTest/commonTest).
 tasks.withType<JavaExec>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // Relays -Dkeryx.reader.webview from the Gradle JVM to the application's own. A JavaExec task
+    // inherits none of the launching JVM's system properties, so without this the override
+    // documented in known-issues.md (the only practical way to see the Compose fallback reader on a
+    // platform whose native web view works) never reaches NativeWebViewSupport.desktop.kt.
+    providers.systemProperty(readerWebviewProperty).orNull?.let {
+        systemProperty(readerWebviewProperty, it)
+    }
 }
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")

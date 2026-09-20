@@ -1,6 +1,10 @@
 package works.merc.keryx.app.ui.article
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -13,8 +17,10 @@ import androidx.compose.ui.platform.asAwtTransferable
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
@@ -26,6 +32,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import java.awt.datatransfer.DataFlavor
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Renders the Compose fallback reader, which stands in for the native web view on platforms that
@@ -197,6 +204,216 @@ class ArticleContentViewTest {
         waitForIdle()
 
         assertEquals("First paragraph\nSecond paragraph", clipboard.copiedText)
+    }
+
+    @Test
+    fun placesTheSimplifiedNoticeAboveTheTitle() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(document("<p>Body text here.</p>"))
+        }
+
+        val noticeTop = onNodeWithText(simpleNotice).fetchSemanticsNode().boundsInRoot.top
+        val titleTop = onNodeWithText("Article title").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(noticeTop < titleTop)
+    }
+
+    // Regression test for the custom table Layout (ArticleBlockViews.kt): a cell-index mistake in
+    // its column/row math would either crash or silently drop cells rather than fail a type check.
+    @Test
+    fun rendersTableHeaderAndDataCells() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(document("<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr></table>"))
+        }
+
+        onNodeWithText("Name").assertIsDisplayed()
+        onNodeWithText("Age").assertIsDisplayed()
+        onNodeWithText("Alice").assertIsDisplayed()
+        onNodeWithText("30").assertIsDisplayed()
+    }
+
+    @Test
+    fun rendersDefinitionListsAndFigureCaptions() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(
+                document(
+                    "<dl><dt>Term</dt><dd>Meaning</dd></dl>" +
+                        """<figure><img src="https://example.com/i.png"><figcaption>caption text</figcaption></figure>""",
+                ),
+            )
+        }
+
+        onNodeWithText("Term").assertIsDisplayed()
+        onNodeWithText("Meaning").assertIsDisplayed()
+        onNodeWithText("caption text").assertIsDisplayed()
+    }
+
+    /**
+     * Builds a document long enough to overflow the test window (see [FILLER_PARAGRAPHS]'s own
+     * KDoc), with a distinctive first/last paragraph to assert scroll position against.
+     */
+    private fun longScrollableDocument(): String {
+        val filler = (1..FILLER_PARAGRAPHS).joinToString("") { "<p>Filler paragraph $it</p>" }
+        return document("<p>First paragraph</p>$filler<p>Last paragraph</p>")
+    }
+
+    // Drives FallbackReaderScrollHost.scroll(...) from inside the composition — via a
+    // LaunchedEffect keyed on a counter flipped from the test body — rather than calling the
+    // suspend function directly from the test's own coroutine, which runs on a different
+    // TestCoroutineScheduler than the one driving composition/animation here (see
+    // runDesktopComposeUiTest's own KDoc on effectContext vs runTestContext) and would race the
+    // animateScrollBy call inside the handler instead of reliably awaiting it.
+    @Test
+    fun repeatedPageScrollsReachTheEndOfALongArticle() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Page)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        repeat(20) {
+            scrollRequests++
+            waitForIdle()
+        }
+
+        onNodeWithText("Last paragraph").assertIsDisplayed()
+    }
+
+    // Companion to repeatedPageScrollsReachTheEndOfALongArticle: a single Line scroll is a fixed,
+    // small per-keypress amount (browser-style ↑/↓), not a fraction of the viewport, so it must
+    // move far less than one Page scroll does — nowhere near enough to reach the article's end.
+    @Test
+    fun aSingleLineScrollMovesMuchLessThanAPageScroll() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Line)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        scrollRequests++
+        waitForIdle()
+
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+    }
+
+    // The touch-primary-carousel invariant: an inactive instance (a preloaded, not-yet-shown
+    // neighbour page) never registers with the scroll host at all, so scroll requests reaching the
+    // host while it is the only instance present are simply dropped.
+    @Test
+    fun anInactiveInstanceNeverRespondsToScrollRequests() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Page)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument(), active = false)
+            }
+        }
+        waitForIdle()
+        onNodeWithText("First paragraph").assertIsDisplayed()
+
+        repeat(20) {
+            scrollRequests++
+            waitForIdle()
+        }
+
+        onNodeWithText("First paragraph").assertIsDisplayed()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+    }
+
+    // Companion to repeatedPageScrollsReachTheEndOfALongArticle: unlike Page, a single Edge request
+    // (direction = 1) reaches the true end in one call, no repetition needed.
+    @Test
+    fun endReachesTheBottomInASingleRequest() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Edge)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        scrollRequests++
+        waitForIdle()
+
+        onNodeWithText("Last paragraph").assertIsDisplayed()
+    }
+
+    // Companion to endReachesTheBottomInASingleRequest: a single Edge request (direction = -1)
+    // reaches the true top in one call from a position scrolled away from it.
+    @Test
+    fun homeReachesTheTopInASingleRequestFromTheBottom() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        var unit by mutableStateOf(ArticleScrollUnit.Edge)
+        var direction by mutableStateOf(1)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(direction, unit)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument())
+            }
+        }
+        waitForIdle()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
+
+        // Get to the bottom first, via the same one-shot Edge/direction=1 request.
+        scrollRequests++
+        waitForIdle()
+        onNodeWithText("Last paragraph").assertIsDisplayed()
+        onAllNodesWithText("First paragraph").assertCountEquals(0)
+
+        direction = -1
+        scrollRequests++
+        waitForIdle()
+
+        onNodeWithText("First paragraph").assertIsDisplayed()
+    }
+
+    // The active=false invariant (see anInactiveInstanceNeverRespondsToScrollRequests above), but
+    // for an Edge request: confirms the gating applies uniformly across all three ArticleScrollUnit
+    // cases, not just Page.
+    @Test
+    fun anInactiveInstanceNeverRespondsToEdgeScrollRequests() = runDesktopComposeUiTest {
+        val host = FallbackReaderScrollHost()
+        var scrollRequests by mutableStateOf(0)
+        setContent {
+            LaunchedEffect(scrollRequests) {
+                if (scrollRequests > 0) host.scroll(1, ArticleScrollUnit.Edge)
+            }
+            CompositionLocalProvider(LocalFallbackReaderScrollHost provides host) {
+                ArticleContentView(longScrollableDocument(), active = false)
+            }
+        }
+        waitForIdle()
+        onNodeWithText("First paragraph").assertIsDisplayed()
+
+        scrollRequests++
+        waitForIdle()
+
+        onNodeWithText("First paragraph").assertIsDisplayed()
+        onAllNodesWithText("Last paragraph").assertCountEquals(0)
     }
 }
 

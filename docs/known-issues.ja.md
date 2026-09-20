@@ -712,17 +712,30 @@ Native library (linux-aarch64/libcomposewebview_wry.so) not found in resource pa
 
 `isNativeWebViewSupported()` が、リーダーがどのみち読み込むことになるネイティブライブラリを
 事前に 1 回だけプローブし、失敗した場合は `ArticleWebView` が記事を Compose で描画する。この
-フォールバックはブロック構造・インライン装飾・画像を再現する。ブラウザエンジンを本当に必要と
-する埋め込み（iframe、スクリプト駆動のウィジェット、動画）は、外部ブラウザで開くボタンになる。
+フォールバック（`ui/article/ArticleContentView.kt` + `ArticleBlockViews.kt`）はブロック構造
+（`<figure>`/`<figcaption>` や `<dl>`/`<dt>`/`<dd>` を含む）・インライン装飾（記事側の `style=""`
+が持つ色・サイズ・太さも `ui/article/InlineCss.kt` で解釈）・画像（`srcset`／遅延読み込み属性、
+画像しか持たない段落やリンクの実ブロック画像への昇格を含む）を再現する。ブラウザエンジンを本当に
+必要とする埋め込み（iframe、スクリプト駆動のウィジェット、動画）は、外部ブラウザで開くボタンになる。
+文字サイズやブロックの余白は、このアプリの `MaterialTheme.typography` ではなく、ドキュメント自身の
+UA 既定の等幅スケール（`ArticleTextStyles.kt`）から導く——理由は `app-architecture.md`「Article
+Reader (native WebView)」を参照。
 
 `-Dkeryx.reader.webview=false` を渡すと任意のデスクトップ環境でフォールバックを強制できる。
-本プロジェクトがビルドできるどのプラットフォームでも通常は発動しない経路なので、見た目を作り込む
-には事実上これしか手段がない。逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。
+ネイティブ WebView が利用できる環境で見た目を作り込むには事実上これが最も手軽な手段である。
+なお Linux arm64 はネイティブ WebView がないため、デフォルトでフォールバックが使われる。
+逆に `-Dkeryx.reader.webview=true` は WebView を強制的に使わせる。
 ライブラリ更新でプローブ対象のクラス名が変わり、プローブが恒常的な偽陰性になった場合に効く（その
-ケースは専用の警告をログに出す）。どちらのプロパティもデスクトップ（JVM）側の `actual`
-（`NativeWebViewSupport.desktop.kt`）でしか読まれない。Android の `actual` は常に WebView が
-利用可能だと報告する（`android.webkit.WebView` は OS 自身が提供するため）ので、どちらのプロパティ
-も Android には効果がない。
+ケースは専用の警告をログに出す）——ただしこれはプローブを再実行するのではなく完全に迂回するため、
+実際にネイティブバイナリが存在する環境でしか安全ではない。Linux arm64 で渡した場合は同じネイティブ
+初期化に到達し、上記で説明した `UnsatisfiedLinkError` とフリーズに見えるモーダルダイアログを再現する。
+どちらのプロパティもデスクトップ（JVM）側の `actual`
+（`NativeWebViewSupport.desktop.kt`）でしか読まれず、`./gradlew :composeApp:run` 自身の JVM から
+そこへは `composeApp/build.gradle.kts` の `tasks.withType<JavaExec>().configureEach` ブロックが
+中継している（`JavaExec` タスクは起動元 JVM のシステムプロパティを自動では引き継がないため、この
+中継が無いと `-Dkeryx.reader.webview` は Gradle 自身に飲み込まれ、アプリまで届かない）。Android の
+`actual` は常に WebView が利用可能だと報告する（`android.webkit.WebView` は OS 自身が提供するため）
+ので、どちらのプロパティも Android には効果がない。
 
 ### 本当の修正に必要なこと
 
