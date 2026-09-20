@@ -220,6 +220,14 @@
     <!-- Official website URL. Locale-dependent: the default (Japanese) locale points to /ja/;
          values-en/strings.xml overrides this with the English (/en/) URL. -->
     <string name="website_url">https://keryx.merc.works/ja/</string>
+    <string name="settings_privacy_policy">プライバシーポリシー</string>
+    <!-- Locale-dependent, like website_url above: the default (Japanese) locale points to /ja/privacy;
+         values-en/strings.xml overrides this with the English (/privacy) URL. -->
+    <string name="privacy_policy_url">https://keryx.merc.works/ja/privacy</string>
+    <string name="settings_terms">利用規約</string>
+    <!-- Locale-dependent, like website_url above: the default (Japanese) locale points to /ja/terms;
+         values-en/strings.xml overrides this with the English (/terms) URL. -->
+    <string name="terms_url">https://keryx.merc.works/ja/terms</string>
     <string name="settings_update_check_interval">アップデート確認間隔</string>
     <string name="settings_update_check_startup_only">起動時のみ</string>
     <string name="settings_update_check_daily">毎日</string>
