@@ -361,7 +361,8 @@ until timeout. The reason differs per OS:
   after the Gradle run ends.
 
 **To test or perform linking, build the app with `./gradlew :composeApp:createDistributable` and
-launch it** (terminate the gradle instance first). Saved tokens are stored in the keychain or
+launch it** (under `composeApp/build/compose/binaries/main/app/`; terminate the gradle instance
+first). Saved tokens are stored in the keychain or
 `.dropbox_tokens.json` in the data directory. Google Drive uses loopback reception and links fine
 under `gradlew run`.
 
