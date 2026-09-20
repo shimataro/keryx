@@ -14,8 +14,11 @@
 | --- | --- |
 | ネットワークエラー・タイムアウト | Result 型 |
 | 同期の競合・リトライ失敗 | Result 型 |
-| フィード URL が無効 | Result 型 |
+| フィード URL が無効 | Result 型\* |
 | DB アクセス失敗・プログラムのバグ | 例外 |
+
+\* 意図されている扱い。これに対応する `InvalidFeedUrlException` は存在するが、現状これを構築する箇所はない
+——後述。
 
 ## エラー型（`core/KeryxException.kt`, `core/Result.kt`）
 
@@ -37,6 +40,10 @@ sealed class KeryxException(message: String) : Exception(message) {
 （"Feed request timed out"）、`SyncConflictException`（"Sync conflict detected"）、
 `SchemaVersionException(localVersion, cloudVersion)`。`UpdateException(stage, message)` だけは例外的に、
 `message` が他の引数より*後*に来る。
+
+`InvalidFeedUrlException` の宣言と、`ui/i18n/ErrorMessages.kt` の `Res.string.error_invalid_url` への
+マッピングはどちらも存在するが、購読処理の中でこれを構築する箇所は現状ない——不正な URL は現在、
+フェッチ自体が失敗した際に `FeedFetchException` として表面化する。
 
 補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 

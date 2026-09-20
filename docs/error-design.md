@@ -14,8 +14,11 @@
 | --- | --- |
 | Network error / timeout | Result type |
 | Sync conflict / retry failure | Result type |
-| Invalid feed URL | Result type |
+| Invalid feed URL | Result type\* |
 | DB access failure / program bug | Exception |
+
+\* The intended handling. `InvalidFeedUrlException` exists for this but nothing currently constructs it — see
+below.
 
 ## Error Types (`core/KeryxException.kt`, `core/Result.kt`)
 
@@ -37,6 +40,10 @@ message text instead: `FeedDiscoveryException(candidates)` ("Feed links found on
 ("Feed request timed out"), `SyncConflictException` ("Sync conflict detected"),
 `SchemaVersionException(localVersion, cloudVersion)`. `UpdateException(stage, message)` is the one exception with
 a `message` parameter that comes *after* its other argument rather than before it.
+
+`InvalidFeedUrlException`'s declaration and its `Res.string.error_invalid_url` mapping in
+`ui/i18n/ErrorMessages.kt` both exist, but nothing in the subscribe path currently constructs one — an
+invalid URL surfaces today as a `FeedFetchException` instead, once the fetch itself fails.
 
 Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
