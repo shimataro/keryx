@@ -80,9 +80,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
   "open with Keryx" from a file manager or mail attachment on Android
 - With no feeds subscribed yet, the article list shows an empty-state message with an "Add feed"
   button rather than the ordinary "no articles" message; on Android's narrower widths, the
-  navigation drawer holding the feed list's own "+" button auto-opens the first time this happens
-  (see §9's "Narrower widths" for the exact rule), so the button is reachable without the user
-  having to find the drawer themselves
+  navigation drawer holding the feed list's own "+" button can auto-open here as well (§9's
+  "Narrower widths" has the exact condition), so the button is reachable without the user having to
+  find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update (download and install, not just a link to the release page): supported for a macOS
   `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
