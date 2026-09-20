@@ -97,8 +97,11 @@ OneDrive (one provider active at a time), here is exactly what happens:
   Credential Manager on Windows, Secret Service on Linux — inside the Snap
   package, an encrypted local store keyed by a per-app master secret from your
   desktop's Secret portal). If the OS store is unavailable, tokens fall back to
-  a permission-restricted (`0600`, readable only by your own account) local
-  file instead. On Android, tokens are encrypted with a key held in the
+  a local file instead — on macOS and Linux this file's permissions are
+  explicitly restricted to your own account (`0600`); on Windows, no such
+  permission bit is set, and the file instead relies on Windows' own per-user
+  ACL inheritance on `%APPDATA%`/`%LOCALAPPDATA%` to keep other accounts out.
+  On Android, tokens are encrypted with a key held in the
   Android Keystore before being written to a file in the app's private
   storage; this file is explicitly excluded from Android's automatic backup
   and device transfer. Tokens are never sent anywhere except directly to

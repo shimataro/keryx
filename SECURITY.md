@@ -93,9 +93,11 @@ Keryx is designed to minimize its attack surface:
 - **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
   platform's secure credential storage: on desktop, Keychain on macOS, Credential Manager on Windows,
   Secret Service on Linux (inside the Snap package, an encrypted local store keyed by a per-app master
-  secret from your desktop's Secret portal), falling back to a permission-restricted (`0600`) local file
-  only when the OS store is unavailable; on Android, an AES-256/GCM key held in the Android Keystore, per
-  provider.
+  secret from your desktop's Secret portal), falling back to a local file only when the OS store is
+  unavailable — on macOS and Linux this fallback file's permissions are restricted to your own
+  account (`0600`); on Windows no such permission bit is set, and Windows' own per-user ACL
+  inheritance on `%APPDATA%`/`%LOCALAPPDATA%` is what keeps other accounts out instead; on Android,
+  an AES-256/GCM key held in the Android Keystore, per provider.
 - **OAuth** uses the authorization-code flow with PKCE, performed directly between
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
