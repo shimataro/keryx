@@ -138,7 +138,7 @@ internal fun ArticleContentView(html: String, modifier: Modifier = Modifier, act
     val scrollHost = LocalFallbackReaderScrollHost.current
     if (scrollHost != null) {
         val lineScrollPx = with(LocalDensity.current) { LINE_SCROLL_DP.toPx() }
-        DisposableEffect(active, listState, scrollHost) {
+        DisposableEffect(active, listState, scrollHost, lineScrollPx) {
             val handler: suspend (Int, ArticleScrollUnit) -> Unit = { direction, unit ->
                 when (unit) {
                     ArticleScrollUnit.Line -> listState.animateScrollBy(direction * lineScrollPx)
