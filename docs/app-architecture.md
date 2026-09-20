@@ -17,14 +17,21 @@
 ```text
 composeApp/src/
   commonMain/kotlin/works/merc/keryx/app/
-    core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect)
+    core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
+               AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens,
+                  CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (refreshFeedsAndNotify/checkForUpdateAndNotify/maybeRebuildFtsIndex), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
-    di/           AppModule (+ expect platformModule)
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor (mostly `expect` declarations, though InstallLocation.kt already mixes its one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below, wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
+    di/           AppModule (+ expect platformModule), HttpClientFactory, ImageLoaderSetup
+    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+                  BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
+                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
+                  one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
+                  wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
     ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
                   center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
                   FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
