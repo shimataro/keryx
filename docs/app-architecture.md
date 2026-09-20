@@ -41,7 +41,8 @@ composeApp/src/
   commonMain/composeResources/  values/strings.xml (Japanese, default/fallback), values-en/strings.xml
     (English, same key set), drawable/ (icons are Android Vector Drawable XML,
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
-    runtime; VectorDrawable XML is the one image format `painterResource` renders on every target)
+    runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
+    target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app

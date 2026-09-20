@@ -38,7 +38,8 @@ composeApp/src/
   commonMain/composeResources/  values/strings.xml（日本語、デフォルト/フォールバック）,
     values-en/strings.xml（英語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
-    実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の画像形式）
+    実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
+    *ベクター*形式——ビットマップ資産（`app_icon.png`、`onedrive.png`、トレイの PNG 群）は対象外）
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
     AppInfo（共有生成 BuildConfig を読むだけ）, FileSystemExtras,
