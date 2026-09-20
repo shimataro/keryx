@@ -609,10 +609,13 @@ well-known name `org.kde.StatusNotifierItem-<pid>-1`):
 - `/StatusNotifierItem` — `SniStatusNotifierItem`, serving `org.kde.StatusNotifierItem`. `IconPixmap`
   carries the badged glyph as big-endian ARGB32 (`TrayPixmap.kt`) at several sizes; `ItemIsMenu = false`
   so a primary click reaches `Activate` instead of opening the menu.
-- `/StatusNotifierItem/menu` — `SniDBusMenu`, serving `com.canonical.dbusmenu` (Show/Hide + Quit).
-  A label/enabled change bumps a revision and emits `ItemsPropertiesUpdated` naming just the item(s)
-  that changed (`changedItemProperties` in `TrayMenuModel.kt`) — **not** `LayoutUpdated`, since the
-  menu's shape never changes and some clients (GNOME Shell's AppIndicator extension) never re-request
+- `/StatusNotifierItem/menu` — `SniDBusMenu`, serving `com.canonical.dbusmenu` (the in-app update
+  entry, then a separator, then Show/Hide, then Quit — `tray/TrayMenuModel.kt`'s `MENU_UPDATE_ID`,
+  `MENU_SEPARATOR_ID`, `MENU_TOGGLE_ID`, `MENU_QUIT_ID`, in that order). A label/enabled change —
+  including the update entry's own `enabled` toggling — bumps a revision and emits
+  `ItemsPropertiesUpdated` naming just the item(s) that changed (`changedItemProperties` in
+  `TrayMenuModel.kt`) — **not** `LayoutUpdated`, since the
+  menu's shape (which items exist) never changes and some clients (GNOME Shell's AppIndicator extension) never re-request
   `label`/`enabled` via `GetLayout` on their own, so a `LayoutUpdated`-only host update would leave an
   already-open menu stuck on stale labels forever. `AboutToShow` still compares the desired labels
   against what `GetLayout` last served, so a dropped signal still heals. GNOME parks the signal until

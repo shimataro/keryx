@@ -622,10 +622,13 @@ SNI ならパネルへ生の ARGB ピクセルを渡せる。
 - `/StatusNotifierItem` — `SniStatusNotifierItem`（`org.kde.StatusNotifierItem`）。`IconPixmap` は
   バッジ付きグリフをビッグエンディアン ARGB32（`TrayPixmap.kt`）で複数サイズ提供する。`ItemIsMenu = false`
   にすることで、左クリックがメニューではなく `Activate` に届く。
-- `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。表示/非表示 + 終了）。
-  ラベル／enabled 変更時は revision を上げつつ、変化した項目だけを名指しした
+- `/StatusNotifierItem/menu` — `SniDBusMenu`（`com.canonical.dbusmenu`。アプリ内アップデート項目・
+  セパレータ・表示/非表示・終了の順——`tray/TrayMenuModel.kt` の `MENU_UPDATE_ID` /
+  `MENU_SEPARATOR_ID` / `MENU_TOGGLE_ID` / `MENU_QUIT_ID` がこの順）。
+  ラベル／enabled 変更（アップデート項目自身の `enabled` 切り替えを含む）時は revision を上げつつ、
+  変化した項目だけを名指しした
   `ItemsPropertiesUpdated`（`TrayMenuModel.kt` の `changedItemProperties`）を発火する ——
-  `LayoutUpdated` ではない。メニューの形は一切変化せず、かつ一部のクライアント（GNOME Shell の
+  `LayoutUpdated` ではない。メニューの形（存在する項目）は一切変化せず、かつ一部のクライアント（GNOME Shell の
   AppIndicator 拡張）は `label`／`enabled` を `GetLayout` で自発的に再取得しないため、
   `LayoutUpdated` だけを送ると既に開いたメニューが古いラベルのまま固まってしまう。
   `AboutToShow` は引き続き現在のラベルと `GetLayout` が最後に返した内容を比較するため、
