@@ -69,7 +69,9 @@
    発火しないため、`watchAll` フロー（と索引済みの再検索）を再発火させて同期内容を再起動なしで UI に反映する。
 4. `sync_state.cloud_file_rev` を記録。
 5. `DatabaseSnapshot.exportForUpload()` で `VACUUM INTO` スナップショットを作り、その**コピー側で
-   `articles_fts` と `sync_state` を DROP**（ライブ DB は不変）してから gzip 圧縮する（`platform/Gzip`）。
+   `articles_fts`・`sync_state`・4本の `idx_articles_*` インデックスを DROP し、最後に `VACUUM` を
+   実行する**（ライブ DB は不変。`domain/SnapshotSql.kt` の `cleanupStatements` 参照）。その後
+   gzip 圧縮する（`platform/Gzip`）。
    その圧縮ファイルを `rev` を指定して `CLOUD_DB_GZ_PATH` へストリームアップロード。ただし
    **スナップショットの SHA-256 が `sync_state.last_uploaded_snapshot_digest` と一致し、
    かつ手順2でマージが走らなかった場合はスキップ**する（クラウドに既に同じバイト列があるため。この
