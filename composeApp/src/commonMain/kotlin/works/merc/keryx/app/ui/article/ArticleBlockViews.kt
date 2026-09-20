@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -186,6 +187,7 @@ private fun PictureView(block: ArticleBlock.Picture, modifier: Modifier = Modifi
         // Inside, not Fit: it shrinks an oversized image to the column but leaves a smaller one
         // at its own size, which is what the document's `max-width: 100%` does.
         contentScale = ContentScale.Inside,
+        alignment = Alignment.CenterStart,
         onError = { failed = true },
         modifier = modifier.fillMaxWidth(),
     )
