@@ -379,9 +379,9 @@ rules (`a`, `img`/`video`/`iframe`, `table`, `td`/`th`) stay plain, so a feed au
 `ArticleWebView` also sets `webSettings.desktopWebSettings.dataDirectory` explicitly, to
 `AppDirs.cacheDir()` plus a `webview` subdirectory, applied identically on all three desktop
 platforms (no OS branch). Left at its `null` default, WebView2 tries to create its data folder next
-to the host executable, which fails with Access Denied whenever that location isn't user-writable —
-see [known-issues.md](known-issues.md) for the investigation (an uncaught exception from the failed
-creation also left the library's creation-retry timer running forever, which was the cause of an
+to the host executable, which fails with Access Denied whenever that location isn't user-writable
+(an uncaught exception from the failed creation also left the library's creation-retry timer
+running forever, which was the cause of an
 app-wide freeze on click).
 
 **At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
@@ -670,7 +670,7 @@ one of two implementations, triggered by a right-click instead of a long-press:
 | Platform | Implementation | Why |
 | --- | --- | --- |
 | macOS | `AwtPopupHandle` (`java.awt.PopupMenu`) | AWT maps it onto a genuine `NSMenu`, and AppKit is point-based, so the Dp-space coordinates the modifier computes need no device-pixel conversion. |
-| Windows / Linux | `SwingPopupHandle` (`javax.swing.JPopupMenu`) | On Linux, AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel, keeping a Motif-era appearance. On Windows, the JDK's AWT menu peer never converts between Java user space and device pixels: the menu opens at `windowOrigin + clickOffset / scale`, and its rows measure `1 / scale` as tall as the glyphs drawn into them, so the labels overlap. Both are detailed in `known-issues.md`. |
+| Windows / Linux | `SwingPopupHandle` (`javax.swing.JPopupMenu`) | On Linux, AWT's `PopupMenu` is a heavyweight XAWT widget that ignores the Swing Look & Feel, keeping a Motif-era appearance. On Windows, the JDK's AWT menu peer never converts between Java user space and device pixels: the menu opens at `windowOrigin + clickOffset / scale`, and its rows measure `1 / scale` as tall as the glyphs drawn into them, so the labels overlap above 100% display scaling. |
 
 `macOs` is a parameter of `defaultPopupHandle` (defaulting to the process constant) only so
 `NativeMenuTest` can pin the mapping on any CI host. Two behaviours follow the chosen backend
@@ -692,15 +692,17 @@ file dialog keeps Windows on the AWT side, because `java.awt.FileDialog` there i
 | Platform | Implementation | Why |
 | --- | --- | --- |
 | macOS / Windows | `AwtFilePickerBackend` (`java.awt.FileDialog`) | AWT maps it onto the real native panel (`NSSavePanel` / `GetOpenFileName`), including native overwrite prompting. |
-| Linux | `SwingFilePickerBackend` (`javax.swing.JFileChooser`) | `sun.awt.X11.XToolkit.createFileDialog()` selects `GtkFileDialogPeer`, whose native GTK callbacks dereference a NULL `JNU_GetEnv` result once the article reader's WebView makes WebKitGTK a second GTK consumer in the process — a JVM-crashing SIGSEGV (see `known-issues.md`). `JFileChooser` is pure Swing and never reaches that code, and it picks up FlatLaf like the app's other Linux Swing surfaces. |
+| Linux | `SwingFilePickerBackend` (`javax.swing.JFileChooser`) | `sun.awt.X11.XToolkit.createFileDialog()` selects `GtkFileDialogPeer`, whose native GTK callbacks dereference a NULL `JNU_GetEnv` result once the article reader's WebView makes WebKitGTK a second GTK consumer in the process — a JVM-crashing SIGSEGV. `JFileChooser` is pure Swing on every Look & Feel (including the FlatLaf-failed system-L&F fallback, since `GTKLookAndFeel`'s own `GTKFileChooserUI` is itself pure Swing) and never reaches that native code, and it picks up FlatLaf like the app's other Linux Swing surfaces. |
 
 The dialog's owner window is resolved *inside* the desktop `actual`
 (`KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow`, falling back to any showing
 `Frame`), not threaded in from the caller — `LocalNativeWindow` only ever resolves to the main
 window, which would be the wrong owner for a dialog opened from the modeless Settings window. Since
-`JFileChooser` has no native overwrite-confirmation of its own (unlike the AWT backend, which gets it
-free from the OS), `SwingFilePickerBackend` restores it explicitly — see `known-issues.md` for why
-that specific behavior was restored rather than left as a plain crash fix.
+`JFileChooser` has no native overwrite-confirmation of its own (unlike the AWT `FileDialog` it
+replaced on Linux, which had `gtk_file_chooser_set_do_overwrite_confirmation(dialog, TRUE)` set
+unconditionally for the SAVE action — matching what macOS/Windows still provide natively),
+`SwingFilePickerBackend` restores it explicitly (`resolveSavePath` + a `JOptionPane` confirmation)
+rather than silently regressing Linux relative to its own prior behavior.
 
 **Future work**: an `org.freedesktop.portal.FileChooser` (XDG Desktop Portal) backend could be
 dropped into the same `FilePickerBackend` seam, spoken over the dbus-java connection this app

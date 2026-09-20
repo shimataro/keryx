@@ -393,9 +393,9 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 `ArticleWebView` は `webSettings.desktopWebSettings.dataDirectory` も明示的に設定しており、
 `AppDirs.cacheDir()` 配下の `webview` サブディレクトリを、デスクトップ 3 OS すべてに同一に適用している
 （OS 分岐なし）。デフォルトの `null` のままだと WebView2 は実行ファイルの隣に自分のデータフォルダを
-作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する — 調査の詳細は
-[known-issues.ja.md](known-issues.ja.md) 参照（この生成失敗の例外が uncaught のまま伝播し、ライブラリの
-生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする原因でもあった）。
+作ろうとし、その場所が書き込み不可の場合は Access Denied で失敗する（この生成失敗の例外が uncaught の
+まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
+原因でもあった）。
 
 **狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
 commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
@@ -682,7 +682,7 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
 | macOS | `AwtPopupHandle`（`java.awt.PopupMenu`） | AWT が本物の `NSMenu` に写像し、かつ AppKit はポイント基準なので、モディファイアが算出する Dp 空間の座標をデバイスピクセルへ変換する必要がない。 |
-| Windows / Linux | `SwingPopupHandle`（`javax.swing.JPopupMenu`） | Linux では AWT の `PopupMenu` が Swing の Look & Feel を無視する heavyweight な XAWT ウィジェットで、Motif 世代の見た目のままになるため。Windows では JDK の AWT メニューピアが Java のユーザー空間とデバイスピクセルの変換を一切行わず、メニューが `ウィンドウ原点 + クリックオフセット ÷ スケール` に開き、行の高さがそこに描かれる文字の `1 / スケール` にしかならずラベルが重なるため。いずれも `known-issues.md` に詳述。 |
+| Windows / Linux | `SwingPopupHandle`（`javax.swing.JPopupMenu`） | Linux では AWT の `PopupMenu` が Swing の Look & Feel を無視する heavyweight な XAWT ウィジェットで、Motif 世代の見た目のままになるため。Windows では JDK の AWT メニューピアが Java のユーザー空間とデバイスピクセルの変換を一切行わず、メニューが `ウィンドウ原点 + クリックオフセット ÷ スケール` に開き、行の高さがそこに描かれる文字の `1 / スケール` にしかならず、表示スケーリングが 100% を超えるとラベルが重なるため。 |
 
 `defaultPopupHandle` の `macOs` 引数（既定値はプロセス定数）は、`NativeMenuTest` がどの CI ホストでも
 対応関係を固定できるようにするためだけのものである。アプリではなく選択されたバックエンドに追随して
@@ -703,14 +703,17 @@ Repository は触れず、Linux のパネルプロトコルにモバイル側の
 | プラットフォーム | 実装 | 理由 |
 | --- | --- | --- |
 | macOS / Windows | `AwtFilePickerBackend`（`java.awt.FileDialog`） | AWT が実際のネイティブパネル（`NSSavePanel` / `GetOpenFileName`）に写像し、ネイティブの上書き確認も含めて提供する。 |
-| Linux | `SwingFilePickerBackend`（`javax.swing.JFileChooser`） | `sun.awt.X11.XToolkit.createFileDialog()` は `GtkFileDialogPeer` を選ぶが、そのネイティブ GTK コールバックは、記事リーダーの WebView がプロセス内で WebKitGTK を 2 つ目の GTK コンシューマにした状態だと NULL の `JNU_GetEnv` の返り値を逆参照し、JVM をクラッシュさせる SIGSEGV になる（`known-issues.md` 参照）。`JFileChooser` は純粋な Swing でそのコードには一切到達せず、アプリの他の Linux Swing 画面と同じく FlatLaf にも追従する。 |
+| Linux | `SwingFilePickerBackend`（`javax.swing.JFileChooser`） | `sun.awt.X11.XToolkit.createFileDialog()` は `GtkFileDialogPeer` を選ぶが、そのネイティブ GTK コールバックは、記事リーダーの WebView がプロセス内で WebKitGTK を 2 つ目の GTK コンシューマにした状態だと NULL の `JNU_GetEnv` の返り値を逆参照し、JVM をクラッシュさせる SIGSEGV になる。`JFileChooser` はどの Look & Feel でも純粋な Swing であり（FlatLaf の初期化に失敗した際のシステム L&F フォールバックも含む——`GTKLookAndFeel` 自身の `GTKFileChooserUI` もまた純粋な Swing であるため）、そのネイティブコードには一切到達せず、アプリの他の Linux Swing 画面と同じく FlatLaf にも追従する。 |
 
 ダイアログの親ウィンドウは呼び出し元から渡すのではなく、デスクトップ版 `actual` の**内部**で解決する
 （`KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow`、表示中の `Frame` へのフォール
 バック付き）。`LocalNativeWindow` は常にメインウィンドウにしか解決されず、modeless な設定ウインドウ
-から開いたダイアログの親としては不適切なため。`JFileChooser` にはネイティブな上書き確認が無い（AWT
-バックエンドは OS からタダで得られる）ため、`SwingFilePickerBackend` はそれを明示的に復元している —
-なぜクラッシュ修正に留めずその挙動まで復元したのかは `known-issues.md` を参照。
+から開いたダイアログの親としては不適切なため。`JFileChooser` にはネイティブな上書き確認が無い
+（Linux で置き換える前の AWT `FileDialog` は SAVE アクションに無条件で
+`gtk_file_chooser_set_do_overwrite_confirmation(dialog, TRUE)` が設定されており、macOS/Windows は
+今もネイティブにこれを提供している）ため、`SwingFilePickerBackend` はこれを明示的に
+（`resolveSavePath` + `JOptionPane` による確認）復元しており、Linux の従来動作をクラッシュ修正のついでに
+静かに退行させることはない。
 
 **将来課題**: 同じ `FilePickerBackend` の継ぎ目に `org.freedesktop.portal.FileChooser`（XDG デスクトップ
 ポータル）バックエンドを追加できる。SNI トレイや AppMenu で既に使っている dbus-java 接続経由で、
