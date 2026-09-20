@@ -79,7 +79,7 @@ composeApp/src/
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
-    exists — see Provider/DI below — plus AndroidNotificationSink, see "Background Update" below),
+    exists — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
     CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead
     a once-per-process `GoogleApiAvailability` check, since it goes through Play services rather
     than a build-time client id — see sync-architecture.md's "Google Drive on Android"), KeryxTextField/KeryxAlertDialog/
@@ -140,7 +140,7 @@ composeApp/src/
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
     so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
-    Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see "Background Update"),
+    Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see [background-update.md](background-update.md)),
     NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,

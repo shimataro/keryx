@@ -76,7 +76,7 @@ composeApp/src/
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
-    Provider/DI 参照。加えて AndroidNotificationSink、下記「バックグラウンド更新」参照）,
+    Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
     CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
     ビルド時のクライアント ID ではなく Play 開発者サービス経由のため、プロセスごとに一度だけ
     `GoogleApiAvailability` で判定する — sync-architecture.ja.md の「Android での Google Drive」参照）,
@@ -139,7 +139,7 @@ composeApp/src/
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
     無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
     Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
-    SelfUpdateCheck（インストール元パッケージ名に基づく判定、下記「バックグラウンド更新」参照）,
+    SelfUpdateCheck（インストール元パッケージ名に基づく判定、[background-update.ja.md](background-update.ja.md) 参照）,
     NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
