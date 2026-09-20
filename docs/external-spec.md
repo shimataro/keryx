@@ -31,7 +31,8 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - The sync file is a gzip-compressed `VACUUM INTO` snapshot of `keryx.db` (excluding the local-only
   `articles_fts` search index, the four `idx_articles_*` indexes, and the `sync_state` table) — see
   [sync-architecture.md](sync-architecture.md).
-- Sync targets: subscription list, read state, stars, tag structure, global settings.
+- Sync targets: subscription list, folders, read state, stars, tag structure, article body, global
+  settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
 - While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its current
