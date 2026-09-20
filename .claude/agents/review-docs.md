@@ -27,6 +27,30 @@ the one nobody notices — code moved, docs did not.
 - `.claude/` configuration (CLAUDE.md, rules, skills, agents) → the `audit-claude-config` skill owns
   it. Do not review it here.
 
+## Code is the ground truth
+
+When docs and code contradict each other, the default assumption is that **the doc is stale and the
+code is correct**, and the finding is filed against the documentation so it can catch up.
+
+However, treat the code as suspect rather than the doc in these situations:
+
+- **The contradiction would crash the app, corrupt data, break sync convergence, leak secrets, or
+  introduce a security vulnerability if the code were correct.** In these cases the code is much
+  more likely to be the bug; surface the conflict, name the concrete harm, and flag it for the
+  appropriate specialist agent (Security, Data integrity, Sync & merge, etc.) rather than silently
+  correcting the doc.
+- **The doc describes behavior that matches general user expectations or common app conventions,
+  while the code produces an awkward, surprising, or broken user experience.** A button that does
+  the opposite of its label, a destructive action with no confirmation, or a flow that contradicts
+  the platform's own standard behavior are all examples where the code, not the doc, is probably
+  wrong. Still file the finding from the docs perspective, but clearly state that the code should
+  be fixed and suggest a concrete direction.
+
+When you do suspect a code bug, report the conflict with both the doc location and the code
+location, explain which side you believe is wrong and why, and propose a fix direction: either
+"fix the doc to say X" or "fix the code at `<path>:<line>` to do Y". The code-side concern will
+then be evaluated by the appropriate specialist agent; surfacing it in the merged report is enough.
+
 ## Checklist — docs match the code
 
 `docs/` is the design record. A structural change invalidates it silently. An **exhaustive
