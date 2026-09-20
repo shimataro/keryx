@@ -167,11 +167,15 @@ Merge SQL (`MergeSql`) key points:
   guid collision guard below would skip independently-fetched duplicates and read-state would never propagate. See
   `articles` section in [db-schema.md](db-schema.md) for details.
 - feed_tags: last-write-wins. Only imported if the referenced feed exists in main (FK protection). The tag is
-  resolved more leniently than the feed: if the cloud's `tag_id` also exists in main, it's used as-is; otherwise the
-  tag is looked up **by name** against `main.tags` via a join through `cloud.tags` (so two devices that created the
-  same tag name independently, with different ids, still converge on one tag).
+  resolved more leniently than the feed: if the cloud's `tag_id` also exists **and is alive** in main
+  (`mt.deleted_at IS NULL`), it's used as-is; otherwise the tag is looked up **by name** against `main.tags` via a
+  join through `cloud.tags` (so two devices that created the same tag name independently, with different ids, still
+  converge on one tag) — a row whose tag resolves to neither is skipped.
 - **feeds user-edited fields are merged independently via dedicated statements using field-specific timestamps** (same design as `read_at` / `starred_at` for articles, separated from row-level `updated_at` = content refresh update):
-  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is strictly newer)`), satisfying: propagation not blocked by refresh, no useless writes after convergence, local preserved if newer. `folder_id` is resolved by the dedicated statement (keep if folder exists in main, fall back to same-name resolution, else NULL) and is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).
+  `mergeFeedFolderId` (`folder_id` / `folder_updated_at`), `mergeFeedSortOrder` (`sort_order` / `sort_order_updated_at`), `mergeFeedCustomTitle` (`custom_title` / `custom_title_updated_at`), `mergeFeedDeletedAt` (`deleted_at` / `deleted_updated_at`). All use NULL-aware comparison (`c.<ts> IS NOT NULL AND (main is NULL or cloud is strictly newer)`), satisfying: propagation not blocked by refresh, no useless writes after convergence, local preserved if newer. `folder_id` is resolved by the dedicated statement, in four branches: NULL outright if the cloud's own referenced
+folder isn't alive in `cloud.folders` (`deleted_at IS NULL`); else the cloud's `folder_id` as-is if that folder is
+alive in `main`; else a same-name lookup joining `main.folders`/`cloud.folders` (both sides' `deleted_at IS NULL`);
+else NULL. It is not included in feeds INSERT. `sort_order` / `custom_title` / `deleted_at` remain in feeds INSERT for initial value propagation (only excluded from `ON CONFLICT`).
 - `NOT EXISTS` / `EXISTS` guards skip colliding rows (same URL, different ID, etc.) so UNIQUE / FK violations do not fail the entire transaction.
 - `MergeSql.all` application order:
   `updateFoldersByName, insertFolders, feeds, mergeFeedFolderId, mergeFeedSortOrder, mergeFeedCustomTitle, mergeFeedDeletedAt, updateTagsByName, insertTags, articles, feedTags, globalSettings`.
