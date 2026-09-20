@@ -151,7 +151,10 @@ Where `selfUpdateCheckSupported` offers a check at all, `domain/UpdateRepository
 so it and any in-flight download outlive a closed settings dialog) drives it past a plain
 "here's a link" into an actual download-and-install, behind one `StateFlow<UpdateState>`:
 `Idle → Checking → (UpToDate | Available) → Downloading → Verifying → Ready → Installing`, with
-`Failed` reachable from `Checking`/`Downloading`/`Verifying`. Every surface — the Updates settings
+`Failed` reachable from `Checking`/`Downloading`/`Verifying`/`Installing` (`retryFailed` branches an
+`Installing`-stage failure to `retryInstall`, matching `UpdateStage`'s four values `CHECK`, `DOWNLOAD`,
+`VERIFY`, `INSTALL` — see below for the one Android install failure that never reaches `Failed` at
+all). Every surface — the Updates settings
 tab, the one update menu item the desktop tray and the Help menu share (both resolved by
 `tray/UpdateMenuEntry.kt`'s `updateMenuEntry`), the notification-center bell — reads this same
 state, so they can never disagree about what's currently true. **No step ever runs unattended**: a

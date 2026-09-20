@@ -150,8 +150,11 @@ Play 以外からの実行可能コードのダウンロードであり、この
 （Koin の `single` なので、これ自身も進行中のダウンロードも設定ダイアログを閉じても生き続ける）が
 「リンクを出すだけ」からさらに進めて、実際のダウンロードとインストールまでを、1 本の
 `StateFlow<UpdateState>` の背後で駆動する: `Idle → Checking → (UpToDate | Available) →
-Downloading → Verifying → Ready → Installing`、そして `Checking`/`Downloading`/`Verifying` から
-`Failed` へも遷移しうる。Updates 設定タブ、デスクトップトレイとアプリメニューの Help メニューが
+Downloading → Verifying → Ready → Installing`、そして `Checking`/`Downloading`/`Verifying`/
+`Installing` から `Failed` へも遷移しうる（`retryFailed` は `Installing` 段階での失敗を
+`retryInstall` に分岐させる。これは `UpdateStage` の4つの値 `CHECK`、`DOWNLOAD`、`VERIFY`、
+`INSTALL` と対応する——`Failed` に一切到達しない Android のインストール失敗ケースについては
+後述）。Updates 設定タブ、デスクトップトレイとアプリメニューの Help メニューが
 共有する唯一のアップデートメニュー項目（どちらも `tray/UpdateMenuEntry.kt` の `updateMenuEntry`
 が解決する）、通知センターのベル——すべてが同じこの状態を読むので、いま何が起きているかについて
 食い違うことはありえない。**どの段階も無人では進まない**: 確認が自動的にダウンロードを始めること
