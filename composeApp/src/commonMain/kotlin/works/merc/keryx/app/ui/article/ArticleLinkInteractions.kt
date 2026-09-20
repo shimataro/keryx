@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -64,6 +65,16 @@ internal fun LinkText(
     val menuOpenLink = stringResource(Res.string.menu_open_link)
     val menuCopyLinkAddress = stringResource(Res.string.menu_copy_link_address)
 
+    val currentText by rememberUpdatedState(text)
+    val currentLayoutResult by rememberUpdatedState(textLayoutResult)
+
+    val hitTest: (Offset) -> Boolean = { offset ->
+        val url = resolveLinkUrlAtOffset(currentText, currentLayoutResult, offset)
+        linkAtHit.value = url
+        url != null
+    }
+    val currentHitTest by rememberUpdatedState(hitTest)
+
     val contextMenuModifier = Modifier.nativeContextMenu(
         items = {
             val url = linkAtHit.value
@@ -82,17 +93,13 @@ internal fun LinkText(
                 emptyList()
             }
         },
-        hitTest = { offset ->
-            val url = resolveLinkUrlAtOffset(text, textLayoutResult, offset)
-            linkAtHit.value = url
-            url != null
-        },
+        hitTest = { offset -> currentHitTest(offset) },
     )
 
     Layout(
         modifier = modifier
             .then(contextMenuModifier)
-            .pointerInput(Unit) {
+            .pointerInput(text) {
                 awaitEachGesture {
                     while (true) {
                         val event = awaitPointerEvent()
