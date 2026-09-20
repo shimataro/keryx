@@ -37,11 +37,13 @@ while (true) {
 
 - The interval setting is re-read every loop, so changes take effect from the next cycle (no explicit rescheduling needed).
 - Errors during update do not crash the app; they are recorded in the notification center (handled inside `FeedRepository.refreshFeed`). On Android they are additionally announced in a Snackbar — but only while the app's window actually has focus, so one raised by `FeedRefreshWorker` in the background waits and is announced once the user comes back, rather than timing out unseen. See "Notification Center" in [error-design.md](error-design.md).
-- New-article notifications reach the OS through one of three platform paths, all fed by the same
+- New-article notifications reach the OS through one of four platform paths, all fed by the same
   `NewArticleNotifier.trayEvents` flow (`TrayState` can only be created inside Compose's `application {}`
-  scope, so a `MutableSharedFlow` bridges it): macOS uses `TrayIcon.displayMessage`, Linux with a
-  StatusNotifierItem host uses `org.freedesktop.Notifications.Notify`, and Windows (plus Linux without
-  an SNI host) uses `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
+  scope, so a `MutableSharedFlow` bridges it), following `KeryxTray`'s own dispatch order: macOS's
+  `MacTray` and Windows' `WindowsTray` both call `TrayIcon.displayMessage`, Linux with a
+  StatusNotifierItem host uses `LinuxTray`'s `org.freedesktop.Notifications.Notify`, and only the
+  remaining case — Linux without an SNI host — falls through to Compose's own `Tray()` composable and
+  its `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
 
 ## Android Implementation (`androidMain/background/` + `AndroidStartupTasks.kt`)
 

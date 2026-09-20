@@ -35,12 +35,13 @@ while (true) {
 
 - 設定間隔は毎ループ読み直すため、設定変更は次サイクルから反映される（明示的な再スケジュール不要）。
 - 更新中のエラーはクラッシュさせず、通知センターに記録する（`FeedRepository.refreshFeed` 内で処理）。Android ではさらに Snackbar でも通知するが、アプリのウィンドウが実際にフォーカスを持っている間に限る。そのため `FeedRefreshWorker` がバックグラウンドで積んだものは保留され、ユーザーが戻ってきた時点で通知される（見られないままタイムアウトすることがない）。[error-design.ja.md](error-design.ja.md) の「通知センター」を参照。
-- 新着通知は同じ `NewArticleNotifier.trayEvents` を入力として、プラットフォームごとに 3 経路で OS へ渡す
-  （`TrayState` は Compose の `application {}` スコープ内でしか作れないため、`MutableSharedFlow` で
-  橋渡しする）。macOS は `TrayIcon.displayMessage`、StatusNotifierItem ホストがある Linux は
-  `org.freedesktop.Notifications.Notify`、Windows（および SNI ホストの無い Linux）は
-  `TrayState.sendNotification`。詳細は [app-architecture.ja.md](app-architecture.ja.md) の
-  「デスクトップトレイ」を参照。
+- 新着通知は同じ `NewArticleNotifier.trayEvents` を入力として、`KeryxTray` 自身の振り分け順にしたがって
+  プラットフォームごとに 4 経路で OS へ渡す（`TrayState` は Compose の `application {}` スコープ内でしか
+  作れないため、`MutableSharedFlow` で橋渡しする）。macOS の `MacTray` と Windows の `WindowsTray` は
+  どちらも `TrayIcon.displayMessage` を呼び、StatusNotifierItem ホストがある Linux は `LinuxTray` の
+  `org.freedesktop.Notifications.Notify` を使う。残る唯一のケース——SNI ホストの無い Linux——だけが
+  Compose 自体の `Tray()` コンポーザブルにフォールバックし、その `TrayState.sendNotification` を使う。
+  詳細は [app-architecture.ja.md](app-architecture.ja.md) の「デスクトップトレイ」を参照。
 
 ## Android 実装（`androidMain/background/` + `AndroidStartupTasks.kt`）
 
