@@ -350,12 +350,12 @@ private val LAZY_IMAGE_ATTRIBUTES = listOf("data-src", "data-original", "data-la
  * usable attribute of its own, the first `<source>` sibling's `srcset`/`src`.
  */
 private fun resolveImageSrc(element: Element, base: String): String? {
-    resolveAttr(element, "src", base)?.let { return it }
     for (attribute in LAZY_IMAGE_ATTRIBUTES) {
         resolveAttr(element, attribute, base)?.let { return it }
     }
-    resolveSrcset(element.attr("srcset"), base)?.let { return it }
     resolveSrcset(element.attr("data-srcset"), base)?.let { return it }
+    resolveAttr(element, "src", base)?.let { return it }
+    resolveSrcset(element.attr("srcset"), base)?.let { return it }
     val pictureParent = element.parent()?.takeIf { it.normalName() == "picture" }
     pictureParent?.selectFirst("source")?.let { source ->
         resolveSrcset(source.attr("srcset"), base)?.let { return it }
