@@ -107,10 +107,21 @@ internal fun LinkText(
                     while (true) {
                         val event = awaitPointerEvent()
                         when (event.type) {
-                            PointerEventType.Move, PointerEventType.Enter -> {
+                            PointerEventType.Enter,
+                            PointerEventType.Move,
+                            PointerEventType.Press,
+                            PointerEventType.Release,
+                            -> {
                                 val pos = event.changes.first().position
                                 pointerPosition = pos
-                                hoveredLinkUrl = resolveLinkUrlAtOffset(text, textLayoutResult, pos)
+                                // Compose freezes hit testing while a pointer is pressed, so this
+                                // node keeps receiving Move events after the pointer has already
+                                // left it. Show nothing until the drag is over.
+                                hoveredLinkUrl = if (event.changes.any { it.pressed }) {
+                                    null
+                                } else {
+                                    resolveLinkUrlAtOffset(text, textLayoutResult, pos)
+                                }
                             }
 
                             PointerEventType.Exit -> {
@@ -170,8 +181,19 @@ internal fun resolveLinkUrlAtOffset(
     offset: Offset,
 ): String? {
     val result = layoutResult ?: return null
+    // getOffsetForPosition clamps an out-of-range position onto the nearest character, so a
+    // position outside the laid-out text would otherwise resolve to the link at its edge.
+    if (!result.containsPosition(offset)) return null
     val textOffset = result.getOffsetForPosition(offset)
     if (textOffset < 0 || textOffset >= text.length) return null
     val annotations = text.getLinkAnnotations(textOffset, textOffset + 1)
     return (annotations.firstOrNull()?.item as? LinkAnnotation.Clickable)?.tag
+}
+
+/** Whether [position] really falls inside the rectangle of the line it resolves to. */
+private fun TextLayoutResult.containsPosition(position: Offset): Boolean {
+    // getLineForVerticalPosition clamps too, so the resolved line's own bounds are re-checked.
+    val line = getLineForVerticalPosition(position.y)
+    if (position.y < getLineTop(line) || position.y > getLineBottom(line)) return false
+    return position.x >= getLineLeft(line) && position.x <= getLineRight(line)
 }

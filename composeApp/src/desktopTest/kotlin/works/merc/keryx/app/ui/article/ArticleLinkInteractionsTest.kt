@@ -148,4 +148,153 @@ class ArticleLinkInteractionsTest {
             resolveLinkUrlAtOffset(annotated, result, Offset(nodeBounds.width + 50f, centerY)),
         )
     }
+
+    @Test
+    fun `resolveLinkUrlAtOffset returns null for positions outside the laid-out line`() = runDesktopComposeUiTest {
+        // Starts and ends on a link, so a clamped offset at either edge would otherwise resolve
+        // to a link URL instead of correctly reporting "outside the text".
+        val annotated = buildAnnotatedString {
+            withLink(
+                LinkAnnotation.Clickable(
+                    tag = "https://start.example.com",
+                    linkInteractionListener = {},
+                )
+            ) {
+                append("start")
+            }
+            append(" middle ")
+            withLink(
+                LinkAnnotation.Clickable(
+                    tag = "https://end.example.com",
+                    linkInteractionListener = {},
+                )
+            ) {
+                append("end")
+            }
+        }
+        var layoutResult: TextLayoutResult? = null
+        setContent {
+            Text(
+                text = annotated,
+                style = TextStyle.Default,
+                modifier = Modifier.testTag("test-text"),
+                onTextLayout = { layoutResult = it },
+            )
+        }
+        waitForIdle()
+        val result = layoutResult ?: error("TextLayoutResult was not captured")
+        val nodeBounds = onNodeWithTag("test-text").fetchSemanticsNode().boundsInRoot
+        val lastCharBox = result.getBoundingBox(annotated.length - 1)
+        // Biased toward the character's left edge rather than its exact center: a position past
+        // the horizontal midpoint of a glyph resolves to the *next* text offset (here, past the
+        // end of the string), which is deliberately outside what this function considers a link.
+        val lastCharCenter = Offset(
+            lastCharBox.left + (lastCharBox.right - lastCharBox.left) * 0.25f,
+            lastCharBox.center.y,
+        )
+
+        // Sanity check: the last character really is part of a link.
+        assertEquals(
+            "https://end.example.com",
+            resolveLinkUrlAtOffset(annotated, result, lastCharCenter),
+        )
+
+        // Above the text.
+        assertNull(
+            resolveLinkUrlAtOffset(annotated, result, Offset(nodeBounds.width / 2f, -50f)),
+        )
+
+        // Below the text.
+        assertNull(
+            resolveLinkUrlAtOffset(
+                annotated,
+                result,
+                Offset(nodeBounds.width / 2f, nodeBounds.height + 50f),
+            ),
+        )
+
+        // Past the end of the last line, where the trailing character is a link.
+        assertNull(
+            resolveLinkUrlAtOffset(
+                annotated,
+                result,
+                Offset(lastCharBox.right + 50f, lastCharCenter.y),
+            ),
+        )
+    }
+
+    @Test
+    fun `tooltip is hidden while dragging over a link`() = runDesktopComposeUiTest {
+        setContent {
+            LinkText(
+                text = buildAnnotatedString {
+                    append("Visit ")
+                    withLink(
+                        LinkAnnotation.Clickable(
+                            tag = "https://example.com",
+                            linkInteractionListener = {},
+                        )
+                    ) {
+                        append("example")
+                    }
+                },
+                style = TextStyle.Default,
+                modifier = Modifier.testTag("link-text"),
+            )
+        }
+
+        val bounds = onNodeWithTag("link-text").fetchSemanticsNode().boundsInRoot
+        val linkCenter = Offset(bounds.width / 2f, bounds.height / 2f)
+
+        onNodeWithTag("link-text").performMouseInput { moveTo(linkCenter) }
+        waitForIdle()
+        onNodeWithText("https://example.com").assertExists()
+
+        onNodeWithTag("link-text").performMouseInput { press() }
+        waitForIdle()
+        onNodeWithText("https://example.com").assertDoesNotExist()
+
+        onNodeWithTag("link-text").performMouseInput { release() }
+    }
+
+    @Test
+    fun `tooltip does not stick after dragging past the element bounds`() = runDesktopComposeUiTest {
+        setContent {
+            LinkText(
+                text = buildAnnotatedString {
+                    append("Visit ")
+                    withLink(
+                        LinkAnnotation.Clickable(
+                            tag = "https://example.com",
+                            linkInteractionListener = {},
+                        )
+                    ) {
+                        append("example")
+                    }
+                },
+                style = TextStyle.Default,
+                modifier = Modifier.testTag("link-text"),
+            )
+        }
+
+        val bounds = onNodeWithTag("link-text").fetchSemanticsNode().boundsInRoot
+        val linkCenter = Offset(bounds.width / 2f, bounds.height / 2f)
+        val belowElement = Offset(bounds.width / 2f, bounds.height + 40f)
+
+        onNodeWithTag("link-text").performMouseInput {
+            moveTo(linkCenter)
+            press()
+        }
+        waitForIdle()
+
+        // Hit testing is frozen while the pointer is pressed, so this node keeps receiving Move
+        // events even once the pointer is well outside its own bounds.
+        onNodeWithTag("link-text").performMouseInput {
+            moveTo(belowElement)
+            release()
+        }
+        waitForIdle()
+
+        onNodeWithText("https://example.com").assertDoesNotExist()
+    }
 }
