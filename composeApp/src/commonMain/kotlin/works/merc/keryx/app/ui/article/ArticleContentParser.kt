@@ -20,7 +20,7 @@ private val DROPPED_TAGS = setOf("script", "style", "link", "noscript", "templat
  */
 private val FORCED_BLOCK_TAGS = setOf(
     "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "blockquote", "pre", "img", "table",
-    "figcaption", "hr", "iframe", "embed", "object", "video", "audio", "center",
+    "figure", "figcaption", "hr", "iframe", "embed", "object", "video", "audio", "center",
 )
 
 /**
@@ -81,11 +81,12 @@ internal fun parseArticleContent(html: String): ArticleContent {
 private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = emptySet()): List<ArticleBlock> {
     val blocks = mutableListOf<ArticleBlock>()
     val pending = mutableListOf<InlineSpan>()
+    val pendingImages = mutableListOf<Element>()
 
     fun flushPending() {
-        val inline = ArticleInline(pending.toList()).trimEdges()
-        if (!inline.isBlank) blocks += ArticleBlock.Paragraph(inline)
+        emitInlineOrPictures(pending.toList(), pendingImages.toList(), base, blocks = blocks)
         pending.clear()
+        pendingImages.clear()
     }
 
     for (node in parent.childNodes()) {
@@ -104,8 +105,17 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
         if (tag in FORCED_BLOCK_TAGS) {
             flushPending()
             when (tag) {
-                "p" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
-                    blocks += ArticleBlock.Paragraph(it, align = resolveBlockAlign(node), muted = node.hasClass("article-notice"))
+                "p" -> {
+                    val images = mutableListOf<Element>()
+                    val spans = inlineSpans(node, base, blockBaseStyle(node), images)
+                    emitInlineOrPictures(
+                        spans,
+                        images,
+                        base,
+                        align = resolveBlockAlign(node),
+                        muted = node.hasClass("article-notice"),
+                        blocks = blocks,
+                    )
                 }
                 "figcaption" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
                     // A caption defaults to centered under its picture unless the markup says
@@ -122,6 +132,7 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
                 "pre" -> node.wholeText().trimEnd().takeIf { it.isNotBlank() }?.let { blocks += ArticleBlock.Code(it) }
                 "img" -> picture(node, base)?.let { blocks += it }
                 "table" -> table(node, base)?.let { blocks += it }
+                "figure" -> parseBlocks(node, base).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Figure(it) }
                 "iframe", "embed", "object", "video", "audio" -> embed(node, base)?.let { blocks += it }
                 "hr" -> blocks += ArticleBlock.Rule
                 // <center> has no decoration of its own beyond forcing every block under it to
@@ -132,7 +143,7 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
             continue
         }
         if (tag in FORCED_INLINE_TAGS || node.tag().isInline()) {
-            pending += inlineSpans(node, base, InlineStyle())
+            pending += inlineSpans(node, base, InlineStyle().extendedBy(tag, node, base), pendingImages)
             continue
         }
 
@@ -147,7 +158,7 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
 
 /** The inline content of [element] as one block, or null when it carries no visible text. */
 private fun inlineBlock(element: Element, base: String, baseStyle: InlineStyle = InlineStyle()): ArticleInline? =
-    ArticleInline(inlineSpans(element, base, baseStyle)).trimEdges().takeIf { !it.isBlank }
+    ArticleInline(inlineSpans(element, base, baseStyle, mutableListOf())).trimEdges().takeIf { !it.isBlank }
 
 /** [element]'s own `style=""` attribute as a starting [InlineStyle], for a tag with no decoration of its own. */
 private fun blockBaseStyle(element: Element): InlineStyle {
@@ -173,10 +184,43 @@ private fun forceCenterAlign(block: ArticleBlock): ArticleBlock = when (block) {
     is ArticleBlock.Caption -> if (block.align == null) block.copy(align = TextAlign.Center) else block
     is ArticleBlock.Heading -> if (block.align == null) block.copy(align = TextAlign.Center) else block
     is ArticleBlock.Quote -> block.copy(children = block.children.map(::forceCenterAlign))
+    is ArticleBlock.Figure -> block.copy(children = block.children.map(::forceCenterAlign))
     else -> block
 }
 
-private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<InlineSpan> = buildList {
+/**
+ * Emits [spans] as a single [ArticleBlock.Paragraph], unless every span is blank text and [images]
+ * holds at least one picture — in which case each image is promoted to its own block-level
+ * [ArticleBlock.Picture] instead of collapsing to nothing. This recovers the common
+ * `<p><img></p>` / `<a href="..."><img></a>` pattern, where the "paragraph" or "link" is really
+ * just a captionless image wrapper: without this, [ArticleInline.isBlank] made the whole run
+ * disappear (a link with no text around a bare image has no text at all), and a *textful*
+ * paragraph's own inline images stay alt text (see [inlineSpans]'s `img` branch) — an inline
+ * image's real size is unknown, so there's no way to drop it into running text without breaking
+ * the line's layout.
+ */
+private fun emitInlineOrPictures(
+    spans: List<InlineSpan>,
+    images: List<Element>,
+    base: String,
+    align: TextAlign? = null,
+    muted: Boolean = false,
+    blocks: MutableList<ArticleBlock>,
+) {
+    val inline = ArticleInline(spans).trimEdges()
+    if (inline.isBlank) {
+        for (image in images) picture(image, base)?.let { blocks += it }
+        return
+    }
+    blocks += ArticleBlock.Paragraph(inline, align = align, muted = muted)
+}
+
+/**
+ * Walks [node]'s children as inline content, accumulating any `<img>` found (directly or nested)
+ * into [images] rather than resolving it here — the caller decides whether those images end up as
+ * alt text (a textful paragraph) or promoted block pictures (see [emitInlineOrPictures]).
+ */
+private fun inlineSpans(node: Node, base: String, style: InlineStyle, images: MutableList<Element>): List<InlineSpan> = buildList {
     for (child in node.childNodes()) {
         when {
             child is TextNode -> add(
@@ -204,13 +248,16 @@ private fun inlineSpans(node: Node, base: String, style: InlineStyle): List<Inli
                     continue
                 }
                 if (tag == "img") {
-                    // An inline image inside a paragraph: keep its alt text rather than dropping
-                    // the image silently, since the block-level Picture branch never sees it.
+                    images.add(child)
+                    // An inline image inside textful content: keep its alt text rather than
+                    // dropping the image silently, since the block-level Picture branch never
+                    // sees it (see emitInlineOrPictures for the image-only-paragraph case, which
+                    // does).
                     child.attr("alt").trim().takeIf { it.isNotEmpty() }
                         ?.let { add(InlineSpan(it, italic = true, link = style.link)) }
                     continue
                 }
-                addAll(inlineSpans(child, base, style.extendedBy(tag, child, base)))
+                addAll(inlineSpans(child, base, style.extendedBy(tag, child, base), images))
             }
         }
     }
@@ -254,15 +301,44 @@ private fun table(element: Element, base: String): ArticleBlock.Table? {
     val rows = element.select("tr").mapNotNull { row ->
         row.children()
             .filter { it.normalName() == "td" || it.normalName() == "th" }
-            .map { cell -> ArticleInline(inlineSpans(cell, base, InlineStyle())).trimEdges() }
+            .map { cell -> ArticleInline(inlineSpans(cell, base, InlineStyle(), mutableListOf())).trimEdges() }
             .takeIf { it.isNotEmpty() }
     }
     return if (rows.isEmpty()) null else ArticleBlock.Table(rows)
 }
 
 private fun picture(element: Element, base: String): ArticleBlock.Picture? {
-    val src = resolveAttr(element, "src", base) ?: return null
+    val src = resolveImageSrc(element, base) ?: return null
     return ArticleBlock.Picture(src, element.attr("alt").trim().ifEmpty { null })
+}
+
+/** Attributes a lazy-loading image commonly carries its real URL under, tried in order after `src`. */
+private val LAZY_IMAGE_ATTRIBUTES = listOf("data-src", "data-original", "data-lazy-src")
+
+/**
+ * Resolves an `<img>`'s real source, trying (in order): `src`; the common lazy-load attributes;
+ * `srcset`/`data-srcset` on the `<img>` itself; and, for an `<img>` inside a `<picture>` with no
+ * usable attribute of its own, the first `<source>` sibling's `srcset`/`src`.
+ */
+private fun resolveImageSrc(element: Element, base: String): String? {
+    resolveAttr(element, "src", base)?.let { return it }
+    for (attribute in LAZY_IMAGE_ATTRIBUTES) {
+        resolveAttr(element, attribute, base)?.let { return it }
+    }
+    resolveSrcset(element.attr("srcset"), base)?.let { return it }
+    resolveSrcset(element.attr("data-srcset"), base)?.let { return it }
+    val pictureParent = element.parent()?.takeIf { it.normalName() == "picture" }
+    pictureParent?.selectFirst("source")?.let { source ->
+        resolveSrcset(source.attr("srcset"), base)?.let { return it }
+        resolveAttr(source, "src", base)?.let { return it }
+    }
+    return null
+}
+
+/** The first candidate URL in a `srcset`/`data-srcset` list (`"a.jpg 1x, b.jpg 2x"` → `a.jpg`). */
+private fun resolveSrcset(value: String, base: String): String? {
+    val first = value.split(',').firstOrNull()?.trim()?.substringBefore(' ')?.trim()
+    return first?.takeIf { it.isNotEmpty() }?.let { UrlResolver.resolve(base, it) }
 }
 
 private fun embed(element: Element, base: String): ArticleBlock.Embed? {

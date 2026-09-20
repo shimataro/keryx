@@ -41,6 +41,7 @@ internal sealed interface ArticleBlock {
     data class Quote(val children: List<ArticleBlock>) : ArticleBlock
     data class Code(val text: String) : ArticleBlock
     data class Picture(val src: String, val alt: String?) : ArticleBlock
+    data class Figure(val children: List<ArticleBlock>) : ArticleBlock
     data class Table(val rows: List<List<ArticleInline>>) : ArticleBlock
     data class Embed(val url: String) : ArticleBlock
     data object Rule : ArticleBlock

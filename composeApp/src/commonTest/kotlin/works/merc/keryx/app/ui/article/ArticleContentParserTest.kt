@@ -187,8 +187,9 @@ class ArticleContentParserTest {
             """<figure><img src="https://example.com/i.png"><figcaption>cap</figcaption></figure>""",
         )
 
-        assertTrue(blocks[0] is ArticleBlock.Picture)
-        assertEquals("cap", (blocks[1] as ArticleBlock.Caption).text.plain())
+        val figure = blocks.single() as ArticleBlock.Figure
+        assertTrue(figure.children[0] is ArticleBlock.Picture)
+        assertEquals("cap", (figure.children[1] as ArticleBlock.Caption).text.plain())
     }
 
     @Test
@@ -294,6 +295,43 @@ class ArticleContentParserTest {
 
         assertEquals(TextAlign.Center, (blocks[0] as ArticleBlock.Paragraph).align)
         assertEquals(TextAlign.Center, (blocks[1] as ArticleBlock.Heading).align)
+    }
+
+    @Test
+    fun resolvesSrcsetAndLazyLoadAttributes() {
+        val fromSrcset = parseBody(
+            """<img data-srcset="/a.jpg 1x, /b.jpg 2x">""",
+            baseUrl = "https://example.com/x",
+        ).single() as ArticleBlock.Picture
+        assertEquals("https://example.com/a.jpg", fromSrcset.src)
+
+        val fromDataSrc = parseBody(
+            """<img data-src="/lazy.jpg">""",
+            baseUrl = "https://example.com/x",
+        ).single() as ArticleBlock.Picture
+        assertEquals("https://example.com/lazy.jpg", fromDataSrc.src)
+    }
+
+    @Test
+    fun promotesAnImageOnlyParagraphToABlockPicture() {
+        val blocks = parseBody(
+            """<p><img src="/img.png"></p>""",
+            baseUrl = "https://example.com/a",
+        )
+
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.single() is ArticleBlock.Picture)
+    }
+
+    @Test
+    fun promotesALinkWrappedImageWithNoTextToABlockPicture() {
+        val blocks = parseBody(
+            """<a href="https://example.com/full"><img src="/img.png"></a>""",
+            baseUrl = "https://example.com/a",
+        )
+
+        assertEquals(1, blocks.size)
+        assertTrue(blocks.single() is ArticleBlock.Picture)
     }
 
     @Test

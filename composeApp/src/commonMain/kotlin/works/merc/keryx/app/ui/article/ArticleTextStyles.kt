@@ -45,10 +45,11 @@ internal fun blockMarginEm(block: ArticleBlock): Pair<Float, Float> = when (bloc
     is ArticleBlock.Bullets -> 1.0f to 1.0f
     is ArticleBlock.Quote -> 1.0f to 1.0f
     is ArticleBlock.Code -> 1.0f to 1.0f
+    is ArticleBlock.Figure -> 1.0f to 1.0f
     ArticleBlock.Rule -> 0.5f to 0.5f
     is ArticleBlock.Table -> 0f to 0f
     // Caption/Picture/Embed carry no UA-default margin of their own; spacing around them comes
-    // from the list/quote that contains them, or from a fixed small gap at the call site.
+    // from the figure/list/quote that contains them, or from a fixed small gap at the call site.
     is ArticleBlock.Caption, is ArticleBlock.Picture, is ArticleBlock.Embed -> 0f to 0f
 }
 

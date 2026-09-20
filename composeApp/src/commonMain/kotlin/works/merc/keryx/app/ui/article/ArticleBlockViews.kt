@@ -15,7 +15,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -83,14 +86,9 @@ internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier
 
         is ArticleBlock.Code -> CodeView(block, modifier)
 
-        is ArticleBlock.Picture -> AsyncImage(
-            model = block.src,
-            contentDescription = block.alt,
-            // Inside, not Fit: it shrinks an oversized image to the column but leaves a smaller one
-            // at its own size, which is what the document's `max-width: 100%` does.
-            contentScale = ContentScale.Inside,
-            modifier = modifier.fillMaxWidth(),
-        )
+        is ArticleBlock.Picture -> PictureView(block, modifier)
+
+        is ArticleBlock.Figure -> FigureView(block, modifier)
 
         is ArticleBlock.Table -> TableView(block, modifier)
 
@@ -149,6 +147,38 @@ private fun CodeView(block: ArticleBlock.Code, modifier: Modifier) {
             style = bodyTextStyle().copy(fontFamily = FontFamily.Monospace),
             softWrap = false,
         )
+    }
+}
+
+@Composable
+private fun PictureView(block: ArticleBlock.Picture, modifier: Modifier = Modifier) {
+    var failed by remember(block.src) { mutableStateOf(false) }
+    if (failed) {
+        block.alt?.let {
+            Text(
+                text = it,
+                style = bodyTextStyle().copy(fontStyle = FontStyle.Italic),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier,
+            )
+        }
+        return
+    }
+    AsyncImage(
+        model = block.src,
+        contentDescription = block.alt,
+        // Inside, not Fit: it shrinks an oversized image to the column but leaves a smaller one
+        // at its own size, which is what the document's `max-width: 100%` does.
+        contentScale = ContentScale.Inside,
+        onError = { failed = true },
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun FigureView(block: ArticleBlock.Figure, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(NESTED_SPACING)) {
+        block.children.forEach { child -> ArticleBlockView(child) }
     }
 }
 
