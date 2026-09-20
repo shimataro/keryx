@@ -54,6 +54,12 @@ private val QUOTE_BAR_WIDTH = 3.dp
 private val NESTED_SPACING = 6.dp
 private val BULLET_MARKER_WIDTH = 24.dp
 
+/** UA-default `dd { margin-left: 40px }` — a fixed physical inset, not an em-relative one. */
+private val DEFINITION_INDENT = 40.dp
+
+/** Marker glyphs cycled by nesting depth, matching a browser's default disc/circle/square cycle. */
+private val BULLET_GLYPHS = listOf("•", "◦", "▪")
+
 @Composable
 internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier) {
     when (block) {
@@ -92,6 +98,8 @@ internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier
 
         is ArticleBlock.Table -> TableView(block, modifier)
 
+        is ArticleBlock.Definition -> DefinitionView(block, modifier)
+
         is ArticleBlock.Embed -> EmbedView(block, modifier)
 
         ArticleBlock.Rule -> HorizontalDivider(modifier, color = MaterialTheme.colorScheme.outlineVariant)
@@ -100,13 +108,21 @@ internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier
 
 @Composable
 private fun BulletsView(block: ArticleBlock.Bullets, modifier: Modifier) {
+    val markerColor = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier, verticalArrangement = Arrangement.spacedBy(NESTED_SPACING)) {
         block.items.forEachIndexed { index, item ->
             Row {
+                val markerText = if (block.ordered) {
+                    "${block.start + index}."
+                } else {
+                    BULLET_GLYPHS[block.depth.coerceAtLeast(0) % BULLET_GLYPHS.size]
+                }
                 Text(
-                    text = if (block.ordered) "${index + 1}." else "•",
+                    text = markerText,
                     style = bodyTextStyle(),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = markerColor,
+                    // UA default right-aligns an ordered-list counter against the following text.
+                    textAlign = if (block.ordered) TextAlign.End else TextAlign.Start,
                     modifier = Modifier.width(BULLET_MARKER_WIDTH),
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(NESTED_SPACING)) {
@@ -179,6 +195,14 @@ private fun PictureView(block: ArticleBlock.Picture, modifier: Modifier = Modifi
 private fun FigureView(block: ArticleBlock.Figure, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(NESTED_SPACING)) {
         block.children.forEach { child -> ArticleBlockView(child) }
+    }
+}
+
+@Composable
+private fun DefinitionView(block: ArticleBlock.Definition, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(text = block.term.annotated(), style = bodyTextStyle().copy(fontWeight = FontWeight.Bold))
+        Text(text = block.description.annotated(), style = bodyTextStyle(), modifier = Modifier.padding(start = DEFINITION_INDENT))
     }
 }
 

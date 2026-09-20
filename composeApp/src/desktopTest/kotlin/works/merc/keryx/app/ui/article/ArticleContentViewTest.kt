@@ -224,6 +224,22 @@ class ArticleContentViewTest {
         onNodeWithText("Alice").assertIsDisplayed()
         onNodeWithText("30").assertIsDisplayed()
     }
+
+    @Test
+    fun rendersDefinitionListsAndFigureCaptions() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(
+                document(
+                    "<dl><dt>Term</dt><dd>Meaning</dd></dl>" +
+                        """<figure><img src="https://example.com/i.png"><figcaption>caption text</figcaption></figure>""",
+                ),
+            )
+        }
+
+        onNodeWithText("Term").assertIsDisplayed()
+        onNodeWithText("Meaning").assertIsDisplayed()
+        onNodeWithText("caption text").assertIsDisplayed()
+    }
 }
 
 /** Enough paragraphs to overflow the test window, so the reader's LazyColumn really can scroll. */

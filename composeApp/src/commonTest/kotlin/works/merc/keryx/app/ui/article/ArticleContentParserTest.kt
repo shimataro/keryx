@@ -339,6 +339,25 @@ class ArticleContentParserTest {
     }
 
     @Test
+    fun honorsOrderedListStart() {
+        val bullets = parseBody("""<ol start="5"><li>a</li></ol>""").single() as ArticleBlock.Bullets
+        assertEquals(5, bullets.start)
+    }
+
+    @Test
+    fun parsesDefinitionListsPairingEachTermWithItsDescription() {
+        val blocks = parseBody("<dl><dt>Term</dt><dd>Def one</dd><dd>Def two</dd></dl>")
+
+        assertEquals(2, blocks.size)
+        val first = blocks[0] as ArticleBlock.Definition
+        val second = blocks[1] as ArticleBlock.Definition
+        assertEquals("Term", first.term.plain())
+        assertEquals("Def one", first.description.plain())
+        assertEquals("Term", second.term.plain())
+        assertEquals("Def two", second.description.plain())
+    }
+
+    @Test
     fun noContentDocumentIsMarkedMuted() {
         val paragraph = parseArticleContent(
             articleNoContentHtml(theme, title = "T", meta = "M", message = "本文がありません"),

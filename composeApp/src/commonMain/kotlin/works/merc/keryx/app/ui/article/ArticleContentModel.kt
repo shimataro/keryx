@@ -40,12 +40,13 @@ internal sealed interface ArticleBlock {
     data class Paragraph(val text: ArticleInline, val align: TextAlign? = null, val muted: Boolean = false) : ArticleBlock
     data class Caption(val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
     data class Heading(val level: Int, val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
-    data class Bullets(val ordered: Boolean, val items: List<List<ArticleBlock>>) : ArticleBlock
+    data class Bullets(val ordered: Boolean, val start: Int = 1, val depth: Int = 0, val items: List<List<ArticleBlock>>) : ArticleBlock
     data class Quote(val children: List<ArticleBlock>) : ArticleBlock
     data class Code(val text: String) : ArticleBlock
     data class Picture(val src: String, val alt: String?) : ArticleBlock
     data class Figure(val children: List<ArticleBlock>) : ArticleBlock
     data class Table(val rows: List<TableRow>) : ArticleBlock
+    data class Definition(val term: ArticleInline, val description: ArticleInline) : ArticleBlock
     data class Embed(val url: String) : ArticleBlock
     data object Rule : ArticleBlock
 }

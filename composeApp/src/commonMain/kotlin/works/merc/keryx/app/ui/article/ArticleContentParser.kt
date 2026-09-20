@@ -20,7 +20,7 @@ private val DROPPED_TAGS = setOf("script", "style", "link", "noscript", "templat
  */
 private val FORCED_BLOCK_TAGS = setOf(
     "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "blockquote", "pre", "img", "table",
-    "figure", "figcaption", "hr", "iframe", "embed", "object", "video", "audio", "center",
+    "figure", "figcaption", "dl", "hr", "iframe", "embed", "object", "video", "audio", "center",
 )
 
 /**
@@ -77,8 +77,10 @@ internal fun parseArticleContent(html: String): ArticleContent {
  * between them — bare text and inline elements alike — into paragraphs of their own.
  *
  * @param skip Elements to leave out entirely, used for the header the caller renders separately.
+ * @param depth The nesting level of the *list* this call is inside (0 outside any list), used to
+ * cycle the marker style/indent a new nested `<ul>`/`<ol>` found here would get — see [bullets].
  */
-private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = emptySet()): List<ArticleBlock> {
+private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = emptySet(), depth: Int = 0): List<ArticleBlock> {
     val blocks = mutableListOf<ArticleBlock>()
     val pending = mutableListOf<InlineSpan>()
     val pendingImages = mutableListOf<Element>()
@@ -126,19 +128,20 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
                 "h1", "h2", "h3", "h4", "h5", "h6" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
                     blocks += ArticleBlock.Heading(tag.substring(1).toInt(), it, align = resolveBlockAlign(node))
                 }
-                "ul", "ol" -> blocks += bullets(node, base, ordered = tag == "ol")
-                "blockquote" -> parseBlocks(node, base).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Quote(it) }
+                "ul", "ol" -> blocks += bullets(node, base, ordered = tag == "ol", depth = depth)
+                "blockquote" -> parseBlocks(node, base, depth = depth).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Quote(it) }
                 // wholeText(), not text(): a code block's own line breaks and indentation are its content.
                 "pre" -> node.wholeText().trimEnd().takeIf { it.isNotBlank() }?.let { blocks += ArticleBlock.Code(it) }
                 "img" -> picture(node, base)?.let { blocks += it }
                 "table" -> table(node, base)?.let { blocks += it }
-                "figure" -> parseBlocks(node, base).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Figure(it) }
+                "dl" -> blocks += definitionList(node, base)
+                "figure" -> parseBlocks(node, base, depth = depth).takeIf { it.isNotEmpty() }?.let { blocks += ArticleBlock.Figure(it) }
                 "iframe", "embed", "object", "video", "audio" -> embed(node, base)?.let { blocks += it }
                 "hr" -> blocks += ArticleBlock.Rule
                 // <center> has no decoration of its own beyond forcing every block under it to
                 // center — applied as a post-pass rather than threaded through parseBlocks, since
                 // only three block kinds actually carry an align field.
-                "center" -> blocks += parseBlocks(node, base).map(::forceCenterAlign)
+                "center" -> blocks += parseBlocks(node, base, depth = depth).map(::forceCenterAlign)
             }
             continue
         }
@@ -147,10 +150,10 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
             continue
         }
 
-        // Anything else — div, section, article, figure, unknown block-level markup — is a
-        // container: recurse so its content is kept rather than flattened or dropped.
+        // Anything else — div, section, article, unknown block-level markup — is a container:
+        // recurse so its content is kept rather than flattened or dropped.
         flushPending()
-        blocks += parseBlocks(node, base)
+        blocks += parseBlocks(node, base, depth = depth)
     }
     flushPending()
     return blocks
@@ -289,12 +292,32 @@ private fun InlineStyle.extendedBy(tag: String, element: Element, base: String):
     return if (style.isBlank()) tagStyle else tagStyle.mergedWithCss(style)
 }
 
-private fun bullets(element: Element, base: String, ordered: Boolean): List<ArticleBlock> {
+/**
+ * A `<ul>`/`<ol>` as one [ArticleBlock.Bullets], with each `<li>`'s own content recursed one list
+ * [depth] deeper — that deeper value is what lets a nested list found while parsing an `<li>`'s
+ * content cycle its own marker (see `ArticleBlockViews.kt`'s bullet-glyph selection).
+ */
+private fun bullets(element: Element, base: String, ordered: Boolean, depth: Int): List<ArticleBlock> {
     val items = element.children()
         .filter { it.normalName() == "li" }
-        .map { parseBlocks(it, base) }
+        .map { li -> parseBlocks(li, base, depth = depth + 1) }
         .filter { it.isNotEmpty() }
-    return if (items.isEmpty()) emptyList() else listOf(ArticleBlock.Bullets(ordered, items))
+    if (items.isEmpty()) return emptyList()
+    val start = if (ordered) element.attr("start").toIntOrNull() ?: 1 else 1
+    return listOf(ArticleBlock.Bullets(ordered, start = start, depth = depth, items = items))
+}
+
+/** A `<dl>` as a flat list of term/description pairs; a `<dt>` with several `<dd>`s repeats the term for each. */
+private fun definitionList(element: Element, base: String): List<ArticleBlock> {
+    val result = mutableListOf<ArticleBlock>()
+    var currentTerm = ArticleInline(emptyList())
+    for (child in element.children()) {
+        when (child.normalName()) {
+            "dt" -> currentTerm = inlineBlock(child, base) ?: ArticleInline(emptyList())
+            "dd" -> inlineBlock(child, base)?.let { result += ArticleBlock.Definition(currentTerm, it) }
+        }
+    }
+    return result
 }
 
 private fun table(element: Element, base: String): ArticleBlock.Table? {
