@@ -192,8 +192,10 @@
 ### 自動同期の抑制
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` は「誰が呼んでいるか」を受け取る。
-`SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupTasks`、`backgroundUpdateLoop`）は
-ゲートの対象になる — `autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
+`SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupMaintenance`（デスクトップの
+`StartupTasks.kt` と Android の起動経路で共有）、デスクトップの `backgroundUpdateLoop`
+（`StartupTasks.kt`）、Android の `FeedRefreshWorker`）はゲートの対象になる —
+`autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
 ダウンロード／マージ／アップロードのサイクルを一切実行せず `Result.Ok(Unit)` を返す。同期スピナーも
 動かさず、通知センターにも触れないので、既に利用不能と分かっているクラウド DB が書き込みのたびに
 再ダウンロード・再マージされることはない。`SyncTrigger.MANUAL`（デフォルト。UI から呼ばれる同期

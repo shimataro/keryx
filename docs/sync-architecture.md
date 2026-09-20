@@ -123,7 +123,8 @@ rather than looking stuck — which is the correct ordering anyway.
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
 debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
-path), and Android's `FeedRefreshWorker` — is subject to a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
+path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` — is subject to
+a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
 is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
 spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded
 and re-merged on every debounced write. `SyncTrigger.MANUAL` (the default, used by every UI-triggered sync — the
