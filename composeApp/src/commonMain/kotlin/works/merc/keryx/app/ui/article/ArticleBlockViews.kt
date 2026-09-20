@@ -25,7 +25,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -45,9 +44,6 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_embed_open
 import works.merc.keryx.app.ui.common.FlatTonalButton
 
-/** Matches the `line-height: 1.6` the web-view document sets on its own body. */
-private const val BODY_LINE_HEIGHT_RATIO = 1.6f
-
 /** Fixed column width for the simplified table rendering, which does no column measurement. */
 private val TABLE_COLUMN_WIDTH = 160.dp
 
@@ -58,7 +54,13 @@ private val BULLET_MARKER_WIDTH = 24.dp
 @Composable
 internal fun ArticleBlockView(block: ArticleBlock, modifier: Modifier = Modifier) {
     when (block) {
-        is ArticleBlock.Paragraph -> Text(block.text.annotated(), style = bodyTextStyle(), textAlign = block.align, modifier = modifier)
+        is ArticleBlock.Paragraph -> Text(
+            text = block.text.annotated(),
+            style = bodyTextStyle(),
+            color = if (block.muted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+            textAlign = block.align,
+            modifier = modifier,
+        )
 
         is ArticleBlock.Caption -> Text(
             text = block.text.annotated(),
@@ -184,28 +186,16 @@ private fun EmbedView(block: ArticleBlock.Embed, modifier: Modifier) {
     }
 }
 
-/** `bodyMedium` with the document's own line height, which M3's default leading is tighter than. */
-@Composable
-private fun bodyTextStyle(): TextStyle = MaterialTheme.typography.bodyMedium.let {
-    it.copy(lineHeight = it.fontSize * BODY_LINE_HEIGHT_RATIO)
-}
-
-@Composable
-private fun headingStyle(level: Int): TextStyle = when (level) {
-    1 -> MaterialTheme.typography.headlineSmall
-    2 -> MaterialTheme.typography.titleLarge
-    3 -> MaterialTheme.typography.titleMedium
-    else -> MaterialTheme.typography.titleSmall
-}
-
 /** Approximates `<mark>`'s UA-default yellow highlight without hardcoding a jarring pure yellow. */
 private val HIGHLIGHT_COLOR = Color(0xFFFFEB3B).copy(alpha = 0.5f)
 
 @Composable
 private fun ArticleInline.annotated(): AnnotatedString {
     val linkColor = MaterialTheme.colorScheme.primary
-    val baseFontSizeSp = MaterialTheme.typography.bodyMedium.fontSize.value
-    return remember(this, linkColor, baseFontSizeSp) { buildInlineString(linkColor, baseFontSizeSp) }
+    // Sized relative to the article body's own base size, not the enclosing element's (a heading,
+    // a table cell) — a simplification: a <sup>/<sub>/<small> nested inside a heading is rare
+    // enough in real feed markup that this is not worth threading per-context base sizes for.
+    return remember(this, linkColor) { buildInlineString(linkColor, ARTICLE_BODY_FONT_SIZE.value) }
 }
 
 private fun ArticleInline.buildInlineString(linkColor: Color, baseFontSizeSp: Float): AnnotatedString = buildAnnotatedString {

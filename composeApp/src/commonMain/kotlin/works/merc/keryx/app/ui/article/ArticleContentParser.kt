@@ -105,7 +105,7 @@ private fun parseBlocks(parent: Element, base: String, skip: Set<Element> = empt
             flushPending()
             when (tag) {
                 "p" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
-                    blocks += ArticleBlock.Paragraph(it, align = resolveBlockAlign(node))
+                    blocks += ArticleBlock.Paragraph(it, align = resolveBlockAlign(node), muted = node.hasClass("article-notice"))
                 }
                 "figcaption" -> inlineBlock(node, base, blockBaseStyle(node))?.let {
                     // A caption defaults to centered under its picture unless the markup says

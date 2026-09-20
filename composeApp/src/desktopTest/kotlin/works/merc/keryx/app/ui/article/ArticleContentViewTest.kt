@@ -26,6 +26,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import java.awt.datatransfer.DataFlavor
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Renders the Compose fallback reader, which stands in for the native web view on platforms that
@@ -197,6 +198,17 @@ class ArticleContentViewTest {
         waitForIdle()
 
         assertEquals("First paragraph\nSecond paragraph", clipboard.copiedText)
+    }
+
+    @Test
+    fun placesTheSimplifiedNoticeAboveTheTitle() = runDesktopComposeUiTest {
+        setContent {
+            ArticleContentView(document("<p>Body text here.</p>"))
+        }
+
+        val noticeTop = onNodeWithText(simpleNotice).fetchSemanticsNode().boundsInRoot.top
+        val titleTop = onNodeWithText("Article title").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(noticeTop < titleTop)
     }
 }
 

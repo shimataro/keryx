@@ -295,4 +295,13 @@ class ArticleContentParserTest {
         assertEquals(TextAlign.Center, (blocks[0] as ArticleBlock.Paragraph).align)
         assertEquals(TextAlign.Center, (blocks[1] as ArticleBlock.Heading).align)
     }
+
+    @Test
+    fun noContentDocumentIsMarkedMuted() {
+        val paragraph = parseArticleContent(
+            articleNoContentHtml(theme, title = "T", meta = "M", message = "本文がありません"),
+        ).blocks.single() as ArticleBlock.Paragraph
+
+        assertTrue(paragraph.muted)
+    }
 }

@@ -34,7 +34,7 @@ internal data class ArticleInline(val spans: List<InlineSpan>) {
 
 /** A block-level piece of an article, in the order it appears. */
 internal sealed interface ArticleBlock {
-    data class Paragraph(val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
+    data class Paragraph(val text: ArticleInline, val align: TextAlign? = null, val muted: Boolean = false) : ArticleBlock
     data class Caption(val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
     data class Heading(val level: Int, val text: ArticleInline, val align: TextAlign? = null) : ArticleBlock
     data class Bullets(val ordered: Boolean, val items: List<List<ArticleBlock>>) : ArticleBlock
