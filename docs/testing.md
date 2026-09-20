@@ -316,9 +316,9 @@ level, but only this manual pass catches wording that reads oddly in context.
   appears once per expanded tag, plus once under its folder — expected, not a duplicate bug). The
   expanded/collapsed state persists after restart, tags default to collapsed, and deleting a tag
   leaves no stale expansion behind.
-- Right-click a feed listed under an expanded tag → "タグから外す" detaches it from that tag only
-  (its folder placement and other tags are untouched); dragging it out of the tag list onto a folder
-  or another tag still works.
+- Right-click a feed listed under an expanded tag → its "タグを設定" (Assign Tags) submenu → unchecking
+  that tag detaches it from that tag only (its folder placement and other tags are untouched);
+  dragging it out of the tag list onto a folder or another tag still works.
 - With a subscription list long enough to scroll, hold a dragged feed (and separately, a dragged
   folder) near the top and the bottom edge of the feed list: the list auto-scrolls in that
   direction, faster the closer the pointer is to the edge, stops in the middle dead zone, and stops
