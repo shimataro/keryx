@@ -194,7 +194,9 @@
 - **Windows**
   - WiX Toolset v3 / v4 / v5（`PATH` に追加） — `packageMsi` に必要
     （jpackage の Windows インストーラー生成）。GitHub ホストの `windows-latest` ランナーには
-    WiX Toolset v3.14.1 がプリインストール済みのため、`ci.yml` と `release.yml` のどちらも
+    互換性のある WiX Toolset のバージョンがプリインストール済み（同梱バージョンはランナー
+    イメージの更新で変わりうるため、現在のバージョンは `actions/runner-images` の Windows
+    イメージ README で確認すること）のため、`ci.yml` と `release.yml` のどちらも
     追加のインストール手順なしでビルドできる。詳細は `build.md` 参照
 
 `fakeroot`/`rpm` は `ubuntu-latest` に既定で入っていない。`ci.yml`・`release.yml` の

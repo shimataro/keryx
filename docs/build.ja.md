@@ -645,7 +645,7 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
        deb/rpm/msi のスキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは
        Release 側のプレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の
        自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。
-   - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には WiX Toolset v3.14.1 がプリインストール済みのため、別途 WiX のセットアップ手順は不要）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
+   - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には互換性のある WiX Toolset（v3/v4/v5）がプリインストール済みのため、別途 WiX のセットアップ手順は不要。[setup.ja.md](setup.ja.md) 参照）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
    - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、`Keryx-<version>-android-universal.apk` と `Keryx-<version>-android-universal.aab` として添付する。APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console 提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップのインストーラーとは異なり、プレリリースタグでもビルド・添付する — Android には該当するバージョンメタデータ制約が無く、テスターが署名済み APK を必要とするため。
 
      > [!WARNING]
