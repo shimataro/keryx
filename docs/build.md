@@ -645,14 +645,15 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Six job definitions in total, five of which (`package-macos`, `package-linux`, `package-snap`,
+3. Seven job definitions in total, five of which (`package-macos`, `package-linux`, `package-snap`,
    `package-windows`, `package-android`) run in parallel — seven actual runs, since `package-linux`
    and `package-snap` are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
    `ubuntu-24.04`/`ubuntu-24.04-arm` respectively; the arm64 legs run `android-actions/setup-android@v3`
    first, since `:composeApp`'s Android target needs `ANDROID_HOME` merely to configure, and the
-   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all). The sixth,
-   `deploy-pages`, is gated on the other four non-Snap jobs and so is not part of that parallel set
-   (eight actual runs in total; see below):
+   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all). The remaining
+   two are not part of that parallel set: `publish-play` depends only on `package-android` (see its
+   own bullet below), and `deploy-pages` is gated on the four non-Snap `package-*` jobs
+   (nine actual runs in total; see below):
 
    - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, once per architecture, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-<arch>.deb`, `Keryx-<version>-linux-<arch>.rpm` **and `Keryx-<version>-linux-<arch>.zip`** for `<arch>` in `x86_64`, `arm64`. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). A failure on one architecture's leg (`fail-fast: false`) does not withhold the other's assets.
@@ -691,11 +692,16 @@ Flow:
      keeps every pre-release version distinct on its own — and testers need a signed APK.
      - **Build and attach.** Only the APK is attached to the GitHub Release, as
        `Keryx-<version>-android-universal.apk` — the AAB is never attached (see the note at the top
-       of this section for why).
-     - **Publish to Google Play.** The same job also uploads the AAB to Google Play
-       (`r0adkll/upload-google-play`), gated on the `PLAY_SERVICE_ACCOUNT_JSON` secret below being
-       set at all — same skip-if-unconfigured pattern as the Snap Store publish above. See
-       "Publishing to Google Play" below for the full setup and the track this targets.
+       of this section for why); instead it is uploaded as a build artifact
+       (`actions/upload-artifact`) for the separate `publish-play` job below to consume.
+   - `publish-play`, a separate job (needs `package-android`, so it starts only once that job's AAB
+     artifact exists) that downloads that artifact and **publishes it to Google Play**
+     (`r0adkll/upload-google-play`), gated on the `PLAY_SERVICE_ACCOUNT_JSON` secret below being set
+     at all — same skip-if-unconfigured pattern as the Snap Store publish above. Kept as its own job
+     (rather than a step inside `package-android`) so a Play publish failure never withholds the APK
+     already attached to the GitHub Release, the same reasoning as `package-snap`'s own separation
+     from `package-linux`. See "Publishing to Google Play" below for the full setup and the track
+     this targets.
 
    `deploy-pages` (triggers the Cloudflare Pages deploy hook for the download page) waits on
    `package-macos` / `package-linux` / `package-windows` / `package-android`, but deliberately
