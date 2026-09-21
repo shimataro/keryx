@@ -24,6 +24,7 @@
     <string name="setup_choose_mode">Choose how to sync (you can change this later)</string>
     <string name="setup_local_only">Use locally only</string>
     <string name="setup_local_desc">Use this device only</string>
+    <string name="setup_local_action">Start</string>
     <string name="setup_cloud_sync_section_title">Sync via cloud storage</string>
     <string name="setup_cloud_sync_section_desc">Share subscriptions and read state across devices</string>
     <string name="setup_dropbox">Sync with Dropbox</string>

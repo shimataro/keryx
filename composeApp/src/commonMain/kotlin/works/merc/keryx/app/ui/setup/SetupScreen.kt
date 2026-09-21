@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,8 +38,6 @@ import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
-import works.merc.keryx.app.ui.common.KeryxIcon
-import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.common_abort
@@ -55,6 +54,7 @@ import works.merc.keryx.app.resources.setup_cloud_sync_section_title
 import works.merc.keryx.app.resources.setup_connecting
 import works.merc.keryx.app.resources.setup_dropbox
 import works.merc.keryx.app.resources.setup_google_drive
+import works.merc.keryx.app.resources.setup_local_action
 import works.merc.keryx.app.resources.setup_local_desc
 import works.merc.keryx.app.resources.setup_local_only
 import works.merc.keryx.app.resources.setup_onedrive
@@ -103,37 +103,75 @@ fun SetupScreen(onComplete: () -> Unit) {
             Spacer(Modifier.height(24.dp))
 
             val enabled = vm.phase != SetupPhase.CONNECTING
-            OptionCard(
-                title = stringResource(Res.string.setup_local_only),
-                description = stringResource(Res.string.setup_local_desc),
-                enabled = enabled,
-                onClick = { vm.chooseLocalOnly(onComplete) },
-            )
-            if (vm.availableCloudTypes.isNotEmpty()) {
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    stringResource(Res.string.setup_cloud_sync_section_title),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    stringResource(Res.string.setup_cloud_sync_section_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
 
-                vm.availableCloudTypes.forEach { type ->
-                    val option = type.setupOption()
-                    Spacer(Modifier.height(12.dp))
-                    OptionCard(
-                        title = stringResource(option.title),
-                        description = null,
-                        enabled = enabled,
-                        icon = option.icon,
-                        onClick = { vm.connect(type, onComplete) },
+            // Local-only card
+            KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
+                Column(
+                    Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        stringResource(Res.string.setup_local_only),
+                        style = MaterialTheme.typography.titleMedium,
                     )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(Res.string.setup_local_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    FlatTonalButton(
+                        onClick = { vm.chooseLocalOnly(onComplete) },
+                        enabled = enabled,
+                    ) {
+                        Text(stringResource(Res.string.setup_local_action))
+                    }
+                }
+            }
+
+            if (vm.availableCloudTypes.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
+                    Column(
+                        Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            stringResource(Res.string.setup_cloud_sync_section_title),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stringResource(Res.string.setup_cloud_sync_section_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        vm.availableCloudTypes.forEachIndexed { index, type ->
+                            val option = type.setupOption()
+                            FlatTonalButton(
+                                onClick = { vm.connect(type, onComplete) },
+                                enabled = enabled,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Image(
+                                        painter = painterResource(option.icon),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(option.title))
+                                }
+                            }
+                            if (index != vm.availableCloudTypes.lastIndex) {
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                    }
                 }
             }
 
@@ -169,49 +207,5 @@ fun SetupScreen(onComplete: () -> Unit) {
             onConfirm = { vm.cancelConnect(); confirmingAbortConnect = false },
             dismissText = stringResource(Res.string.common_cancel),
         )
-    }
-}
-
-@Composable
-private fun OptionCard(
-    title: String,
-    description: String?,
-    enabled: Boolean,
-    icon: DrawableResource? = null,
-    onClick: () -> Unit,
-) {
-    KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
-        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            if (description != null) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            FlatTonalButton(onClick = onClick, enabled = enabled) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (icon != null) {
-                        Image(
-                            painter = painterResource(icon),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    } else {
-                        KeryxIcon(
-                            KeryxIcons.ThisDevice,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(title)
-                }
-            }
-        }
     }
 }

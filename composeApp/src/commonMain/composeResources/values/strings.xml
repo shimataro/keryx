@@ -25,6 +25,7 @@
     <string name="setup_choose_mode">同期方法を選んでください（後からでも変更できます）</string>
     <string name="setup_local_only">ローカルのみで使う</string>
     <string name="setup_local_desc">このデバイス単体で使用します</string>
+    <string name="setup_local_action">開始</string>
     <string name="setup_cloud_sync_section_title">クラウドストレージで同期する</string>
     <string name="setup_cloud_sync_section_desc">複数デバイスで購読・既読を共有します</string>
     <string name="setup_dropbox">Dropbox で同期する</string>
