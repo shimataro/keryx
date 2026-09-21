@@ -10,7 +10,7 @@ metadata.
 
 ## Layout
 
-```
+```text
 listing/
 ├── en-US/
 │   ├── title.txt               # ≤ 30 characters
