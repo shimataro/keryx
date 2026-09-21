@@ -460,11 +460,14 @@ once a release tag is pushed.
 `androidApp/build.gradle.kts`'s `versionCodeOf` folds `appVersion` into Android's single,
 strictly-increasing `versionCode` integer: `MAJOR*1_000_000 + MINOR*10_000 + PATCH*100 +
 preReleaseOrdinal`, where `preReleaseOrdinal` comes from an optional SemVer pre-release label
-(`-alpha`, `-beta.2`, `-rc.1`, ...) — `0 + N` for `alpha`, `30 + N` for `beta`, `60 + N` for `rc`
-(`N` defaults to 1, and must be in `1..29`), or `99` with no suffix at all:
+(`-alpha`, `-beta.2`, `-rc.1`, ...) — `0` for a bare `alpha`, `0 + N` (`N` in `1..29`) for
+`alpha.N`, `30`/`30 + N` for `beta`/`beta.N`, `60`/`60 + N` for `rc`/`rc.N`, or `99` with no
+suffix at all. A bare label gets its own ordinal rather than defaulting to `.1`'s, since SemVer
+itself orders `v1.2.0-alpha` strictly before `v1.2.0-alpha.1`:
 
 | Tag | `versionCode` |
 | --- | --- |
+| `v1.2.0-alpha` | `1020000` |
 | `v1.2.0-alpha.1` | `1020001` |
 | `v1.2.0-beta.1` | `1020031` |
 | `v1.2.0-rc.1` | `1020061` |

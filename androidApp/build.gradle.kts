@@ -24,10 +24,13 @@ val appVersion: String =
 //   MAJOR*1_000_000 + MINOR*10_000 + PATCH*100 + preReleaseOrdinal
 // preReleaseOrdinal keeps every pre-release of a given MAJOR.MINOR.PATCH strictly below its final
 // release's own code (99), so `v1.2.0-beta.1` and the eventual `v1.2.0` never collide:
-//   -alpha[.N]   ->  0 + N   (N defaults to 1, must be in 1..29)
-//   -beta[.N]    -> 30 + N
-//   -rc[.N]      -> 60 + N
+//   -alpha       ->  0        -alpha.N (N in 1..29) -> 0 + N
+//   -beta        -> 30        -beta.N  (N in 1..29) -> 30 + N
+//   -rc          -> 60        -rc.N    (N in 1..29) -> 60 + N
 //   (no suffix)  -> 99
+// A bare label (no `.N`) gets its own reserved ordinal rather than defaulting to `.1`'s — SemVer
+// itself orders `1.2.0-alpha` strictly before `1.2.0-alpha.1`, and the older `?: 1` fallback here
+// folded both to the same versionCode, which Play rejects as a re-upload of an already-seen code.
 // This replaces an older scheme that stripped the pre-release suffix entirely before folding,
 // which made every pre-release of a version share its eventual final release's versionCode — Play
 // rejects a re-upload at an already-used versionCode, so that scheme could never actually publish
@@ -58,9 +61,24 @@ fun versionCodeOf(version: String): Int {
                 "versionCodeOf does not recognize pre-release label '$suffix' in $version — " +
                     "expected alpha/beta/rc, optionally followed by a numeric ordinal (e.g. beta.1)",
             )
-        val ordinal = match.groupValues[2].toIntOrNull() ?: 1
-        require(ordinal in 1..29) {
-            "versionCodeOf requires the pre-release ordinal in 1..29, got $ordinal in $version"
+        // The `.N` group is empty (not merely absent) for a bare label like `alpha` — that case
+        // gets its own reserved ordinal (0) rather than silently sharing `.1`'s, so `1.2.0-alpha`
+        // and `1.2.0-alpha.1` never fold to the same versionCode. `toIntOrNull()` failing on a
+        // non-empty group means the number overflowed Int — reject it explicitly rather than
+        // falling back to a default that would hide the collision the same way.
+        val ordinalGroup = match.groupValues[2]
+        val ordinal = if (ordinalGroup.isEmpty()) {
+            0
+        } else {
+            val explicitOrdinal = ordinalGroup.toIntOrNull()
+                ?: error(
+                    "versionCodeOf requires the pre-release ordinal to fit in a 32-bit integer, " +
+                        "got '$ordinalGroup' in $version",
+                )
+            require(explicitOrdinal in 1..29) {
+                "versionCodeOf requires the pre-release ordinal in 1..29, got $explicitOrdinal in $version"
+            }
+            explicitOrdinal
         }
         when (match.groupValues[1]) {
             "alpha" -> 0 + ordinal

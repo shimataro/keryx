@@ -463,11 +463,14 @@ variant をビルドする）が、`bundlePlayRelease` はどの集約ライフ�
 `androidApp/build.gradle.kts` の `versionCodeOf` は `appVersion` を Android の単一で単調増加する
 `versionCode` 整数に畳み込む: `MAJOR*1_000_000 + MINOR*10_000 + PATCH*100 + preReleaseOrdinal`。
 `preReleaseOrdinal` は任意の SemVer プレリリースラベル（`-alpha`、`-beta.2`、`-rc.1` など）から
-決まる — `alpha` は `0 + N`、`beta` は `30 + N`、`rc` は `60 + N`（`N` は省略時 1、`1..29` の範囲）、
-接尾辞が無ければ `99`:
+決まる — 裸の `alpha` は `0`、`alpha.N`（`N` は `1..29`）は `0 + N`、`beta`/`beta.N` は
+`30`/`30 + N`、`rc`/`rc.N` は `60`/`60 + N`、接尾辞が無ければ `99`。裸のラベルは `.1` の値を
+共有せず自身専用の値を持つ — SemVer 自体が `v1.2.0-alpha` を `v1.2.0-alpha.1` より確実に前に
+並べるため:
 
 | タグ | `versionCode` |
 | --- | --- |
+| `v1.2.0-alpha` | `1020000` |
 | `v1.2.0-alpha.1` | `1020001` |
 | `v1.2.0-beta.1` | `1020031` |
 | `v1.2.0-rc.1` | `1020061` |
