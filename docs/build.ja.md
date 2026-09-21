@@ -520,8 +520,10 @@ APK が入っている端末では `installGithubDebug` がダウングレード
 | `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
 
 この 4 つがどれも未設定なら、`playRelease` は単純にアプリ署名鍵で署名する —
-このプロジェクトがなぜ別のアップロード鍵を使うのか、そして未設定のままにしておくことが劣化ではなく
-正当な選択である理由は、後述の「Google Play への公開」を参照。
+ローカルの未公開ビルドとしては正当な選択である。`release.yml` と `publish-play.yml` は
+（`-PandroidReleaseSigningRequired=true` により）この 4 つも常に必須とする — このプロジェクトは
+Play に専用のアップロード鍵を登録済みであり、それ以外の鍵で署名した AAB は公開できないため。
+このプロジェクトがなぜ別のアップロード鍵を使うのかは、後述の「Google Play への公開」を参照。
 
 アプリアイコンは `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`。トレイアイコンは
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`。`tray_icon_outlined.png`
@@ -820,18 +822,25 @@ Play App Signing の登録ページからダウンロードできる）。生成
 最終的に目にする ID をそのまま持たせるため）。一方 `playRelease` の AAB は**別のアップロード鍵**
 で署名する — 一度登録すると Play 自身の署名設定画面が「アップロード鍵の証明書」として表示する鍵で、
 隣に並ぶ「アプリ署名鍵の証明書」とは別物である。Google はアプリ署名鍵をそのままアップロード鍵として
-再利用することを明示的に許可している（このプロジェクトでも `ANDROID_UPLOAD_*` の4つの Secrets を
-設定しないだけでそうできる — `androidApp/build.gradle.kts` の `signingConfigs` 参照）が、専用の
-アップロード鍵を登録するのは Google が推奨する追加の防御策であり、このプロジェクトは実際にそちらを
-採用している。
+再利用することを明示的に許可している——*ローカルの*未公開ビルドに限れば、`ANDROID_UPLOAD_*` の
+4つの値を設定しないだけでそうできる（`androidApp/build.gradle.kts` の `signingConfigs` 参照）が、
+専用のアップロード鍵を登録するのは Google が推奨する追加の防御策であり、このプロジェクトは実際に
+そちらを採用している。専用のアップロード鍵を Play Console に登録済みである以上、公開が絡む場面では
+このフォールバックは選択肢にならない: Play は登録済みのアップロード鍵証明書（アップロード鍵を
+一度も登録していなければアプリ署名鍵証明書）で署名された AAB しか受け付けず、それ以外は拒否する。
+そのため、公開を行う2つのワークフローはこのフォールバックを許さず、下記のとおり専用鍵を必須と
+する。
 
-**8つの署名 Secrets は、存在する場合はすべて揃って初めて有効になる。** `release.yml` と
+**公開を行う処理では、8つの署名 Secrets すべてが揃って初めて有効になる。** `release.yml` と
 `publish-play.yml` はいずれも `-PandroidReleaseSigningRequired=true` を渡しており、これは
 アプリ署名側の Secrets が未設定（または一部だけ設定）の場合に即座のビルド失敗へつなげる
-（従来どおり）。アップロード鍵側についても*一部だけ*設定されていれば同様に失敗するが、*完全に
-未設定*であれば問題なく、単にアプリ署名鍵で AAB を署名する（上記「アプリ署名鍵とアップロード鍵の
-違い」参照）。いずれにせよこのワークフローは、未署名のアーティファクトや半端な署名 ID のまま
-成功してはならない。
+（従来どおり）。アップロード鍵側については*一部だけ*設定されていても*完全に未設定*であっても
+同様に失敗する——このプロジェクトは Play に専用のアップロード鍵を登録済みであり、それ以外の鍵
+（アプリ署名鍵へのフォールバックを含む）で署名した `playRelease` の AAB は公開できる成果物では
+なく、ローカルで使えるだけの成果物になってしまうため。いずれにせよこのワークフローは、未署名の
+アーティファクトや半端な署名 ID のまま成功してはならない。このフラグを使わない通常のローカル
+`./gradlew build`/`bundlePlayRelease` では、4つの `ANDROID_UPLOAD_*` は引き続き任意で、上記の
+アプリ署名鍵へのフォールバックがそのまま働く。
 
 **チャネル間で一致していなければならないのは Play が再署名する先の ID であり、ビルド時の鍵では
 ない。** `androidApp/build.gradle.kts` の `signingConfigs` ブロック自体は flavor スコープではない

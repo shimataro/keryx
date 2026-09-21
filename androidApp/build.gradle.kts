@@ -256,10 +256,16 @@ android {
             missingUploadSigningValues.size < 4 ->
                 error("Incomplete Android upload signing configuration: missing ${missingUploadSigningValues.joinToString()}. See docs/setup.md.")
 
-            // Unlike the app-signing case, there is no unsigned fallback here to warn about:
-            // leaving this unconfigured simply means playRelease signs with the app signing
-            // config instead (see androidComponents below) — the same throwaway keystore then
-            // covers github/play/debug for local development, with nothing left unsigned.
+            // Unlike the app-signing case, leaving this unconfigured is not itself a problem:
+            // playRelease simply signs with the app signing config instead (see androidComponents
+            // below), the same throwaway keystore then covering github/play/debug for local
+            // development with nothing left unsigned. That fallback only holds for a *local*
+            // build, though — this project has a dedicated upload key registered with Play
+            // Console, so a `playRelease` AAB signed any other way is not something Play will
+            // actually accept, only something a local build can produce. releaseSigningRequired
+            // (set only by release.yml/publish-play.yml, which publish) turns that "fine
+            // locally, but not publishable" gap into a hard failure here instead of a confusing
+            // rejection from Play later.
             releaseSigningRequired ->
                 error("Android upload signing is required here but is not configured. See docs/build.md.")
 

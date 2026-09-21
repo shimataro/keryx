@@ -531,11 +531,14 @@ jobs:
       # is decoded only when set: GitHub maps an unset secret to an empty string rather than
       # leaving the variable unset, and decoding that would produce a 0-byte file that looks
       # "configured" to androidApp/build.gradle.kts's own null check — failing deep inside AGP
-      # instead of taking the documented, unset-and-fall-back-to-app-signing path.
-      # -PandroidReleaseSigningRequired below requires both keys regardless, so this job always
-      # fails loudly if either secret is genuinely missing; it just fails with
-      # androidApp/build.gradle.kts's own clear error message rather than a 0-byte-keystore one
-      # from deep inside AGP.
+      # with an obscure keystore-format error instead of that file's own clear message. This job
+      # always passes -PandroidReleaseSigningRequired=true below, which requires all eight signing
+      # values regardless of whether the upload secret is genuinely missing or half-configured
+      # (this project has a dedicated upload key registered with Play, so there is no
+      # fall-back-to-app-signing path available to a publishing job — only a local,
+      # -PandroidReleaseSigningRequired-less build can take that path); the point of decoding
+      # conditionally here is purely to get androidApp/build.gradle.kts's own clear error message
+      # instead of a 0-byte-keystore one from deep inside AGP.
       - name: Decode signing keystores
         id: keystore
         env:

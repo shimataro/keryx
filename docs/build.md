@@ -516,9 +516,11 @@ under the same three-source priority — the *upload* key, distinct from the app
 | `android.upload.key.alias` | `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` |
 | `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
 
-With none of these four set, `playRelease` simply signs with the app signing key instead — see
-"Publishing to Google Play" below for why this project uses a separate upload key at all, and why
-leaving it unset is a legitimate choice, not a degraded one.
+With none of these four set, `playRelease` simply signs with the app signing key instead — a
+legitimate choice for a local, unpublished build. `release.yml` and `publish-play.yml` require all
+four regardless (via `-PandroidReleaseSigningRequired=true`), since this project has a dedicated
+upload key registered with Play and an AAB signed any other way is not publishable — see
+"Publishing to Google Play" below for why this project uses a separate upload key at all.
 
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
@@ -803,18 +805,25 @@ that: `githubRelease`'s APK is signed directly with the app signing key (so it a
 identity a device will see, matching what sideloading needs), while `playRelease`'s AAB is signed
 with a **separate upload key** instead — the key Play's own signing-config UI shows as the "upload
 key certificate" once one is registered, distinct from the "app signing key certificate" alongside
-it. Google explicitly allows reusing the app signing key as its own upload key (this project could
-too, by simply not setting the four `ANDROID_UPLOAD_*` secrets — see
-`androidApp/build.gradle.kts`'s `signingConfigs`), but registering a dedicated upload key is
-Google's recommended hardening, and it is what this project actually does.
+it. Google explicitly allows reusing the app signing key as its own upload key — for a *local*,
+unpublished build, simply not setting the four `ANDROID_UPLOAD_*` values does that (see
+`androidApp/build.gradle.kts`'s `signingConfigs`) — but registering a dedicated upload key is
+Google's recommended hardening, and it is what this project actually does. Because a dedicated
+upload key is registered with Play Console, that fallback is not an option once publishing is
+actually involved: Play only recognizes an AAB signed with the registered upload key certificate
+(or the app signing key certificate, if no upload key were ever registered) and rejects anything
+else, so the two publishing workflows require the dedicated key below rather than allowing the
+fallback.
 
-**All eight signing secrets, when present, are required together.** `release.yml` and
+**All eight signing secrets are required together for anything that publishes.** `release.yml` and
 `publish-play.yml` both pass `-PandroidReleaseSigningRequired=true`, which turns a missing or
 half-configured app-signing secret into an immediate build failure (as always), and — separately —
-a *half-configured* upload secret into the same failure; a *fully unset* upload secret is fine and
-simply falls back to signing the AAB with the app signing key (see "App signing key vs. upload key"
-above). Either way, this workflow must never succeed with an unsigned artifact or a half-formed
-signing identity.
+*any* incomplete upload secret, half-configured or fully unset, into the same failure: this project
+has a dedicated upload key registered with Play, so a `playRelease` AAB signed with anything else
+(the app-signing-key fallback included) is not a publishable artifact, only a locally useful one.
+Either way, this workflow must never succeed with an unsigned artifact or a half-formed signing
+identity. Outside that flag — a plain local `./gradlew build`/`bundlePlayRelease` — the four
+`ANDROID_UPLOAD_*` values stay optional and the app-signing-key fallback above still applies.
 
 **What has to match across channels is the identity Play re-signs to, not the build-time key.**
 `androidApp/build.gradle.kts`'s `signingConfigs` block is not flavor-scoped by itself — `playRelease`
