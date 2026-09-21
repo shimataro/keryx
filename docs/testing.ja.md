@@ -161,20 +161,24 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 ```
 
 CI で実行する（そしてローカルでも実行すべき）のは `github` だけ——このスイートは flavor 固有の
-挙動を何も検証していない（2 つの flavor の違いは `REQUEST_INSTALL_PACKAGES` マニフェスト権限の
-有無だけ）。そもそも `connectedPlayDebugAndroidTest` にフォールバックする先すら無い:
+挙動を何も検証していない: **debug** ビルドに限れば、2 つの flavor の違いは
+`REQUEST_INSTALL_PACKAGES` マニフェスト権限の有無だけである（release ビルドは署名鍵も異なる——
+`build.ja.md` の「Google Play への公開」参照——が `androidComponents` が差し替えるのは
+`playRelease` だけで debug バリアントには一切触れないため、この debug 専用スイートには無関係）。
+そもそも `connectedPlayDebugAndroidTest` にフォールバックする先すら無い:
 `androidApp/build.gradle.kts` が `playDebug` バリアント自体を無効化しているためで（`githubDebug`
 がすでにカバーしていない、デバッグビルド固有の検証対象は無い——同ファイル自身のコメント参照）、
 `connectedAndroidTest`（flavor 指定なし）は今では唯一残るデバッグバリアントである `githubDebug`
 のみを実行する。
 
-「2 つの flavor の違いがその権限*だけ*である」こと自体も、`ci.yml` の
+「`github`/`play` の **release** マニフェストの違いがその権限*だけ*である」こと自体は、`ci.yml` の
 「Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)」ステップが毎 push で検証している。
 `:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` を実行し、**マージ後の**
 マニフェスト 2 つを grep するので、flavor のソースセットではなく AGP が実際に生成したものに対する
 アサーションになる。マージ後であることが重要で、どちらの flavor の `AndroidManifest.xml` も変えずに
 推移的なライブラリのマニフェストが `play` 側へこの権限を復活させることがあり得る——そしてそれこそが
-Google Play に弾かれるケースである。
+Google Play に弾かれるケースである。このチェックはマニフェストのみを対象とし、2 つの release
+バリアントの署名鍵については（その目的上）何も検証しないし、検証する必要もない。
 
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
@@ -1214,7 +1218,12 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
   確認する。サイドロードする APK と更新先のリリースは**同じ鍵**で署名されている必要がある（そうでないと
   Android が上書きを許さない）ため、どちら側も debug ビルドで代用できず、確認後に
   `installGithubDebug` へ戻るには先に `./gradlew :androidApp:uninstallGithubDebug` が必要
-  （[setup.ja.md](setup.ja.md) の「よくある問題」参照）。
+  （[setup.ja.md](setup.ja.md) の「よくある問題」参照）。同じ理由で、ローカルに
+  `android.upload.keystore.*` を設定している場合（`build.ja.md` の「Google Play への公開」参照）は、
+  上記の `github`/`play` 両 flavor のサイドロードを同じ端末に続けて行えない —— 両 flavor の
+  `applicationId` は同じ `works.merc.keryx` なので、`play` 側は `github` 側とは異なる署名証明書を
+  持つことになり、2 つ目のインストールが更新の衝突として失敗する。片方をアンインストールしてから
+  もう片方をサイドロードするか、端末（プロファイル）を分けること。
 - **各プラットフォームの失敗経路**: ダウンロード途中でキャンセルする（`Failed` ではなく
   `Available` に戻り、`.part` ファイルも消えていること）；ダウンロード中にネットワークを切断する
   （`Failed` になり再試行アクションが出ること）；ダウンロード開始前にディスクを満杯にする

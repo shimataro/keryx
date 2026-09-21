@@ -742,3 +742,57 @@ not host the WebView"*, with the app's entry point becoming
 `FilePicker` and the macOS `Desktop` handlers on top of. Worth doing only as its own project —
 Linux arm64 being a released target now (see "Status" above) makes the simplified reader's UX gap
 more visible, but doesn't by itself justify replacing the app's entry point.
+
+## CI-only: macOS `packageDmg` fails with `hdiutil detach` "Resource busy"
+
+**Status**: external (macOS runner) flakiness, mitigated with a retry rather than fixed. jpackage's
+own DMG step is outside this app's control.
+
+### Symptom
+
+`./gradlew packageDmg` fails on a `macos-latest` GitHub Actions runner with:
+
+```text
+Execution failed for task ':composeApp:packageDmg' (registered by plugin 'org.jetbrains.compose').
+> Command failed (exit 16): hdiutil detach /dev/disk31s1
+```
+
+Observed on `feat/google-play-publishing` @ `e484ad6` (run 35576202091, job "Build & Test
+(macos-latest)"). The same branch's two preceding CI runs (35564082624, 35573298168) were both
+green, including the macOS leg, and the only diff between the last green run and this one was a
+docs-only commit (`docs/build.md` / `docs/build.ja.md`).
+
+### Ruled out
+
+- **Not caused by that branch's own changes.** Its full diff against `v0` is scoped to
+  `androidApp/`, `.github/workflows/publish-play.yml`, `distribution/play/`, and docs; the only
+  `composeApp/build.gradle.kts` change is a pure deletion of an unused Android-only val, and
+  `gradle/libs.versions.toml` (which pins the Compose Multiplatform plugin) has no diff at all. The
+  new CI step that branch adds to `ci.yml` is guarded `if: runner.os == 'Linux'` and never runs on
+  the macOS job.
+- **Not a change to the `packageDmg` CI step itself** — that step has been stable since it was
+  introduced in #71.
+- **Not concurrent `packageDmg` runs on the same runner.** GitHub Actions runners are single-use
+  VMs and no `concurrency:` group serializes/cancels pushes, so a stale mount can't come from a
+  second run sharing the same disk.
+
+jpackage builds a DMG by mounting a scratch disk image, copying the app bundle in, and detaching it
+again; the orphan-process cleanup in the same log (`Terminate orphan process: pid (diskimages-help)`)
+shows a disk-image helper process still alive at job teardown, consistent with the detach racing
+against something (Spotlight/`mdworker`, most likely) still holding the volume open.
+
+### Mitigation
+
+`.github/workflows/ci.yml`'s "Verify packaging (macOS)" step and `.github/workflows/release.yml`'s
+"Package App bundle (+ Dmg for stable releases)" step both retry `packageDmg` up to 3 times, but
+only when the failure log actually contains `hdiutil` — any other failure (a real packaging
+regression) still fails on the first attempt. Before retrying, any volume still mounted under
+`/Volumes/Keryx*` is force-detached so the next attempt doesn't land on a differently-named mount
+point.
+
+### What a real fix would need
+
+There is no app-side lever here — the mount/detach is entirely inside jpackage's native DMG
+assembly, and the race is a property of the CI runner's environment (Spotlight indexing a freshly
+mounted volume), not of anything this app configures. A retry is the only available mitigation
+short of GitHub or the JDK addressing it upstream.

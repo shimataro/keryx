@@ -113,28 +113,6 @@ val appPackageVersion: String = appVersion.substringBefore('-')
 val isZeroMajorVersion = appPackageVersion.substringBefore('.').toIntOrNull() == 0
 val macOsPackageVersion = if (isZeroMajorVersion) "1.0.0" else appPackageVersion
 
-// Android's versionCode is a single monotonically-increasing integer, so MAJOR.MINOR.PATCH is
-// folded into one number two decimal digits per component (1.2.3 -> 10203, 0.1.2 -> 102). This
-// caps MINOR and PATCH at 99 each, which is well beyond anything this project's tagging produces.
-// Derived from appPackageVersion (already stripped of any pre-release suffix) so a `-beta.1` build
-// and its final release share a versionCode — Play would reject a re-upload at the same code, but
-// pre-release builds are not published there (see release.yml, which skips installers for them).
-val androidVersionCode: Int = appPackageVersion.split('.')
-    .map { it.toIntOrNull() ?: 0 }
-    .let { parts ->
-        val major = parts.getOrElse(0) { 0 }
-        val minor = parts.getOrElse(1) { 0 }
-        val patch = parts.getOrElse(2) { 0 }
-        // Each component must fit the two decimal digits reserved for it, or two distinct
-        // versions could fold to the same versionCode (e.g. 1.100.0 and 2.0.0 both -> 20000).
-        require(minor in 0..99 && patch in 0..99) {
-            "androidVersionCode encoding requires MINOR and PATCH in 0..99, got $appPackageVersion"
-        }
-        major * 10000 + minor * 100 + patch
-    }
-    // versionCode must be >= 1; the local-dev "0.0.0" default would otherwise fold to 0.
-    .coerceAtLeast(1)
-
 val generatedBuildConfigDir = layout.buildDirectory.dir("generated/buildConfig/kotlin")
 
 // Google Drive is desktop-only (see CloudStorageAvailability.android.kt / PlatformModule.android.kt

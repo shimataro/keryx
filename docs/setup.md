@@ -127,7 +127,11 @@ Split into what every target needs in common, and what's specific to the Android
   rather than silently building unsigned or with only part of the signing identity. `.gitignore`
   already excludes `*.keystore` / `*.jks`, so it's safe to keep the file at the repo root — it
   won't get committed by accident. See [build.md](build.md) for how to issue a production keystore
-  for Google Play distribution.
+  for Google Play distribution. A separate, optional `android.upload.keystore.*` (plus
+  `.key.alias`/`.key.password`) signs the `playRelease` variant submitted to Google Play with a
+  dedicated upload key — leaving it unset simply signs `playRelease` with the same keystore as
+  everything else, so the four keys above are enough to build and install everything locally; see
+  build.md's "Publishing to Google Play" for why the two keys exist in the first place.
 - **A connected Android device or running emulator**: only needed to run one of the two Android
   instrumented suites — `androidDeviceTest` (`DatabaseMerger`/`DatabaseSnapshot`'s Android actuals
   against the real bundled SQLite) and `androidApp`'s own suite (Compose UI gesture tests) — see

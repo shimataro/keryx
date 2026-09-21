@@ -51,9 +51,9 @@ Linux is available for both x86_64 and arm64.
 > Windows SmartScreen shows a "Windows protected your PC" warning on first run. Click
 > "More info", then "Run anyway" to continue.
 >
-> **Android**: the `.apk` is not distributed through Google Play, so Android will ask you to
-> allow installing from this source the first time you open it. The `.aab` is a Google Play
-> submission format, not something you can install directly — download the `.apk` instead.
+> **Android**: this `.apk` is a sideload install, distributed directly rather than through
+> Google Play, so Android will ask you to allow installing from this source the first time
+> you install it from the app you used to open it (e.g. your file manager or browser).
 
 Once Keryx is running, it can check for, download, and install newer releases on its own — from
 the notification bell, the task tray, or Settings → Updates — so the manual steps above are only
