@@ -50,31 +50,29 @@ import works.merc.keryx.app.resources.setup_abort_connect_confirm_body
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_title
 import works.merc.keryx.app.resources.setup_auth_failed
 import works.merc.keryx.app.resources.setup_choose_mode
+import works.merc.keryx.app.resources.setup_cloud_sync_section_desc
+import works.merc.keryx.app.resources.setup_cloud_sync_section_title
 import works.merc.keryx.app.resources.setup_connecting
 import works.merc.keryx.app.resources.setup_dropbox
-import works.merc.keryx.app.resources.setup_dropbox_desc
 import works.merc.keryx.app.resources.setup_google_drive
-import works.merc.keryx.app.resources.setup_google_drive_desc
-import works.merc.keryx.app.resources.setup_onedrive
-import works.merc.keryx.app.resources.setup_onedrive_desc
 import works.merc.keryx.app.resources.setup_local_desc
 import works.merc.keryx.app.resources.setup_local_only
+import works.merc.keryx.app.resources.setup_onedrive
 import works.merc.keryx.app.resources.setup_title
 
-/** Setup card copy + brand icon for a cloud provider. */
+/** Setup card title + brand icon for a cloud provider. */
 private class CloudSetupOption(
     val title: StringResource,
-    val description: StringResource,
     val icon: DrawableResource,
 )
 
 private fun CloudStorageType.setupOption(): CloudSetupOption = when (this) {
     CloudStorageType.DROPBOX ->
-        CloudSetupOption(Res.string.setup_dropbox, Res.string.setup_dropbox_desc, Res.drawable.dropbox)
+        CloudSetupOption(Res.string.setup_dropbox, Res.drawable.dropbox)
     CloudStorageType.GOOGLE_DRIVE ->
-        CloudSetupOption(Res.string.setup_google_drive, Res.string.setup_google_drive_desc, Res.drawable.google_drive)
+        CloudSetupOption(Res.string.setup_google_drive, Res.drawable.google_drive)
     CloudStorageType.ONEDRIVE ->
-        CloudSetupOption(Res.string.setup_onedrive, Res.string.setup_onedrive_desc, Res.drawable.onedrive)
+        CloudSetupOption(Res.string.setup_onedrive, Res.drawable.onedrive)
 }
 
 @Composable
@@ -111,16 +109,32 @@ fun SetupScreen(onComplete: () -> Unit) {
                 enabled = enabled,
                 onClick = { vm.chooseLocalOnly(onComplete) },
             )
-            vm.availableCloudTypes.forEach { type ->
-                val option = type.setupOption()
-                Spacer(Modifier.height(12.dp))
-                OptionCard(
-                    title = stringResource(option.title),
-                    description = stringResource(option.description),
-                    enabled = enabled,
-                    icon = option.icon,
-                    onClick = { vm.connect(type, onComplete) },
+            if (vm.availableCloudTypes.isNotEmpty()) {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    stringResource(Res.string.setup_cloud_sync_section_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
                 )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(Res.string.setup_cloud_sync_section_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                vm.availableCloudTypes.forEach { type ->
+                    val option = type.setupOption()
+                    Spacer(Modifier.height(12.dp))
+                    OptionCard(
+                        title = stringResource(option.title),
+                        description = null,
+                        enabled = enabled,
+                        icon = option.icon,
+                        onClick = { vm.connect(type, onComplete) },
+                    )
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -161,7 +175,7 @@ fun SetupScreen(onComplete: () -> Unit) {
 @Composable
 private fun OptionCard(
     title: String,
-    description: String,
+    description: String?,
     enabled: Boolean,
     icon: DrawableResource? = null,
     onClick: () -> Unit,
@@ -169,13 +183,15 @@ private fun OptionCard(
     KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
         Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (description != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             FlatTonalButton(onClick = onClick, enabled = enabled) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
