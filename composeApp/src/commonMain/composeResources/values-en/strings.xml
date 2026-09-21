@@ -24,12 +24,12 @@
     <string name="setup_choose_mode">Choose how to sync (you can change this later)</string>
     <string name="setup_local_only">Use locally only</string>
     <string name="setup_local_desc">Use this device only</string>
+    <string name="setup_local_action">Start</string>
+    <string name="setup_cloud_sync_section_title">Sync via cloud storage</string>
+    <string name="setup_cloud_sync_section_desc">Share subscriptions and read state across devices</string>
     <string name="setup_dropbox">Sync with Dropbox</string>
-    <string name="setup_dropbox_desc">Share subscriptions and read state across devices</string>
     <string name="setup_google_drive">Sync with Google Drive</string>
-    <string name="setup_google_drive_desc">Share subscriptions and read state across devices</string>
     <string name="setup_onedrive">Sync with OneDrive</string>
-    <string name="setup_onedrive_desc">Share subscriptions and read state across devices</string>
     <string name="setup_connecting">Connecting to cloud storage...</string>
     <string name="setup_abort_connect_confirm_title">Abort the connection?</string>
     <string name="setup_abort_connect_confirm_body">Nothing has been saved yet.</string>

@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.rememberNotificationPermissionRequester
 import works.merc.keryx.app.ui.home.HomeScreen
@@ -39,7 +40,18 @@ fun App() {
 
     KeryxTheme(themeMode = settings.themeMode, fontScale = settings.fontSizeScale.toFloat()) {
         val setupComplete = remember { settingsRepository.isSetupComplete() }
-        val navigator = rememberNavigator(if (setupComplete) Screen.Home else Screen.Setup)
+        val hasCloudOptions = remember { CloudStorageAvailability.available.isNotEmpty() }
+        val startScreen = if (setupComplete || !hasCloudOptions) Screen.Home else Screen.Setup
+        val navigator = rememberNavigator(startScreen)
+
+        if (!setupComplete && !hasCloudOptions) {
+            // No cloud providers available — persist local-only settings so the next launch
+            // also skips setup, then land directly on Home.
+            LaunchedEffect(Unit) {
+                settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = null) }
+                settingsRepository.flush()
+            }
+        }
 
         // Keep the menu bar's screen-gating (see AppMenuBar) in sync with the active destination.
         LaunchedEffect(navigator.current) { menuController.currentScreen.value = navigator.current }
