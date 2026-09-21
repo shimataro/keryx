@@ -28,8 +28,13 @@ on:
         description: "Existing release tag to publish (e.g. v1.2.0)"
         required: true
         type: string
+      # Options are Play Developer API track IDs, not Play Console's own testing-tier names:
+      # `alpha` is the API id for what Play Console calls "closed testing" ("closed" itself is
+      # not a valid track id — a closed track beyond `alpha` gets a developer-chosen custom name,
+      # created manually in Play Console, so it can't be offered as a fixed choice here). See
+      # docs/build.md's "Publishing to Google Play" for how these map to account access tiers.
       track:
-        description: "Google Play track to publish to"
+        description: "Google Play track (internal=Internal testing, alpha=Closed testing, beta=Open testing, production=Production)"
         required: true
         type: choice
         default: internal

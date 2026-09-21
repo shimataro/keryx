@@ -863,14 +863,16 @@ to the former, everything else to the latter (the same `github.event.release.pre
 `production`/`beta` because a **personal** Google Play developer account created on or after
 2023-11-13 cannot use "production" or "open testing" at all until it clears Play's own testing
 requirement: a closed test with 12 or more opted-in testers, sustained continuously for 14 days,
-followed by an approved application for production access. Until then, `internal` and `closed` are
-the only tracks available — `closed` has to be populated by hand from Play Console (this project's
-CI never publishes there automatically), and once product-level access is approved, change these
-two constants to `beta`/`production` and this workflow needs no further changes.
+followed by an approved application for production access. Until then, `internal` and closed
+testing (the Play Developer API's `alpha` track id — "closed" itself is not a valid track id; see
+`publish-play.yml`'s own `track` input) are the only tracks available — the closed test has to be
+populated by hand from Play Console (this project's CI never publishes there automatically), and
+once product-level access is approved, change these two constants to `beta`/`production` and this
+workflow needs no further changes.
 
 **`publish-play.yml`** is a manual `workflow_dispatch` escape hatch for the same publish, given a
-`tag` (an existing GitHub Release) and a `track` to target — useful for pushing straight to
-`closed` while accumulating the 12-tester/14-day history above, or for retrying a failed publish
+`tag` (an existing GitHub Release) and a `track` to target — useful for pushing straight to closed
+testing (`alpha`) while accumulating the 12-tester/14-day history above, or for retrying a failed publish
 without cutting a new GitHub Release (which would also bump the tag, and therefore the
 `versionCode`). It rebuilds the AAB from that tag rather than reusing anything already
 published — a tag deterministically reproduces the same `versionCode` and signing output either
