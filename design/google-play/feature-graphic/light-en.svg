@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500">
+  <defs>
+    <linearGradient id="bg-c" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E0F2F1"/>
+      <stop offset="100%" stop-color="#B2DFDB"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="500" fill="url(#bg-c)"/>
+  <circle cx="150" cy="420" r="280" fill="#00897B" opacity="0.05"/>
+  <circle cx="900" cy="80" r="220" fill="#004D40" opacity="0.04"/>
+  <text x="100" y="200" font-family="'Hiragino Sans', 'Noto Sans JP', sans-serif" font-size="72" font-weight="bold" fill="#263238">Keryx</text>
+  <text x="100" y="270" font-family="'Hiragino Sans', 'Noto Sans JP', sans-serif" font-size="24" fill="#004D40">One reader. Every device.</text>
+  <g transform="translate(640, 120) scale(0.22)">
+    <rect x="183.45" y="202.25" width="178.47" height="619.50" rx="89.24" fill="#00897B"/>
+    <circle cx="361.93" cy="512" r="87.61" fill="#00897B"/>
+    <path d="M 521.98 351.95 A 226.34 226.34 0 0 1 521.98 672.05" fill="none" stroke="#00897B" stroke-width="113.58" stroke-linecap="round"/>
+    <path d="M 660.21 213.71 A 421.85 421.85 0 0 1 660.21 810.29" fill="none" stroke="#00897B" stroke-width="113.58" stroke-linecap="round"/>
+  </g>
+</svg>
