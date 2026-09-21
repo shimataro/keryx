@@ -894,10 +894,12 @@ testing (`alpha`) while accumulating the 12-tester/14-day history above, or for 
 without cutting a new GitHub Release (which would also bump the tag, and therefore the
 `versionCode`). It rebuilds the AAB from that tag rather than reusing anything already
 published — a tag deterministically reproduces the same `versionCode` and signing output either
-way, and `release.yml` no longer attaches an AAB to the GitHub Release for it to reuse. It cannot
-*promote* a `versionCode` Play has already seen to a different track — the Play Developer API only
-ever accepts a new upload — so moving an existing release between tracks is a Play Console UI
-action, not something either workflow does.
+way, and `release.yml` no longer attaches an AAB to the GitHub Release for it to reuse. Neither
+workflow *promotes* a `versionCode` Play has already seen to a different track: both only ever
+upload a freshly built AAB. The Play Developer API itself can do it — `edits.tracks.update` accepts
+an already-uploaded `versionCode` in another track's release — but neither workflow implements
+that, so moving an existing release between tracks is a Play Console UI action (or an API call of
+your own), not something either workflow does.
 
 **Release notes ("recent changes") come from the GitHub Release body**, reformatted to Play's
 plain-text, 500-characters-per-locale limit (headings and bolded bullet titles survive; links,
