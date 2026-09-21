@@ -39,7 +39,6 @@ import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.dropbox
@@ -91,8 +90,6 @@ fun SetupScreen(onComplete: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(stringResource(Res.string.app_name), style = MaterialTheme.typography.displaySmall)
-            Spacer(Modifier.height(8.dp))
             Text(stringResource(Res.string.setup_title), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(
