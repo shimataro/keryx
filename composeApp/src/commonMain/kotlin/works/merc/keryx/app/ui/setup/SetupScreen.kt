@@ -122,6 +122,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                     FlatTonalButton(
                         onClick = { vm.chooseLocalOnly(onComplete) },
                         enabled = enabled,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(stringResource(Res.string.setup_local_action))
                     }
