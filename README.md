@@ -53,7 +53,7 @@ Linux is available for both x86_64 and arm64.
 >
 > **Android**: this `.apk` is a sideload install, distributed directly rather than through
 > Google Play, so Android will ask you to allow installing from this source the first time
-> you open it.
+> you install it from the app you used to open it (e.g. your file manager or browser).
 
 Once Keryx is running, it can check for, download, and install newer releases on its own — from
 the notification bell, the task tray, or Settings → Updates — so the manual steps above are only
