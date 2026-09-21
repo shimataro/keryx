@@ -133,10 +133,11 @@ val missingSigningValues = buildList {
     if (releaseKeyPassword == null) add("key password")
 }
 
-// The upload signing identity: signs only playRelease's AAB, the artifact submitted to Google Play
-// Console. Optional and independent of the app-signing values above — the same keystore MAY serve
-// both roles, but this project registers a distinct upload key with Play, so a dedicated keystore
-// signs the AAB rather than the app signing key. See docs/build.md's "Publishing to Google Play".
+// The upload signing identity: signs the playRelease variant (AAB included — see below), the one
+// submitted to Google Play Console. Optional and independent of the app-signing values above —
+// the same keystore MAY serve both roles, but this project registers a distinct upload key with
+// Play, so a dedicated keystore signs playRelease rather than the app signing key. See
+// docs/build.md's "Publishing to Google Play".
 val uploadKeystorePath = releaseSigningValue("ANDROID_UPLOAD_KEYSTORE_PATH", "androidUploadKeystorePath", "android.upload.keystore.path")
 val uploadKeystorePassword = releaseSigningValue("ANDROID_UPLOAD_KEYSTORE_PASSWORD", "androidUploadKeystorePassword", "android.upload.keystore.password")
 val uploadKeyAlias = releaseSigningValue("ANDROID_UPLOAD_KEY_ALIAS", "androidUploadKeyAlias", "android.upload.key.alias")
@@ -296,9 +297,10 @@ androidComponents {
         variantBuilder.enable = false
     }
 
-    // playRelease's AAB — the artifact submitted to Google Play — signs with the dedicated upload
-    // key instead of the app signing key githubRelease/playDebug use, whenever one is configured
-    // (see the signingConfigs block above). Done through the variant API rather than a
+    // The playRelease variant as a whole (not just the AAB `bundlePlayRelease` produces — any
+    // `assemblePlayRelease` APK carries this too) signs with the dedicated upload key instead of
+    // the app signing key githubRelease uses, whenever one is configured (see the signingConfigs
+    // block above). Done through the variant API rather than a
     // flavor-scoped `signingConfig` assignment in the DSL so it stays independent of AGP's own
     // buildType-vs-flavor signingConfig precedence rules (a buildType-level assignment always
     // wins), and so buildTypes.release's existing signingConfig assignment above — which every

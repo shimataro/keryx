@@ -137,19 +137,23 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 ```
 
 Only `github` runs in CI (and is the one to run locally too) — the suite doesn't exercise anything
-flavor-specific (the two flavors differ only in the `REQUEST_INSTALL_PACKAGES` manifest permission).
-There is no `connectedPlayDebugAndroidTest` to fall back to either way: `androidApp/build.gradle.kts`
-disables the `playDebug` variant entirely (nothing debug-build-specific to exercise there that
-`githubDebug` doesn't already cover — see that file's own comment), so `connectedAndroidTest` (no
-flavor) now runs only `githubDebug`, the sole remaining debug variant.
+flavor-specific: for **debug** builds, the two flavors differ only in the `REQUEST_INSTALL_PACKAGES`
+manifest permission (release builds also differ in signing key — see `build.md`'s "Publishing to
+Google Play" — but `androidComponents` only repoints `playRelease`, never a debug variant, so that
+difference is irrelevant to this debug-only suite). There is no `connectedPlayDebugAndroidTest` to
+fall back to either way: `androidApp/build.gradle.kts` disables the `playDebug` variant entirely
+(nothing debug-build-specific to exercise there that `githubDebug` doesn't already cover — see
+that file's own comment), so `connectedAndroidTest` (no flavor) now runs only `githubDebug`, the
+sole remaining debug variant.
 
-That the flavors differ *only* in that permission is itself checked on every push, by `ci.yml`'s
-"Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
+That the `github`/`play` **release** manifests differ only in that permission is itself checked on
+every push, by `ci.yml`'s "Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
 `:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` and greps the two **merged**
 manifests, so the assertion holds against what AGP actually produces rather than against the flavor
 source sets. Merged output is what matters here — a transitive library manifest could reintroduce
 the permission into `play` without either flavor's own `AndroidManifest.xml` changing, and that is
-exactly the case Google Play would reject.
+exactly the case Google Play would reject. This check is scoped to the manifest alone; it says
+nothing about (and does not need to, for its own purpose) the two release variants' signing keys.
 
 Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
 application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
@@ -1142,6 +1146,12 @@ a rollback path has a bug that leaves it damaged.
   Android will not let one replace the other otherwise — so a debug build cannot stand in for
   either half, and going back to `installGithubDebug` afterwards needs
   `./gradlew :androidApp:uninstallGithubDebug` first (see [setup.md](setup.md)'s "Common Issues").
+  This also means the `github`- and `play`-flavor sideloads above can't simply be installed one
+  after the other on the same device if a local `android.upload.keystore.*` is configured (see
+  `build.md`'s "Publishing to Google Play") — both flavors share `works.merc.keryx` as their
+  `applicationId`, so `play` then carries a different signing certificate than `github` and the
+  second install fails as an update conflict; uninstall the first flavor before sideloading the
+  other, or use two separate devices/profiles.
 - **Failure paths, each platform**: cancel a download mid-transfer (state returns to `Available`,
   not `Failed`, and the `.part` file is gone); disconnect the network mid-download (state becomes
   `Failed` with a retry action); fill the disk before starting a download (the pre-flight free-space

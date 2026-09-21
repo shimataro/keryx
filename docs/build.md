@@ -502,7 +502,8 @@ With none of the three sources set, the build still succeeds but produces an **u
 APK (a build warning, no fallback to debug signing) — see "Release (CD)" below for how CI handles
 signing, and setup.md's "Software Required to Build" for the reasoning behind that design.
 
-`:androidApp:bundlePlayRelease`'s AAB additionally accepts a second, **optional** signing identity
+The `playRelease` variant as a whole — `:androidApp:bundlePlayRelease`'s AAB, and any APK
+`assemblePlayRelease` produces too — additionally accepts a second, **optional** signing identity
 under the same three-source priority — the *upload* key, distinct from the app signing key above:
 
 | `local.properties` key | `-P` property | Environment variable |
@@ -512,9 +513,9 @@ under the same three-source priority — the *upload* key, distinct from the app
 | `android.upload.key.alias` | `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` |
 | `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
 
-With none of these four set, `bundlePlayRelease` simply signs the AAB with the app signing key
-instead — see "Publishing to Google Play" below for why this project uses a separate upload key at
-all, and why leaving it unset is a legitimate choice, not a degraded one.
+With none of these four set, `playRelease` simply signs with the app signing key instead — see
+"Publishing to Google Play" below for why this project uses a separate upload key at all, and why
+leaving it unset is a legitimate choice, not a degraded one.
 
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
@@ -829,7 +830,8 @@ aggregate lifecycle task, which is why `release.yml` above invokes it explicitly
 identity as the unsigned-release case (a build warning, not a failure — see "Android release
 signing keystore" in [setup.md](setup.md)) rather than requiring `androidReleaseSigningRequired`.
 So plain `./gradlew build` — in CI or locally — needs no keystore at all; only a workflow that
-actually distributes the result (`release.yml`) opts into hard failure instead.
+actually distributes the result (`release.yml`, and `publish-play.yml` below) opts into hard
+failure instead.
 
 ### Publishing to Google Play
 
@@ -841,10 +843,10 @@ Play Console listing (`works.merc.keryx`):
 2. Create a service account in that same project (IAM & Admin → Service Accounts). It needs no GCP
    role at all — Play Console grants its own permissions separately in the next step. Generate a
    JSON key for it (Keys tab → Add key → JSON) and keep the file.
-3. In Play Console → Users and permissions → Invite new users, add the service account's email and
-   grant it access to this one app with the **"Release to testing tracks"** permission (production
-   access can be added later, once this account's own product-level access is approved — see
-   below).
+3. In Play Console → Users and permissions → Invite new users, add the service account's email,
+   open the "App permissions" tab, add this one app, and grant it the
+   **"Release apps to testing tracks"** permission (production access can be added later, once
+   this account's own product-level access is approved — see below).
 4. Set the JSON key's full file contents as the `PLAY_SERVICE_ACCOUNT_JSON` repository secret. Both
    `release.yml` and `publish-play.yml` read it; `release.yml`'s own publish step is skipped
    entirely for as long as this secret is unset, the same skip-if-unconfigured pattern

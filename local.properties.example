@@ -81,12 +81,12 @@ android.release.keystore.password=
 android.release.key.alias=
 android.release.key.password=
 
-# Android upload signing configuration (OPTIONAL). Signs only :androidApp:bundlePlayRelease's AAB
-# — the artifact submitted to Google Play Console — with a dedicated upload key, distinct from the
-# app signing key above. Play re-signs every APK with the registered app signing key before it
-# reaches a device, so leaving this unset simply signs the AAB with the app signing key above
-# instead: the same throwaway keystore then covers github/play/debug for local development, with
-# nothing left unsigned.
+# Android upload signing configuration (OPTIONAL). Signs the :androidApp playRelease variant
+# — including :androidApp:bundlePlayRelease's AAB, the artifact submitted to Google Play Console —
+# with a dedicated upload key, distinct from the app signing key above. Play re-signs every APK
+# with the registered app signing key before it reaches a device, so leaving this unset simply
+# signs playRelease with the app signing key above instead: the same throwaway keystore then
+# covers github/play/debug for local development, with nothing left unsigned.
 #   Gradle properties: -PandroidUploadKeystorePath=...
 #                      -PandroidUploadKeystorePassword=...
 #                      -PandroidUploadKeyAlias=...

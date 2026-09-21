@@ -124,10 +124,10 @@
   `*.keystore` / `*.jks` を除外済みなので、リポジトリ直下に置いても誤ってコミットされることは
   ない。Google Play 配布用の本番キーストアの発行手順は [build.ja.md](build.ja.md) を参照。
   任意項目の `android.upload.keystore.*`（`.key.alias` / `.key.password` も同様）は、
-  Google Play へアップロードする AAB だけを専用のアップロード鍵で署名するためのもので、
+  Google Play へ提出する `playRelease` バリアントを専用のアップロード鍵で署名するためのもので、
   未設定のままなら他と同じキーストアでそのまま署名される — つまり上記4つだけでローカルの
   ビルド・インストールは完結する。2つの鍵が存在する理由は build.ja.md の
-  「Publishing to Google Play」を参照。
+  「Google Play への公開」を参照。
 - **実機または起動中の Android エミュレータ**: Android の計装テストスイート2つ
   ——`androidDeviceTest`（`DatabaseMerger`/`DatabaseSnapshot` の Android 実装を実際の
   バンドル SQLite に対して検証）と `androidApp` 自身のスイート（Compose UI のジェスチャテスト）

@@ -526,15 +526,16 @@ jobs:
           packages: "platform-tools"
 
       # Decodes both signing identities androidApp/build.gradle.kts accepts: the app signing key
-      # (signs githubRelease directly) and the upload key (signs playRelease's AAB — see
-      # docs/build.md's "Publishing to Google Play"). ANDROID_UPLOAD_KEYSTORE_BASE64 is decoded
-      # only when set: GitHub maps an unset secret to an empty string rather than leaving the
-      # variable unset, and decoding that would produce a 0-byte file that looks "configured" to
-      # androidApp/build.gradle.kts's own null check — failing deep inside AGP instead of taking
-      # the documented, unset-and-fall-back-to-app-signing path. -PandroidReleaseSigningRequired
-      # below requires both keys regardless, so this job always fails loudly if either secret is
-      # genuinely missing; it just fails with androidApp/build.gradle.kts's own clear error message
-      # rather than a 0-byte-keystore one from deep inside AGP.
+      # (signs githubRelease directly) and the upload key (signs the playRelease variant, AAB
+      # included — see docs/build.md's "Publishing to Google Play"). ANDROID_UPLOAD_KEYSTORE_BASE64
+      # is decoded only when set: GitHub maps an unset secret to an empty string rather than
+      # leaving the variable unset, and decoding that would produce a 0-byte file that looks
+      # "configured" to androidApp/build.gradle.kts's own null check — failing deep inside AGP
+      # instead of taking the documented, unset-and-fall-back-to-app-signing path.
+      # -PandroidReleaseSigningRequired below requires both keys regardless, so this job always
+      # fails loudly if either secret is genuinely missing; it just fails with
+      # androidApp/build.gradle.kts's own clear error message rather than a 0-byte-keystore one
+      # from deep inside AGP.
       - name: Decode signing keystores
         id: keystore
         env:
@@ -611,7 +612,7 @@ jobs:
           echo "apk=$apk_dest" >> "$GITHUB_OUTPUT"
           # The AAB is never a GitHub Release asset — a user cannot install one, and
           # selectUpdateAsset never matches a `.aab` — so it keeps its AGP-generated name/location
-          # and is only ever read by "Publish to Google Play" below.
+          # and is only ever read by the publish-play job below, via the artifact uploaded next.
           echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
@@ -620,11 +621,49 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
 
+      # Hands the AAB to the publish-play job below without ever attaching it to the GitHub
+      # Release (see the "Locate build outputs" comment above for why). Kept as a workflow
+      # artifact rather than a job output — job outputs are strings, not files — with the
+      # default retention; nothing outside this workflow run reads it. A Play publish failure
+      # (e.g. transient API error, a permission grant still propagating) must not block
+      # deploy-pages below, which is exactly why publish-play is its own job rather than more
+      # steps tacked onto this one — same reasoning as package-snap's own separation from
+      # package-linux.
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-aab
+          path: ${{ steps.artifact.outputs.aab }}
+
+  publish-play:
+    name: Publish Android AAB to Google Play
+    needs: package-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download AAB artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: android-aab
+
+      - name: Locate downloaded AAB
+        id: artifact
+        run: |
+          aab_src=$(find . -name '*.aab' | head -n 1)
+          if [ -z "$aab_src" ]; then
+            echo "::error::No AAB found in the android-aab artifact from package-android."
+            exit 1
+          fi
+          echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
+
       # Track constants — change these two once product-level access is approved (see
       # docs/build.md's "Publishing to Google Play"): a personal developer account created on or
       # after 2023-11-13 cannot use "production" or "open testing" until then, only "internal" and
       # "closed". Keyed on the GitHub Release's own prerelease flag, the same signal
-      # package-snap's channel-selection step above uses, not the tag suffix alone.
+      # package-snap's channel-selection step uses, not the tag suffix alone.
       - name: Resolve Play track
         id: play
         env:
@@ -653,6 +692,8 @@ jobs:
       # Written to *both* locales this project ships (ja-JP alongside en-US) with the same English
       # text — leaving ja-JP absent would make Play silently carry over whichever text that locale
       # last had, which is worse than a same-language duplicate. See docs/build.md.
+      # No checkout in this job (nothing here touches repo files), so --repo is passed explicitly
+      # rather than relying on `gh` inferring it from a git remote in the working directory.
       - name: Prepare Play release notes
         id: whatsnew
         if: steps.play.outputs.configured == 'true'
@@ -663,7 +704,7 @@ jobs:
           whatsnew_dir="$RUNNER_TEMP/play-whatsnew"
           mkdir -p "$whatsnew_dir"
 
-          formatted=$(gh release view "$RELEASE_TAG" --json body --jq .body | awk '
+          formatted=$(gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" --json body --jq .body | awk '
             { line = $0; gsub(/\r$/, "", line) }
             line ~ /^## / { next }
             line ~ /^\*\*Full Changelog\*\*/ { next }

@@ -15,6 +15,12 @@ name: Publish to Google Play
 # previously-attached one — release.yml no longer attaches the AAB to the GitHub Release at all
 # (see "Publish to Google Play" there), and a tag deterministically reproduces the same
 # versionCode/signing output either way.
+#
+# `checkout` below pins to `tag`'s own androidApp/build.gradle.kts, not this workflow file's —
+# so `tag` must be at or after the commit that introduced the upload-key signing split and the
+# current versionCode scheme (see docs/build.md's "Publishing to Google Play"). An older tag
+# builds an AAB signed with the app signing key instead of the upload key, which Play rejects as
+# not matching the registered upload certificate.
 on:
   workflow_dispatch:
     inputs:

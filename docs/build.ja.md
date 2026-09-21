@@ -505,7 +505,8 @@ APK が入っている端末では `installGithubDebug` がダウングレード
 （ビルド警告のみで、debug 署名へのフォールバックは無い）— CI での署名の扱いは後述の
 「リリース（CD）」、この設計の理由は setup.ja.md の「ビルドに必要なソフトウェア」を参照。
 
-`:androidApp:bundlePlayRelease` の AAB は、同じ 3 段の優先順で 2 つ目の**任意**の署名情報も
+`playRelease` バリアント全体 —— `:androidApp:bundlePlayRelease` の AAB だけでなく
+`assemblePlayRelease` が出す APK も —— は、同じ 3 段の優先順で 2 つ目の**任意**の署名情報も
 受け付ける — 上記のアプリ署名鍵とは別の**アップロード鍵**である:
 
 | `local.properties` のキー | `-P` プロパティ | 環境変数 |
@@ -515,7 +516,7 @@ APK が入っている端末では `installGithubDebug` がダウングレード
 | `android.upload.key.alias` | `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` |
 | `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
 
-この 4 つがどれも未設定なら、`bundlePlayRelease` は単純にアプリ署名鍵で AAB を署名する —
+この 4 つがどれも未設定なら、`playRelease` は単純にアプリ署名鍵で署名する —
 このプロジェクトがなぜ別のアップロード鍵を使うのか、そして未設定のままにしておくことが劣化ではなく
 正当な選択である理由は、後述の「Google Play への公開」を参照。
 
@@ -846,8 +847,8 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
 状態を「未署名リリース」として扱う（ビルド失敗ではなく警告 — [setup.ja.md](setup.ja.md) の
 「Android release signing keystore」参照）。`androidReleaseSigningRequired` を明示的に要求
 しない限りこの経路に入るため、単なる `./gradlew build` は CI でもローカルでも keystore を
-一切必要としない。成果物を実際に配布するワークフロー（`release.yml`）だけが、この経路の代わりに
-即座の失敗を選んでいる。
+一切必要としない。成果物を実際に配布するワークフロー（`release.yml`、および後述の
+`publish-play.yml`）だけが、この経路の代わりに即座の失敗を選んでいる。
 
 ### Google Play への公開
 
@@ -861,7 +862,8 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
    ロールは一切不要 — 権限は次の手順で Play Console 側から個別に付与する。JSON 形式の鍵を
    生成し（鍵タブ → 鍵を追加 → JSON）、そのファイルを保管する。
 3. Play Console → ユーザーと権限 → 新しいユーザーを招待 で、サービスアカウントのメール
-   アドレスを追加し、このアプリ1つに対して**「テストトラックへのリリース」**権限を付与する
+   アドレスを追加し、「アプリの権限」タブでこのアプリ 1 つを追加して
+   **「テスト版トラックとしてのアプリのリリース」**権限を付与する
    （製品版への権限は後述のとおりこのアカウント自身の製品版アクセスが承認された後に追加すれば
    よい）。
 4. JSON 鍵ファイルの内容全体を `PLAY_SERVICE_ACCOUNT_JSON` としてリポジトリの Secrets に設定
