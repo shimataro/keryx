@@ -750,3 +750,57 @@ Desktop without Tao will not host the WebView"* — アプリのエントリポ�
 着手する価値がある — Linux arm64 が出荷ターゲットになった今（上記「状態」参照）は簡易リーダーの
 UX ギャップがより多くのユーザーの目に触れるようになるが、それだけでアプリのエントリポイント
 置き換えが正当化されるわけではない。
+
+## CI限定: macOS の `packageDmg` が `hdiutil detach` の「リソースがビジー」で失敗する
+
+**状態**: 外部要因（macOS ランナー）による一過性の不具合。修正ではなくリトライで緩和している。
+DMG 生成処理そのものは jpackage 内部にあり、アプリ側で制御できない。
+
+### 症状
+
+`macos-latest` の GitHub Actions ランナー上で `./gradlew packageDmg` が次のように失敗する:
+
+```text
+Execution failed for task ':composeApp:packageDmg' (registered by plugin 'org.jetbrains.compose').
+> Command failed (exit 16): hdiutil detach /dev/disk31s1
+```
+
+`feat/google-play-publishing` ブランチの `e484ad6`（run 35576202091、ジョブ "Build & Test
+(macos-latest)"）で観測。同じブランチの直前2回の CI（run 35564082624, 35573298168）は macOS
+ジョブを含めて全て成功しており、直前の green から今回までの差分はドキュメントのみのコミット
+（`docs/build.md` / `docs/build.ja.md`）だった。
+
+### 除外した原因
+
+- **そのブランチ自身の変更が原因ではない。** `v0` との差分は `androidApp/` /
+  `.github/workflows/publish-play.yml` / `distribution/play/` / ドキュメントに限定されており、
+  `composeApp/build.gradle.kts` の唯一の変更は未使用の Android 専用 val の削除のみ。Compose
+  Multiplatform プラグインを固定する `gradle/libs.versions.toml` にも差分はない。そのブランチが
+  `ci.yml` に追加した新しいステップは `if: runner.os == 'Linux'` でガードされており、macOS の
+  ジョブでは実行されない。
+- **`packageDmg` の CI ステップ自体の変更でもない** — このステップは #71 で導入されて以降安定
+  している。
+- **同一ランナー上での `packageDmg` の同時実行でもない。** GitHub Actions のランナーは使い捨ての
+  VM であり、push を直列化/キャンセルする `concurrency:` グループも存在しないため、別の実行と
+  ディスクを共有して残留マウントが生じることはあり得ない。
+
+jpackage は DMG 生成時にスクラッチのディスクイメージをマウントし、アプリバンドルをコピーしてから
+detach する。同じログに残っているオーファンプロセスの後始末（`Terminate orphan process: pid
+(diskimages-help)`）は、ジョブ終了時点でディスクイメージのヘルパプロセスがまだ生きていたことを
+示しており、detach が（おそらく Spotlight / `mdworker` によって）ボリュームを掴まれている状態と
+競合したという見立てと整合する。
+
+### 緩和策
+
+`.github/workflows/ci.yml` の "Verify packaging (macOS)" ステップと `.github/workflows/release.yml`
+の "Package App bundle (+ Dmg for stable releases)" ステップは、どちらも `packageDmg` を最大3回まで
+リトライする。ただし失敗ログに実際に `hdiutil` が含まれている場合に限る — それ以外の失敗（本物の
+パッケージング不具合）は1回目でそのまま失敗する。リトライ前に `/Volumes/Keryx*` 配下に残っている
+マウントを強制 detach し、次の試行が別名のマウントポイントに当たらないようにしている。
+
+### 本当の修正に必要なこと
+
+アプリ側で打てる手はない — マウント/detach は jpackage のネイティブな DMG 生成処理の内部で完結して
+おり、この競合は CI ランナーの環境（マウント直後のボリュームを Spotlight がインデックスしようと
+すること）の性質であって、このアプリが設定している何かに起因するものではない。GitHub または JDK
+側が上流で対処しない限り、リトライ以外に取れる緩和策はない。

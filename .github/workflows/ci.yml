@@ -80,9 +80,30 @@ jobs:
       # jpackage-specific one; the second invocation is a no-op rebuild via Gradle's up-to-date check.
       - name: Verify packaging (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           ./gradlew createDistributable --no-configuration-cache
-          ./gradlew packageDmg --no-configuration-cache
+          # jpackage builds the DMG by mounting a scratch disk image and detaching it again, and
+          # that detach intermittently fails on a runner ("Command failed (exit 16): hdiutil
+          # detach") while Spotlight still holds the volume - unrelated to the packaging
+          # regressions this step exists to catch. Only an hdiutil failure is retried, so a real
+          # regression still fails on the first attempt.
+          for attempt in 1 2 3; do
+            log="$RUNNER_TEMP/packageDmg-$attempt.log"
+            if ./gradlew packageDmg --no-configuration-cache 2>&1 | tee "$log"; then
+              break
+            fi
+            if [ "$attempt" = 3 ] || ! grep -q hdiutil "$log"; then
+              exit 1
+            fi
+            echo "::warning::packageDmg hit a transient hdiutil failure (attempt $attempt); retrying."
+            # A failed detach leaves the volume mounted, and the next attempt would be mounted
+            # alongside it as "Keryx 1" instead, where jpackage cannot find it.
+            for volume in /Volumes/Keryx*; do
+              [ -d "$volume" ] && hdiutil detach "$volume" -force || true
+            done
+            sleep 5
+          done
           # The other half of what makes an in-app update work, and the half no unit test can
           # reach: that the release ZIP, built exactly as release.yml builds it, survives being
           # unpacked again. `zip -y` has to store the bundled JDK's symlinks as links and `ditto`
