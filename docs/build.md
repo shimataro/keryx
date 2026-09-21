@@ -127,9 +127,13 @@ is an OAuth client registered against this app's identity:
    project, so sharing the project is what lets a phone and a desktop see the same sync file), go to
    "Google Auth Platform" → "Clients" → "Create client" and choose application type **"Android"**.
 2. Package name: `works.merc.keryx`.
-3. SHA-1 of the signing certificate. Register **one client per signing key you actually run**:
-   - the release key (see "Release (CD)" below for `ANDROID_RELEASE_KEYSTORE_BASE64` and friends —
-     the same key backs both the GitHub APK and the Play upload, so one entry covers both channels);
+3. SHA-1 of the signing certificate. Register **one client per signing certificate that actually
+   reaches a device**:
+   - the **app signing key**'s certificate (see "App signing key vs. upload key" under
+     "Release (CD)" below) — Google re-signs every APK with this key before it reaches a device,
+     regardless of which key the AAB was uploaded with, so this is the certificate to register, not
+     the upload key's (which never reaches a device at all); one entry covers both the sideloaded
+     GitHub APK and the Play-installed one, since both carry this same certificate in the end;
    - your local **debug** keystore, or `installGithubDebug` builds cannot authorize at all
      (`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`).
 4. No client ID or secret is copied into the project — Play services matches the app by package name
@@ -453,10 +457,31 @@ be invoked explicitly — see "Release (CD)" below for how `release.yml` uses bo
 derives them from the flavor/build-type names, and a rename there silently breaks the workflow only
 once a release tag is pushed.
 
+`androidApp/build.gradle.kts`'s `versionCodeOf` folds `appVersion` into Android's single,
+strictly-increasing `versionCode` integer: `MAJOR*1_000_000 + MINOR*10_000 + PATCH*100 +
+preReleaseOrdinal`, where `preReleaseOrdinal` comes from an optional SemVer pre-release label
+(`-alpha`, `-beta.2`, `-rc.1`, ...) — `0 + N` for `alpha`, `30 + N` for `beta`, `60 + N` for `rc`
+(`N` defaults to 1, and must be in `1..29`), or `99` with no suffix at all:
+
+| Tag | `versionCode` |
+| --- | --- |
+| `v1.2.0-alpha.1` | `1020001` |
+| `v1.2.0-beta.1` | `1020031` |
+| `v1.2.0-rc.1` | `1020061` |
+| `v1.2.0` | `1020099` |
+
+This keeps every pre-release of a given `MAJOR.MINOR.PATCH` strictly below its own eventual final
+release's `versionCode`, and the alpha → beta → rc → final progression itself strictly increasing —
+Google Play rejects a re-upload at a `versionCode` it has already seen, so a scheme that let two
+tags collide could never actually publish both of them to a test track. `ci.yml`'s "Verify Android
+versionCode scheme" step is a regression guard against exactly that (see `printAndroidVersionCodes`,
+a plain stdout probe task since `versionCodeOf` lives in this `*.gradle.kts` script and has no test
+source set of its own).
+
 Debug variants do not take their `versionCode` from `appVersion` at all: `androidApp/build.gradle.kts`
-pins every debug output to a fixed `debugVersionCode` (2,000,000,000 — below Play's ceiling, far above
-anything the `MAJOR*10000 + MINOR*100 + PATCH` fold can produce). A local build passes no
-`-PappVersion`, so it would otherwise be `versionCode` 1 and the package manager would reject
+pins every debug output to a fixed `debugVersionCode` (2,000,000,000 — below Play's ceiling, above
+anything `versionCodeOf` can fold to, since `MAJOR` is capped at 1999). A local build passes no
+`-PappVersion`, so it would otherwise be a low `versionCode` and the package manager would reject
 `installGithubDebug` as a downgrade over any real-version APK already on the device. Release variants
 are unaffected. See [setup.md](setup.md)'s "Common Issues" for the install failure this leaves — a
 release-signed and a debug-signed APK still cannot replace each other.
@@ -476,6 +501,20 @@ result); see [setup.md](setup.md) for how to generate a keystore for local use:
 With none of the three sources set, the build still succeeds but produces an **unsigned** release
 APK (a build warning, no fallback to debug signing) — see "Release (CD)" below for how CI handles
 signing, and setup.md's "Software Required to Build" for the reasoning behind that design.
+
+`:androidApp:bundlePlayRelease`'s AAB additionally accepts a second, **optional** signing identity
+under the same three-source priority — the *upload* key, distinct from the app signing key above:
+
+| `local.properties` key | `-P` property | Environment variable |
+| --- | --- | --- |
+| `android.upload.keystore.path` | `androidUploadKeystorePath` | `ANDROID_UPLOAD_KEYSTORE_PATH` |
+| `android.upload.keystore.password` | `androidUploadKeystorePassword` | `ANDROID_UPLOAD_KEYSTORE_PASSWORD` |
+| `android.upload.key.alias` | `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` |
+| `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
+
+With none of these four set, `bundlePlayRelease` simply signs the AAB with the app signing key
+instead — see "Publishing to Google Play" below for why this project uses a separate upload key at
+all, and why leaving it unset is a legitimate choice, not a degraded one.
 
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
@@ -583,9 +622,12 @@ per platform:
 
 ## Release (CD)
 
-`.github/workflows/release.yml` builds the packages and attaches them to the GitHub Release.
-**macOS (arm64), Linux (x86_64 and arm64), Windows (x86_64), and Android (universal APK/AAB)**
-(cross-compilation is not supported, so each architecture needs its own runner).
+`.github/workflows/release.yml` builds the packages and attaches the installers to the GitHub
+Release — **macOS (arm64), Linux (x86_64 and arm64), Windows (x86_64), and Android (universal
+APK)** (cross-compilation is not supported, so each architecture needs its own runner) — and
+separately **publishes the Android AAB to Google Play** (see "Publishing to Google Play" below).
+The AAB itself is never attached to the GitHub Release: neither a user nor the in-app updater can
+install one (`selectUpdateAsset` never matches a `.aab`), so the only place it belongs is Play.
 
 Linux arm64 ships with the same caveat noted in `known-issues.md`: the article reader's web-view
 library ships no `linux-aarch64` binary, so on that architecture the reader falls back to a
@@ -634,16 +676,20 @@ Flow:
        Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every
        Store user by snapd's own auto-refresh with no way to recall it).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships a compatible WiX Toolset version (v3/v4/v5) preinstalled, so no separate WiX setup step is needed; see [setup.md](setup.md)), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
-   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), attached as `Keryx-<version>-android-universal.apk` and `Keryx-<version>-android-universal.aab`. The APK comes from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from `play` (the Play Console submission artifact, which must not carry that permission). Unlike the desktop installers, Android packages are built and attached for pre-release tags too, because Android has no equivalent version-metadata restriction and testers need a signed APK.
-
-     > [!WARNING]
-     > **Pre-release APK/AAB files produced by the workflow are GitHub test artifacts only — never submit
-     > one to Google Play as-is.** `androidApp/build.gradle.kts` derives `versionCode` from
-     > `appVersion.substringBefore('-')`, so a pre-release tag such as `v1.2.0-beta.1` and the final
-     > `v1.2.0` produce the same `versionCode` (e.g. `10200`). Before submitting to Google Play, assign a
-     > strictly increasing `versionCode` by adjusting `androidApp/build.gradle.kts` (or the release tag
-     > that drives it) and rebuilding the APK/AAB — the value is baked into the signed artifact at build
-     > time and cannot be edited afterward.
+   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), building
+     the APK from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an
+     in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from
+     `play` (the Play Console submission artifact, which must not carry that permission). Unlike
+     the desktop installers, Android packages are built for pre-release tags too, because Android has
+     no equivalent version-metadata restriction — `versionCodeOf` (see "Android (APK / AAB)" above)
+     keeps every pre-release version distinct on its own — and testers need a signed APK.
+     - **Build and attach.** Only the APK is attached to the GitHub Release, as
+       `Keryx-<version>-android-universal.apk` — the AAB is never attached (see the note at the top
+       of this section for why).
+     - **Publish to Google Play.** The same job also uploads the AAB to Google Play
+       (`r0adkll/upload-google-play`), gated on the `PLAY_SERVICE_ACCOUNT_JSON` secret below being
+       set at all — same skip-if-unconfigured pattern as the Snap Store publish above. See
+       "Publishing to Google Play" below for the full setup and the track this targets.
 
    `deploy-pages` (triggers the Cloudflare Pages deploy hook for the download page) waits on
    `package-macos` / `package-linux` / `package-windows` / `package-android`, but deliberately
@@ -734,32 +780,46 @@ package" above for why (Snapcraft reviewers decline this interface's auto-connec
 and for the `LibSecretTokenStorage`/Secret-portal path used instead, which needs no such request.
 
 For Android release signing, set `ANDROID_RELEASE_KEYSTORE_BASE64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD`,
-`ANDROID_RELEASE_KEY_ALIAS`, and `ANDROID_RELEASE_KEY_PASSWORD` as repository secrets. The keystore is a
-Base64-encoded PKCS12/JKS file; the workflow decodes it at build time.
+`ANDROID_RELEASE_KEY_ALIAS`, `ANDROID_RELEASE_KEY_PASSWORD`, and (optionally, see "App signing key
+vs. upload key" below) `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_UPLOAD_KEYSTORE_PASSWORD`,
+`ANDROID_UPLOAD_KEY_ALIAS`, `ANDROID_UPLOAD_KEY_PASSWORD` as repository secrets. Each keystore is a
+Base64-encoded PKCS12/JKS file; the workflow decodes both at build time.
 
-**Enrolling the keystore with Google Play (one-time, for the same signing key on both channels).** To keep
-the same signing key on GitHub Releases and Google Play, generate the keystore locally and, when creating
-the app in Google Play Console, enroll it as the **existing app signing key**: Play Console never accepts
-the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play Encrypt Private Key) tool
+**Enrolling the app signing key with Google Play (one-time).** Generate the keystore locally and,
+when creating the app in Google Play Console, enroll it as the **existing app signing key**: Play
+Console never accepts the raw JKS/PKCS12 file directly — first encrypt it with Google's PEPK (Play
+Encrypt Private Key) tool
 (`java -jar pepk.jar --keystore=<path> --alias=<alias> --output=<encrypted-file> --encryptionkey=<key-from-play-console>`,
 downloaded from the Play App Signing enrollment page), then upload the resulting encrypted file.
 
-**App signing key vs. upload key.** This registers the keystore as the **app signing key** — the key Google
-holds and uses to re-sign the app before it reaches users, distinct from the **upload key** used to sign each
-`.aab` submitted through Play Console afterward. The same keystore can serve both roles (Google explicitly
-allows reusing the app signing key as its own upload key), which is what keeps a single keystore sufficient
-for both GitHub Releases (where the APK/AAB is signed with it directly) and Google Play; a separate,
-dedicated upload key is Google's recommended hardening, not a requirement.
+**App signing key vs. upload key.** Google re-signs every APK with the **app signing key** just
+enrolled before it ever reaches a device — that re-signed identity is what has to be consistent
+everywhere, not the key a given artifact happened to be built with. This project takes advantage of
+that: `githubRelease`'s APK is signed directly with the app signing key (so it already carries the
+identity a device will see, matching what sideloading needs), while `playRelease`'s AAB is signed
+with a **separate upload key** instead — the key Play's own signing-config UI shows as the "upload
+key certificate" once one is registered, distinct from the "app signing key certificate" alongside
+it. Google explicitly allows reusing the app signing key as its own upload key (this project could
+too, by simply not setting the four `ANDROID_UPLOAD_*` secrets — see
+`androidApp/build.gradle.kts`'s `signingConfigs`), but registering a dedicated upload key is
+Google's recommended hardening, and it is what this project actually does.
 
-**All four secrets are required, not optional.** `release.yml` passes `-PandroidReleaseSigningRequired=true`
-to `:androidApp:assembleGithubRelease`/`:androidApp:bundlePlayRelease`, which turns a missing (or
-half-configured) secret into an immediate build failure — since this workflow publishes its output, it must
-never succeed with an unsigned artifact.
+**All eight signing secrets, when present, are required together.** `release.yml` and
+`publish-play.yml` both pass `-PandroidReleaseSigningRequired=true`, which turns a missing or
+half-configured app-signing secret into an immediate build failure (as always), and — separately —
+a *half-configured* upload secret into the same failure; a *fully unset* upload secret is fine and
+simply falls back to signing the AAB with the app signing key (see "App signing key vs. upload key"
+above). Either way, this workflow must never succeed with an unsigned artifact or a half-formed
+signing identity.
 
-**Both flavors share one keystore.** The `signingConfigs` block isn't flavor-scoped, which is exactly what
-the app-signing-key enrollment above requires: the sideloaded `github` APK and the Play-resigned `play` AAB
-need to trace back to the same signing identity, or a device that already has one installed can never
-receive the other as an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+**What has to match across channels is the identity Play re-signs to, not the build-time key.**
+`androidApp/build.gradle.kts`'s `signingConfigs` block is not flavor-scoped by itself — `playRelease`
+is repointed at the upload key through the `androidComponents` variant API instead (see that file),
+leaving `githubRelease` on the app signing key unchanged. This is why the two channels stay
+compatible for an in-place update (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` otherwise): a device already
+running the GitHub APK sees Play's own install as coming from that same app signing key, because
+Play re-signed it that way — never mind that the AAB was uploaded signed with something else
+entirely.
 
 `ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
 push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
@@ -770,6 +830,61 @@ identity as the unsigned-release case (a build warning, not a failure — see "A
 signing keystore" in [setup.md](setup.md)) rather than requiring `androidReleaseSigningRequired`.
 So plain `./gradlew build` — in CI or locally — needs no keystore at all; only a workflow that
 actually distributes the result (`release.yml`) opts into hard failure instead.
+
+### Publishing to Google Play
+
+**One-time Google Cloud / Play Console setup**, done once by whoever administers this project's
+Play Console listing (`works.merc.keryx`):
+
+1. Enable the Google Play Android Developer API for a Google Cloud project
+   (`console.cloud.google.com` → APIs & Services → Library → "Google Play Android Developer API").
+2. Create a service account in that same project (IAM & Admin → Service Accounts). It needs no GCP
+   role at all — Play Console grants its own permissions separately in the next step. Generate a
+   JSON key for it (Keys tab → Add key → JSON) and keep the file.
+3. In Play Console → Users and permissions → Invite new users, add the service account's email and
+   grant it access to this one app with the **"Release to testing tracks"** permission (production
+   access can be added later, once this account's own product-level access is approved — see
+   below).
+4. Set the JSON key's full file contents as the `PLAY_SERVICE_ACCOUNT_JSON` repository secret. Both
+   `release.yml` and `publish-play.yml` read it; `release.yml`'s own publish step is skipped
+   entirely for as long as this secret is unset, the same skip-if-unconfigured pattern
+   `SNAPCRAFT_STORE_CREDENTIALS` above uses.
+5. Upload one AAB **manually** through the Play Console UI before the first automated publish. The
+   Play Developer API can refuse a publish to a package it has never seen a release for at all
+   (a precondition failure, not the same thing as the per-track access above) — see
+   `r0adkll/upload-google-play`'s own README for this.
+
+**Track constants.** `release.yml`'s "Resolve Play track" step hardcodes `PLAY_TRACK_PRERELEASE`
+and `PLAY_TRACK_STABLE` to `internal` for both — a GitHub Release marked as a pre-release publishes
+to the former, everything else to the latter (the same `github.event.release.prerelease` flag
+`package-snap`'s own channel-selection step above uses). Both start on `internal` rather than
+`production`/`beta` because a **personal** Google Play developer account created on or after
+2023-11-13 cannot use "production" or "open testing" at all until it clears Play's own testing
+requirement: a closed test with 12 or more opted-in testers, sustained continuously for 14 days,
+followed by an approved application for production access. Until then, `internal` and `closed` are
+the only tracks available — `closed` has to be populated by hand from Play Console (this project's
+CI never publishes there automatically), and once product-level access is approved, change these
+two constants to `beta`/`production` and this workflow needs no further changes.
+
+**`publish-play.yml`** is a manual `workflow_dispatch` escape hatch for the same publish, given a
+`tag` (an existing GitHub Release) and a `track` to target — useful for pushing straight to
+`closed` while accumulating the 12-tester/14-day history above, or for retrying a failed publish
+without cutting a new GitHub Release (which would also bump the tag, and therefore the
+`versionCode`). It rebuilds the AAB from that tag rather than reusing anything already
+published — a tag deterministically reproduces the same `versionCode` and signing output either
+way, and `release.yml` no longer attaches an AAB to the GitHub Release for it to reuse. It cannot
+*promote* a `versionCode` Play has already seen to a different track — the Play Developer API only
+ever accepts a new upload — so moving an existing release between tracks is a Play Console UI
+action, not something either workflow does.
+
+**Release notes ("recent changes") come from the GitHub Release body**, reformatted to Play's
+plain-text, 500-characters-per-locale limit (headings and bolded bullet titles survive; links,
+descriptions, and the generated header/footer lines are dropped). Written identically to both
+`whatsnew-en-US` and `whatsnew-ja-JP` — this project's release notes are English-only, and leaving
+`ja-JP` absent would make Play silently keep whichever text that locale last had, which is more
+misleading than a same-language duplicate. Edit a release's notes for a specific locale afterward
+directly in Play Console if a translated version is ever wanted; neither workflow touches an
+existing release once published.
 
 > [!IMPORTANT]
 > **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the

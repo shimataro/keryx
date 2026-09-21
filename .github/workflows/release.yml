@@ -525,15 +525,33 @@ jobs:
         with:
           packages: "platform-tools"
 
-      - name: Decode release keystore
+      # Decodes both signing identities androidApp/build.gradle.kts accepts: the app signing key
+      # (signs githubRelease directly) and the upload key (signs playRelease's AAB — see
+      # docs/build.md's "Publishing to Google Play"). ANDROID_UPLOAD_KEYSTORE_BASE64 is decoded
+      # only when set: GitHub maps an unset secret to an empty string rather than leaving the
+      # variable unset, and decoding that would produce a 0-byte file that looks "configured" to
+      # androidApp/build.gradle.kts's own null check — failing deep inside AGP instead of taking
+      # the documented, unset-and-fall-back-to-app-signing path. -PandroidReleaseSigningRequired
+      # below requires both keys regardless, so this job always fails loudly if either secret is
+      # genuinely missing; it just fails with androidApp/build.gradle.kts's own clear error message
+      # rather than a 0-byte-keystore one from deep inside AGP.
+      - name: Decode signing keystores
         id: keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
         run: |
-          keystore_path="$RUNNER_TEMP/keryx-release.keystore"
-          echo "$KEYSTORE_BASE64" | base64 -d > "$keystore_path"
-          chmod 600 "$keystore_path"
-          echo "path=$keystore_path" >> "$GITHUB_OUTPUT"
+          release_path="$RUNNER_TEMP/keryx-release.keystore"
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$release_path"
+          chmod 600 "$release_path"
+          echo "release_path=$release_path" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$UPLOAD_KEYSTORE_BASE64" ]; then
+            upload_path="$RUNNER_TEMP/keryx-upload.keystore"
+            echo "$UPLOAD_KEYSTORE_BASE64" | base64 -d > "$upload_path"
+            chmod 600 "$upload_path"
+            echo "upload_path=$upload_path" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build Android release packages
         # No GOOGLE_DRIVE_CLIENT_ID/SECRET here (unlike the desktop packaging jobs below): Android's
@@ -543,7 +561,9 @@ jobs:
         # isn't a build input for :androidApp at all.
         # androidReleaseSigningRequired turns a missing/half-configured secret above into a hard
         # build failure instead of androidApp/build.gradle.kts's own local-dev fallback (an
-        # unsigned APK) — this job publishes its output, so it must never succeed unsigned.
+        # unsigned APK, or — for the upload key specifically — signing with the app signing key
+        # instead) — this job publishes its output, so it must never succeed unsigned or with the
+        # wrong signing identity on the AAB.
         # The APK comes from the "github" flavor (carries REQUEST_INSTALL_PACKAGES, the sideload
         # distribution an in-app update installs over) and the AAB from "play" (the Play Console
         # submission artifact, which must not carry that permission) — see
@@ -555,12 +575,16 @@ jobs:
         env:
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
-          ANDROID_RELEASE_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          ANDROID_RELEASE_KEYSTORE_PATH: ${{ steps.keystore.outputs.release_path }}
           ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEYSTORE_PATH: ${{ steps.keystore.outputs.upload_path }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
 
-      - name: Rename artifacts
+      - name: Locate build outputs
         id: artifact
         run: |
           apk_src=$(find androidApp/build/outputs/apk/github/release -maxdepth 1 -name '*.apk' | head -n 1)
@@ -575,7 +599,7 @@ jobs:
           fi
           # Defense in depth on top of -PandroidReleaseSigningRequired=true above: AGP names an
           # unsigned release APK with an "-unsigned" suffix (it has no equivalent marker for the
-          # AAB), so this is a cheap extra check right before the irreversible upload below.
+          # AAB), so this is a cheap extra check right before the irreversible upload/publish below.
           case "$apk_src" in
             *-unsigned.apk)
               echo "::error::Refusing to publish an unsigned APK ($apk_src)."
@@ -583,17 +607,98 @@ jobs:
               ;;
           esac
           apk_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.apk"
-          aab_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.aab"
           mv "$apk_src" "$apk_dest"
-          mv "$aab_src" "$aab_dest"
           echo "apk=$apk_dest" >> "$GITHUB_OUTPUT"
-          echo "aab=$aab_dest" >> "$GITHUB_OUTPUT"
+          # The AAB is never a GitHub Release asset — a user cannot install one, and
+          # selectUpdateAsset never matches a `.aab` — so it keeps its AGP-generated name/location
+          # and is only ever read by "Publish to Google Play" below.
+          echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" "${{ steps.artifact.outputs.aab }}" --clobber
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+      # Track constants — change these two once product-level access is approved (see
+      # docs/build.md's "Publishing to Google Play"): a personal developer account created on or
+      # after 2023-11-13 cannot use "production" or "open testing" until then, only "internal" and
+      # "closed". Keyed on the GitHub Release's own prerelease flag, the same signal
+      # package-snap's channel-selection step above uses, not the tag suffix alone.
+      - name: Resolve Play track
+        id: play
+        env:
+          IS_GITHUB_PRERELEASE: ${{ github.event.release.prerelease }}
+          SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          PLAY_TRACK_PRERELEASE=internal
+          PLAY_TRACK_STABLE=internal
+          if [ "$IS_GITHUB_PRERELEASE" = "true" ]; then
+            echo "track=$PLAY_TRACK_PRERELEASE" >> "$GITHUB_OUTPUT"
+          else
+            echo "track=$PLAY_TRACK_STABLE" >> "$GITHUB_OUTPUT"
+          fi
+          # Same skip-if-unconfigured pattern as SNAPCRAFT_STORE_CREDENTIALS below: publishing to
+          # Play only starts once this secret exists, rather than failing every release until it does.
+          if [ -n "$SERVICE_ACCOUNT_JSON" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Google Play's "recent changes" field is plain text, 500 characters per locale. Reuses the
+      # GitHub Release body rather than maintaining a second, hand-written copy: drops the
+      # generated header/compare-link lines, turns "### Heading" into a plain line and
+      # "- **Title** — description (#N)" into "- Title", then truncates on a line boundary.
+      # Written to *both* locales this project ships (ja-JP alongside en-US) with the same English
+      # text — leaving ja-JP absent would make Play silently carry over whichever text that locale
+      # last had, which is worse than a same-language duplicate. See docs/build.md.
+      - name: Prepare Play release notes
+        id: whatsnew
+        if: steps.play.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          whatsnew_dir="$RUNNER_TEMP/play-whatsnew"
+          mkdir -p "$whatsnew_dir"
+
+          formatted=$(gh release view "$RELEASE_TAG" --json body --jq .body | awk '
+            { line = $0; gsub(/\r$/, "", line) }
+            line ~ /^## / { next }
+            line ~ /^\*\*Full Changelog\*\*/ { next }
+            line ~ /^$/ { next }
+            line ~ /^### / { sub(/^### /, "", line); print line; next }
+            line ~ /^- \*\*/ {
+              rest = line
+              sub(/^- \*\*/, "", rest)
+              sub(/\*\*.*$/, "", rest)
+              print "- " rest
+            }
+          ' | awk -v limit=500 '
+            { len += length($0) + (NR > 1 ? 1 : 0) }
+            len <= limit { print; next }
+            { exit }
+          ')
+
+          if [ -z "$formatted" ]; then
+            formatted="See the GitHub Release for details: https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+          fi
+
+          printf '%s' "$formatted" > "$whatsnew_dir/whatsnew-en-US"
+          printf '%s' "$formatted" > "$whatsnew_dir/whatsnew-ja-JP"
+          echo "dir=$whatsnew_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Google Play
+        if: steps.play.outputs.configured == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: works.merc.keryx
+          releaseFiles: ${{ steps.artifact.outputs.aab }}
+          track: ${{ steps.play.outputs.track }}
+          status: completed
+          whatsNewDirectory: ${{ steps.whatsnew.outputs.dir }}
 
   deploy-pages:
     name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)

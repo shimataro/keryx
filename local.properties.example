@@ -80,3 +80,27 @@ android.release.keystore.path=
 android.release.keystore.password=
 android.release.key.alias=
 android.release.key.password=
+
+# Android upload signing configuration (OPTIONAL). Signs only :androidApp:bundlePlayRelease's AAB
+# — the artifact submitted to Google Play Console — with a dedicated upload key, distinct from the
+# app signing key above. Play re-signs every APK with the registered app signing key before it
+# reaches a device, so leaving this unset simply signs the AAB with the app signing key above
+# instead: the same throwaway keystore then covers github/play/debug for local development, with
+# nothing left unsigned.
+#   Gradle properties: -PandroidUploadKeystorePath=...
+#                      -PandroidUploadKeystorePassword=...
+#                      -PandroidUploadKeyAlias=...
+#                      -PandroidUploadKeyPassword=...
+#   Environment variables: ANDROID_UPLOAD_KEYSTORE_PATH
+#                          ANDROID_UPLOAD_KEYSTORE_PASSWORD
+#                          ANDROID_UPLOAD_KEY_ALIAS
+#                          ANDROID_UPLOAD_KEY_PASSWORD
+#   Default: (empty — falls back to the app signing key above)
+# Setting some but not all four is always a mistake and fails the build immediately, same as the
+# app signing key above. Use an absolute path for android.upload.keystore.path; relative paths are
+# resolved against the androidApp module directory, not the repository root.
+# See docs/build.md's "Publishing to Google Play" for why this project uses a separate upload key.
+android.upload.keystore.path=
+android.upload.keystore.password=
+android.upload.key.alias=
+android.upload.key.password=

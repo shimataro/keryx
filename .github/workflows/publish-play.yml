@@ -1,0 +1,185 @@
+name: Publish to Google Play
+
+# Manual escape hatch alongside release.yml's own automatic Play publish (see
+# package-android's "Resolve Play track" / "Publish to Google Play" steps there and
+# docs/build.md's "Publishing to Google Play"). Kept as its own workflow rather than a
+# `workflow_dispatch` trigger bolted onto release.yml, since every job in that file reads
+# `github.event.release.tag_name` — a `workflow_dispatch` event carries no such context.
+#
+# Two uses this exists for: pushing a build straight to the closed track while accumulating the
+# 12-tester/14-day history a personal developer account needs before Play grants product-level
+# access, and re-running a failed publish without re-cutting the GitHub Release (which would bump
+# the tag and therefore the versionCode).
+#
+# Unlike release.yml, this always rebuilds the AAB from the given tag rather than reusing a
+# previously-attached one — release.yml no longer attaches the AAB to the GitHub Release at all
+# (see "Publish to Google Play" there), and a tag deterministically reproduces the same
+# versionCode/signing output either way.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (e.g. v1.2.0)"
+        required: true
+        type: string
+      track:
+        description: "Google Play track to publish to"
+        required: true
+        type: choice
+        default: internal
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build & publish (${{ inputs.track }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      # Same tag-to-version resolution as release.yml's own "Resolve version from tag" step —
+      # duplicated rather than shared (this repo has no reusable-workflow/composite-action setup
+      # yet), so keep the two in sync by hand if the tag format ever changes.
+      - name: Resolve version from tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          tag="$RELEASE_TAG"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Tag '$tag' does not yield a compatible version (got '$version')."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      # Same as release.yml's package-android job — see its own "Decode signing keystores" step
+      # for the full reasoning (0-byte-keystore trap on an unset secret, etc.).
+      - name: Decode signing keystores
+        id: keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          release_path="$RUNNER_TEMP/keryx-release.keystore"
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$release_path"
+          chmod 600 "$release_path"
+          echo "release_path=$release_path" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$UPLOAD_KEYSTORE_BASE64" ]; then
+            upload_path="$RUNNER_TEMP/keryx-upload.keystore"
+            echo "$UPLOAD_KEYSTORE_BASE64" | base64 -d > "$upload_path"
+            chmod 600 "$upload_path"
+            echo "upload_path=$upload_path" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only the "play" flavor's AAB is needed here — no "github" APK, since this workflow never
+      # touches the GitHub Release. -PandroidReleaseSigningRequired=true still requires all eight
+      # signing values regardless (see androidApp/build.gradle.kts): the flag means "this Gradle
+      # invocation publishes something", not "this Gradle invocation builds every flavor".
+      - name: Build Android release bundle
+        run: >
+          ./gradlew :androidApp:bundlePlayRelease
+          -PappVersion=${{ steps.version.outputs.version }}
+          -PandroidReleaseSigningRequired=true
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          ANDROID_RELEASE_KEYSTORE_PATH: ${{ steps.keystore.outputs.release_path }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          ANDROID_UPLOAD_KEYSTORE_PATH: ${{ steps.keystore.outputs.upload_path }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+
+      - name: Locate build output
+        id: artifact
+        run: |
+          aab_src=$(find androidApp/build/outputs/bundle/playRelease -maxdepth 1 -name '*.aab' | head -n 1)
+          if [ -z "$aab_src" ]; then
+            echo "::error::No AAB produced under androidApp/build/outputs/bundle/playRelease."
+            exit 1
+          fi
+          echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
+
+      # Same formatting as release.yml's own "Prepare Play release notes" step — see there for the
+      # full reasoning. Duplicated for the same "no reusable-workflow setup yet" reason as the
+      # version-resolution step above.
+      - name: Prepare Play release notes
+        id: whatsnew
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          whatsnew_dir="$RUNNER_TEMP/play-whatsnew"
+          mkdir -p "$whatsnew_dir"
+
+          formatted=$(gh release view "$RELEASE_TAG" --json body --jq .body | awk '
+            { line = $0; gsub(/\r$/, "", line) }
+            line ~ /^## / { next }
+            line ~ /^\*\*Full Changelog\*\*/ { next }
+            line ~ /^$/ { next }
+            line ~ /^### / { sub(/^### /, "", line); print line; next }
+            line ~ /^- \*\*/ {
+              rest = line
+              sub(/^- \*\*/, "", rest)
+              sub(/\*\*.*$/, "", rest)
+              print "- " rest
+            }
+          ' | awk -v limit=500 '
+            { len += length($0) + (NR > 1 ? 1 : 0) }
+            len <= limit { print; next }
+            { exit }
+          ')
+
+          if [ -z "$formatted" ]; then
+            formatted="See the GitHub Release for details: https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+          fi
+
+          printf '%s' "$formatted" > "$whatsnew_dir/whatsnew-en-US"
+          printf '%s' "$formatted" > "$whatsnew_dir/whatsnew-ja-JP"
+          echo "dir=$whatsnew_dir" >> "$GITHUB_OUTPUT"
+
+      # No skip-if-unconfigured guard here, unlike release.yml's own publish step: this workflow
+      # exists specifically to publish, so a missing PLAY_SERVICE_ACCOUNT_JSON should fail loudly
+      # rather than silently do nothing.
+      - name: Publish to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: works.merc.keryx
+          releaseFiles: ${{ steps.artifact.outputs.aab }}
+          track: ${{ inputs.track }}
+          status: completed
+          whatsNewDirectory: ${{ steps.whatsnew.outputs.dir }}

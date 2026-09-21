@@ -1,0 +1,35 @@
+One reader. Every device.
+
+Keryx is a local-first, cross-platform RSS reader. All of your data lives on your
+device; turn on cloud sync only if you want the same subscriptions, read/starred
+status, and articles to follow you between your phone and your desktop.
+
+FEATURES
+
+• Multi-device sync via your own cloud storage (Dropbox, Google Drive, or
+  OneDrive) — no account with Keryx itself, ever. On Android, Google Drive sync
+  requires Google Play services; devices without it can still sync via Dropbox
+  or OneDrive.
+• Local-first: works fully offline, with no sync required
+• Fast local full-text search across article titles and content
+• Organize feeds with tags (cross-cutting labels) and folders (hierarchical
+  grouping)
+• RSS 2.0 and Atom 1.0 support (RSS 1.0/RDF is also loosely parsed)
+• OPML import and export, for moving to or from other RSS readers and for
+  backing up your subscriptions
+• Completely free — no freemium tiers, no trial period, no ads
+• Open source — the full source code is public and can be inspected or modified
+  by anyone
+
+PRIVACY
+
+Keryx has no user accounts and no server operated by its developer. There is
+nothing to sign up for, and nothing that its developer's own infrastructure ever
+receives. The app includes no analytics, telemetry, crash reporting, advertising,
+or tracking of any kind.
+
+Keryx talks only to servers directly relevant to what you're doing: the feeds you
+subscribe to (and their favicons), GitHub for update checks, and — only if you
+connect one — Dropbox, Google Drive, or OneDrive for sync. Nothing else.
+
+Learn more, including the full privacy policy, at https://keryx.merc.works
