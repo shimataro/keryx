@@ -1,8 +1,8 @@
 One reader. Every device.
 
-Keryx is a local-first, cross-platform RSS reader. All of your data lives on your
-device; turn on cloud sync only if you want the same subscriptions, read/starred
-status, and articles to follow you between your phone and your desktop.
+Keryx is a local-first, cross-platform RSS reader. By default, all of your data
+lives on your device; turn on cloud sync only if you want the same subscriptions,
+read/starred status, and articles to follow you between your phone and your desktop.
 
 FEATURES
 
