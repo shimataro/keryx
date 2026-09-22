@@ -187,7 +187,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 共有するため重要である。`SEARCH_FALLBACK_RESULT_LIMIT` はスコープの**内側**に適用される（`WHERE` が
 先に行を絞り込んだ上で `LIMIT` がそれに対して数える）のであってその前ではない——そのため、1つの
 フィードにスコープされた検索が、無関係な別フィードのヒットに上限を埋められて飢えることはない。
-`HomeViewModel` がどのスコープを渡すかについては [app-architecture.md](app-architecture.md) の
+`HomeViewModel` がどのスコープを渡すかについては [app-architecture.ja.md](app-architecture.ja.md) の
 「`ArticleFilter` から独立した検索」を参照。
 
 ## local_settings.json（keryx.db 外・非同期）
