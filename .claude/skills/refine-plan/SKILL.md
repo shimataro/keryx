@@ -44,6 +44,14 @@ Resolve which document to work on, in this order:
    change."
 9. **Sequencing** — steps are ordered so prerequisites precede dependents
    (e.g. schema changes before code that reads the new schema).
+10. **Commit strategy** — if the plan spans multiple phases, it includes a
+    Commit Strategy section specifying:
+    - Commits are created in revertible units (one per phase or logical step)
+      so each can be reverted independently without breaking the build or
+      leaving the codebase inconsistent.
+    - Commit messages are generated automatically from the diff content,
+      following the Conventional Commits style.
+    - Changes are never pushed; all work stays local.
 
 ## Iteration loop
 
