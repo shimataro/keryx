@@ -82,8 +82,8 @@ feature branch (i.e. not `v*`), this rule no longer triggers.
 
 After implementing a plan that changes source code, output a concise commit
 message in English for the resulting diff (`git diff`). Do not commit unless
-asked. Follow the repo's Conventional Commits style (`fix(scope): ...`,
-`docs(scope): ...`, etc.).
+asked, except when the user has explicitly approved auto-commit. Follow the
+repo's Conventional Commits style (`fix(scope): ...`, `docs(scope): ...`, etc.).
 
 When changes are not committed, generate a commit comment from the diff and
 present it to the user so they can review or use it manually.
