@@ -5,9 +5,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 
@@ -16,6 +18,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
  * (not just the label) is the tap target when [onClick] is given, matching Android's own list-row
  * convention; hover has no touch equivalent, so [supporting] renders as `ListItem`'s own
  * `supportingContent` line instead of a tooltip.
+ *
+ * The container is transparent rather than `ListItem`'s default `surface`, so a row takes the tone
+ * of whatever it sits on (a `SettingsCard`, an alert dialog) instead of showing as a band of a
+ * different tone inside it.
  */
 @Composable
 actual fun KeryxSettingRow(
@@ -28,6 +34,7 @@ actual fun KeryxSettingRow(
 ) {
     ListItem(
         headlineContent = { Text(label) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         supportingContent = supporting?.let { { Text(it) } },
         // trailing (e.g. FlatSwitch) has its own semantics node (M3's Switch reports Role.Switch +
         // its own checked state) that would otherwise merge into a second, separately-focusable
