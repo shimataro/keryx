@@ -323,6 +323,16 @@
     <string name="notification_level_info">情報</string>
     <string name="notification_detail_title">詳細</string>
     <string name="notification_snackbar_action">表示</string>
+    <string name="time_now">たった今</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="other">%1$d分前</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="other">%1$d時間前</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="other">%1$d日前</item>
+    </plurals>
 
     <!-- errors -->
     <string name="error_feed_timeout">フィードの取得がタイムアウトしました</string>

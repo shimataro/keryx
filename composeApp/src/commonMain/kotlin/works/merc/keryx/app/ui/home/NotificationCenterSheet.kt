@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,10 +31,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_dismiss
@@ -43,6 +48,10 @@ import works.merc.keryx.app.resources.notification_level_error
 import works.merc.keryx.app.resources.notification_level_info
 import works.merc.keryx.app.resources.notification_level_warning
 import works.merc.keryx.app.resources.settings_cloud_reset
+import works.merc.keryx.app.resources.time_days_ago
+import works.merc.keryx.app.resources.time_hours_ago
+import works.merc.keryx.app.resources.time_minutes_ago
+import works.merc.keryx.app.resources.time_now
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
@@ -72,6 +81,15 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
     val items by vm.items.collectAsState()
     val shape = MaterialTheme.shapes.medium
     val isTouchPrimary = works.merc.keryx.app.platform.isTouchPrimary
+    // One shared reading for every row, re-read while the panel is composed so relative labels
+    // don't freeze; produceState cancels the loop once the panel leaves composition.
+    val clock: Clock = koinInject()
+    val nowMillis by produceState(clock.nowMillis(), clock) {
+        while (true) {
+            delay(RELATIVE_TIME_REFRESH_MS)
+            value = clock.nowMillis()
+        }
+    }
 
     val body = @Composable {
         Column(Modifier.padding(16.dp)) {
@@ -95,6 +113,7 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
                     items.forEach { notification ->
                         NotificationRow(
                             notification = notification,
+                            nowMillis = nowMillis,
                             onDismiss = { vm.dismiss(notification.id) },
                             onRequestHostAction = { vm.requestAction(notification) },
                             onNavigated = onNavigated,
@@ -118,6 +137,7 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
 /**
  * Displays a notification with its level indicator, message, optional action, and dismiss control.
  *
+ * @param nowMillis The current time the relative timestamp is measured against.
  * @param onDismiss Dismisses the notification.
  * @param onRequestHostAction Requests handling of a notification action by the host screen.
  * @param onNavigated Called after a row action completes.
@@ -125,6 +145,7 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
 @Composable
 private fun NotificationRow(
     notification: AppNotification,
+    nowMillis: Long,
     onDismiss: () -> Unit,
     onRequestHostAction: () -> Unit,
     onNavigated: () -> Unit,
@@ -171,6 +192,12 @@ private fun NotificationRow(
                 color = if (rowAction != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
                 textDecoration = if (rowAction != null && hovered) TextDecoration.Underline else null,
             )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                formatRelativeTime(notification.timestampMillis, nowMillis),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
             // The destructive recovery action (an unusable cloud DB) gets an explicit button instead,
             // inline below the message (the popup is too narrow to place it alongside).
             if (action == AppNotificationAction.ResetCloudData) {
@@ -184,6 +211,47 @@ private fun NotificationRow(
         TooltipIconButton(tooltip = dismissTooltip, onClick = onDismiss) {
             KeryxIcon(KeryxIcons.CloseOutlined, contentDescription = dismissTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))
         }
+    }
+}
+
+/** How often an open notification panel re-reads the clock; minutes are the finest unit shown. */
+private const val RELATIVE_TIME_REFRESH_MS = 60_000L
+
+/** Which relative-time label a notification row shows, given how long ago it was raised. */
+internal sealed interface RelativeTime {
+    data object Now : RelativeTime
+    data class Minutes(val count: Int) : RelativeTime
+    data class Hours(val count: Int) : RelativeTime
+    data class Days(val count: Int) : RelativeTime
+
+    /** Older than a week: shown as an absolute date and time instead. */
+    data object Absolute : RelativeTime
+}
+
+/**
+ * Buckets [diffMillis] (now minus the notification's timestamp) into a [RelativeTime]. A negative
+ * difference (a timestamp slightly ahead of the clock) counts as [RelativeTime.Now].
+ */
+internal fun relativeTimeOf(diffMillis: Long): RelativeTime = when {
+    diffMillis < 60_000L -> RelativeTime.Now
+    diffMillis < 3_600_000L -> RelativeTime.Minutes((diffMillis / 60_000L).toInt())
+    diffMillis < 86_400_000L -> RelativeTime.Hours((diffMillis / 3_600_000L).toInt())
+    diffMillis < 604_800_000L -> RelativeTime.Days((diffMillis / 86_400_000L).toInt())
+    else -> RelativeTime.Absolute
+}
+
+/**
+ * Formats [timestampMillis] relative to [nowMillis] for display in notification rows. The caller
+ * supplies [nowMillis] and refreshes it while the panel is open, so the labels stay current.
+ */
+@Composable
+private fun formatRelativeTime(timestampMillis: Long, nowMillis: Long): String {
+    return when (val relative = relativeTimeOf(nowMillis - timestampMillis)) {
+        RelativeTime.Now -> stringResource(Res.string.time_now)
+        is RelativeTime.Minutes -> pluralStringResource(Res.plurals.time_minutes_ago, relative.count, relative.count)
+        is RelativeTime.Hours -> pluralStringResource(Res.plurals.time_hours_ago, relative.count, relative.count)
+        is RelativeTime.Days -> pluralStringResource(Res.plurals.time_days_ago, relative.count, relative.count)
+        RelativeTime.Absolute -> formatTimestamp(timestampMillis)
     }
 }
 
