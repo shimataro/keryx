@@ -233,7 +233,7 @@
     <!-- Locale-dependent, like website_url above: the Japanese default points to /ja/terms; this
          override points to the English (/terms) page. -->
     <string name="terms_url">https://keryx.merc.works/terms</string>
-    <string name="settings_contact">Contact</string>
+    <string name="settings_contact">Contact (Email)</string>
     <!-- Contact email address. Locale-dependent, like website_url above: currently the same address
          as the Japanese default, kept here so the two locales can diverge later. -->
     <string name="contact_email">keryx@merc.works</string>

@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,6 +61,12 @@ fun AboutDialog(onDismiss: () -> Unit) {
 /**
  * The dialog body — separated so it can be rendered in a UI test without the DialogWindow.
  *
+ * Below the icon and version, links are grouped by how often they're wanted — first the product and
+ * support links (website, project page, contact), then the legal documents (terms, privacy policy,
+ * licenses) — with a divider before each group. On a touch-primary platform no row shows its URL or
+ * address as a second line ([LinkRow]'s `showUrlInline`, [EmailLinkRow]), so the grouping isn't
+ * buried under long URLs; the contact row's own label says it opens an email instead.
+ *
  * @param openUrl Opens a link row's URL on click — a seam for tests; defaults to [BrowserOpener.open].
  */
 @Composable
@@ -77,35 +85,20 @@ internal fun AboutDialogContent(openUrl: (String) -> Unit = BrowserOpener::open)
             stringResource(Res.string.settings_version, AppInfo.version),
             style = MaterialTheme.typography.bodyMedium,
         )
-        Spacer(Modifier.height(20.dp))
+
+        AboutGroupDivider()
         LinkRow(
             label = stringResource(Res.string.settings_website),
             url = stringResource(Res.string.website_url),
             openUrl = openUrl,
+            showUrlInline = false,
         )
         Spacer(Modifier.height(4.dp))
         LinkRow(
             label = stringResource(Res.string.settings_project_page),
             url = PROJECT_URL,
             openUrl = openUrl,
-        )
-        Spacer(Modifier.height(4.dp))
-        LinkRow(
-            label = stringResource(Res.string.settings_licenses),
-            url = LICENSES_URL,
-            openUrl = openUrl,
-        )
-        Spacer(Modifier.height(4.dp))
-        LinkRow(
-            label = stringResource(Res.string.settings_privacy_policy),
-            url = stringResource(Res.string.privacy_policy_url),
-            openUrl = openUrl,
-        )
-        Spacer(Modifier.height(4.dp))
-        LinkRow(
-            label = stringResource(Res.string.settings_terms),
-            url = stringResource(Res.string.terms_url),
-            openUrl = openUrl,
+            showUrlInline = false,
         )
         Spacer(Modifier.height(4.dp))
         EmailLinkRow(
@@ -113,7 +106,38 @@ internal fun AboutDialogContent(openUrl: (String) -> Unit = BrowserOpener::open)
             address = stringResource(Res.string.contact_email),
             openUrl = openUrl,
         )
+
+        AboutGroupDivider()
+        LinkRow(
+            label = stringResource(Res.string.settings_terms),
+            url = stringResource(Res.string.terms_url),
+            openUrl = openUrl,
+            showUrlInline = false,
+        )
+        Spacer(Modifier.height(4.dp))
+        LinkRow(
+            label = stringResource(Res.string.settings_privacy_policy),
+            url = stringResource(Res.string.privacy_policy_url),
+            openUrl = openUrl,
+            showUrlInline = false,
+        )
+        Spacer(Modifier.height(4.dp))
+        LinkRow(
+            label = stringResource(Res.string.settings_licenses),
+            url = LICENSES_URL,
+            openUrl = openUrl,
+            showUrlInline = false,
+        )
         // Extra breathing room before the shared button row so the OK button doesn't feel crammed.
         Spacer(Modifier.height(8.dp))
     }
+}
+
+/** A semantic break between [AboutDialogContent]'s groups, in the same tone as [Section]'s divider. */
+@Composable
+private fun AboutGroupDivider() {
+    HorizontalDivider(
+        Modifier.padding(vertical = 12.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+    )
 }

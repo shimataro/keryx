@@ -40,6 +40,11 @@ import works.merc.keryx.app.resources.common_back
  * surface pattern (`surfaceContainerLow` + no elevation — see the `ui-guidelines` skill), but on
  * Android a dialog surface is exactly where M3's own tonal elevation reads as native. Not passing
  * it to [AlertDialog] lets `AlertDialogDefaults`' own values apply.
+ *
+ * [text] is wrapped in a `verticalScroll` [Column], matching the desktop actual: M3's
+ * [AlertDialog] only constrains its text slot's height, it doesn't scroll it, so content taller
+ * than the screen (a phone in landscape, a large font scale) would otherwise be clipped. A caller
+ * embedding a lazy list must bound its height, as it already must on desktop.
  */
 @Composable
 actual fun KeryxAlertDialog(
@@ -80,7 +85,9 @@ actual fun KeryxAlertDialog(
                 }
             }
         },
-        text = text,
+        text = text?.let { content ->
+            { Column(Modifier.verticalScroll(rememberScrollState())) { content() } }
+        },
         // containerColor deliberately NOT forwarded — see this function's own KDoc.
     )
 }

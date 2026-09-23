@@ -230,7 +230,7 @@
     <!-- Locale-dependent, like website_url above: the default (Japanese) locale points to /ja/terms;
          values-en/strings.xml overrides this with the English (/terms) URL. -->
     <string name="terms_url">https://keryx.merc.works/ja/terms</string>
-    <string name="settings_contact">お問い合わせ</string>
+    <string name="settings_contact">お問い合わせ（メール）</string>
     <!-- Contact email address. Locale-dependent, like website_url above: both locales currently
          share one address, but values-en/strings.xml can override it with a locale-specific one. -->
     <string name="contact_email">keryx@merc.works</string>
