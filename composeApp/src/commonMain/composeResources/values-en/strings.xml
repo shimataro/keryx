@@ -323,6 +323,19 @@
     <string name="notification_level_info">Info</string>
     <string name="notification_detail_title">Details</string>
     <string name="notification_snackbar_action">View</string>
+    <string name="time_now">Just now</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%1$d minute ago</item>
+        <item quantity="other">%1$d minutes ago</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">%1$d hour ago</item>
+        <item quantity="other">%1$d hours ago</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">%1$d day ago</item>
+        <item quantity="other">%1$d days ago</item>
+    </plurals>
 
     <!-- errors -->
     <string name="error_feed_timeout">Fetching the feed timed out</string>

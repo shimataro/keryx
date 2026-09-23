@@ -30,10 +30,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.number
+import kotlinx.datetime.toLocalDateTime
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_dismiss
@@ -43,11 +49,16 @@ import works.merc.keryx.app.resources.notification_level_error
 import works.merc.keryx.app.resources.notification_level_info
 import works.merc.keryx.app.resources.notification_level_warning
 import works.merc.keryx.app.resources.settings_cloud_reset
+import works.merc.keryx.app.resources.time_days_ago
+import works.merc.keryx.app.resources.time_hours_ago
+import works.merc.keryx.app.resources.time_minutes_ago
+import works.merc.keryx.app.resources.time_now
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
+import kotlin.time.Instant
 
 /**
  * Notification panel, hosted by [works.merc.keryx.app.ui.common.KeryxAnchoredPanel] from
@@ -171,6 +182,12 @@ private fun NotificationRow(
                 color = if (rowAction != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
                 textDecoration = if (rowAction != null && hovered) TextDecoration.Underline else null,
             )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                formatRelativeTime(notification.timestampMillis),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
             // The destructive recovery action (an unusable cloud DB) gets an explicit button instead,
             // inline below the message (the popup is too narrow to place it alongside).
             if (action == AppNotificationAction.ResetCloudData) {
@@ -183,6 +200,38 @@ private fun NotificationRow(
         val dismissTooltip = stringResource(Res.string.notification_dismiss)
         TooltipIconButton(tooltip = dismissTooltip, onClick = onDismiss) {
             KeryxIcon(KeryxIcons.CloseOutlined, contentDescription = dismissTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))
+        }
+    }
+}
+
+/**
+ * Formats a relative time string for display in notification rows.
+ * Uses a fixed snapshot of the current time at composition time (no live updates).
+ */
+@Composable
+private fun formatRelativeTime(timestampMillis: Long): String {
+    val clock: Clock = koinInject()
+    val nowMillis = remember { clock.nowMillis() }
+    val diff = nowMillis - timestampMillis
+    return when {
+        diff < 60_000L -> stringResource(Res.string.time_now)
+        diff < 3_600_000L -> pluralStringResource(Res.plurals.time_minutes_ago, (diff / 60_000L).toInt(), (diff / 60_000L).toInt())
+        diff < 86_400_000L -> pluralStringResource(Res.plurals.time_hours_ago, (diff / 3_600_000L).toInt(), (diff / 3_600_000L).toInt())
+        diff < 604_800_000L -> pluralStringResource(Res.plurals.time_days_ago, (diff / 86_400_000L).toInt(), (diff / 86_400_000L).toInt())
+        else -> {
+            val zone = TimeZone.currentSystemDefault()
+            val dt = Instant.fromEpochMilliseconds(timestampMillis).toLocalDateTime(zone)
+            buildString {
+                append(dt.year.toString().padStart(4, '0'))
+                append('/')
+                append(dt.month.number.toString().padStart(2, '0'))
+                append('/')
+                append(dt.day.toString().padStart(2, '0'))
+                append(' ')
+                append(dt.hour.toString().padStart(2, '0'))
+                append(':')
+                append(dt.minute.toString().padStart(2, '0'))
+            }
         }
     }
 }
