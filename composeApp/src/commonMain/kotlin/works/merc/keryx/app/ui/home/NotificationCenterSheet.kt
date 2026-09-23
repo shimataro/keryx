@@ -32,9 +32,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.number
-import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -60,7 +57,6 @@ import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
-import kotlin.time.Instant
 
 /**
  * Notification panel, hosted by [works.merc.keryx.app.ui.common.KeryxAnchoredPanel] from
@@ -255,21 +251,7 @@ private fun formatRelativeTime(timestampMillis: Long, nowMillis: Long): String {
         is RelativeTime.Minutes -> pluralStringResource(Res.plurals.time_minutes_ago, relative.count, relative.count)
         is RelativeTime.Hours -> pluralStringResource(Res.plurals.time_hours_ago, relative.count, relative.count)
         is RelativeTime.Days -> pluralStringResource(Res.plurals.time_days_ago, relative.count, relative.count)
-        RelativeTime.Absolute -> {
-            val zone = TimeZone.currentSystemDefault()
-            val dt = Instant.fromEpochMilliseconds(timestampMillis).toLocalDateTime(zone)
-            buildString {
-                append(dt.year.toString().padStart(4, '0'))
-                append('/')
-                append(dt.month.number.toString().padStart(2, '0'))
-                append('/')
-                append(dt.day.toString().padStart(2, '0'))
-                append(' ')
-                append(dt.hour.toString().padStart(2, '0'))
-                append(':')
-                append(dt.minute.toString().padStart(2, '0'))
-            }
-        }
+        RelativeTime.Absolute -> formatTimestamp(timestampMillis)
     }
 }
 
