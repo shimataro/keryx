@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import works.merc.keryx.app.core.AppInfo
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -57,6 +58,22 @@ class AboutDialogContentTest {
 
         // The terms of service link (settings_terms) opens the locale-specific terms_url.
         onNodeWithText("利用規約").assertIsDisplayed()
+    }
+
+    @Test
+    fun rendersContactLink() = runDesktopComposeUiTest {
+        setContent { AboutDialogContent() }
+        waitForIdle()
+
+        // The contact link (settings_contact) opens a mailto: URL for the locale-specific
+        // contact_email. The address itself is only a hover tooltip on desktop, so only the label
+        // is asserted here.
+        onNodeWithText("お問い合わせ").assertIsDisplayed()
+    }
+
+    @Test
+    fun mailtoUrlPrefixesTheAddress() {
+        assertEquals("mailto:keryx@example.com", mailtoUrl("keryx@example.com"))
     }
 
     @Test

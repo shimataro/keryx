@@ -71,6 +71,21 @@ internal fun LinkRow(label: String, url: String) {
 }
 
 /**
+ * A [LinkRow] variant for an email address: opens a `mailto:` URL in the user's mail client, but
+ * shows only the bare [address] as the desktop tooltip / Android supporting text, not the scheme.
+ *
+ * @param label The text displayed for the link.
+ * @param address The email address to compose a message to.
+ */
+@Composable
+internal fun EmailLinkRow(label: String, address: String) {
+    KeryxSettingRow(label = label, supporting = address, onClick = { BrowserOpener.open(mailtoUrl(address)) })
+}
+
+/** Builds the `mailto:` URL [EmailLinkRow] opens for [address]. */
+internal fun mailtoUrl(address: String): String = "mailto:$address"
+
+/**
  * A tappable row sharing [LinkRow]'s visual language for an in-app action rather than opening a
  * URL — no destination tooltip/supporting text, since there's nothing to preview. Used for
  * Settings/About entry points that have no native application menu bar to live in (see

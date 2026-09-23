@@ -19,7 +19,9 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.common_ok
+import works.merc.keryx.app.resources.contact_email
 import works.merc.keryx.app.resources.privacy_policy_url
+import works.merc.keryx.app.resources.settings_contact
 import works.merc.keryx.app.resources.settings_licenses
 import works.merc.keryx.app.resources.settings_privacy_policy
 import works.merc.keryx.app.resources.settings_project_page
@@ -94,6 +96,11 @@ internal fun AboutDialogContent() {
         LinkRow(
             label = stringResource(Res.string.settings_terms),
             url = stringResource(Res.string.terms_url),
+        )
+        Spacer(Modifier.height(4.dp))
+        EmailLinkRow(
+            label = stringResource(Res.string.settings_contact),
+            address = stringResource(Res.string.contact_email),
         )
         // Extra breathing room before the shared button row so the OK button doesn't feel crammed.
         Spacer(Modifier.height(8.dp))
