@@ -11,10 +11,18 @@ actual object BrowserOpener {
      */
     actual fun open(url: String) {
         runCatching {
+            val uri = URI(url)
+            if (uri.scheme.equals("mailto", ignoreCase = true) &&
+                Desktop.isDesktopSupported() &&
+                Desktop.getDesktop().isSupported(Desktop.Action.MAIL)
+            ) {
+                Desktop.getDesktop().mail(uri)
+                return
+            }
             if (Desktop.isDesktopSupported() &&
                 Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)
             ) {
-                Desktop.getDesktop().browse(URI(url))
+                Desktop.getDesktop().browse(uri)
                 return
             }
         }
