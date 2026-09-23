@@ -2,6 +2,7 @@ package works.merc.keryx.app.ui.settings
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -12,6 +13,7 @@ import works.merc.keryx.app.resources.contact_email
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -83,6 +85,29 @@ class AboutDialogContentTest {
         waitForIdle()
 
         assertEquals(expectedUrl, openedUrl)
+    }
+
+    @Test
+    fun groupsSupportLinksAboveLegalLinks() = runDesktopComposeUiTest {
+        setContent { AboutDialogContent() }
+        waitForIdle()
+
+        // Product/support links come first, then the legal documents, in this exact order.
+        val labels = listOf("ウェブサイト", "プロジェクトページ", "お問い合わせ", "利用規約", "プライバシーポリシー", "オープンソースライセンス")
+        val tops = labels.map { onNodeWithText(it).getUnclippedBoundsInRoot().top }
+        assertEquals(tops.sorted(), tops, "About links out of order: ${labels.zip(tops)}")
+        assertEquals(tops.size, tops.toSet().size, "About links overlap: ${labels.zip(tops)}")
+    }
+
+    @Test
+    fun linkRowSupportingHidesUrlOnlyOnTouchWhenRequested() {
+        val url = "https://example.com/"
+        // Desktop always keeps the URL (it is only a hover tooltip there).
+        assertEquals(url, linkRowSupporting(url, showUrlInline = true, touchPrimary = false))
+        assertEquals(url, linkRowSupporting(url, showUrlInline = false, touchPrimary = false))
+        // A touch-primary platform shows it as a second line unless the caller opts out.
+        assertEquals(url, linkRowSupporting(url, showUrlInline = true, touchPrimary = true))
+        assertNull(linkRowSupporting(url, showUrlInline = false, touchPrimary = true))
     }
 
     @Test

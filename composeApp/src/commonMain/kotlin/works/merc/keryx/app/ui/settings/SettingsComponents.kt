@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatSwitch
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.common.KeryxSettingRow
@@ -65,11 +66,30 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  * @param label The text displayed for the link.
  * @param url The external URL to open, and to show as the desktop tooltip / Android supporting text.
  * @param openUrl Opens the URL on click — a seam for tests; defaults to [BrowserOpener.open].
+ * @param showUrlInline Whether a touch-primary platform shows [url] as the row's supporting line —
+ *   see [linkRowSupporting].
  */
 @Composable
-internal fun LinkRow(label: String, url: String, openUrl: (String) -> Unit = BrowserOpener::open) {
-    KeryxSettingRow(label = label, supporting = url, onClick = { openUrl(url) })
+internal fun LinkRow(
+    label: String,
+    url: String,
+    openUrl: (String) -> Unit = BrowserOpener::open,
+    showUrlInline: Boolean = true,
+) {
+    KeryxSettingRow(label = label, supporting = linkRowSupporting(url, showUrlInline), onClick = { openUrl(url) })
 }
+
+/**
+ * The `supporting` text a [LinkRow] passes to [KeryxSettingRow]. Desktop always keeps [url], since
+ * there it is only a hover tooltip; a touch-primary platform renders it as an always-visible second
+ * line instead, which a caller listing several self-explanatory links can opt out of with
+ * [showUrlInline] `= false` (the About dialog, where long URLs would bury its grouping).
+ */
+internal fun linkRowSupporting(
+    url: String,
+    showUrlInline: Boolean,
+    touchPrimary: Boolean = isTouchPrimary,
+): String? = if (touchPrimary && !showUrlInline) null else url
 
 /**
  * A [LinkRow] variant for an email address: opens a `mailto:` URL in the user's mail client, but
