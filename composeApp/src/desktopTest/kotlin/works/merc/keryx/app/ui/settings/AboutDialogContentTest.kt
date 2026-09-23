@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.settings
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -68,7 +69,9 @@ class AboutDialogContentTest {
         // The contact link (settings_contact) opens a mailto: URL for the locale-specific
         // contact_email. The address itself is only a hover tooltip on desktop, so only the label
         // is asserted here.
-        onNodeWithText("お問い合わせ").assertIsDisplayed()
+        onNodeWithText("お問い合わせ")
+            .assertIsDisplayed()
+            .assertHasClickAction()
     }
 
     @Test
