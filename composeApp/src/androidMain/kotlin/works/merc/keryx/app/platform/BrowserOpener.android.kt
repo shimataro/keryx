@@ -14,7 +14,12 @@ private const val TAG = "BrowserOpener"
  */
 actual object BrowserOpener {
     actual fun open(url: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val uri = Uri.parse(url)
+        val intent = if (uri.scheme.equals("mailto", ignoreCase = true)) {
+            Intent(Intent.ACTION_SENDTO, uri)
+        } else {
+            Intent(Intent.ACTION_VIEW, uri)
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             AndroidAppContext.application.startActivity(intent)
         } catch (e: ActivityNotFoundException) {

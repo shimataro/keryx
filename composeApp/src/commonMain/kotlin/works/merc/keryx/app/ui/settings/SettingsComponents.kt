@@ -64,11 +64,28 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  *
  * @param label The text displayed for the link.
  * @param url The external URL to open, and to show as the desktop tooltip / Android supporting text.
+ * @param openUrl Opens the URL on click — a seam for tests; defaults to [BrowserOpener.open].
  */
 @Composable
-internal fun LinkRow(label: String, url: String) {
-    KeryxSettingRow(label = label, supporting = url, onClick = { BrowserOpener.open(url) })
+internal fun LinkRow(label: String, url: String, openUrl: (String) -> Unit = BrowserOpener::open) {
+    KeryxSettingRow(label = label, supporting = url, onClick = { openUrl(url) })
 }
+
+/**
+ * A [LinkRow] variant for an email address: opens a `mailto:` URL in the user's mail client, but
+ * shows only the bare [address] as the desktop tooltip / Android supporting text, not the scheme.
+ *
+ * @param label The text displayed for the link.
+ * @param address The email address to compose a message to.
+ * @param openUrl Opens the `mailto:` URL on click — a seam for tests; defaults to [BrowserOpener.open].
+ */
+@Composable
+internal fun EmailLinkRow(label: String, address: String, openUrl: (String) -> Unit = BrowserOpener::open) {
+    KeryxSettingRow(label = label, supporting = address, onClick = { openUrl(mailtoUrl(address)) })
+}
+
+/** Builds the `mailto:` URL [EmailLinkRow] opens for [address]. */
+internal fun mailtoUrl(address: String): String = "mailto:$address"
 
 /**
  * A tappable row sharing [LinkRow]'s visual language for an in-app action rather than opening a

@@ -15,11 +15,14 @@ import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.AppInfo
+import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.app_name
 import works.merc.keryx.app.resources.common_ok
+import works.merc.keryx.app.resources.contact_email
 import works.merc.keryx.app.resources.privacy_policy_url
+import works.merc.keryx.app.resources.settings_contact
 import works.merc.keryx.app.resources.settings_licenses
 import works.merc.keryx.app.resources.settings_privacy_policy
 import works.merc.keryx.app.resources.settings_project_page
@@ -53,9 +56,13 @@ fun AboutDialog(onDismiss: () -> Unit) {
     )
 }
 
-/** The dialog body — separated so it can be rendered in a UI test without the DialogWindow. */
+/**
+ * The dialog body — separated so it can be rendered in a UI test without the DialogWindow.
+ *
+ * @param openUrl Opens a link row's URL on click — a seam for tests; defaults to [BrowserOpener.open].
+ */
 @Composable
-internal fun AboutDialogContent() {
+internal fun AboutDialogContent(openUrl: (String) -> Unit = BrowserOpener::open) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -74,26 +81,37 @@ internal fun AboutDialogContent() {
         LinkRow(
             label = stringResource(Res.string.settings_website),
             url = stringResource(Res.string.website_url),
+            openUrl = openUrl,
         )
         Spacer(Modifier.height(4.dp))
         LinkRow(
             label = stringResource(Res.string.settings_project_page),
             url = PROJECT_URL,
+            openUrl = openUrl,
         )
         Spacer(Modifier.height(4.dp))
         LinkRow(
             label = stringResource(Res.string.settings_licenses),
             url = LICENSES_URL,
+            openUrl = openUrl,
         )
         Spacer(Modifier.height(4.dp))
         LinkRow(
             label = stringResource(Res.string.settings_privacy_policy),
             url = stringResource(Res.string.privacy_policy_url),
+            openUrl = openUrl,
         )
         Spacer(Modifier.height(4.dp))
         LinkRow(
             label = stringResource(Res.string.settings_terms),
             url = stringResource(Res.string.terms_url),
+            openUrl = openUrl,
+        )
+        Spacer(Modifier.height(4.dp))
+        EmailLinkRow(
+            label = stringResource(Res.string.settings_contact),
+            address = stringResource(Res.string.contact_email),
+            openUrl = openUrl,
         )
         // Extra breathing room before the shared button row so the OK button doesn't feel crammed.
         Spacer(Modifier.height(8.dp))
