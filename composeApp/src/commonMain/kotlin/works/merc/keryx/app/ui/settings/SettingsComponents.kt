@@ -64,10 +64,11 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
  *
  * @param label The text displayed for the link.
  * @param url The external URL to open, and to show as the desktop tooltip / Android supporting text.
+ * @param openUrl Opens the URL on click — a seam for tests; defaults to [BrowserOpener.open].
  */
 @Composable
-internal fun LinkRow(label: String, url: String) {
-    KeryxSettingRow(label = label, supporting = url, onClick = { BrowserOpener.open(url) })
+internal fun LinkRow(label: String, url: String, openUrl: (String) -> Unit = BrowserOpener::open) {
+    KeryxSettingRow(label = label, supporting = url, onClick = { openUrl(url) })
 }
 
 /**
@@ -76,10 +77,11 @@ internal fun LinkRow(label: String, url: String) {
  *
  * @param label The text displayed for the link.
  * @param address The email address to compose a message to.
+ * @param openUrl Opens the `mailto:` URL on click — a seam for tests; defaults to [BrowserOpener.open].
  */
 @Composable
-internal fun EmailLinkRow(label: String, address: String) {
-    KeryxSettingRow(label = label, supporting = address, onClick = { BrowserOpener.open(mailtoUrl(address)) })
+internal fun EmailLinkRow(label: String, address: String, openUrl: (String) -> Unit = BrowserOpener::open) {
+    KeryxSettingRow(label = label, supporting = address, onClick = { openUrl(mailtoUrl(address)) })
 }
 
 /** Builds the `mailto:` URL [EmailLinkRow] opens for [address]. */

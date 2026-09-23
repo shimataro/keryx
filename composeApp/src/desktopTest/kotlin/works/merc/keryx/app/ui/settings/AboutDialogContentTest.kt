@@ -1,11 +1,14 @@
 package works.merc.keryx.app.ui.settings
 
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.AppInfo
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.contact_email
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -63,15 +66,23 @@ class AboutDialogContentTest {
 
     @Test
     fun rendersContactLink() = runDesktopComposeUiTest {
-        setContent { AboutDialogContent() }
+        var openedUrl: String? = null
+        var expectedUrl: String? = null
+        setContent {
+            expectedUrl = mailtoUrl(stringResource(Res.string.contact_email))
+            AboutDialogContent(openUrl = { openedUrl = it })
+        }
         waitForIdle()
 
-        // The contact link (settings_contact) opens a mailto: URL for the locale-specific
-        // contact_email. The address itself is only a hover tooltip on desktop, so only the label
-        // is asserted here.
+        // Clicking the contact link (settings_contact) opens a mailto: URL for the locale-specific
+        // contact_email. The address itself is only a hover tooltip on desktop, so the row is
+        // located by its label.
         onNodeWithText("お問い合わせ")
             .assertIsDisplayed()
-            .assertHasClickAction()
+            .performClick()
+        waitForIdle()
+
+        assertEquals(expectedUrl, openedUrl)
     }
 
     @Test
