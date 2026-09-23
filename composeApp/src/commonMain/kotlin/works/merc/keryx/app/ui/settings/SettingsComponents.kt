@@ -92,8 +92,10 @@ internal fun linkRowSupporting(
 ): String? = if (touchPrimary && !showUrlInline) null else url
 
 /**
- * A [LinkRow] variant for an email address: opens a `mailto:` URL in the user's mail client, but
- * shows only the bare [address] as the desktop tooltip / Android supporting text, not the scheme.
+ * A [LinkRow] variant for an email address: opens a `mailto:` URL in the user's mail client. The
+ * bare [address] (not the scheme) appears only as the desktop tooltip — a touch-primary platform
+ * shows no supporting line, the same as [LinkRow]'s `showUrlInline = false` — so [label] itself
+ * should say that the row opens an email (e.g. "Contact (Email)").
  *
  * @param label The text displayed for the link.
  * @param address The email address to compose a message to.
@@ -101,7 +103,11 @@ internal fun linkRowSupporting(
  */
 @Composable
 internal fun EmailLinkRow(label: String, address: String, openUrl: (String) -> Unit = BrowserOpener::open) {
-    KeryxSettingRow(label = label, supporting = address, onClick = { openUrl(mailtoUrl(address)) })
+    KeryxSettingRow(
+        label = label,
+        supporting = linkRowSupporting(address, showUrlInline = false),
+        onClick = { openUrl(mailtoUrl(address)) },
+    )
 }
 
 /** Builds the `mailto:` URL [EmailLinkRow] opens for [address]. */

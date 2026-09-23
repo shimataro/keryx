@@ -76,10 +76,10 @@ class AboutDialogContentTest {
         }
         waitForIdle()
 
-        // Clicking the contact link (settings_contact) opens a mailto: URL for the locale-specific
-        // contact_email. The address itself is only a hover tooltip on desktop, so the row is
-        // located by its label.
-        onNodeWithText("お問い合わせ")
+        // Clicking the contact link (settings_contact, labelled as email) opens a mailto: URL for
+        // the locale-specific contact_email. The address itself is only a hover tooltip on desktop
+        // (and not shown at all on touch), so the row is located by its label.
+        onNodeWithText("お問い合わせ（メール）")
             .assertIsDisplayed()
             .performClick()
         waitForIdle()
@@ -93,7 +93,7 @@ class AboutDialogContentTest {
         waitForIdle()
 
         // Product/support links come first, then the legal documents, in this exact order.
-        val labels = listOf("ウェブサイト", "プロジェクトページ", "お問い合わせ", "利用規約", "プライバシーポリシー", "オープンソースライセンス")
+        val labels = listOf("ウェブサイト", "プロジェクトページ", "お問い合わせ（メール）", "利用規約", "プライバシーポリシー", "オープンソースライセンス")
         val tops = labels.map { onNodeWithText(it).getUnclippedBoundsInRoot().top }
         assertEquals(tops.sorted(), tops, "About links out of order: ${labels.zip(tops)}")
         assertEquals(tops.size, tops.toSet().size, "About links overlap: ${labels.zip(tops)}")

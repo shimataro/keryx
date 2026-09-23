@@ -63,9 +63,9 @@ fun AboutDialog(onDismiss: () -> Unit) {
  *
  * Below the icon and version, links are grouped by how often they're wanted — first the product and
  * support links (website, project page, contact), then the legal documents (terms, privacy policy,
- * licenses) — with a divider before each group. On a touch-primary platform the link rows omit their
- * URL line ([LinkRow]'s `showUrlInline`) so the grouping isn't buried under long URLs; the contact
- * row keeps its address, which is information in its own right.
+ * licenses) — with a divider before each group. On a touch-primary platform no row shows its URL or
+ * address as a second line ([LinkRow]'s `showUrlInline`, [EmailLinkRow]), so the grouping isn't
+ * buried under long URLs; the contact row's own label says it opens an email instead.
  *
  * @param openUrl Opens a link row's URL on click — a seam for tests; defaults to [BrowserOpener.open].
  */
