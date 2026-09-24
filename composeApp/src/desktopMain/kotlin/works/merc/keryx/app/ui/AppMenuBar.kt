@@ -120,8 +120,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val screen by menuController.currentScreen.collectAsState()
     val textInputFocused by menuController.textInputFocused.collectAsState()
     val selected by homeVm.selectedArticle.collectAsState()
-    val feedRefreshing by homeVm.feedRefreshing.collectAsState()
-    val syncing by homeVm.syncing.collectAsState()
+    val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()
     val unreadOnly by homeVm.unreadOnly.collectAsState()
@@ -146,8 +145,7 @@ internal fun FrameWindowScope.AppMenuBar(
         screen = screen,
         hasSelectedArticle = selected != null,
         selectedArticleHasUrl = hasUsableUrl(selected?.url),
-        feedRefreshing = feedRefreshing,
-        syncing = syncing,
+        activity = activity,
         cloudConnected = cloudConnected,
         searchActive = searchActive,
         unreadOnly = unreadOnly,

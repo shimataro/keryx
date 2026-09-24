@@ -90,6 +90,7 @@ fun HomeScreen() {
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
     val feeds by vm.feeds.collectAsState()
+    val searchActive by vm.searchActive.collectAsState()
     // Whether the expanded search bar is open — see homeBackAction's own KDoc.
     val searchBarVisible by vm.searchBarVisible.collectAsState()
     val tags by vm.tags.collectAsState()
@@ -428,6 +429,13 @@ fun HomeScreen() {
                     onFeedListDelete = { if (keyboardPane == HomePane.FeedList) feedListDeleteRequestId++ },
                     onSearch = { focusSearch() },
                     onKeyboardEngaged = { keyboardEngaged = true },
+                    // Same rule the article list's own pull gesture uses, so the shortcut exists
+                    // exactly where the gesture does.
+                    onRefreshList = if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) {
+                        vm::pullToRefresh
+                    } else {
+                        null
+                    },
                 ),
         ) {
             // Wraps both the Triple and narrow-layout branches below (and FeedDragGhost) in one

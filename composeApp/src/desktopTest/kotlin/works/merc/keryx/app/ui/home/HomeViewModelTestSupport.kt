@@ -34,6 +34,7 @@ import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -74,16 +75,14 @@ private fun notFoundHttpClient(): HttpClient = HttpClient(MockEngine { respond("
 /**
  * Bundles the [HomeViewModel] under test with every resource [newHomeViewModel] creates outside
  * its own [HomeViewModel.viewModelScope] — the SQL [driver] itself, [SyncRepository]'s
- * channel-consumer scope, the MockEngine [HttpClient]s, and (only when [newHomeViewModel] built the
- * default [ActivityCenter] itself) that `ActivityCenter`'s own scope — so a test can release all of
- * them, in the one order that's safe, via [close].
+ * channel-consumer scope, and the MockEngine [HttpClient]s — so a test can release all of them, in
+ * the one order that's safe, via [close].
  */
 internal class HomeViewModelFixture(
     val vm: HomeViewModel,
     private val driver: SqlDriver,
     private val syncScope: CoroutineScope,
     private val httpClients: List<HttpClient>,
-    val ownedActivityCenterScope: CoroutineScope? = null,
 ) {
     /**
      * Cancels every scope this fixture owns and *joins* it before [driver] is closed.
@@ -98,15 +97,10 @@ internal class HomeViewModelFixture(
      * it, which then surfaces flakily — on whichever *other* test happens to run next — as
      * `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`. Same reasoning, and the same fix, as
      * `SettingsViewModelTest.tearDown`.
-     *
-     * [ownedActivityCenterScope] is only non-null when [newHomeViewModel] built the default
-     * [ActivityCenter] itself — a caller-supplied `ActivityCenter` keeps its scope's lifecycle
-     * external, exactly like [driver]/[db] passed in from outside.
      */
     suspend fun close() {
         vm.viewModelScope.coroutineContext.job.cancelAndJoin()
         syncScope.coroutineContext.job.cancelAndJoin()
-        ownedActivityCenterScope?.coroutineContext?.job?.cancelAndJoin()
         httpClients.forEach { it.close() }
         driver.close()
     }
@@ -122,33 +116,34 @@ internal class HomeViewModelFixture(
  * mis-ordered. Call this directly only for a plain (non-Compose) `HomeViewModel` test, where the
  * caller must still `try { … } finally { runBlocking { fixture.close() } }` itself.
  *
- * When [activityCenter] is left `null`, this function builds the default [ActivityCenter] itself
- * (over a scope this fixture then owns and cancels in [HomeViewModelFixture.close]) rather than
- * relying on [ActivityCenter]'s own default constructor argument, whose scope nothing would ever
- * cancel. Pass an [activityCenter] explicitly only when the caller needs to observe or drive it
- * itself (e.g. via [ActivityCenter.trackFeedRefresh]) — that scope's lifecycle then stays the
- * caller's responsibility.
+ * Pass an [activityCenter] explicitly only when the caller needs to observe or drive it itself
+ * (e.g. via [ActivityCenter.trackFeedRefresh]); it holds no coroutines, so there is nothing of its
+ * own to tear down either way.
  *
  * Everything created below is tracked in `cleanupOnFailure` as it's built, and unwound in reverse
  * if a later step throws — [HomeViewModelFixture.close] is only reachable once this function
  * actually returns a [HomeViewModelFixture], so a throw partway through (e.g. from [HomeViewModel]'s
- * own constructor) would otherwise leak whatever was already created, most notably
- * [ActivityCenter]'s `SharingStarted.Eagerly` collectors, which start running the moment
- * `ActivityCenter(...)` is called — well before this function has a fixture to hand back to a
- * caller who could ever cancel them.
+ * own constructor) would otherwise leak whatever was already created — the MockEngine clients and
+ * [SyncRepository]'s channel-consumer scope — well before this function has a fixture to hand back
+ * to a caller who could ever release them.
  */
 internal fun newHomeViewModel(
     driver: SqlDriver,
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
-    activityCenter: ActivityCenter? = null,
+    activityCenter: ActivityCenter = ActivityCenter(),
     tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
     appKey: String = "",
-    // Test-only injection point, invoked right after `resolvedActivityCenter` is built: lets a test
-    // simulate a late constructor throwing, to verify the failure-cleanup below actually runs. A
-    // no-op default keeps every other caller unaffected.
-    injectFailureAfterActivityCenter: (ownedActivityCenterScope: CoroutineScope?) -> Unit = {},
+    // [SyncRepository]'s channel-consumer scope. The fixture owns and cancels it either way (in
+    // [HomeViewModelFixture.close], or in the failure cleanup below); overridable only so a test
+    // can observe that cancellation.
+    syncScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+    // Test-only injection point, invoked right after every resource that needs cleanup has been
+    // built and before the repositories that use them: lets a test simulate a late constructor
+    // throwing, to verify the failure-cleanup below actually runs. A no-op default keeps every
+    // other caller unaffected.
+    injectFailureAfterActivityCenter: () -> Unit = {},
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -171,16 +166,8 @@ internal fun newHomeViewModel(
         val settingsRepository = SettingsRepository(
             db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined,
         )
-        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-            .also { scope -> cleanupOnFailure += { scope.cancel() } }
-        val ownedActivityCenterScope = if (activityCenter == null) {
-            CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-                .also { scope -> cleanupOnFailure += { scope.cancel() } }
-        } else {
-            null
-        }
-        val resolvedActivityCenter = activityCenter ?: ActivityCenter(ownedActivityCenterScope!!)
-        injectFailureAfterActivityCenter(ownedActivityCenterScope)
+        cleanupOnFailure += { syncScope.cancel() }
+        injectFailureAfterActivityCenter()
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
@@ -188,7 +175,7 @@ internal fun newHomeViewModel(
             cloudProvider = { null },
             clock = clock,
             scope = syncScope,
-            activityCenter = resolvedActivityCenter,
+            activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
             notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
@@ -204,13 +191,17 @@ internal fun newHomeViewModel(
             clientId = appKey,
             clock = clock,
         )
+        val refreshCycleRunner = RefreshCycleRunner(
+            activityCenter, feedRepository, syncRepository, cloudSession, NewArticleNotifier(),
+            settingsRepository, FakeNotificationMessages(),
+        )
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, resolvedActivityCenter, clock, NewArticleNotifier(),
-            FakeNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
+            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner,
+            Dispatchers.Unconfined, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(
-            vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedActivityCenterScope,
+            vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient),
         )
     } catch (e: Throwable) {
         cleanupOnFailure.asReversed().forEach { it() }
@@ -232,7 +223,7 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
     clock: Clock = Clock { 0L },
-    activityCenter: ActivityCenter? = null,
+    activityCenter: ActivityCenter = ActivityCenter(),
     tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
     appKey: String = "",
     block: suspend (HomeViewModelFixture) -> T,

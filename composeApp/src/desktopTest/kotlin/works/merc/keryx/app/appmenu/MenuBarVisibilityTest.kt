@@ -2,6 +2,7 @@ package works.merc.keryx.app.appmenu
 
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.menu.AppMenuActions
@@ -64,7 +65,7 @@ class MenuBarVisibilityTest {
     private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
         ui = computeMenuUiState(
             screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
-            feedRefreshing = false, syncing = false, cloudConnected = true,
+            activity = ActivitySnapshot(), cloudConnected = true,
             searchActive = false, unreadOnly = false,
             hasSelectedFeed = true, hasRenamableSelection = true,
         ),

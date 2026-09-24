@@ -158,8 +158,9 @@ class SyncRepository(
     /**
      * The step the currently-running (or most recently finished) sync is on. Mirrors [_syncPhase],
      * which every phase transition writes under [mutex] — see [SyncPhase] for why that ordering
-     * matters. The cloud-sync settings tab pairs this with [ActivityCenter.syncing] (via
-     * `SettingsViewModel`) to show live progress text on the connected provider's row.
+     * matters. The cloud-sync settings tab pairs this with [ActivitySnapshot.syncing] (from
+     * [ActivityCenter.activity], via `SettingsViewModel`) to show live progress text on the
+     * connected provider's row.
      */
     val syncPhase: StateFlow<SyncPhase> = _syncPhase
 

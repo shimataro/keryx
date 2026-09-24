@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,8 +23,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -69,6 +79,7 @@ import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_no_articles
 import works.merc.keryx.app.resources.home_no_feeds
 import works.merc.keryx.app.resources.home_open_feed_list
+import works.merc.keryx.app.resources.home_refresh_this_list
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
@@ -149,6 +160,9 @@ fun ArticleListPane(
     onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
+    // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
+    // a real touch-primary platform to run on; every real call site relies on the default.
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val filter by vm.filter.collectAsState()
     val feeds by vm.feeds.collectAsState()
@@ -304,6 +318,10 @@ fun ArticleListPane(
         }
     }
 
+    val pullRefreshingFilters by vm.pullRefreshingFilters.collectAsState()
+    val onPullRefresh: (() -> Unit)? =
+        if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) vm::pullToRefresh else null
+
     ArticleListPaneContent(
         articles = articles,
         feedTitles = feedTitles,
@@ -335,6 +353,12 @@ fun ArticleListPane(
         titleMarkedById = titleMarkedById,
         emptyContent = emptyContent,
         header = header,
+        // Gated by pullRefreshAvailable (touch-primary only, never over search results or with no
+        // feeds). The scope is the current selection's own feeds; see HomeRefreshController.pullToRefresh.
+        onPullRefresh = onPullRefresh,
+        // Only the list whose own pull is still running shows the indicator — another selection
+        // switched to mid-pull is not the list being refreshed.
+        pullRefreshing = onPullRefresh != null && filter in pullRefreshingFilters,
     )
 }
 
@@ -531,7 +555,12 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   when [articles] is empty — search's own "too short a query"/"no matching articles" hints, which
  *   have nothing to do with whether the user has any feeds at all. `null` (the default) falls back
  *   to that ordinary message.
+ * @param onPullRefresh Invoked when the list (or its "no articles" empty state) is pulled down past
+ *   the refresh threshold. `null` (the default) disables the gesture entirely — desktop, search
+ *   results, and a user with no feeds all pass `null`.
+ * @param pullRefreshing Whether the pull-to-refresh indicator shows as refreshing.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ArticleListPaneContent(
     articles: List<ArticleListRow>,
@@ -561,6 +590,8 @@ internal fun ArticleListPaneContent(
     titleMarkedById: Map<String, String>? = null,
     header: (@Composable () -> Unit)? = null,
     emptyContent: (@Composable () -> Unit)? = null,
+    onPullRefresh: (() -> Unit)? = null,
+    pullRefreshing: Boolean = false,
 ) {
     LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
@@ -598,24 +629,60 @@ internal fun ArticleListPaneContent(
             onSearchClick = onSearchClick,
         )
 
-        Box(Modifier.fillMaxSize().imePadding()) {
+        // The pull-to-refresh modifier and its indicator are always present, merely disabled when
+        // onPullRefresh is null, so turning the gesture on/off (e.g. entering search) never adds or
+        // removes a wrapper around the LazyColumn — see ui-guidelines' "Layout stability".
+        val pullState = rememberPullToRefreshState()
+        val refreshActionLabel = stringResource(Res.string.home_refresh_this_list)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .imePadding()
+                .pullToRefresh(
+                    isRefreshing = pullRefreshing,
+                    state = pullState,
+                    enabled = onPullRefresh != null,
+                    onRefresh = { onPullRefresh?.invoke() },
+                )
+                // The pull is a pointer-only gesture, so a screen reader gets the same refresh as a
+                // custom action (see ui-guidelines' Accessibility section). An empty list clears
+                // the actions rather than removing the modifier, keeping the chain stable.
+                .semantics {
+                    customActions = if (onPullRefresh != null) {
+                        listOf(CustomAccessibilityAction(refreshActionLabel) { onPullRefresh(); true })
+                    } else {
+                        emptyList()
+                    }
+                },
+        ) {
             if (articles.isEmpty()) {
                 if (emptyContent != null) {
                     emptyContent()
-                } else {
+                } else if (hasNoFeeds) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        if (hasNoFeeds) {
-                            // A narrow layout's "+" button lives inside the feed-list drawer (closed by
-                            // default), so this is the one reachable entry point to add a first feed —
-                            // without it a phone-width user with no feeds yet would have no visible way
-                            // forward. See ArticleListPaneContent's own KDoc.
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (onAddFeedClick != null) {
-                                    FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
-                                }
+                        // A narrow layout's "+" button lives inside the feed-list drawer (closed by
+                        // default), so this is the one reachable entry point to add a first feed —
+                        // without it a phone-width user with no feeds yet would have no visible way
+                        // forward. See ArticleListPaneContent's own KDoc.
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (onAddFeedClick != null) {
+                                FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
                             }
-                        } else {
+                        }
+                    }
+                } else {
+                    // Scrollable (though it never overflows) only so a pull here still reaches
+                    // pullToRefresh, which listens through nested scroll: an empty unread-only list
+                    // must stay pullable. The min height keeps the message centered in the pane.
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .heightIn(min = maxHeight),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -655,6 +722,11 @@ internal fun ArticleListPaneContent(
                 }
                 VerticalScrollbarIfNeeded(listState)
             }
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = pullRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
     }
 }

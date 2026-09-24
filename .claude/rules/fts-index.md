@@ -24,7 +24,8 @@ rows incrementally via `FtsManager.indexMissing()` — never a full `'rebuild'`,
 which is O(all indexed text) and would block/zero-out concurrent searches. The
 whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
 (`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on
-`lastFtsRebuiltAt` + `ActivityCenter` idle, called from desktop's `StartupTasks.kt`),
+`lastFtsRebuiltAt` + `ActivityCenter` idle — no sync, no feed refresh, and no
+refresh-then-sync cycle (`refreshCycleRunning`) in flight — called from desktop's `StartupTasks.kt`),
 which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
 run and backfills any missing rows. Android's `KeryxApplication.onCreate` calls the
 cheaper `FtsManager.ensureIndexedIfTableAbsent()` instead — it also runs on every

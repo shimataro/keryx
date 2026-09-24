@@ -4,7 +4,10 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
+import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
@@ -29,40 +32,24 @@ class HomeViewModelTestSupportTest {
     }
 
     /**
-     * Pins the sibling invariant for the default [ActivityCenter] [newHomeViewModel]/
-     * [ComposeUiTest.useHomeViewModel] build when no [ActivityCenter] is supplied: its own scope
-     * (holding the `SharingStarted.Eagerly` `feedRefreshing`/`syncing` collectors) must be
-     * cancelled by [HomeViewModelFixture.close] too, not just [HomeViewModel.viewModelScope]. A
-     * regression here leaks one live coroutine scope per test that doesn't pass its own
-     * [ActivityCenter].
-     */
-    @Test
-    fun useHomeViewModelCancelsOwnedActivityCenterScope() = runDesktopComposeUiTest {
-        val (driver, db) = inMemoryDb()
-        val ownedScope = useHomeViewModel(driver, db) { it.ownedActivityCenterScope }
-        assertFalse(ownedScope!!.isActive)
-    }
-
-    /**
-     * Pins the failure-path counterpart of [useHomeViewModelCancelsOwnedActivityCenterScope]:
+     * Pins the failure-path counterpart of [useHomeViewModelLeavesNoLiveViewModelScopeBehind]:
      * [newHomeViewModel] never gets to return a [HomeViewModelFixture] here, so
-     * [HomeViewModelFixture.close] is never reachable — the owned [ActivityCenter] scope's eager
-     * `SharingStarted.Eagerly` collectors must instead be cancelled by [newHomeViewModel]'s own
-     * failure cleanup. A regression here leaks one live coroutine scope per construction that fails
-     * partway through.
+     * [HomeViewModelFixture.close] is never reachable — the resources it would have released, such
+     * as [SyncRepository]'s channel-consumer scope, must instead be released by
+     * [newHomeViewModel]'s own failure cleanup. A regression here leaks one live coroutine scope
+     * per construction that fails partway through.
      */
     @Test
     fun newHomeViewModelCancelsOwnedResourcesWhenLateConstructionFails() {
         val (driver, db) = inMemoryDb()
-        var capturedScope: CoroutineScope? = null
+        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             assertFailsWith<IllegalStateException> {
-                newHomeViewModel(driver, db, injectFailureAfterActivityCenter = { scope ->
-                    capturedScope = scope
+                newHomeViewModel(driver, db, syncScope = syncScope, injectFailureAfterActivityCenter = {
                     error("simulated late construction failure")
                 })
             }
-            assertFalse(capturedScope!!.isActive)
+            assertFalse(syncScope.isActive)
         } finally {
             // newHomeViewModel never returns a HomeViewModelFixture here, so nothing else closes
             // the caller-owned driver (matching HomeViewModelFixture.close()'s ownership model).

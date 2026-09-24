@@ -1,6 +1,6 @@
 package works.merc.keryx.app.ui.menu
 
-import works.merc.keryx.app.ui.home.feedOperationsAvailable
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.ui.navigation.Screen
 
 /**
@@ -52,8 +52,9 @@ data class MenuUiState(
  * Most items are gated on being on the Home screen (their targets live in Home's composition).
  * Article/URL actions additionally require a selection (and a non-blank URL for the latter). Sort
  * can't be toggled while the Search scope is active (search order is fixed to relevance rank).
- * Refresh/sync are suppressed while their operation is already in flight, and sync additionally
- * requires a connected cloud account.
+ * Refresh/sync are suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while either
+ * operation, or a refresh-then-sync cycle (which also covers the gap between the two), is already
+ * in flight — and sync additionally requires a connected cloud account.
  *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
@@ -62,8 +63,7 @@ fun computeMenuUiState(
     screen: Screen,
     hasSelectedArticle: Boolean,
     selectedArticleHasUrl: Boolean,
-    feedRefreshing: Boolean,
-    syncing: Boolean,
+    activity: ActivitySnapshot,
     cloudConnected: Boolean,
     searchActive: Boolean,
     unreadOnly: Boolean,
@@ -83,8 +83,8 @@ fun computeMenuUiState(
         markAllReadEnabled = onHome,
         articleActionsEnabled = onHome && hasSelectedArticle,
         urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
-        refreshAllEnabled = onHome && feedOperationsAvailable(feedRefreshing, syncing),
-        syncEnabled = onHome && cloudConnected && feedOperationsAvailable(feedRefreshing, syncing),
+        refreshAllEnabled = onHome && activity.idle,
+        syncEnabled = onHome && cloudConnected && activity.idle,
         openSettingsEnabled = onHome,
         feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
         renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,

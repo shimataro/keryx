@@ -16,20 +16,22 @@
 at `refreshIntervalMinutes` intervals. The sketch below is abridged — per-cycle error handling and the
 separately-scheduled update check are omitted. `backgroundUpdateLoop` itself is desktop-only (a plain
 coroutine loop; Android's equivalent is a `WorkManager` `PeriodicWorkRequest`, see the Platform
-Strategy table above and "Android Implementation" below), but the three functions it calls each cycle
-— `refreshFeedsAndNotify`, `checkForUpdateAndNotify`, `maybeRebuildFtsIndex` — are platform-independent
-and live in commonMain's `domain/StartupMaintenanceTasks.kt`, so the Android worker calls the same
-implementations instead of duplicating them.
+Strategy table above and "Android Implementation" below), but what it runs each cycle is
+platform-independent commonMain code, so the Android worker calls the same implementations instead of
+duplicating them: `domain/RefreshCycleRunner.kt`'s `RefreshCycleRunner.run` (the refresh → new-article
+notification → sync cycle — also what the manual refresh and pull-to-refresh go through, via its
+`runIfIdle`), plus `checkForUpdateAndNotify` and `maybeRebuildFtsIndex` from
+`domain/StartupMaintenanceTasks.kt`.
 
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
     delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // "Manual only" (minutes <= 0) wakes every minute
     if (minutes > 0) {
-        refreshFeedsAndNotify()   // Refresh all feeds (ETag / Last-Modified differential fetch), then
-                                  // NewArticleNotifier.notifyIfEnabled(...) when
-                                  // new articles arrived and notifications are enabled
-        sync()                    // Cloud sync
+        refreshCycleRunner.run()  // One refresh cycle: refresh all feeds (ETag / Last-Modified
+                                  // differential fetch), NewArticleNotifier.notifyIfEnabled(...) when
+                                  // new articles arrived and notifications are enabled, then cloud
+                                  // sync if CloudSession.isConnected()
     }
     maybeRebuildFtsIndex()        // Daily idle FTS rebuild heal (see below)
 }
@@ -61,8 +63,8 @@ matters for a hand-edited or migrated `local_settings.json`.
 `background/FeedRefreshWorker.kt` (a `CoroutineWorker`, instantiated by `WorkManager`'s own
 `WorkerFactory` via reflection — dependencies are resolved from `KoinPlatform.getKoin()` inside
 `doWork()` rather than constructor-injected) runs exactly the same sequence desktop's
-`backgroundUpdateLoop` runs each cycle: `refreshFeedsAndNotify`, then (if `CloudSession.isConnected()`)
-`SyncRepository.sync(SyncTrigger.AUTOMATIC)`, then `checkForUpdateAndNotify` if `shouldCheckForUpdate` says it is due, then `maybeRebuildFtsIndex`.
+`backgroundUpdateLoop` runs each cycle: `RefreshCycleRunner.run` (the feed refresh and its
+new-article notification, then — if `CloudSession.isConnected()` — `SyncRepository.sync(SyncTrigger.AUTOMATIC)`), then `checkForUpdateAndNotify` if `shouldCheckForUpdate` says it is due, then `maybeRebuildFtsIndex`.
 On Android, `CloudSession` carries Dropbox and OneDrive plus — only where Play services is available —
 Google Drive (see [sync-architecture.md](sync-architecture.md)'s "Google Drive on Android"), so `sync()`
 is a genuine no-op when the user hasn't connected any of them, or — even when connected — while
@@ -82,7 +84,8 @@ throwing — e.g. `maybeRebuildFtsIndex` hitting `FtsManager`'s `busy_timeout` �
 
 1. `cleanUpArticleCacheIfDue` (see below).
 2. The initial cloud sync — same gate and position as desktop's `runStartupTasks`.
-3. `refreshFeedsAndNotify`
+3. The feed refresh and its new-article notification (steps 2 and 3 run as one sync-first
+   `RefreshCycleRunner.run` cycle)
 4. `checkForUpdateAndNotify`
 5. `maybeRebuildFtsIndex`
 
@@ -468,7 +471,8 @@ its own KDoc for why):
    only where Play services is available. Startup doesn't bypass the `SyncTrigger.AUTOMATIC` gate
    described above either: while `autoSyncSuspended` is true, this call downloads, merges and
    uploads nothing.
-3. Feed refresh and its new-article notification (`refreshFeedsAndNotify`).
+3. Feed refresh and its new-article notification. Steps 2 and 3 run as one `RefreshCycleRunner.run`
+   cycle in `SYNC_THEN_REFRESH` order, so the gap between them still counts as busy.
 4. Update check on the automatic/background schedule (`checkForUpdateAndNotify`).
 5. FTS full rebuild (`maybeRebuildFtsIndex`, only if 24+ hours since last run **and** idle; see below).
 
@@ -488,8 +492,8 @@ runs once per process, before `runStartupTasks`/`runAndroidStartupTasks` is even
   call is an `O(articles)` scan, which `ensureIndexedIfTableAbsent()` skips entirely (a single
   `sqlite_master` lookup) once the table has already been created and backfilled once.
 - New articles keep getting indexed as normal through the hot-path `indexMissing()` calls in
-  `refreshFeedsAndNotify`/sync and the daily rebuild heal below.
+  the `RefreshCycleRunner` refresh/sync and the daily rebuild heal below.
 
 ## Daily FTS Rebuild Heal (`maybeRebuildFtsIndex`)
 
-Hot paths (feed refresh, sync merge) use `FtsManager.indexMissing()` to incrementally index only new articles (no full rebuild). Therefore, to resolve the staleness of existing-article indexes when body text is updated, the full rebuild is demoted to **daily idle** execution. `runStartupTasks`, each iteration of `backgroundUpdateLoop`, `runAndroidStartupTasks`, and each run of `FeedRefreshWorker` all call `maybeRebuildFtsIndex`, and `rebuildIndex()` is executed only when the `local_settings.lastFtsRebuiltAt` 24h gate and `ActivityCenter` idle state (no sync / update running) are both satisfied, then `lastFtsRebuiltAt` is recorded. `'rebuild'` is atomic + `busy_timeout` wait, so running searches also do not regress to zero results. See [sync-architecture.md](sync-architecture.md) "FTS5 handling" for details.
+Hot paths (feed refresh, sync merge) use `FtsManager.indexMissing()` to incrementally index only new articles (no full rebuild). Therefore, to resolve the staleness of existing-article indexes when body text is updated, the full rebuild is demoted to **daily idle** execution. `runStartupTasks`, each iteration of `backgroundUpdateLoop`, `runAndroidStartupTasks`, and each run of `FeedRefreshWorker` all call `maybeRebuildFtsIndex`, and `rebuildIndex()` is executed only when the `local_settings.lastFtsRebuiltAt` 24h gate and `ActivityCenter` idle state (no sync / update running, and no refresh-then-sync cycle — `refreshCycleRunning`, which also covers the gap between a cycle's refresh and its sync) are both satisfied, then `lastFtsRebuiltAt` is recorded. `'rebuild'` is atomic + `busy_timeout` wait, so running searches also do not regress to zero results. See [sync-architecture.md](sync-architecture.md) "FTS5 handling" for details.

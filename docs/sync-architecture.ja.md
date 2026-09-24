@@ -92,7 +92,7 @@
 
 `SyncRepository` は `syncPhase: StateFlow<SyncPhase>`（`IDLE` / `CHECKING` / `DOWNLOADING` / `MERGING` /
 `INDEXING` / `PREPARING` / `UPLOADING` / `ARCHIVING`）を公開しており、クラウド同期設定タブは「同期中かどうか」
-（`ActivityCenter.syncing`、単なる真偽値）だけでなく「今どの段階か」を表示できる。すべての遷移は
+（`ActivityCenter.activity` のスナップショットの `syncing`、単なる真偽値）だけでなく「今どの段階か」を表示できる。すべての遷移は
 `sync()`/`resetCloudData()` が保持しているのと同じ `mutex` の内側で行われるため、後から並んだ同期が前の同期の
 古いフェーズを見てしまうことはなく、そのロック内側の `finally` が常に `IDLE` に戻す — 成功・分類済みの
 `Result.Err`・捕捉されない例外のいずれの経路でも。
@@ -387,7 +387,8 @@ main（ローカル）側に既に存在する不整合が、マージの `UPDAT
   （許容。記事はなお旧トークンでヒットするので検索が 0 件に退行しない）。
 - **healing 用の全再構築（`rebuildIndex()` = `'rebuild'`）**:
   `domain/StartupMaintenanceTasks.kt` の `maybeRebuildFtsIndex`（desktop と Android で共有）による日次アイドル
-  pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル）でのみ実行。増分投入以降に
+  pass（`local_settings.lastFtsRebuiltAt` の 24h ゲート + `ActivityCenter` アイドル。同期・フィード更新に加え、
+  更新 → 同期の一連の処理（`refreshCycleRunning`。その更新と同期の間の一瞬も含む）も実行中でないこと）でのみ実行。増分投入以降に
   本文が更新されて古くなった既存行を作り直す。
   `'rebuild'` は単一文で原子的（読み手は再構築前後どちらかを見るだけ）＋ `busy_timeout` で待つため、
   実行中の検索も 0 件にならない。

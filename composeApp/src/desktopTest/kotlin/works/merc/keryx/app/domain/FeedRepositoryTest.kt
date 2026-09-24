@@ -32,7 +32,9 @@ import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
+import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -851,6 +853,119 @@ class FeedRepositoryTest {
             val byUrl = results.entries.associate { (id, r) -> db.feedsQueries.getById(id).executeAsOne().url to r }
             assertIs<Result.Ok<Int>>(byUrl.getValue("https://ex.com/feed1"))
             assertIs<Result.Err>(byUrl.getValue("https://ex.com/feed2"))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshFeedsFetchesOnlyTheGivenFeeds(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            for (i in 1..3) setupRepo.subscribeFeed("https://ex.com/feed$i")
+            val byUrl = db.feedsQueries.watchAll().executeAsList().associateBy { it.url }
+
+            val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                requested += request.url.toString()
+                respond(RSS, HttpStatusCode.OK)
+            })
+
+            val targets = listOf(byUrl.getValue("https://ex.com/feed1"), byUrl.getValue("https://ex.com/feed3"))
+            val results = repo.refreshFeeds(targets)
+
+            assertEquals(targets.map { it.id }.toSet(), results.keys)
+            assertTrue(results.values.all { it is Result.Ok }, "targeted feeds should refresh Ok: $results")
+            assertEquals(setOf("https://ex.com/feed1", "https://ex.com/feed3"), requested.toSet())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshFeedsWithAnEmptyListFetchesNothing(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            setupRepo.subscribeFeed("https://ex.com/feed1")
+
+            val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                requested += request.url.toString()
+                respond(RSS, HttpStatusCode.OK)
+            })
+
+            val results = repo.refreshFeeds(emptyList())
+
+            assertTrue(results.isEmpty(), "nothing should be refreshed: $results")
+            assertTrue(requested.isEmpty(), "no request expected: $requested")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun feedsCoveredByAllAndStarredIsEverySubscribedFeed() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1", sortOrder = 0)
+            db.insertFeed("f2", sortOrder = 1)
+            db.insertFeed("gone", deletedAt = 5L)
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals(listOf("f1", "f2"), repo.feedsCoveredBy(ArticleFilter.All).map { it.id })
+            assertEquals(listOf("f1", "f2"), repo.feedsCoveredBy(ArticleFilter.Starred).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun feedsCoveredByNarrowsToTheSelectedFeedFolderOrTag() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Folder")
+            db.insertFeed("f1", folderId = "d1", sortOrder = 0)
+            db.insertFeed("f2", folderId = "d1", sortOrder = 1)
+            db.insertFeed("f3", sortOrder = 2)
+            db.insertTag("t1", "Tag 1")
+            db.insertTag("t2", "Tag 2")
+            db.insertFeedTag("f1", "t1")
+            db.insertFeedTag("f3", "t1")
+            db.insertFeedTag("f2", "t2")
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals(listOf("f2"), repo.feedsCoveredBy(ArticleFilter.Feed("f2")).map { it.id })
+            assertEquals(listOf("f1", "f2"), repo.feedsCoveredBy(ArticleFilter.Folder("d1")).map { it.id })
+            assertEquals(listOf("f1", "f3"), repo.feedsCoveredBy(ArticleFilter.Tag("t1")).map { it.id })
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun feedsCoveredByIsEmptyWhenTheSelectionCoversNoSubscribedFeed() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFolder("d1", "Folder")
+            db.insertFolder("d2", "Empty folder")
+            db.insertFeed("live", sortOrder = 0)
+            // Unsubscribed but still filed in d1 and tagged t1: must not count for either.
+            db.insertFeed("gone", folderId = "d1", deletedAt = 5L)
+            db.insertTag("t1", "Tag 1")
+            db.insertTag("t2", "Tag 2")
+            db.insertFeedTag("gone", "t1")
+            // Detached tag link: t2 no longer covers "live".
+            db.insertFeedTag("live", "t2", deletedAt = 5L)
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+
+            assertEquals(emptyList(), repo.feedsCoveredBy(ArticleFilter.Feed("gone")))
+            assertEquals(emptyList(), repo.feedsCoveredBy(ArticleFilter.Feed("no-such-feed")))
+            assertEquals(emptyList(), repo.feedsCoveredBy(ArticleFilter.Folder("d1")))
+            assertEquals(emptyList(), repo.feedsCoveredBy(ArticleFilter.Folder("d2")))
+            assertEquals(emptyList(), repo.feedsCoveredBy(ArticleFilter.Tag("t1")))
+            assertEquals(emptyList(), repo.feedsCoveredBy(ArticleFilter.Tag("t2")))
         } finally {
             driver.close()
         }

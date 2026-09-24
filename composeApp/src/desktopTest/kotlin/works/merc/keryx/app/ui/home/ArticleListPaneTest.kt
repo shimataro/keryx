@@ -5,10 +5,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -23,6 +26,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -42,6 +47,151 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class ArticleListPaneTest {
+
+    /**
+     * Pulls the pane down from below its top bar, far enough to pass the pull-to-refresh
+     * threshold (the drag is damped by half before it counts against the threshold).
+     */
+    private fun ComposeUiTest.pullDown() {
+        onRoot().performTouchInput { swipeDown(startY = height * 0.3f, endY = height * 0.95f, durationMillis = 300) }
+        waitForIdle()
+    }
+
+    @Composable
+    private fun PullablePane(items: List<ArticleListRow>, onPullRefresh: (() -> Unit)?) {
+        ArticleListPaneContent(
+            articles = items,
+            feedTitles = emptyMap(),
+            selectedId = null,
+            unreadOnly = false,
+            onToggleUnreadOnly = {},
+            onToggleSort = {},
+            onMarkAllRead = {},
+            onSelectArticle = {},
+            modifier = Modifier.size(360.dp, 600.dp),
+            onPullRefresh = onPullRefresh,
+        )
+    }
+
+    @Test
+    fun pullingTheListDownInvokesOnPullRefresh() = runDesktopComposeUiTest {
+        var pulls = 0
+        setContent { PullablePane(articles(30)) { pulls++ } }
+        waitForIdle()
+
+        pullDown()
+
+        assertEquals(1, pulls)
+    }
+
+    /** An empty unread-only list must still be pullable, even though there is nothing to scroll. */
+    @Test
+    fun pullingTheNoArticlesEmptyStateInvokesOnPullRefresh() = runDesktopComposeUiTest {
+        var pulls = 0
+        setContent { PullablePane(emptyList()) { pulls++ } }
+        waitForIdle()
+        onNodeWithText("記事がありません").assertIsDisplayed()
+
+        pullDown()
+
+        assertEquals(1, pulls)
+    }
+
+    /** A null callback (desktop, search, no feeds) disables the gesture, and re-enabling it works. */
+    @Test
+    fun pullToRefreshIsDisabledWhileOnPullRefreshIsNull() = runDesktopComposeUiTest {
+        var pulls = 0
+        var enabled by mutableStateOf(false)
+        setContent { PullablePane(articles(30), if (enabled) ({ pulls++ }) else null) }
+        waitForIdle()
+
+        pullDown()
+        assertEquals(0, pulls)
+
+        enabled = true
+        waitForIdle()
+        pullDown()
+        assertEquals(1, pulls)
+    }
+
+    // --- The pull's screen-reader counterpart: a "refresh this list" custom accessibility action,
+    // exposed exactly where pullRefreshAvailable allows the gesture itself. ---
+
+    private val refreshListLabel = "この一覧を更新"
+
+    private val hasRefreshListAction = SemanticsMatcher("has the refresh-this-list custom action") { node ->
+        node.config.getOrElse(SemanticsActions.CustomActions) { emptyList() }.any { it.label == refreshListLabel }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsExposedAndStartsAPull() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, isTouchPrimary = true)
+            }
+            waitForIdle()
+
+            val action = onNode(hasRefreshListAction).fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions].single { it.label == refreshListLabel }
+            // Assert inside the same runOnIdle call as the trigger: pullToRefresh's cleanup runs on
+            // viewModelScope (the real EDT), and a gap between firing and asserting here is a race
+            // window for that coroutine to finish and clear the filter before the check runs.
+            runOnIdle {
+                action.action()
+                assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the action must start the same pull")
+            }
+        }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsAbsentWhileSearching() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, isTouchPrimary = true)
+            }
+            waitForIdle()
+            onNode(hasRefreshListAction).assertExists()
+
+            vm.setSearchBarVisible(true)
+            vm.setSearchQuery("kotlin")
+            waitForIdle()
+
+            onNode(hasRefreshListAction).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsAbsentWithNoFeeds() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent {
+                ArticleListPane(vm = fixture.vm, focused = true, onActivated = {}, isTouchPrimary = true)
+            }
+            waitForIdle()
+
+            onNode(hasRefreshListAction).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsAbsentWhenNotTouchPrimary() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        useHomeViewModel(driver, db) { fixture ->
+            setContent {
+                ArticleListPane(vm = fixture.vm, focused = true, onActivated = {}, isTouchPrimary = false)
+            }
+            waitForIdle()
+
+            onNode(hasRefreshListAction).assertDoesNotExist()
+        }
+    }
 
     @Test
     fun scrollsOffscreenSelectionIntoFullView() = runDesktopComposeUiTest {

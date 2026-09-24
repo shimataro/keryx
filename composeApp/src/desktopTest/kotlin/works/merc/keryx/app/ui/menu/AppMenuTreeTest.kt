@@ -2,6 +2,7 @@ package works.merc.keryx.app.ui.menu
 
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.navigation.Screen
@@ -61,14 +62,14 @@ class AppMenuTreeTest {
 
     private fun enabledUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
-        feedRefreshing = false, syncing = false, cloudConnected = true,
+        activity = ActivitySnapshot(), cloudConnected = true,
         searchActive = false, unreadOnly = true,
         hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
         screen = Screen.Setup, hasSelectedArticle = false, selectedArticleHasUrl = false,
-        feedRefreshing = true, syncing = true, cloudConnected = false,
+        activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), cloudConnected = false,
         searchActive = true, unreadOnly = false,
         hasSelectedFeed = false, hasRenamableSelection = false,
     )
@@ -76,14 +77,14 @@ class AppMenuTreeTest {
     /** A folder (or tag) selected: a rename/delete target, but no feed-specific selection. */
     private fun folderSelectedUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = false, selectedArticleHasUrl = false,
-        feedRefreshing = false, syncing = false, cloudConnected = true,
+        activity = ActivitySnapshot(), cloudConnected = true,
         searchActive = false, unreadOnly = false,
         hasSelectedFeed = false, hasRenamableSelection = true,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
-        feedRefreshing = false, syncing = false, cloudConnected = true,
+        activity = ActivitySnapshot(), cloudConnected = true,
         searchActive = false, unreadOnly = true,
         hasSelectedFeed = true, hasRenamableSelection = true,
     )

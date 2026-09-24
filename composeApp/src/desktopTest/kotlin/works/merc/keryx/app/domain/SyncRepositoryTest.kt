@@ -2,12 +2,9 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -215,7 +212,7 @@ class SyncRepositoryTest {
     private fun TestScope.newRepo(
         cloud: CloudStorage,
         clockMillis: Long = 1_000L,
-        activityCenter: ActivityCenter = ActivityCenter(backgroundScope),
+        activityCenter: ActivityCenter = ActivityCenter(),
     ): SyncRepository =
         SyncRepository(
             driver = localDriver,
@@ -856,25 +853,22 @@ class SyncRepositoryTest {
 
     @Test
     fun syncingIsTrueWhileRunningAndFalseAfter() = runTest {
-        // Unconfined scope so the ActivityCenter's stateIn reflects counter changes inline.
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         val cloud = FakeCloudStorage()
         cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
         val gate = CompletableDeferred<Unit>()
         cloud.downloadGate = gate
         val repo = newRepo(cloud, activityCenter = activityCenter)
 
-        assertFalse(activityCenter.syncing.value)
+        assertFalse(activityCenter.activity.value.syncing)
 
         val job = launch { repo.sync() }
         runCurrent() // advance until sync() suspends inside the gated download
-        assertTrue(activityCenter.syncing.value)
+        assertTrue(activityCenter.activity.value.syncing)
 
         gate.complete(Unit)
         job.join()
-        assertFalse(activityCenter.syncing.value)
-        activityScope.cancel()
+        assertFalse(activityCenter.activity.value.syncing)
     }
 
     @Test
@@ -1224,7 +1218,7 @@ class SyncRepositoryTest {
             cloudProvider = { null },
             clock = Clock { 1_000L },
             scope = backgroundScope,
-            activityCenter = ActivityCenter(backgroundScope),
+            activityCenter = ActivityCenter(),
             notificationCenter = notificationCenter,
             notificationMessages = FakeNotificationMessages(),
             localDbPath = localFile.absolutePath,

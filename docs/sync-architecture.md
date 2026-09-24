@@ -55,10 +55,10 @@ Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batc
 
 `SyncRepository` exposes `syncPhase: StateFlow<SyncPhase>` (`IDLE`, `CHECKING`, `DOWNLOADING`, `MERGING`,
 `INDEXING`, `PREPARING`, `UPLOADING`, `ARCHIVING`), so the cloud-sync settings tab can show *what* a sync is
-currently doing rather than only *whether* one is running (`ActivityCenter.syncing`, a plain boolean). Every
-transition happens inside the same `mutex` `sync()`/`resetCloudData()` already hold, so a sync queued behind
-another never observes a stale phase left by the one ahead of it, and the `finally` inside that lock always
-resets to `IDLE` on the way out — success, a classified `Result.Err`, or an uncaught exception alike.
+currently doing rather than only *whether* one is running (the `syncing` flag of the `ActivityCenter.activity`
+snapshot, a plain boolean). Every transition happens inside the same `mutex` `sync()`/`resetCloudData()`
+already hold, so a sync queued behind another never observes a stale phase left by the one ahead of it, and the
+`finally` inside that lock always resets to `IDLE` on the way out — success, a classified `Result.Err`, or an uncaught exception alike.
 
 The phases map onto the steps above: `CHECKING` for each retry loop's `metadata()` round trip (step 1),
 `DOWNLOADING` for the `download()` call in step 2, `MERGING` for the decompress-and-`DatabaseMerger.merge()`
@@ -244,7 +244,9 @@ Index maintenance is two-tier:
 - **Hot path (after feed refresh / sync merge)**: `FtsManager.indexMissing()` incrementally indexes only unindexed new articles (O(new rows), does not wipe index). Full rebuild (`'rebuild'`) is O(total indexed text) and heavy, and could reject running searches, so it is not used on hot paths. Indexes of existing articles with updated body text remain stale until the next rebuild (acceptable; they still match old tokens so searches do not regress to zero results).
 - **Healing full rebuild (`rebuildIndex()` = `'rebuild'`)**:
   Executed only in the daily idle pass (`domain/StartupMaintenanceTasks.kt`'s `maybeRebuildFtsIndex`, shared by
-  desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle). Rebuilds stale
+  desktop and Android, gated by `local_settings.lastFtsRebuiltAt` 24h gate + `ActivityCenter` idle — no sync, no feed
+  refresh, and no refresh-then-sync cycle (`refreshCycleRunning`, which also covers the gap between a cycle's refresh
+  and its sync) in flight). Rebuilds stale
   existing rows (body text updated since incremental indexing). `'rebuild'` is a single atomic statement (readers
   see only before or after) + `busy_timeout` wait, so running searches do not regress to zero results either.
 

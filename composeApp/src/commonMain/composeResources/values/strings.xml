@@ -97,6 +97,7 @@
     <string name="home_unsubscribe_body">スター付き記事は引き続き閲覧できます。</string>
     <string name="home_refresh">更新</string>
     <string name="home_refreshing">新着を確認中…</string>
+    <string name="home_refresh_this_list">この一覧を更新</string>
     <string name="home_feed_error">フィードのエラー</string>
     <string name="home_feed_gone">フィードが見つかりません（削除された可能性があります）</string>
     <string name="home_mark_all_read">すべて既読にする</string>

@@ -5,6 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.KeyInjectionScope
@@ -24,6 +28,10 @@ class KeyboardNavTest {
     private fun firedEvents(
         textInputFocused: Boolean = false,
         isMacOs: Boolean = false,
+        withRefreshList: Boolean = false,
+        // Records an R KeyDown the shortcuts left unconsumed as "unconsumedR", via an onKeyEvent
+        // behind them — opt-in so every other test's expected list stays unchanged.
+        trackUnconsumed: Boolean = false,
         press: KeyInjectionScope.() -> Unit,
     ): List<String> {
         val fired = mutableListOf<String>()
@@ -46,8 +54,12 @@ class KeyboardNavTest {
                         onPageDown = { fired += "pageDown" },
                         onHome = { fired += "home" },
                         onEnd = { fired += "end" },
+                        onRefreshList = if (withRefreshList) ({ fired += "refreshList" }) else null,
                         isMacOs = isMacOs,
-                    ),
+                    ).onKeyEvent { event ->
+                        if (trackUnconsumed && event.type == KeyEventType.KeyDown && event.key == Key.R) fired += "unconsumedR"
+                        false
+                    },
                 )
             }
             onNodeWithTag("root").requestFocus()
@@ -254,5 +266,45 @@ class KeyboardNavTest {
         // they must not be hijacked into a scroll-to-edge request while the search field is focused.
         assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.MoveHome) })
         assertEquals(emptyList(), firedEvents(textInputFocused = true) { pressKey(Key.MoveEnd) })
+    }
+
+    // --- Ctrl+Shift+R: the hardware-keyboard counterpart of pull-to-refresh (onRefreshList). ---
+
+    private fun KeyInjectionScope.ctrlShiftR() {
+        withKeyDown(Key.CtrlLeft) { withKeyDown(Key.ShiftLeft) { pressKey(Key.R) } }
+    }
+
+    @Test
+    fun ctrlShiftRFiresOnRefreshListWhenProvided() {
+        assertEquals(listOf("refreshList"), firedEvents(withRefreshList = true) { ctrlShiftR() })
+    }
+
+    @Test
+    fun ctrlShiftRIsLeftUnconsumedWhenOnRefreshListIsNull() {
+        // Desktop passes null, so its own Ctrl+Shift+R app-menu accelerator keeps working.
+        assertEquals(listOf("unconsumedR"), firedEvents(trackUnconsumed = true) { ctrlShiftR() })
+    }
+
+    @Test
+    fun ctrlShiftRIsConsumedWhenOnRefreshListIsProvided() {
+        assertEquals(listOf("refreshList"), firedEvents(withRefreshList = true, trackUnconsumed = true) { ctrlShiftR() })
+    }
+
+    @Test
+    fun ctrlShiftRDoesNotFireOnRefreshListWhileATextInputIsFocused() {
+        assertEquals(emptyList(), firedEvents(textInputFocused = true, withRefreshList = true) { ctrlShiftR() })
+    }
+
+    @Test
+    fun ctrlShiftMetaRDoesNotFireOnRefreshList() {
+        assertEquals(
+            emptyList(),
+            firedEvents(withRefreshList = true) { withKeyDown(Key.MetaLeft) { ctrlShiftR() } },
+        )
+    }
+
+    @Test
+    fun ctrlRWithoutShiftDoesNotFireOnRefreshList() {
+        assertEquals(emptyList(), firedEvents(withRefreshList = true) { withKeyDown(Key.CtrlLeft) { pressKey(Key.R) } })
     }
 }

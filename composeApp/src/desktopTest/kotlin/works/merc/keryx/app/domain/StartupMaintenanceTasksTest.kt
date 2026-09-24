@@ -4,9 +4,12 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
@@ -28,9 +31,11 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private const val ONE_DAY_MS = 24 * 60 * 60 * 1000L
 
@@ -66,11 +71,13 @@ class StartupMaintenanceTasksTest {
             db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, clock, writeDispatcher = Dispatchers.Unconfined,
         )
         val articleRepository = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, clock, Dispatchers.Unconfined)
+        val activityCenter = ActivityCenter()
         return koinApplication {
             modules(
                 module {
                     single { settingsRepository }
                     single { articleRepository }
+                    single { activityCenter }
                     single<Clock> { clock }
                 },
             )
@@ -172,14 +179,41 @@ class StartupMaintenanceTasksTest {
             // isSetupComplete() checks for — so this also marks setup as finished.
             koin.get<SettingsRepository>().mutateLocalSettings { it }
 
-            // The later steps (sync/feedRefresh/updateCheck/ftsRebuild) all need dependencies this
-            // test's Koin never registers (CloudSession, FtsManager, SelfUpdateCheckSupport, ...),
-            // so each throws — but runMaintenanceStep swallows that per-step, and this test only
-            // asserts on the first step's own effect: reaching the end and observing it proves the
-            // gate passed and the sequence actually started running step by step.
+            // The later steps (refreshCycle/updateCheck/ftsRebuild) all need dependencies this
+            // test's Koin never registers (RefreshCycleRunner, FtsManager, SelfUpdateCheckSupport,
+            // ...), so each throws — but runMaintenanceStep swallows that per-step, and this test
+            // only asserts on the first step's own effect: reaching the end and observing it proves
+            // the gate passed and the sequence actually started running step by step. The cycle's
+            // own order and stage isolation are covered by RefreshCycleRunnerTest.
             runStartupMaintenance(koin)
 
             assertEquals(now, koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
+            // A step that failed before the cycle even started must not leave a cycle counted.
+            assertFalse(koin.get<ActivityCenter>().activity.value.refreshCycleRunning)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun maybeRebuildFtsIndexSkipsWhileARefreshCycleIsRunning() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val now = 10 * ONE_DAY_MS
+            val koin = testKoin(db, driver, now)
+            val activityCenter = koin.get<ActivityCenter>()
+            val gap = CompletableDeferred<Unit>()
+            // A cycle in the gap between its refresh and its sync: only refreshCycleRunning is up.
+            val cycle = launch(UnconfinedTestDispatcher(testScheduler)) { activityCenter.trackRefreshCycle { gap.await() } }
+            assertTrue(activityCenter.activity.value.refreshCycleRunning)
+
+            // lastFtsRebuiltAt is unset, so only the idle gate stands between this call and a
+            // rebuild. No FtsManager is registered: passing the gate would throw here.
+            maybeRebuildFtsIndex(koin)
+
+            assertNull(koin.get<SettingsRepository>().getLocalSettings().lastFtsRebuiltAt)
+            gap.complete(Unit)
+            cycle.join()
         } finally {
             driver.close()
         }
