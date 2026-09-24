@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Serializes Android's two independent maintenance entry points — [runAndroidStartupTasks]
  * (Activity) and `FeedRefreshWorker` (`WorkManager`) — so a periodic wakeup landing while the
  * Activity's own startup sequence is still running does not duplicate
- * `refreshFeedsAndNotify`/`sync`/`checkForUpdateAndNotify`/`maybeRebuildFtsIndex` work. A
+ * the `RefreshCycleRunner` refresh/sync cycle or `checkForUpdateAndNotify`/`maybeRebuildFtsIndex` work. A
  * process-wide singleton (not a per-call `Mutex()`) since both entry points must contend on the
  * *same* lock instance; `internal` (not `private`) so `background/FeedRefreshWorker.kt` — a
  * different package in the same androidMain source set — can share it.
@@ -38,7 +38,7 @@ private val startupTasksRan = AtomicBoolean(false)
  *
  * Called from `MainActivity.onCreate`, not `KeryxApplication.onCreate`: the latter also runs when
  * `WorkManager` wakes the process to run `FeedRefreshWorker`, and running the full startup
- * sequence on every background wakeup would duplicate `refreshFeedsAndNotify`/etc. on top of what
+ * sequence on every background wakeup would duplicate the refresh/sync cycle/etc. on top of what
  * the worker itself just did.
  *
  * Public rather than `internal`: `MainActivity` lives in the separate `:androidApp` Gradle module,
@@ -62,7 +62,7 @@ suspend fun runAndroidStartupTasks(koin: Koin) {
         // flag — it is a plain `set`, not a `compareAndSet`, because only one caller can ever reach
         // this point at a time. Set unconditionally once every step has been attempted (matching
         // runStartupMaintenance's own per-step isolation) — a step that failed is logged and left
-        // for FeedRefreshWorker's own periodic run to pick back up (refreshFeedsAndNotify / sync /
+        // for FeedRefreshWorker's own periodic run to pick back up (the RefreshCycleRunner cycle /
         // checkForUpdateAndNotify / maybeRebuildFtsIndex), except cleanUpArticleCacheIfDue, which
         // only runs here and simply waits for its own 24h gate on the next process start.
         runStartupMaintenance(koin)

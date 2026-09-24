@@ -9,14 +9,11 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.errorOrNull
-import works.merc.keryx.app.domain.ActivityCenter
-import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
-import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.startupMaintenanceMutex
 
@@ -24,9 +21,9 @@ private const val LOG_TAG = "FeedRefreshWorker"
 
 /**
  * `WorkManager`'s periodic entry point for background feed refresh — the Android equivalent of
- * one iteration of desktop's `backgroundUpdateLoop` (`refreshFeedsAndNotify` / `sync` /
- * `checkForUpdateAndNotify` / `maybeRebuildFtsIndex`, the same three commonMain maintenance
- * functions plus `SyncRepository.sync()` desktop's `StartupTasks.kt` calls). `WorkManager`
+ * one iteration of desktop's `backgroundUpdateLoop` (a `RefreshCycleRunner` refresh-then-sync
+ * cycle, then `checkForUpdateAndNotify` / `maybeRebuildFtsIndex` — the same commonMain
+ * implementations desktop's `StartupTasks.kt` calls). `WorkManager`
  * instantiates this itself via its default `WorkerFactory` (reflection over the
  * `(Context, WorkerParameters)` constructor), so dependencies are resolved from
  * [KoinPlatform.getKoin] inside [doWork] instead of being constructor-injected — mirroring how
@@ -46,22 +43,17 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
         // periodic run will acquire the lock normally.
         if (!startupMaintenanceMutex.tryLock()) return Result.success()
         return try {
-            // One cycle for ActivityCenter's busy checks, so the gap between the refresh and the
-            // sync isn't mistaken for idle (e.g. by a pull-to-refresh joining this run).
-            val retrySync = koin.get<ActivityCenter>().trackRefreshCycle {
-                refreshFeedsAndNotify(koin)
-                // Retry only the failure category error-design.md documents as auto-retryable
-                // (CloudStorageException) — CloudAuthException/SchemaVersionException/
-                // CloudDataIncompatibleException are permanent until the user acts, and retrying
-                // them would just burn battery on a doomed repeat attempt (already recorded in the
-                // notification center by SyncRepository itself).
-                if (koin.get<CloudSession>().isConnected()) {
-                    val syncResult = koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-                    syncResult.errorOrNull is CloudStorageException
-                } else {
-                    false
-                }
-            }
+            // One RefreshCycleRunner cycle (refresh, notify, then sync if connected), so the gap
+            // between the refresh and the sync isn't mistaken for idle (e.g. by a pull-to-refresh
+            // joining this run). No `step` wrapper: an exception here is caught below and retried.
+            val syncResult = koin.get<RefreshCycleRunner>().run(trigger = SyncTrigger.AUTOMATIC)
+            // Retry only the failure category error-design.md documents as auto-retryable
+            // (CloudStorageException) — CloudAuthException/SchemaVersionException/
+            // CloudDataIncompatibleException are permanent until the user acts, and retrying them
+            // would just burn battery on a doomed repeat attempt (already recorded in the
+            // notification center by SyncRepository itself). A `null` result means no provider is
+            // connected, so there is nothing to retry.
+            val retrySync = syncResult?.errorOrNull is CloudStorageException
             // Mirrors desktop's backgroundUpdateLoop (StartupTasks.kt), which only rechecks for an
             // update once the user's configured interval has elapsed — unlike this worker's own
             // refresh cadence, which WorkManager floors at 15 minutes regardless of that setting.

@@ -179,16 +179,16 @@ class StartupMaintenanceTasksTest {
             // isSetupComplete() checks for — so this also marks setup as finished.
             koin.get<SettingsRepository>().mutateLocalSettings { it }
 
-            // The later steps (sync/feedRefresh/updateCheck/ftsRebuild) all need dependencies this
-            // test's Koin never registers (CloudSession, FtsManager, SelfUpdateCheckSupport, ...),
-            // so each throws — but runMaintenanceStep swallows that per-step, and this test only
-            // asserts on the first step's own effect: reaching the end and observing it proves the
-            // gate passed and the sequence actually started running step by step.
+            // The later steps (refreshCycle/updateCheck/ftsRebuild) all need dependencies this
+            // test's Koin never registers (RefreshCycleRunner, FtsManager, SelfUpdateCheckSupport,
+            // ...), so each throws — but runMaintenanceStep swallows that per-step, and this test
+            // only asserts on the first step's own effect: reaching the end and observing it proves
+            // the gate passed and the sequence actually started running step by step. The cycle's
+            // own order and stage isolation are covered by RefreshCycleRunnerTest.
             runStartupMaintenance(koin)
 
             assertEquals(now, koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
-            // The sync/feedRefresh cycle wrapper must release its counter even though both steps
-            // inside it threw (the steps swallow their own failures; the wrapper's finally does the rest).
+            // A step that failed before the cycle even started must not leave a cycle counted.
             assertFalse(koin.get<ActivityCenter>().activity.value.refreshCycleRunning)
         } finally {
             driver.close()

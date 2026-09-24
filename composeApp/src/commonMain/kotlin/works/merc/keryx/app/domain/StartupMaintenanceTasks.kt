@@ -38,8 +38,8 @@ internal suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) 
 /**
  * The maintenance sequence desktop's `StartupTasks.kt` and Android's `AndroidStartupTasks.kt` both
  * run at startup, sharing this one implementation rather than each hand-writing the same five
- * [runMaintenanceStep] calls: cache cleanup, initial cloud sync, feed refresh, update check, FTS
- * heal. Each caller wraps this with whatever else its own platform needs before/after it (desktop's
+ * [runMaintenanceStep] calls: cache cleanup, initial cloud sync, feed refresh (the two run as one
+ * [RefreshCycleRunner] cycle), update check, FTS heal. Each caller wraps this with whatever else its own platform needs before/after it (desktop's
  * macOS translocation warning and stale-self-replace-artifact cleanup run before this; Android's
  * `startupMaintenanceMutex`/once-per-process guard wraps around the call instead).
  *
@@ -56,14 +56,14 @@ internal suspend fun runStartupMaintenance(koin: Koin) {
     if (!koin.get<SettingsRepository>().isSetupComplete()) return
     runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
     // Sync-then-refresh here (the reverse of the other callers), but still one cycle for
-    // ActivityCenter's busy checks. Each step keeps its own failure isolation inside it.
-    koin.get<ActivityCenter>().trackRefreshCycle {
-        runMaintenanceStep("sync") {
-            if (koin.get<CloudSession>().isConnected()) {
-                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-            }
-        }
-        runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
+    // ActivityCenter's busy checks. Each stage keeps its own failure isolation through `step`; the
+    // outer step only covers resolving the runner itself.
+    runMaintenanceStep("refreshCycle") {
+        koin.get<RefreshCycleRunner>().run(
+            order = RefreshCycleRunner.CycleOrder.SYNC_THEN_REFRESH,
+            trigger = SyncTrigger.AUTOMATIC,
+            step = ::runMaintenanceStep,
+        )
     }
     runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
     runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
@@ -81,17 +81,6 @@ internal suspend fun cleanUpArticleCacheIfDue(koin: Koin) {
     val days = settingsRepository.getCacheRetentionDays()
     koin.get<ArticleRepository>().deleteExpiredArticles(days)
     settingsRepository.mutateLocalSettings { it.copy(lastCacheCleanupAt = now) }
-}
-
-/**
- * Refreshes all feeds and processes notifications for newly fetched articles according to the local notification setting.
- */
-internal suspend fun refreshFeedsAndNotify(koin: Koin) {
-    val settingsRepository = koin.get<SettingsRepository>()
-    val results = koin.get<ActivityCenter>().trackFeedRefresh { koin.get<FeedRepository>().refreshAll() }
-    koin.get<NewArticleNotifier>().notifyIfEnabled(
-        results, settingsRepository.getLocalSettings().notificationEnabled, koin.get<NotificationMessages>(),
-    )
 }
 
 /**

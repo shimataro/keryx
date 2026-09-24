@@ -28,6 +28,7 @@ import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OpmlImporter
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -113,6 +114,7 @@ val appModule: Module = module {
     single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
+    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
 
     // ViewModels are app-scoped for this single-window desktop app.
     single { NotificationCenterViewModel(get()) }

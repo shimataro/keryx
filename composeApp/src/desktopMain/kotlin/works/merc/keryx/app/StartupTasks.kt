@@ -9,16 +9,14 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.checkForUpdateAndNotify
 import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.maybeRebuildFtsIndex
-import works.merc.keryx.app.domain.refreshFeedsAndNotify
 import works.merc.keryx.app.domain.runMaintenanceStep
 import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.domain.shouldCheckForUpdate
@@ -49,7 +47,7 @@ internal suspend fun runStartupTasks(koin: Koin) {
  * Feed refreshing and synchronization occur when the configured refresh interval is positive.
  * Update checks and full-text index maintenance run independently of feed refresh settings. Each
  * step runs through [runMaintenanceStep] for the same reason [runStartupTasks] does — a failure in
- * one (e.g. a feed fetch timing out) must not skip `sync`/`checkForUpdateAndNotify`/
+ * one (e.g. a feed fetch timing out) must not skip the sync/`checkForUpdateAndNotify`/
  * `maybeRebuildFtsIndex` for the rest of this cycle.
  */
 internal suspend fun backgroundUpdateLoop(koin: Koin) {
@@ -61,11 +59,11 @@ internal suspend fun backgroundUpdateLoop(koin: Koin) {
         // setup completes.
         if (!settingsRepository.isSetupComplete()) continue
         if (minutes > 0) {
-            // One cycle for ActivityCenter's busy checks, so the gap between the two steps isn't
-            // mistaken for idle; each step still isolates its own failure.
-            koin.get<ActivityCenter>().trackRefreshCycle {
-                runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
-                runMaintenanceStep("sync") { koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC) }
+            // One RefreshCycleRunner cycle (refresh, notify, then sync if connected), so the gap
+            // between the two stages isn't mistaken for idle; each stage still isolates its own
+            // failure through `step`.
+            runMaintenanceStep("refreshCycle") {
+                koin.get<RefreshCycleRunner>().run(trigger = SyncTrigger.AUTOMATIC, step = ::runMaintenanceStep)
             }
         }
         val settings = settingsRepository.getLocalSettings()
