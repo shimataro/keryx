@@ -593,6 +593,17 @@ internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delt
     return if (delta < 0) ReorderTarget(orderedIds[landsAt]) else ReorderTarget(orderedIds.getOrNull(landsAt + 1))
 }
 
+/**
+ * Whether the article list's "refresh this list" action — the pull-to-refresh gesture, its
+ * accessibility action, and the hardware-keyboard shortcut — is available: only on a touch-primary
+ * platform (a mouse has no pull gesture, and desktop's own app menu already owns the same
+ * shortcut), never over search results (refreshing the feeds behind a result list isn't what the
+ * gesture means there), and never with no feeds at all (nothing to refresh). The single rule both
+ * `ArticleListPane` and `HomeScreen`'s keyboard handling read, so the two can never disagree.
+ */
+internal fun pullRefreshAvailable(isTouchPrimary: Boolean, searchActive: Boolean, hasNoFeeds: Boolean): Boolean =
+    isTouchPrimary && !searchActive && !hasNoFeeds
+
 /** Whether [url] is present and non-blank — the single rule for when URL-dependent actions
  * (open in browser, copy URL) are available, for an article's URL or a feed's site URL alike. */
 internal fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()

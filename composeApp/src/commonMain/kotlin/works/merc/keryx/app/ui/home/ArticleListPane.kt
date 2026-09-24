@@ -44,6 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -67,7 +70,6 @@ import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
-import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
@@ -77,6 +79,7 @@ import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_no_articles
 import works.merc.keryx.app.resources.home_no_feeds
 import works.merc.keryx.app.resources.home_open_feed_list
+import works.merc.keryx.app.resources.home_refresh_this_list
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
@@ -157,6 +160,9 @@ fun ArticleListPane(
     onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
+    // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
+    // a real touch-primary platform to run on; every real call site relies on the default.
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val filter by vm.filter.collectAsState()
     val feeds by vm.feeds.collectAsState()
@@ -313,7 +319,8 @@ fun ArticleListPane(
     }
 
     val pullRefreshingFilters by vm.pullRefreshingFilters.collectAsState()
-    val onPullRefresh: (() -> Unit)? = if (isTouchPrimary && !searchActive && !hasNoFeeds) vm::pullToRefresh else null
+    val onPullRefresh: (() -> Unit)? =
+        if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) vm::pullToRefresh else null
 
     ArticleListPaneContent(
         articles = articles,
@@ -346,10 +353,8 @@ fun ArticleListPane(
         titleMarkedById = titleMarkedById,
         emptyContent = emptyContent,
         header = header,
-        // Android only (a mouse has no pull gesture), and never over search results — pulling a
-        // result list to refresh the feeds behind it isn't what the gesture means there — nor with
-        // no feeds at all, where there is nothing to refresh. The scope is the current selection's
-        // own feeds; see HomeViewModel.pullToRefresh.
+        // Gated by pullRefreshAvailable (touch-primary only, never over search results or with no
+        // feeds). The scope is the current selection's own feeds; see HomeRefreshController.pullToRefresh.
         onPullRefresh = onPullRefresh,
         // Only the list whose own pull is still running shows the indicator — another selection
         // switched to mid-pull is not the list being refreshed.
@@ -628,6 +633,7 @@ internal fun ArticleListPaneContent(
         // onPullRefresh is null, so turning the gesture on/off (e.g. entering search) never adds or
         // removes a wrapper around the LazyColumn — see ui-guidelines' "Layout stability".
         val pullState = rememberPullToRefreshState()
+        val refreshActionLabel = stringResource(Res.string.home_refresh_this_list)
         Box(
             Modifier
                 .fillMaxSize()
@@ -637,7 +643,17 @@ internal fun ArticleListPaneContent(
                     state = pullState,
                     enabled = onPullRefresh != null,
                     onRefresh = { onPullRefresh?.invoke() },
-                ),
+                )
+                // The pull is a pointer-only gesture, so a screen reader gets the same refresh as a
+                // custom action (see ui-guidelines' Accessibility section). An empty list clears
+                // the actions rather than removing the modifier, keeping the chain stable.
+                .semantics {
+                    customActions = if (onPullRefresh != null) {
+                        listOf(CustomAccessibilityAction(refreshActionLabel) { onPullRefresh(); true })
+                    } else {
+                        emptyList()
+                    }
+                },
         ) {
             if (articles.isEmpty()) {
                 if (emptyContent != null) {

@@ -48,6 +48,11 @@ enum class HomeTextInput { SearchField, RowNameEditor }
  *   bare-key binding here — they are Ctrl+Shift+<letter> app-menu accelerators instead (see
  *   `AppMenuShortcut`), since those actions have side effects (clipboard, browser launch,
  *   read/star state, network) that shouldn't fire from an easily-mistyped bare key.
+ * - Ctrl+Shift+R (no Meta) : refresh the article list's current selection — the hardware-keyboard
+ *   counterpart of the touch-only pull-to-refresh gesture, handled only when [onRefreshList] is
+ *   non-null. `HomeScreen` passes it only where `pullRefreshAvailable` holds, which is never on
+ *   desktop, so it never competes with desktop's own Ctrl+Shift+R app-menu accelerator
+ *   (refresh-selected-feed); a `null` [onRefreshList] leaves the key unconsumed.
  * - J / K / F2 / Return / Delete / Backspace all require neither Ctrl nor Meta to be held, so they
  *   never shadow the OS's own Ctrl/Cmd+<key> bindings
  * - Cmd/Ctrl+F : search
@@ -95,6 +100,7 @@ fun Modifier.homeKeyboardShortcuts(
     onHome: () -> Unit = {},
     onEnd: () -> Unit = {},
     onKeyboardEngaged: () -> Unit = {},
+    onRefreshList: (() -> Unit)? = null,
     isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs,
 ): Modifier = onPreviewKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -111,6 +117,8 @@ fun Modifier.homeKeyboardShortcuts(
     onKeyboardEngaged()
     when {
         (event.isMetaPressed || event.isCtrlPressed) && event.key == Key.F -> { onSearch(); true }
+        onRefreshList != null && event.isCtrlPressed && event.isShiftPressed && !event.isMetaPressed &&
+            event.key == Key.R -> { onRefreshList(); true }
         event.key == Key.DirectionDown -> { onDown(); true }
         event.key == Key.DirectionUp -> { onUp(); true }
         event.key == Key.DirectionLeft -> { onLeft(); true }

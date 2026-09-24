@@ -10,6 +10,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -110,6 +112,81 @@ class ArticleListPaneTest {
         waitForIdle()
         pullDown()
         assertEquals(1, pulls)
+    }
+
+    // --- The pull's screen-reader counterpart: a "refresh this list" custom accessibility action,
+    // exposed exactly where pullRefreshAvailable allows the gesture itself. ---
+
+    private val refreshListLabel = "この一覧を更新"
+
+    private val hasRefreshListAction = SemanticsMatcher("has the refresh-this-list custom action") { node ->
+        node.config.getOrElse(SemanticsActions.CustomActions) { emptyList() }.any { it.label == refreshListLabel }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsExposedAndStartsAPull() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, isTouchPrimary = true)
+            }
+            waitForIdle()
+
+            val action = onNode(hasRefreshListAction).fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions].single { it.label == refreshListLabel }
+            runOnIdle { action.action() }
+
+            assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the action must start the same pull")
+        }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsAbsentWhileSearching() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setContent {
+                ArticleListPane(vm = vm, focused = true, onActivated = {}, isTouchPrimary = true)
+            }
+            waitForIdle()
+            onNode(hasRefreshListAction).assertExists()
+
+            vm.setSearchBarVisible(true)
+            vm.setSearchQuery("kotlin")
+            waitForIdle()
+
+            onNode(hasRefreshListAction).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsAbsentWithNoFeeds() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        useHomeViewModel(driver, db) { fixture ->
+            setContent {
+                ArticleListPane(vm = fixture.vm, focused = true, onActivated = {}, isTouchPrimary = true)
+            }
+            waitForIdle()
+
+            onNode(hasRefreshListAction).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun refreshListAccessibilityActionIsAbsentWhenNotTouchPrimary() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        useHomeViewModel(driver, db) { fixture ->
+            setContent {
+                ArticleListPane(vm = fixture.vm, focused = true, onActivated = {}, isTouchPrimary = false)
+            }
+            waitForIdle()
+
+            onNode(hasRefreshListAction).assertDoesNotExist()
+        }
     }
 
     @Test

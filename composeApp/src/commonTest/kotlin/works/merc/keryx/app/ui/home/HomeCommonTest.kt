@@ -11,6 +11,17 @@ import kotlin.test.assertNull
 
 class HomeCommonTest {
 
+    @Test
+    fun pullRefreshAvailableOnlyOnTouchOutsideSearchWithFeeds() {
+        for (touch in listOf(false, true)) for (search in listOf(false, true)) for (noFeeds in listOf(false, true)) {
+            assertEquals(
+                touch && !search && !noFeeds,
+                pullRefreshAvailable(isTouchPrimary = touch, searchActive = search, hasNoFeeds = noFeeds),
+                "touch=$touch search=$search noFeeds=$noFeeds",
+            )
+        }
+    }
+
     // --- FeedListRowSelection.canonicalFor ---
 
     @Test
