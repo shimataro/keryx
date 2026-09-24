@@ -9,6 +9,7 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -117,10 +118,14 @@ private class AlwaysFailingCloudStorage : CloudStorage {
  * Every other method fails cleanly (never called in the "first sync ever" path this drives: two
  * gated [metadata] calls — compressed then legacy, both absent — land on [create]).
  */
-private class GatedCloudStorage(private val gate: CompletableDeferred<Unit>) : CloudStorage {
+private class GatedCloudStorage(
+    private val gate: CompletableDeferred<Unit>,
+    private val metadataCalls: AtomicInteger? = null,
+) : CloudStorage {
     private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("not used by this test"))
     override suspend fun authenticate(): Result<Unit> = Result.Ok(Unit)
     override suspend fun metadata(path: String): Result<CloudFileMeta?> {
+        metadataCalls?.incrementAndGet()
         gate.await()
         return Result.Ok(null)
     }
@@ -901,10 +906,11 @@ class SettingsViewModelTest {
         val tokenStorage = FakeTokenStorage()
         tokenStorage.save(OAuthTokens("AT"))
         val gate = CompletableDeferred<Unit>()
+        val metadataCalls = AtomicInteger()
         val vm = newViewModel(
             tokenStorage = tokenStorage,
-            syncCloudProvider = { GatedCloudStorage(gate) },
-            dispatcher = Dispatchers.Default,
+            syncCloudProvider = { GatedCloudStorage(gate, metadataCalls) },
+            dispatcher = CountingDispatcher(),
         )
         assertTrue(vm.canSyncNow)
 
@@ -916,6 +922,7 @@ class SettingsViewModelTest {
 
         gate.complete(Unit)
         awaitTrue { vm.canSyncNow }
+        assertEquals(2, metadataCalls.get())
     }
 
     /**
