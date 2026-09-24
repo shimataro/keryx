@@ -549,8 +549,8 @@ class ArticleListPaneTest {
         waitForIdle()
 
         // canHideRead defaults to false, so the button is present but disabled.
-        onNodeWithContentDescription("既読を隠す").assertIsNotEnabled()
-        onNodeWithContentDescription("既読を隠す").performClick()
+        onNodeWithContentDescription("既読記事を非表示").assertIsNotEnabled()
+        onNodeWithContentDescription("既読記事を非表示").performClick()
         waitForIdle()
 
         assertEquals(0, hideReadCount)
@@ -573,8 +573,8 @@ class ArticleListPaneTest {
         }
         waitForIdle()
 
-        onNodeWithContentDescription("既読を隠す").assertIsEnabled()
-        onNodeWithContentDescription("既読を隠す").performClick()
+        onNodeWithContentDescription("既読記事を非表示").assertIsEnabled()
+        onNodeWithContentDescription("既読記事を非表示").performClick()
         waitForIdle()
 
         assertEquals(1, hideReadCount)
