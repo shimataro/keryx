@@ -1152,6 +1152,13 @@ class HomeViewModel(
     val syncing: StateFlow<Boolean> = activityCenter.syncing
 
     /**
+     * True while a whole refresh-then-sync sequence (manual or background) is in flight,
+     * including the gap between its two operations where neither [feedRefreshing] nor [syncing]
+     * is up — see [ActivityCenter.refreshCycleRunning].
+     */
+    val refreshCycleRunning: StateFlow<Boolean> = activityCenter.refreshCycleRunning
+
+    /**
      * Refreshes the specified feed.
      *
      * @param feed The feed to refresh.
@@ -1194,12 +1201,21 @@ class HomeViewModel(
         _pullRefreshing.value = true
         viewModelScope.launch {
             try {
-                if (feedOperationsAvailable(activityCenter.feedRefreshing.value, activityCenter.syncing.value)) {
+                if (feedOperationsAvailable(
+                        activityCenter.feedRefreshing.value,
+                        activityCenter.syncing.value,
+                        activityCenter.refreshCycleRunning.value,
+                    )
+                ) {
                     val targetIds = refreshTargetFeedIds(_filter.value, feeds.value, feedTagMap.value)
                     if (targetIds == null || targetIds.isNotEmpty()) launchRefresh(targetIds)?.join()
                 } else {
-                    combine(activityCenter.feedRefreshing, activityCenter.syncing) { refreshing, syncing ->
-                        feedOperationsAvailable(refreshing, syncing)
+                    combine(
+                        activityCenter.feedRefreshing,
+                        activityCenter.syncing,
+                        activityCenter.refreshCycleRunning,
+                    ) { refreshing, syncing, cycleRunning ->
+                        feedOperationsAvailable(refreshing, syncing, cycleRunning)
                     }.first { it }
                 }
             } finally {
@@ -1212,11 +1228,11 @@ class HomeViewModel(
      * Shared body of [refreshAll] / [pullToRefresh]: refreshes [targetIds] (`null` = every feed),
      * notifies about newly available articles when enabled, then syncs.
      *
-     * @return The launched job (refresh + notification + sync), or `null` when a feed refresh is
-     *   already in flight and nothing was started.
+     * @return The launched job (refresh + notification + sync), or `null` when a feed refresh or a
+     *   refresh-then-sync cycle is already in flight and nothing was started.
      */
     private fun launchRefresh(targetIds: Set<String>?): Job? {
-        if (activityCenter.feedRefreshing.value) return null
+        if (activityCenter.feedRefreshing.value || activityCenter.refreshCycleRunning.value) return null
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         // The heavy work goes off the UI thread: a full feed refresh (fetch, parse, per-feed DB
         // writes, FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO,

@@ -114,10 +114,14 @@ internal suspend fun checkForUpdateAndNotify(koin: Koin) {
 
 /**
  * Rebuilds the full FTS index when the application is idle and at least 24 hours have passed since the previous rebuild.
+ *
+ * "Idle" means no sync, no feed refresh, and no refresh-then-sync cycle
+ * ([ActivityCenter.refreshCycleRunning]) is in flight — the last covers the gap between a cycle's
+ * refresh and its sync, where the other two flags are both down.
  */
 internal suspend fun maybeRebuildFtsIndex(koin: Koin) {
     val activityCenter = koin.get<ActivityCenter>()
-    if (activityCenter.syncing.value || activityCenter.feedRefreshing.value) return
+    if (activityCenter.syncing.value || activityCenter.feedRefreshing.value || activityCenter.refreshCycleRunning.value) return
     val settingsRepository = koin.get<SettingsRepository>()
     val now = SystemClock.nowMillis()
     val last = settingsRepository.getLocalSettings().lastFtsRebuiltAt

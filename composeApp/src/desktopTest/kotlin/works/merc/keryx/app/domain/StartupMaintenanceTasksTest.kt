@@ -4,9 +4,12 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
@@ -32,6 +35,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private const val ONE_DAY_MS = 24 * 60 * 60 * 1000L
 
@@ -187,6 +191,30 @@ class StartupMaintenanceTasksTest {
             // The sync/feedRefresh cycle wrapper must release its counter even though both steps
             // inside it threw (the steps swallow their own failures; the wrapper's finally does the rest).
             assertFalse(koin.get<ActivityCenter>().refreshCycleRunning.value)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun maybeRebuildFtsIndexSkipsWhileARefreshCycleIsRunning() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val now = 10 * ONE_DAY_MS
+            val koin = testKoin(db, driver, now)
+            val activityCenter = koin.get<ActivityCenter>()
+            val gap = CompletableDeferred<Unit>()
+            // A cycle in the gap between its refresh and its sync: only refreshCycleRunning is up.
+            val cycle = launch(UnconfinedTestDispatcher(testScheduler)) { activityCenter.trackRefreshCycle { gap.await() } }
+            assertTrue(activityCenter.refreshCycleRunning.value)
+
+            // lastFtsRebuiltAt is unset, so only the idle gate stands between this call and a
+            // rebuild. No FtsManager is registered: passing the gate would throw here.
+            maybeRebuildFtsIndex(koin)
+
+            assertNull(koin.get<SettingsRepository>().getLocalSettings().lastFtsRebuiltAt)
+            gap.complete(Unit)
+            cycle.join()
         } finally {
             driver.close()
         }

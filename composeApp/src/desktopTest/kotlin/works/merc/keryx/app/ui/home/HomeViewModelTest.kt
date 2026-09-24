@@ -505,6 +505,103 @@ class HomeViewModelTest {
         }
     }
 
+    /**
+     * Regression: a refresh-then-sync cycle (e.g. the background loop) has a gap between its
+     * refresh and its sync where neither [ActivityCenter.feedRefreshing] nor
+     * [ActivityCenter.syncing] is up. A pull that joined the cycle used to treat that gap as
+     * "done" and drop its indicator before the sync had even started.
+     */
+    @Test
+    fun pullToRefreshJoiningARefreshCycleStaysUpAcrossTheGapBeforeItsSync() = runTest {
+        db.insertFeed("f1")
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter(activityScope)
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            val refreshGate = CompletableDeferred<Unit>()
+            val gap = CompletableDeferred<Unit>()
+            val syncGate = CompletableDeferred<Unit>()
+            val cycle = activityScope.launch {
+                activityCenter.trackRefreshCycle {
+                    activityCenter.trackFeedRefresh { refreshGate.await() }
+                    gap.await()
+                    activityCenter.trackSync { syncGate.await() }
+                }
+            }
+
+            vm.pullToRefresh()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.pullRefreshing.value)
+
+            // Into the gap: the refresh is over and the sync hasn't started yet.
+            refreshGate.complete(Unit)
+            testScheduler.advanceUntilIdle()
+            assertFalse(activityCenter.feedRefreshing.value)
+            assertFalse(activityCenter.syncing.value)
+            assertTrue(vm.pullRefreshing.value, "the pull must wait for the cycle's sync, not just its refresh")
+
+            gap.complete(Unit)
+            testScheduler.advanceUntilIdle()
+            assertTrue(activityCenter.syncing.value)
+            assertTrue(vm.pullRefreshing.value)
+
+            syncGate.complete(Unit)
+            cycle.join()
+            testScheduler.advanceUntilIdle()
+            assertFalse(vm.pullRefreshing.value)
+            assertEquals(0, fetches.get(), "joining must not start a refresh of its own")
+        } finally {
+            activityScope.cancel()
+        }
+    }
+
+    @Test
+    fun refreshAllStartsNothingInTheGapOfARefreshCycle() = runTest {
+        db.insertFeed("f1")
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter(activityScope)
+        try {
+            val cloud = CountingNoCloud()
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                activityCenter = activityCenter,
+                cloudProvider = cloud,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            // A cycle sitting in the gap between its refresh and its sync: only the cycle flag is up.
+            val gap = CompletableDeferred<Unit>()
+            val cycle = activityScope.launch { activityCenter.trackRefreshCycle { gap.await() } }
+            assertTrue(vm.refreshCycleRunning.value)
+            assertFalse(vm.feedRefreshing.value)
+
+            vm.refreshAll()
+            // Give a wrongly started refresh time to reach the (real-dispatcher) MockEngine.
+            repeat(5) {
+                testScheduler.advanceUntilIdle()
+                Thread.sleep(50)
+            }
+            assertEquals(0, fetches.get(), "refreshAll must not refresh while a cycle is running")
+            assertEquals(0, cloud.syncs.get(), "refreshAll must not sync while a cycle is running")
+
+            gap.complete(Unit)
+            cycle.join()
+            testScheduler.advanceUntilIdle()
+            assertFalse(vm.refreshCycleRunning.value)
+        } finally {
+            activityScope.cancel()
+        }
+    }
+
     @Test
     fun repeatedPullsStartASingleRefresh() = runTest {
         db.insertFeed("f1")

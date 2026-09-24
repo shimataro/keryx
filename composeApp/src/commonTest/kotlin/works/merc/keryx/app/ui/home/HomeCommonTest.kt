@@ -348,10 +348,13 @@ class HomeCommonTest {
 
     @Test
     fun feedOperationsAvailableRequiresNeitherRefreshNorSyncInFlight() {
-        assertEquals(true, feedOperationsAvailable(feedRefreshing = false, syncing = false))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = false))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = false, syncing = true))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = true))
+        assertEquals(true, feedOperationsAvailable(feedRefreshing = false, syncing = false, refreshCycleRunning = false))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = false, refreshCycleRunning = false))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = false, syncing = true, refreshCycleRunning = false))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = true, refreshCycleRunning = false))
+        // The gap between a cycle's refresh and its sync: neither per-operation flag is up.
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = false, syncing = false, refreshCycleRunning = true))
+        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = true, refreshCycleRunning = true))
     }
 
     @Test

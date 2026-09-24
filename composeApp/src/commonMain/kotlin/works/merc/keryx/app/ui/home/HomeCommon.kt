@@ -595,9 +595,11 @@ internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delt
 
 /** Whether the refresh-all / sync actions (toolbar buttons and app-menu items alike) are
  * available — each is blocked while the other operation is in flight, since running both at
- * once isn't supported. */
-internal fun feedOperationsAvailable(feedRefreshing: Boolean, syncing: Boolean): Boolean =
-    !feedRefreshing && !syncing
+ * once isn't supported. [refreshCycleRunning] ([works.merc.keryx.app.domain.ActivityCenter.refreshCycleRunning])
+ * also blocks them, covering the gap between a refresh-then-sync sequence's two operations where
+ * neither of the other two flags is up. Deliberately has no default, so a caller can't forget it. */
+internal fun feedOperationsAvailable(feedRefreshing: Boolean, syncing: Boolean, refreshCycleRunning: Boolean): Boolean =
+    !feedRefreshing && !syncing && !refreshCycleRunning
 
 /**
  * The feeds a pull-to-refresh on the article list refreshes for the current [filter]: `null` means

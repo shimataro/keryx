@@ -61,14 +61,14 @@ class AppMenuTreeTest {
 
     private fun enabledUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
-        feedRefreshing = false, syncing = false, cloudConnected = true,
+        feedRefreshing = false, syncing = false, refreshCycleRunning = false, cloudConnected = true,
         searchActive = false, unreadOnly = true,
         hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
         screen = Screen.Setup, hasSelectedArticle = false, selectedArticleHasUrl = false,
-        feedRefreshing = true, syncing = true, cloudConnected = false,
+        feedRefreshing = true, syncing = true, refreshCycleRunning = true, cloudConnected = false,
         searchActive = true, unreadOnly = false,
         hasSelectedFeed = false, hasRenamableSelection = false,
     )
@@ -76,14 +76,14 @@ class AppMenuTreeTest {
     /** A folder (or tag) selected: a rename/delete target, but no feed-specific selection. */
     private fun folderSelectedUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = false, selectedArticleHasUrl = false,
-        feedRefreshing = false, syncing = false, cloudConnected = true,
+        feedRefreshing = false, syncing = false, refreshCycleRunning = false, cloudConnected = true,
         searchActive = false, unreadOnly = false,
         hasSelectedFeed = false, hasRenamableSelection = true,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
         screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
-        feedRefreshing = false, syncing = false, cloudConnected = true,
+        feedRefreshing = false, syncing = false, refreshCycleRunning = false, cloudConnected = true,
         searchActive = false, unreadOnly = true,
         hasSelectedFeed = true, hasRenamableSelection = true,
     )

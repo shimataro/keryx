@@ -881,6 +881,7 @@ private fun FeedListToolbarRow(
 ) {
     val refreshing by vm.feedRefreshing.collectAsState()
     val syncing by vm.syncing.collectAsState()
+    val refreshCycleRunning by vm.refreshCycleRunning.collectAsState()
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(
             modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
@@ -906,7 +907,7 @@ private fun FeedListToolbarRow(
                 val refreshTooltip = stringResource(
                     if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
                 )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
+                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = feedOperationsAvailable(refreshing, syncing, refreshCycleRunning)) {
                     if (refreshing) {
                         SmallSpinner()
                     } else {
@@ -917,7 +918,7 @@ private fun FeedListToolbarRow(
                     val syncTooltip = stringResource(
                         if (syncing) Res.string.home_syncing else Res.string.home_sync,
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = feedOperationsAvailable(refreshing, syncing)) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = feedOperationsAvailable(refreshing, syncing, refreshCycleRunning)) {
                         if (syncing) {
                             SmallSpinner()
                         } else {

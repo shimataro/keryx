@@ -14,6 +14,7 @@ class MenuUiStateTest {
         selectedArticleHasUrl: Boolean = false,
         feedRefreshing: Boolean = false,
         syncing: Boolean = false,
+        refreshCycleRunning: Boolean = false,
         cloudConnected: Boolean = false,
         searchActive: Boolean = false,
         unreadOnly: Boolean = false,
@@ -27,6 +28,7 @@ class MenuUiStateTest {
         selectedArticleHasUrl = selectedArticleHasUrl,
         feedRefreshing = feedRefreshing,
         syncing = syncing,
+        refreshCycleRunning = refreshCycleRunning,
         cloudConnected = cloudConnected,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
@@ -156,6 +158,15 @@ class MenuUiStateTest {
     fun sync_also_disabled_while_refreshing() {
         // Mirrors FeedListPane's toolbar buttons, which block Sync while a refresh is running.
         assertFalse(state(cloudConnected = true, syncing = false, feedRefreshing = true).syncEnabled)
+    }
+
+    @Test
+    fun refresh_all_and_sync_disabled_while_a_refresh_cycle_is_running() {
+        // The gap between a cycle's refresh and its sync has neither per-operation flag up, but the
+        // cycle as a whole is still busy.
+        val ui = state(cloudConnected = true, feedRefreshing = false, syncing = false, refreshCycleRunning = true)
+        assertFalse(ui.refreshAllEnabled)
+        assertFalse(ui.syncEnabled)
     }
 
     // --- Feed actions require Home + a selected feed ---

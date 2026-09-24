@@ -64,7 +64,7 @@ class MenuBarVisibilityTest {
     private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
         ui = computeMenuUiState(
             screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
-            feedRefreshing = false, syncing = false, cloudConnected = true,
+            feedRefreshing = false, syncing = false, refreshCycleRunning = false, cloudConnected = true,
             searchActive = false, unreadOnly = false,
             hasSelectedFeed = true, hasRenamableSelection = true,
         ),
