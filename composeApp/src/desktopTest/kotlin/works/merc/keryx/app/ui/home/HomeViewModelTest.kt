@@ -51,6 +51,7 @@ import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
@@ -194,7 +195,9 @@ class HomeViewModelTest {
         // StandardTestDispatcher) instead of the default Unconfined, which always runs it inline.
         dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         // Consulted once per sync() — a test can count invocations to tell whether a sync ran.
-        cloudProvider: () -> works.merc.keryx.app.data.cloud.CloudStorage? = { null },
+        // Passing one also connects the CloudSession (a client ID plus stored tokens), since a
+        // refresh-then-sync cycle only syncs while a provider is connected.
+        cloudProvider: (() -> works.merc.keryx.app.data.cloud.CloudStorage?)? = null,
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -212,7 +215,7 @@ class HomeViewModelTest {
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = cloudProvider,
+            cloudProvider = cloudProvider ?: { null },
             clock = clock,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             activityCenter = activityCenter,
@@ -223,17 +226,21 @@ class HomeViewModelTest {
         )
         val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
         val authManager = DropboxAuthManager(authClient, clock = clock)
+        if (cloudProvider != null) tokenStorage.save(OAuthTokens(accessToken = "token"))
         val cloudSession = singleProviderCloudSession(
             client = authClient,
             tokenStorage = tokenStorage,
             authManager = authManager,
-            clientId = appKey,
+            clientId = if (cloudProvider != null && appKey.isEmpty()) "APPKEY" else appKey,
             clock = clock,
+        )
+        val refreshCycleRunner = RefreshCycleRunner(
+            activityCenter, feedRepository, syncRepository, cloudSession, newArticleNotifier,
+            settingsRepository, FakeNotificationMessages(),
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock,
-            newArticleNotifier, FakeNotificationMessages(),
+            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner,
             Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
@@ -363,6 +370,9 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
     }
 
+    /** Whether any pull-to-refresh is still pending, whichever selection it was started on. */
+    private val HomeViewModel.pulling: Boolean get() = pullRefreshingFilters.value.isNotEmpty()
+
     /** A no-cloud provider for [newViewModel] that counts how many syncs consulted it. */
     private class CountingNoCloud : () -> works.merc.keryx.app.data.cloud.CloudStorage? {
         val syncs = java.util.concurrent.atomic.AtomicInteger(0)
@@ -388,15 +398,15 @@ class HomeViewModelTest {
 
         vm.pullToRefresh()
         // Raised synchronously, before the refresh coroutine has even started running.
-        assertTrue(vm.pullRefreshing.value)
+        assertTrue(vm.pulling)
         testScheduler.runCurrent()
         assertTrue(activityCenter.activity.value.feedRefreshing)
-        assertTrue(vm.pullRefreshing.value)
+        assertTrue(vm.pulling)
 
         gate.complete(Unit)
-        pumpUntil { !vm.pullRefreshing.value }
+        pumpUntil { !vm.pulling }
 
-        assertFalse(vm.pullRefreshing.value)
+        assertFalse(vm.pulling)
         assertFalse(activityCenter.activity.value.feedRefreshing)
         assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
         assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
@@ -422,9 +432,9 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         vm.pullToRefresh()
-        pumpUntil { !vm.pullRefreshing.value }
+        pumpUntil { !vm.pulling }
 
-        assertFalse(vm.pullRefreshing.value)
+        assertFalse(vm.pulling)
         assertEquals(setOf("https://feed/f1", "https://feed/f2"), requested.toSet())
     }
 
@@ -449,13 +459,13 @@ class HomeViewModelTest {
 
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
-            assertTrue(vm.pullRefreshing.value, "the pull waits for the in-flight refresh")
+            assertTrue(vm.pulling, "the pull waits for the in-flight refresh")
             assertEquals(0, fetches.get())
 
             gate.complete(Unit)
             job.join()
             testScheduler.advanceUntilIdle()
-            assertFalse(vm.pullRefreshing.value)
+            assertFalse(vm.pulling)
             assertEquals(0, fetches.get(), "joining must not start a refresh of its own")
         } finally {
             activityScope.cancel()
@@ -482,13 +492,13 @@ class HomeViewModelTest {
 
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
-            assertTrue(vm.pullRefreshing.value)
+            assertTrue(vm.pulling)
             assertFalse(vm.activity.value.feedRefreshing)
 
             gate.complete(Unit)
             job.join()
             testScheduler.advanceUntilIdle()
-            assertFalse(vm.pullRefreshing.value)
+            assertFalse(vm.pulling)
             assertFalse(vm.activity.value.feedRefreshing)
             assertEquals(0, fetches.get())
         } finally {
@@ -529,24 +539,24 @@ class HomeViewModelTest {
 
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
-            assertTrue(vm.pullRefreshing.value)
+            assertTrue(vm.pulling)
 
             // Into the gap: the refresh is over and the sync hasn't started yet.
             refreshGate.complete(Unit)
             testScheduler.advanceUntilIdle()
             assertFalse(activityCenter.activity.value.feedRefreshing)
             assertFalse(activityCenter.activity.value.syncing)
-            assertTrue(vm.pullRefreshing.value, "the pull must wait for the cycle's sync, not just its refresh")
+            assertTrue(vm.pulling, "the pull must wait for the cycle's sync, not just its refresh")
 
             gap.complete(Unit)
             testScheduler.advanceUntilIdle()
             assertTrue(activityCenter.activity.value.syncing)
-            assertTrue(vm.pullRefreshing.value)
+            assertTrue(vm.pulling)
 
             syncGate.complete(Unit)
             cycle.join()
             testScheduler.advanceUntilIdle()
-            assertFalse(vm.pullRefreshing.value)
+            assertFalse(vm.pulling)
             assertEquals(0, fetches.get(), "joining must not start a refresh of its own")
         } finally {
             activityScope.cancel()
@@ -656,12 +666,12 @@ class HomeViewModelTest {
         vm.refreshAll()
         vm.pullToRefresh()
         pumpUntil { fetches.get() >= 1 }
-        assertTrue(vm.pullRefreshing.value, "the pull waits for the in-flight refresh")
+        assertTrue(vm.pulling, "the pull waits for the in-flight refresh")
 
         gate.complete(Unit)
-        pumpUntil { !vm.pullRefreshing.value }
+        pumpUntil { !vm.pulling }
 
-        assertFalse(vm.pullRefreshing.value)
+        assertFalse(vm.pulling)
         assertTrue(vm.activity.value.idle, "the pull only finishes once the refresh and its sync have")
         assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
         assertEquals(1, cloud.syncs.get())
@@ -691,9 +701,9 @@ class HomeViewModelTest {
         testScheduler.runCurrent()
 
         gate.complete(Unit)
-        pumpUntil { !vm.pullRefreshing.value }
+        pumpUntil { !vm.pulling }
 
-        assertFalse(vm.pullRefreshing.value)
+        assertFalse(vm.pulling)
         assertEquals(1, fetches.get())
     }
 
@@ -716,9 +726,141 @@ class HomeViewModelTest {
         vm.pullToRefresh()
         testScheduler.advanceUntilIdle()
 
-        assertFalse(vm.pullRefreshing.value)
+        assertFalse(vm.pulling)
         assertEquals(0, fetches.get())
         assertEquals(0, cloud.syncs.get(), "an empty target must not sync")
+    }
+
+    @Test
+    fun thePullIndicatorBelongsToTheSelectionThePullStartedOn() = runTest {
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches))
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.pullToRefresh()
+        pumpUntil { fetches.get() >= 1 }
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.Feed("f1")), vm.pullRefreshingFilters.value)
+
+        // Another selection is not the list being refreshed...
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.filter.value in vm.pullRefreshingFilters.value)
+
+        // ...and switching back shows the still-running pull again.
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.filter.value in vm.pullRefreshingFilters.value)
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+        assertEquals(emptySet(), vm.pullRefreshingFilters.value)
+        assertEquals(1, fetches.get(), "only the first selection's feed is fetched")
+    }
+
+    @Test
+    fun aPullOnAnotherSelectionWaitsAndStaysUpUntilEverythingFinishes() = runTest {
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), cloudProvider = cloud)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.pullToRefresh()
+        pumpUntil { fetches.get() >= 1 }
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+        testScheduler.advanceUntilIdle()
+        vm.pullToRefresh()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            setOf<ArticleFilter>(ArticleFilter.Feed("f1"), ArticleFilter.Feed("f2")),
+            vm.pullRefreshingFilters.value,
+        )
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+
+        assertEquals(emptySet(), vm.pullRefreshingFilters.value)
+        assertTrue(vm.activity.value.idle)
+        assertEquals(1, fetches.get(), "the second pull must wait for the first, not start its own")
+        assertEquals(1, cloud.syncs.get())
+    }
+
+    @Test
+    fun aPullWaitsForACycleSomeoneElseClaimedFirst() = runTest {
+        db.insertFeed("f1")
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter()
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            val gate = CompletableDeferred<Unit>()
+            val other = activityScope.launch { activityCenter.tryTrackRefreshCycle { gate.await() } }
+            assertTrue(activityCenter.activity.value.refreshCycleRunning)
+
+            vm.pullToRefresh()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.pulling, "the pull waits for the cycle that got there first")
+
+            gate.complete(Unit)
+            other.join()
+            testScheduler.advanceUntilIdle()
+            assertFalse(vm.pulling)
+            assertEquals(0, fetches.get(), "waiting must not start a refresh of its own")
+        } finally {
+            activityScope.cancel()
+        }
+    }
+
+    @Test
+    fun refreshAllDuringASyncStartsNothing() = runTest {
+        db.insertFeed("f1")
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter()
+        try {
+            val cloud = CountingNoCloud()
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                activityCenter = activityCenter,
+                cloudProvider = cloud,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            val gate = CompletableDeferred<Unit>()
+            val sync = activityScope.launch { activityCenter.trackSync { gate.await() } }
+
+            vm.refreshAll()
+            repeat(5) {
+                testScheduler.advanceUntilIdle()
+                Thread.sleep(50)
+            }
+            gate.complete(Unit)
+            sync.join()
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(0, fetches.get(), "refreshAll must not refresh while a sync is running")
+            assertEquals(0, cloud.syncs.get(), "refreshAll must not queue a sync of its own either")
+            assertTrue(vm.activity.value.idle)
+        } finally {
+            activityScope.cancel()
+        }
     }
 
     /**

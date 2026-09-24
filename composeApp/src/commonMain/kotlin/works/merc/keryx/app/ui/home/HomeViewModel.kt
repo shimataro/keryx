@@ -6,7 +6,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -56,8 +55,7 @@ import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
-import works.merc.keryx.app.domain.NewArticleNotifier
-import works.merc.keryx.app.domain.NotificationMessages
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
@@ -84,8 +82,7 @@ class HomeViewModel(
     private val cloudSession: CloudSession,
     private val activityCenter: ActivityCenter,
     private val clock: Clock,
-    private val newArticleNotifier: NewArticleNotifier,
-    private val notificationMessages: NotificationMessages,
+    private val refreshCycleRunner: RefreshCycleRunner,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
@@ -1155,113 +1152,38 @@ class HomeViewModel(
      */
     val activity: StateFlow<ActivitySnapshot> = activityCenter.activity
 
-    /**
-     * Refreshes the specified feed.
-     *
-     * @param feed The feed to refresh.
-     */
-    fun refreshFeed(feed: Feeds) {
-        viewModelScope.launch {
-            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) } }
-        }
-    }
+    // Refresh / sync actions live in their own class; this ViewModel only delegates to it.
+    private val refreshController = HomeRefreshController(
+        scope = viewModelScope,
+        dispatcher = dispatcher,
+        runner = refreshCycleRunner,
+        feedRepository = feedRepository,
+        syncRepository = syncRepository,
+        activityCenter = activityCenter,
+        currentFilter = { _filter.value },
+        repinSelected = { _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected() },
+    )
+
+    /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
+    fun refreshFeed(feed: Feeds) = refreshController.refreshFeed(feed)
 
     /**
-     * Refreshes all feeds, notifies about newly available articles when enabled, and synchronizes data.
+     * Refreshes all feeds, notifies about newly available articles when enabled, and synchronizes
+     * data — unless anything is already in flight. See [HomeRefreshController.refreshAll].
      */
-    fun refreshAll() {
-        launchRefresh(ArticleFilter.All)
-    }
-
-    private val _pullRefreshing = MutableStateFlow(false)
+    fun refreshAll() = refreshController.refreshAll()
 
     /**
-     * True while a pull-to-refresh started by [pullToRefresh] is still running — through the
-     * refresh itself *and* the sync that follows it, or while it is waiting on an already
-     * in-flight refresh/sync. Deliberately not derived from [ActivitySnapshot.feedRefreshing]: that
-     * would show the indicator on every background refresh the user never asked for, and
-     * [ActivityCenter.trackFeedRefresh] only raises its flag once the work reaches [dispatcher], so
-     * the indicator would briefly vanish right after the pull.
+     * The selections whose pull-to-refresh is still running. See
+     * [HomeRefreshController.pullRefreshingFilters].
      */
-    val pullRefreshing: StateFlow<Boolean> = _pullRefreshing.asStateFlow()
+    val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> get() = refreshController.pullRefreshingFilters
 
-    /**
-     * Pull-to-refresh on the article list: refreshes only the feeds the current [filter] covers
-     * ([FeedRepository.feedsCoveredBy]), then syncs, exactly like [refreshAll] otherwise. A selection that
-     * covers no subscribed feed finishes at once without fetching or syncing. When a refresh or
-     * sync is already in flight, no new refresh is started (the same constraint that disables the
-     * toolbar button); the pull instead joins it, keeping [pullRefreshing] up until both finish.
-     * A pull while one is already pending is ignored.
-     */
-    fun pullToRefresh() {
-        if (_pullRefreshing.value) return
-        _pullRefreshing.value = true
-        viewModelScope.launch {
-            try {
-                if (activityCenter.activity.value.idle) {
-                    launchRefresh(_filter.value)?.join()
-                } else {
-                    activityCenter.activity.first { it.idle }
-                }
-            } finally {
-                _pullRefreshing.value = false
-            }
-        }
-    }
+    /** Pull-to-refresh on the current selection. See [HomeRefreshController.pullToRefresh]. */
+    fun pullToRefresh() = refreshController.pullToRefresh()
 
-    /**
-     * Shared body of [refreshAll] / [pullToRefresh]: refreshes the feeds [filter] covers
-     * ([FeedRepository.feedsCoveredBy]), notifies about newly available articles when enabled, then
-     * syncs. A narrow [filter] (feed / folder / tag) that covers no subscribed feed fetches and
-     * syncs nothing.
-     *
-     * @return The launched job (refresh + notification + sync), or `null` when a feed refresh or a
-     *   refresh-then-sync cycle is already in flight and nothing was started.
-     */
-    private fun launchRefresh(filter: ArticleFilter): Job? {
-        if (activityCenter.activity.value.let { it.feedRefreshing || it.refreshCycleRunning }) return null
-        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        // The heavy work goes off the UI thread: a full feed refresh (fetch, parse, per-feed DB
-        // writes, FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO,
-        // whole-DB read). `viewModelScope` is Dispatchers.Main.immediate, so a launch naming no
-        // dispatcher ran all of that inline on the AWT EDT. Only the IO is moved — the coroutine
-        // itself stays on Main so the state writes below remain confined there, as they were, rather
-        // than racing the UI's own writes to the same flows. Mirrors what SettingsViewModel already
-        // does for its equivalent calls. Feed writes stay serialized either way: the repository
-        // applies them in one sequential loop internally.
-        // The whole body is one ActivityCenter refresh cycle, so the gap between the refresh and
-        // the sync (the notification below) still counts as busy.
-        return viewModelScope.launch {
-            activityCenter.trackRefreshCycle {
-                val results = withContext(dispatcher) {
-                    val targets = feedRepository.feedsCoveredBy(filter)
-                    val coversEveryFeed = filter == ArticleFilter.All || filter == ArticleFilter.Starred
-                    if (!coversEveryFeed && targets.isEmpty()) null
-                    else activityCenter.trackFeedRefresh { feedRepository.refreshFeeds(targets) }
-                } ?: return@trackRefreshCycle
-                newArticleNotifier.notifyIfEnabled(
-                    results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
-                )
-                withContext(dispatcher) { syncRepository.sync() }
-                // Re-trim using the selection as it stands now: it may have changed since the
-                // snapshot above was taken, and the stale pre-refresh selection must not outlive it.
-                _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-            }
-        }
-    }
-
-    /**
-     * Synchronizes local data with the cloud.
-     */
-    fun sync() {
-        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        // IO off the UI thread — see launchRefresh(): a sync writes the downloaded cloud DB to disk,
-        // runs the ATTACH merge, VACUUM INTOs a snapshot and reads it all back.
-        viewModelScope.launch {
-            withContext(dispatcher) { syncRepository.sync() }
-            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
-        }
-    }
+    /** Synchronizes local data with the cloud. See [HomeRefreshController.sync]. */
+    fun sync() = refreshController.sync()
 
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
      *  cloud DB). Errors surface via the notification center from [SyncRepository]. */

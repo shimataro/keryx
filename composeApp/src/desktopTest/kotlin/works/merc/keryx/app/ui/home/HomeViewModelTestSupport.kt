@@ -34,6 +34,7 @@ import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -190,10 +191,14 @@ internal fun newHomeViewModel(
             clientId = appKey,
             clock = clock,
         )
+        val refreshCycleRunner = RefreshCycleRunner(
+            activityCenter, feedRepository, syncRepository, cloudSession, NewArticleNotifier(),
+            settingsRepository, FakeNotificationMessages(),
+        )
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, NewArticleNotifier(),
-            FakeNotificationMessages(), Dispatchers.Unconfined, Dispatchers.Unconfined,
+            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner,
+            Dispatchers.Unconfined, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(
             vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient),

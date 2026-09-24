@@ -312,7 +312,8 @@ fun ArticleListPane(
         }
     }
 
-    val pullRefreshing by vm.pullRefreshing.collectAsState()
+    val pullRefreshingFilters by vm.pullRefreshingFilters.collectAsState()
+    val onPullRefresh: (() -> Unit)? = if (isTouchPrimary && !searchActive && !hasNoFeeds) vm::pullToRefresh else null
 
     ArticleListPaneContent(
         articles = articles,
@@ -349,8 +350,10 @@ fun ArticleListPane(
         // result list to refresh the feeds behind it isn't what the gesture means there — nor with
         // no feeds at all, where there is nothing to refresh. The scope is the current selection's
         // own feeds; see HomeViewModel.pullToRefresh.
-        onPullRefresh = if (isTouchPrimary && !searchActive && !hasNoFeeds) vm::pullToRefresh else null,
-        pullRefreshing = pullRefreshing,
+        onPullRefresh = onPullRefresh,
+        // Only the list whose own pull is still running shows the indicator — another selection
+        // switched to mid-pull is not the list being refreshed.
+        pullRefreshing = onPullRefresh != null && filter in pullRefreshingFilters,
     )
 }
 
