@@ -880,7 +880,11 @@ private fun FeedListToolbarRow(
     hasNativeAppMenu: Boolean,
 ) {
     val activity by vm.activity.collectAsState()
-    val refreshing = activity.feedRefreshing
+    // The whole refresh-then-sync cycle keeps the refresh spinner up, not just its fetch phase —
+    // otherwise it flickers off in the gap before the sync while the button is still disabled
+    // (activity.idle is false for the whole cycle). The sync phase hands over to the sync button's
+    // own spinner instead; see ActivitySnapshot.refreshIndicatorShown.
+    val refreshing = activity.refreshIndicatorShown
     val syncing = activity.syncing
     WindowDragArea(Modifier.fillMaxWidth()) {
         KeryxPaneTopBar(

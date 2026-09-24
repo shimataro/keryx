@@ -38,6 +38,7 @@ import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
@@ -243,6 +244,51 @@ class FeedListPaneTest {
                 }
                 waitForIdle()
 
+                onNodeWithContentDescription("更新").assertIsNotEnabled()
+
+                syncGate.complete(Unit)
+                waitForIdle()
+                onNodeWithContentDescription("更新").assertIsEnabled()
+            }
+        } finally {
+            testScope.cancel()
+        }
+    }
+
+    /**
+     * In the gap of a refresh-then-sync cycle (only [ActivitySnapshot.refreshCycleCount] up — the
+     * refresh has finished, the sync hasn't started) the refresh button must keep its spinner
+     * rather than flash back to the plain (and still disabled) icon.
+     */
+    @Test
+    fun refreshButtonKeepsItsSpinnerInTheGapOfARefreshCycle() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val testScope = CoroutineScope(Dispatchers.Unconfined)
+        val activityCenter = ActivityCenter()
+        try {
+            useHomeViewModel(driver, db, activityCenter = activityCenter) { fixture ->
+                val vm = fixture.vm
+                setContent { FeedListPaneTestHost(vm, 300.dp) }
+                waitForIdle()
+                onNodeWithContentDescription("更新").assertIsEnabled()
+
+                val gap = CompletableDeferred<Unit>()
+                val syncGate = CompletableDeferred<Unit>()
+                testScope.launch {
+                    activityCenter.trackRefreshCycle {
+                        activityCenter.trackFeedRefresh { }
+                        gap.await()
+                        activityCenter.trackSync { syncGate.await() }
+                    }
+                }
+                waitForIdle()
+                assertEquals(ActivitySnapshot(refreshCycleCount = 1), activityCenter.activity.value)
+                // The spinner replaces the icon, so the icon's content description is gone.
+                onNodeWithContentDescription("更新").assertDoesNotExist()
+
+                // The cycle's sync phase: the refresh button shows its (disabled) icon again.
+                gap.complete(Unit)
+                waitForIdle()
                 onNodeWithContentDescription("更新").assertIsNotEnabled()
 
                 syncGate.complete(Unit)
