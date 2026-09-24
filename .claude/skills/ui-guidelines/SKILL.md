@@ -386,6 +386,16 @@ rules parallel the pull-to-refresh ones above:
   pile up unseen. The bottom placement carries `WindowInsets.safeDrawing`'s bottom side so it clears
   Android's edge-to-edge navigation bar, applied unconditionally (even at the top placement) so the
   modifier chain itself never branches on direction.
+- **An empty-then-filled baseline never counts as "new".** `NewArticleTracking.withList` treats a
+  `null` *or empty* previous `knownIds` as still-seeding, not something to diff against — a
+  brand-new feed's raw query starting at 0 articles, then landing its first fetch, must re-seed
+  rather than mark every one of those articles unseen. This relies on that fetch's insert being one
+  DB transaction (every real writer of a whole batch already is — see `withList`'s own KDoc); don't
+  reach for two separate non-transactional inserts when seeding a test around this.
+  `HomeViewModel.subscribeFeeds` resets the tracker outright on a successful subscribe for the same
+  reason at the "already had other articles" end of it: articles the user just fetched by
+  subscribing were never something they could have missed, whether or not the currently selected
+  filter happens to show that feed.
 
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height

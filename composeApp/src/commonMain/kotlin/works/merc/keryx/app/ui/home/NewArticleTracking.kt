@@ -12,11 +12,10 @@ package works.merc.keryx.app.ui.home
  * flow), so an existing article under the new filter is never mistaken for new.
  *
  * @param knownIds The full id set from the most recent raw query result. `null` until the first
- *   emission — that first emission only seeds [knownIds] and adds nothing to [unseenIds], since
- *   every article in it was already there before tracking started (there is nothing to have missed
- *   yet).
- * @param unseenIds Ids that appeared in a later emission than the one that seeded [knownIds] and
- *   have not yet been reported as visible via [withVisible].
+ *   emission, and treated exactly like an empty one — see [withList] for why the two are the same
+ *   thing as far as "what could the user have missed" goes.
+ * @param unseenIds Ids that appeared in an emission later than the one that established a non-empty
+ *   [knownIds] baseline, and have not yet been reported as visible via [withVisible].
  */
 internal data class NewArticleTracking(
     val knownIds: Set<String>? = null,
@@ -24,15 +23,25 @@ internal data class NewArticleTracking(
 )
 
 /**
- * Folds in a fresh raw query result. The first call after a reset only seeds [NewArticleTracking.knownIds]
- * (nothing is "new" relative to a baseline that didn't exist yet); every later call adds whatever
- * ids are in [ids] but weren't in the previous [NewArticleTracking.knownIds], and drops any
- * previously-unseen id that fell out of [ids] (deleted, unsubscribed, or filtered out by the query
- * itself — e.g. sync-merge propagating a tombstone).
+ * Folds in a fresh raw query result. A call whose *previous* [NewArticleTracking.knownIds] was
+ * `null` or empty only seeds the new baseline (nothing is "new" relative to a baseline that either
+ * didn't exist yet, or held literally nothing the user could have missed — e.g. a brand-new feed
+ * with no articles yet, or an empty folder/tag, right before its first real content lands). Every
+ * other call adds whatever ids are in [ids] but weren't in the previous [NewArticleTracking.knownIds],
+ * and drops any previously-unseen id that fell out of [ids] (deleted, unsubscribed, or filtered out
+ * by the query itself — e.g. sync-merge propagating a tombstone).
+ *
+ * The empty-baseline case only actually fires once per burst of arrivals, because
+ * [HomeViewModel.filteredArticles]'s underlying SQLDelight query coalesces every write inside one
+ * DB transaction into a single re-emission — and every real writer of a whole batch of articles at
+ * once (`FeedRepository.applyFetch`'s own fetch-then-insert, a sync merge) commits that way. Two
+ * separate, non-transactional inserts would instead surface as two raw-query emissions: the first
+ * re-seeds the baseline, but the second then diffs against *that* non-empty baseline and correctly
+ * (if perhaps confusingly, outside a transaction) reports the second insert as new.
  */
 internal fun NewArticleTracking.withList(ids: Set<String>): NewArticleTracking {
     val previouslyKnown = knownIds
-    val nextUnseen = if (previouslyKnown == null) {
+    val nextUnseen = if (previouslyKnown.isNullOrEmpty()) {
         unseenIds
     } else {
         (unseenIds + (ids - previouslyKnown)).intersect(ids)

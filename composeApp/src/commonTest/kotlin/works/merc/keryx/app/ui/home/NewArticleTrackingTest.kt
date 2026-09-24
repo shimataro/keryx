@@ -52,6 +52,27 @@ class NewArticleTrackingTest {
         assertTrue(tracking.unseenIds.isEmpty())
     }
 
+    @Test
+    fun withListTreatsAnEmptyBaselineAsStillSeeding() {
+        // e.g. a brand-new feed with no articles yet, then its first fetch lands: there was
+        // nothing in the empty list the user could have missed, so the arrival becomes the new
+        // baseline rather than a batch of "new" articles.
+        val tracking = NewArticleTracking()
+            .withList(emptySet())
+            .withList(setOf("a", "b", "c"))
+        assertEquals(setOf("a", "b", "c"), tracking.knownIds)
+        assertTrue(tracking.unseenIds.isEmpty())
+    }
+
+    @Test
+    fun withListStillDetectsArrivalsAfterAnEmptyBaselineHasFilled() {
+        val tracking = NewArticleTracking()
+            .withList(emptySet())
+            .withList(setOf("a"))
+            .withList(setOf("a", "b"))
+        assertEquals(setOf("b"), tracking.unseenIds)
+    }
+
     // --- withVisible ---
 
     @Test

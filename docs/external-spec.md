@@ -104,7 +104,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   another device (none of which otherwise raise an OS notification while the app is in the
   foreground). It appears at every window width and on every platform, including Android's
   single-pane layout, where the feed list's own unread badges are hidden behind the navigation
-  drawer.
+  drawer. It does **not** appear the first time a list that had no articles at all gets its first
+  ones (a newly subscribed feed, an empty folder/tag that just gained a feed) — there was nothing
+  to have missed yet — nor for a feed's own articles right after subscribing to it, since those are
+  already right there in front of the person who just added it.
 - Stars (persistent), open in external browser
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.

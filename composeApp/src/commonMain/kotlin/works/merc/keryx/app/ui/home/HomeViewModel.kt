@@ -279,7 +279,7 @@ class HomeViewModel(
                 // A filter change re-keys flatMapLatest, so this runs before the new filter's first
                 // emission and resets tracking to a fresh, unseeded instance — otherwise the new
                 // filter's own existing articles would look "new" against the old filter's id set.
-                .onStart { _newArticleTracking.value = NewArticleTracking() }
+                .onStart { resetNewArticleTracking() }
                 .onEach { list ->
                     val ids = list.mapTo(HashSet(list.size)) { it.id }
                     _newArticleTracking.update { it.withList(ids) }
@@ -361,6 +361,16 @@ class HomeViewModel(
     /** The "new articles" pill's own tap action — jumps to the fresh end of the list. */
     fun markAllArticlesSeen() {
         _newArticleTracking.update { it.allSeen() }
+    }
+
+    /**
+     * Re-seeds [_newArticleTracking]'s baseline from scratch — used by [filteredArticles]'s
+     * `onStart` (a filter change) and by [subscribeFeeds] (a successful subscribe). Both share the
+     * same reasoning: whatever the next raw query emission contains was not "missed" by the user,
+     * so it must become the new baseline rather than being diffed against whatever came before it.
+     */
+    private fun resetNewArticleTracking() {
+        _newArticleTracking.value = NewArticleTracking()
     }
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
@@ -1117,14 +1127,22 @@ class HomeViewModel(
     suspend fun resolvePreview(rawUrl: String): AddFeedPreview = addFeedPreviewResolver.resolvePreview(rawUrl)
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
-    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome =
-        addFeedPreviewResolver.subscribeFeeds(
+    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
+        val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
             folderIdForNewFeed(),
             afterFeedIdForNewFeed(),
             beforeFeedIdForNewFeed(),
             tagIdForNewFeed(),
         )
+        // Subscribing is the user's own action, and whatever it fetched is right there in front of
+        // them — it was never "missed". Reset unconditionally on success rather than only when the
+        // currently selected filter would show the new feed: the raw query's own emission for the
+        // fetched articles can land either before or after this call returns, so a reset scoped to
+        // "only if this filter is affected" would have to guess which race it's in.
+        if (outcome.successCount > 0) resetNewArticleTracking()
+        return outcome
+    }
 
     /**
      * The folder a newly subscribed feed should be filed into, derived from the feed list's

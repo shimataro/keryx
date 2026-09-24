@@ -3881,6 +3881,10 @@ class HomeViewModelTest {
     @Test
     fun markArticlesSeenDropsOnlyTheReportedIdsFromTheCount() = runTest {
         db.insertFeed("f1")
+        // A non-empty baseline before the VM even starts — an empty-then-filled one is its own
+        // "still seeding" case (see NewArticleTracking.withList) and would leave nothing here for
+        // markArticlesSeen to trim.
+        db.insertArticle("seed", "f1")
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
@@ -3899,6 +3903,8 @@ class HomeViewModelTest {
     @Test
     fun markAllArticlesSeenClearsTheCount() = runTest {
         db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1")
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
@@ -3934,6 +3940,8 @@ class HomeViewModelTest {
     @Test
     fun togglingUnreadOnlyOrSortDirectionDoesNotChangeTheCount() = runTest {
         db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1", isRead = 1L)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
@@ -3956,6 +3964,8 @@ class HomeViewModelTest {
     @Test
     fun newArticleCountIsZeroWhileSearchIsActive() = runTest {
         db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1", content = "<p>unrelated</p>")
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
@@ -3969,6 +3979,54 @@ class HomeViewModelTest {
         vm.setSearchQuery("hello")
         testScheduler.advanceUntilIdle()
         assertTrue(vm.searchActive.value)
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun newArticleCountStaysZeroWhenAFilterThatStartedEmptyGetsItsFirstArticles() = runTest {
+        // A brand-new feed: selecting its filter before anything has been fetched starts the raw
+        // query at an empty list, matching the real subscribe flow this guards against.
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // The initial fetch lands — nothing in the empty list could have been missed, so this
+        // becomes the new baseline rather than a batch of "new" articles. A single transaction,
+        // matching FeedRepository.applyFetch's own real insert (a whole fetch's articles commit
+        // together): SQLDelight coalesces query-listener notifications per transaction, so two
+        // separate (non-transactional) inserts here would instead surface as two raw-query
+        // emissions — the first re-seeding the baseline to {a1}, the second then correctly (but
+        // misleadingly, for this test) detecting a2 as new relative to that baseline.
+        db.transaction {
+            db.insertArticle("a1", "f1")
+            db.insertArticle("a2", "f1")
+        }
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun subscribingAFeedDoesNotCountItsArticlesAsNew() = runTest {
+        db.insertFeed("f1")
+        // A non-empty baseline on the currently selected filter (All), established before
+        // subscribing — otherwise this couldn't be distinguished from the already-covered
+        // empty-baseline case (see NewArticleTracking.withList).
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        vm.subscribeFeeds(listOf("https://ex.com/feed"))
+        testScheduler.advanceUntilIdle()
+
+        // The new feed's own fetched article is right there in the list the user is already
+        // looking at — it was never "missed".
         assertEquals(0, vm.newArticleCount.value)
     }
 }
