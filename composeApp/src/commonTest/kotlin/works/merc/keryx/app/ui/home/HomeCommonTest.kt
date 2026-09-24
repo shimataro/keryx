@@ -355,6 +355,32 @@ class HomeCommonTest {
     }
 
     @Test
+    fun refreshTargetFeedIdsCoversEveryFeedForAllAndStarred() {
+        val feeds = listOf(feed("f1"), feed("f2"))
+        assertNull(refreshTargetFeedIds(ArticleFilter.All, feeds, emptyMap()))
+        assertNull(refreshTargetFeedIds(ArticleFilter.Starred, feeds, emptyMap()))
+    }
+
+    @Test
+    fun refreshTargetFeedIdsNarrowsToTheSelectedFeedFolderOrTag() {
+        val feeds = listOf(feed("f1", folderId = "d1"), feed("f2", folderId = "d1"), feed("f3"))
+        val feedTagMap = mapOf("f1" to setOf("t1"), "f3" to setOf("t1", "t2"), "f2" to setOf("t2"))
+        assertEquals(setOf("f2"), refreshTargetFeedIds(ArticleFilter.Feed("f2"), feeds, feedTagMap))
+        assertEquals(setOf("f1", "f2"), refreshTargetFeedIds(ArticleFilter.Folder("d1"), feeds, feedTagMap))
+        assertEquals(setOf("f1", "f3"), refreshTargetFeedIds(ArticleFilter.Tag("t1"), feeds, feedTagMap))
+    }
+
+    @Test
+    fun refreshTargetFeedIdsIsEmptyWhenTheSelectionCoversNoSubscribedFeed() {
+        val feeds = listOf(feed("f1", folderId = "d1"))
+        // A tag-map entry for a feed that is no longer subscribed does not count.
+        val feedTagMap = mapOf("gone" to setOf("t1"))
+        assertEquals(emptySet(), refreshTargetFeedIds(ArticleFilter.Feed("gone"), feeds, feedTagMap))
+        assertEquals(emptySet(), refreshTargetFeedIds(ArticleFilter.Folder("d2"), feeds, feedTagMap))
+        assertEquals(emptySet(), refreshTargetFeedIds(ArticleFilter.Tag("t1"), feeds, feedTagMap))
+    }
+
+    @Test
     fun hasUsableUrlRejectsNullEmptyAndBlank() {
         assertEquals(false, hasUsableUrl(null))
         assertEquals(false, hasUsableUrl(""))
