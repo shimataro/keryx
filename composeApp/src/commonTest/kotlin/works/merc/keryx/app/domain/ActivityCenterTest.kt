@@ -1,6 +1,13 @@
 package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -318,5 +325,107 @@ class ActivityCenterTest {
         cycleGate.complete(Unit)
         cycle.join()
         assertTrue(center.activity.value.idle)
+    }
+
+    @Test
+    fun tryTrackRefreshCycleRunsTheBlockInsideACycleWhenIdle() = runTest {
+        val center = ActivityCenter()
+
+        val result = center.tryTrackRefreshCycle {
+            assertEquals(ActivitySnapshot(refreshCycleCount = 1), center.activity.value)
+            7
+        }
+
+        assertEquals(7, result)
+        assertTrue(center.activity.value.idle)
+    }
+
+    @Test
+    fun tryTrackRefreshCycleReturnsNullWithoutRunningWhenNotIdle() = runTest {
+        val center = ActivityCenter()
+        val busyStates: List<suspend (suspend () -> Unit) -> Unit> = listOf(
+            { b -> center.trackFeedRefresh { b() } },
+            { b -> center.trackSync { b() } },
+            { b -> center.trackRefreshCycle { b() } },
+        )
+        for (busy in busyStates) {
+            var ran = false
+            busy {
+                val result = center.tryTrackRefreshCycle { ran = true }
+                assertEquals(null, result)
+            }
+            assertFalse(ran)
+            assertTrue(center.activity.value.idle)
+        }
+    }
+
+    @Test
+    fun tryTrackRefreshCycleClearsTheCycleWhenTheBlockThrows() = runTest {
+        val center = ActivityCenter()
+
+        runCatching { center.tryTrackRefreshCycle { error("boom") } }
+
+        assertTrue(center.activity.value.idle)
+    }
+
+    @Test
+    fun concurrentTryTrackRefreshCycleCallsRunOnlyOne() = runTest {
+        val center = ActivityCenter()
+        val gate = CompletableDeferred<Unit>()
+        var runs = 0
+        val first = launch(UnconfinedTestDispatcher(testScheduler)) {
+            center.tryTrackRefreshCycle { runs++; gate.await() }
+        }
+        val second = launch(UnconfinedTestDispatcher(testScheduler)) {
+            assertEquals(null, center.tryTrackRefreshCycle { runs++ })
+        }
+        second.join()
+        gate.complete(Unit)
+        first.join()
+
+        assertEquals(1, runs)
+        assertTrue(center.activity.value.idle)
+    }
+
+    @Test
+    fun tryTrackRefreshCycleAdmitsExactlyOneAcrossRealThreads() = runTest {
+        val center = ActivityCenter()
+        val gate = CompletableDeferred<Unit>()
+        val runs = MutableStateFlow(0) // CAS-updated counter, safe across threads
+        withContext(Dispatchers.Default) {
+            val attempts = List(ATTEMPTS) {
+                async { center.tryTrackRefreshCycle { runs.update { it + 1 }; gate.await() } }
+            }
+            // Every attempt except the winner returns null at once; release the winner afterwards.
+            while (attempts.count { it.isCompleted } < ATTEMPTS - 1) yield()
+            gate.complete(Unit)
+            attempts.awaitAll()
+        }
+
+        assertEquals(1, runs.value)
+        assertTrue(center.activity.value.idle)
+    }
+
+    @Test
+    fun refreshIndicatorShownTruthTable() {
+        // (feedRefreshCount, syncCount, refreshCycleCount) -> expected
+        val cases = mapOf(
+            Triple(0, 0, 0) to false,
+            Triple(1, 0, 0) to true,
+            Triple(0, 1, 0) to false,
+            Triple(0, 0, 1) to true, // the gap between a cycle's refresh and its sync
+            Triple(1, 1, 0) to true,
+            Triple(1, 0, 1) to true,
+            Triple(0, 1, 1) to false, // the cycle's sync phase: the sync control spins instead
+            Triple(1, 1, 1) to true,
+        )
+        for ((counts, expected) in cases) {
+            val snapshot = ActivitySnapshot(counts.first, counts.second, counts.third)
+            assertEquals(expected, snapshot.refreshIndicatorShown, "for $snapshot")
+        }
+    }
+
+    private companion object {
+        const val ATTEMPTS = 16
     }
 }
