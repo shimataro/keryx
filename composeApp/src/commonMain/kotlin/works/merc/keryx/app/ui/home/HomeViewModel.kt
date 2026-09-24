@@ -443,6 +443,24 @@ class HomeViewModel(
             // article write, for nobody.
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
+    /**
+     * Whether the article list toolbar's "hide read" action currently has anything to do: unread
+     * only is on, and the list currently on screen (search results while searching, the filter's
+     * own list otherwise — the same resolution [pagerArticles] uses) has a read row other than the
+     * selected one. Pressing the action re-runs the same re-trim [setUnreadOnly] already applies
+     * when turning unread-only on ([pinnedReadArticlesKeepingSelected]), so this only decides
+     * whether that re-trim currently has anything left to do.
+     */
+    val canHideRead: StateFlow<Boolean> =
+        combine(unreadOnly, searchActive, articles, searchResults, _selectedArticle) { unread, active, rows, results, selected ->
+            unread && hasHideableRead(if (active) results.map { it.article } else rows, selected?.id)
+        }.stateIn(viewModelScope, started, false)
+
+    /** Runs [ArticleListTopBar]'s "hide read" action — see [canHideRead]. */
+    fun hideRead() {
+        if (canHideRead.value) _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+    }
+
     // Requests to move keyboard focus into whichever composable currently owns the search field —
     // FeedListPane's own KeryxTextField at PaneLayout.Triple, or ArticleListPane's
     // KeryxExpandedSearchBar at a narrow layout (Cmd+F, or tapping the search icon, both call

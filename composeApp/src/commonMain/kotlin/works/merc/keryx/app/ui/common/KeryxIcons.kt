@@ -61,6 +61,7 @@ expect object KeryxIcons {
     val ThisDevice: DrawableResource
     val Tune: DrawableResource
     val Update: DrawableResource
+    val VisibilityOff: DrawableResource
     val Warning: DrawableResource
 
     // Semantic state (Filled)

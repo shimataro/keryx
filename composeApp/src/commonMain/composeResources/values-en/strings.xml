@@ -102,6 +102,7 @@
     <string name="home_feed_error">Feed error</string>
     <string name="home_feed_gone">Feed not found (it may have been removed)</string>
     <string name="home_mark_all_read">Mark all as read</string>
+    <string name="home_hide_read">Hide read articles</string>
     <string name="home_no_feeds">No feeds yet</string>
     <string name="home_no_articles">No articles</string>
     <string name="home_open_feed_list">Open feed list</string>

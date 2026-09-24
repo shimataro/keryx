@@ -74,6 +74,7 @@ import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
+import works.merc.keryx.app.resources.home_hide_read
 import works.merc.keryx.app.resources.home_mark_all_read
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_no_articles
@@ -186,6 +187,7 @@ fun ArticleListPane(
     val searchActive by vm.searchActive.collectAsState()
     val selected by vm.selectedArticle.collectAsState()
     val unreadOnly by vm.unreadOnly.collectAsState()
+    val canHideRead by vm.canHideRead.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
@@ -328,12 +330,14 @@ fun ArticleListPane(
         feedFavicons = feedFavicons,
         selectedId = selected?.id,
         unreadOnly = unreadOnly,
+        canHideRead = canHideRead,
         // Deliberately the real sort direction even while search disables the button — search
         // order is always FTS5 relevance rank, but sortDirectionIcon's own KDoc says the button
         // still reflects the current direction while disabled, it just can't be toggled.
         newestFirst = newestFirst,
         focused = focused,
         onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
+        onHideRead = { vm.hideRead() },
         onToggleSort = { vm.toggleSort() },
         onMarkAllRead = { vm.markAllRead() },
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
@@ -416,10 +420,17 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
 
 /**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): unread-only toggle, notifications bell, sort, mark-all-read. When
- * [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance rank,
- * or recency when every term is too short to be ranked, see FtsSearch), the sort button is disabled
- * and its tooltip explains why instead of showing the usual "sort by ...".
+ * or its search results): unread-only toggle, notifications bell, sort, hide-read, mark-all-read.
+ * When [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance
+ * rank, or recency when every term is too short to be ranked, see FtsSearch), the sort button is
+ * disabled and its tooltip explains why instead of showing the usual "sort by ...".
+ *
+ * The hide-read action ([onHideRead]) is always present, enabled only while [canHideRead] — per
+ * "Layout stability under state changes" in the `ui-guidelines` skill, a control whose availability
+ * depends on state is shown disabled rather than hidden, so it never shifts its neighbors. Unlike
+ * [unreadOnly] (a toggle: pressing it again reverses it), this is a one-shot action — see
+ * `HomeViewModel.canHideRead`'s own KDoc for what it does and why it's separate from the
+ * unread-only toggle itself.
  *
  * When [onOpenDrawer] is non-null (this pane is shown at a narrow [PaneLayout], where the feed
  * list is a modal navigation drawer rather than an on-screen pane — see `ArticleListPane`'s KDoc),
@@ -446,6 +457,8 @@ internal fun ArticleListTopBar(
     newestFirst: Boolean,
     onToggleSort: () -> Unit,
     onMarkAllRead: () -> Unit,
+    canHideRead: Boolean = false,
+    onHideRead: () -> Unit = {},
     sortEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
     onOpenDrawer: (() -> Unit)? = null,
@@ -494,6 +507,10 @@ internal fun ArticleListTopBar(
                 }
                 TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
                     KeryxIcon(sortDirectionIcon(newestFirst), contentDescription = sortTooltip)
+                }
+                val hideReadTooltip = stringResource(Res.string.home_hide_read)
+                TooltipIconButton(tooltip = hideReadTooltip, onClick = onHideRead, enabled = canHideRead) {
+                    KeryxIcon(KeryxIcons.VisibilityOff, contentDescription = hideReadTooltip)
                 }
                 val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
                 TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
@@ -569,6 +586,8 @@ internal fun ArticleListPaneContent(
     selectedId: String?,
     unreadOnly: Boolean,
     onToggleUnreadOnly: () -> Unit,
+    canHideRead: Boolean = false,
+    onHideRead: () -> Unit = {},
     onToggleSort: () -> Unit,
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
@@ -619,6 +638,8 @@ internal fun ArticleListPaneContent(
         ArticleListTopBar(
             unreadOnly = unreadOnly,
             onToggleUnreadOnly = onToggleUnreadOnly,
+            canHideRead = canHideRead,
+            onHideRead = onHideRead,
             newestFirst = newestFirst,
             onToggleSort = onToggleSort,
             onMarkAllRead = onMarkAllRead,
