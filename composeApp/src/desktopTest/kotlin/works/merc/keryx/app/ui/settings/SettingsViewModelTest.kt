@@ -803,6 +803,92 @@ class SettingsViewModelTest {
         assertTrue(vm.lastSyncAuthFailed)
     }
 
+    @Test
+    fun canSyncNowIsFalseWithNoProviderConnected() {
+        val vm = newViewModel()
+        assertNull(vm.connectedType)
+
+        assertFalse(vm.canSyncNow)
+    }
+
+    /**
+     * The cloud-sync tab's "sync now" follows Home's cloud button: enabled only while nothing else
+     * is running, including a sync this ViewModel didn't start.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun canSyncNowTracksActivityCenterIdleWhileConnected() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(tokenStorage = tokenStorage, activityCenter = activityCenter)
+        assertTrue(vm.canSyncNow)
+
+        val gate = CompletableDeferred<Unit>()
+        val job = CoroutineScope(Dispatchers.Default).launch {
+            activityCenter.trackSync { gate.await() }
+        }
+        awaitTrue { !vm.idle }
+        assertFalse(vm.canSyncNow)
+
+        gate.complete(Unit)
+        awaitTrue { vm.idle }
+        assertTrue(vm.canSyncNow)
+        runBlocking { job.join() }
+    }
+
+    /**
+     * An authorization failure disables "sync now": a sync would only repeat it, and the row's own
+     * "reconnect" is what fixes it.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun canSyncNowIsFalseWhileLastSyncFailedOnAuthorization() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        assertTrue(vm.canSyncNow)
+
+        runBlocking { createdSyncRepository.sync() }
+
+        awaitTrue { vm.lastSyncAuthFailed }
+        assertFalse(vm.canSyncNow)
+    }
+
+    /**
+     * `syncNow()` runs a real sync through [SyncRepository] — observable as the sync the ViewModel
+     * mirrors — and the button disables itself for as long as that sync runs.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun syncNowRunsASyncAndDisablesItselfUntilItFinishes() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(
+            tokenStorage = tokenStorage,
+            syncCloudProvider = { GatedCloudStorage(gate) },
+            dispatcher = Dispatchers.Default,
+        )
+        assertFalse(vm.syncing)
+
+        vm.syncNow()
+
+        // Two separate collectors carry these, so wait on each rather than assume their order.
+        awaitTrue { vm.syncing }
+        awaitTrue { vm.syncPhase == SyncPhase.CHECKING }
+        assertFalse(vm.canSyncNow)
+
+        gate.complete(Unit)
+        awaitTrue { !vm.syncing }
+        assertFalse(vm.syncing)
+    }
+
     /**
      * `reconnect()` must not stop at the teardown half. On Android's Google Drive the disconnect is
      * the only thing that clears Play services' cached token, but a disconnect that never connects

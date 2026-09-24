@@ -50,6 +50,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.dropbox
+import works.merc.keryx.app.resources.menu_feed_sync_now
 import works.merc.keryx.app.resources.google_drive
 import works.merc.keryx.app.resources.onedrive
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
@@ -162,6 +163,17 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                 )
             }
         }
+        Spacer(Modifier.height(8.dp))
+        // The same manual sync as Home's cloud button, placed where a sync failure is reported
+        // (a sync-error notification opens this tab), so retrying needs no trip back to Home.
+        // Always present and only disabled when unavailable (no provider, something else running,
+        // an auth failure the row's own "reconnect" must fix first), per the layout-stability rule.
+        // Kept out of CloudProviderRow: a third labelled action would overrun that row's width.
+        SyncNowButton(
+            enabled = vm.canSyncNow,
+            busy = vm.syncing && connected != null,
+            onClick = { vm.syncNow() },
+        )
     }
 
     confirmingDisconnect?.let { type ->
@@ -211,6 +223,26 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             onConfirm = { vm.switchTo(type); confirmingSwitchTo = null },
             dismissText = stringResource(Res.string.common_cancel),
         )
+    }
+}
+
+/**
+ * The tab's "sync now" button: a labelled tonal button whose glyph swaps for a spinner in the same
+ * fixed slot while a sync is running, so the swap can't reflow the label.
+ */
+@Composable
+private fun SyncNowButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
+    FlatTonalButton(onClick = onClick, enabled = enabled) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (busy) {
+                SmallSpinner(size = 18.dp, color = LocalContentColor.current)
+            } else {
+                // Decorative: the Text beside it announces the action.
+                KeryxIcon(KeryxIcons.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(Res.string.menu_feed_sync_now))
+        }
     }
 }
 
