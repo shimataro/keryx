@@ -136,9 +136,13 @@ class ArticleListPaneTest {
 
             val action = onNode(hasRefreshListAction).fetchSemanticsNode()
                 .config[SemanticsActions.CustomActions].single { it.label == refreshListLabel }
-            runOnIdle { action.action() }
-
-            assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the action must start the same pull")
+            // Assert inside the same runOnIdle call as the trigger: pullToRefresh's cleanup runs on
+            // viewModelScope (the real EDT), and a gap between firing and asserting here is a race
+            // window for that coroutine to finish and clear the filter before the check runs.
+            runOnIdle {
+                action.action()
+                assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the action must start the same pull")
+            }
         }
     }
 
