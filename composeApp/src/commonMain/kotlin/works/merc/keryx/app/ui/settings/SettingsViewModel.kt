@@ -166,6 +166,31 @@ class SettingsViewModel(
     var disconnecting by mutableStateOf(false)
         private set
 
+    /**
+     * Mirrors [works.merc.keryx.app.domain.ActivitySnapshot.idle] — no refresh or sync running
+     * anywhere. Gates [canSyncNow] the same way Home's cloud button is gated.
+     */
+    var idle by mutableStateOf(activityCenter.activity.value.idle)
+        private set
+
+    /**
+     * Whether the cloud-sync tab's "sync now" button is enabled: a provider is connected, nothing
+     * else is running (see [idle]), no connect / switch / disconnect / reset is in flight (each
+     * would race the sync), and the last sync did not fail on authorization — a sync then would
+     * only repeat that failure, and the row's own "reconnect" is the action that fixes it.
+     */
+    val canSyncNow: Boolean
+        get() = connectedType != null && idle && connectingType == null && initialSyncingType == null &&
+            !disconnecting && !resetting && !lastSyncAuthFailed && !manualSyncInFlight
+
+    /**
+     * True while a manual sync started by [syncNow] is in flight. Prevents a second click from
+     * racing past [canSyncNow] before the [ActivityCenter] collector updates [idle]: a redundant
+     * call would otherwise queue behind the mutex in [syncRepository.sync] and run a second sync
+     * once the first finishes.
+     */
+    private var manualSyncInFlight by mutableStateOf(false)
+
     init {
         refreshLastSyncedAt()
         viewModelScope.launch {
@@ -194,6 +219,30 @@ class SettingsViewModel(
                     runCatching { refreshLastSyncedAt() }
                         .onFailure { Log.warn(TAG, "Failed to refresh last-synced time", it) }
                 }
+            }
+        }
+        viewModelScope.launch {
+            activityCenter.activity.map { it.idle }.distinctUntilChanged().collect { idle = it }
+        }
+    }
+
+    /**
+     * Runs a manual sync — the same [SyncRepository.sync] Home's cloud button triggers. Progress,
+     * the new last-synced time and any failure all surface through the state this ViewModel
+     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncErrorText]).
+     */
+    fun syncNow() {
+        if (!canSyncNow) return
+        manualSyncInFlight = true
+        viewModelScope.launch {
+            try {
+                withContext(dispatcher) { syncRepository.sync() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.error(TAG, "Manual sync failed", e)
+            } finally {
+                manualSyncInFlight = false
             }
         }
     }
@@ -273,6 +322,10 @@ class SettingsViewModel(
             initialSyncingType = type
             try {
                 withContext(dispatcher) { syncRepository.sync() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.error(TAG, "Initial sync failed", e)
             } finally {
                 initialSyncingType = null
             }

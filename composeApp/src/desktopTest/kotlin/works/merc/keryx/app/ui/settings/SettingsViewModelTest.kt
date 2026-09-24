@@ -9,6 +9,7 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -117,10 +118,14 @@ private class AlwaysFailingCloudStorage : CloudStorage {
  * Every other method fails cleanly (never called in the "first sync ever" path this drives: two
  * gated [metadata] calls — compressed then legacy, both absent — land on [create]).
  */
-private class GatedCloudStorage(private val gate: CompletableDeferred<Unit>) : CloudStorage {
+private class GatedCloudStorage(
+    private val gate: CompletableDeferred<Unit>,
+    private val metadataCalls: AtomicInteger? = null,
+) : CloudStorage {
     private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("not used by this test"))
     override suspend fun authenticate(): Result<Unit> = Result.Ok(Unit)
     override suspend fun metadata(path: String): Result<CloudFileMeta?> {
+        metadataCalls?.incrementAndGet()
         gate.await()
         return Result.Ok(null)
     }
@@ -177,6 +182,34 @@ private class CountingDispatcher : CoroutineDispatcher() {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
         dispatchCount++
         block.run()
+    }
+}
+
+/**
+ * Holds every dispatched block until [release] is called, then runs the held blocks and every later
+ * one inline. Holding the body of `withContext(dispatcher)` keeps a sync from reaching
+ * [works.merc.keryx.app.domain.ActivityCenter.trackSync], so the ViewModel's `idle` stays true.
+ */
+private class HoldingDispatcher : CoroutineDispatcher() {
+    private val held = ArrayDeque<Runnable>()
+    private var released = false
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        synchronized(this) {
+            if (!released) {
+                held.addLast(block)
+                return
+            }
+        }
+        block.run()
+    }
+
+    fun release() {
+        val pending = synchronized(this) {
+            released = true
+            held.toList().also { held.clear() }
+        }
+        pending.forEach { it.run() }
     }
 }
 
@@ -801,6 +834,134 @@ class SettingsViewModelTest {
 
         awaitTrue { vm.lastSyncAuthFailed }
         assertTrue(vm.lastSyncAuthFailed)
+    }
+
+    @Test
+    fun canSyncNowIsFalseWithNoProviderConnected() {
+        val vm = newViewModel()
+        assertNull(vm.connectedType)
+
+        assertFalse(vm.canSyncNow)
+    }
+
+    /**
+     * The cloud-sync tab's "sync now" follows Home's cloud button: enabled only while nothing else
+     * is running, including a sync this ViewModel didn't start.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun canSyncNowTracksActivityCenterIdleWhileConnected() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(tokenStorage = tokenStorage, activityCenter = activityCenter)
+        assertTrue(vm.canSyncNow)
+
+        val gate = CompletableDeferred<Unit>()
+        val job = CoroutineScope(Dispatchers.Default).launch {
+            activityCenter.trackSync { gate.await() }
+        }
+        awaitTrue { !vm.idle }
+        assertFalse(vm.canSyncNow)
+
+        gate.complete(Unit)
+        awaitTrue { vm.idle }
+        assertTrue(vm.canSyncNow)
+        runBlocking { job.join() }
+    }
+
+    /**
+     * An authorization failure disables "sync now": a sync would only repeat it, and the row's own
+     * "reconnect" is what fixes it.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun canSyncNowIsFalseWhileLastSyncFailedOnAuthorization() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        assertTrue(vm.canSyncNow)
+
+        runBlocking { createdSyncRepository.sync() }
+
+        awaitTrue { vm.lastSyncAuthFailed }
+        assertFalse(vm.canSyncNow)
+    }
+
+    /**
+     * `syncNow()` runs a real sync through [SyncRepository] — observable as the sync the ViewModel
+     * mirrors — and the button disables itself for as long as that sync runs.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun syncNowRunsASyncAndDisablesItselfUntilItFinishes() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(
+            tokenStorage = tokenStorage,
+            syncCloudProvider = { GatedCloudStorage(gate) },
+            dispatcher = Dispatchers.Default,
+        )
+        assertFalse(vm.syncing)
+
+        vm.syncNow()
+
+        // Two separate collectors carry these, so wait on each rather than assume their order.
+        awaitTrue { vm.syncing }
+        awaitTrue { vm.syncPhase == SyncPhase.CHECKING }
+        assertFalse(vm.canSyncNow)
+
+        gate.complete(Unit)
+        awaitTrue { !vm.syncing }
+        assertFalse(vm.syncing)
+    }
+
+    /**
+     * A second `syncNow()` while the first is still in flight must be ignored. Without a local
+     * in-flight flag the second call can race past [canSyncNow] before the [ActivityCenter]
+     * collector updates [idle], causing a redundant sync to queue behind [SyncRepository]'s mutex.
+     * A [HoldingDispatcher] holds the sync body so the second call lands while `idle` is still
+     * true — the in-flight flag, not the idle gate, must be what rejects it.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun syncNowIgnoresSecondCallWhileFirstIsInFlight() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val gate = CompletableDeferred<Unit>()
+        val metadataCalls = AtomicInteger()
+        val held = HoldingDispatcher()
+        val vm = newViewModel(
+            tokenStorage = tokenStorage,
+            syncCloudProvider = { GatedCloudStorage(gate, metadataCalls) },
+            dispatcher = held,
+        )
+        assertTrue(vm.canSyncNow)
+
+        vm.syncNow()
+        try {
+            // The sync body is held, so ActivityCenter hasn't seen it: idle is still true and only
+            // the in-flight flag can be what disables the button.
+            assertTrue(vm.idle)
+            assertFalse(vm.canSyncNow)
+
+            vm.syncNow() // must be ignored by the in-flight flag, not by idle
+        } finally {
+            // Released even when an assertion above fails: a block still held can never resume,
+            // so tearDown()'s cancelAndJoin would wait on it forever.
+            held.release()
+            gate.complete(Unit)
+        }
+        awaitTrue { vm.canSyncNow }
+        // One sync's worth; a second sync queued behind the mutex would double this.
+        assertEquals(2, metadataCalls.get())
     }
 
     /**
