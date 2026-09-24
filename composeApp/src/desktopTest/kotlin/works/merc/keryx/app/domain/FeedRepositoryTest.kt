@@ -857,6 +857,55 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun refreshFeedsFetchesOnlyTheRequestedFeeds(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            for (i in 1..3) setupRepo.subscribeFeed("https://ex.com/feed$i")
+            val idByUrl = db.feedsQueries.watchAll().executeAsList().associate { it.url to it.id }
+
+            val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                requested += request.url.toString()
+                respond(RSS, HttpStatusCode.OK)
+            })
+
+            val targets = setOf(idByUrl.getValue("https://ex.com/feed1"), idByUrl.getValue("https://ex.com/feed3"))
+            val results = repo.refreshFeeds(targets)
+
+            assertEquals(targets, results.keys)
+            assertTrue(results.values.all { it is Result.Ok }, "targeted feeds should refresh Ok: $results")
+            assertEquals(setOf("https://ex.com/feed1", "https://ex.com/feed3"), requested.toSet())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshFeedsSkipsUnknownAndUnsubscribedIdsWithoutFetching(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            setupRepo.subscribeFeed("https://ex.com/feed1")
+            val feedId = db.feedsQueries.watchAll().executeAsList().single().id
+            setupRepo.unsubscribeFeed(feedId)
+
+            val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                requested += request.url.toString()
+                respond(RSS, HttpStatusCode.OK)
+            })
+
+            val results = repo.refreshFeeds(setOf(feedId, "no-such-feed"))
+
+            assertTrue(results.isEmpty(), "nothing should be refreshed: $results")
+            assertTrue(requested.isEmpty(), "no request expected: $requested")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun refreshAllFetchesFeedsConcurrentlyAndAppliesEveryWrite(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
         try {

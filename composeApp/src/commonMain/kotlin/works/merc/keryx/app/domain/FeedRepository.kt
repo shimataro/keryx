@@ -27,8 +27,9 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.FetchedFeed
 
 /**
- * Max feeds fetched concurrently in [FeedRepository.refreshAll]'s network phase. Bounded so a large
- * subscription list doesn't open an unbounded number of sockets at once; DB writes stay serial.
+ * Max feeds fetched concurrently in [FeedRepository.refreshAll] / [FeedRepository.refreshFeeds]'s
+ * network phase. Bounded so a large subscription list doesn't open an unbounded number of sockets
+ * at once; DB writes stay serial.
  */
 private const val REFRESH_FETCH_CONCURRENCY = 6
 
@@ -494,8 +495,28 @@ class FeedRepository(
      *
      * @return A map from feed ID to the result containing the number of newly processed articles.
      */
-    suspend fun refreshAll(): Map<String, Result<Int>> {
-        val feedList = feeds.watchAll().executeAsList()
+    suspend fun refreshAll(): Map<String, Result<Int>> = refreshFeedList(feeds.watchAll().executeAsList())
+
+    /**
+     * Refreshes only the subscribed feeds whose ID is in [feedIds] (e.g. the feeds of the article
+     * list's current selection), with the same bounded-concurrency fetch and ordered write phases
+     * as [refreshAll].
+     *
+     * The feed rows are re-read from the DB at call time rather than taken from the caller, so a
+     * caller's possibly stale snapshot (old etag / URL) is never used. IDs that no longer match a
+     * subscribed feed are silently skipped.
+     *
+     * @param feedIds The IDs of the feeds to refresh.
+     * @return A map from feed ID to the result containing the number of newly processed articles.
+     */
+    suspend fun refreshFeeds(feedIds: Set<String>): Map<String, Result<Int>> =
+        refreshFeedList(feeds.watchAll().executeAsList().filter { it.id in feedIds })
+
+    /**
+     * Shared body of [refreshAll] / [refreshFeeds]: fetches [feedList] concurrently, then applies
+     * the DB writes serially in list order and indexes any new articles for search.
+     */
+    private suspend fun refreshFeedList(feedList: List<Feeds>): Map<String, Result<Int>> {
         // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO
         // DB writes — this is where the wall-clock win comes from vs. the old sequential loop.
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
