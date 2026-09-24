@@ -11,6 +11,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
@@ -147,12 +149,13 @@ class SettingsViewModel(
         private set
 
     /**
-     * Mirrors [ActivityCenter.syncing] — true for every sync in progress (manual "sync now" on
-     * Home, a debounced sync, the background loop, and the connect-time initial sync this
-     * ViewModel itself starts), not only the ones this ViewModel initiates. The cloud-sync tab
+     * Mirrors [ActivityCenter.activity]'s [works.merc.keryx.app.domain.ActivitySnapshot.syncing] —
+     * true for every sync in progress (manual "sync now" on Home, a debounced sync, the background
+     * loop, and the connect-time initial sync this ViewModel itself starts), not only the ones this
+     * ViewModel initiates. The cloud-sync tab
      * pairs this with [syncPhase] to show live progress on the connected provider's row.
      */
-    var syncing by mutableStateOf(activityCenter.syncing.value)
+    var syncing by mutableStateOf(activityCenter.activity.value.syncing)
         private set
 
     /** Mirrors [SyncRepository.syncPhase] — the step the current (or most recent) sync is on. */
@@ -176,13 +179,13 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             // Collects the subscription-time replay too, not just later changes: the property
-            // initializer above reads activityCenter.syncing.value synchronously at construction,
+            // initializer above reads activityCenter.activity.value synchronously at construction,
             // but this launch only starts collecting once viewModelScope actually dispatches it,
             // so the StateFlow's value can have moved on in between. Dropping that replay (as a
             // once-tried `drop(1)` did) would silently swallow a real transition happening in that
             // window; collecting it is safe since it just repeats work this ViewModel already does
             // at startup (refreshLastSyncedAt() is a pure, idempotent read).
-            activityCenter.syncing.collect { isSyncing ->
+            activityCenter.activity.map { it.syncing }.distinctUntilChanged().collect { isSyncing ->
                 syncing = isSyncing
                 // Guarded: a transient read failure must not kill this long-lived collector (which
                 // would silently stop all future last-synced refreshes) or leak as an uncaught

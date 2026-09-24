@@ -621,7 +621,7 @@ class SettingsViewModelTest {
         val job = CoroutineScope(Dispatchers.Default).launch {
             activityCenter.trackSync { gate.await() }
         }
-        awaitTrue { activityCenter.syncing.value }
+        awaitTrue { activityCenter.activity.value.syncing }
 
         val vm = newViewModel(activityCenter = activityCenter)
         assertTrue(vm.syncing)

@@ -44,6 +44,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.domain.AddFeedPreview
 import works.merc.keryx.app.domain.AddFeedPreviewResolver
 import works.merc.keryx.app.domain.ArticleListRow
@@ -1145,18 +1146,14 @@ class HomeViewModel(
 
     fun renameFeed(id: String, title: String?) = feedRepository.renameFeed(id, title)
 
-    /** True while a feed refresh (manual, per-feed, or background) is in flight. */
-    val feedRefreshing: StateFlow<Boolean> = activityCenter.feedRefreshing
-
-    /** True while a cloud sync (manual, debounced, or background) is in flight. */
-    val syncing: StateFlow<Boolean> = activityCenter.syncing
-
     /**
-     * True while a whole refresh-then-sync sequence (manual or background) is in flight,
-     * including the gap between its two operations where neither [feedRefreshing] nor [syncing]
-     * is up — see [ActivityCenter.refreshCycleRunning].
+     * What's in flight right now — feed refreshes, syncs (manual, debounced, or background), and
+     * whole refresh-then-sync sequences, including the gap between a sequence's two operations
+     * where neither [ActivitySnapshot.feedRefreshing] nor [ActivitySnapshot.syncing] is up. One
+     * consistent snapshot, current the instant any of them starts or ends — see
+     * [ActivityCenter.activity].
      */
-    val refreshCycleRunning: StateFlow<Boolean> = activityCenter.refreshCycleRunning
+    val activity: StateFlow<ActivitySnapshot> = activityCenter.activity
 
     /**
      * Refreshes the specified feed.
@@ -1181,8 +1178,8 @@ class HomeViewModel(
     /**
      * True while a pull-to-refresh started by [pullToRefresh] is still running — through the
      * refresh itself *and* the sync that follows it, or while it is waiting on an already
-     * in-flight refresh/sync. Deliberately not derived from [feedRefreshing]: that would show the
-     * indicator on every background refresh the user never asked for, and
+     * in-flight refresh/sync. Deliberately not derived from [ActivitySnapshot.feedRefreshing]: that
+     * would show the indicator on every background refresh the user never asked for, and
      * [ActivityCenter.trackFeedRefresh] only raises its flag once the work reaches [dispatcher], so
      * the indicator would briefly vanish right after the pull.
      */
@@ -1201,22 +1198,11 @@ class HomeViewModel(
         _pullRefreshing.value = true
         viewModelScope.launch {
             try {
-                if (feedOperationsAvailable(
-                        activityCenter.feedRefreshing.value,
-                        activityCenter.syncing.value,
-                        activityCenter.refreshCycleRunning.value,
-                    )
-                ) {
+                if (activityCenter.activity.value.idle) {
                     val targetIds = refreshTargetFeedIds(_filter.value, feeds.value, feedTagMap.value)
                     if (targetIds == null || targetIds.isNotEmpty()) launchRefresh(targetIds)?.join()
                 } else {
-                    combine(
-                        activityCenter.feedRefreshing,
-                        activityCenter.syncing,
-                        activityCenter.refreshCycleRunning,
-                    ) { refreshing, syncing, cycleRunning ->
-                        feedOperationsAvailable(refreshing, syncing, cycleRunning)
-                    }.first { it }
+                    activityCenter.activity.first { it.idle }
                 }
             } finally {
                 _pullRefreshing.value = false
@@ -1232,7 +1218,7 @@ class HomeViewModel(
      *   refresh-then-sync cycle is already in flight and nothing was started.
      */
     private fun launchRefresh(targetIds: Set<String>?): Job? {
-        if (activityCenter.feedRefreshing.value || activityCenter.refreshCycleRunning.value) return null
+        if (activityCenter.activity.value.let { it.feedRefreshing || it.refreshCycleRunning }) return null
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         // The heavy work goes off the UI thread: a full feed refresh (fetch, parse, per-feed DB
         // writes, FTS indexing) followed by a sync (whole-DB write, ATTACH merge, VACUUM INTO,

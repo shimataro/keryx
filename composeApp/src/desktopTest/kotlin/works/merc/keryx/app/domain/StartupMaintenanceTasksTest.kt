@@ -190,7 +190,7 @@ class StartupMaintenanceTasksTest {
             assertEquals(now, koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
             // The sync/feedRefresh cycle wrapper must release its counter even though both steps
             // inside it threw (the steps swallow their own failures; the wrapper's finally does the rest).
-            assertFalse(koin.get<ActivityCenter>().refreshCycleRunning.value)
+            assertFalse(koin.get<ActivityCenter>().activity.value.refreshCycleRunning)
         } finally {
             driver.close()
         }
@@ -206,7 +206,7 @@ class StartupMaintenanceTasksTest {
             val gap = CompletableDeferred<Unit>()
             // A cycle in the gap between its refresh and its sync: only refreshCycleRunning is up.
             val cycle = launch(UnconfinedTestDispatcher(testScheduler)) { activityCenter.trackRefreshCycle { gap.await() } }
-            assertTrue(activityCenter.refreshCycleRunning.value)
+            assertTrue(activityCenter.activity.value.refreshCycleRunning)
 
             // lastFtsRebuiltAt is unset, so only the idle gate stands between this call and a
             // rebuild. No FtsManager is registered: passing the gate would throw here.

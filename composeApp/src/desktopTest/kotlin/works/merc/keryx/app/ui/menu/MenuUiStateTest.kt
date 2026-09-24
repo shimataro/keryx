@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.menu
 
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.ui.navigation.Screen
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,9 +13,7 @@ class MenuUiStateTest {
         screen: Screen = Screen.Home,
         hasSelectedArticle: Boolean = false,
         selectedArticleHasUrl: Boolean = false,
-        feedRefreshing: Boolean = false,
-        syncing: Boolean = false,
-        refreshCycleRunning: Boolean = false,
+        activity: ActivitySnapshot = ActivitySnapshot(),
         cloudConnected: Boolean = false,
         searchActive: Boolean = false,
         unreadOnly: Boolean = false,
@@ -26,9 +25,7 @@ class MenuUiStateTest {
         screen = screen,
         hasSelectedArticle = hasSelectedArticle,
         selectedArticleHasUrl = selectedArticleHasUrl,
-        feedRefreshing = feedRefreshing,
-        syncing = syncing,
-        refreshCycleRunning = refreshCycleRunning,
+        activity = activity,
         cloudConnected = cloudConnected,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
@@ -136,35 +133,35 @@ class MenuUiStateTest {
 
     @Test
     fun refresh_all_disabled_while_refreshing() {
-        assertTrue(state(feedRefreshing = false).refreshAllEnabled)
-        assertFalse(state(feedRefreshing = true).refreshAllEnabled)
+        assertTrue(state(activity = ActivitySnapshot()).refreshAllEnabled)
+        assertFalse(state(activity = ActivitySnapshot(feedRefreshCount = 1)).refreshAllEnabled)
     }
 
     @Test
     fun refresh_all_also_disabled_while_syncing() {
         // Mirrors FeedListPane's toolbar buttons, which block Refresh while a sync is running —
-        // running both at once isn't supported (see feedOperationsAvailable).
-        assertFalse(state(feedRefreshing = false, syncing = true).refreshAllEnabled)
+        // running both at once isn't supported (see ActivitySnapshot.idle).
+        assertFalse(state(activity = ActivitySnapshot(syncCount = 1)).refreshAllEnabled)
     }
 
     @Test
     fun sync_requires_connection_and_not_syncing() {
-        assertFalse(state(cloudConnected = false, syncing = false).syncEnabled)
-        assertFalse(state(cloudConnected = true, syncing = true).syncEnabled)
-        assertTrue(state(cloudConnected = true, syncing = false).syncEnabled)
+        assertFalse(state(cloudConnected = false).syncEnabled)
+        assertFalse(state(cloudConnected = true, activity = ActivitySnapshot(syncCount = 1)).syncEnabled)
+        assertTrue(state(cloudConnected = true).syncEnabled)
     }
 
     @Test
     fun sync_also_disabled_while_refreshing() {
         // Mirrors FeedListPane's toolbar buttons, which block Sync while a refresh is running.
-        assertFalse(state(cloudConnected = true, syncing = false, feedRefreshing = true).syncEnabled)
+        assertFalse(state(cloudConnected = true, activity = ActivitySnapshot(feedRefreshCount = 1)).syncEnabled)
     }
 
     @Test
     fun refresh_all_and_sync_disabled_while_a_refresh_cycle_is_running() {
         // The gap between a cycle's refresh and its sync has neither per-operation flag up, but the
         // cycle as a whole is still busy.
-        val ui = state(cloudConnected = true, feedRefreshing = false, syncing = false, refreshCycleRunning = true)
+        val ui = state(cloudConnected = true, activity = ActivitySnapshot(refreshCycleCount = 1))
         assertFalse(ui.refreshAllEnabled)
         assertFalse(ui.syncEnabled)
     }

@@ -347,17 +347,6 @@ class HomeCommonTest {
     }
 
     @Test
-    fun feedOperationsAvailableRequiresNeitherRefreshNorSyncInFlight() {
-        assertEquals(true, feedOperationsAvailable(feedRefreshing = false, syncing = false, refreshCycleRunning = false))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = false, refreshCycleRunning = false))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = false, syncing = true, refreshCycleRunning = false))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = true, refreshCycleRunning = false))
-        // The gap between a cycle's refresh and its sync: neither per-operation flag is up.
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = false, syncing = false, refreshCycleRunning = true))
-        assertEquals(false, feedOperationsAvailable(feedRefreshing = true, syncing = true, refreshCycleRunning = true))
-    }
-
-    @Test
     fun refreshTargetFeedIdsCoversEveryFeedForAllAndStarred() {
         val feeds = listOf(feed("f1"), feed("f2"))
         assertNull(refreshTargetFeedIds(ArticleFilter.All, feeds, emptyMap()))

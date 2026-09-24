@@ -865,15 +865,15 @@ class SyncRepositoryTest {
         cloud.downloadGate = gate
         val repo = newRepo(cloud, activityCenter = activityCenter)
 
-        assertFalse(activityCenter.syncing.value)
+        assertFalse(activityCenter.activity.value.syncing)
 
         val job = launch { repo.sync() }
         runCurrent() // advance until sync() suspends inside the gated download
-        assertTrue(activityCenter.syncing.value)
+        assertTrue(activityCenter.activity.value.syncing)
 
         gate.complete(Unit)
         job.join()
-        assertFalse(activityCenter.syncing.value)
+        assertFalse(activityCenter.activity.value.syncing)
         activityScope.cancel()
     }
 

@@ -42,6 +42,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.domain.AddFeedPreview
 import works.merc.keryx.app.domain.addFeedAlreadySubscribed
 import works.merc.keryx.app.domain.addFeedCanSubscribe
@@ -303,16 +304,16 @@ class HomeViewModelTest {
         val activityCenter = ActivityCenter(activityScope)
         try {
             val vm = newViewModel(activityCenter = activityCenter)
-            assertFalse(vm.feedRefreshing.value)
+            assertFalse(vm.activity.value.feedRefreshing)
 
             // Hold a refresh open on the injected ActivityCenter; the VM must expose the same state.
             val gate = CompletableDeferred<Unit>()
             val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
-            assertTrue(vm.feedRefreshing.value)
+            assertTrue(vm.activity.value.feedRefreshing)
 
             gate.complete(Unit)
             job.join()
-            assertFalse(vm.feedRefreshing.value)
+            assertFalse(vm.activity.value.feedRefreshing)
         } finally {
             activityScope.cancel()
         }
@@ -331,17 +332,17 @@ class HomeViewModelTest {
             // Simulate an in-flight refresh (e.g. the background loop) holding the indicator on.
             val gate = CompletableDeferred<Unit>()
             val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
-            assertTrue(vm.feedRefreshing.value)
+            assertTrue(vm.activity.value.feedRefreshing)
 
             // A manual refresh while busy must be a no-op (guard) and must not throw or clear state early.
             vm.refreshAll()
             testScheduler.advanceUntilIdle()
-            assertTrue(vm.feedRefreshing.value)
+            assertTrue(vm.activity.value.feedRefreshing)
 
             gate.complete(Unit)
             job.join()
             testScheduler.advanceUntilIdle()
-            assertFalse(vm.feedRefreshing.value)
+            assertFalse(vm.activity.value.feedRefreshing)
         } finally {
             activityScope.cancel()
         }
@@ -391,14 +392,14 @@ class HomeViewModelTest {
             // Raised synchronously, before the refresh coroutine has even started running.
             assertTrue(vm.pullRefreshing.value)
             testScheduler.runCurrent()
-            assertTrue(activityCenter.feedRefreshing.value)
+            assertTrue(activityCenter.activity.value.feedRefreshing)
             assertTrue(vm.pullRefreshing.value)
 
             gate.complete(Unit)
             pumpUntil { !vm.pullRefreshing.value }
 
             assertFalse(vm.pullRefreshing.value)
-            assertFalse(activityCenter.feedRefreshing.value)
+            assertFalse(activityCenter.activity.value.feedRefreshing)
             assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
             assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
         } finally {
@@ -454,7 +455,7 @@ class HomeViewModelTest {
             // Simulate an in-flight refresh (e.g. the background loop).
             val gate = CompletableDeferred<Unit>()
             val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
-            assertTrue(vm.feedRefreshing.value)
+            assertTrue(vm.activity.value.feedRefreshing)
 
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
@@ -487,18 +488,18 @@ class HomeViewModelTest {
 
             val gate = CompletableDeferred<Unit>()
             val job = activityScope.launch { activityCenter.trackSync { gate.await() } }
-            assertTrue(vm.syncing.value)
+            assertTrue(vm.activity.value.syncing)
 
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
             assertTrue(vm.pullRefreshing.value)
-            assertFalse(vm.feedRefreshing.value)
+            assertFalse(vm.activity.value.feedRefreshing)
 
             gate.complete(Unit)
             job.join()
             testScheduler.advanceUntilIdle()
             assertFalse(vm.pullRefreshing.value)
-            assertFalse(vm.feedRefreshing.value)
+            assertFalse(vm.activity.value.feedRefreshing)
             assertEquals(0, fetches.get())
         } finally {
             activityScope.cancel()
@@ -507,8 +508,8 @@ class HomeViewModelTest {
 
     /**
      * Regression: a refresh-then-sync cycle (e.g. the background loop) has a gap between its
-     * refresh and its sync where neither [ActivityCenter.feedRefreshing] nor
-     * [ActivityCenter.syncing] is up. A pull that joined the cycle used to treat that gap as
+     * refresh and its sync where neither [ActivitySnapshot.feedRefreshing] nor
+     * [ActivitySnapshot.syncing] is up. A pull that joined the cycle used to treat that gap as
      * "done" and drop its indicator before the sync had even started.
      */
     @Test
@@ -543,13 +544,13 @@ class HomeViewModelTest {
             // Into the gap: the refresh is over and the sync hasn't started yet.
             refreshGate.complete(Unit)
             testScheduler.advanceUntilIdle()
-            assertFalse(activityCenter.feedRefreshing.value)
-            assertFalse(activityCenter.syncing.value)
+            assertFalse(activityCenter.activity.value.feedRefreshing)
+            assertFalse(activityCenter.activity.value.syncing)
             assertTrue(vm.pullRefreshing.value, "the pull must wait for the cycle's sync, not just its refresh")
 
             gap.complete(Unit)
             testScheduler.advanceUntilIdle()
-            assertTrue(activityCenter.syncing.value)
+            assertTrue(activityCenter.activity.value.syncing)
             assertTrue(vm.pullRefreshing.value)
 
             syncGate.complete(Unit)
@@ -581,8 +582,8 @@ class HomeViewModelTest {
             // A cycle sitting in the gap between its refresh and its sync: only the cycle flag is up.
             val gap = CompletableDeferred<Unit>()
             val cycle = activityScope.launch { activityCenter.trackRefreshCycle { gap.await() } }
-            assertTrue(vm.refreshCycleRunning.value)
-            assertFalse(vm.feedRefreshing.value)
+            assertTrue(vm.activity.value.refreshCycleRunning)
+            assertFalse(vm.activity.value.feedRefreshing)
 
             vm.refreshAll()
             // Give a wrongly started refresh time to reach the (real-dispatcher) MockEngine.
@@ -596,10 +597,101 @@ class HomeViewModelTest {
             gap.complete(Unit)
             cycle.join()
             testScheduler.advanceUntilIdle()
-            assertFalse(vm.refreshCycleRunning.value)
+            assertFalse(vm.activity.value.refreshCycleRunning)
         } finally {
             activityScope.cancel()
         }
+    }
+
+    /**
+     * A feed fetcher that counts its requests and holds each one at [gate], so a refresh stays in
+     * flight until the test releases it.
+     */
+    private fun gatedCountingFetcher(gate: CompletableDeferred<Unit>, fetches: java.util.concurrent.atomic.AtomicInteger) =
+        fetcherWith {
+            fetches.incrementAndGet()
+            gate.await()
+            respond("", HttpStatusCode.NotFound)
+        }
+
+    /**
+     * An [ActivityCenter] whose per-flag `stateIn` copies only catch up when the test scheduler is
+     * advanced, making their lag deterministic: anything that still read them would see a refresh
+     * started a moment ago as not running. [ActivityCenter.activity] never depends on this scope.
+     */
+    private fun TestScope.laggingActivityCenter(): ActivityCenter =
+        ActivityCenter(CoroutineScope(StandardTestDispatcher(testScheduler)))
+
+    /**
+     * Regression: [HomeViewModel.refreshAll]'s double-start guard used to read ActivityCenter's
+     * per-flag `stateIn` copies, which only catch up once their sharing coroutine is dispatched
+     * (on `Dispatchers.Default` for the default [ActivityCenter]), so a second call right after the
+     * first could still see "not refreshing" and start a second refresh. [laggingActivityCenter]
+     * makes that lag deterministic.
+     *
+     * Main is unconfined here, like production's `Main.immediate` on the UI thread: each
+     * `viewModelScope.launch` runs inline up to its first suspension, so the first call's refresh
+     * cycle is already registered by the time it returns, and only a stale read could let the
+     * second call through.
+     */
+    @Test
+    fun refreshAllTwiceInARowStartsASingleRefresh() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(
+            feedFetcher = gatedCountingFetcher(gate, fetches),
+            activityCenter = laggingActivityCenter(),
+            cloudProvider = cloud,
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        vm.refreshAll()
+
+        gate.complete(Unit)
+        pumpUntil { vm.activity.value.idle }
+
+        assertTrue(vm.activity.value.idle)
+        assertEquals(1, fetches.get(), "the second refreshAll() must be a no-op while the first runs")
+        assertEquals(1, cloud.syncs.get())
+    }
+
+    /**
+     * Regression: same stale read as [refreshAllTwiceInARowStartsASingleRefresh], via
+     * [HomeViewModel.pullToRefresh]'s own "anything in flight?" check — a pull right after
+     * [HomeViewModel.refreshAll] started a refresh of its own instead of waiting for that one.
+     */
+    @Test
+    fun pullToRefreshRightAfterRefreshAllWaitsForItWithoutStartingAnother() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(
+            feedFetcher = gatedCountingFetcher(gate, fetches),
+            activityCenter = laggingActivityCenter(),
+            cloudProvider = cloud,
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        vm.pullToRefresh()
+        pumpUntil { fetches.get() >= 1 }
+        assertTrue(vm.pullRefreshing.value, "the pull waits for the in-flight refresh")
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pullRefreshing.value }
+
+        assertFalse(vm.pullRefreshing.value)
+        assertTrue(vm.activity.value.idle, "the pull only finishes once the refresh and its sync have")
+        assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
+        assertEquals(1, cloud.syncs.get())
     }
 
     @Test
@@ -1560,7 +1652,7 @@ class HomeViewModelTest {
             // viewModelScope.launch{} bodies are only queued, not run inline; runCurrent() starts the
             // coroutine so it reaches (and suspends on) the gate before we proceed.
             testScheduler.runCurrent()
-            assertTrue(activityCenter.feedRefreshing.value)
+            assertTrue(activityCenter.activity.value.feedRefreshing)
             // The refresh is genuinely in flight here — simulate the user moving on to a2 before it completes.
             val article2 = db.articlesQueries.getById("a2").executeAsOne()
             vm.selectArticle(article2.toListRow())
@@ -1570,7 +1662,7 @@ class HomeViewModelTest {
             // so poll with short real sleeps until refreshAll settles (mirrors
             // refreshAllRaisesTrayNotificationWhenNewArticlesArrive's established pattern).
             var waited = 0
-            while (activityCenter.feedRefreshing.value && waited < 5_000) {
+            while (activityCenter.activity.value.feedRefreshing && waited < 5_000) {
                 testScheduler.advanceUntilIdle()
                 Thread.sleep(50)
                 waited += 50
