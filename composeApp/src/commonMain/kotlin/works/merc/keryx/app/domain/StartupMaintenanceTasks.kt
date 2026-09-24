@@ -55,12 +55,16 @@ internal suspend fun runMaintenanceStep(name: String, step: suspend () -> Unit) 
 internal suspend fun runStartupMaintenance(koin: Koin) {
     if (!koin.get<SettingsRepository>().isSetupComplete()) return
     runMaintenanceStep("cacheCleanup") { cleanUpArticleCacheIfDue(koin) }
-    runMaintenanceStep("sync") {
-        if (koin.get<CloudSession>().isConnected()) {
-            koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+    // Sync-then-refresh here (the reverse of the other callers), but still one cycle for
+    // ActivityCenter's busy checks. Each step keeps its own failure isolation inside it.
+    koin.get<ActivityCenter>().trackRefreshCycle {
+        runMaintenanceStep("sync") {
+            if (koin.get<CloudSession>().isConnected()) {
+                koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+            }
         }
+        runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
     }
-    runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
     runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
     runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
 }

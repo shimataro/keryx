@@ -9,6 +9,7 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.SystemClock
+import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
@@ -60,8 +61,12 @@ internal suspend fun backgroundUpdateLoop(koin: Koin) {
         // setup completes.
         if (!settingsRepository.isSetupComplete()) continue
         if (minutes > 0) {
-            runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
-            runMaintenanceStep("sync") { koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC) }
+            // One cycle for ActivityCenter's busy checks, so the gap between the two steps isn't
+            // mistaken for idle; each step still isolates its own failure.
+            koin.get<ActivityCenter>().trackRefreshCycle {
+                runMaintenanceStep("feedRefresh") { refreshFeedsAndNotify(koin) }
+                runMaintenanceStep("sync") { koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC) }
+            }
         }
         val settings = settingsRepository.getLocalSettings()
         if (shouldCheckForUpdate(SystemClock.nowMillis(), settings.lastUpdateCheckAt, settings.updateCheckIntervalHours)) {

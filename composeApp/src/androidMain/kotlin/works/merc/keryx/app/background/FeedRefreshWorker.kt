@@ -9,6 +9,7 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.errorOrNull
+import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -45,16 +46,21 @@ class FeedRefreshWorker(context: Context, params: WorkerParameters) : CoroutineW
         // periodic run will acquire the lock normally.
         if (!startupMaintenanceMutex.tryLock()) return Result.success()
         return try {
-            refreshFeedsAndNotify(koin)
-            // Retry only the failure category error-design.md documents as auto-retryable
-            // (CloudStorageException) — CloudAuthException/SchemaVersionException/
-            // CloudDataIncompatibleException are permanent until the user acts, and retrying them
-            // would just burn battery on a doomed repeat attempt (already recorded in the
-            // notification center by SyncRepository itself).
-            var retrySync = false
-            if (koin.get<CloudSession>().isConnected()) {
-                val syncResult = koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-                retrySync = syncResult.errorOrNull is CloudStorageException
+            // One cycle for ActivityCenter's busy checks, so the gap between the refresh and the
+            // sync isn't mistaken for idle (e.g. by a pull-to-refresh joining this run).
+            val retrySync = koin.get<ActivityCenter>().trackRefreshCycle {
+                refreshFeedsAndNotify(koin)
+                // Retry only the failure category error-design.md documents as auto-retryable
+                // (CloudStorageException) — CloudAuthException/SchemaVersionException/
+                // CloudDataIncompatibleException are permanent until the user acts, and retrying
+                // them would just burn battery on a doomed repeat attempt (already recorded in the
+                // notification center by SyncRepository itself).
+                if (koin.get<CloudSession>().isConnected()) {
+                    val syncResult = koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
+                    syncResult.errorOrNull is CloudStorageException
+                } else {
+                    false
+                }
             }
             // Mirrors desktop's backgroundUpdateLoop (StartupTasks.kt), which only rechecks for an
             // update once the user's configured interval has elapsed — unlike this worker's own

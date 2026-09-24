@@ -1226,19 +1226,23 @@ class HomeViewModel(
         // than racing the UI's own writes to the same flows. Mirrors what SettingsViewModel already
         // does for its equivalent calls. Feed writes stay serialized either way: the repository
         // applies them in one sequential loop internally.
+        // The whole body is one ActivityCenter refresh cycle, so the gap between the refresh and
+        // the sync (the notification below) still counts as busy.
         return viewModelScope.launch {
-            val results = withContext(dispatcher) {
-                activityCenter.trackFeedRefresh {
-                    if (targetIds == null) feedRepository.refreshAll() else feedRepository.refreshFeeds(targetIds)
+            activityCenter.trackRefreshCycle {
+                val results = withContext(dispatcher) {
+                    activityCenter.trackFeedRefresh {
+                        if (targetIds == null) feedRepository.refreshAll() else feedRepository.refreshFeeds(targetIds)
+                    }
                 }
+                newArticleNotifier.notifyIfEnabled(
+                    results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
+                )
+                withContext(dispatcher) { syncRepository.sync() }
+                // Re-trim using the selection as it stands now: it may have changed since the
+                // snapshot above was taken, and the stale pre-refresh selection must not outlive it.
+                _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
             }
-            newArticleNotifier.notifyIfEnabled(
-                results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
-            )
-            withContext(dispatcher) { syncRepository.sync() }
-            // Re-trim using the selection as it stands now: it may have changed since the snapshot
-            // above was taken, and the stale pre-refresh selection must not outlive it.
-            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         }
     }
 

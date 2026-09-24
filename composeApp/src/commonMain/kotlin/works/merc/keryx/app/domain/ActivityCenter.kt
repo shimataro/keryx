@@ -21,6 +21,14 @@ import kotlinx.coroutines.flow.update
  * finish — e.g. a background refresh overlapping a manual one, or a debounced sync overlapping a
  * manual sync. [MutableStateFlow.update] is CAS-atomic, so the counters never race.
  *
+ * [refreshCycleRunning] is a third counter for the refresh-then-sync *sequences* (the manual
+ * refresh in [HomeViewModel], desktop's background loop, Android's `FeedRefreshWorker`, and the
+ * startup maintenance run, which syncs first and refreshes second): each wraps the whole sequence
+ * in [trackRefreshCycle]. The two per-operation counters alone leave a gap between the refresh
+ * finishing and the sync starting (new-article notification, connection check) where both
+ * [feedRefreshing] and [syncing] are false, so anything asking "is work in flight?" must also
+ * consult [refreshCycleRunning] to treat the whole sequence as busy end to end.
+ *
  * [scope] is injectable so tests can supply `runTest`'s `backgroundScope` (see [SyncRepository] for
  * the same pattern). The default is an app-lifetime scope, matching this class's Koin `single`.
  */
@@ -52,6 +60,21 @@ class ActivityCenter(
             return block()
         } finally {
             syncCount.update { it - 1 }
+        }
+    }
+
+    private val refreshCycleCount = MutableStateFlow(0)
+
+    /** True while any refresh-then-sync sequence wrapped in [trackRefreshCycle] is in flight. */
+    val refreshCycleRunning: StateFlow<Boolean> =
+        refreshCycleCount.map { it > 0 }.stateIn(scope, SharingStarted.Eagerly, false)
+
+    suspend fun <T> trackRefreshCycle(block: suspend () -> T): T {
+        refreshCycleCount.update { it + 1 }
+        try {
+            return block()
+        } finally {
+            refreshCycleCount.update { it - 1 }
         }
     }
 }

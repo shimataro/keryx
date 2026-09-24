@@ -28,6 +28,7 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -66,11 +67,14 @@ class StartupMaintenanceTasksTest {
             db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, clock, writeDispatcher = Dispatchers.Unconfined,
         )
         val articleRepository = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, clock, Dispatchers.Unconfined)
+        // Unconfined so refreshCycleRunning.value reflects the counter synchronously (see ActivityCenterTest).
+        val activityCenter = ActivityCenter(CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         return koinApplication {
             modules(
                 module {
                     single { settingsRepository }
                     single { articleRepository }
+                    single { activityCenter }
                     single<Clock> { clock }
                 },
             )
@@ -180,6 +184,9 @@ class StartupMaintenanceTasksTest {
             runStartupMaintenance(koin)
 
             assertEquals(now, koin.get<SettingsRepository>().getLocalSettings().lastCacheCleanupAt)
+            // The sync/feedRefresh cycle wrapper must release its counter even though both steps
+            // inside it threw (the steps swallow their own failures; the wrapper's finally does the rest).
+            assertFalse(koin.get<ActivityCenter>().refreshCycleRunning.value)
         } finally {
             driver.close()
         }
