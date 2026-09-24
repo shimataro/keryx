@@ -237,6 +237,10 @@ class SettingsViewModel(
         viewModelScope.launch {
             try {
                 withContext(dispatcher) { syncRepository.sync() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.error(TAG, "Manual sync failed", e)
             } finally {
                 manualSyncInFlight = false
             }
@@ -318,6 +322,10 @@ class SettingsViewModel(
             initialSyncingType = type
             try {
                 withContext(dispatcher) { syncRepository.sync() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.error(TAG, "Initial sync failed", e)
             } finally {
                 initialSyncingType = null
             }
