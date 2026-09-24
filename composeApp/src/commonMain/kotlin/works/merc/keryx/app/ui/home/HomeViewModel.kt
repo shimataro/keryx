@@ -1170,7 +1170,7 @@ class HomeViewModel(
      * Refreshes all feeds, notifies about newly available articles when enabled, and synchronizes data.
      */
     fun refreshAll() {
-        launchRefresh(null)
+        launchRefresh(ArticleFilter.All)
     }
 
     private val _pullRefreshing = MutableStateFlow(false)
@@ -1187,7 +1187,7 @@ class HomeViewModel(
 
     /**
      * Pull-to-refresh on the article list: refreshes only the feeds the current [filter] covers
-     * ([refreshTargetFeedIds]), then syncs, exactly like [refreshAll] otherwise. A selection that
+     * ([FeedRepository.feedsCoveredBy]), then syncs, exactly like [refreshAll] otherwise. A selection that
      * covers no subscribed feed finishes at once without fetching or syncing. When a refresh or
      * sync is already in flight, no new refresh is started (the same constraint that disables the
      * toolbar button); the pull instead joins it, keeping [pullRefreshing] up until both finish.
@@ -1199,8 +1199,7 @@ class HomeViewModel(
         viewModelScope.launch {
             try {
                 if (activityCenter.activity.value.idle) {
-                    val targetIds = refreshTargetFeedIds(_filter.value, feeds.value, feedTagMap.value)
-                    if (targetIds == null || targetIds.isNotEmpty()) launchRefresh(targetIds)?.join()
+                    launchRefresh(_filter.value)?.join()
                 } else {
                     activityCenter.activity.first { it.idle }
                 }
@@ -1211,13 +1210,15 @@ class HomeViewModel(
     }
 
     /**
-     * Shared body of [refreshAll] / [pullToRefresh]: refreshes [targetIds] (`null` = every feed),
-     * notifies about newly available articles when enabled, then syncs.
+     * Shared body of [refreshAll] / [pullToRefresh]: refreshes the feeds [filter] covers
+     * ([FeedRepository.feedsCoveredBy]), notifies about newly available articles when enabled, then
+     * syncs. A narrow [filter] (feed / folder / tag) that covers no subscribed feed fetches and
+     * syncs nothing.
      *
      * @return The launched job (refresh + notification + sync), or `null` when a feed refresh or a
      *   refresh-then-sync cycle is already in flight and nothing was started.
      */
-    private fun launchRefresh(targetIds: Set<String>?): Job? {
+    private fun launchRefresh(filter: ArticleFilter): Job? {
         if (activityCenter.activity.value.let { it.feedRefreshing || it.refreshCycleRunning }) return null
         _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
         // The heavy work goes off the UI thread: a full feed refresh (fetch, parse, per-feed DB
@@ -1233,10 +1234,11 @@ class HomeViewModel(
         return viewModelScope.launch {
             activityCenter.trackRefreshCycle {
                 val results = withContext(dispatcher) {
-                    activityCenter.trackFeedRefresh {
-                        if (targetIds == null) feedRepository.refreshAll() else feedRepository.refreshFeeds(targetIds)
-                    }
-                }
+                    val targets = feedRepository.feedsCoveredBy(filter)
+                    val coversEveryFeed = filter == ArticleFilter.All || filter == ArticleFilter.Starred
+                    if (!coversEveryFeed && targets.isEmpty()) null
+                    else activityCenter.trackFeedRefresh { feedRepository.refreshFeeds(targets) }
+                } ?: return@trackRefreshCycle
                 newArticleNotifier.notifyIfEnabled(
                     results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
                 )

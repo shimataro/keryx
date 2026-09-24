@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withPermit
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
@@ -495,28 +496,46 @@ class FeedRepository(
      *
      * @return A map from feed ID to the result containing the number of newly processed articles.
      */
-    suspend fun refreshAll(): Map<String, Result<Int>> = refreshFeedList(feeds.watchAll().executeAsList())
+    suspend fun refreshAll(): Map<String, Result<Int>> = refreshFeeds(feedsCoveredBy(ArticleFilter.All))
 
     /**
-     * Refreshes only the subscribed feeds whose ID is in [feedIds] (e.g. the feeds of the article
-     * list's current selection), with the same bounded-concurrency fetch and ordered write phases
-     * as [refreshAll].
+     * The subscribed feeds whose articles [filter]'s article list shows, read from the DB at call
+     * time — the set a refresh of that list has to fetch:
      *
-     * The feed rows are re-read from the DB at call time rather than taken from the caller, so a
-     * caller's possibly stale snapshot (old etag / URL) is never used. IDs that no longer match a
-     * subscribed feed are silently skipped.
+     * - [ArticleFilter.All] / [ArticleFilter.Starred]: every subscribed feed (starred articles can
+     *   come from any feed).
+     * - [ArticleFilter.Feed]: that feed, if it is still subscribed.
+     * - [ArticleFilter.Folder]: the subscribed feeds filed in the folder.
+     * - [ArticleFilter.Tag]: the subscribed feeds the tag is currently attached to.
      *
-     * @param feedIds The IDs of the feeds to refresh.
+     * The narrow cases are the same row sets `articles.sq`'s `watchByFeed` / `watchByFolder` /
+     * `watchByTag` draw their articles from, restricted to subscribed feeds (`watchByFeed` itself
+     * does not join `feeds`, but an unsubscribed feed has nothing left to fetch). An empty list
+     * means the selection covers no subscribed feed at all (an empty folder or tag, or an
+     * unsubscribed feed). Ordered like [getAllFeeds].
+     */
+    fun feedsCoveredBy(filter: ArticleFilter): List<Feeds> = when (filter) {
+        ArticleFilter.All, ArticleFilter.Starred -> feeds.watchAll().executeAsList()
+        is ArticleFilter.Feed -> feeds.watchAll().executeAsList().filter { it.id == filter.feedId }
+        is ArticleFilter.Folder -> feeds.getByFolder(filter.folderId).executeAsList()
+        is ArticleFilter.Tag -> {
+            val tagged = db.feed_tagsQueries.watchFeedIdsForTag(filter.tagId).executeAsList().toSet()
+            feeds.watchAll().executeAsList().filter { it.id in tagged }
+        }
+    }
+
+    /**
+     * Refreshes [feedList] (e.g. [feedsCoveredBy] the article list's current selection), fetching
+     * concurrently with bounded concurrency, then applying the DB writes serially in list order and
+     * indexing any new articles for search.
+     *
+     * Pass rows freshly read from the DB (as [feedsCoveredBy] returns them) rather than a
+     * long-lived UI snapshot, so a stale etag / URL is never used for the fetch.
+     *
+     * @param feedList The feeds to refresh.
      * @return A map from feed ID to the result containing the number of newly processed articles.
      */
-    suspend fun refreshFeeds(feedIds: Set<String>): Map<String, Result<Int>> =
-        refreshFeedList(feeds.watchAll().executeAsList().filter { it.id in feedIds })
-
-    /**
-     * Shared body of [refreshAll] / [refreshFeeds]: fetches [feedList] concurrently, then applies
-     * the DB writes serially in list order and indexes any new articles for search.
-     */
-    private suspend fun refreshFeedList(feedList: List<Feeds>): Map<String, Result<Int>> {
+    suspend fun refreshFeeds(feedList: List<Feeds>): Map<String, Result<Int>> {
         // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO
         // DB writes — this is where the wall-clock win comes from vs. the old sequential loop.
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)

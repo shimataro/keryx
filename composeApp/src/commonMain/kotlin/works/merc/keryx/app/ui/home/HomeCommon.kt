@@ -593,25 +593,6 @@ internal fun reorderTargetWithinScope(orderedIds: List<String>, index: Int, delt
     return if (delta < 0) ReorderTarget(orderedIds[landsAt]) else ReorderTarget(orderedIds.getOrNull(landsAt + 1))
 }
 
-/**
- * The feeds a pull-to-refresh on the article list refreshes for the current [filter]: `null` means
- * every feed (`All`, and `Starred`, whose articles span any number of feeds); otherwise the IDs of
- * the subscribed [feeds] the selection covers — the feed itself, the feeds filed in the folder, or
- * the feeds whose [feedTagMap] entry (feedId → tagIds) carries the tag. An empty set means the
- * selection covers no subscribed feed at all (an empty folder or tag, an unsubscribed feed).
- */
-internal fun refreshTargetFeedIds(
-    filter: ArticleFilter,
-    feeds: List<Feeds>,
-    feedTagMap: Map<String, Set<String>>,
-): Set<String>? = when (filter) {
-    ArticleFilter.All, ArticleFilter.Starred -> null
-    is ArticleFilter.Feed -> feeds.filter { it.id == filter.feedId }.mapTo(LinkedHashSet()) { it.id }
-    is ArticleFilter.Folder -> feeds.filter { it.folder_id == filter.folderId }.mapTo(LinkedHashSet()) { it.id }
-    is ArticleFilter.Tag ->
-        feeds.filter { feedTagMap[it.id]?.contains(filter.tagId) == true }.mapTo(LinkedHashSet()) { it.id }
-}
-
 /** Whether [url] is present and non-blank — the single rule for when URL-dependent actions
  * (open in browser, copy URL) are available, for an article's URL or a feed's site URL alike. */
 internal fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
