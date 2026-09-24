@@ -420,7 +420,7 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
 
 /**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): unread-only toggle, notifications bell, sort, hide-read, mark-all-read.
+ * or its search results): unread-only toggle, hide-read, notifications bell, sort, mark-all-read.
  * When [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance
  * rank, or recency when every term is too short to be ranked, see FtsSearch), the sort button is
  * disabled and its tooltip explains why instead of showing the usual "sort by ...".
@@ -430,7 +430,11 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
  * depends on state is shown disabled rather than hidden, so it never shifts its neighbors. Unlike
  * [unreadOnly] (a toggle: pressing it again reverses it), this is a one-shot action — see
  * `HomeViewModel.canHideRead`'s own KDoc for what it does and why it's separate from the
- * unread-only toggle itself.
+ * unread-only toggle itself. It sits directly beside the unread-only chip rather than in the
+ * trailing [ToolbarIconGroup]: its enabled state depends on that chip alone, so adjacency makes
+ * the dependency visible, and it keeps this view-only action away from the bulk-mutating
+ * mark-all-read it would otherwise be easy to mistake it for. As a lone icon it stays bare (no
+ * capsule), per the `ui-guidelines` skill's `ToolbarIconGroup` rule.
  *
  * When [onOpenDrawer] is non-null (this pane is shown at a narrow [PaneLayout], where the feed
  * list is a modal navigation drawer rather than an on-screen pane — see `ArticleListPane`'s KDoc),
@@ -495,6 +499,11 @@ internal fun ArticleListTopBar(
                 checked = unreadOnly,
                 onCheckedChange = { onToggleUnreadOnly() },
             )
+            Spacer(Modifier.width(4.dp))
+            val hideReadTooltip = stringResource(Res.string.home_hide_read)
+            TooltipIconButton(tooltip = hideReadTooltip, onClick = onHideRead, enabled = canHideRead) {
+                KeryxIcon(KeryxIcons.VisibilityOff, contentDescription = hideReadTooltip)
+            }
             Spacer(Modifier.weight(1f))
             ToolbarIconGroup {
                 if (notifVm != null) {
@@ -507,10 +516,6 @@ internal fun ArticleListTopBar(
                 }
                 TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
                     KeryxIcon(sortDirectionIcon(newestFirst), contentDescription = sortTooltip)
-                }
-                val hideReadTooltip = stringResource(Res.string.home_hide_read)
-                TooltipIconButton(tooltip = hideReadTooltip, onClick = onHideRead, enabled = canHideRead) {
-                    KeryxIcon(KeryxIcons.VisibilityOff, contentDescription = hideReadTooltip)
                 }
                 val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
                 TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
