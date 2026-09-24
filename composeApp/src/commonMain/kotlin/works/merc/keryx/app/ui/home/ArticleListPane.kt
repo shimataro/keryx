@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,8 +23,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +67,7 @@ import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
+import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
@@ -304,6 +312,8 @@ fun ArticleListPane(
         }
     }
 
+    val pullRefreshing by vm.pullRefreshing.collectAsState()
+
     ArticleListPaneContent(
         articles = articles,
         feedTitles = feedTitles,
@@ -335,6 +345,12 @@ fun ArticleListPane(
         titleMarkedById = titleMarkedById,
         emptyContent = emptyContent,
         header = header,
+        // Android only (a mouse has no pull gesture), and never over search results — pulling a
+        // result list to refresh the feeds behind it isn't what the gesture means there — nor with
+        // no feeds at all, where there is nothing to refresh. The scope is the current selection's
+        // own feeds; see HomeViewModel.pullToRefresh.
+        onPullRefresh = if (isTouchPrimary && !searchActive && !hasNoFeeds) vm::pullToRefresh else null,
+        pullRefreshing = pullRefreshing,
     )
 }
 
@@ -531,7 +547,12 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   when [articles] is empty — search's own "too short a query"/"no matching articles" hints, which
  *   have nothing to do with whether the user has any feeds at all. `null` (the default) falls back
  *   to that ordinary message.
+ * @param onPullRefresh Invoked when the list (or its "no articles" empty state) is pulled down past
+ *   the refresh threshold. `null` (the default) disables the gesture entirely — desktop, search
+ *   results, and a user with no feeds all pass `null`.
+ * @param pullRefreshing Whether the pull-to-refresh indicator shows as refreshing.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ArticleListPaneContent(
     articles: List<ArticleListRow>,
@@ -561,6 +582,8 @@ internal fun ArticleListPaneContent(
     titleMarkedById: Map<String, String>? = null,
     header: (@Composable () -> Unit)? = null,
     emptyContent: (@Composable () -> Unit)? = null,
+    onPullRefresh: (() -> Unit)? = null,
+    pullRefreshing: Boolean = false,
 ) {
     LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
@@ -598,24 +621,49 @@ internal fun ArticleListPaneContent(
             onSearchClick = onSearchClick,
         )
 
-        Box(Modifier.fillMaxSize().imePadding()) {
+        // The pull-to-refresh modifier and its indicator are always present, merely disabled when
+        // onPullRefresh is null, so turning the gesture on/off (e.g. entering search) never adds or
+        // removes a wrapper around the LazyColumn — see ui-guidelines' "Layout stability".
+        val pullState = rememberPullToRefreshState()
+        Box(
+            Modifier
+                .fillMaxSize()
+                .imePadding()
+                .pullToRefresh(
+                    isRefreshing = pullRefreshing,
+                    state = pullState,
+                    enabled = onPullRefresh != null,
+                    onRefresh = { onPullRefresh?.invoke() },
+                ),
+        ) {
             if (articles.isEmpty()) {
                 if (emptyContent != null) {
                     emptyContent()
-                } else {
+                } else if (hasNoFeeds) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        if (hasNoFeeds) {
-                            // A narrow layout's "+" button lives inside the feed-list drawer (closed by
-                            // default), so this is the one reachable entry point to add a first feed —
-                            // without it a phone-width user with no feeds yet would have no visible way
-                            // forward. See ArticleListPaneContent's own KDoc.
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (onAddFeedClick != null) {
-                                    FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
-                                }
+                        // A narrow layout's "+" button lives inside the feed-list drawer (closed by
+                        // default), so this is the one reachable entry point to add a first feed —
+                        // without it a phone-width user with no feeds yet would have no visible way
+                        // forward. See ArticleListPaneContent's own KDoc.
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (onAddFeedClick != null) {
+                                FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
                             }
-                        } else {
+                        }
+                    }
+                } else {
+                    // Scrollable (though it never overflows) only so a pull here still reaches
+                    // pullToRefresh, which listens through nested scroll: an empty unread-only list
+                    // must stay pullable. The min height keeps the message centered in the pane.
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .heightIn(min = maxHeight),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -655,6 +703,11 @@ internal fun ArticleListPaneContent(
                 }
                 VerticalScrollbarIfNeeded(listState)
             }
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = pullRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
     }
 }
