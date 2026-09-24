@@ -245,6 +245,27 @@ tablet's own reading pane in Gmail. At the desktop-width 3-pane layout — which
 tablet in landscape also reaches — the reader is a permanent, keyboard-driven pane instead (J/K —
 see `app-architecture.md`), and the swipe gesture does not apply there.
 
+The article list has one more touch-only affordance, on Android at **every** width (including the
+3-pane layout a large tablet reaches) and with no desktop counterpart, since a mouse has no pull
+gesture: **pulling the list down refreshes it**, using Material 3's own pull-to-refresh indicator.
+Unlike the toolbar's "Refresh All" — which keeps refreshing every feed, unchanged — a pull refreshes
+only the feeds behind the list currently on screen:
+
+| Selected in the feed list | Feeds a pull refreshes |
+| --- | --- |
+| All Feeds / Starred | Every feed (starred articles can come from any feed) |
+| A feed | That feed alone |
+| A folder | The feeds filed in that folder |
+| A tag | The feeds carrying that tag |
+
+A selection that covers no subscribed feed at all (an empty folder or tag) finishes at once, fetching
+and syncing nothing. The gesture works on an empty list too (e.g. "unread only" with nothing unread),
+but is disabled while search results are showing — pulling a result list isn't a request to refresh
+the feeds behind it — and while there are no feeds at all. As with "Refresh All", a pull is followed
+by a cloud sync when one is connected, and the indicator stays up until that sync has finished too,
+not just the feed fetches. A pull made while a refresh or sync is already running (a background
+refresh, say) starts nothing new; the indicator simply stays up until the running one finishes.
+
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
 macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own teal theme,
