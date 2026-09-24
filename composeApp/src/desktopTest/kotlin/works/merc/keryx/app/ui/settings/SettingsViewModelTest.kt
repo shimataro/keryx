@@ -185,6 +185,34 @@ private class CountingDispatcher : CoroutineDispatcher() {
     }
 }
 
+/**
+ * Holds every dispatched block until [release] is called, then runs the held blocks and every later
+ * one inline. Holding the body of `withContext(dispatcher)` keeps a sync from reaching
+ * [works.merc.keryx.app.domain.ActivityCenter.trackSync], so the ViewModel's `idle` stays true.
+ */
+private class HoldingDispatcher : CoroutineDispatcher() {
+    private val held = ArrayDeque<Runnable>()
+    private var released = false
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        synchronized(this) {
+            if (!released) {
+                held.addLast(block)
+                return
+            }
+        }
+        block.run()
+    }
+
+    fun release() {
+        val pending = synchronized(this) {
+            released = true
+            held.toList().also { held.clear() }
+        }
+        pending.forEach { it.run() }
+    }
+}
+
 /** Throws [CancellationException] the moment work is dispatched to it — simulates the coroutine being cancelled mid-`withContext`. */
 private class CancellingDispatcher : CoroutineDispatcher() {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
@@ -898,6 +926,8 @@ class SettingsViewModelTest {
      * A second `syncNow()` while the first is still in flight must be ignored. Without a local
      * in-flight flag the second call can race past [canSyncNow] before the [ActivityCenter]
      * collector updates [idle], causing a redundant sync to queue behind [SyncRepository]'s mutex.
+     * A [HoldingDispatcher] holds the sync body so the second call lands while `idle` is still
+     * true — the in-flight flag, not the idle gate, must be what rejects it.
      *
      * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
      */
@@ -907,21 +937,30 @@ class SettingsViewModelTest {
         tokenStorage.save(OAuthTokens("AT"))
         val gate = CompletableDeferred<Unit>()
         val metadataCalls = AtomicInteger()
+        val held = HoldingDispatcher()
         val vm = newViewModel(
             tokenStorage = tokenStorage,
             syncCloudProvider = { GatedCloudStorage(gate, metadataCalls) },
-            dispatcher = CountingDispatcher(),
+            dispatcher = held,
         )
         assertTrue(vm.canSyncNow)
 
         vm.syncNow()
-        // Immediately after the first call the local flag blocks a second one.
-        assertFalse(vm.canSyncNow)
+        try {
+            // The sync body is held, so ActivityCenter hasn't seen it: idle is still true and only
+            // the in-flight flag can be what disables the button.
+            assertTrue(vm.idle)
+            assertFalse(vm.canSyncNow)
 
-        vm.syncNow() // must be ignored
-
-        gate.complete(Unit)
+            vm.syncNow() // must be ignored by the in-flight flag, not by idle
+        } finally {
+            // Released even when an assertion above fails: a block still held can never resume,
+            // so tearDown()'s cancelAndJoin would wait on it forever.
+            held.release()
+            gate.complete(Unit)
+        }
         awaitTrue { vm.canSyncNow }
+        // One sync's worth; a second sync queued behind the mutex would double this.
         assertEquals(2, metadataCalls.get())
     }
 
