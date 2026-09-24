@@ -92,7 +92,7 @@
 
 `SyncRepository` は `syncPhase: StateFlow<SyncPhase>`（`IDLE` / `CHECKING` / `DOWNLOADING` / `MERGING` /
 `INDEXING` / `PREPARING` / `UPLOADING` / `ARCHIVING`）を公開しており、クラウド同期設定タブは「同期中かどうか」
-（`ActivityCenter.syncing`、単なる真偽値）だけでなく「今どの段階か」を表示できる。すべての遷移は
+（`ActivityCenter.activity` のスナップショットの `syncing`、単なる真偽値）だけでなく「今どの段階か」を表示できる。すべての遷移は
 `sync()`/`resetCloudData()` が保持しているのと同じ `mutex` の内側で行われるため、後から並んだ同期が前の同期の
 古いフェーズを見てしまうことはなく、そのロック内側の `finally` が常に `IDLE` に戻す — 成功・分類済みの
 `Result.Err`・捕捉されない例外のいずれの経路でも。

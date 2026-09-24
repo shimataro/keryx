@@ -1,9 +1,7 @@
 package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -16,40 +14,35 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class ActivityCenterTest {
 
-    // An unconfined scope makes the `stateIn` sharing coroutine run inline, so `feedRefreshing.value`
-    // reflects counter changes deterministically (an active collector isn't needed).
+    // Gated operations are launched unconfined, so each `track*` call starts inline (and resumes
+    // inline once its gate completes) and the assertions right after it see its effect.
 
     @Test
     fun startsIdle() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         assertFalse(center.activity.value.feedRefreshing)
-        scope.cancel()
     }
 
     @Test
     fun trackFeedRefreshIsTrueWhileRunningAndFalseAfter() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
-        val job = scope.launch { center.trackFeedRefresh { gate.await() } }
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackFeedRefresh { gate.await() } }
 
         assertTrue(center.activity.value.feedRefreshing)
 
         gate.complete(Unit)
         job.join()
         assertFalse(center.activity.value.feedRefreshing)
-        scope.cancel()
     }
 
     @Test
     fun concurrentRefreshesStayTrueUntilAllFinish() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate1 = CompletableDeferred<Unit>()
         val gate2 = CompletableDeferred<Unit>()
-        val job1 = scope.launch { center.trackFeedRefresh { gate1.await() } }
-        val job2 = scope.launch { center.trackFeedRefresh { gate2.await() } }
+        val job1 = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackFeedRefresh { gate1.await() } }
+        val job2 = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackFeedRefresh { gate2.await() } }
 
         assertTrue(center.activity.value.feedRefreshing)
 
@@ -60,13 +53,11 @@ class ActivityCenterTest {
         gate2.complete(Unit)
         job2.join()
         assertFalse(center.activity.value.feedRefreshing)
-        scope.cancel()
     }
 
     @Test
     fun trackFeedRefreshReturnsBlockResultAndClearsOnFailure() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
 
         val result = center.trackFeedRefresh { 42 }
         assertEquals(42, result)
@@ -74,40 +65,34 @@ class ActivityCenterTest {
         // A throwing block must still decrement the counter (finally).
         runCatching { center.trackFeedRefresh { error("boom") } }
         assertFalse(center.activity.value.feedRefreshing)
-        scope.cancel()
     }
 
     @Test
     fun syncStartsIdle() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         assertFalse(center.activity.value.syncing)
-        scope.cancel()
     }
 
     @Test
     fun trackSyncIsTrueWhileRunningAndFalseAfter() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
-        val job = scope.launch { center.trackSync { gate.await() } }
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackSync { gate.await() } }
 
         assertTrue(center.activity.value.syncing)
 
         gate.complete(Unit)
         job.join()
         assertFalse(center.activity.value.syncing)
-        scope.cancel()
     }
 
     @Test
     fun concurrentSyncsStayTrueUntilAllFinish() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate1 = CompletableDeferred<Unit>()
         val gate2 = CompletableDeferred<Unit>()
-        val job1 = scope.launch { center.trackSync { gate1.await() } }
-        val job2 = scope.launch { center.trackSync { gate2.await() } }
+        val job1 = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackSync { gate1.await() } }
+        val job2 = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackSync { gate2.await() } }
 
         assertTrue(center.activity.value.syncing)
 
@@ -118,13 +103,11 @@ class ActivityCenterTest {
         gate2.complete(Unit)
         job2.join()
         assertFalse(center.activity.value.syncing)
-        scope.cancel()
     }
 
     @Test
     fun trackSyncReturnsBlockResultAndClearsOnFailure() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
 
         val result = center.trackSync { 42 }
         assertEquals(42, result)
@@ -132,15 +115,13 @@ class ActivityCenterTest {
         // A throwing block must still decrement the counter (finally).
         runCatching { center.trackSync { error("boom") } }
         assertFalse(center.activity.value.syncing)
-        scope.cancel()
     }
 
     @Test
     fun feedRefreshAndSyncAreIndependent() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
-        val job = scope.launch { center.trackSync { gate.await() } }
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackSync { gate.await() } }
 
         // A sync in flight must not light the feed-refresh indicator, and vice versa.
         assertTrue(center.activity.value.syncing)
@@ -148,36 +129,30 @@ class ActivityCenterTest {
 
         gate.complete(Unit)
         job.join()
-        scope.cancel()
     }
 
     @Test
     fun refreshCycleStartsIdle() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         assertFalse(center.activity.value.refreshCycleRunning)
-        scope.cancel()
     }
 
     @Test
     fun trackRefreshCycleIsTrueWhileRunningAndFalseAfter() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
-        val job = scope.launch { center.trackRefreshCycle { gate.await() } }
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackRefreshCycle { gate.await() } }
 
         assertTrue(center.activity.value.refreshCycleRunning)
 
         gate.complete(Unit)
         job.join()
         assertFalse(center.activity.value.refreshCycleRunning)
-        scope.cancel()
     }
 
     @Test
     fun trackRefreshCycleReturnsBlockResultAndClearsOnFailure() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
 
         val result = center.trackRefreshCycle { 42 }
         assertEquals(42, result)
@@ -185,17 +160,15 @@ class ActivityCenterTest {
         // A throwing block must still decrement the counter (finally).
         runCatching { center.trackRefreshCycle { error("boom") } }
         assertFalse(center.activity.value.refreshCycleRunning)
-        scope.cancel()
     }
 
     @Test
     fun concurrentRefreshCyclesStayTrueUntilAllFinish() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val gate1 = CompletableDeferred<Unit>()
         val gate2 = CompletableDeferred<Unit>()
-        val job1 = scope.launch { center.trackRefreshCycle { gate1.await() } }
-        val job2 = scope.launch { center.trackRefreshCycle { gate2.await() } }
+        val job1 = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackRefreshCycle { gate1.await() } }
+        val job2 = launch(UnconfinedTestDispatcher(testScheduler)) { center.trackRefreshCycle { gate2.await() } }
 
         assertTrue(center.activity.value.refreshCycleRunning)
 
@@ -206,16 +179,14 @@ class ActivityCenterTest {
         gate2.complete(Unit)
         job2.join()
         assertFalse(center.activity.value.refreshCycleRunning)
-        scope.cancel()
     }
 
     @Test
     fun nestedRefreshCyclesStayTrueUntilTheOuterOneFinishes() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val inner = CompletableDeferred<Unit>()
         val outer = CompletableDeferred<Unit>()
-        val job = scope.launch {
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
             center.trackRefreshCycle {
                 center.trackRefreshCycle { inner.await() }
                 outer.await()
@@ -230,17 +201,15 @@ class ActivityCenterTest {
         outer.complete(Unit)
         job.join()
         assertFalse(center.activity.value.refreshCycleRunning)
-        scope.cancel()
     }
 
     @Test
     fun refreshCycleStaysTrueBetweenItsRefreshAndSync() = runTest {
-        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val center = ActivityCenter(scope)
+        val center = ActivityCenter()
         val refreshGate = CompletableDeferred<Unit>()
         val gap = CompletableDeferred<Unit>()
         val syncGate = CompletableDeferred<Unit>()
-        val job = scope.launch {
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
             center.trackRefreshCycle {
                 center.trackFeedRefresh { refreshGate.await() }
                 gap.await()
@@ -259,7 +228,6 @@ class ActivityCenterTest {
         syncGate.complete(Unit)
         job.join()
         assertFalse(center.activity.value.refreshCycleRunning)
-        scope.cancel()
     }
 
     @Test

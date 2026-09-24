@@ -299,15 +299,6 @@ class SettingsViewModelTest {
         )
     }
 
-    /**
-     * An [ActivityCenter] whose scope is tracked in [createdSyncScopes], so tearDown() cancels
-     * its eager stateIn collectors instead of leaking them for the life of the JVM test process.
-     */
-    private fun trackedActivityCenter(): ActivityCenter =
-        ActivityCenter(
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
-        )
-
     private fun newViewModel(
         connectResult: Result<OAuthTokens> = Result.Ok(OAuthTokens("AT")),
         tokenStorage: TokenStorage = FakeTokenStorage(),
@@ -321,7 +312,7 @@ class SettingsViewModelTest {
         cloudSession: CloudSession? = null,
         // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
         // to simulate a sync completing and assert the ViewModel reacts to it.
-        activityCenter: ActivityCenter = trackedActivityCenter(),
+        activityCenter: ActivityCenter = ActivityCenter(),
         // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
         // a test can supply a failing storage to exercise the sync-error state.
         syncCloudProvider: () -> CloudStorage? = { null },
@@ -588,12 +579,13 @@ class SettingsViewModelTest {
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion above — ActivityCenter.syncing
-    // is derived via a map{}.stateIn(...) pipeline that runs independently of any virtual scheduler,
-    // so both the true and the false side of the transition are polled with real wall-clock waits.
+    // lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion below — the ViewModel's
+    // collector runs on the standalone UnconfinedTestDispatcher installed as Main, and the sync on a
+    // real Dispatchers.Default thread, neither on runTest's scheduler, so both the true and the false
+    // side of the transition are polled with real wall-clock waits.
     @Test
     fun syncingMirrorsActivityCenter() {
-        val activityCenter = trackedActivityCenter()
+        val activityCenter = ActivityCenter()
         val vm = newViewModel(activityCenter = activityCenter)
         assertFalse(vm.syncing)
 
@@ -606,17 +598,17 @@ class SettingsViewModelTest {
         runBlocking { job.join() }
     }
 
-    // Note: same reason as syncingMirrorsActivityCenter above — ActivityCenter.syncing is derived
-    // via a map{}.stateIn(...) pipeline outside any virtual scheduler, so this polls with real
-    // wall-clock waits. Regression test for a `drop(1)`-based bug: the syncing collector used to
-    // skip the subscription-time replay of ActivityCenter.syncing on the assumption it always
+    // Note: same reason as syncingMirrorsActivityCenter above — the sync runs on a real thread
+    // outside any virtual scheduler, so this polls with real wall-clock waits. Regression test for
+    // a `drop(1)`-based bug: the syncing collector used to skip the subscription-time replay of
+    // ActivityCenter's sync state on the assumption it always
     // matched the value the property initializer had already captured. That assumption can fail
     // when a sync is already running before the ViewModel is even constructed (e.g. the background
     // loop already syncing when Settings is opened) — the transition back to false can then race
     // past the subscription point and get silently dropped, leaving `syncing` stuck true forever.
     @Test
     fun syncingReflectsActivityCenterAcrossAFullCycleEvenWhenAlreadyRunningAtConstruction() {
-        val activityCenter = trackedActivityCenter()
+        val activityCenter = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
         val job = CoroutineScope(Dispatchers.Default).launch {
             activityCenter.trackSync { gate.await() }
@@ -757,15 +749,15 @@ class SettingsViewModelTest {
     // runTest's own TestCoroutineScheduler, so we poll with real wall-clock waits instead.
     @Test
     fun lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion() {
-        val activityCenter = trackedActivityCenter()
+        val activityCenter = ActivityCenter()
         val vm = newViewModel(activityCenter = activityCenter)
         assertNull(vm.lastSyncedAtText)
 
         // Simulate what SyncRepository.sync() does on success: write the new sync_state row, then
         // report a sync cycle through the same ActivityCenter the ViewModel observes. A short real
-        // delay (every real sync does at least one suspending network call) gives ActivityCenter's
-        // internal syncing StateFlow — derived via an async map{}.stateIn(Dispatchers.Default)
-        // pipeline — a chance to actually observe the true state before it flips back to false.
+        // delay (every real sync does at least one suspending network call) gives the ViewModel's
+        // collector — a StateFlow collector is conflated, so it can miss a value that is replaced
+        // straight away — a chance to actually observe the true state before it flips back to false.
         val newMillis = 1_234_567_890_123L
         db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, newMillis.toString())
         runBlocking { activityCenter.trackSync { delay(50) } }

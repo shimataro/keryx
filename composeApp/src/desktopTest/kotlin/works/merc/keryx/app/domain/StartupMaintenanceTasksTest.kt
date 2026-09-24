@@ -71,8 +71,7 @@ class StartupMaintenanceTasksTest {
             db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, clock, writeDispatcher = Dispatchers.Unconfined,
         )
         val articleRepository = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, clock, Dispatchers.Unconfined)
-        // Unconfined so refreshCycleRunning.value reflects the counter synchronously (see ActivityCenterTest).
-        val activityCenter = ActivityCenter(CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        val activityCenter = ActivityCenter()
         return koinApplication {
             modules(
                 module {

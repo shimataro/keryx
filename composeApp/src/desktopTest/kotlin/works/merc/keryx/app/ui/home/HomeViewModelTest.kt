@@ -299,9 +299,9 @@ class HomeViewModelTest {
 
     @Test
     fun feedRefreshingReflectsActivityCenter() = runTest {
-        // Unconfined scope so the ActivityCenter's stateIn reflects counter changes inline.
+        // Unconfined scope so the gated track call below starts (and registers) inline.
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         try {
             val vm = newViewModel(activityCenter = activityCenter)
             assertFalse(vm.activity.value.feedRefreshing)
@@ -323,7 +323,7 @@ class HomeViewModelTest {
     fun refreshAllIsGuardedWhileAlreadyRefreshing() = runTest {
         db.insertFeed("f1")
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         try {
             val vm = newViewModel(activityCenter = activityCenter)
             subscribeAll(vm)
@@ -376,35 +376,30 @@ class HomeViewModelTest {
     fun pullToRefreshKeepsTheIndicatorUpThroughRefreshAndSync() = runTest {
         db.insertFeed("f1")
         val gate = CompletableDeferred<Unit>()
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
-        try {
-            val cloud = CountingNoCloud()
-            val vm = newViewModel(
-                feedFetcher = fetcherWith { gate.await(); respond(RSS, HttpStatusCode.OK) },
-                activityCenter = activityCenter,
-                cloudProvider = cloud,
-            )
-            subscribeAll(vm)
-            testScheduler.advanceUntilIdle()
+        val activityCenter = ActivityCenter()
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { gate.await(); respond(RSS, HttpStatusCode.OK) },
+            activityCenter = activityCenter,
+            cloudProvider = cloud,
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
 
-            vm.pullToRefresh()
-            // Raised synchronously, before the refresh coroutine has even started running.
-            assertTrue(vm.pullRefreshing.value)
-            testScheduler.runCurrent()
-            assertTrue(activityCenter.activity.value.feedRefreshing)
-            assertTrue(vm.pullRefreshing.value)
+        vm.pullToRefresh()
+        // Raised synchronously, before the refresh coroutine has even started running.
+        assertTrue(vm.pullRefreshing.value)
+        testScheduler.runCurrent()
+        assertTrue(activityCenter.activity.value.feedRefreshing)
+        assertTrue(vm.pullRefreshing.value)
 
-            gate.complete(Unit)
-            pumpUntil { !vm.pullRefreshing.value }
+        gate.complete(Unit)
+        pumpUntil { !vm.pullRefreshing.value }
 
-            assertFalse(vm.pullRefreshing.value)
-            assertFalse(activityCenter.activity.value.feedRefreshing)
-            assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
-            assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
-        } finally {
-            activityScope.cancel()
-        }
+        assertFalse(vm.pullRefreshing.value)
+        assertFalse(activityCenter.activity.value.feedRefreshing)
+        assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
+        assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
     }
 
     @Test
@@ -414,28 +409,23 @@ class HomeViewModelTest {
         db.insertFeed("f2", folderId = "d1")
         db.insertFeed("f3")
         val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
-        try {
-            val vm = newViewModel(
-                feedFetcher = fetcherWith { request ->
-                    requested += request.url.toString()
-                    respond("", HttpStatusCode.NotFound)
-                },
-                activityCenter = activityCenter,
-            )
-            subscribeAll(vm)
-            vm.selectFilter(ArticleFilter.Folder("d1"))
-            testScheduler.advanceUntilIdle()
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { request ->
+                requested += request.url.toString()
+                respond("", HttpStatusCode.NotFound)
+            },
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
 
-            vm.pullToRefresh()
-            pumpUntil { !vm.pullRefreshing.value }
+        vm.pullToRefresh()
+        pumpUntil { !vm.pullRefreshing.value }
 
-            assertFalse(vm.pullRefreshing.value)
-            assertEquals(setOf("https://feed/f1", "https://feed/f2"), requested.toSet())
-        } finally {
-            activityScope.cancel()
-        }
+        assertFalse(vm.pullRefreshing.value)
+        assertEquals(setOf("https://feed/f1", "https://feed/f2"), requested.toSet())
     }
 
     @Test
@@ -443,7 +433,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         try {
             val vm = newViewModel(
                 feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
@@ -477,7 +467,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         try {
             val vm = newViewModel(
                 feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
@@ -517,7 +507,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         try {
             val vm = newViewModel(
                 feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
@@ -568,7 +558,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
+        val activityCenter = ActivityCenter()
         try {
             val cloud = CountingNoCloud()
             val vm = newViewModel(
@@ -615,19 +605,10 @@ class HomeViewModelTest {
         }
 
     /**
-     * An [ActivityCenter] whose per-flag `stateIn` copies only catch up when the test scheduler is
-     * advanced, making their lag deterministic: anything that still read them would see a refresh
-     * started a moment ago as not running. [ActivityCenter.activity] never depends on this scope.
-     */
-    private fun TestScope.laggingActivityCenter(): ActivityCenter =
-        ActivityCenter(CoroutineScope(StandardTestDispatcher(testScheduler)))
-
-    /**
      * Regression: [HomeViewModel.refreshAll]'s double-start guard used to read ActivityCenter's
      * per-flag `stateIn` copies, which only catch up once their sharing coroutine is dispatched
      * (on `Dispatchers.Default` for the default [ActivityCenter]), so a second call right after the
-     * first could still see "not refreshing" and start a second refresh. [laggingActivityCenter]
-     * makes that lag deterministic.
+     * first could still see "not refreshing" and start a second refresh.
      *
      * Main is unconfined here, like production's `Main.immediate` on the UI thread: each
      * `viewModelScope.launch` runs inline up to its first suspension, so the first call's refresh
@@ -641,11 +622,7 @@ class HomeViewModelTest {
         val gate = CompletableDeferred<Unit>()
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val cloud = CountingNoCloud()
-        val vm = newViewModel(
-            feedFetcher = gatedCountingFetcher(gate, fetches),
-            activityCenter = laggingActivityCenter(),
-            cloudProvider = cloud,
-        )
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), cloudProvider = cloud)
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
@@ -672,11 +649,7 @@ class HomeViewModelTest {
         val gate = CompletableDeferred<Unit>()
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val cloud = CountingNoCloud()
-        val vm = newViewModel(
-            feedFetcher = gatedCountingFetcher(gate, fetches),
-            activityCenter = laggingActivityCenter(),
-            cloudProvider = cloud,
-        )
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), cloudProvider = cloud)
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
@@ -699,34 +672,29 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         val gate = CompletableDeferred<Unit>()
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
-        try {
-            val vm = newViewModel(
-                feedFetcher = fetcherWith {
-                    fetches.incrementAndGet()
-                    gate.await()
-                    respond("", HttpStatusCode.NotFound)
-                },
-                activityCenter = activityCenter,
-            )
-            subscribeAll(vm)
-            testScheduler.advanceUntilIdle()
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith {
+                fetches.incrementAndGet()
+                gate.await()
+                respond("", HttpStatusCode.NotFound)
+            },
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
 
-            vm.pullToRefresh()
-            vm.pullToRefresh()
-            testScheduler.runCurrent()
-            vm.pullToRefresh()
-            testScheduler.runCurrent()
+        vm.pullToRefresh()
+        vm.pullToRefresh()
+        testScheduler.runCurrent()
+        vm.pullToRefresh()
+        testScheduler.runCurrent()
 
-            gate.complete(Unit)
-            pumpUntil { !vm.pullRefreshing.value }
+        gate.complete(Unit)
+        pumpUntil { !vm.pullRefreshing.value }
 
-            assertFalse(vm.pullRefreshing.value)
-            assertEquals(1, fetches.get())
-        } finally {
-            activityScope.cancel()
-        }
+        assertFalse(vm.pullRefreshing.value)
+        assertEquals(1, fetches.get())
     }
 
     @Test
@@ -734,28 +702,23 @@ class HomeViewModelTest {
         db.insertFolder("d1", "Empty folder")
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
-        try {
-            val cloud = CountingNoCloud()
-            val vm = newViewModel(
-                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
-                activityCenter = activityCenter,
-                cloudProvider = cloud,
-            )
-            subscribeAll(vm)
-            vm.selectFilter(ArticleFilter.Folder("d1"))
-            testScheduler.advanceUntilIdle()
+        val activityCenter = ActivityCenter()
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+            activityCenter = activityCenter,
+            cloudProvider = cloud,
+        )
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
 
-            vm.pullToRefresh()
-            testScheduler.advanceUntilIdle()
+        vm.pullToRefresh()
+        testScheduler.advanceUntilIdle()
 
-            assertFalse(vm.pullRefreshing.value)
-            assertEquals(0, fetches.get())
-            assertEquals(0, cloud.syncs.get(), "an empty target must not sync")
-        } finally {
-            activityScope.cancel()
-        }
+        assertFalse(vm.pullRefreshing.value)
+        assertEquals(0, fetches.get())
+        assertEquals(0, cloud.syncs.get(), "an empty target must not sync")
     }
 
     /**
@@ -1630,50 +1593,42 @@ class HomeViewModelTest {
         // Gate the feed fetch open with a CompletableDeferred so refreshAll() genuinely suspends
         // mid-flight, giving us a window to change the selection before it completes.
         val gate = CompletableDeferred<Unit>()
-        // Unconfined-on-testScheduler ActivityCenter (mirrors feedRefreshingReflectsActivityCenter):
-        // the default ActivityCenter() runs its stateIn on a real Dispatchers.Default scope, which
-        // would mix real and virtual time here and make the poll below unreliable.
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
-        try {
-            val vm = newViewModel(
-                feedFetcher = fetcherWith { gate.await(); respond("", HttpStatusCode.NotFound) },
-                activityCenter = activityCenter,
-            )
-            subscribeAll(vm)
-            vm.selectFilter(ArticleFilter.All)
-            testScheduler.advanceUntilIdle()
-            val article1 = db.articlesQueries.getById("a1").executeAsOne()
-            vm.selectArticle(article1.toListRow())
-            vm.setUnreadOnly(true)
-            testScheduler.advanceUntilIdle()
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { gate.await(); respond("", HttpStatusCode.NotFound) },
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
 
-            vm.refreshAll()
-            // viewModelScope.launch{} bodies are only queued, not run inline; runCurrent() starts the
-            // coroutine so it reaches (and suspends on) the gate before we proceed.
-            testScheduler.runCurrent()
-            assertTrue(activityCenter.activity.value.feedRefreshing)
-            // The refresh is genuinely in flight here — simulate the user moving on to a2 before it completes.
-            val article2 = db.articlesQueries.getById("a2").executeAsOne()
-            vm.selectArticle(article2.toListRow())
-            gate.complete(Unit)
+        vm.refreshAll()
+        // viewModelScope.launch{} bodies are only queued, not run inline; runCurrent() starts the
+        // coroutine so it reaches (and suspends on) the gate before we proceed.
+        testScheduler.runCurrent()
+        assertTrue(activityCenter.activity.value.feedRefreshing)
+        // The refresh is genuinely in flight here — simulate the user moving on to a2 before it completes.
+        val article2 = db.articlesQueries.getById("a2").executeAsOne()
+        vm.selectArticle(article2.toListRow())
+        gate.complete(Unit)
 
-            // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
-            // so poll with short real sleeps until refreshAll settles (mirrors
-            // refreshAllRaisesTrayNotificationWhenNewArticlesArrive's established pattern).
-            var waited = 0
-            while (activityCenter.activity.value.feedRefreshing && waited < 5_000) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(50)
-                waited += 50
-            }
+        // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
+        // so poll with short real sleeps until refreshAll settles (mirrors
+        // refreshAllRaisesTrayNotificationWhenNewArticlesArrive's established pattern).
+        var waited = 0
+        while (activityCenter.activity.value.feedRefreshing && waited < 5_000) {
             testScheduler.advanceUntilIdle()
-
-            // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
-            assertEquals(listOf("a2"), vm.articles.value.map { it.id })
-        } finally {
-            activityScope.cancel()
+            Thread.sleep(50)
+            waited += 50
         }
+        testScheduler.advanceUntilIdle()
+
+        // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
     }
 
     @Test
@@ -2620,38 +2575,30 @@ class HomeViewModelTest {
         // helpers rely on elsewhere in this file), and this scope's advanceUntilIdle() below reliably
         // pumps it, matching NewArticleNotifierTest's established pattern.
         val trayJob = launch { notifier.trayEvents.collect { tray.add(it) } }
-        // Explicit Unconfined-on-testScheduler ActivityCenter (mirrors feedRefreshingReflectsActivityCenter):
-        // the default ActivityCenter() runs its stateIn on a real Dispatchers.Default scope, which
-        // would mix real and virtual time here and make the poll below unreliable.
-        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
-        val activityCenter = ActivityCenter(activityScope)
-        try {
-            val vm = newViewModel(
-                feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
-                newArticleNotifier = notifier,
-                activityCenter = activityCenter,
-            )
-            subscribeAll(vm)
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+            newArticleNotifier = notifier,
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        // The feed fetch/parse work hops onto Ktor's real MockEngine dispatcher (not the virtual
+        // test scheduler), so a single advanceUntilIdle() can race it (see docs/testing.md on
+        // mixing runTest with Ktor MockEngine). Poll with short real sleeps until it lands.
+        var waited = 0
+        while (tray.isEmpty() && waited < 5_000) {
             testScheduler.advanceUntilIdle()
-
-            vm.refreshAll()
-            // The feed fetch/parse work hops onto Ktor's real MockEngine dispatcher (not the virtual
-            // test scheduler), so a single advanceUntilIdle() can race it (see docs/testing.md on
-            // mixing runTest with Ktor MockEngine). Poll with short real sleeps until it lands.
-            var waited = 0
-            while (tray.isEmpty() && waited < 5_000) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(50)
-                waited += 50
-            }
-
-            // The single fetched article (guid g1) is reported via the fake NotificationMessages
-            // as "new:1"; this proves manual refresh now reaches the tray, not just the background loop.
-            assertEquals(listOf("new:1"), tray)
-            trayJob.cancel()
-        } finally {
-            activityScope.cancel()
+            Thread.sleep(50)
+            waited += 50
         }
+
+        // The single fetched article (guid g1) is reported via the fake NotificationMessages
+        // as "new:1"; this proves manual refresh now reaches the tray, not just the background loop.
+        assertEquals(listOf("new:1"), tray)
+        trayJob.cancel()
     }
 
     @Test

@@ -226,7 +226,7 @@ class FeedListPaneTest {
     fun refreshButtonStaysDisabledThroughRefreshAllsSyncPhase() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         val testScope = CoroutineScope(Dispatchers.Unconfined)
-        val activityCenter = ActivityCenter(testScope)
+        val activityCenter = ActivityCenter()
         try {
             useHomeViewModel(driver, db, activityCenter = activityCenter) { fixture ->
                 val vm = fixture.vm
@@ -258,7 +258,7 @@ class FeedListPaneTest {
     fun syncButtonStaysDisabledThroughRefreshAllsFetchPhase() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         val testScope = CoroutineScope(Dispatchers.Unconfined)
-        val activityCenter = ActivityCenter(testScope)
+        val activityCenter = ActivityCenter()
         val tokenStorage = FeedListPaneTestTokenStorage().apply { save(OAuthTokens("AT", "RT")) }
         try {
             useHomeViewModel(

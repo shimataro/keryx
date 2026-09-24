@@ -55,10 +55,10 @@ Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batc
 
 `SyncRepository` exposes `syncPhase: StateFlow<SyncPhase>` (`IDLE`, `CHECKING`, `DOWNLOADING`, `MERGING`,
 `INDEXING`, `PREPARING`, `UPLOADING`, `ARCHIVING`), so the cloud-sync settings tab can show *what* a sync is
-currently doing rather than only *whether* one is running (`ActivityCenter.syncing`, a plain boolean). Every
-transition happens inside the same `mutex` `sync()`/`resetCloudData()` already hold, so a sync queued behind
-another never observes a stale phase left by the one ahead of it, and the `finally` inside that lock always
-resets to `IDLE` on the way out — success, a classified `Result.Err`, or an uncaught exception alike.
+currently doing rather than only *whether* one is running (the `syncing` flag of the `ActivityCenter.activity`
+snapshot, a plain boolean). Every transition happens inside the same `mutex` `sync()`/`resetCloudData()`
+already hold, so a sync queued behind another never observes a stale phase left by the one ahead of it, and the
+`finally` inside that lock always resets to `IDLE` on the way out — success, a classified `Result.Err`, or an uncaught exception alike.
 
 The phases map onto the steps above: `CHECKING` for each retry loop's `metadata()` round trip (step 1),
 `DOWNLOADING` for the `download()` call in step 2, `MERGING` for the decompress-and-`DatabaseMerger.merge()`
