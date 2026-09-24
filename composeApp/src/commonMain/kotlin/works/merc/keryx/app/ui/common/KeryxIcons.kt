@@ -35,6 +35,8 @@ expect object KeryxIcons {
     // Chrome / actions (Outlined)
     val Add: DrawableResource
     val ArrowBack: DrawableResource
+    val ArrowDownward: DrawableResource
+    val ArrowUpward: DrawableResource
     val ChevronRight: DrawableResource
     val Cloud: DrawableResource
     val ContentCopy: DrawableResource

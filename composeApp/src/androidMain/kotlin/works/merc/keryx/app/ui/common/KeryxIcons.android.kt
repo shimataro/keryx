@@ -4,6 +4,8 @@ import org.jetbrains.compose.resources.DrawableResource
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.ic_add_material
 import works.merc.keryx.app.resources.ic_arrow_back_material
+import works.merc.keryx.app.resources.ic_arrow_downward_material
+import works.merc.keryx.app.resources.ic_arrow_upward_material
 import works.merc.keryx.app.resources.ic_article_material
 import works.merc.keryx.app.resources.ic_check_filled_material
 import works.merc.keryx.app.resources.ic_check_outlined_material
@@ -60,6 +62,8 @@ actual object KeryxIcons {
     // Chrome / actions (Outlined)
     actual val Add: DrawableResource = Res.drawable.ic_add_material
     actual val ArrowBack: DrawableResource = Res.drawable.ic_arrow_back_material
+    actual val ArrowDownward: DrawableResource = Res.drawable.ic_arrow_downward_material
+    actual val ArrowUpward: DrawableResource = Res.drawable.ic_arrow_upward_material
     actual val ChevronRight: DrawableResource = Res.drawable.ic_chevron_right_material
     actual val Cloud: DrawableResource = Res.drawable.ic_cloud_material
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_material

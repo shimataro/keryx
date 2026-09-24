@@ -268,6 +268,7 @@ class HomeViewModelTest {
         backgroundScope.launch { vm.articles.collect {} }
         backgroundScope.launch { vm.searchResults.collect {} }
         backgroundScope.launch { vm.pagerArticles.collect {} }
+        backgroundScope.launch { vm.newArticleCount.collect {} }
     }
 
     @Test
@@ -3842,6 +3843,133 @@ class HomeViewModelTest {
         assertEquals(ARTICLE_CONTENT_CACHE_LIMIT, vm.articleContents.value.size)
         // The two requested first are the two dropped; the most recent are all still in hand.
         assertEquals(ids.drop(2).toSet(), vm.articleContents.value.keys)
+    }
+
+    // --- newArticleCount (the article list's "new articles" pill) ---
+
+    @Test
+    fun newArticleCountIsZeroOnInitialLoad() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        // Nothing was "missed" yet — the first emission only seeds the baseline.
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun newArticleCountIncreasesWhenArticlesAreAddedAfterTheBaselineIsSeeded() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        db.insertArticle("a2", "f1")
+        db.insertArticle("a3", "f1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(2, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun markArticlesSeenDropsOnlyTheReportedIdsFromTheCount() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.newArticleCount.value)
+
+        vm.markArticlesSeen(listOf("a1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun markAllArticlesSeenClearsTheCount() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.newArticleCount.value)
+
+        vm.markAllArticlesSeen()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun switchingFiltersDoesNotCountThePreviousFilterSExistingArticlesAsNew() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // All still contains a1 — already present before tracking on this filter began — so
+        // switching must not treat it as new just because the query itself is now different.
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun togglingUnreadOnlyOrSortDirectionDoesNotChangeTheCount() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1", isRead = 0L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        vm.setUnreadOnly(false)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun newArticleCountIsZeroWhileSearchIsActive() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setSearchBarVisible(true)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1", content = "<p>hello world</p>")
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        vm.setSearchQuery("hello")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.searchActive.value)
+        assertEquals(0, vm.newArticleCount.value)
     }
 }
 

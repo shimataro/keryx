@@ -57,6 +57,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.windowInsetsPadding
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.DrawableResource
@@ -322,6 +324,28 @@ fun ArticleListPane(
     val onPullRefresh: (() -> Unit)? =
         if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) vm::pullToRefresh else null
 
+    // Reports which articles are actually on screen, so HomeViewModel can drop them from the "new
+    // articles" pill's count — see NewArticleTracking's own KDoc. layoutInfo is read only inside
+    // snapshotFlow, never in composition (see the ui-guidelines skill's "Scroll indicators"
+    // section), so a scroll never recomposes this pane. Suppressed during search: the pill's own
+    // count is already forced to 0 there (HomeViewModel.newArticleCount), so reporting search
+    // results as "seen" would just spend cycles on ids that were never counted as unseen anyway.
+    LaunchedEffect(listState, searchActive) {
+        if (searchActive) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } }
+            .distinctUntilChanged()
+            .collect { vm.markArticlesSeen(it) }
+    }
+
+    val newArticleCount by vm.newArticleCount.collectAsState()
+    val pillScope = rememberCoroutineScope()
+    val onNewArticlesClick: () -> Unit = {
+        vm.markAllArticlesSeen()
+        pillScope.launch {
+            listState.scrollToItem(if (newestFirst) 0 else articles.lastIndex.coerceAtLeast(0))
+        }
+    }
+
     ArticleListPaneContent(
         articles = articles,
         feedTitles = feedTitles,
@@ -359,6 +383,8 @@ fun ArticleListPane(
         // Only the list whose own pull is still running shows the indicator — another selection
         // switched to mid-pull is not the list being refreshed.
         pullRefreshing = onPullRefresh != null && filter in pullRefreshingFilters,
+        newArticleCount = newArticleCount,
+        onNewArticlesClick = onNewArticlesClick,
     )
 }
 
@@ -559,6 +585,10 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   the refresh threshold. `null` (the default) disables the gesture entirely — desktop, search
  *   results, and a user with no feeds all pass `null`.
  * @param pullRefreshing Whether the pull-to-refresh indicator shows as refreshing.
+ * @param newArticleCount Unseen-article count for the floating "new articles" pill
+ *   ([NewArticlesPill]) — `0` (the default) renders nothing. Always `0` for search results, since
+ *   `NewArticleTracking` is seeded from the filter's own raw query, not search.
+ * @param onNewArticlesClick The pill's own tap action.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -592,6 +622,8 @@ internal fun ArticleListPaneContent(
     emptyContent: (@Composable () -> Unit)? = null,
     onPullRefresh: (() -> Unit)? = null,
     pullRefreshing: Boolean = false,
+    newArticleCount: Int = 0,
+    onNewArticlesClick: () -> Unit = {},
 ) {
     LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
@@ -726,6 +758,23 @@ internal fun ArticleListPaneContent(
                 state = pullState,
                 isRefreshing = pullRefreshing,
                 modifier = Modifier.align(Alignment.TopCenter),
+            )
+            // Always present as a sibling of the LazyColumn (never one of its items — see
+            // known-issues.md's article-list reuse crash) so its own presence/count never affects
+            // that list's own LayoutNode count. newestFirst decides which end it hugs: new
+            // articles land where they'd otherwise pile up unseen.
+            NewArticlesPill(
+                count = newArticleCount,
+                up = newestFirst,
+                onClick = onNewArticlesClick,
+                modifier = Modifier
+                    .align(if (newestFirst) Alignment.TopCenter else Alignment.BottomCenter)
+                    // Only meaningful at the bottom alignment (clears Android's edge-to-edge
+                    // navigation bar, matching the LazyColumn's own bottom contentPadding above);
+                    // applying it unconditionally keeps this modifier chain identical regardless
+                    // of newestFirst, rather than branching it too.
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                    .padding(8.dp),
             )
         }
     }
