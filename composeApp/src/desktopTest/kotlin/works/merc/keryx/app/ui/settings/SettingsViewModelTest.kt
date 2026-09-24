@@ -890,6 +890,35 @@ class SettingsViewModelTest {
     }
 
     /**
+     * A second `syncNow()` while the first is still in flight must be ignored. Without a local
+     * in-flight flag the second call can race past [canSyncNow] before the [ActivityCenter]
+     * collector updates [idle], causing a redundant sync to queue behind [SyncRepository]'s mutex.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun syncNowIgnoresSecondCallWhileFirstIsInFlight() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(
+            tokenStorage = tokenStorage,
+            syncCloudProvider = { GatedCloudStorage(gate) },
+            dispatcher = Dispatchers.Default,
+        )
+        assertTrue(vm.canSyncNow)
+
+        vm.syncNow()
+        // Immediately after the first call the local flag blocks a second one.
+        assertFalse(vm.canSyncNow)
+
+        vm.syncNow() // must be ignored
+
+        gate.complete(Unit)
+        awaitTrue { vm.canSyncNow }
+    }
+
+    /**
      * `reconnect()` must not stop at the teardown half. On Android's Google Drive the disconnect is
      * the only thing that clears Play services' cached token, but a disconnect that never connects
      * back would leave the user staring at an unconfigured provider after pressing a button labelled

@@ -181,7 +181,15 @@ class SettingsViewModel(
      */
     val canSyncNow: Boolean
         get() = connectedType != null && idle && connectingType == null && initialSyncingType == null &&
-            !disconnecting && !resetting && !lastSyncAuthFailed
+            !disconnecting && !resetting && !lastSyncAuthFailed && !manualSyncInFlight
+
+    /**
+     * True while a manual sync started by [syncNow] is in flight. Prevents a second click from
+     * racing past [canSyncNow] before the [ActivityCenter] collector updates [idle]: a redundant
+     * call would otherwise queue behind the mutex in [syncRepository.sync] and run a second sync
+     * once the first finishes.
+     */
+    private var manualSyncInFlight by mutableStateOf(false)
 
     init {
         refreshLastSyncedAt()
@@ -225,8 +233,13 @@ class SettingsViewModel(
      */
     fun syncNow() {
         if (!canSyncNow) return
+        manualSyncInFlight = true
         viewModelScope.launch {
-            withContext(dispatcher) { syncRepository.sync() }
+            try {
+                withContext(dispatcher) { syncRepository.sync() }
+            } finally {
+                manualSyncInFlight = false
+            }
         }
     }
 
