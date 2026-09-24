@@ -16,18 +16,19 @@
 要約で、各周回のエラー処理と、独立した間隔で走るアップデート確認は省略している。`backgroundUpdateLoop`
 自体はデスクトップ専用（単純なコルーチンループ。Android 側の対応物は `WorkManager` の
 `PeriodicWorkRequest` — 上のプラットフォーム方針の表と後述の「Android 実装」を参照）だが、毎周回
-呼び出す3関数 `refreshFeedsAndNotify` / `checkForUpdateAndNotify` / `maybeRebuildFtsIndex` は
-プラットフォーム非依存で commonMain の `domain/StartupMaintenanceTasks.kt` にあるため、Android 側の
-worker は重複実装せず同じ実装を呼んでいる。
+実行する処理はプラットフォーム非依存の commonMain のコードなので、Android 側の worker は重複実装せず
+同じ実装を呼んでいる: `domain/RefreshCycleRunner.kt` の `RefreshCycleRunner.run`（更新 → 新着記事通知 →
+同期のサイクル。手動更新と引っ張って更新も、その `runIfIdle` 経由で同じものを通る）と、
+`domain/StartupMaintenanceTasks.kt` の `checkForUpdateAndNotify` / `maybeRebuildFtsIndex` である。
 
 ```kotlin
 while (true) {
     val minutes = settings.refreshIntervalMinutes
     delay(if (minutes <= 0) 60_000L else minutes * 60_000L)  // 「手動」（minutes <= 0）は 1 分ごとに起床
     if (minutes > 0) {
-        refreshFeedsAndNotify()   // 全フィード更新（ETag / Last-Modified 差分取得）→ 新着があり通知が
-                                  // 有効なら NewArticleNotifier.notifyIfEnabled(...)
-        sync()                    // クラウド同期
+        refreshCycleRunner.run()  // 更新サイクル1回: 全フィード更新（ETag / Last-Modified 差分取得）→
+                                  // 新着があり通知が有効なら NewArticleNotifier.notifyIfEnabled(...)
+                                  // → CloudSession.isConnected() ならクラウド同期
     }
     maybeRebuildFtsIndex()        // FTS 全再構築の日次 heal（後述）
 }
@@ -59,8 +60,8 @@ while (true) {
 `background/FeedRefreshWorker.kt`（`CoroutineWorker`。`WorkManager` 自身の `WorkerFactory` が
 リフレクションでインスタンス化するため、依存関係はコンストラクタ注入ではなく `doWork()` 内で
 `KoinPlatform.getKoin()` から解決する）は、デスクトップの `backgroundUpdateLoop` が毎周回実行する
-のとまったく同じ手順を実行する: `refreshFeedsAndNotify` → （`CloudSession.isConnected()` が真なら）
-`SyncRepository.sync(SyncTrigger.AUTOMATIC)` → `shouldCheckForUpdate` が true の場合のみ `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
+のとまったく同じ手順を実行する: `RefreshCycleRunner.run`（フィード更新とその新着記事通知 →
+`CloudSession.isConnected()` が真なら `SyncRepository.sync(SyncTrigger.AUTOMATIC)`）→ `shouldCheckForUpdate` が true の場合のみ `checkForUpdateAndNotify` → `maybeRebuildFtsIndex`。
 Android の `CloudSession` は Dropbox と OneDrive に加え、Play 開発者サービスが利用できる環境でのみ
 Google Drive も持つ（[sync-architecture.ja.md](sync-architecture.ja.md) の
 「Android での Google Drive」参照）ため、ユーザーがそのいずれとも連携していない場合、あるいは
@@ -81,7 +82,8 @@ Google Drive も持つ（[sync-architecture.ja.md](sync-architecture.ja.md) の
 
 1. `cleanUpArticleCacheIfDue`（後述）。
 2. 初回クラウド同期——デスクトップの `runStartupTasks` と同じ位置・同じゲート。
-3. `refreshFeedsAndNotify`
+3. フィード更新とその新着記事通知（2 と 3 は同期を先に行う1回の `RefreshCycleRunner.run` サイクル
+   として実行される）
 4. `checkForUpdateAndNotify`
 5. `maybeRebuildFtsIndex`
 
@@ -475,7 +477,8 @@ self-replace 成果物の掃除——を足すだけで、残りは `runStartupM
    Play 開発者サービスが利用できる環境のみ）。起動時であっても前述の
    `SyncTrigger.AUTOMATIC` のゲートを迂回するわけではなく、`autoSyncSuspended` が真の間は、
    この呼び出しでダウンロードもマージもアップロードも行われない。
-3. フィード更新とその新着記事通知（`refreshFeedsAndNotify`）。
+3. フィード更新とその新着記事通知。2 と 3 は `SYNC_THEN_REFRESH` 順の1回の `RefreshCycleRunner.run`
+   サイクルとして実行されるため、その間の隙間も処理中として扱われる。
 4. 自動/バックグラウンドのスケジュールでのアップデート確認（`checkForUpdateAndNotify`）。
 5. FTS 全再構築（`maybeRebuildFtsIndex`、前回から 24 時間以上 かつ アイドル時のみ。下記）。
 
@@ -495,7 +498,7 @@ self-replace 成果物の掃除——を足すだけで、残りは `runStartupM
   1日最大 ~96 回。「Android での実装」節を参照）ため、`ensureIndexed()` が呼ぶ `indexMissing()`
   の `O(記事数)` スキャンをそのたびに払うわけにはいかない。`ensureIndexedIfTableAbsent()` は
   テーブルが一度作成・バックフィルされた後は `sqlite_master` を1回引くだけの no-op になる。
-- 新着記事の索引付けは、`refreshFeedsAndNotify` / 同期でのホットパス `indexMissing()` 呼び出しと、
+- 新着記事の索引付けは、`RefreshCycleRunner` の更新 / 同期でのホットパス `indexMissing()` 呼び出しと、
   下記の日次再構築 heal で通常どおり継続される。
 
 ## FTS 全再構築の日次 heal（`maybeRebuildFtsIndex`）

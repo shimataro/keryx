@@ -248,7 +248,7 @@ see `app-architecture.md`), and the swipe gesture does not apply there.
 The article list has one more touch-only affordance, on Android at **every** width (including the
 3-pane layout a large tablet reaches) and with no desktop counterpart, since a mouse has no pull
 gesture: **pulling the list down refreshes it**, using Material 3's own pull-to-refresh indicator.
-Unlike the toolbar's "Refresh All" — which keeps refreshing every feed, unchanged — a pull refreshes
+Unlike the toolbar's refresh button — which keeps refreshing every feed, unchanged — a pull refreshes
 only the feeds behind the list currently on screen:
 
 | Selected in the feed list | Feeds a pull refreshes |
@@ -261,10 +261,13 @@ only the feeds behind the list currently on screen:
 A selection that covers no subscribed feed at all (an empty folder or tag) finishes at once, fetching
 and syncing nothing. The gesture works on an empty list too (e.g. "unread only" with nothing unread),
 but is disabled while search results are showing — pulling a result list isn't a request to refresh
-the feeds behind it — and while there are no feeds at all. As with "Refresh All", a pull is followed
-by a cloud sync when one is connected, and the indicator stays up until that sync has finished too,
-not just the feed fetches. A pull made while a refresh or sync is already running (a background
-refresh, say) starts nothing new; the indicator simply stays up until the running one finishes.
+the feeds behind it — and while there are no feeds at all. As with the toolbar's refresh button, a
+pull is followed by a cloud sync when one is connected, and the indicator stays up until that sync
+has finished too, not just the feed fetches. A pull made while a refresh or sync is already running (a
+background refresh, say) starts nothing new; the indicator simply stays up until the running one
+finishes. The same refresh is also reachable without the gesture, wherever the gesture itself is
+available: as a TalkBack custom action on the list ("Refresh this list"), and from a physical
+keyboard with Ctrl+Shift+R.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

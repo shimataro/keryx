@@ -332,6 +332,36 @@ that is the node a screen reader actually focuses. These are not a nice-to-have 
 the pager's user scroll disables its own accessibility scroll actions too, so this is the only way
 a screen-reader user can move between articles.
 
+**Touch input on the article list.** Pulling the article list down refreshes the feeds behind the
+current selection (`external-spec.md` §9) — `ArticleListPaneContent` wraps its list in M3's
+`Modifier.pullToRefresh` plus a `PullToRefreshDefaults.Indicator`, at every width on Android. A few
+rules keep it consistent with the rest of this file:
+
+- **Always composed, only `enabled` toggles.** The modifier and the indicator are present on every
+  platform and in every state; `onPullRefresh == null` merely disables the gesture. Entering or
+  leaving search, or the last feed being unsubscribed, therefore never adds or removes a wrapper
+  around the `LazyColumn` (see "Layout stability under state changes").
+- **An empty list must stay pullable.** `pullToRefresh` listens through nested scroll, which a
+  plain non-scrolling empty-state `Box` never produces. The "no articles" message therefore sits in
+  a `verticalScroll` column with `heightIn(min = maxHeight)` — it never overflows, but a pull on it
+  still reaches the modifier, and the message stays centered.
+- **One rule decides availability.** `ui/home/HomeCommon.kt`'s `pullRefreshAvailable(isTouchPrimary,
+  searchActive, hasNoFeeds)` — touch-primary only, never over search results, never with no feeds —
+  is read by both `ArticleListPane` (the gesture and its accessibility action) and `HomeScreen`
+  (the keyboard shortcut below). Never re-derive the condition at a new call site.
+- **The indicator belongs to the list that was pulled.** `HomeViewModel.pullRefreshingFilters`
+  holds the `ArticleFilter` each pending pull started on; the pane shows the indicator only when
+  `onPullRefresh != null && filter in pullRefreshingFilters`. Switching to another selection
+  mid-pull shows that list as idle, and switching back shows the pull again. It is deliberately not
+  derived from `ActivityCenter`, which would light it up for background refreshes nobody pulled.
+- **Non-pointer equivalents.** Per "A pointer-only gesture … needs a `CustomAccessibilityAction`
+  equivalent" under Accessibility, the list's `Box` carries a "Refresh this list"
+  (`home_refresh_this_list`) custom action whenever the gesture is enabled (an empty action list
+  otherwise, so the modifier chain itself stays stable). A physical keyboard reaches the same
+  refresh with Ctrl+Shift+R (`homeKeyboardShortcuts`' `onRefreshList`), passed only where
+  `pullRefreshAvailable` holds — so never on desktop, whose app menu owns Ctrl+Shift+R for
+  refresh-selected-feed.
+
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
 (`ui/home/ListRowChrome.kt`'s `listRowMinHeight`, matching M3's `NavigationDrawerItem` minimum —
