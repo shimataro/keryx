@@ -1,5 +1,7 @@
 package works.merc.keryx.app.ui.home
 
+import works.merc.keryx.app.domain.ArticleListRow
+
 /**
  * Tracks which newly inserted article ids have appeared in the current filter's raw query result
  * but have not yet scrolled into the article list's viewport — the "new articles" pill's own state
@@ -17,6 +19,13 @@ package works.merc.keryx.app.ui.home
  * feed moved into the folder being viewed, a tag attached to its feed, a star synced in from another
  * device — none of which the user "missed". The rowid check is what rules those out; see
  * `ArticleRepository.articleIdsInsertedAfter`.
+ *
+ * [unseenIds] is not what the pill shows, though: the pill counts only the unseen ids on the list's
+ * fresh side of the viewport ([freshSideUnseenCount]). The list is ordered by `published_at`, so a
+ * new article can land anywhere in it — mid-list, or at the far end for a missing date — and one
+ * that lands on the stale side of the viewport would otherwise keep the pill up even after
+ * scrolling all the way to the fresh end, since that scroll never brings it on screen. It stays in
+ * [unseenIds] regardless, and drops out as usual if a scroll ever passes it.
  *
  * @param knownIds Every id seen in any raw query result since the baseline was seeded under this
  *   filter (a cumulative union, not just the latest result), plus any acknowledged via
@@ -105,3 +114,44 @@ internal fun NewArticleTracking.withVisible(ids: Set<String>): NewArticleTrackin
 /** Clears every unseen id — the pill's own tap action. */
 internal fun NewArticleTracking.allSeen(): NewArticleTracking =
     if (unseenIds.isEmpty()) this else copy(unseenIds = emptySet())
+
+/**
+ * The article list's viewport as it last reported itself: the ids of its first and last visible
+ * rows, in display order.
+ */
+internal data class VisibleRange(val firstId: String, val lastId: String)
+
+/**
+ * The "new articles" pill's count: the [unseenIds] in [display] that sit beyond the [viewport] on
+ * the list's fresh side — before its first visible row under [newestFirst], after its last one
+ * otherwise. So scrolling all the way to the fresh end always brings the count to `0`.
+ *
+ * Judged against the viewport as it stands now, not where it was when each article arrived: a row
+ * on the stale side can only reach the fresh side by a scroll passing it, which reports it visible
+ * and drops it from [unseenIds] on the way. An article inserted at the fresh end while the list
+ * already sits there lands just beyond the viewport (the lazy list keeps its first visible row by
+ * key), and correctly counts until scrolled to.
+ *
+ * With no [viewport] reported yet, or one whose row is no longer in [display], every unseen id in
+ * [display] counts — the pre-viewport behavior. That state is transient: a change to [display]
+ * changes the visible rows too, so a fresh report follows on the next layout.
+ */
+internal fun freshSideUnseenCount(
+    display: List<ArticleListRow>,
+    unseenIds: Set<String>,
+    viewport: VisibleRange?,
+    newestFirst: Boolean,
+): Int {
+    if (unseenIds.isEmpty()) return 0
+    val edge = when {
+        viewport == null -> -1
+        newestFirst -> display.indexOfFirst { it.id == viewport.firstId }
+        else -> display.indexOfFirst { it.id == viewport.lastId }
+    }
+    val freshSide = when {
+        edge < 0 -> display
+        newestFirst -> display.subList(0, edge)
+        else -> display.subList(edge + 1, display.size)
+    }
+    return freshSide.count { it.id in unseenIds }
+}

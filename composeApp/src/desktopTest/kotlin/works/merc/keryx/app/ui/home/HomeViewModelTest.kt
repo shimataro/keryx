@@ -4079,18 +4079,97 @@ class HomeViewModelTest {
         // A non-empty baseline before the VM even starts — an empty-then-filled one is its own
         // "still seeding" case (see NewArticleTracking.withList) and would leave nothing here for
         // markArticlesSeen to trim.
-        db.insertArticle("seed", "f1")
+        db.insertArticle("seed", "f1", publishedAt = 100L)
         val vm = newViewModel()
         subscribeAll(vm)
         vm.selectFilter(ArticleFilter.All)
         testScheduler.advanceUntilIdle()
 
-        db.insertArticle("a1", "f1")
-        db.insertArticle("a2", "f1")
+        db.insertArticle("a1", "f1", publishedAt = 200L)
+        db.insertArticle("a2", "f1", publishedAt = 300L)
         testScheduler.advanceUntilIdle()
         assertEquals(2, vm.newArticleCount.value)
 
+        // Display order is a2, a1, seed: reporting a1 as the viewport leaves a2 above it, on the
+        // fresh side, so it still counts (see freshSideUnseenCount).
         vm.markArticlesSeen(listOf("a1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun anArticleLandingBelowTheViewportIsNotCountedButOneAboveIs() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        // Scrolled partway down: only s2 is on screen (display order s3, s2, s1).
+        vm.markArticlesSeen(listOf("s2"))
+        testScheduler.advanceUntilIdle()
+
+        // An older publish date sorts it below the viewport — scrolling to the top would never
+        // bring it on screen, so it must not hold the pill up.
+        db.insertArticle("old", "f1", publishedAt = 500L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun scrollingToTheFreshEndClearsTheCountEvenWithUnseenArticlesFurtherDown() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.markArticlesSeen(listOf("s3"))
+        testScheduler.advanceUntilIdle()
+
+        // The reported bug: new articles land above the viewport and below it while the user is
+        // scrolled away from the top.
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        db.insertArticle("old", "f1", publishedAt = 500L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        // Scrolled back to the top: "old" is still unseen, but the pill must be gone.
+        vm.markArticlesSeen(listOf("fresh", "s3"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun theFreshSideFollowsSortDirection() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.markArticlesSeen(listOf("s2"))
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        db.insertArticle("old1", "f1", publishedAt = 500L)
+        db.insertArticle("old2", "f1", publishedAt = 400L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        // Oldest first: display is old2, old1, s1, s2, s3, fresh. The fresh side is now below s2,
+        // so it is still "fresh" alone that counts — not the two older ones now above the viewport.
+        vm.toggleSort()
         testScheduler.advanceUntilIdle()
         assertEquals(1, vm.newArticleCount.value)
     }

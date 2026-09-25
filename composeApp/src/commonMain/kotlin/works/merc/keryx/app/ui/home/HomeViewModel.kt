@@ -354,19 +354,33 @@ class HomeViewModel(
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, emptyList())
 
+    // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
+    // measures "the fresh side" against. null until the list first reports.
+    private val _visibleRange = MutableStateFlow<VisibleRange?>(null)
+
     /**
      * Count for the article list's "new articles" pill — ids tracked by [_newArticleTracking] that
      * are also in the currently displayed [articles] (so an unseen id hidden by unread-only doesn't
-     * inflate the count; it reappears if the toggle is turned back off). Always `0` while search is
-     * active, since search results aren't what [_newArticleTracking] was seeded from.
+     * inflate the count; it reappears if the toggle is turned back off) *and* sit beyond the
+     * viewport on the list's fresh side (see [freshSideUnseenCount]), so scrolling to the fresh end
+     * always clears the pill. Always `0` while search is active, since search results aren't what
+     * [_newArticleTracking] was seeded from.
      */
     val newArticleCount: StateFlow<Int> =
-        combine(_newArticleTracking, articles, searchActive) { tracking, list, searching ->
-            if (searching || tracking.unseenIds.isEmpty()) 0 else list.count { it.id in tracking.unseenIds }
+        combine(
+            _newArticleTracking, articles, searchActive, _visibleRange, _newestFirst,
+        ) { tracking, list, searching, viewport, newest ->
+            // Short-circuits before touching the list: this re-runs on every visible-row change
+            // while scrolling, and nothing is unseen almost all of the time.
+            if (searching || tracking.unseenIds.isEmpty()) 0 else freshSideUnseenCount(list, tracking.unseenIds, viewport, newest)
         }.stateIn(viewModelScope, started, 0)
 
-    /** Reports the article ids currently visible in the list, clearing them from [newArticleCount]. */
-    fun markArticlesSeen(ids: Collection<String>) {
+    /**
+     * Reports the article ids currently visible in the list, in display order — clearing them from
+     * [newArticleCount], and recording the viewport that count's fresh side is measured against.
+     */
+    fun markArticlesSeen(ids: List<String>) {
+        _visibleRange.value = if (ids.isEmpty()) null else VisibleRange(ids.first(), ids.last())
         if (ids.isEmpty()) return
         _newArticleTracking.update { it.withVisible(ids.toSet()) }
     }

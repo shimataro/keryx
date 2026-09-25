@@ -327,9 +327,11 @@ fun ArticleListPane(
         if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) vm::pullToRefresh else null
 
     // Reports which articles are actually on screen, so HomeViewModel can drop them from the "new
-    // articles" pill's count — see NewArticleTracking's own KDoc. layoutInfo is read only inside
-    // snapshotFlow, never in composition (see the ui-guidelines skill's "Scroll indicators"
-    // section), so a scroll never recomposes this pane. Suppressed during search: the pill's own
+    // articles" pill's count — and measure which side of the viewport the rest sit on, since only
+    // the fresh side counts (freshSideUnseenCount). See NewArticleTracking's own KDoc. layoutInfo
+    // is read only inside snapshotFlow, never in composition (see the ui-guidelines skill's
+    // "Scroll indicators" section), so a scroll never recomposes this pane. Suppressed during
+    // search: the pill's own
     // count is already forced to 0 there (HomeViewModel.newArticleCount), so reporting search
     // results as "seen" would just spend cycles on ids that were never counted as unseen anyway.
     LaunchedEffect(listState, searchActive) {

@@ -1,6 +1,7 @@
 package works.merc.keryx.app.ui.home
 
 import kotlin.test.Test
+import works.merc.keryx.app.domain.ArticleListRow
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -10,6 +11,14 @@ import kotlin.test.assertTrue
  * has its own tests further down, calling the two-argument [withList] directly.
  */
 private fun NewArticleTracking.withList(ids: Set<String>): NewArticleTracking = withList(ids, inserted = ids)
+
+/** A display list in the given order — [freshSideUnseenCount] only reads ids and positions. */
+private fun rows(vararg ids: String): List<ArticleListRow> = ids.map { id ->
+    ArticleListRow(
+        id = id, feed_id = "f1", title = id, url = "https://article/$id",
+        published_at = null, created_at = 0L, is_read = 0L, is_starred = 0L,
+    )
+}
 
 class NewArticleTrackingTest {
 
@@ -237,5 +246,51 @@ class NewArticleTrackingTest {
         val tracking = NewArticleTracking().withList(setOf("a"))
         val result = tracking.allSeen()
         assertEquals(tracking, result)
+    }
+
+    // --- freshSideUnseenCount (the pill's own count) ---
+
+    @Test
+    fun freshSideUnseenCountUnderNewestFirstCountsOnlyUnseenIdsAboveTheViewport() {
+        // Viewport is c..e; a is above it, d inside, g below.
+        val display = rows("a", "b", "c", "d", "e", "f", "g")
+        val count = freshSideUnseenCount(display, setOf("a", "d", "g"), VisibleRange("c", "e"), newestFirst = true)
+        assertEquals(1, count)
+    }
+
+    @Test
+    fun freshSideUnseenCountUnderOldestFirstCountsOnlyUnseenIdsBelowTheViewport() {
+        // The same rows reversed: the fresh end is now the bottom, so only a (below c) counts.
+        val display = rows("g", "f", "e", "d", "c", "b", "a")
+        val count = freshSideUnseenCount(display, setOf("a", "d", "g"), VisibleRange("e", "c"), newestFirst = false)
+        assertEquals(1, count)
+    }
+
+    @Test
+    fun freshSideUnseenCountIsZeroOnceTheViewportReachesTheFreshEnd() {
+        val display = rows("a", "b", "c", "d")
+        assertEquals(0, freshSideUnseenCount(display, setOf("a", "d"), VisibleRange("a", "b"), newestFirst = true))
+        assertEquals(0, freshSideUnseenCount(display, setOf("a", "d"), VisibleRange("c", "d"), newestFirst = false))
+    }
+
+    @Test
+    fun freshSideUnseenCountCountsEveryUnseenIdWithNoViewportReported() {
+        val display = rows("a", "b", "c")
+        assertEquals(2, freshSideUnseenCount(display, setOf("a", "c"), viewport = null, newestFirst = true))
+    }
+
+    @Test
+    fun freshSideUnseenCountCountsEveryUnseenIdWhenTheViewportRowIsGone() {
+        val display = rows("a", "b", "c")
+        val stale = VisibleRange("x", "y")
+        assertEquals(2, freshSideUnseenCount(display, setOf("a", "c"), stale, newestFirst = true))
+        assertEquals(2, freshSideUnseenCount(display, setOf("a", "c"), stale, newestFirst = false))
+    }
+
+    @Test
+    fun freshSideUnseenCountIgnoresUnseenIdsMissingFromTheDisplayList() {
+        // e.g. hidden by unread-only.
+        val display = rows("a", "b", "c")
+        assertEquals(1, freshSideUnseenCount(display, setOf("a", "hidden"), VisibleRange("c", "c"), newestFirst = true))
     }
 }
