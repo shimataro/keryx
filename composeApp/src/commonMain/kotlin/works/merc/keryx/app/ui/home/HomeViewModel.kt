@@ -365,9 +365,10 @@ class HomeViewModel(
 
     /**
      * Re-seeds [_newArticleTracking]'s baseline from scratch — used by [filteredArticles]'s
-     * `onStart` (a filter change) and by [subscribeFeeds] (a successful subscribe). Both share the
-     * same reasoning: whatever the next raw query emission contains was not "missed" by the user,
-     * so it must become the new baseline rather than being diffed against whatever came before it.
+     * `onStart` (a filter change): whatever the new filter's first raw query emission contains was
+     * not "missed" by the user, so it must become the new baseline rather than being diffed against
+     * the previous filter's id set. ([subscribeFeeds] deliberately does not reset — it acknowledges
+     * just the subscribed feeds' articles via [withAcknowledged].)
      */
     private fun resetNewArticleTracking() {
         _newArticleTracking.value = NewArticleTracking()
@@ -1162,11 +1163,16 @@ class HomeViewModel(
             tagIdForNewFeed(),
         )
         // Subscribing is the user's own action, and whatever it fetched is right there in front of
-        // them — it was never "missed". Reset unconditionally on success rather than only when the
-        // currently selected filter would show the new feed: the raw query's own emission for the
-        // fetched articles can land either before or after this call returns, so a reset scoped to
-        // "only if this filter is affected" would have to guess which race it's in.
-        if (outcome.successCount > 0) resetNewArticleTracking()
+        // them — it was never "missed". Acknowledge exactly the subscribed feeds' articles instead
+        // of resetting the whole baseline: a reset would drop any unseen ids the user genuinely
+        // hasn't scrolled to yet, and — when the current filter isn't affected by the subscription
+        // and so never re-emits — leave the baseline unseeded, so the next real arrival would only
+        // re-seed it and be missed. withAcknowledged gives the same result whether the raw query's
+        // own emission for the fetched articles lands before or after this point.
+        if (outcome.feedIds.isNotEmpty()) {
+            val ids = withContext(dbWriteDispatcher) { articleRepository.articleIdsByFeeds(outcome.feedIds) }
+            _newArticleTracking.update { it.withAcknowledged(ids) }
+        }
         return outcome
     }
 

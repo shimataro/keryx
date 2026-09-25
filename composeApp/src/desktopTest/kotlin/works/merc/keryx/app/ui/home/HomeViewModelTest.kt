@@ -4224,6 +4224,51 @@ class HomeViewModelTest {
         // looking at — it was never "missed".
         assertEquals(0, vm.newArticleCount.value)
     }
+
+    @Test
+    fun subscribingAFeedKeepsExistingUnseenArticlesCounted() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.newArticleCount.value)
+
+        vm.subscribeFeeds(listOf("https://ex.com/feed"))
+        testScheduler.advanceUntilIdle()
+
+        // Only the subscribed feed's own article is acknowledged; a1/a2 are still unseen.
+        assertEquals(2, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun anArrivalAfterSubscribingAFeedOutsideTheCurrentFilterIsStillCounted() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // The new feed is outside Feed(f1), so this filter's raw query never re-emits for it — the
+        // baseline must survive rather than being left unseeded.
+        vm.subscribeFeeds(listOf("https://ex.com/feed"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        db.insertArticle("a1", "f1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, vm.newArticleCount.value)
+    }
 }
 
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>

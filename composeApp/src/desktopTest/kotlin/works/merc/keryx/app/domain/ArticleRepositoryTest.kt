@@ -141,6 +141,37 @@ class ArticleRepositoryTest {
         }
     }
 
+    @Test
+    fun articleIdsByFeedsReturnsOnlyLiveArticlesOfTheRequestedFeeds() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2")
+            db.insertFeed("f3")
+            db.insertArticle("a1", "f1")
+            db.insertArticle("a2", "f2")
+            db.insertArticle("deleted", "f1")
+            db.insertArticle("other", "f3")
+            driver.stampArticleDeleted("deleted", deletedAt = 100L)
+
+            val ids = newRepo(db, driver).articleIdsByFeeds(listOf("f1", "f2", "missing"))
+
+            assertEquals(setOf("a1", "a2"), ids)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleIdsByFeedsOfAnEmptyCollectionIsEmptyWithNoQuery() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            assertEquals(emptySet(), newRepo(db, driver).articleIdsByFeeds(emptyList()))
+        } finally {
+            driver.close()
+        }
+    }
+
     /**
      * The list projection deliberately omits the body columns; the reader loads them per selected
      * article instead. Pins the split so neither side drifts back.

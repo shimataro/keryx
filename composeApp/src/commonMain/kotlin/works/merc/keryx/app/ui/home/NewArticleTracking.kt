@@ -49,6 +49,25 @@ internal fun NewArticleTracking.withList(ids: Set<String>): NewArticleTracking {
     return copy(knownIds = ids, unseenIds = nextUnseen)
 }
 
+/**
+ * Marks [ids] as already known without the user having scrolled to them — used for articles the
+ * user just brought in themselves (a subscription), which were never "missed".
+ *
+ * A `null`/empty baseline is returned unchanged: the next raw query emission seeds the baseline
+ * anyway (see [withList]), so nothing it contains can be counted. Otherwise [ids] join
+ * [NewArticleTracking.knownIds] and leave [NewArticleTracking.unseenIds]. The result is the same
+ * whichever side of this call the corresponding raw query emission lands on: before it, the ids are
+ * in the baseline when the emission diffs and so are never added; after it, the emission already
+ * counted them and this removes them again. Either way every *other* unseen id is kept, and an id
+ * in [ids] that isn't under the current filter at all only widens [NewArticleTracking.knownIds]
+ * harmlessly (the next [withList] replaces it with the actual result).
+ */
+internal fun NewArticleTracking.withAcknowledged(ids: Set<String>): NewArticleTracking {
+    val known = knownIds
+    if (known.isNullOrEmpty() || ids.isEmpty()) return this
+    return copy(knownIds = known + ids, unseenIds = unseenIds - ids)
+}
+
 /** Drops [ids] from [NewArticleTracking.unseenIds] — the list's own report of what's now on screen. */
 internal fun NewArticleTracking.withVisible(ids: Set<String>): NewArticleTracking =
     if (unseenIds.isEmpty()) this else copy(unseenIds = unseenIds - ids)

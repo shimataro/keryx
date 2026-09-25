@@ -188,6 +188,18 @@ class ArticleRepository(
     }
 
     /**
+     * Collects the IDs of every live (non-soft-deleted) article belonging to [feedIds].
+     *
+     * @param feedIds The feed IDs whose articles to collect.
+     * @return The matching article IDs; empty (without querying) when [feedIds] is empty.
+     */
+    fun articleIdsByFeeds(feedIds: Collection<String>): Set<String> {
+        if (feedIds.isEmpty()) return emptySet()
+        return feedIds.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMapTo(HashSet()) { chunk -> articles.idsByFeeds(chunk).executeAsList() }
+    }
+
+    /**
      * Marks an article as read and schedules synchronization.
      *
      * @param id The ID of the article to mark as read.

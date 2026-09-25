@@ -102,6 +102,12 @@ FROM articles WHERE id IN ?;
 aliveFlagsIn:
 SELECT id, is_read, is_starred FROM articles WHERE id IN ? AND deleted_at IS NULL;
 
+-- Every live article id belonging to the given feeds. Used to acknowledge a just-subscribed
+-- feed's articles in the new-articles pill's baseline (callers chunk to stay under the
+-- bound-parameter limit).
+idsByFeeds:
+SELECT id FROM articles WHERE feed_id IN ? AND deleted_at IS NULL;
+
 getByFeedAndGuid:
 SELECT * FROM articles WHERE feed_id = ? AND guid = ?;
 

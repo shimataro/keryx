@@ -73,6 +73,57 @@ class NewArticleTrackingTest {
         assertEquals(setOf("b"), tracking.unseenIds)
     }
 
+    // --- withAcknowledged ---
+
+    @Test
+    fun withAcknowledgedLeavesAnUnseededTrackerUnchanged() {
+        val tracking = NewArticleTracking()
+        assertEquals(tracking, tracking.withAcknowledged(setOf("a")))
+    }
+
+    @Test
+    fun withAcknowledgedLeavesAnEmptyBaselineUnchanged() {
+        val tracking = NewArticleTracking().withList(emptySet())
+        assertEquals(tracking, tracking.withAcknowledged(setOf("a")))
+    }
+
+    @Test
+    fun withAcknowledgedBeforeTheEmissionKeepsThoseIdsFromBeingCounted() {
+        val tracking = NewArticleTracking()
+            .withList(setOf("a"))
+            .withAcknowledged(setOf("b"))
+            .withList(setOf("a", "b"))
+        assertTrue(tracking.unseenIds.isEmpty())
+        assertEquals(setOf("a", "b"), tracking.knownIds)
+    }
+
+    @Test
+    fun withAcknowledgedAfterTheEmissionRemovesThoseIdsFromUnseen() {
+        val tracking = NewArticleTracking()
+            .withList(setOf("a"))
+            .withList(setOf("a", "b"))
+            .withAcknowledged(setOf("b"))
+        assertTrue(tracking.unseenIds.isEmpty())
+    }
+
+    @Test
+    fun withAcknowledgedKeepsOtherUnseenIds() {
+        val tracking = NewArticleTracking()
+            .withList(setOf("a"))
+            .withList(setOf("a", "b", "c"))
+            .withAcknowledged(setOf("b", "x"))
+        assertEquals(setOf("c"), tracking.unseenIds)
+    }
+
+    @Test
+    fun withAcknowledgedGivesTheSameResultWhicheverSideOfTheEmissionItLands() {
+        val seeded = NewArticleTracking().withList(setOf("a")).withList(setOf("a", "c"))
+        val before = seeded.withAcknowledged(setOf("b")).withList(setOf("a", "b", "c"))
+        val after = seeded.withList(setOf("a", "b", "c")).withAcknowledged(setOf("b"))
+        assertEquals(setOf("c"), before.unseenIds)
+        assertEquals(before.unseenIds, after.unseenIds)
+    }
+
     // --- withVisible ---
 
     @Test
