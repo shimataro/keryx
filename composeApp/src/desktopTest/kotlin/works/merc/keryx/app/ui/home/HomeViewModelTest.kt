@@ -268,6 +268,7 @@ class HomeViewModelTest {
         backgroundScope.launch { vm.articles.collect {} }
         backgroundScope.launch { vm.searchResults.collect {} }
         backgroundScope.launch { vm.pagerArticles.collect {} }
+        backgroundScope.launch { vm.newArticleCount.collect {} }
     }
 
     @Test
@@ -4037,6 +4038,383 @@ class HomeViewModelTest {
         assertEquals(ARTICLE_CONTENT_CACHE_LIMIT, vm.articleContents.value.size)
         // The two requested first are the two dropped; the most recent are all still in hand.
         assertEquals(ids.drop(2).toSet(), vm.articleContents.value.keys)
+    }
+
+    // --- newArticleCount (the article list's "new articles" pill) ---
+
+    @Test
+    fun newArticleCountIsZeroOnInitialLoad() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        // Nothing was "missed" yet — the first emission only seeds the baseline.
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun newArticleCountIncreasesWhenArticlesAreAddedAfterTheBaselineIsSeeded() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        db.insertArticle("a2", "f1")
+        db.insertArticle("a3", "f1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(2, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun markArticlesSeenDropsOnlyTheReportedIdsFromTheCount() = runTest {
+        db.insertFeed("f1")
+        // A non-empty baseline before the VM even starts — an empty-then-filled one is its own
+        // "still seeding" case (see NewArticleTracking.withList) and would leave nothing here for
+        // markArticlesSeen to trim.
+        db.insertArticle("seed", "f1", publishedAt = 100L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1", publishedAt = 200L)
+        db.insertArticle("a2", "f1", publishedAt = 300L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.newArticleCount.value)
+
+        // Display order is a2, a1, seed: reporting a1 as the viewport leaves a2 above it, on the
+        // fresh side, so it still counts (see freshSideUnseenCount).
+        vm.markArticlesSeen(listOf("a1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun anArticleLandingBelowTheViewportIsNotCountedButOneAboveIs() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        // Scrolled partway down: only s2 is on screen (display order s3, s2, s1).
+        vm.markArticlesSeen(listOf("s2"))
+        testScheduler.advanceUntilIdle()
+
+        // An older publish date sorts it below the viewport — scrolling to the top would never
+        // bring it on screen, so it must not hold the pill up.
+        db.insertArticle("old", "f1", publishedAt = 500L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun scrollingToTheFreshEndClearsTheCountEvenWithUnseenArticlesFurtherDown() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.markArticlesSeen(listOf("s3"))
+        testScheduler.advanceUntilIdle()
+
+        // The reported bug: new articles land above the viewport and below it while the user is
+        // scrolled away from the top.
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        db.insertArticle("old", "f1", publishedAt = 500L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        // Scrolled back to the top: "old" is still unseen, but the pill must be gone.
+        vm.markArticlesSeen(listOf("fresh", "s3"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun theFreshSideFollowsSortDirection() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("s1", "f1", publishedAt = 1000L)
+        db.insertArticle("s2", "f1", publishedAt = 2000L)
+        db.insertArticle("s3", "f1", publishedAt = 3000L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.markArticlesSeen(listOf("s2"))
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("fresh", "f1", publishedAt = 4000L)
+        db.insertArticle("old1", "f1", publishedAt = 500L)
+        db.insertArticle("old2", "f1", publishedAt = 400L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        // Oldest first: display is old2, old1, s1, s2, s3, fresh. The fresh side is now below s2,
+        // so it is still "fresh" alone that counts — not the two older ones now above the viewport.
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun markAllArticlesSeenClearsTheCount() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.newArticleCount.value)
+
+        vm.markAllArticlesSeen()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun switchingFiltersDoesNotCountThePreviousFilterSExistingArticlesAsNew() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // All still contains a1 — already present before tracking on this filter began — so
+        // switching must not treat it as new just because the query itself is now different.
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun togglingUnreadOnlyOrSortDirectionDoesNotChangeTheCount() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1", isRead = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1", isRead = 0L)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        vm.setUnreadOnly(false)
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun newArticleCountIsZeroWhileSearchIsActive() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1", content = "<p>unrelated</p>")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setSearchBarVisible(true)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1", content = "<p>hello world</p>")
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+
+        vm.setSearchQuery("hello")
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.searchActive.value)
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun newArticleCountStaysZeroWhenAFilterThatStartedEmptyGetsItsFirstArticles() = runTest {
+        // A brand-new feed: selecting its filter before anything has been fetched starts the raw
+        // query at an empty list, matching the real subscribe flow this guards against.
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // The initial fetch lands — nothing in the empty list could have been missed, so this
+        // becomes the new baseline rather than a batch of "new" articles. A single transaction,
+        // matching FeedRepository.applyFetch's own real insert (a whole fetch's articles commit
+        // together): SQLDelight coalesces query-listener notifications per transaction, so two
+        // separate (non-transactional) inserts here would instead surface as two raw-query
+        // emissions — the first re-seeding the baseline to {a1}, the second then correctly (but
+        // misleadingly, for this test) detecting a2 as new relative to that baseline.
+        db.transaction {
+            db.insertArticle("a1", "f1")
+            db.insertArticle("a2", "f1")
+        }
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun subscribingAFeedDoesNotCountItsArticlesAsNew() = runTest {
+        db.insertFeed("f1")
+        // A non-empty baseline on the currently selected filter (All), established before
+        // subscribing — otherwise this couldn't be distinguished from the already-covered
+        // empty-baseline case (see NewArticleTracking.withList).
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        vm.subscribeFeeds(listOf("https://ex.com/feed"))
+        testScheduler.advanceUntilIdle()
+
+        // The new feed's own fetched article is right there in the list the user is already
+        // looking at — it was never "missed".
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun subscribingAFeedKeepsExistingUnseenArticlesCounted() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.newArticleCount.value)
+
+        vm.subscribeFeeds(listOf("https://ex.com/feed"))
+        testScheduler.advanceUntilIdle()
+
+        // Only the subscribed feed's own article is acknowledged; a1/a2 are still unseen.
+        assertEquals(2, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun anArrivalAfterSubscribingAFeedOutsideTheCurrentFilterIsStillCounted() = runTest {
+        db.insertFeed("f1")
+        // See markArticlesSeenDropsOnlyTheReportedIdsFromTheCount for why a seed article is needed.
+        db.insertArticle("seed", "f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // The new feed is outside Feed(f1), so this filter's raw query never re-emits for it — the
+        // baseline must survive rather than being left unseeded.
+        vm.subscribeFeeds(listOf("https://ex.com/feed"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        db.insertArticle("a1", "f1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun reStarringAnExistingArticleWhileBrowsingStarredIsNotCountedAsNew() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("seed", "f1", isStarred = 1L)
+        db.insertArticle("a1", "f1", isStarred = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // Unstarring drops a1 from Starred's raw query (the row stays on screen via the unstar pin)...
+        vm.toggleStar(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // ...and re-starring brings it back into the query: new to the id set, but an existing row,
+        // so it must not surface as a "new article".
+        vm.toggleStar(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_starred)
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun anExistingArticleStarredElsewhereWhileBrowsingStarredIsNotCountedAsNew() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("seed", "f1", isStarred = 1L)
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // e.g. a star made on another device arriving via sync: a1 enters Starred's query for the
+        // first time, but it is an existing row, not a newly arrived article.
+        db.articlesQueries.updateStarStatus(1L, 100L, 100L, "a1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("seed", "a1"), vm.articles.value.map { it.id }.toSet())
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun movingAnExistingFeedIntoTheViewedFolderDoesNotCountItsArticlesAsNew() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertFeed("f2")
+        db.insertArticle("seed", "f1")
+        db.insertArticle("a1", "f2")
+        db.insertArticle("a2", "f2")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        vm.moveFeed("f2", "d1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("seed", "a1", "a2"), vm.articles.value.map { it.id }.toSet())
+        assertEquals(0, vm.newArticleCount.value)
+
+        // A genuinely new article in the moved feed still counts.
+        db.insertArticle("a3", "f2")
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
     }
 }
 

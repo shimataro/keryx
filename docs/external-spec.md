@@ -98,6 +98,23 @@ data exists in the cloud it is automatically merged (imported) during the initia
   not guarantee.
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
 - **Unread-only deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the unread-only toggle (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected — and running it never turns unread-only off.
+- **New articles that land beyond the current scroll position, toward the list's fresh end, surface
+  as a floating pill** (e.g. "12 new articles") rather than silently piling up unseen past where the
+  list happens to be scrolled — tapping it jumps straight to them. The fresh end follows the sort
+  direction (the top when newest first, the bottom when oldest first), and scrolling all the way to
+  it always clears the pill. The list is ordered by publish date, so a new article can also land
+  mid-list or past the stale end of what's on screen (an older publish date, or none at all); such
+  an article is not counted, since scrolling to the fresh end would never bring it into view. This
+  covers arrival while the list is already open: a manual/background refresh, pull-to-refresh, or a cloud sync merging in articles fetched on
+  another device (none of which otherwise raise an OS notification while the app is in the
+  foreground). It appears at every window width and on every platform, including Android's
+  single-pane layout, where the feed list's own unread badges are hidden behind the navigation
+  drawer. It does **not** appear the first time a list that had no articles at all gets its first
+  ones (a newly subscribed feed, an empty folder/tag that just gained a feed) — there was nothing
+  to have missed yet — nor for a feed's own articles right after subscribing to it, since those are
+  already right there in front of the person who just added it. Nor does an existing article that merely
+  re-enters a list (starred again after being unstarred, or its feed moved into the folder/tag being
+  viewed) count as new — only an article that has actually just arrived does.
 - Stars (persistent), open in external browser
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.

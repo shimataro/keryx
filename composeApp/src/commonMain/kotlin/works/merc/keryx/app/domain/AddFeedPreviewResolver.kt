@@ -20,8 +20,18 @@ sealed interface AddFeedPreview {
     data class Failed(val exception: KeryxException) : AddFeedPreview
 }
 
-/** Tally returned by [AddFeedPreviewResolver.subscribeFeeds]. */
-data class SubscribeOutcome(val successCount: Int, val failCount: Int, val firstError: KeryxException?)
+/**
+ * Tally returned by [AddFeedPreviewResolver.subscribeFeeds].
+ *
+ * @param feedIds The ids of every successfully subscribed feed, in request order (including an
+ *   already-subscribed URL that resolved to its existing feed).
+ */
+data class SubscribeOutcome(
+    val successCount: Int,
+    val failCount: Int,
+    val firstError: KeryxException?,
+    val feedIds: List<String>,
+)
 
 /**
  * Determines whether the add-feed dialog can enable the subscribe action.
@@ -131,11 +141,12 @@ class AddFeedPreviewResolver(
             }
             subscription.result
         }
-        val successCount = results.count { it is Result.Ok }
+        val feedIds = results.mapNotNull { it.valueOrNull?.id }
         return SubscribeOutcome(
-            successCount = successCount,
-            failCount = results.size - successCount,
+            successCount = feedIds.size,
+            failCount = results.size - feedIds.size,
             firstError = results.filterIsInstance<Result.Err>().firstOrNull()?.exception,
+            feedIds = feedIds,
         )
     }
 }

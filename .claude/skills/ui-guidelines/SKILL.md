@@ -367,6 +367,55 @@ rules keep it consistent with the rest of this file:
   `pullRefreshAvailable` holds — so never on desktop, whose app menu owns Ctrl+Shift+R for
   refresh-selected-feed.
 
+**The "new articles" pill.** `ArticleListPaneContent` also floats `NewArticlesPill`
+(`ui/home/NewArticlesPill.kt`) over the list — a count of articles that arrived (or were merged in
+by a sync) outside the current viewport, tapped to jump to them (`external-spec.md` §7). A few
+rules parallel the pull-to-refresh ones above:
+
+- **A sibling of the `LazyColumn`, never one of its items.** It shares the same `Box` the
+  pull-to-refresh indicator floats in, positioned via `Modifier.align`. This is not a cosmetic
+  choice: the article list's own reuse-pool crash (`known-issues.md`) is sensitive to `LayoutNode`
+  count per row, and this pill adds none — putting it inside `items { }` would.
+  `HomeViewModel.newArticleCount` (backed by `NewArticleTracking`, seeded from the raw per-filter
+  query — see that class's own KDoc) is what it renders, never a value computed inside this
+  composable.
+- **Always composed; only its own alpha toggles.** `NewArticlesPill` runs its own
+  `animateFloatAsState` and returns without drawing once that alpha reaches `0`, rather than the
+  caller wrapping it in an `if (count > 0)` — an invisible-but-present button would still sit in
+  the layout and intercept taps meant for the list beneath it, so it has to be genuinely absent at
+  zero, not just transparent. A short show delay (its own `showDelayMillis`) absorbs the one-frame
+  gap between a new query result landing and the list's own visible-id report catching up, so an
+  article that lands *inside* the current viewport never flashes the pill for a single frame.
+- **Which end it hugs follows sort direction**, not a fixed corner: `Alignment.TopCenter` under
+  `newestFirst`, `Alignment.BottomCenter` otherwise — new articles land wherever they'd otherwise
+  pile up unseen. The bottom placement carries `WindowInsets.safeDrawing`'s bottom side so it clears
+  Android's edge-to-edge navigation bar, applied unconditionally (even at the top placement) so the
+  modifier chain itself never branches on direction.
+- **An empty-then-filled baseline never counts as "new".** `NewArticleTracking.withList` treats a
+  `null` *or empty* previous `knownIds` as still-seeding, not something to diff against — a
+  brand-new feed's raw query starting at 0 articles, then landing its first fetch, must re-seed
+  rather than mark every one of those articles unseen. This relies on that fetch's insert being one
+  DB transaction (every real writer of a whole batch already is — see `withList`'s own KDoc); don't
+  reach for two separate non-transactional inserts when seeding a test around this.
+  `HomeViewModel.subscribeFeeds` does **not** reset the tracker — a reset would drop unseen ids the
+  user hasn't scrolled to yet and, if the current filter never re-emits, leave the baseline
+  unseeded so the next real arrival is missed. It instead acknowledges exactly the subscribed feeds'
+  articles (`NewArticleTracking.withAcknowledged`), which gives the same result whichever side of it
+  the raw query's emission lands on.
+- **"New" means newly inserted, not newly in the query.** An id counts only if it is absent from the
+  cumulative `knownIds` *and* its row's `rowid` is above the watermark `resetNewArticleTracking`
+  takes in `onStart` (`ArticleRepository.maxArticleRowId` / `articleIdsInsertedAfter`) — so an
+  existing article re-entering the list (re-starred, its feed moved into the viewed folder/tag, a
+  star synced in) is never counted. Tests that stand in for a new arrival must insert a real row
+  (`db.insertArticle`), not un-delete or re-tag an existing one.
+- **Only the fresh side of the viewport counts.** `HomeViewModel.newArticleCount` counts just the
+  unseen ids beyond the viewport toward the fresh end (`freshSideUnseenCount` in
+  `NewArticleTracking.kt`), so scrolling to that end always clears the pill — the list is ordered by
+  `published_at`, and a new article landing on the stale side would otherwise hold the pill up with
+  no scroll able to reach it. The viewport comes from the same visible-id report the list already
+  sends (`markArticlesSeen`, in display order), recorded in the ViewModel as a `VisibleRange`;
+  don't read `listState.layoutInfo` in composition to compute it instead (see "Scroll indicators").
+
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
 (`ui/home/ListRowChrome.kt`'s `listRowMinHeight`, matching M3's `NavigationDrawerItem` minimum —

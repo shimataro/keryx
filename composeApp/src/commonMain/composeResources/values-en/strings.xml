@@ -99,6 +99,10 @@
     <string name="home_refresh">Refresh</string>
     <string name="home_refreshing">Checking for new articles…</string>
     <string name="home_refresh_this_list">Refresh this list</string>
+    <plurals name="home_new_articles">
+        <item quantity="one">%1$d new article</item>
+        <item quantity="other">%1$d new articles</item>
+    </plurals>
     <string name="home_feed_error">Feed error</string>
     <string name="home_feed_gone">Feed not found (it may have been removed)</string>
     <string name="home_mark_all_read">Mark all as read</string>

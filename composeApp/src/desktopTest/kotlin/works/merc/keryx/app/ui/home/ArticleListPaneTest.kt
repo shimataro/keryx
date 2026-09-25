@@ -114,6 +114,59 @@ class ArticleListPaneTest {
         assertEquals(1, pulls)
     }
 
+    // --- The floating "new articles" pill (see NewArticlesPill) ---
+
+    @Composable
+    private fun PaneWithPill(newArticleCount: Int, onNewArticlesClick: () -> Unit) {
+        ArticleListPaneContent(
+            articles = articles(5),
+            feedTitles = emptyMap(),
+            selectedId = null,
+            unreadOnly = false,
+            onToggleUnreadOnly = {},
+            onToggleSort = {},
+            onMarkAllRead = {},
+            onSelectArticle = {},
+            modifier = Modifier.size(360.dp, 600.dp),
+            newArticleCount = newArticleCount,
+            onNewArticlesClick = onNewArticlesClick,
+        )
+    }
+
+    /**
+     * Mirrors `waitForNoSearchResultsHint`'s own reasoning: the pill's own show delay is a real
+     * wall-clock wait `waitForIdle` cannot pump.
+     */
+    private fun ComposeUiTest.waitForPillText(text: String) =
+        waitUntil(timeoutMillis = 2000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+
+    @Test
+    fun theNewArticlesPillShowsTheGivenCount() = runDesktopComposeUiTest {
+        setContent { PaneWithPill(newArticleCount = 4, onNewArticlesClick = {}) }
+        waitForPillText("新着 4 件")
+
+        onNodeWithText("新着 4 件").assertIsDisplayed()
+    }
+
+    @Test
+    fun theNewArticlesPillIsAbsentAtZeroCount() = runDesktopComposeUiTest {
+        setContent { PaneWithPill(newArticleCount = 0, onNewArticlesClick = {}) }
+        waitForIdle()
+
+        assertEquals(0, onAllNodesWithText("新着", substring = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun clickingTheNewArticlesPillInvokesOnNewArticlesClick() = runDesktopComposeUiTest {
+        var clicks = 0
+        setContent { PaneWithPill(newArticleCount = 2, onNewArticlesClick = { clicks++ }) }
+        waitForPillText("新着 2 件")
+
+        onNodeWithText("新着 2 件").performClick()
+
+        assertEquals(1, clicks)
+    }
+
     // --- The pull's screen-reader counterpart: a "refresh this list" custom accessibility action,
     // exposed exactly where pullRefreshAvailable allows the gesture itself. ---
 

@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -261,12 +262,42 @@ class HomeViewModel(
     // dependent on read-state bookkeeping it has nothing to do with.
     private val _pinnedUnstarredArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
 
+    // Backs the "new articles" pill (ArticleListPane/NewArticlesPill). Declared before
+    // filteredArticles below, which writes to it on every raw query emission: `articles`' own
+    // stateIn is Eagerly, so under an immediate test dispatcher the collector can start during this
+    // class's own construction, and a property declared later than its first writer would still be
+    // null at that point (Kotlin initializes properties in declaration order).
+    private val _newArticleTracking = MutableStateFlow(NewArticleTracking())
+
     // Only the filter keys the DB query: switching filters must switch queries, but the unread-only,
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
     private val filteredArticles: Flow<List<ArticleListRow>> =
-        _filter.flatMapLatest { articleRepository.watchArticles(it) }
+        _filter.flatMapLatest { filter ->
+            articleRepository.watchArticles(filter)
+                // A filter change re-keys flatMapLatest, so this runs before the new filter's first
+                // emission and resets tracking to a fresh, unseeded instance — otherwise the new
+                // filter's own existing articles would look "new" against the old filter's id set.
+                .onStart { resetNewArticleTracking() }
+                .onEach { list ->
+                    val ids = list.mapTo(HashSet(list.size)) { it.id }
+                    // Only an id not seen before under this filter *and* inserted after the
+                    // watermark is new — the rowid lookup is what rules out an existing article
+                    // re-entering the query (re-starred, its feed moved into this folder/tag). It
+                    // runs only when there is a candidate at all, so the common re-emission (a read
+                    // or star toggle) issues no extra query. Runs on `dispatcher` (articles'
+                    // flowOn), like the list query itself.
+                    val tracking = _newArticleTracking.value
+                    val candidates = tracking.candidatesIn(ids)
+                    val inserted = if (candidates.isEmpty()) {
+                        emptySet()
+                    } else {
+                        articleRepository.articleIdsInsertedAfter(tracking.insertedAfterRowId, candidates)
+                    }
+                    _newArticleTracking.update { it.withList(ids, inserted) }
+                }
+        }
 
     val articles: StateFlow<List<ArticleListRow>> =
         combine(
@@ -322,6 +353,58 @@ class HomeViewModel(
         }
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, emptyList())
+
+    // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
+    // measures "the fresh side" against. null until the list first reports.
+    private val _visibleRange = MutableStateFlow<VisibleRange?>(null)
+
+    /**
+     * Count for the article list's "new articles" pill — ids tracked by [_newArticleTracking] that
+     * are also in the currently displayed [articles] (so an unseen id hidden by unread-only doesn't
+     * inflate the count; it reappears if the toggle is turned back off) *and* sit beyond the
+     * viewport on the list's fresh side (see [freshSideUnseenCount]), so scrolling to the fresh end
+     * always clears the pill. Always `0` while search is active, since search results aren't what
+     * [_newArticleTracking] was seeded from.
+     */
+    val newArticleCount: StateFlow<Int> =
+        combine(
+            _newArticleTracking, articles, searchActive, _visibleRange, _newestFirst,
+        ) { tracking, list, searching, viewport, newest ->
+            // Short-circuits before touching the list: this re-runs on every visible-row change
+            // while scrolling, and nothing is unseen almost all of the time.
+            if (searching || tracking.unseenIds.isEmpty()) 0 else freshSideUnseenCount(list, tracking.unseenIds, viewport, newest)
+        }.stateIn(viewModelScope, started, 0)
+
+    /**
+     * Reports the article ids currently visible in the list, in display order — clearing them from
+     * [newArticleCount], and recording the viewport that count's fresh side is measured against.
+     */
+    fun markArticlesSeen(ids: List<String>) {
+        _visibleRange.value = if (ids.isEmpty()) null else VisibleRange(ids.first(), ids.last())
+        if (ids.isEmpty()) return
+        _newArticleTracking.update { it.withVisible(ids.toSet()) }
+    }
+
+    /** The "new articles" pill's own tap action — jumps to the fresh end of the list. */
+    fun markAllArticlesSeen() {
+        _newArticleTracking.update { it.allSeen() }
+    }
+
+    /**
+     * Re-seeds [_newArticleTracking]'s baseline from scratch — used by [filteredArticles]'s
+     * `onStart` (a filter change): whatever the new filter's first raw query emission contains was
+     * not "missed" by the user, so it must become the new baseline rather than being diffed against
+     * the previous filter's id set. ([subscribeFeeds] deliberately does not reset — it acknowledges
+     * just the subscribed feeds' articles via [withAcknowledged].)
+     *
+     * Also takes the insertion watermark. `onStart` runs before the new filter's query first
+     * executes, so the watermark can never be later than the baseline snapshot: a row inserted
+     * in between is above the watermark and, if it's missing from that snapshot, still counts once
+     * a later emission picks it up.
+     */
+    private fun resetNewArticleTracking() {
+        _newArticleTracking.value = NewArticleTracking(insertedAfterRowId = articleRepository.maxArticleRowId())
+    }
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
     val selectedArticle: StateFlow<Articles?> = _selectedArticle
@@ -1103,14 +1186,27 @@ class HomeViewModel(
     suspend fun resolvePreview(rawUrl: String): AddFeedPreview = addFeedPreviewResolver.resolvePreview(rawUrl)
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
-    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome =
-        addFeedPreviewResolver.subscribeFeeds(
+    suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
+        val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
             folderIdForNewFeed(),
             afterFeedIdForNewFeed(),
             beforeFeedIdForNewFeed(),
             tagIdForNewFeed(),
         )
+        // Subscribing is the user's own action, and whatever it fetched is right there in front of
+        // them — it was never "missed". Acknowledge exactly the subscribed feeds' articles instead
+        // of resetting the whole baseline: a reset would drop any unseen ids the user genuinely
+        // hasn't scrolled to yet, and — when the current filter isn't affected by the subscription
+        // and so never re-emits — leave the baseline unseeded, so the next real arrival would only
+        // re-seed it and be missed. withAcknowledged gives the same result whether the raw query's
+        // own emission for the fetched articles lands before or after this point.
+        if (outcome.feedIds.isNotEmpty()) {
+            val ids = withContext(dbWriteDispatcher) { articleRepository.articleIdsByFeeds(outcome.feedIds) }
+            _newArticleTracking.update { it.withAcknowledged(ids) }
+        }
+        return outcome
+    }
 
     /**
      * The folder a newly subscribed feed should be filed into, derived from the feed list's

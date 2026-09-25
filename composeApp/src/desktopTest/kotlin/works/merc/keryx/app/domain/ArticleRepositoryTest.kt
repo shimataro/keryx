@@ -141,6 +141,115 @@ class ArticleRepositoryTest {
         }
     }
 
+    @Test
+    fun articleIdsByFeedsReturnsOnlyLiveArticlesOfTheRequestedFeeds() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2")
+            db.insertFeed("f3")
+            db.insertArticle("a1", "f1")
+            db.insertArticle("a2", "f2")
+            db.insertArticle("deleted", "f1")
+            db.insertArticle("other", "f3")
+            driver.stampArticleDeleted("deleted", deletedAt = 100L)
+
+            val ids = newRepo(db, driver).articleIdsByFeeds(listOf("f1", "f2", "missing"))
+
+            assertEquals(setOf("a1", "a2"), ids)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleIdsByFeedsOfAnEmptyCollectionIsEmptyWithNoQuery() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            assertEquals(emptySet(), newRepo(db, driver).articleIdsByFeeds(emptyList()))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun maxArticleRowIdIsZeroForAnEmptyTable() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            assertEquals(0L, newRepo(db, driver).maxArticleRowId())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun maxArticleRowIdGrowsOnInsertAndStaysPutWhenAnExistingArticleIsUpserted() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val repo = newRepo(db, driver)
+            db.insertArticle("a1", "f1")
+            val afterFirst = repo.maxArticleRowId()
+            db.insertArticle("a2", "f1")
+            val afterSecond = repo.maxArticleRowId()
+            assertTrue(afterSecond > afterFirst)
+
+            // A refresh re-upserting an existing article (ON CONFLICT DO UPDATE) keeps its rowid,
+            // so neither the watermark nor that article's "inserted after" status moves.
+            db.insertArticle("a1", "f1", title = "Updated")
+            assertEquals(afterSecond, repo.maxArticleRowId())
+            assertEquals(emptySet(), repo.articleIdsInsertedAfter(afterSecond, listOf("a1", "a2")))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleIdsInsertedAfterReturnsOnlyRequestedIdsAboveTheWatermark() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val repo = newRepo(db, driver)
+            db.insertArticle("old", "f1")
+            val watermark = repo.maxArticleRowId()
+            db.insertArticle("new1", "f1")
+            db.insertArticle("new2", "f1")
+
+            val ids = repo.articleIdsInsertedAfter(watermark, listOf("old", "new1", "missing"))
+
+            assertEquals(setOf("new1"), ids)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleIdsInsertedAfterSpansMultipleChunks() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            val repo = newRepo(db, driver)
+            val watermark = repo.maxArticleRowId()
+            db.insertArticle("new", "f1")
+            // Well past one ID_FETCH_CHUNK (900), with the only match in the last chunk.
+            val ids = List(2000) { "missing-$it" } + "new"
+
+            assertEquals(setOf("new"), repo.articleIdsInsertedAfter(watermark, ids))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun articleIdsInsertedAfterOfAnEmptyCollectionIsEmpty() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            assertEquals(emptySet(), newRepo(db, driver).articleIdsInsertedAfter(0L, emptyList()))
+        } finally {
+            driver.close()
+        }
+    }
+
     /**
      * The list projection deliberately omits the body columns; the reader loads them per selected
      * article instead. Pins the split so neither side drifts back.

@@ -188,6 +188,40 @@ class ArticleRepository(
     }
 
     /**
+     * Collects the IDs of every live (non-soft-deleted) article belonging to [feedIds].
+     *
+     * @param feedIds The feed IDs whose articles to collect.
+     * @return The matching article IDs; empty (without querying) when [feedIds] is empty.
+     */
+    fun articleIdsByFeeds(feedIds: Collection<String>): Set<String> {
+        if (feedIds.isEmpty()) return emptySet()
+        return feedIds.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMapTo(HashSet()) { chunk -> articles.idsByFeeds(chunk).executeAsList() }
+    }
+
+    /**
+     * The highest `articles` rowid currently present, or `0` when the table is empty — a watermark
+     * for [articleIdsInsertedAfter]. Rowids are stable and monotonic on the live DB (see the
+     * `maxRowId` query's own comment in `articles.sq`), so any row inserted after this call gets a
+     * larger one.
+     */
+    fun maxArticleRowId(): Long = articles.maxRowId().executeAsOne()
+
+    /**
+     * Narrows [ids] to the articles inserted after [rowId] (a [maxArticleRowId] watermark), telling
+     * a genuinely new row apart from an existing one that merely re-entered a list's query.
+     *
+     * @param rowId The watermark; only rows with a strictly larger rowid match.
+     * @param ids The candidate article IDs.
+     * @return The subset of [ids] inserted after [rowId]; empty (without querying) when [ids] is empty.
+     */
+    fun articleIdsInsertedAfter(rowId: Long, ids: Collection<String>): Set<String> {
+        if (ids.isEmpty()) return emptySet()
+        return ids.distinct().chunked(ID_FETCH_CHUNK)
+            .flatMapTo(HashSet()) { chunk -> articles.idsInsertedAfter(rowId, chunk).executeAsList() }
+    }
+
+    /**
      * Marks an article as read and schedules synchronization.
      *
      * @param id The ID of the article to mark as read.

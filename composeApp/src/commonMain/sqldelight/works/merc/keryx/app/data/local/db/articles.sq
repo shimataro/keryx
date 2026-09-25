@@ -102,6 +102,29 @@ FROM articles WHERE id IN ?;
 aliveFlagsIn:
 SELECT id, is_read, is_starred FROM articles WHERE id IN ? AND deleted_at IS NULL;
 
+-- Every live article id belonging to the given feeds. Used to acknowledge a just-subscribed
+-- feed's articles in the new-articles pill's baseline (callers chunk to stay under the
+-- bound-parameter limit).
+idsByFeeds:
+SELECT id FROM articles WHERE feed_id IN ? AND deleted_at IS NULL;
+
+-- The new-articles pill's insertion watermark: the highest rowid currently in the table (0 when
+-- empty). maxRowId/idsInsertedAfter tell a genuinely newly inserted article apart from an
+-- existing one that merely re-entered a list's query (re-starred, its feed moved into the viewed
+-- folder/tag). This relies on the live table's implicit rowid being stable and monotonic:
+-- refresh upserts and the sync merge both use INSERT ... ON CONFLICT DO UPDATE (never INSERT OR
+-- REPLACE, which would delete and re-insert under a new rowid), rows are only ever soft-deleted
+-- (never physically removed, so a freed max rowid can't be reused), and a plain VACUUM (which may
+-- renumber an implicit rowid) only ever runs on the upload snapshot copy, never on the live DB.
+-- articles_fts's content_rowid already depends on the same guarantee.
+maxRowId:
+SELECT COALESCE(MAX(rowid), 0) FROM articles;
+
+-- Which of the given ids belong to rows inserted after the given maxRowId watermark (callers
+-- chunk to stay under the bound-parameter limit).
+idsInsertedAfter:
+SELECT id FROM articles WHERE rowid > ? AND id IN ?;
+
 getByFeedAndGuid:
 SELECT * FROM articles WHERE feed_id = ? AND guid = ?;
 
