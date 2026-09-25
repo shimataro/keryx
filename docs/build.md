@@ -640,6 +640,23 @@ library ships no `linux-aarch64` binary, so on that architecture the reader fall
 Compose-drawn simplified view instead of using the native web view (never a freeze — the fallback
 covers block structure, inline decorations, and images).
 
+**Workflow lint.** Most of what this section describes (`release.yml`, `publish-play.yml`,
+`.github/scripts/`) only ever runs when a release is cut, so `.github/workflows/lint-workflows.yml`
+checks it statically on every push that touches `.github/**`: `shellcheck` (preinstalled on
+`ubuntu-latest`) over `.github/scripts/*.sh`, and `actionlint` over every workflow — undefined
+`inputs`/`matrix`/`needs` references, unknown action inputs, expression type errors, and each `run:`
+block through shellcheck. It cannot catch a misspelled `steps.<id>.outputs.<name>`, since step
+outputs are only written at run time through `$GITHUB_OUTPUT`. actionlint is not preinstalled, so
+the workflow downloads a pinned release tarball and verifies it against a hardcoded SHA-256; to
+upgrade, update `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` together (the digest is listed in that
+release's `actionlint_<version>_checksums.txt`). Run the same checks locally, with no install, via
+Docker (keep the image tag in step with `ACTIONLINT_VERSION`):
+
+```bash
+docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/scripts/*.sh
+```
+
 Flow:
 
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style

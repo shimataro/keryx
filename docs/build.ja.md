@@ -653,6 +653,23 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
 （フリーズはしない — ブロック構造・インライン装飾・画像を再現し、本物のブラウザエンジンが要る
 コンテンツは外部で開くボタンになる）。
 
+**ワークフローの lint。** 本節で扱うものの大半（`release.yml`、`publish-play.yml`、`.github/scripts/`）は
+リリース時にしか動かないため、`.github/workflows/lint-workflows.yml` が `.github/**` に触れる push の
+たびに静的検査する: `.github/scripts/*.sh` に対する `shellcheck`（`ubuntu-latest` に同梱）と、全
+ワークフローに対する `actionlint` — 未定義の `inputs`/`matrix`/`needs` 参照、action に存在しない入力、
+式の型エラー、そして各 `run:` ブロックの shellcheck 検査。ただし `steps.<id>.outputs.<name>` の綴り
+誤りは検出できない（ステップの出力は実行時に `$GITHUB_OUTPUT` 経由で書かれるため）。actionlint は
+ランナーに同梱されていないので、ワークフローはバージョン固定のリリース tarball をダウンロードし、
+直書きした SHA-256 で検証してから使う。更新するときは `ACTIONLINT_VERSION` と `ACTIONLINT_SHA256` を
+一緒に変える（ダイジェストはそのリリースの `actionlint_<version>_checksums.txt` に載っている）。
+ローカルでは Docker で、何もインストールせずに同じ検査を実行できる（イメージのタグは
+`ACTIONLINT_VERSION` に揃える）:
+
+```bash
+docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/scripts/*.sh
+```
+
 フロー:
 
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
