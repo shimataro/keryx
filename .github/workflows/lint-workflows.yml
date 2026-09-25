@@ -1,0 +1,47 @@
+name: Lint workflows
+
+# Static checks for everything under .github/: most of it (release.yml, publish-play.yml,
+# .github/scripts/) only ever runs when a release is cut, so an undefined input reference or an
+# unquoted variable would otherwise surface on release day rather than on the push that
+# introduced it. (A misspelled steps.<id>.outputs.<name> is out of reach: step outputs only
+# exist at run time.) Kept apart from ci.yml so it runs only when .github/ changes and finishes in
+# seconds. See docs/build.md's "Release (CD)" for how to run the same checks locally.
+on:
+  push:
+    paths:
+      - '.github/**'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: actionlint + shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # shellcheck ships preinstalled on ubuntu-latest.
+      - name: shellcheck (.github/scripts)
+        run: shellcheck .github/scripts/*.sh
+
+      # actionlint is not preinstalled. A pinned release tarball verified against a hardcoded
+      # SHA-256, rather than piping the project's download script from its main branch into bash.
+      # Bump both values together (see docs/build.md); keep the local docker image tag in sync.
+      # actionlint also runs every `run:` block through the shellcheck on PATH.
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --silent --show-error --fail --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color

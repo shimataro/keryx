@@ -100,7 +100,7 @@ jobs:
             # A failed detach leaves the volume mounted, and the next attempt would be mounted
             # alongside it as "Keryx 1" instead, where jpackage cannot find it.
             for volume in /Volumes/Keryx*; do
-              [ -d "$volume" ] && hdiutil detach "$volume" -force || true
+              if [ -d "$volume" ]; then hdiutil detach "$volume" -force || true; fi
             done
             sleep 5
           done

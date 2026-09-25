@@ -76,7 +76,7 @@ jobs:
               fi
               echo "::warning::packageDmg hit a transient hdiutil failure (attempt $attempt); retrying."
               for volume in /Volumes/Keryx*; do
-                [ -d "$volume" ] && hdiutil detach "$volume" -force || true
+                if [ -d "$volume" ]; then hdiutil detach "$volume" -force || true; fi
               done
               sleep 5
             done
@@ -663,6 +663,14 @@ jobs:
       contents: read
 
     steps:
+      # Only for .github/scripts/publish-play.sh — nothing else in this job reads repo files.
+      - name: Checkout publish script
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Download AAB artifact
         uses: actions/download-artifact@v8
         with:
@@ -678,23 +686,25 @@ jobs:
           fi
           echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
 
-      # Track constants — change these two once product-level access is approved (see
-      # docs/build.md's "Publishing to Google Play"): a personal developer account created on or
-      # after 2023-11-13 cannot use "production" or "open testing" until then, only "internal" and
-      # "closed". Keyed on the GitHub Release's own prerelease flag, the same signal
-      # package-snap's channel-selection step uses, not the tag suffix alone.
+      # Track constants — comma-separated Play Developer API track ids, all published to in one
+      # atomic edit by publish-play.sh (`alpha` is the id of Play Console's "closed testing").
+      # Change these two once product-level access is approved (see docs/build.md's "Publishing
+      # to Google Play"): a personal developer account created on or after 2023-11-13 cannot use
+      # "production" or "open testing" until then, only "internal" and "closed". Keyed on the
+      # GitHub Release's own prerelease flag, the same signal package-snap's channel-selection
+      # step uses, not the tag suffix alone.
       - name: Resolve Play track
         id: play
         env:
           IS_GITHUB_PRERELEASE: ${{ github.event.release.prerelease }}
           SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
-          PLAY_TRACK_PRERELEASE=internal
-          PLAY_TRACK_STABLE=internal
+          PLAY_TRACKS_PRERELEASE=internal,alpha
+          PLAY_TRACKS_STABLE=internal,alpha
           if [ "$IS_GITHUB_PRERELEASE" = "true" ]; then
-            echo "track=$PLAY_TRACK_PRERELEASE" >> "$GITHUB_OUTPUT"
+            echo "tracks=$PLAY_TRACKS_PRERELEASE" >> "$GITHUB_OUTPUT"
           else
-            echo "track=$PLAY_TRACK_STABLE" >> "$GITHUB_OUTPUT"
+            echo "tracks=$PLAY_TRACKS_STABLE" >> "$GITHUB_OUTPUT"
           fi
           # Same skip-if-unconfigured pattern as SNAPCRAFT_STORE_CREDENTIALS below: publishing to
           # Play only starts once this secret exists, rather than failing every release until it does.
@@ -711,8 +721,8 @@ jobs:
       # Written to *both* locales this project ships (ja-JP alongside en-US) with the same English
       # text — leaving ja-JP absent would make Play silently carry over whichever text that locale
       # last had, which is worse than a same-language duplicate. See docs/build.md.
-      # No checkout in this job (nothing here touches repo files), so --repo is passed explicitly
-      # rather than relying on `gh` inferring it from a git remote in the working directory.
+      # This job's checkout is sparse and only for the publish script, so --repo is passed
+      # explicitly rather than relying on `gh` inferring it from a git remote in the working directory.
       - name: Prepare Play release notes
         id: whatsnew
         if: steps.play.outputs.configured == 'true'
@@ -751,14 +761,13 @@ jobs:
 
       - name: Publish to Google Play
         if: steps.play.outputs.configured == 'true'
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: works.merc.keryx
-          releaseFiles: ${{ steps.artifact.outputs.aab }}
-          track: ${{ steps.play.outputs.track }}
-          status: completed
-          whatsNewDirectory: ${{ steps.whatsnew.outputs.dir }}
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PACKAGE_NAME: works.merc.keryx
+          AAB_PATH: ${{ steps.artifact.outputs.aab }}
+          TRACKS: ${{ steps.play.outputs.tracks }}
+          WHATSNEW_DIR: ${{ steps.whatsnew.outputs.dir }}
+        run: .github/scripts/publish-play.sh
 
   deploy-pages:
     name: Update "https://keryx.merc.works" (trigger Cloudflare Pages deploy hook)
