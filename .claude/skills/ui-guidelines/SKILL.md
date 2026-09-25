@@ -397,10 +397,17 @@ rules parallel the pull-to-refresh ones above:
   rather than mark every one of those articles unseen. This relies on that fetch's insert being one
   DB transaction (every real writer of a whole batch already is — see `withList`'s own KDoc); don't
   reach for two separate non-transactional inserts when seeding a test around this.
-  `HomeViewModel.subscribeFeeds` resets the tracker outright on a successful subscribe for the same
-  reason at the "already had other articles" end of it: articles the user just fetched by
-  subscribing were never something they could have missed, whether or not the currently selected
-  filter happens to show that feed.
+  `HomeViewModel.subscribeFeeds` does **not** reset the tracker — a reset would drop unseen ids the
+  user hasn't scrolled to yet and, if the current filter never re-emits, leave the baseline
+  unseeded so the next real arrival is missed. It instead acknowledges exactly the subscribed feeds'
+  articles (`NewArticleTracking.withAcknowledged`), which gives the same result whichever side of it
+  the raw query's emission lands on.
+- **"New" means newly inserted, not newly in the query.** An id counts only if it is absent from the
+  cumulative `knownIds` *and* its row's `rowid` is above the watermark `resetNewArticleTracking`
+  takes in `onStart` (`ArticleRepository.maxArticleRowId` / `articleIdsInsertedAfter`) — so an
+  existing article re-entering the list (re-starred, its feed moved into the viewed folder/tag, a
+  star synced in) is never counted. Tests that stand in for a new arrival must insert a real row
+  (`db.insertArticle`), not un-delete or re-tag an existing one.
 
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
