@@ -408,6 +408,13 @@ rules parallel the pull-to-refresh ones above:
   existing article re-entering the list (re-starred, its feed moved into the viewed folder/tag, a
   star synced in) is never counted. Tests that stand in for a new arrival must insert a real row
   (`db.insertArticle`), not un-delete or re-tag an existing one.
+- **Only the fresh side of the viewport counts.** `HomeViewModel.newArticleCount` counts just the
+  unseen ids beyond the viewport toward the fresh end (`freshSideUnseenCount` in
+  `NewArticleTracking.kt`), so scrolling to that end always clears the pill — the list is ordered by
+  `published_at`, and a new article landing on the stale side would otherwise hold the pill up with
+  no scroll able to reach it. The viewport comes from the same visible-id report the list already
+  sends (`markArticlesSeen`, in display order), recorded in the ViewModel as a `VisibleRange`;
+  don't read `listState.layoutInfo` in composition to compute it instead (see "Scroll indicators").
 
 **Touch density.** Each pane's own click-to-focus background (a mouse-only affordance — see
 `ui/home/HomeCommon.kt`'s `paneActivation`) and every interactive list row's minimum height
