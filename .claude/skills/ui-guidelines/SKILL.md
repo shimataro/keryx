@@ -115,6 +115,11 @@ not in global chrome:
   "Adaptive pane layout & touch affordances" below).
 - Sort / mark all read — header row of `ArticleListPane`, unchanged at every
   layout.
+- Hide read — the same header row, directly after the "unread only"
+  `ToggleChip` (4dp gap) rather than in the trailing icon cluster: its
+  enabled state depends on that chip alone, and keeping it away from mark all
+  read avoids confusing a view-only action with a bulk mutation. A lone icon,
+  so bare (no `ToolbarIconGroup` capsule).
 - Notifications (the bell) — `ArticleListPane`'s own header row, at every
   layout and every reachable depth: the article list is visible everywhere
   except `PaneLayout.Single`'s article-detail depth (see `visiblePanes` in

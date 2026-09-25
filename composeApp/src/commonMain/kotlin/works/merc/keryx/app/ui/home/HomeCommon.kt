@@ -33,6 +33,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
@@ -607,6 +608,15 @@ internal fun pullRefreshAvailable(isTouchPrimary: Boolean, searchActive: Boolean
 /** Whether [url] is present and non-blank — the single rule for when URL-dependent actions
  * (open in browser, copy URL) are available, for an article's URL or a feed's site URL alike. */
 internal fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
+
+/**
+ * Whether the article list's "hide read articles" action has anything to do: at least one row in
+ * [rows] is read and not [selectedId] (the selected article stays visible even when read, so it
+ * doesn't count — hiding it would be indistinguishable from deselecting it). Used both to enable
+ * the toolbar action and, after running it, to fall back to disabled once nothing is left to hide.
+ */
+internal fun hasHideableRead(rows: List<ArticleListRow>, selectedId: String?): Boolean =
+    rows.any { it.is_read == 1L && it.id != selectedId }
 
 /** Whether [url] is a plain http:// or https:// URL. Scheme matching is case-insensitive. */
 internal fun isHttpOrHttpsUrl(url: String?): Boolean {

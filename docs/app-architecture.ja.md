@@ -1058,3 +1058,14 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 一緒にクリアする。これはピンそのものにとって本質的に重要である——選択を残したままだと、次に
 ユーザーが「未読のみ」を再度 ON にした瞬間に `HomeViewModel.pinnedReadArticlesKeepingSelected`
 がそこから既読ピンを再シードしてしまい、このリセット自体が意味を失ってしまう。
+
+`pinnedReadArticlesKeepingSelected()` は `_pinnedReadArticles` を、選択中の記事（それが対象条件を
+満たす場合のみ）だけに刈り込み直す。これを呼び出す箇所はどれも、既読ピンに削るだけの価値がある
+エントリが溜まっていることが見込まれる瞬間である——「未読のみ」を ON にした瞬間（`setUnreadOnly`）、
+リフレッシュ／同期が完了した瞬間（`HomeRefreshController.repinSelected`）、そして記事一覧ツールバーの
+明示的な「既読記事を非表示」操作（`HomeViewModel.hideRead`）——最後の 1 つだけがユーザーが直接引き金を引く
+呼び出し箇所で、「未読のみ」自体からは抜けずに、厳密な未読のみからずれてしまった一覧をその状態へ
+引き戻すためのものである。`hideRead` は `canHideRead`（`unreadOnly`・現在画面に出ている一覧——検索中
+なら検索結果、そうでなければそのフィルタ自身の一覧で、`pagerArticles` と同じ解決方法——・選択状態を
+組み合わせた `StateFlow`）でゲートされているため、選択中の記事以外に既読ピンが残っていない状態では
+この操作は何もしない。

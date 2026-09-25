@@ -101,6 +101,7 @@
     <string name="home_feed_error">フィードのエラー</string>
     <string name="home_feed_gone">フィードが見つかりません（削除された可能性があります）</string>
     <string name="home_mark_all_read">すべて既読にする</string>
+    <string name="home_hide_read">既読記事を非表示</string>
     <string name="home_no_feeds">フィードが登録されていません</string>
     <string name="home_no_articles">記事がありません</string>
     <string name="home_open_feed_list">フィード一覧を開く</string>

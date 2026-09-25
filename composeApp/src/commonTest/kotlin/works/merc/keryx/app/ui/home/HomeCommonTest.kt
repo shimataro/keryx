@@ -4,10 +4,13 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.ArticleListRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class HomeCommonTest {
 
@@ -1080,7 +1083,41 @@ class HomeCommonTest {
         assertEquals(RowHalf.BOTTOM, resolveRowHalf(120f, band))
         assertEquals(RowHalf.BOTTOM, resolveRowHalf(139f, band))
     }
+
+    // --- hasHideableRead ---
+
+    @Test
+    fun hasHideableReadIsFalseWithNoReadRowsAtAll() {
+        val rows = listOf(hideableArticle("a1", read = false), hideableArticle("a2", read = false))
+        assertFalse(hasHideableRead(rows, selectedId = null))
+        assertFalse(hasHideableRead(rows, selectedId = "a1"))
+    }
+
+    @Test
+    fun hasHideableReadIsFalseWhenOnlyTheSelectedArticleIsRead() {
+        val rows = listOf(hideableArticle("a1", read = true), hideableArticle("a2", read = false))
+        assertFalse(hasHideableRead(rows, selectedId = "a1"))
+    }
+
+    @Test
+    fun hasHideableReadIsTrueWhenAnUnselectedRowIsRead() {
+        val rows = listOf(hideableArticle("a1", read = true), hideableArticle("a2", read = false))
+        assertTrue(hasHideableRead(rows, selectedId = "a2"))
+        // No selection at all: any read row counts.
+        assertTrue(hasHideableRead(rows, selectedId = null))
+    }
 }
+
+private fun hideableArticle(id: String, read: Boolean): ArticleListRow = ArticleListRow(
+    id = id,
+    feed_id = "f1",
+    title = "Article $id",
+    url = "u$id",
+    published_at = 0L,
+    created_at = 0L,
+    is_read = if (read) 1L else 0L,
+    is_starred = 0L,
+)
 
 /** [autoScrollVelocityPxPerSec] over a 0..1000 viewport with 100px edge zones and 900px/s max. */
 private fun autoScrollVelocity(pointerY: Float): Float = autoScrollVelocityPxPerSec(
