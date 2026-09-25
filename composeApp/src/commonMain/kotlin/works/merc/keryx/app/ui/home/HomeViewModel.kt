@@ -951,16 +951,24 @@ class HomeViewModel(
     /**
      * Preserves the selected read article for continued display when it remains available.
      *
-     * @return A map containing the selected article if it is read and not deleted; an empty map otherwise.
+     * @return A map containing the selected article — or, while a newer selection is still
+     *   loading, that selection's own row — if it is read and not deleted; an empty map otherwise.
      */
     private fun pinnedReadArticlesKeepingSelected(): Map<String, ArticleListRow> {
         val selected = _selectedArticle.value
+        val cursor = selectionCursorId
+        if (cursor != null && cursor != selected?.id) {
+            // A newer selection is still loading its body, so [_selectedArticle] is the article
+            // being replaced. Its own hydration only re-pins a row that was unread before this
+            // selection (see selectArticle's `article.is_read == 0L` check) — a row that was
+            // already read must keep its place here instead, or it disappears from an unread-only
+            // list for good once that hydration lands without ever re-adding it.
+            val pending = currentArticles().firstOrNull { it.id == cursor && it.is_read == 1L }
+                ?: return emptyMap()
+            if (pending.id !in articleRepository.aliveArticleFlags(listOf(pending.id))) return emptyMap()
+            return mapOf(pending.id to pending)
+        }
         if (selected == null || selected.is_read != 1L) return emptyMap()
-        // A newer selection is still loading its body, so [_selectedArticle] is the article being
-        // replaced: keeping it would preserve a pin the user has already navigated away from. The
-        // hydration in flight pins its own article when it lands, so nothing is lost by dropping
-        // everything here.
-        if (selectionCursorId != selected.id) return emptyMap()
         // The selected row may have been tombstoned by a sync merge that landed while it was
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same

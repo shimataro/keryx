@@ -1789,6 +1789,54 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun hideReadKeepsAPendingReselectionOfAnAlreadyReadArticleVisible() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2", "a3"), vm.articles.value.map { it.id })
+
+        // a1 is already read; its body is still loading, so the selection is still a2.
+        vm.selectArticle(vm.articles.value.first { it.id == "a1" })
+        vm.hideRead()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(listOf("a1", "a3"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun turningUnreadOnlyOnKeepsAPendingSelectionOfAnAlreadyReadArticleVisible() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        // a1 was read before this session, so it is not pinned; its body is still loading.
+        vm.selectArticle(vm.articles.value.first { it.id == "a1" })
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
     fun hideReadIsANoOpWhenUnreadOnlyIsOff() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
