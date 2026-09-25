@@ -34,6 +34,8 @@ fail() {
 
 # Validate every track id before touching the network: they are interpolated into URL paths,
 # and publish-play.yml takes them from free-form workflow_dispatch input.
+# read -a silently drops a trailing empty field, so reject a trailing comma up front.
+[[ "$TRACKS" != *, ]] || fail "Invalid Play track list: trailing comma."
 IFS=',' read -r -a tracks <<< "$TRACKS"
 [ "${#tracks[@]}" -gt 0 ] || fail "TRACKS is empty."
 for track in "${tracks[@]}"; do
