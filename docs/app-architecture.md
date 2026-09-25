@@ -1044,3 +1044,13 @@ for that removed mechanism). A genuine filter change still clears `_selectedArti
 both pins on every path that reaches it, which matters for the pins' own sake — left set,
 `HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read pin from it the
 next time the user toggles unread-only back on, defeating the reset entirely.
+
+`pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
+selection (if it qualifies), and every call site that runs it is a moment the read pin is expected
+to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), a completed
+refresh/sync (`HomeRefreshController.repinSelected`), and the article list toolbar's explicit "hide
+read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
+a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
+gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
+results while searching, the filter's own list otherwise, the same resolution `pagerArticles` uses
+— and the selection), so the action is a no-op once nothing but the selection is left pinned-read.

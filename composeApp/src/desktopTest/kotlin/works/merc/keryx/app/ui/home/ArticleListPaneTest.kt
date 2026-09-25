@@ -586,6 +586,54 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun articleListTopBarHideReadButtonDisabledByDefaultDoesNotInvokeCallback() = runDesktopComposeUiTest {
+        var hideReadCount = 0
+
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = true,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onHideRead = { hideReadCount++ },
+            )
+        }
+        waitForIdle()
+
+        // canHideRead defaults to false, so the button is present but disabled.
+        onNodeWithContentDescription("既読記事を非表示").assertIsNotEnabled()
+        onNodeWithContentDescription("既読記事を非表示").performClick()
+        waitForIdle()
+
+        assertEquals(0, hideReadCount)
+    }
+
+    @Test
+    fun articleListTopBarHideReadButtonEnabledInvokesCallback() = runDesktopComposeUiTest {
+        var hideReadCount = 0
+
+        setContent {
+            ArticleListTopBar(
+                unreadOnly = true,
+                onToggleUnreadOnly = {},
+                newestFirst = true,
+                onToggleSort = {},
+                onMarkAllRead = {},
+                canHideRead = true,
+                onHideRead = { hideReadCount++ },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("既読記事を非表示").assertIsEnabled()
+        onNodeWithContentDescription("既読記事を非表示").performClick()
+        waitForIdle()
+
+        assertEquals(1, hideReadCount)
+    }
+
+    @Test
     fun sortDirectionIconDistinguishesTheTwoDirections() {
         // The regression this guards: both directions used to share one asset, flipped vertically at
         // the call site, which reads as a direction only on an icon set whose sort glyph has an arrow.

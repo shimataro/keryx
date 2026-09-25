@@ -97,6 +97,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
   for the full design and [SECURITY.md](../SECURITY.md) for what that verification does and does
   not guarantee.
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
+- **Unread-only deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the unread-only toggle (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected — and running it never turns unread-only off.
 - **New articles that land outside the current scroll position surface as a floating pill** (e.g.
   "12 new articles") rather than silently piling up unseen above or below where the list happens to
   be scrolled — tapping it jumps straight to them. This covers arrival while the list is already

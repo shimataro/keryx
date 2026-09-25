@@ -44,6 +44,7 @@ import works.merc.keryx.app.resources.ic_star_filled
 import works.merc.keryx.app.resources.ic_storage_outlined
 import works.merc.keryx.app.resources.ic_tune_outlined
 import works.merc.keryx.app.resources.ic_update_outlined
+import works.merc.keryx.app.resources.ic_visibility_off_outlined
 import works.merc.keryx.app.resources.ic_warning_outlined
 
 /** Desktop `actual`: Tabler Icons (MIT) — see [KeryxIcons]'s own KDoc for why. */
@@ -79,6 +80,7 @@ actual object KeryxIcons {
     actual val ThisDevice: DrawableResource = Res.drawable.ic_computer_outlined
     actual val Tune: DrawableResource = Res.drawable.ic_tune_outlined
     actual val Update: DrawableResource = Res.drawable.ic_update_outlined
+    actual val VisibilityOff: DrawableResource = Res.drawable.ic_visibility_off_outlined
     actual val Warning: DrawableResource = Res.drawable.ic_warning_outlined
 
     // Semantic state (Filled)
