@@ -708,11 +708,12 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
        それを取得する。
    - `publish-play` は独立したジョブで（`package-android` に依存するため、そのジョブの AAB
      成果物ができてから初めて開始する）、その成果物をダウンロードして**Google Play へ公開する**
-     （`r0adkll/upload-google-play`）。上記 Snap Store 公開と同じ仕組みで、後述の
+     （`.github/scripts/publish-play.sh`。Play Developer API の 1 つの edit の中で AAB を 1 回だけ
+     アップロードし、設定された全トラックに割り当てる）。上記 Snap Store 公開と同じ仕組みで、後述の
      `PLAY_SERVICE_ACCOUNT_JSON` シークレットが設定されている場合のみ実行される。
      `package-android` 内のステップではなく独立ジョブにしてあるのは、Play への公開が失敗しても
      GitHub Release に既に添付済みの APK を道連れにしないためで、`package-snap` が
-     `package-linux` から独立しているのと同じ理由。詳細なセットアップと公開先トラックは後述の
+     `package-linux` から独立しているのと同じ理由。詳細なセットアップと公開先の各トラックは後述の
      「Google Play への公開」を参照。
 
    `deploy-pages`（ダウンロードページ更新用の Cloudflare Pages デプロイフックをトリガーする）は
@@ -891,27 +892,37 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
    skip-if-unconfigured のパターン。
 5. 最初の自動公開より前に、Play Console の UI から**手動で**一度 AAB をアップロードしておく。
    Play Developer API は、そのパッケージに対して一度もリリースが存在しない状態への公開を拒否
-   することがある（上記のトラック単位のアクセス権限とは別の precondition failure）——
-   `r0adkll/upload-google-play` 自身の README にこの注意点がある。
+   することがある（上記のトラック単位のアクセス権限とは別の precondition failure）ため、アプリの
+   最初のリリースだけは手動で作成する必要がある。
 
-**トラックの定数。** `release.yml` の「Resolve Play track」ステップは `PLAY_TRACK_PRERELEASE` と
-`PLAY_TRACK_STABLE` の両方を `internal` に固定している — GitHub Release がプレリリースとして
-マークされていれば前者へ、それ以外は後者へ公開する（`package-snap` 自身のチャンネル選択ステップが
-使っているのと同じ `github.event.release.prerelease` フラグ）。両方とも `production`/`beta` では
-なく `internal` から始めるのは、2023-11-13 以降に作成された**個人用**の Google Play デベロッパー
-アカウントが、Play 自身のテスト要件——12人以上のオプトイン済みテスターによるクローズドテストを
-14日間連続で維持し、その後製品版アクセスの申請が承認されること——をクリアするまで「製品版」も
-「オープンテスト」もまったく使えないため。それまでは `internal` とクローズドテスト
-（Play Developer API のトラック ID では `alpha` — `closed` という ID 自体は存在しない。
-`publish-play.yml` 自身の `track` 入力参照）だけが使えるトラックであり、クローズドテストは
-Play Console から手動で人を集める必要がある（このプロジェクトの CI が自動でそこへ公開することは
-ない）。製品版アクセスが承認されたら、この2つの定数を `beta`/`production` に変更するだけでよく、
-ワークフロー自体に他の変更は不要。
+**トラックの定数。** `release.yml` の「Resolve Play track」ステップは `PLAY_TRACKS_PRERELEASE` と
+`PLAY_TRACKS_STABLE` を固定している。どちらも Play Developer API のトラック ID のカンマ区切り
+リストで、現在は両方とも `internal,alpha`、つまり内部テスト*と*クローズドテストの両方である
+（`alpha` は Play Console のクローズドテストを指す API 上の ID — `closed` という ID 自体は存在しない。
+`publish-play.yml` 自身の `tracks` 入力参照）。GitHub Release がプレリリースとしてマークされて
+いれば前者へ、それ以外は後者へ公開する（`package-snap` 自身のチャンネル選択ステップが使っている
+のと同じ `github.event.release.prerelease` フラグ）。どちらにも `production`/`beta` を含めないのは、
+2023-11-13 以降に作成された**個人用**の Google Play デベロッパーアカウントが、Play 自身のテスト
+要件——12人以上のオプトイン済みテスターによるクローズドテストを14日間連続で維持し、その後製品版
+アクセスの申請が承認されること——をクリアするまで「製品版」も「オープンテスト」もまったく使えない
+ため。製品版アクセスが承認されたら、この2つの定数を変更する（`beta`/`production` を加えるなど）
+だけでよく、ワークフロー自体に他の変更は不要。
+
+Play は一度見た `versionCode` の再アップロードを拒否するため、1 つのビルドを複数トラックへ公開する
+のにトラックごとにアップロードすることはできない。そこで `.github/scripts/publish-play.sh` は
+Play Developer API の edit を 1 つだけ開き、AAB を 1 回アップロードし、指定された全トラックの
+リリースをその `versionCode` に向けて（`edits.tracks.update`）から、最後に commit する。途中の
+どこかで失敗すれば edit は commit されずに削除されるので、公開に失敗しても片方のトラックだけが
+更新された状態にはならない。スクリプトは third-party action を使わず `curl`/`jq`/`openssl` で API を
+直接呼び（サービスアカウントの OAuth JWT も自前で署名する）、リクエストを送る前に各トラック ID を
+検証する。
 
 **`publish-play.yml`** は同じ公開処理を手動 `workflow_dispatch` で実行できる逃げ道で、既存の
-GitHub Release の `tag` と公開先の `track` を指定する — 上記の12人×14日の履歴を積むために
-クローズドテスト（`alpha`）へ直接投入したい場合や、GitHub Release を切り直さずに（切り直すとタグが変わり、
-`versionCode` も変わってしまう）失敗した公開をやり直したい場合に使う。既に公開済みの何かを
+GitHub Release の `tag` と公開先の `tracks`（カンマ区切り、既定値 `internal,alpha`）を指定する —
+上記の定数とは別のトラックの組み合わせへ公開したい場合や、GitHub Release を切り直さずに（切り直すと
+タグが変わり、`versionCode` も変わってしまう）失敗した公開をやり直したい場合に使う。使うのは同じ
+`publish-play.sh` で、`tag` ではなくワークフロー自身の ref から取得するため、スクリプトが存在する
+前に切られたタグでも動く。既に公開済みの何かを
 再利用するのではなく、指定タグから AAB を毎回ビルドし直す — タグからは常に同じ `versionCode` と
 署名結果が再現され、また `release.yml` はもう AAB を GitHub Release に添付しないため再利用する
 ものが無い。既に Play が見た `versionCode` を別のトラックへ**昇格**させることは、どちらのワークフローも

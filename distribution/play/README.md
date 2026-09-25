@@ -3,8 +3,8 @@
 This directory holds **draft copy for the Google Play Console store listing** —
 nothing here is read by any build or workflow. Every value has to be copy-pasted
 into Play Console by hand (App content → Store listing / Main store listing);
-`r0adkll/upload-google-play`, the action `release.yml` and `publish-play.yml` use
-to publish the AAB (see [`docs/build.md`](../../docs/build.md)'s "Publishing to
+`.github/scripts/publish-play.sh`, the script `release.yml` and `publish-play.yml`
+use to publish the AAB (see [`docs/build.md`](../../docs/build.md)'s "Publishing to
 Google Play"), only uploads the binary and release notes, never store-listing
 metadata.
 

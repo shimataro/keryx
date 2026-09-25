@@ -696,11 +696,12 @@ Flow:
        (`actions/upload-artifact`) for the separate `publish-play` job below to consume.
    - `publish-play`, a separate job (needs `package-android`, so it starts only once that job's AAB
      artifact exists) that downloads that artifact and **publishes it to Google Play**
-     (`r0adkll/upload-google-play`), gated on the `PLAY_SERVICE_ACCOUNT_JSON` secret below being set
+     (`.github/scripts/publish-play.sh`, one atomic Play Developer API edit that uploads the AAB
+     once and assigns it to every configured track), gated on the `PLAY_SERVICE_ACCOUNT_JSON` secret below being set
      at all — same skip-if-unconfigured pattern as the Snap Store publish above. Kept as its own job
      (rather than a step inside `package-android`) so a Play publish failure never withholds the APK
      already attached to the GitHub Release, the same reasoning as `package-snap`'s own separation
-     from `package-linux`. See "Publishing to Google Play" below for the full setup and the track
+     from `package-linux`. See "Publishing to Google Play" below for the full setup and the tracks
      this targets.
 
    `deploy-pages` (triggers the Cloudflare Pages deploy hook for the download page) waits on
@@ -871,28 +872,37 @@ Play Console listing (`works.merc.keryx`):
    `SNAPCRAFT_STORE_CREDENTIALS` above uses.
 5. Upload one AAB **manually** through the Play Console UI before the first automated publish. The
    Play Developer API can refuse a publish to a package it has never seen a release for at all
-   (a precondition failure, not the same thing as the per-track access above) — see
-   `r0adkll/upload-google-play`'s own README for this.
+   (a precondition failure, not the same thing as the per-track access above), so the very first
+   release of the app has to be created by hand.
 
-**Track constants.** `release.yml`'s "Resolve Play track" step hardcodes `PLAY_TRACK_PRERELEASE`
-and `PLAY_TRACK_STABLE` to `internal` for both — a GitHub Release marked as a pre-release publishes
-to the former, everything else to the latter (the same `github.event.release.prerelease` flag
-`package-snap`'s own channel-selection step above uses). Both start on `internal` rather than
-`production`/`beta` because a **personal** Google Play developer account created on or after
-2023-11-13 cannot use "production" or "open testing" at all until it clears Play's own testing
-requirement: a closed test with 12 or more opted-in testers, sustained continuously for 14 days,
-followed by an approved application for production access. Until then, `internal` and closed
-testing (the Play Developer API's `alpha` track id — "closed" itself is not a valid track id; see
-`publish-play.yml`'s own `track` input) are the only tracks available — the closed test has to be
-populated by hand from Play Console (this project's CI never publishes there automatically), and
-once product-level access is approved, change these two constants to `beta`/`production` and this
-workflow needs no further changes.
+**Track constants.** `release.yml`'s "Resolve Play track" step hardcodes `PLAY_TRACKS_PRERELEASE`
+and `PLAY_TRACKS_STABLE`, each a comma-separated list of Play Developer API track ids — currently
+`internal,alpha` for both, i.e. internal testing *and* closed testing (`alpha` is the API's id for
+Play Console's closed testing — "closed" itself is not a valid track id; see `publish-play.yml`'s own
+`tracks` input). A GitHub Release marked as a pre-release publishes to the former, everything else
+to the latter (the same `github.event.release.prerelease` flag `package-snap`'s own
+channel-selection step above uses). Neither includes `production`/`beta` because a **personal**
+Google Play developer account created on or after 2023-11-13 cannot use "production" or "open
+testing" at all until it clears Play's own testing requirement: a closed test with 12 or more
+opted-in testers, sustained continuously for 14 days, followed by an approved application for
+production access. Once product-level access is approved, change these two constants (e.g. adding
+`beta`/`production`) and the workflow needs no further changes.
+
+Play refuses a second upload of a `versionCode` it has already seen, so publishing one build to
+several tracks can't be done as one upload per track. `.github/scripts/publish-play.sh` instead
+opens a single Play Developer API edit, uploads the AAB once, points every listed track's release
+at the resulting `versionCode` (`edits.tracks.update`), and only then commits. If any step fails, the
+edit is deleted rather than committed, so a failed publish never leaves one track updated and the
+other not. The script calls the API directly with `curl`/`jq`/`openssl` (signing the service
+account's OAuth JWT itself) rather than through a third-party action; it validates each track id
+before making any request.
 
 **`publish-play.yml`** is a manual `workflow_dispatch` escape hatch for the same publish, given a
-`tag` (an existing GitHub Release) and a `track` to target — useful for pushing straight to closed
-testing (`alpha`) while accumulating the 12-tester/14-day history above, or for retrying a failed publish
-without cutting a new GitHub Release (which would also bump the tag, and therefore the
-`versionCode`). It rebuilds the AAB from that tag rather than reusing anything already
+`tag` (an existing GitHub Release) and `tracks` to target (comma-separated, default `internal,alpha`)
+— useful for publishing to a different set of tracks than the constants above, or for retrying a
+failed publish without cutting a new GitHub Release (which would also bump the tag, and therefore
+the `versionCode`). It runs the same `publish-play.sh`, taken from the workflow's own ref rather
+than from `tag`, so it also works for a tag cut before the script existed. It rebuilds the AAB from that tag rather than reusing anything already
 published — a tag deterministically reproduces the same `versionCode` and signing output either
 way, and `release.yml` no longer attaches an AAB to the GitHub Release for it to reuse. Neither
 workflow *promotes* a `versionCode` Play has already seen to a different track: both only ever

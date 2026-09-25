@@ -1,15 +1,15 @@
 name: Publish to Google Play
 
 # Manual escape hatch alongside release.yml's own automatic Play publish (see
-# package-android's "Resolve Play track" / "Publish to Google Play" steps there and
+# publish-play's "Resolve Play track" / "Publish to Google Play" steps there and
 # docs/build.md's "Publishing to Google Play"). Kept as its own workflow rather than a
 # `workflow_dispatch` trigger bolted onto release.yml, since every job in that file reads
 # `github.event.release.tag_name` — a `workflow_dispatch` event carries no such context.
 #
-# Two uses this exists for: pushing a build straight to the closed track while accumulating the
-# 12-tester/14-day history a personal developer account needs before Play grants product-level
-# access, and re-running a failed publish without re-cutting the GitHub Release (which would bump
-# the tag and therefore the versionCode).
+# Two uses this exists for: publishing a tag to a different set of tracks than release.yml's own
+# constants, and re-running a failed publish without re-cutting the GitHub Release (which would
+# bump the tag and therefore the versionCode). Both go through the same publish-play.sh, which
+# uploads the AAB once and assigns it to every requested track in a single atomic edit.
 #
 # Unlike release.yml, this always rebuilds the AAB from the given tag rather than reusing a
 # previously-attached one — release.yml no longer attaches the AAB to the GitHub Release at all
@@ -28,28 +28,24 @@ on:
         description: "Existing release tag to publish (e.g. v1.2.0)"
         required: true
         type: string
-      # Options are Play Developer API track IDs, not Play Console's own testing-tier names:
+      # Comma-separated Play Developer API track IDs, not Play Console's own testing-tier names:
       # `alpha` is the API id for what Play Console calls "closed testing" ("closed" itself is
       # not a valid track id — a closed track beyond `alpha` gets a developer-chosen custom name,
-      # created manually in Play Console, so it can't be offered as a fixed choice here). See
-      # docs/build.md's "Publishing to Google Play" for how these map to account access tiers.
-      track:
-        description: "Google Play track (internal=Internal testing, alpha=Closed testing, beta=Open testing, production=Production)"
+      # created manually in Play Console, which is why this is free text rather than a choice).
+      # publish-play.sh validates each id before publishing. See docs/build.md's "Publishing to
+      # Google Play" for how these map to account access tiers.
+      tracks:
+        description: "Comma-separated Google Play tracks (internal=Internal testing, alpha=Closed testing, beta=Open testing, production=Production)"
         required: true
-        type: choice
-        default: internal
-        options:
-          - internal
-          - alpha
-          - beta
-          - production
+        type: string
+        default: internal,alpha
 
 permissions:
   contents: read
 
 jobs:
   publish:
-    name: Build & publish (${{ inputs.track }})
+    name: Build & publish (${{ inputs.tracks }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -58,6 +54,17 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      # The publish script comes from this workflow's own ref, not from `tag`: a tag cut before the
+      # script existed wouldn't carry it. Checked out after the tag checkout above, since that one
+      # cleans the workspace.
+      - name: Checkout publish script
+        uses: actions/checkout@v7
+        with:
+          path: .publish-tools
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # Same tag-to-version resolution as release.yml's own "Resolve version from tag" step —
@@ -186,11 +193,10 @@ jobs:
       # exists specifically to publish, so a missing PLAY_SERVICE_ACCOUNT_JSON should fail loudly
       # rather than silently do nothing.
       - name: Publish to Google Play
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: works.merc.keryx
-          releaseFiles: ${{ steps.artifact.outputs.aab }}
-          track: ${{ inputs.track }}
-          status: completed
-          whatsNewDirectory: ${{ steps.whatsnew.outputs.dir }}
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          PACKAGE_NAME: works.merc.keryx
+          AAB_PATH: ${{ steps.artifact.outputs.aab }}
+          TRACKS: ${{ inputs.tracks }}
+          WHATSNEW_DIR: ${{ steps.whatsnew.outputs.dir }}
+        run: .publish-tools/.github/scripts/publish-play.sh
