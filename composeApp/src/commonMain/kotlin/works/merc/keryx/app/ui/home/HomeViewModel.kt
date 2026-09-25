@@ -282,7 +282,20 @@ class HomeViewModel(
                 .onStart { resetNewArticleTracking() }
                 .onEach { list ->
                     val ids = list.mapTo(HashSet(list.size)) { it.id }
-                    _newArticleTracking.update { it.withList(ids) }
+                    // Only an id not seen before under this filter *and* inserted after the
+                    // watermark is new — the rowid lookup is what rules out an existing article
+                    // re-entering the query (re-starred, its feed moved into this folder/tag). It
+                    // runs only when there is a candidate at all, so the common re-emission (a read
+                    // or star toggle) issues no extra query. Runs on `dispatcher` (articles'
+                    // flowOn), like the list query itself.
+                    val tracking = _newArticleTracking.value
+                    val candidates = tracking.candidatesIn(ids)
+                    val inserted = if (candidates.isEmpty()) {
+                        emptySet()
+                    } else {
+                        articleRepository.articleIdsInsertedAfter(tracking.insertedAfterRowId, candidates)
+                    }
+                    _newArticleTracking.update { it.withList(ids, inserted) }
                 }
         }
 
@@ -369,9 +382,14 @@ class HomeViewModel(
      * not "missed" by the user, so it must become the new baseline rather than being diffed against
      * the previous filter's id set. ([subscribeFeeds] deliberately does not reset — it acknowledges
      * just the subscribed feeds' articles via [withAcknowledged].)
+     *
+     * Also takes the insertion watermark. `onStart` runs before the new filter's query first
+     * executes, so the watermark can never be later than the baseline snapshot: a row inserted
+     * in between is above the watermark and, if it's missing from that snapshot, still counts once
+     * a later emission picks it up.
      */
     private fun resetNewArticleTracking() {
-        _newArticleTracking.value = NewArticleTracking()
+        _newArticleTracking.value = NewArticleTracking(insertedAfterRowId = articleRepository.maxArticleRowId())
     }
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)

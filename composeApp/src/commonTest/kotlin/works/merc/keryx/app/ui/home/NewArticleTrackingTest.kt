@@ -4,6 +4,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/**
+ * Most tests below are about the id-diff bookkeeping alone, so they fold in a result whose every id
+ * is a freshly inserted row (the rowid check passes for all of them); the rowid-specific behavior
+ * has its own tests further down, calling the two-argument [withList] directly.
+ */
+private fun NewArticleTracking.withList(ids: Set<String>): NewArticleTracking = withList(ids, inserted = ids)
+
 class NewArticleTrackingTest {
 
     // --- withList: seeding ---
@@ -71,6 +78,78 @@ class NewArticleTrackingTest {
             .withList(setOf("a"))
             .withList(setOf("a", "b"))
         assertEquals(setOf("b"), tracking.unseenIds)
+    }
+
+    @Test
+    fun withListSeedingIgnoresInsertedAndKeepsTheWatermark() {
+        val tracking = NewArticleTracking(insertedAfterRowId = 42).withList(setOf("a", "b"), inserted = setOf("a", "b"))
+        assertEquals(setOf("a", "b"), tracking.knownIds)
+        assertTrue(tracking.unseenIds.isEmpty())
+        assertEquals(42, tracking.insertedAfterRowId)
+    }
+
+    // --- withList: rowid-inserted check ---
+
+    @Test
+    fun withListDoesNotCountACandidateThatWasNotNewlyInserted() {
+        // e.g. an existing article re-starred while browsing Starred, or its feed moved into the
+        // folder being viewed: new to this list's id set, but not a newly inserted row.
+        val tracking = NewArticleTracking()
+            .withList(setOf("a"), inserted = emptySet())
+            .withList(setOf("a", "b", "c"), inserted = setOf("c"))
+        assertEquals(setOf("c"), tracking.unseenIds)
+        assertEquals(setOf("a", "b", "c"), tracking.knownIds)
+    }
+
+    @Test
+    fun withListIgnoresInsertedIdsThatAreAlreadyKnown() {
+        val tracking = NewArticleTracking()
+            .withList(setOf("a", "b"), inserted = emptySet())
+            .withList(setOf("a", "b"), inserted = setOf("b"))
+        assertTrue(tracking.unseenIds.isEmpty())
+    }
+
+    @Test
+    fun withListKeepsKnownIdsCumulativeSoAReenteringArticleIsNotRecounted() {
+        val counted = NewArticleTracking()
+            .withList(setOf("a"), inserted = emptySet())
+            .withList(setOf("a", "b"), inserted = setOf("b"))
+        assertEquals(setOf("b"), counted.unseenIds)
+        // "b" leaves the result (e.g. unstarred) — it drops out of unseen but stays known...
+        val left = counted.withList(setOf("a"), inserted = emptySet())
+        assertTrue(left.unseenIds.isEmpty())
+        assertEquals(setOf("a", "b"), left.knownIds)
+        // ...so coming back (re-starred) doesn't count it again, even though its row is still
+        // above the watermark.
+        val back = left.withList(setOf("a", "b"), inserted = setOf("b"))
+        assertTrue(back.unseenIds.isEmpty())
+    }
+
+    @Test
+    fun withListDoesNotCountAnExistingArticleReenteringAfterLeaving() {
+        val tracking = NewArticleTracking()
+            .withList(setOf("a", "b"), inserted = emptySet())
+            .withList(setOf("a"), inserted = emptySet())
+            .withList(setOf("a", "b"), inserted = emptySet())
+        assertTrue(tracking.unseenIds.isEmpty())
+    }
+
+    // --- candidatesIn ---
+
+    @Test
+    fun candidatesInIsEmptyForAnUnseededTracker() {
+        assertTrue(NewArticleTracking().candidatesIn(setOf("a")).isEmpty())
+    }
+
+    @Test
+    fun candidatesInIsEmptyForAnEmptyBaseline() {
+        assertTrue(NewArticleTracking().withList(emptySet()).candidatesIn(setOf("a")).isEmpty())
+    }
+
+    @Test
+    fun candidatesInReturnsTheIdsNotYetKnown() {
+        val tracking = NewArticleTracking().withList(setOf("a")).withList(setOf("b"))
+        assertEquals(setOf("c"), tracking.candidatesIn(setOf("a", "b", "c")))
     }
 
     // --- withAcknowledged ---

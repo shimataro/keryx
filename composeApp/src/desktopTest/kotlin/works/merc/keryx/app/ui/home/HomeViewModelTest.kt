@@ -4269,6 +4269,74 @@ class HomeViewModelTest {
 
         assertEquals(1, vm.newArticleCount.value)
     }
+
+    @Test
+    fun reStarringAnExistingArticleWhileBrowsingStarredIsNotCountedAsNew() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("seed", "f1", isStarred = 1L)
+        db.insertArticle("a1", "f1", isStarred = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // Unstarring drops a1 from Starred's raw query (the row stays on screen via the unstar pin)...
+        vm.toggleStar(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // ...and re-starring brings it back into the query: new to the id set, but an existing row,
+        // so it must not surface as a "new article".
+        vm.toggleStar(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_starred)
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun anExistingArticleStarredElsewhereWhileBrowsingStarredIsNotCountedAsNew() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("seed", "f1", isStarred = 1L)
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        // e.g. a star made on another device arriving via sync: a1 enters Starred's query for the
+        // first time, but it is an existing row, not a newly arrived article.
+        db.articlesQueries.updateStarStatus(1L, 100L, 100L, "a1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("seed", "a1"), vm.articles.value.map { it.id }.toSet())
+        assertEquals(0, vm.newArticleCount.value)
+    }
+
+    @Test
+    fun movingAnExistingFeedIntoTheViewedFolderDoesNotCountItsArticlesAsNew() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertFeed("f2")
+        db.insertArticle("seed", "f1")
+        db.insertArticle("a1", "f2")
+        db.insertArticle("a2", "f2")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, vm.newArticleCount.value)
+
+        vm.moveFeed("f2", "d1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("seed", "a1", "a2"), vm.articles.value.map { it.id }.toSet())
+        assertEquals(0, vm.newArticleCount.value)
+
+        // A genuinely new article in the moved feed still counts.
+        db.insertArticle("a3", "f2")
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, vm.newArticleCount.value)
+    }
 }
 
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
