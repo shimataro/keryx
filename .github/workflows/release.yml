@@ -76,7 +76,7 @@ jobs:
               fi
               echo "::warning::packageDmg hit a transient hdiutil failure (attempt $attempt); retrying."
               for volume in /Volumes/Keryx*; do
-                [ -d "$volume" ] && hdiutil detach "$volume" -force || true
+                if [ -d "$volume" ]; then hdiutil detach "$volume" -force || true; fi
               done
               sleep 5
             done
