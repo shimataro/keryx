@@ -910,8 +910,10 @@ several tracks can't be done as one upload per track. `.github/scripts/publish-p
 opens a single Play Developer API edit, uploads the AAB once, points every listed track's release
 at the resulting `versionCode` (`edits.tracks.update`), and only then commits. If any step fails, the
 edit is deleted rather than committed, so a failed publish never leaves one track updated and the
-other not. The script calls the API directly with `curl`/`jq`/`openssl` (signing the service
-account's OAuth JWT itself) rather than through a third-party action; it validates each track id
+other not. The commit passes `changesInReviewBehavior=CANCEL_IN_REVIEW_AND_SUBMIT` explicitly: a
+newer build superseding an older release still in review is the intended outcome, whereas
+`ERROR_IF_IN_REVIEW` would fail the automatic publish until that review finished. The script
+calls the API directly with `curl`/`jq`/`openssl` (signing the service account's OAuth JWT itself) rather than through a third-party action; it validates each track id
 before making any request.
 
 **`publish-play.yml`** is a manual `workflow_dispatch` escape hatch for the same publish, given a

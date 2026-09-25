@@ -124,6 +124,10 @@ for track in "${tracks[@]}"; do
   echo "Assigned versionCode $version_code to track '$track'."
 done
 
-api POST "$API/$PACKAGE_NAME/edits/$edit_id:commit" > /dev/null
+# tracks.update above replaces each track's release, so a newer build superseding an older one
+# still in review is the intended outcome: cancel that review and submit this edit. Stated
+# explicitly rather than relying on the API default; ERROR_IF_IN_REVIEW would instead fail
+# release.yml's automatic publish until the older review finished.
+api POST "$API/$PACKAGE_NAME/edits/$edit_id:commit?changesInReviewBehavior=CANCEL_IN_REVIEW_AND_SUBMIT" > /dev/null
 edit_id=""
 echo "Committed: versionCode $version_code published to ${tracks[*]}."

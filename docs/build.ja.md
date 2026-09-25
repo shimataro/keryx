@@ -930,8 +930,10 @@ Play は一度見た `versionCode` の再アップロードを拒否するため
 Play Developer API の edit を 1 つだけ開き、AAB を 1 回アップロードし、指定された全トラックの
 リリースをその `versionCode` に向けて（`edits.tracks.update`）から、最後に commit する。途中の
 どこかで失敗すれば edit は commit されずに削除されるので、公開に失敗しても片方のトラックだけが
-更新された状態にはならない。スクリプトは third-party action を使わず `curl`/`jq`/`openssl` で API を
-直接呼び（サービスアカウントの OAuth JWT も自前で署名する）、リクエストを送る前に各トラック ID を
+更新された状態にはならない。commit には `changesInReviewBehavior=CANCEL_IN_REVIEW_AND_SUBMIT` を
+明示的に渡す。審査中の古いリリースを新しいビルドで置き換えるのが意図した挙動であり、
+`ERROR_IF_IN_REVIEW` にするとその審査が終わるまで自動公開が失敗してしまうためである。
+スクリプトは third-party action を使わず `curl`/`jq`/`openssl` で API を直接呼び（サービスアカウントの OAuth JWT も自前で署名する）、リクエストを送る前に各トラック ID を
 検証する。
 
 **`publish-play.yml`** は同じ公開処理を手動 `workflow_dispatch` で実行できる逃げ道で、既存の
