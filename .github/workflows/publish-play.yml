@@ -6,10 +6,14 @@ name: Publish to Google Play
 # `workflow_dispatch` trigger bolted onto release.yml, since every job in that file reads
 # `github.event.release.tag_name` — a `workflow_dispatch` event carries no such context.
 #
-# Two uses this exists for: publishing a tag to a different set of tracks than release.yml's own
-# constants, and re-running a failed publish without re-cutting the GitHub Release (which would
-# bump the tag and therefore the versionCode). Both go through the same publish-play.sh, which
-# uploads the AAB once and assigns it to every requested track in a single atomic edit.
+# Two uses this exists for: publishing a tag whose versionCode Play has not accepted yet to a
+# different set of tracks than release.yml's own constants, and re-running a failed publish
+# without re-cutting the GitHub Release (which would bump the tag and therefore the versionCode).
+# Both go through the same publish-play.sh, which uploads the AAB once and assigns it to every
+# requested track in a single atomic edit. A retry is always safe: a failed edit is deleted, never
+# committed, so its versionCode stays unused. A versionCode Play has already accepted, though, is
+# refused on upload, so moving an existing release to another track is a Play Console action, not
+# this workflow's (see docs/build.md's "Publishing to Google Play").
 #
 # Unlike release.yml, this always rebuilds the AAB from the given tag rather than reusing a
 # previously-attached one — release.yml no longer attaches the AAB to the GitHub Release at all
