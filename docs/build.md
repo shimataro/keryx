@@ -192,12 +192,51 @@ not just iOS/iPadOS).
    here. This feeds `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`, generated into `appleMain` only by
    `shared/build.gradle.kts`'s `generateAppleBuildConfig` task — analogous to
    `generateDesktopBuildConfig`, but with no secret counterpart since this client type has none.
-4. No separate redirect-URI registration is needed: it is the client's own reversed-client-id custom
-   scheme, `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`, which Google derives from the
-   Client ID automatically (`googleIosClientRedirectUri`, `data/cloud/GoogleDriveAuthManager.kt`).
-   When building the Swift app, register that scheme in Info.plist's `CFBundleURLTypes` (or as an
-   `ASWebAuthenticationSession` `callbackURLScheme`) alongside the shared `keryx://` one Dropbox/
-   OneDrive use.
+4. No separate redirect-URI registration is needed with Google: it is the client's own
+   reversed-client-id custom scheme, `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`, which
+   Google derives from the Client ID automatically (`googleIosClientRedirectUri`,
+   `data/cloud/GoogleDriveAuthManager.kt`).
+5. **Register the custom URL schemes in the Swift app's Info.plist.** Two schemes need to be
+   registered: the shared `keryx` scheme (Dropbox/OneDrive, and now Google Drive too — all three
+   disambiguated by `state`) and the Google client's own reversed-client-id scheme from step 4.
+   `CFBundleURLTypes` takes one `<dict>` per scheme, each with its own `CFBundleURLName` and a
+   `CFBundleURLSchemes` array holding just that one scheme string — the same shape the desktop app's
+   Compose packaging already uses for `keryx` (`composeApp/build.gradle.kts`'s
+   `nativeDistributions.macOS.infoPlist.extraKeysRawXml`):
+
+   ```xml
+   <key>CFBundleURLTypes</key>
+   <array>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>keryx</string>
+           </array>
+       </dict>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth.googledrive</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>com.googleusercontent.apps.NNNN-xxxx</string>
+           </array>
+       </dict>
+   </array>
+   ```
+
+   Replace `com.googleusercontent.apps.NNNN-xxxx` with the actual reversed client ID from step 4.
+   Xcode's own editor (target → **Info** tab → **URL Types**, "+") writes the same two keys and can
+   be used instead of hand-editing the XML.
+
+   **This registration is only needed for the redirect-delivery path desktop uses today** — the OS
+   handing the URL to the running app (`NSApplicationDelegate.application(_:open:)` on macOS,
+   `onOpenURL`/`scene(_:openURLContexts:)` on iOS) after the user completes sign-in in the system
+   browser. If the Swift app instead opens the authorization URL through
+   `ASWebAuthenticationSession` and passes the scheme as its `callbackURLScheme` parameter, that
+   session intercepts the redirect itself and needs no `CFBundleURLTypes` entry for it — the two are
+   alternative delivery mechanisms, not both required.
 
 Leaving `googledrive.apple.client.id` empty hides Google Drive on the Apple app only — it has no
 effect on desktop's or Android's own Google Drive keys, and vice versa. See

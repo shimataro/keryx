@@ -192,11 +192,49 @@ Dropbox と OneDrive は上記と同じ `local.properties` のキーを使う。
    `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` に渡り、`shared/build.gradle.kts` の
    `generateAppleBuildConfig` タスクが `appleMain` にだけ生成する——`generateDesktopBuildConfig` と
    同じ方式だが、このクライアント種別には secret が無いので secret の対になるものは無い。
-4. リダイレクト URI を別途登録する必要はない——クライアント ID を逆順にした自分専用のカスタムスキーム
-   `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect` を Google 側が自動的に導出する
-   （`googleIosClientRedirectUri`、`data/cloud/GoogleDriveAuthManager.kt`）。Swift アプリを実装する際は、
-   Dropbox・OneDrive が使う共通の `keryx://` と並べて、Info.plist の `CFBundleURLTypes`
-   （または `ASWebAuthenticationSession` の `callbackURLScheme`）にこのスキームを登録する。
+4. Google の場合、リダイレクト URI を別途登録する必要はない——クライアント ID を逆順にした自分専用の
+   カスタムスキーム `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect` を Google 側が自動的に
+   導出する（`googleIosClientRedirectUri`、`data/cloud/GoogleDriveAuthManager.kt`）。
+5. **Swift アプリの Info.plist にカスタム URL スキームを登録する。** 登録が必要なスキームは2つ：
+   共有の `keryx` スキーム（Dropbox・OneDrive、そして今回から Google Drive も——3つとも `state` で
+   判別）と、ステップ4の Google クライアント専用の逆順クライアント ID スキーム。`CFBundleURLTypes`
+   には、スキームごとに1つの `<dict>`（`CFBundleURLName` + 1スキームだけを含む `CFBundleURLSchemes`
+   配列）を追加する——desktop 版の Compose パッケージングが `keryx` に対してすでに使っている書式と
+   同じ（`composeApp/build.gradle.kts` の `nativeDistributions.macOS.infoPlist.extraKeysRawXml`）：
+
+   ```xml
+   <key>CFBundleURLTypes</key>
+   <array>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>keryx</string>
+           </array>
+       </dict>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth.googledrive</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>com.googleusercontent.apps.NNNN-xxxx</string>
+           </array>
+       </dict>
+   </array>
+   ```
+
+   `com.googleusercontent.apps.NNNN-xxxx` はステップ4で得た実際の逆順クライアント ID に置き換える。
+   Xcode の Info タブの「URL Types」セクション（「+」ボタン）から GUI で追加しても同じ2つのキーが
+   書き込まれるので、XML を手で書く代わりに使える。
+
+   **この登録が必要なのは、desktop 版と同じ経路でリダイレクトを受け取る場合だけ**——ユーザーが
+   システムブラウザーでサインインを完了した後、OS が実行中のアプリに URL を渡す経路
+   （macOS の `NSApplicationDelegate.application(_:open:)`、iOS の `onOpenURL`/
+   `scene(_:openURLContexts:)`）。Swift アプリが代わりに `ASWebAuthenticationSession` で認可 URL を
+   開き、そのスキームを `callbackURLScheme` パラメーターに渡す場合は、セッション自身がリダイレクトを
+   横取りするため、そのスキームに `CFBundleURLTypes` のエントリは不要——両者は択一の受け取り方式で、
+   両方必要というわけではない。
 
 `googledrive.apple.client.id` を空にすると Google Drive が Apple 版だけで隠れる——desktop 版や
 Android 版それぞれの Google Drive キーには影響しない（逆も同様）。仕組みの詳細は
