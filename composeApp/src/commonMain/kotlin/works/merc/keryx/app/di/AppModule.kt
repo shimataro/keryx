@@ -1,43 +1,8 @@
 package works.merc.keryx.app.di
 
-import app.cash.sqldelight.db.SqlDriver
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import org.koin.core.module.Module
 import org.koin.dsl.module
-import works.merc.keryx.app.core.AppInfo
-import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.Log
-import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.data.local.DatabaseDriverFactory
-import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.data.local.FtsSearch
-import works.merc.keryx.app.data.local.LocalSettingsStore
-import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.data.remote.FaviconResolver
-import works.merc.keryx.app.data.remote.FeedFetcher
-import works.merc.keryx.app.data.remote.UpdateDownloader
-import works.merc.keryx.app.domain.ActivityCenter
-import works.merc.keryx.app.domain.ArticleRepository
-import works.merc.keryx.app.domain.CloudSession
-import works.merc.keryx.app.domain.FeedRepository
-import works.merc.keryx.app.domain.FolderRepository
-import works.merc.keryx.app.domain.NewArticleNotifier
-import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
-import works.merc.keryx.app.domain.OpmlImporter
-import works.merc.keryx.app.domain.RefreshCycleRunner
-import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncRepository
-import works.merc.keryx.app.domain.SyncScheduler
-import works.merc.keryx.app.domain.TagRepository
-import works.merc.keryx.app.domain.UpdateChecker
-import works.merc.keryx.app.domain.UpdateRepository
-import works.merc.keryx.app.platform.SelfUpdateCheckSupport
-import works.merc.keryx.app.platform.detectInstallLocation
-import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.i18n.ComposeNotificationMessages
@@ -45,76 +10,19 @@ import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.settings.SettingsViewModel
 import works.merc.keryx.app.ui.setup.SetupViewModel
 
-/** Platform-specific bindings (HTTP client, token storage, cloud session). */
+/** Platform-specific bindings (HTTP client, token storage, cloud session, update installer). */
 expect val platformModule: Module
 
 /**
- * Shared bindings. Platform bindings ([platformModule]) provide the SQL driver
- * inputs, [io.ktor.client.HttpClient], token storage, [CloudSession], and the
- * Dropbox connect flow. ViewModel bindings live in [viewModelModule].
+ * The Compose app's bindings: :shared's [sharedModule] and [updateModule], plus what only this
+ * UI provides — the Compose Resources [NotificationMessages], the menu bus, and the ViewModels.
+ * Platform bindings come from [platformModule].
  */
 val appModule: Module = module {
-    single<SqlDriver> { DatabaseDriverFactory().create() }
-    single { KeryxDatabase(get()) }
-    single { FtsManager(get<SqlDriver>()) }
-    single { FtsSearch(get<SqlDriver>()) }
-    single { LocalSettingsStore() }
-    single<Clock> { SystemClock }
-    single { NotificationCenter() }
-    single { ActivityCenter() }
+    includes(sharedModule, updateModule)
+
     single { MenuController() }
-    single { NewArticleNotifier(get()) }
     single<NotificationMessages> { ComposeNotificationMessages() }
-
-    // Long-lived scope for debounced sync + background work. The handler doesn't change any
-    // existing behavior (SupervisorJob's semantics and every launch/async's own exception handling
-    // are unaffected) — it only keeps an exception that would otherwise reach the platform default
-    // handler (stderr, invisible in a packaged .app with no attached console) from vanishing
-    // without a trace. That silence is exactly what made a launch()-time IllegalArgumentException
-    // in the in-app updater look like a hang instead of a logged failure (see DetachedProcess.kt).
-    single {
-        val exceptionHandler = CoroutineExceptionHandler { _, e -> Log.error("AppScope", "Uncaught coroutine exception", e) }
-        CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
-    }
-
-    single {
-        SyncRepository(
-            driver = get(),
-            db = get(),
-            ftsManager = get(),
-            cloudProvider = { get<CloudSession>().current() },
-            clock = get(),
-            scope = get(),
-            activityCenter = get(),
-            notificationCenter = get(),
-            notificationMessages = get(),
-            // localDbPath left at its constructor default (platform/DatabaseFile.kt's
-            // databaseFilePath(), already the platform-correct real DB path on both desktop and
-            // Android) rather than passed here — see that function's own KDoc for why it exists.
-        )
-    }
-    single<SyncScheduler> { get<SyncRepository>() }
-
-    single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
-    single { FaviconResolver(get()) }
-    // Resolved once here rather than left to each of UpdateChecker/UpdateRepository/
-    // DesktopUpdateInstaller's own constructor-default detectInstallLocation() call: that default
-    // exists only so tests can supply a fake location without DI, not as an invitation for three
-    // independent live filesystem probes (InstallLocation.parentWritable actually creates and
-    // deletes a temp file) to disagree with each other, or to run three times on the startup path.
-    single { detectInstallLocation() }
-    single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo, location = get()) }
-    single { UpdateDownloader(get()) }
-    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), notificationMessages = get(), scope = get(), location = get()) }
-    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
-
-    single { SettingsRepository(get(), get(), get(), get()) }
-    single { ArticleRepository(get(), get(), get(), get()) }
-    single { TagRepository(get(), get(), get()) }
-    single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    single { FolderRepository(get(), get(), get(), get()) }
-    single { OpmlImporter(get(), get(), get()) }
-    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
 
     // ViewModels are app-scoped for this single-window desktop app.
     single { NotificationCenterViewModel(get()) }

@@ -23,7 +23,12 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
+// The UI-framework-free shared code (core/data/domain + SQLDelight schema) — see
+// shared/build.gradle.kts.
+include(":shared")
 include(":composeApp")
+// Test-only helpers used by both :shared's and :composeApp's tests.
+include(":testing")
 // The Android application module (AndroidManifest, MainActivity, KeryxApplication). Separate
 // from :composeApp because AGP 9's com.android.application plugin cannot coexist with the Kotlin
 // Multiplatform plugin in the same module — see the plan doc's "実装中に判明した構造変更".
