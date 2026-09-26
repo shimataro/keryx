@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -24,6 +25,7 @@ class SetupViewModel(
     private val settingsRepository: SettingsRepository,
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
+    private val cloudConnectionService: CloudConnectionService,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher —
     // same rationale as SettingsViewModel's own dispatcher.
@@ -81,9 +83,9 @@ class SetupViewModel(
             }
             when (result) {
                 is Result.Ok -> {
-                    withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
-                    settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
-                    withContext(dispatcher) { settingsRepository.flush() }
+                    // Saves the tokens and flushes the provider selection to disk before the sync
+                    // below starts — see CloudConnectionService.completeConnect.
+                    withContext(dispatcher) { cloudConnectionService.completeConnect(type, result.value) }
                     // Merge whatever already exists in the cloud (imports on first sync).
                     withContext(dispatcher) { syncRepository.sync() }
                     _phase.value = SetupPhase.IDLE

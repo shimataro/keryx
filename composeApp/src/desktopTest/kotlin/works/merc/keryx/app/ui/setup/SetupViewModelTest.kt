@@ -31,6 +31,7 @@ import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -128,7 +129,10 @@ class SetupViewModelTest {
             clock = clock,
             connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
         )
-        return SetupViewModel(settingsRepository, cloudSession, syncRepository, dispatcher)
+        return SetupViewModel(
+            settingsRepository, cloudSession, syncRepository,
+            CloudConnectionService(cloudSession, settingsRepository, syncRepository), dispatcher,
+        )
             .also { createdViewModels += it }
     }
 
@@ -225,7 +229,8 @@ class SetupViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(SetupPhase.IDLE, vm.phase.value)
-        // Three withContext(dispatcher) hops: saveTokens, settingsRepository.flush(), sync().
-        assertTrue(counting.dispatchCount >= 3)
+        // Two withContext(dispatcher) hops: CloudConnectionService.completeConnect() (token save +
+        // settings flush) and sync().
+        assertTrue(counting.dispatchCount >= 2)
     }
 }

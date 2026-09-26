@@ -51,6 +51,7 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
@@ -397,7 +398,8 @@ class SettingsViewModelTest {
         }
         createdSyncRepository = syncRepository
         return SettingsViewModel(
-            settingsRepository, session, syncRepository, feedRepository, folderRepository, tagRepository,
+            settingsRepository, session, syncRepository, CloudConnectionService(session, settingsRepository, syncRepository),
+            feedRepository, folderRepository, tagRepository,
             opmlImporter, updateRepository, activityCenter, dispatcher, fileSelector,
         ).also { createdViewModels += it }
     }

@@ -27,6 +27,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.awaitCancellableConnect
 import works.merc.keryx.app.domain.displayTitle
@@ -57,6 +58,7 @@ class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
+    private val cloudConnectionService: CloudConnectionService,
     private val feedRepository: FeedRepository,
     private val folderRepository: FolderRepository,
     private val tagRepository: TagRepository,
@@ -362,12 +364,9 @@ class SettingsViewModel(
         } ?: return false
         return when (result) {
             is Result.Ok -> {
-                withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
-                update { it.copy(cloudStorageType = type.id) }
-                // Persist the provider selection to disk before the initial sync. Tokens are
-                // saved durably to the keychain above, so without this flush a crash could leave
-                // tokens present but cloudStorageType null → every later sync a silent no-op.
-                withContext(dispatcher) { settingsRepository.flush() }
+                // Saves the tokens and flushes the provider selection to disk before [connect]
+                // starts the initial sync — see CloudConnectionService.completeConnect.
+                withContext(dispatcher) { cloudConnectionService.completeConnect(type, result.value) }
                 _connectedType.value = type
                 true
             }
@@ -383,15 +382,14 @@ class SettingsViewModel(
     }
 
     /**
-     * Disconnects [type] and clears everything a subsequent connect must not inherit: the sync
-     * failure reason (so a fresh connect doesn't start out showing the old provider's error), the
-     * persisted provider setting, and the last-synced timestamp. Shared by [disconnect] and
+     * Disconnects [type] and clears everything a subsequent connect must not inherit: the domain
+     * state via [CloudConnectionService.tearDown] (tokens, sync failure reason — so a fresh connect
+     * doesn't start out showing the old provider's error — and the persisted provider setting),
+     * then this screen's connected state and last-synced timestamp. Shared by [disconnect] and
      * [switchTo], which differ only in what runs before/after this teardown.
      */
     private suspend fun tearDownConnection(type: CloudStorageType) {
-        withContext(dispatcher) { cloudSession.disconnect(type) }
-        syncRepository.clearSyncFailureState()
-        update { it.copy(cloudStorageType = null) }
+        withContext(dispatcher) { cloudConnectionService.tearDown(type) }
         _connectedType.value = null
         _lastSyncedAtText.value = null
     }

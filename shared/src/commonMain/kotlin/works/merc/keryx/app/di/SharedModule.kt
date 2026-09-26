@@ -21,6 +21,7 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
@@ -89,6 +90,7 @@ fun sharedModule(): Module = module {
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }
+    single { CloudConnectionService(get(), get(), get()) }
 
     single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
     single { FaviconResolver(get()) }
