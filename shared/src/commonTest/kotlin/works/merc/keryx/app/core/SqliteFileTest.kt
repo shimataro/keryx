@@ -1,6 +1,6 @@
 package works.merc.keryx.app.core
 
-import java.io.File
+import works.merc.keryx.app.tempFileWith
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -47,11 +47,7 @@ class SqliteFileTest {
     // --- the path-based overload, which is the form the sync flow uses now that the payload is
     // streamed to disk instead of being held in memory ---
 
-    private fun fileWith(bytes: ByteArray): String =
-        File.createTempFile("keryx-sqlitefile-", ".bin").apply {
-            deleteOnExit()
-            writeBytes(bytes)
-        }.absolutePath
+    private fun fileWith(bytes: ByteArray): String = tempFileWith(bytes, "keryx-sqlitefile-")
 
     @Test
     fun missingFileIsRejected() {

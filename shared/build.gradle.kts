@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 import java.util.Properties
 
 // The UI-framework-free half of the app: core, data, domain, the SQLDelight schema, and the
@@ -206,7 +207,25 @@ kotlin {
         }
     }
 
+    // The native Apple app (macOS first, iOS later) consumes this module as the KeryxShared
+    // XCFramework — see docs/app-architecture.md's "Apple Native Apps (SwiftUI)". Static, so the
+    // app links one binary rather than embedding a dynamic framework. Apple Silicon only, like the
+    // existing macOS release (and lifecycle-viewmodel publishes no macosX64 variant anyway).
+    val xcframework = XCFramework("KeryxShared")
+    listOf(macosArm64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "KeryxShared"
+            isStatic = true
+            xcframework.add(this)
+        }
+    }
+
     sourceSets {
+        // BuildConfig (the OAuth client keys, version and update repo) is plain constants, readable
+        // from every target — including Apple, which has no jvmCommonMain.
+        commonMain {
+            kotlin.srcDir(generatedBuildConfigDir)
+        }
         commonMain.dependencies {
             api(libs.koin.core)
             api(libs.sqldelight.coroutines.extensions)
@@ -232,7 +251,6 @@ kotlin {
         // own source set instead.
         val jvmCommonMain = create("jvmCommonMain") {
             dependsOn(commonMain.get())
-            kotlin.srcDir(generatedBuildConfigDir)
         }
         getByName("desktopMain").dependsOn(jvmCommonMain)
         getByName("androidMain").dependsOn(jvmCommonMain)
@@ -250,6 +268,25 @@ kotlin {
                 api(libs.sqldelight.driver.android)
                 api(libs.requery.sqlite.android)
             }
+        }
+
+        // Apple source sets, wired by hand: the custom jvmCommonMain above turns off Kotlin's
+        // default hierarchy template, which would otherwise create these. appleMain holds what both
+        // platforms share; macosMain/iosMain only what differs (AppKit vs UIKit).
+        val appleMain = create("appleMain") { dependsOn(commonMain.get()) }
+        val macosMain = create("macosMain") { dependsOn(appleMain) }
+        val iosMain = create("iosMain") { dependsOn(appleMain) }
+        getByName("macosArm64Main").dependsOn(macosMain)
+        getByName("iosArm64Main").dependsOn(iosMain)
+        getByName("iosSimulatorArm64Main").dependsOn(iosMain)
+        val appleTest = create("appleTest") { dependsOn(commonTest.get()) }
+        listOf("macosArm64Test", "iosArm64Test", "iosSimulatorArm64Test").forEach { getByName(it).dependsOn(appleTest) }
+
+        // Apple actuals: CommonCrypto/zlib/Security/Foundation and the system sqlite3 come from the
+        // Kotlin/Native platform libraries; only the HTTP engine and the SQLDelight driver are extra.
+        appleMain.dependencies {
+            implementation(libs.ktor.client.darwin)
+            api(libs.sqldelight.driver.native)
         }
 
         getByName("desktopMain") {

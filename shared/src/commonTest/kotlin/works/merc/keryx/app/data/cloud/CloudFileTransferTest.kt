@@ -14,7 +14,8 @@ import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.io.readByteArray
-import java.io.File
+import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.tempFileWith
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -27,11 +28,7 @@ import kotlin.test.assertFailsWith
  */
 class CloudFileTransferTest {
 
-    private fun tempFile(bytes: ByteArray): File =
-        File.createTempFile("keryx-transfer-", ".bin").apply {
-            deleteOnExit()
-            writeBytes(bytes)
-        }
+    private fun tempFile(bytes: ByteArray): String = tempFileWith(bytes, "keryx-transfer-")
 
     /** Bigger than the helpers' internal chunk, so the multi-chunk loop is actually exercised. */
     private fun multiChunkBytes(): ByteArray = Random(7).nextBytes(200 * 1024)
@@ -40,11 +37,11 @@ class CloudFileTransferTest {
     fun bodyIsWrittenToTheDestinationFileVerbatim() = runTest {
         val payload = multiChunkBytes()
         val client = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
-        val dest = File.createTempFile("keryx-dest-", ".bin").apply { deleteOnExit() }
+        val dest = tempFileWith(ByteArray(0), "keryx-dest-")
 
-        client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath, payload.size.toLong())
+        client.get("https://example.invalid/x").writeBodyToFile(dest, payload.size.toLong())
 
-        assertContentEquals(payload, dest.readBytes())
+        assertContentEquals(payload, FileIO.readBytes(dest))
     }
 
     @Test
@@ -55,9 +52,9 @@ class CloudFileTransferTest {
         val payload = byteArrayOf(1, 2, 3, 4)
         val client = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
 
-        client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath, payload.size.toLong())
+        client.get("https://example.invalid/x").writeBodyToFile(dest, payload.size.toLong())
 
-        assertContentEquals(payload, dest.readBytes())
+        assertContentEquals(payload, FileIO.readBytes(dest))
     }
 
     @Test
@@ -66,10 +63,10 @@ class CloudFileTransferTest {
         // can't exhaust disk before any content validation ever inspects it.
         val payload = multiChunkBytes()
         val client = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
-        val dest = File.createTempFile("keryx-dest-", ".bin").apply { deleteOnExit() }
+        val dest = tempFileWith(ByteArray(0), "keryx-dest-")
 
         assertFailsWith<IllegalStateException> {
-            client.get("https://example.invalid/x").writeBodyToFile(dest.absolutePath, (payload.size - 1).toLong())
+            client.get("https://example.invalid/x").writeBodyToFile(dest, (payload.size - 1).toLong())
         }
     }
 
@@ -85,7 +82,7 @@ class CloudFileTransferTest {
             }
         ) { expectSuccess = false }
 
-        val content = FileUploadContent(source.absolutePath)
+        val content = FileUploadContent(source)
         assertEquals(payload.size.toLong(), content.contentLength)
         client.post("https://example.invalid/x") { setBody(content) }
 
@@ -108,7 +105,7 @@ class CloudFileTransferTest {
             }
         ) { expectSuccess = false }
 
-        val content = FileUploadContent(source.absolutePath, prefix = prefix, suffix = suffix)
+        val content = FileUploadContent(source, prefix = prefix, suffix = suffix)
         assertEquals((prefix.size + payload.size + suffix.size).toLong(), content.contentLength)
         client.post("https://example.invalid/x") { setBody(content) }
 

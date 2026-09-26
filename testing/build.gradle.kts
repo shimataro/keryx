@@ -19,6 +19,11 @@ kotlin {
         }
     }
 
+    // :shared's commonTest runs on its Apple targets too, and depends on this module's fakes.
+    macosArm64()
+    iosArm64()
+    iosSimulatorArm64()
+
     sourceSets {
         commonMain.dependencies {
             api(project(":shared"))
