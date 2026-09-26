@@ -44,8 +44,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
                   actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
-                  FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel),
-                  Formatting (formatTimestamp). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
+                  the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
+                  HomeShortcuts — the keyboard-shortcut table over logical keys), article/ (ArticleWebViewHtml —
+                  the reader's HTML document, CSP and theme CSS), Formatting (formatTimestamp). Pane
+                  layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -1116,8 +1119,10 @@ platform:
   hide-read, sort order, search query and results, the new-article count, unread counts, and every
   action on them. These implement `external-spec.md` behavior directly, so writing them twice would
   let the two apps drift.
-- **Per UI**: pane layout and focus (`HomePane`, the focused pane, search-bar visibility, pane
-  widths), keyboard event handling, window restoration, and all rendering. SwiftUI covers these
+- **Per UI**: pane layout and focus (`HomePane`, the focused pane, pane widths), keyboard event
+  handling (each UI maps its own key events onto the shared shortcut table, `presentation/home/HomeShortcuts.kt`),
+  window restoration, and all rendering. Search-bar visibility is an input the UI sets on the shared
+  state (it decides whether a query is showing results), not state it owns. SwiftUI covers these
   with `NavigationSplitView`, `@FocusState`, `@SceneStorage` and its own window restoration; the
   Compose app keeps its own implementations.
 - Swift observes the shared state holders' `StateFlow`s through a thin `@Observable` adapter.

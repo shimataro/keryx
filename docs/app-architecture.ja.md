@@ -42,7 +42,10 @@
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
                   NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
-                  ArticleListModel）、Formatting（formatTimestamp）。ペイン構成・フォーカス・幅は UI ごと（`ui/home/HomeLayoutViewModel`）
+                  ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
+                  ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表）、article/（ArticleWebViewHtml——
+                  リーダーの HTML 文書・CSP・テーマ CSS）、Formatting（formatTimestamp）。ペイン構成・フォーカス・幅は UI ごと
+                  （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -1121,8 +1124,9 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 - **共有するもの**（Kotlin、UI フレームワーク非依存）：core・data・domain・SQLDelight スキーマ、そして画面の背後にある
   *state holder*（フィルタ、選択、記事リスト、未読のみ、既読を隠す、並び順、検索クエリと結果、新着件数、未読数、それらに対する
   すべての操作）。これらは `external-spec.md` の挙動そのものなので、2 回書くと 2 つのアプリの挙動がずれる。
-- **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、検索バーの表示、ペイン幅）、キーボードイベントの
-  処理、ウィンドウの復元、すべての描画。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
+- **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、ペイン幅）、キーボードイベントの処理（各 UI は
+  自分のキーイベントを共有のショートカット対応表 `presentation/home/HomeShortcuts.kt` に対応付ける）、ウィンドウの復元、すべての描画。
+  検索バーの表示状態は、UI が共有状態に設定する入力（クエリの結果を表示するかどうかを決める）であり、UI が所有する状態ではない。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
   これらを担い、Compose アプリは独自の実装を持ち続ける。
 - Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
 - **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
