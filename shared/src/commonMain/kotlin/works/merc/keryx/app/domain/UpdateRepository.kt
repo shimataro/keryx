@@ -27,6 +27,7 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_INTERVAL_MS
@@ -105,7 +106,6 @@ class UpdateRepository(
     private val downloader: UpdateDownloader,
     private val installer: UpdateInstaller,
     private val notificationCenter: NotificationCenter,
-    private val notificationMessages: NotificationMessages,
     private val scope: CoroutineScope,
     private val location: InstallLocation = detectInstallLocation(),
     // Sweeping <cacheDir>/updates/ and deleting a superseded version directory in check() are
@@ -181,7 +181,7 @@ class UpdateRepository(
     // mutex-guarded at all). A plain var here would let a background check() and a download finishing
     // race to dismiss/replace this id, losing one of the two updates — this repository's own KDoc
     // promises "one evolving row", not "usually one row". Guarded by its own, narrower mutex rather
-    // than folded into [mutex] so a slow notificationMessages.* call here never blocks the decision
+    // than folded into [mutex] so a slow notification-center update here never blocks the decision
     // points [mutex] exists for.
     private val notificationMutex = Mutex()
 
@@ -296,7 +296,7 @@ class UpdateRepository(
         }
 
         if (status is UpdateStatus.Available && after is UpdateState.Available) {
-            val message = notificationMessages.updateAvailable(status.version)
+            val text = NotificationText.UpdateAvailable(status.version)
             // Reuses after.update.installable (resolved moments ago by nextStateAfterCheck via the
             // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
             // one live query, one fact, shared with whatever the Updates tab/tray display for it.
@@ -305,7 +305,7 @@ class UpdateRepository(
             } else {
                 AppNotificationAction.OpenUrl(status.url)
             }
-            postNotification(message, action)
+            postNotification(text, action)
         }
 
         Log.info(
@@ -500,7 +500,7 @@ class UpdateRepository(
                     coroutineContext.ensureActive()
                     _state.value = UpdateState.Ready(update, destPath)
                     postNotification(
-                        notificationMessages.updateReadyToInstall(update.version),
+                        NotificationText.UpdateReadyToInstall(update.version),
                         AppNotificationAction.ShowSettingsTab("updates"),
                     )
                 }
@@ -598,18 +598,18 @@ class UpdateRepository(
         }
     }
 
-    /** Replaces [lastNotificationId] (if any) with a fresh row for [message]/[action], so an update
+    /** Replaces [lastNotificationId] (if any) with a fresh row for [text]/[action], so an update
      * moving from "available" to "ready to install" reads as one evolving row rather than two.
      * [notificationMutex]-guarded — see that field's own KDoc for why: [check] and [runDownload] can
      * both reach this, on different threads, with no other synchronization between them. */
-    private suspend fun postNotification(message: String, action: AppNotificationAction) = notificationMutex.withLock {
+    private suspend fun postNotification(text: NotificationText, action: AppNotificationAction) = notificationMutex.withLock {
         lastNotificationId?.let { notificationCenter.dismiss(it) }
         val id = IdGenerator.newId()
         notificationCenter.addCoalescing(
             AppNotification(
                 id = id,
                 level = AppNotificationLevel.INFO,
-                message = message,
+                text = text,
                 timestampMillis = SystemClock.nowMillis(),
                 action = action,
             ),

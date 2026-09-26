@@ -19,6 +19,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
@@ -47,7 +48,6 @@ class FeedRepository(
     private val ftsManager: FtsManager,
     private val syncScheduler: SyncScheduler,
     private val notificationCenter: NotificationCenter,
-    private val messages: NotificationMessages,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
@@ -397,7 +397,7 @@ class FeedRepository(
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
                     feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
                     notify(
-                        messages.feedGone(feed.displayTitle()),
+                        NotificationText.FeedGone(feed.displayTitle()),
                         AppNotificationLevel.WARNING,
                         action = AppNotificationAction.ShowFeedDetail(feed.id),
                     )
@@ -476,7 +476,7 @@ class FeedRepository(
         // cannot host, and a listener must not observe a half-applied feed anyway.
         if (redirectTarget != null) {
             notify(
-                messages.feedUrlChanged(feed.displayTitle()),
+                NotificationText.FeedUrlChanged(feed.displayTitle()),
                 AppNotificationLevel.WARNING,
                 action = AppNotificationAction.ShowFeedDetail(feed.id),
             )
@@ -559,18 +559,18 @@ class FeedRepository(
     }
 
     /**
-     * Adds a notification with the specified message and severity level.
+     * Adds a notification with the specified text and severity level.
      *
-     * @param message The notification message.
+     * @param text What the notification says.
      * @param level The notification severity level.
      * @param action The next action offered when the user acts on the notification.
      */
-    private suspend fun notify(message: String, level: AppNotificationLevel, action: AppNotificationAction? = null) {
+    private suspend fun notify(text: NotificationText, level: AppNotificationLevel, action: AppNotificationAction? = null) {
         notificationCenter.add(
             AppNotification(
                 id = IdGenerator.newId(),
                 level = level,
-                message = message,
+                text = text,
                 timestampMillis = clock.nowMillis(),
                 action = action,
             ),

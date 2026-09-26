@@ -4,6 +4,7 @@ import org.koin.core.Koin
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SystemClock
 
 private const val LOG_TAG = "OpmlOpenHandler"
@@ -27,12 +28,11 @@ suspend fun importOpmlAndNotify(koin: Koin, xml: String) {
             Log.warn(LOG_TAG, "Failed to import the opened OPML file", it)
             return
         }
-    val message = koin.get<NotificationMessages>().opmlImported(outcome.added, outcome.failed)
     koin.get<NotificationCenter>().add(
         AppNotification(
             id = IdGenerator.newId(),
             level = AppNotificationLevel.INFO,
-            message = message,
+            text = NotificationText.OpmlImported(outcome.added, outcome.failed),
             timestampMillis = SystemClock.nowMillis(),
         ),
     )

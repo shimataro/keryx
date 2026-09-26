@@ -12,6 +12,7 @@ import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -55,7 +56,7 @@ class OpmlOpenHandlerTest {
         val ftsManager = works.merc.keryx.app.ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, FeedFetcher(client), FaviconResolver(faviconClient), articleRepository, ftsManager,
-            SyncScheduler {}, NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
+            SyncScheduler {}, NotificationCenter(), clock, Dispatchers.Unconfined,
         )
         val folderRepository = FolderRepository(db, feedRepository, SyncScheduler {}, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, SyncScheduler {}, clock, Dispatchers.Unconfined)
@@ -82,7 +83,7 @@ class OpmlOpenHandlerTest {
             val notifications = koin.get<NotificationCenter>().items.value
             assertEquals(1, notifications.size)
             assertEquals(AppNotificationLevel.INFO, notifications.single().level)
-            assertEquals("opmlImported:1/0", notifications.single().message)
+            assertEquals(NotificationText.OpmlImported(added = 1, failed = 0), notifications.single().text)
         } finally {
             driver.close()
         }

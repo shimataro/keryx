@@ -57,6 +57,7 @@ import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton
+import works.merc.keryx.app.ui.i18n.notificationText
 
 /**
  * Notification panel, hosted by [works.merc.keryx.app.ui.common.KeryxAnchoredPanel] from
@@ -187,7 +188,7 @@ private fun NotificationRow(
             // app's established "this text leads somewhere" convention — rather than adding a
             // chevron or any other extra slot (which would shift the layout).
             Text(
-                notification.message,
+                notificationText(notification.text),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (rowAction != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
                 textDecoration = if (rowAction != null && hovered) TextDecoration.Underline else null,

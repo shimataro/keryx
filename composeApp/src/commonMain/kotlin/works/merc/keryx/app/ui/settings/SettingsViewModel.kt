@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.LocalSettings
@@ -137,13 +138,12 @@ class SettingsViewModel(
      * so the cloud-sync tab shows the current reason even after the notification was dismissed.
      * Distinct from [connectFailedType], which only covers a failed connect (OAuth) flow.
      */
-    var lastSyncErrorText by mutableStateOf<String?>(null)
+    var lastSyncError by mutableStateOf<ErrorKind?>(null)
         private set
 
     /**
-     * Whether [lastSyncErrorText] is an authentication failure specifically. Mirrors
-     * [SyncRepository.lastSyncAuthFailed]; see that property for why it travels separately from the
-     * message rather than being matched out of it.
+     * Whether [lastSyncError] is an authentication failure specifically. Mirrors
+     * [SyncRepository.lastSyncAuthFailed].
      */
     var lastSyncAuthFailed by mutableStateOf(false)
         private set
@@ -194,7 +194,7 @@ class SettingsViewModel(
     init {
         refreshLastSyncedAt()
         viewModelScope.launch {
-            syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+            syncRepository.lastSyncError.collect { lastSyncError = it }
         }
         viewModelScope.launch {
             syncRepository.lastSyncAuthFailed.collect { lastSyncAuthFailed = it }
@@ -229,7 +229,7 @@ class SettingsViewModel(
     /**
      * Runs a manual sync — the same [SyncRepository.sync] Home's cloud button triggers. Progress,
      * the new last-synced time and any failure all surface through the state this ViewModel
-     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncErrorText]).
+     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncError]).
      */
     fun syncNow() {
         if (!canSyncNow) return

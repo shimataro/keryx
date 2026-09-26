@@ -12,6 +12,8 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -146,9 +148,9 @@ class CloudSessionTest {
 
         val notification = center.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, notification.level)
-        assertEquals("tokenStorageFallback", notification.message)
+        assertEquals(NotificationText.TokenStorageFallback, notification.text)
         assertEquals(
-            AppNotificationAction.ShowInfoDialog("tokenStorageFallbackDetail"),
+            AppNotificationAction.ShowInfoDialog(InfoDialogText.TOKEN_STORAGE_FALLBACK),
             notification.action,
         )
     }
@@ -167,9 +169,9 @@ class CloudSessionTest {
 
         val notification = center.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, notification.level)
-        assertEquals("tokenStorageNotPersisted", notification.message)
+        assertEquals(NotificationText.TokenStorageNotPersisted, notification.text)
         assertEquals(
-            AppNotificationAction.ShowInfoDialog("tokenStorageNotPersistedDetail"),
+            AppNotificationAction.ShowInfoDialog(InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED),
             notification.action,
         )
     }

@@ -6,12 +6,14 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.NotificationText
 
 class NotificationCenterTest {
-    private fun notification(id: String, message: String = "msg") = AppNotification(
+    private fun notification(id: String, text: NotificationText = NotificationText.AppTranslocated) = AppNotification(
         id = id,
         level = AppNotificationLevel.WARNING,
-        message = message,
+        text = text,
         timestampMillis = 0L,
     )
 
@@ -70,12 +72,12 @@ class NotificationCenterTest {
     @Test
     fun addCoalescingReplacesDuplicateAndMovesToTopWithLatestTimestamp() {
         val center = NotificationCenter()
-        center.add(notification("other", message = "other"))
+        center.add(notification("other", text = NotificationText.FeedGone("other")))
         center.addCoalescing(
-            AppNotification("s1", AppNotificationLevel.ERROR, message = "sync failed", timestampMillis = 10L),
+            AppNotification("s1", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.GENERIC), timestampMillis = 10L),
         )
         center.addCoalescing(
-            AppNotification("s2", AppNotificationLevel.ERROR, message = "sync failed", timestampMillis = 20L),
+            AppNotification("s2", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.GENERIC), timestampMillis = 20L),
         )
 
         // The duplicate sync error collapses to a single entry (the newest), moved to the top;
@@ -88,20 +90,20 @@ class NotificationCenterTest {
     fun addCoalescingKeepsNotificationsThatDifferInLevelMessageOrAction() {
         val center = NotificationCenter()
         center.addCoalescing(
-            AppNotification("a", AppNotificationLevel.ERROR, message = "auth", timestampMillis = 0L),
+            AppNotification("a", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.CLOUD_AUTH), timestampMillis = 0L),
         )
-        // Different message → not coalesced.
+        // Different text → not coalesced.
         center.addCoalescing(
-            AppNotification("b", AppNotificationLevel.ERROR, message = "storage", timestampMillis = 0L),
+            AppNotification("b", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.CLOUD_STORAGE), timestampMillis = 0L),
         )
-        // Same message but different level → not coalesced.
+        // Same text but different level → not coalesced.
         center.addCoalescing(
-            AppNotification("c", AppNotificationLevel.WARNING, message = "auth", timestampMillis = 0L),
+            AppNotification("c", AppNotificationLevel.WARNING, text = NotificationText.SyncFailed(ErrorKind.CLOUD_AUTH), timestampMillis = 0L),
         )
-        // Same level+message but a distinct action → not coalesced.
+        // Same level+text but a distinct action → not coalesced.
         center.addCoalescing(
             AppNotification(
-                "d", AppNotificationLevel.ERROR, message = "auth", timestampMillis = 0L,
+                "d", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.CLOUD_AUTH), timestampMillis = 0L,
                 action = AppNotificationAction.ResetCloudData,
             ),
         )

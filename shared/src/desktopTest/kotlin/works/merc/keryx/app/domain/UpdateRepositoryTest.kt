@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.core.AppNotificationAction
-import works.merc.keryx.app.core.KeryxException
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.data.remote.UpdateDownloader
@@ -76,20 +76,6 @@ private fun <T> assertSubsequenceOf(expected: List<T>, actual: List<T>, label: S
     }
 }
 
-private class RecordingNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String) = "feedGone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String) = "feedUrlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int) = "newArticles:$count"
-    override suspend fun syncFailed(exception: KeryxException) = "syncFailed"
-    override suspend fun opmlImported(added: Int, failed: Int) = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String) = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String) = "updateReadyToInstall:$version"
-    override suspend fun tokenStorageFallback() = "tokenStorageFallback"
-    override suspend fun tokenStorageFallbackDetail() = "tokenStorageFallbackDetail"
-    override suspend fun tokenStorageNotPersisted() = "tokenStorageNotPersisted"
-    override suspend fun tokenStorageNotPersistedDetail() = "tokenStorageNotPersistedDetail"
-}
-
 /**
  * Exercises [UpdateRepository] end to end against real (MockEngine-backed) [UpdateChecker]/
  * [UpdateDownloader] instances and a real temp directory — the only fakes are [UpdateInstaller]
@@ -145,7 +131,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -179,21 +164,20 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
 
         runBlocking { repo.check() }
-        assertEquals(listOf("updateAvailable:2.0.0"), notificationCenter.items.value.map { it.message })
+        assertEquals(listOf<NotificationText>(NotificationText.UpdateAvailable("2.0.0")), notificationCenter.items.value.map { it.text })
 
         repo.startDownload()
         awaitState(repo) { it is UpdateState.Ready }
 
         val items = notificationCenter.items.value
         assertEquals(1, items.size, "the \"available\" row must be replaced, not left alongside a new one")
-        assertEquals("updateReadyToInstall:2.0.0", items.single().message)
+        assertEquals(NotificationText.UpdateReadyToInstall("2.0.0"), items.single().text)
         assertEquals(AppNotificationAction.ShowSettingsTab("updates"), items.single().action)
     }
 
@@ -208,7 +192,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -240,7 +223,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -273,7 +255,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -313,7 +294,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -361,7 +341,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -416,7 +395,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -456,7 +434,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -488,7 +465,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = cacheDir,
@@ -533,7 +509,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -627,7 +602,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -673,7 +647,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(canInstall = false),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -704,7 +677,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(canInstall = false),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -732,7 +704,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = cacheDir,
@@ -761,7 +732,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = cacheDir,
@@ -784,7 +754,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = cacheDir,
@@ -819,7 +788,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -928,7 +896,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -968,7 +935,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1005,7 +971,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1048,7 +1013,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1088,7 +1052,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1119,7 +1082,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1149,7 +1111,7 @@ class UpdateRepositoryTest {
 
         val items = notificationCenter.items.value
         assertEquals(1, items.size, "exactly one row, not one per poll")
-        assertEquals("updateAvailable:2.0.0", items.single().message)
+        assertEquals(NotificationText.UpdateAvailable("2.0.0"), items.single().text)
         assertEquals(AppNotificationAction.ShowSettingsTab("updates"), items.single().action)
 
         // The quiet retries that found nothing must never have flashed UpdateState.Checking — that
@@ -1181,7 +1143,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1228,7 +1189,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1261,7 +1221,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1306,7 +1265,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1376,7 +1334,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1440,7 +1397,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
@@ -1534,7 +1490,6 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = consentGatedInstaller(installerCanInstall),
             notificationCenter = notificationCenter,
-            notificationMessages = RecordingNotificationMessages(),
             scope = trackedScope(),
             location = location,
             cacheDirOverride = newTempDir(),

@@ -1,18 +1,11 @@
 package works.merc.keryx.app.ui.i18n
 
 import androidx.compose.runtime.Composable
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
-import works.merc.keryx.app.core.CloudAuthException
-import works.merc.keryx.app.core.CloudDataIncompatibleException
-import works.merc.keryx.app.core.CloudStorageException
-import works.merc.keryx.app.core.FeedFetchException
-import works.merc.keryx.app.core.FeedNotFoundException
-import works.merc.keryx.app.core.FeedParseException
-import works.merc.keryx.app.core.FeedTimeoutException
+import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.KeryxException
-import works.merc.keryx.app.core.SchemaVersionException
-import works.merc.keryx.app.core.SyncConflictException
-import works.merc.keryx.app.core.UpdateException
+import works.merc.keryx.app.core.errorKind
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.error_cloud_auth
 import works.merc.keryx.app.resources.error_cloud_data_incompatible
@@ -29,18 +22,24 @@ import works.merc.keryx.app.resources.error_update
 
 /** Maps a [KeryxException] to a localized, user-facing message. */
 @Composable
-fun userMessage(exception: KeryxException): String = stringResource(
-    when (exception) {
-        is FeedTimeoutException -> Res.string.error_feed_timeout
-        is FeedFetchException -> Res.string.error_feed_fetch
-        is FeedParseException -> Res.string.error_feed_parse
-        is CloudAuthException -> Res.string.error_cloud_auth
-        is CloudDataIncompatibleException -> Res.string.error_cloud_data_incompatible
-        is CloudStorageException -> Res.string.error_cloud_storage
-        is SyncConflictException -> Res.string.error_sync_conflict
-        is SchemaVersionException -> Res.string.error_schema_version
-        is FeedNotFoundException -> if (exception.isGone) Res.string.error_feed_gone else Res.string.error_feed_not_found
-        is UpdateException -> Res.string.error_update
-        else -> Res.string.error_generic
-    },
-)
+fun userMessage(exception: KeryxException): String = errorMessage(exception.errorKind)
+
+/** Maps an [ErrorKind] to a localized, user-facing message. */
+@Composable
+fun errorMessage(kind: ErrorKind): String = stringResource(errorMessageResource(kind))
+
+/** The string resource each [ErrorKind] is shown as. */
+internal fun errorMessageResource(kind: ErrorKind): StringResource = when (kind) {
+    ErrorKind.FEED_TIMEOUT -> Res.string.error_feed_timeout
+    ErrorKind.FEED_FETCH -> Res.string.error_feed_fetch
+    ErrorKind.FEED_PARSE -> Res.string.error_feed_parse
+    ErrorKind.FEED_GONE -> Res.string.error_feed_gone
+    ErrorKind.FEED_NOT_FOUND -> Res.string.error_feed_not_found
+    ErrorKind.CLOUD_AUTH -> Res.string.error_cloud_auth
+    ErrorKind.CLOUD_DATA_INCOMPATIBLE -> Res.string.error_cloud_data_incompatible
+    ErrorKind.CLOUD_STORAGE -> Res.string.error_cloud_storage
+    ErrorKind.SYNC_CONFLICT -> Res.string.error_sync_conflict
+    ErrorKind.SCHEMA_VERSION -> Res.string.error_schema_version
+    ErrorKind.UPDATE -> Res.string.error_update
+    ErrorKind.GENERIC -> Res.string.error_generic
+}

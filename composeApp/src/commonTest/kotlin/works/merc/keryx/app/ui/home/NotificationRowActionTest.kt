@@ -7,6 +7,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.NotificationText
 
 /**
  * The one place that decides what acting on a notification does — shared by the notification row
@@ -18,7 +20,7 @@ class NotificationRowActionTest {
     private fun notification(action: AppNotificationAction?) = AppNotification(
         id = "n",
         level = AppNotificationLevel.WARNING,
-        message = "msg",
+        text = NotificationText.AppTranslocated,
         timestampMillis = 0L,
         action = action,
     )
@@ -59,7 +61,7 @@ class NotificationRowActionTest {
         for (action in listOf(
             AppNotificationAction.ShowFeedDetail("feed-1"),
             AppNotificationAction.ShowSettingsTab("cloud_sync"),
-            AppNotificationAction.ShowInfoDialog("detail"),
+            AppNotificationAction.ShowInfoDialog(InfoDialogText.APP_TRANSLOCATED),
         )) {
             assertEquals(1 to 1, invoke(action), action::class.simpleName)
         }

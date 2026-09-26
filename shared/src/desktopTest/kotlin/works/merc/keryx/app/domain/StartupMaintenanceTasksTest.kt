@@ -264,7 +264,6 @@ class StartupMaintenanceTasksTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = notificationCenter,
-            notificationMessages = FakeNotificationMessages(),
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             location = location,
         )

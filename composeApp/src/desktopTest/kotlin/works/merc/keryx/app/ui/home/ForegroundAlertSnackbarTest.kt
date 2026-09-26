@@ -6,13 +6,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.domain.NotificationCenter
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import works.merc.keryx.app.ui.i18n.resolveNotificationText
 
 /**
  * Android's foreground alert Snackbar: the active half of the fix for alerts being announced only
@@ -27,9 +31,15 @@ class ForegroundAlertSnackbarTest {
     private fun notification(
         id: String,
         level: AppNotificationLevel = AppNotificationLevel.ERROR,
-        message: String = "msg:$id",
+        text: NotificationText = NotificationText.FeedGone("msg:$id"),
         action: AppNotificationAction? = null,
-    ) = AppNotification(id = id, level = level, message = message, timestampMillis = 0L, action = action)
+    ) = AppNotification(id = id, level = level, text = text, timestampMillis = 0L, action = action)
+
+    /** What the Snackbar shows for [text] — the same resolution production uses. */
+    private fun shown(text: NotificationText): String = runBlocking { resolveNotificationText(text) }
+
+    private val syncFailed = NotificationText.SyncFailed(ErrorKind.GENERIC)
+    private val feedGone = NotificationText.FeedGone("feed")
 
     @Test
     fun anAlertRaisedWhileTheWindowIsFocusedIsAnnounced() = runDesktopComposeUiTest {
@@ -40,10 +50,10 @@ class ForegroundAlertSnackbarTest {
         waitForIdle()
         assertNull(hostState.currentSnackbarData)
 
-        center.add(notification("a", message = "同期に失敗しました"))
+        center.add(notification("a", text = syncFailed))
         waitUntil { hostState.currentSnackbarData != null }
 
-        assertEquals("同期に失敗しました", hostState.currentSnackbarData?.visuals?.message)
+        assertEquals(shown(syncFailed), hostState.currentSnackbarData?.visuals?.message)
     }
 
     @Test
@@ -79,7 +89,7 @@ class ForegroundAlertSnackbarTest {
         focused = true
         waitUntil { hostState.currentSnackbarData != null }
 
-        assertEquals("msg:a", hostState.currentSnackbarData?.visuals?.message)
+        assertEquals(shown(NotificationText.FeedGone("msg:a")), hostState.currentSnackbarData?.visuals?.message)
     }
 
     @Test
@@ -95,7 +105,7 @@ class ForegroundAlertSnackbarTest {
         center.add(notification("b"))
         waitUntil { hostState.currentSnackbarData != null }
 
-        assertEquals("msg:b", hostState.currentSnackbarData?.visuals?.message)
+        assertEquals(shown(NotificationText.FeedGone("msg:b")), hostState.currentSnackbarData?.visuals?.message)
         // The older one is consumed alongside it rather than queued up behind — dismissing the
         // shown Snackbar must not walk backwards through the queue.
         hostState.currentSnackbarData?.dismiss()
@@ -113,12 +123,12 @@ class ForegroundAlertSnackbarTest {
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
 
-        center.addCoalescing(notification("first", message = "同期に失敗しました"))
+        center.addCoalescing(notification("first", text = syncFailed))
         waitUntil { hostState.currentSnackbarData != null }
         hostState.currentSnackbarData?.dismiss()
         waitForIdle()
 
-        center.addCoalescing(notification("second", message = "同期に失敗しました"))
+        center.addCoalescing(notification("second", text = syncFailed))
         repeat(5) { waitForIdle() }
 
         assertNull(hostState.currentSnackbarData)
@@ -132,15 +142,15 @@ class ForegroundAlertSnackbarTest {
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
 
-        center.add(notification("a", message = "同期に失敗しました"))
+        center.add(notification("a", text = syncFailed))
         waitUntil { hostState.currentSnackbarData != null }
         hostState.currentSnackbarData?.dismiss()
         waitForIdle()
 
-        center.add(notification("b", message = "フィードが見つかりません"))
+        center.add(notification("b", text = feedGone))
         waitUntil { hostState.currentSnackbarData != null }
 
-        assertEquals("フィードが見つかりません", hostState.currentSnackbarData?.visuals?.message)
+        assertEquals(shown(feedGone), hostState.currentSnackbarData?.visuals?.message)
     }
 
     @Test
@@ -158,7 +168,7 @@ class ForegroundAlertSnackbarTest {
         hostState.currentSnackbarData?.performAction()
         waitForIdle()
 
-        assertEquals("a", vm.pendingAction?.id)
+        assertEquals("a", vm.pendingAction?.notificationId)
     }
 
     @Test
@@ -174,7 +184,7 @@ class ForegroundAlertSnackbarTest {
         center.add(notification("a", action = AppNotificationAction.ResetCloudData))
         waitUntil { hostState.currentSnackbarData != null }
 
-        assertEquals("msg:a", hostState.currentSnackbarData?.visuals?.message)
+        assertEquals(shown(NotificationText.FeedGone("msg:a")), hostState.currentSnackbarData?.visuals?.message)
         assertNull(hostState.currentSnackbarData?.visuals?.actionLabel)
     }
 

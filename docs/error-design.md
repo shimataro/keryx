@@ -59,7 +59,14 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
     - See "Merge Failure Classification" in [sync-architecture.md](sync-architecture.md) for the full decision table.
 - **Repository layer**: Receives `Result` and applies business logic (retries, etc.).
 - **ViewModel layer**: Converts `Result` into UI state.
-- **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` only localizes a `KeryxException` into a message `String` for inline display (e.g. the add-feed error text); it does not dispatch to the notification center. Notification-center entries are populated separately, from the Repository layer via `NotificationMessages` (see below).
+- **UI layer**: `ui/i18n/ErrorMessages.kt`'s `userMessage(KeryxException)` only localizes a `KeryxException` into a message `String` for inline display (e.g. the add-feed error text); it does not dispatch to the notification center. It goes through `core/NotificationText.kt`'s `ErrorKind` — `KeryxException.errorKind` is the single exception-type → category mapping, shared with the Apple app — and `errorMessage(ErrorKind)` localizes the category. Notification-center entries are populated separately, from the Repository layer (see below).
+
+**Shared code never holds localized prose.** Everything a UI shows travels out of `:shared` as data —
+an `ErrorKind`, or a `NotificationText` (which message, plus its arguments) — and each UI localizes it
+with its own resources: the Compose app in `ui/i18n/` (`notificationText` / `resolveNotificationText` /
+`infoDialogText` / `errorMessage`), the SwiftUI app through its String Catalog. The one exception is the
+new-articles OS notification, posted from background work with no UI to hand it to: its text still comes
+from the `NotificationMessages` interface (just `newArticles(count)`), which each UI implements.
 
 ## Notification Center (`domain/NotificationCenter`)
 
@@ -74,7 +81,7 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
 - Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: a badge alone only reaches a user already looking at the pane hosting the bell, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
-  - Already-announced bookkeeping keys on `core/AppNotification.kt`'s `AlertKey` (level + message + action), not the notification id, which `NotificationCenter.addCoalescing` mints afresh on every recurrence — so a permanently failing sync announces itself once, not once per background attempt. Both go through the same helper so they cannot drift.
+  - Already-announced bookkeeping keys on `core/AppNotification.kt`'s `AlertKey` (level + text + action), not the notification id, which `NotificationCenter.addCoalescing` mints afresh on every recurrence — so a permanently failing sync announces itself once, not once per background attempt. Both go through the same helper so they cannot drift.
   - The collector is gated on the window actually having OS focus (`LocalWindowInfo`). While the app is backgrounded, the notification shade is down, or the settings dialog (a window of its own) is open, the alert simply waits — announcing it into a window nobody is looking at would time the Snackbar out unseen and consume it for good. It is surfaced once focus returns.
   - The Snackbar's action runs the notification's own next action (see the table below), through the same `notificationRowAction` the bell's rows use. `ResetCloudData` is announced without an action, since it must go through its own confirmation.
   - Only the newest of a simultaneous batch is announced (Material 3 shows one Snackbar at a time); the badge carries the count.
@@ -90,8 +97,11 @@ Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `
 | `ShowInfoDialog(detail)` | Token save persisted nothing (`CloudSession`) — neither the secure store nor the plaintext fallback file accepted the write (`TokenSaveOutcome.NOT_PERSISTED`), so the account has to be connected again after a restart | Shows an explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |
 
-`AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`.
-When emitting notifications from the Repository, text is localized via `NotificationMessages` (`getString`-based, Fake in tests) (hardcoding is prohibited).
+`AppNotification(id, level: INFO|WARNING|ERROR, text: NotificationText, timestampMillis, action)`.
+A Repository emits a notification's `text` as data (`NotificationText.FeedGone(title)`,
+`NotificationText.SyncFailed(ErrorKind)`, …) and never a string; the UI rendering the row localizes it
+(hardcoding is prohibited). `ShowInfoDialog`'s `detail` is likewise an `InfoDialogText`. Because both are
+plain data classes/enums, `AlertKey` (level + text + action) compares them structurally.
 
 ## Error Severity and Notification Destinations (excerpt)
 

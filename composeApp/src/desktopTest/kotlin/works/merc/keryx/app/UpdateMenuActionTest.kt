@@ -15,12 +15,10 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import works.merc.keryx.app.core.AppNotificationAction
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.domain.UpdatePlan
@@ -60,20 +58,6 @@ private fun releaseJson(version: String, sizeBytes: Int, sha256: String) = """
 private val UP_TO_DATE_RELEASE_JSON = """
     {"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0","prerelease":false,"draft":false,"assets":[]}
 """.trimIndent()
-
-private class FakeNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String) = "feedGone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String) = "feedUrlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int) = "newArticles:$count"
-    override suspend fun syncFailed(exception: KeryxException) = "syncFailed"
-    override suspend fun opmlImported(added: Int, failed: Int) = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String) = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String) = "updateReadyToInstall:$version"
-    override suspend fun tokenStorageFallback() = "tokenStorageFallback"
-    override suspend fun tokenStorageFallbackDetail() = "tokenStorageFallbackDetail"
-    override suspend fun tokenStorageNotPersisted() = "tokenStorageNotPersisted"
-    override suspend fun tokenStorageNotPersistedDetail() = "tokenStorageNotPersistedDetail"
-}
 
 /** Records what [UpdateRepository.install] handed it, without ever launching anything. */
 private class RecordingInstaller(private val canInstall: Boolean) : UpdateInstaller {
@@ -172,7 +156,6 @@ class UpdateMenuActionTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = notificationCenter,
-            notificationMessages = FakeNotificationMessages(),
             scope = trackedScope(),
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),

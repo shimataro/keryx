@@ -18,9 +18,7 @@ import works.merc.keryx.app.data.cloud.TokenSaveOutcome
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudSession
-import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
 
 /**
  * In-memory [TokenStorage] fake for tests. [outcome] is what [save] reports back — set it to
@@ -75,7 +73,6 @@ fun singleProviderCloudSession(
     accessTokenProvider: (suspend () -> String?)? = null,
     selectedType: () -> CloudStorageType? = { type },
     notificationCenter: NotificationCenter = NotificationCenter(),
-    notificationMessages: NotificationMessages = FakeNotificationMessages(),
 ): CloudSession = CloudSession(
     providers = mapOf(
         type to CloudSession.Provider(
@@ -90,7 +87,6 @@ fun singleProviderCloudSession(
     selectedType = selectedType,
     clock = clock,
     notificationCenter = notificationCenter,
-    notificationMessages = notificationMessages,
 )
 
 /**
@@ -111,7 +107,6 @@ fun multiProviderCloudSession(
     googleDriveConnectFlow: CloudConnectFlow = FakeCloudConnectFlow(),
     selectedType: () -> CloudStorageType? = { CloudStorageType.DROPBOX },
     notificationCenter: NotificationCenter = NotificationCenter(),
-    notificationMessages: NotificationMessages = FakeNotificationMessages(),
 ): CloudSession = CloudSession(
     providers = mapOf(
         CloudStorageType.DROPBOX to CloudSession.Provider(
@@ -132,5 +127,4 @@ fun multiProviderCloudSession(
     selectedType = selectedType,
     clock = clock,
     notificationCenter = notificationCenter,
-    notificationMessages = notificationMessages,
 )

@@ -6,6 +6,7 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
@@ -25,7 +26,7 @@ class PendingNotificationActionHostTest {
     private fun showFeedDetail(feedId: String) = AppNotification(
         id = "n",
         level = AppNotificationLevel.WARNING,
-        message = "msg",
+        text = NotificationText.FeedGone("feed"),
         timestampMillis = 0L,
         action = AppNotificationAction.ShowFeedDetail(feedId),
     )

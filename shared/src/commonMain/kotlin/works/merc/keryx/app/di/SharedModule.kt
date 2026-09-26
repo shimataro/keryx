@@ -42,9 +42,9 @@ import works.merc.keryx.app.platform.selfUpdateCheckSupported
  * Bindings every app built on :shared needs — database, repositories, sync, notifications.
  *
  * Not self-contained: the embedding app's own modules must also provide the
- * [io.ktor.client.HttpClient], token storage, [CloudSession] and
- * [works.merc.keryx.app.domain.NotificationMessages] (the Compose app's `platformModule` and
- * `appModule` do).
+ * [io.ktor.client.HttpClient], token storage, [CloudSession] and the
+ * [works.merc.keryx.app.domain.NotificationMessages] for OS notifications (the Compose app's
+ * `platformModule` and `appModule` do).
  */
 val sharedModule: Module = module {
     single<SqlDriver> { DatabaseDriverFactory().create() }
@@ -78,7 +78,6 @@ val sharedModule: Module = module {
             scope = get(),
             activityCenter = get(),
             notificationCenter = get(),
-            notificationMessages = get(),
             // localDbPath left at its constructor default (platform/DatabaseFile.kt's
             // databaseFilePath(), already the platform-correct real DB path on both desktop and
             // Android) rather than passed here — see that function's own KDoc for why it exists.
@@ -92,7 +91,7 @@ val sharedModule: Module = module {
     single { SettingsRepository(get(), get(), get(), get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
-    single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get()) }
     single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
     single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
@@ -113,6 +112,6 @@ val updateModule: Module = module {
     single { detectInstallLocation() }
     single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo, location = get()) }
     single { UpdateDownloader(get()) }
-    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), notificationMessages = get(), scope = get(), location = get()) }
+    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), scope = get(), location = get()) }
     single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 }

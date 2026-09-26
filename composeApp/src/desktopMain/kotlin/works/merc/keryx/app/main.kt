@@ -41,9 +41,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.APP_NAME
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
-import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
@@ -782,25 +780,15 @@ private fun checkForUpdateAndShowIfAvailable(
  * Brings the window to front (the click may well have come from the tray while it was hidden) and
  * opens the settings dialog on the Updates tab — the same effect as clicking a `ShowSettingsTab` row
  * in the notification center (`NotificationCenterViewModel.requestAction` ->
- * [NotificationCenterViewModel.pendingAction] -> `App.kt`'s `LaunchedEffect(pendingAction)`), but with
- * a throwaway [AppNotification] that is never added to the notification center itself — `App.kt`'s
- * effect only ever reads `.action`, so nothing else about the notification matters here. This is
- * deliberately independent of whatever [UpdateRepository.check] itself posts to the notification
+ * [NotificationCenterViewModel.pendingAction] -> `App.kt`'s `LaunchedEffect(pendingAction)`), but
+ * requested as a bare action with no notification behind it. This is deliberately independent of whatever [UpdateRepository.check] itself posts to the notification
  * center (that's for the bell's history), since [startAndShowUpdatesTab]'s callers never call
  * `check()` at all. Shared by both call sites so the two effects (raise window, navigate) can never
  * come apart.
  */
 private fun bringToFrontAndShowUpdatesTab(notificationCenterViewModel: NotificationCenterViewModel) {
     activationRequests.tryEmit(Unit)
-    notificationCenterViewModel.requestAction(
-        AppNotification(
-            id = "update-menu-navigate",
-            level = AppNotificationLevel.INFO,
-            message = "",
-            timestampMillis = SystemClock.nowMillis(),
-            action = AppNotificationAction.ShowSettingsTab("updates"),
-        ),
-    )
+    notificationCenterViewModel.requestAction(AppNotificationAction.ShowSettingsTab("updates"))
 }
 
 /**

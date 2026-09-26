@@ -108,7 +108,6 @@ fun Module.cloudSessionSingles(
             },
             clock = get(),
             notificationCenter = get(),
-            notificationMessages = get(),
         )
     }
 }

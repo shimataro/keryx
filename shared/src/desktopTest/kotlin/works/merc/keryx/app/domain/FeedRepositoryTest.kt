@@ -22,6 +22,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedTimeoutException
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
@@ -158,7 +159,7 @@ class FeedRepositoryTest {
         val ftsManager = ftsManagerIndexed(driver)
         return FeedRepository(
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
-            notificationCenter, messages, clock, Dispatchers.Unconfined,
+            notificationCenter, clock, Dispatchers.Unconfined,
         )
     }
 
@@ -708,7 +709,7 @@ class FeedRepositoryTest {
             assertIs<Result.Err>(result)
             val notifications = notificationCenter.items.value
             assertEquals(1, notifications.size)
-            assertTrue(notifications.single().message.startsWith("gone:"))
+            assertIs<NotificationText.FeedGone>(notifications.single().text)
             // Acting on the warning jumps to the feed in the sidebar.
             assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
 
@@ -822,7 +823,7 @@ class FeedRepositoryTest {
             assertEquals("https://ex.com/new", updated.url)
             val notifications = notificationCenter.items.value
             assertEquals(1, notifications.size)
-            assertTrue(notifications.single().message.startsWith("urlChanged:"))
+            assertIs<NotificationText.FeedUrlChanged>(notifications.single().text)
             assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
         } finally {
             driver.close()

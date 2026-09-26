@@ -83,6 +83,7 @@ import works.merc.keryx.app.resources.settings_onedrive_connect
 import works.merc.keryx.app.resources.settings_onedrive_disconnect
 import works.merc.keryx.app.resources.settings_last_synced
 import works.merc.keryx.app.resources.setup_auth_failed
+import works.merc.keryx.app.ui.i18n.errorMessage
 
 /**
  * Cloud sync tab: provider connect/disconnect/switch, with the three confirmation dialogs.
@@ -134,7 +135,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
                     // Only meaningful for the connected provider: it's why its background syncs
                     // are currently failing (an expired token, a transient outage, bad cloud data).
-                    lastSyncErrorText = if (connected == type) vm.lastSyncErrorText else null,
+                    lastSyncErrorText = if (connected == type) vm.lastSyncError?.let { errorMessage(it) } else null,
                     // Swaps this row's recovery action from "reset sync data" to "reconnect" — see
                     // CloudProviderRow's own comment for why the two are mutually exclusive.
                     authFailed = connected == type && vm.lastSyncAuthFailed,
@@ -595,7 +596,7 @@ internal fun CloudProviderRow(
                 )
             }
         }
-        // An in-progress sync failure (already localized per exception type) takes precedence: it
+        // An in-progress sync failure (localized per ErrorKind by the caller) takes precedence: it
         // describes the live state of a working connection, whereas `failed` only reports that the
         // last connect attempt didn't complete.
         val errorText = lastSyncErrorText ?: stringResource(Res.string.setup_auth_failed).takeIf { failed }

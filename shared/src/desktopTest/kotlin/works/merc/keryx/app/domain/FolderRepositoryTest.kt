@@ -53,7 +53,7 @@ class FolderRepositoryTest {
         val ftsManager = ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, FeedFetcher(failingClient()), FaviconResolver(failingClient()),
-            articleRepository, ftsManager, syncScheduler, NotificationCenter(), FakeNotificationMessages(),
+            articleRepository, ftsManager, syncScheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
         )
         return FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)

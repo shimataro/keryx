@@ -19,6 +19,8 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
@@ -32,6 +34,7 @@ import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SYNC_STATE_LAST_UPLOADED_DIGEST
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.syncErrorKind
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
@@ -79,19 +82,18 @@ class SyncRepository(
     private val scope: CoroutineScope,
     private val activityCenter: ActivityCenter,
     private val notificationCenter: NotificationCenter,
-    private val notificationMessages: NotificationMessages,
     private val localDbPath: String = databaseFilePath(),
     private val tempDir: String = AppDirs.tempDir(),
 ) : SyncScheduler {
 
     private val mutex = Mutex()
-    private val _lastSyncError = MutableStateFlow<String?>(null)
+    private val _lastSyncError = MutableStateFlow<ErrorKind?>(null)
 
     /**
      * Whether [lastSyncError] is an authentication failure specifically, rather than any other
-     * reason sync can break. Kept beside the message rather than derived from it: the message is
-     * already localized prose by the time it reaches [_lastSyncError], and matching on that text
-     * would be both fragile and locale-dependent.
+     * reason sync can break — i.e. [ErrorKind.CLOUD_AUTH]. Written in the same step as
+     * [_lastSyncError] (never derived asynchronously from it), so the two can never be observed
+     * disagreeing.
      *
      * The cloud-sync settings tab uses this to offer reconnecting instead of resetting cloud data —
      * a reset needs a working authorization of its own, so it is precisely the wrong recovery to
@@ -136,11 +138,12 @@ class SyncRepository(
     }
 
     /**
-     * Why the last sync failed, or null when it succeeded (or none has run yet) — the same localized
-     * text as the notification-center entry, kept as state so the cloud-sync settings tab can show
-     * "why sync is broken right now" even after that notification was dismissed.
+     * Why the last sync failed, or null when it succeeded (or none has run yet) — the same reason
+     * as the notification-center entry's [NotificationText.SyncFailed], kept as state so the
+     * cloud-sync settings tab can show "why sync is broken right now" even after that notification
+     * was dismissed. The UI localizes it.
      */
-    val lastSyncError: StateFlow<String?> = _lastSyncError
+    val lastSyncError: StateFlow<ErrorKind?> = _lastSyncError
 
     /** See [_lastSyncAuthFailed]. Always false while [lastSyncError] is null. */
     val lastSyncAuthFailed: StateFlow<Boolean> = _lastSyncAuthFailed
@@ -325,14 +328,14 @@ class SyncRepository(
      */
     private suspend fun emitErrorNotification(result: Result<Unit>) {
         if (result is Result.Err && result.exception !is SyncConflictException) {
-            val message = notificationMessages.syncFailed(result.exception)
-            _lastSyncError.value = message
-            _lastSyncAuthFailed.value = result.exception is CloudAuthException
+            val reason = result.exception.syncErrorKind
+            _lastSyncError.value = reason
+            _lastSyncAuthFailed.value = reason == ErrorKind.CLOUD_AUTH
             notificationCenter.addCoalescing(
                 AppNotification(
                     id = IdGenerator.newId(),
                     level = AppNotificationLevel.ERROR,
-                    message = message,
+                    text = NotificationText.SyncFailed(reason),
                     timestampMillis = clock.nowMillis(),
                     action = nextActionFor(result.exception),
                 ),

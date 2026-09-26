@@ -203,7 +203,7 @@ class HomeViewModelTest {
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
-            NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
@@ -220,7 +220,6 @@ class HomeViewModelTest {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
-            notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
             tempDir = "unused",
         )

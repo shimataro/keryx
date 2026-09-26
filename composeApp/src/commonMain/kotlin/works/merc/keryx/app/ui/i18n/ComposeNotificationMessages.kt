@@ -1,100 +1,12 @@
 package works.merc.keryx.app.ui.i18n
 
 import org.jetbrains.compose.resources.getPluralString
-import org.jetbrains.compose.resources.getString
-import works.merc.keryx.app.core.CloudAuthException
-import works.merc.keryx.app.core.CloudDataIncompatibleException
-import works.merc.keryx.app.core.CloudStorageException
-import works.merc.keryx.app.core.KeryxException
-import works.merc.keryx.app.core.SchemaVersionException
-import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.error_cloud_auth
-import works.merc.keryx.app.resources.error_cloud_data_incompatible
-import works.merc.keryx.app.resources.error_cloud_storage
-import works.merc.keryx.app.resources.error_generic
-import works.merc.keryx.app.resources.error_schema_version
-import works.merc.keryx.app.resources.error_sync_conflict
-import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_new_articles
-import works.merc.keryx.app.resources.feed_url_changed
-import works.merc.keryx.app.resources.notification_token_storage_fallback
-import works.merc.keryx.app.resources.notification_token_storage_fallback_detail
-import works.merc.keryx.app.resources.notification_token_storage_not_persisted
-import works.merc.keryx.app.resources.notification_token_storage_not_persisted_detail
-import works.merc.keryx.app.resources.settings_import_failed
-import works.merc.keryx.app.resources.settings_import_success
-import works.merc.keryx.app.resources.update_available_notification
-import works.merc.keryx.app.resources.update_ready_notification
-
-/** The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero. */
-internal suspend fun opmlImportedText(added: Int, failed: Int): String {
-    val addedText = getPluralString(Res.plurals.settings_import_success, added, added)
-    return if (failed > 0) {
-        "$addedText / ${getPluralString(Res.plurals.settings_import_failed, failed, failed)}"
-    } else {
-        addedText
-    }
-}
 
 /** [NotificationMessages] backed by Compose string resources (system-locale aware). */
 class ComposeNotificationMessages : NotificationMessages {
-    /**
-     * Creates a notification message for a feed that is no longer available.
-     *
-     * @param feedTitle The title of the unavailable feed.
-     * @return The localized feed-unavailable message.
-     */
-    override suspend fun feedGone(feedTitle: String): String =
-        getString(Res.string.feed_gone_message, feedTitle)
-
-    /**
-     * Creates a localized message indicating that a feed URL has changed.
-     *
-     * @param feedTitle The title of the feed whose URL changed.
-     * @return The localized feed URL change message.
-     */
-    override suspend fun feedUrlChanged(feedTitle: String): String =
-        getString(Res.string.feed_url_changed, feedTitle)
-
     override suspend fun newArticles(count: Int): String =
         getPluralString(Res.plurals.feed_new_articles, count, count)
-
-    /**
-     * Provides a localized message describing a synchronization failure.
-     *
-     * @param exception The exception that identifies the synchronization failure.
-     * @return The localized synchronization error message.
-     */
-    override suspend fun syncFailed(exception: KeryxException): String = getString(
-        when (exception) {
-            is CloudAuthException -> Res.string.error_cloud_auth
-            is SchemaVersionException -> Res.string.error_schema_version
-            is CloudDataIncompatibleException -> Res.string.error_cloud_data_incompatible
-            is SyncConflictException -> Res.string.error_sync_conflict
-            is CloudStorageException -> Res.string.error_cloud_storage
-            else -> Res.string.error_generic
-        },
-    )
-
-    override suspend fun opmlImported(added: Int, failed: Int): String = opmlImportedText(added, failed)
-
-    override suspend fun updateAvailable(version: String): String =
-        getString(Res.string.update_available_notification, version)
-
-    override suspend fun updateReadyToInstall(version: String): String =
-        getString(Res.string.update_ready_notification, version)
-
-    override suspend fun tokenStorageFallback(): String =
-        getString(Res.string.notification_token_storage_fallback)
-
-    override suspend fun tokenStorageFallbackDetail(): String =
-        getString(Res.string.notification_token_storage_fallback_detail)
-
-    override suspend fun tokenStorageNotPersisted(): String =
-        getString(Res.string.notification_token_storage_not_persisted)
-
-    override suspend fun tokenStorageNotPersistedDetail(): String =
-        getString(Res.string.notification_token_storage_not_persisted_detail)
 }

@@ -21,7 +21,6 @@ import works.merc.keryx.app.SuspendingCloudConnectFlow
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -33,7 +32,6 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -65,21 +63,6 @@ private class CountingDispatcher : CoroutineDispatcher() {
         dispatchCount++
         block.run()
     }
-}
-
-/** Minimal [NotificationMessages] fake (SyncRepository requires one; Setup tests never assert on it). */
-private object SetupViewModelTestNotificationMessages : NotificationMessages {
-    override suspend fun feedGone(feedTitle: String): String = "gone:$feedTitle"
-    override suspend fun feedUrlChanged(feedTitle: String): String = "urlChanged:$feedTitle"
-    override suspend fun newArticles(count: Int): String = "new:$count"
-    override suspend fun syncFailed(exception: KeryxException): String = "syncFailed:${exception::class.simpleName}"
-    override suspend fun opmlImported(added: Int, failed: Int): String = "opmlImported:$added/$failed"
-    override suspend fun updateAvailable(version: String): String = "updateAvailable:$version"
-    override suspend fun updateReadyToInstall(version: String): String = "updateReadyToInstall:$version"
-    override suspend fun tokenStorageFallback(): String = "tokenStorageFallback"
-    override suspend fun tokenStorageFallbackDetail(): String = "tokenStorageFallbackDetail"
-    override suspend fun tokenStorageNotPersisted(): String = "tokenStorageNotPersisted"
-    override suspend fun tokenStorageNotPersistedDetail(): String = "tokenStorageNotPersistedDetail"
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -133,7 +116,6 @@ class SetupViewModelTest {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             activityCenter = ActivityCenter(),
             notificationCenter = NotificationCenter(),
-            notificationMessages = SetupViewModelTestNotificationMessages,
             localDbPath = "unused",
             tempDir = "unused",
         )

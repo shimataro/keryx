@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import works.merc.keryx.app.core.AlertKey
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.alertKey
 import works.merc.keryx.app.domain.NotificationCenter
@@ -22,9 +23,9 @@ class NotificationCenterViewModel(
 ) : ViewModel() {
     val items = center.items
 
-    /** A notification whose inline action the user tapped, awaiting a host (HomeScreen) to resolve
-     *  it (e.g. show a confirmation and run it). null when nothing is pending. */
-    var pendingAction by mutableStateOf<AppNotification?>(null)
+    /** An action the user asked for, awaiting a host (HomeScreen / App) to resolve it (e.g. show a
+     *  confirmation and run it). null when nothing is pending. */
+    var pendingAction by mutableStateOf<PendingNotificationAction?>(null)
         private set
 
     /**
@@ -72,8 +73,14 @@ class NotificationCenterViewModel(
         surfacedAlerts.update { it + keys }
     }
 
+    /** Requests [notification]'s own action (a no-op for a notification with none). */
     fun requestAction(notification: AppNotification) {
-        pendingAction = notification
+        pendingAction = notification.action?.let { PendingNotificationAction(notification.id, it) }
+    }
+
+    /** Requests [action] on its own, with no notification behind it (e.g. the app menu's "Updates"). */
+    fun requestAction(action: AppNotificationAction) {
+        pendingAction = PendingNotificationAction(notificationId = null, action = action)
     }
 
     fun clearPendingAction() {
@@ -84,3 +91,12 @@ class NotificationCenterViewModel(
 
     fun dismissAll() = center.dismissAll()
 }
+
+/**
+ * A pending [action]. [notificationId] is the notification-center row it came from — so resolving
+ * it can dismiss that row — or null when it was requested without one.
+ */
+data class PendingNotificationAction(
+    val notificationId: String?,
+    val action: AppNotificationAction,
+)

@@ -8,6 +8,8 @@ import kotlinx.coroutines.test.setMain
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationLevel
 import kotlinx.coroutines.test.advanceUntilIdle
+import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.domain.NotificationCenter
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -30,7 +32,7 @@ class NotificationCenterViewModelTest {
     }
 
     private fun notification(id: String) =
-        AppNotification(id = id, level = AppNotificationLevel.WARNING, message = "msg:$id", timestampMillis = 0L)
+        AppNotification(id = id, level = AppNotificationLevel.WARNING, text = NotificationText.FeedGone(id), timestampMillis = 0L)
 
     @Test
     fun itemsMirrorsUnderlyingNotificationCenter() = runTest {
@@ -73,8 +75,8 @@ class NotificationCenterViewModelTest {
 
     // --- alertToSurface / markAlertsSurfaced (Android's foreground alert Snackbar) ---
 
-    private fun alert(id: String, level: AppNotificationLevel, message: String = "msg:$id") =
-        AppNotification(id = id, level = level, message = message, timestampMillis = 0L)
+    private fun alert(id: String, level: AppNotificationLevel, text: NotificationText = NotificationText.FeedGone(id)) =
+        AppNotification(id = id, level = level, text = text, timestampMillis = 0L)
 
     @Test
     fun alertToSurfaceReportsTheNewestWarningOrErrorAndIgnoresInfo() = runTest {
@@ -116,16 +118,16 @@ class NotificationCenterViewModelTest {
         // would announce the same failure again every background sync.
         val center = NotificationCenter()
         val vm = NotificationCenterViewModel(center)
-        center.addCoalescing(alert("first", AppNotificationLevel.ERROR, message = "sync failed"))
+        center.addCoalescing(alert("first", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.GENERIC)))
         advanceUntilIdle()
         vm.markAlertsSurfaced()
         advanceUntilIdle()
 
-        center.addCoalescing(alert("second", AppNotificationLevel.ERROR, message = "sync failed"))
+        center.addCoalescing(alert("second", AppNotificationLevel.ERROR, text = NotificationText.SyncFailed(ErrorKind.GENERIC)))
         advanceUntilIdle()
         assertNull(vm.alertToSurface.value)
 
-        center.add(alert("other", AppNotificationLevel.ERROR, message = "feed gone"))
+        center.add(alert("other", AppNotificationLevel.ERROR, text = NotificationText.FeedGone("feed")))
         advanceUntilIdle()
         assertEquals("other", vm.alertToSurface.value?.id)
     }

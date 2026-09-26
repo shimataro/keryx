@@ -33,6 +33,7 @@ import works.merc.keryx.app.SuspendingCloudConnectFlow
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.data.cloud.CloudFileMeta
@@ -51,7 +52,6 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectFlow
 import works.merc.keryx.app.domain.CloudSession
-import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NotificationCenter
@@ -327,7 +327,6 @@ class SettingsViewModelTest {
             downloader = UpdateDownloader(unusedClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            notificationMessages = FakeNotificationMessages(),
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it },
         )
     }
@@ -362,7 +361,7 @@ class SettingsViewModelTest {
         val ftsManager = ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
-            NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), clock, Dispatchers.Unconfined,
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -382,7 +381,6 @@ class SettingsViewModelTest {
             scope = syncScope,
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
-            notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
             tempDir = "unused",
         )
@@ -818,7 +816,7 @@ class SettingsViewModelTest {
     /**
      * The cloud-sync tab swaps its reset action for a reconnect one off this flag, so it has to
      * reach the ViewModel at all — it travels on its own collector, separate from the one carrying
-     * [SettingsViewModel.lastSyncErrorText].
+     * [SettingsViewModel.lastSyncError].
      *
      * Note: avoids `runTest`'s virtual scheduler for the same reason as
      * disconnectClearsConnectedTypeAndCloudStorageType above.
@@ -1000,16 +998,16 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+        awaitTrue { vm.lastSyncError == ErrorKind.CLOUD_AUTH }
 
         vm.disconnect()
-        // Await the actual condition being asserted, not just connectedType: lastSyncErrorText is
+        // Await the actual condition being asserted, not just connectedType: lastSyncError is
         // updated by an independent collector coroutine (init block) reacting to
         // clearSyncFailureState()'s StateFlow write, so polling connectedType alone gives no
         // happens-before guarantee for it.
-        awaitTrue { vm.connectedType == null && vm.lastSyncErrorText == null }
+        awaitTrue { vm.connectedType == null && vm.lastSyncError == null }
 
-        assertNull(vm.lastSyncErrorText)
+        assertNull(vm.lastSyncError)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -1031,24 +1029,24 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         val vm = newViewModel(cloudSession = session, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+        awaitTrue { vm.lastSyncError == ErrorKind.CLOUD_AUTH }
 
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
         // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
         // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
         // once connect(newType) is underway (i.e. after clearSyncFailureState() has already run). Also
-        // await lastSyncErrorText directly: it's updated by an independent collector coroutine
+        // await lastSyncError directly: it's updated by an independent collector coroutine
         // reacting to clearSyncFailureState()'s StateFlow write, so canCancelConnect alone gives no
         // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
-        awaitTrue { vm.canCancelConnect && vm.lastSyncErrorText == null }
+        awaitTrue { vm.canCancelConnect && vm.lastSyncError == null }
 
-        assertNull(vm.lastSyncErrorText)
+        assertNull(vm.lastSyncError)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // disconnectClearsConnectedTypeAndCloudStorageType above.
     @Test
-    fun lastSyncErrorTextMirrorsSyncRepositoryLastSyncError() {
+    fun lastSyncErrorMirrorsSyncRepositoryLastSyncError() {
         // The cloud-sync tab shows this as the reason the connected provider isn't syncing, so it has
         // to track SyncRepository.lastSyncError in both directions.
         val tokenStorage = FakeTokenStorage()
@@ -1056,15 +1054,15 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         var failing = true
         val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { if (failing) cloud else null })
-        assertNull(vm.lastSyncErrorText)
+        assertNull(vm.lastSyncError)
 
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncErrorText == "syncFailed:CloudAuthException" }
+        awaitTrue { vm.lastSyncError == ErrorKind.CLOUD_AUTH }
 
         // Local-only from here on, so the next sync is a success and must clear the reason.
         failing = false
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncErrorText == null }
+        awaitTrue { vm.lastSyncError == null }
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as

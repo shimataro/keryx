@@ -73,6 +73,8 @@ import works.merc.keryx.app.ui.article.ArticleScrollUnit
 import works.merc.keryx.app.ui.article.FallbackReaderScrollHost
 import works.merc.keryx.app.ui.article.LocalFallbackReaderScrollHost
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.i18n.infoDialogText
+import works.merc.keryx.app.ui.i18n.resolveNotificationText
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 
@@ -733,7 +735,7 @@ internal fun PendingNotificationActionHost(
                 confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
                 onConfirm = {
                     vm.resetCloudData()
-                    notifVm.dismiss(pending.id)
+                    pending.notificationId?.let(notifVm::dismiss)
                     notifVm.clearPendingAction()
                 },
                 dismissText = stringResource(Res.string.common_cancel),
@@ -741,7 +743,7 @@ internal fun PendingNotificationActionHost(
         // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
         // where that list is a screen of its own and focusing it would navigate backwards; see
         // paneForFeedDetail's own KDoc.
-        is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending.id) {
+        is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending) {
             vm.selectFilter(ArticleFilter.Feed(action.feedId))
             onFocusPane(paneForFeedDetail(layout))
             notifVm.clearPendingAction()
@@ -751,7 +753,7 @@ internal fun PendingNotificationActionHost(
             KeryxAlertDialog(
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.notification_detail_title),
-                text = { Text(action.detail) },
+                text = { Text(infoDialogText(action.detail)) },
                 confirmText = stringResource(Res.string.common_ok),
                 onConfirm = { notifVm.clearPendingAction() },
             )
@@ -799,7 +801,7 @@ internal fun ForegroundAlertSnackbar(
                 onNavigated = {},
             )
             val result = hostState.showSnackbar(
-                message = alert.message,
+                message = resolveNotificationText(alert.text),
                 actionLabel = actionLabel.takeIf { act != null },
                 withDismissAction = true,
                 duration = SnackbarDuration.Long,

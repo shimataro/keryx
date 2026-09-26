@@ -5,6 +5,8 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.fold
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.CloudStorage
@@ -37,7 +39,6 @@ class CloudSession(
     private val selectedType: () -> CloudStorageType?,
     private val clock: Clock,
     private val notificationCenter: NotificationCenter,
-    private val notificationMessages: NotificationMessages,
 ) {
     /** Per-provider registry entry. */
     class Provider(
@@ -126,22 +127,22 @@ class CloudSession(
      * ([validAccessToken]): a refreshed token is exactly as sensitive as the original, and the
      * refresh path recurs — which is why the entry is added with
      * [NotificationCenter.addCoalescing], so a persistently unavailable secret store leaves one
-     * bell entry rather than one per refresh. Coalescing keys on the message, so the two outcomes
+     * bell entry rather than one per refresh. Coalescing keys on the text, so the two outcomes
      * above collapse independently of each other.
      */
     private suspend fun saveTokensReportingFallback(provider: Provider, tokens: OAuthTokens) {
-        val (message, detail) = when (provider.tokenStorage.save(tokens)) {
+        val (text, detail) = when (provider.tokenStorage.save(tokens)) {
             TokenSaveOutcome.SECURE -> return
             TokenSaveOutcome.PLAINTEXT_FILE ->
-                notificationMessages.tokenStorageFallback() to notificationMessages.tokenStorageFallbackDetail()
+                NotificationText.TokenStorageFallback to InfoDialogText.TOKEN_STORAGE_FALLBACK
             TokenSaveOutcome.NOT_PERSISTED ->
-                notificationMessages.tokenStorageNotPersisted() to notificationMessages.tokenStorageNotPersistedDetail()
+                NotificationText.TokenStorageNotPersisted to InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED
         }
         notificationCenter.addCoalescing(
             AppNotification(
                 id = IdGenerator.newId(),
                 level = AppNotificationLevel.WARNING,
-                message = message,
+                text = text,
                 timestampMillis = clock.nowMillis(),
                 action = AppNotificationAction.ShowInfoDialog(detail),
             ),

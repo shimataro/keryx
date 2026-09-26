@@ -30,19 +30,20 @@ sealed interface AppNotificationAction {
     data class ShowSettingsTab(val tabId: String) : AppNotificationAction
 
     /** Shows [detail] in an explanatory dialog, without navigating anywhere. */
-    data class ShowInfoDialog(val detail: String) : AppNotificationAction
+    data class ShowInfoDialog(val detail: InfoDialogText) : AppNotificationAction
 }
 
 /**
  * An in-session notification shown in the notification center (bell icon).
  * Session-only — never persisted. Warnings/errors plus INFO notices worth looking back at (e.g. a
  * new app version). [action] is the notification's "next action": either an inline action button
- * ([AppNotificationAction.ResetCloudData]) or what clicking the row does.
+ * ([AppNotificationAction.ResetCloudData]) or what clicking the row does. [text] is what it says,
+ * as data — the UI showing it localizes it (see [NotificationText]).
  */
 data class AppNotification(
     val id: String,
     val level: AppNotificationLevel,
-    val message: String,
+    val text: NotificationText,
     val timestampMillis: Long,
     val action: AppNotificationAction? = null,
 )
@@ -59,9 +60,9 @@ data class AppNotification(
  */
 data class AlertKey(
     val level: AppNotificationLevel,
-    val message: String,
+    val text: NotificationText,
     val action: AppNotificationAction?,
 )
 
 /** This notification's [AlertKey]. */
-fun AppNotification.alertKey(): AlertKey = AlertKey(level, message, action)
+fun AppNotification.alertKey(): AlertKey = AlertKey(level, text, action)

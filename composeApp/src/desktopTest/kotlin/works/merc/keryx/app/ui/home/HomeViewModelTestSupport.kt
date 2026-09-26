@@ -158,7 +158,7 @@ internal fun newHomeViewModel(
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         val feedRepository = FeedRepository(
             db, FeedFetcher(fetcherClient), FaviconResolver(faviconClient), articleRepository,
-            ftsManagerIndexed(driver), syncScheduler, NotificationCenter(), FakeNotificationMessages(),
+            ftsManagerIndexed(driver), syncScheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
         )
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -177,7 +177,6 @@ internal fun newHomeViewModel(
             scope = syncScope,
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
-            notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
             tempDir = "unused",
         )

@@ -100,7 +100,7 @@ class RefreshCycleRunnerTest {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, clock, Dispatchers.Unconfined)
         val feedRepository = FeedRepository(
             db, fetcher, favicons, articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
-            NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), clock, Dispatchers.Unconfined,
         )
         val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { scope -> cleanups += { scope.cancel() } }
         val syncRepository = SyncRepository(
@@ -112,7 +112,6 @@ class RefreshCycleRunnerTest {
             scope = syncScope,
             activityCenter = activityCenter,
             notificationCenter = NotificationCenter(),
-            notificationMessages = FakeNotificationMessages(),
             localDbPath = "unused",
             tempDir = "unused",
         )

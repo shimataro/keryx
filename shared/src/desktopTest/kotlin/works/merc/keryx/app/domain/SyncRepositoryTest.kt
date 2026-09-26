@@ -17,7 +17,9 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.SYNC_MAX_RETRY
@@ -223,7 +225,6 @@ class SyncRepositoryTest {
             scope = backgroundScope,
             activityCenter = activityCenter,
             notificationCenter = notificationCenter,
-            notificationMessages = FakeNotificationMessages(),
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
         )
@@ -924,7 +925,7 @@ class SyncRepositoryTest {
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
-        assertEquals("syncFailed:SchemaVersionException", notes.first().message)
+        assertEquals(NotificationText.SyncFailed(ErrorKind.SCHEMA_VERSION), notes.first().text)
         // The app is out of date; the fix lives on the updates tab.
         assertEquals(AppNotificationAction.ShowSettingsTab("updates"), notes.first().action)
     }
@@ -948,7 +949,7 @@ class SyncRepositoryTest {
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
-        assertEquals("syncFailed:CloudDataIncompatibleException", notes.first().message)
+        assertEquals(NotificationText.SyncFailed(ErrorKind.CLOUD_DATA_INCOMPATIBLE), notes.first().text)
         assertEquals(AppNotificationAction.ResetCloudData, notes.first().action)
     }
 
@@ -1092,7 +1093,7 @@ class SyncRepositoryTest {
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
-        assertEquals("syncFailed:CloudStorageException", notes.first().message)
+        assertEquals(NotificationText.SyncFailed(ErrorKind.CLOUD_STORAGE), notes.first().text)
         // A transient / app-bug error must not offer the destructive reset; it points at the
         // cloud-sync tab (reconnect / disconnect / reset all live there) instead.
         assertEquals(AppNotificationAction.ShowSettingsTab("cloud_sync"), notes.first().action)
@@ -1109,7 +1110,7 @@ class SyncRepositoryTest {
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
         assertEquals(AppNotificationLevel.ERROR, notes.first().level)
-        assertEquals("syncFailed:CloudAuthException", notes.first().message)
+        assertEquals(NotificationText.SyncFailed(ErrorKind.CLOUD_AUTH), notes.first().text)
         // Re-authorizing is done on the cloud-sync tab, so that's where acting on it leads.
         assertEquals(AppNotificationAction.ShowSettingsTab("cloud_sync"), notes.first().action)
     }
@@ -1126,7 +1127,7 @@ class SyncRepositoryTest {
         assertNull(repo.lastSyncError.value)
 
         assertIs<Result.Err>(repo.sync())
-        assertEquals("syncFailed:CloudAuthException", repo.lastSyncError.value)
+        assertEquals(ErrorKind.CLOUD_AUTH, repo.lastSyncError.value)
 
         assertIs<Result.Ok<Unit>>(repo.sync())
         assertNull(repo.lastSyncError.value)
@@ -1142,7 +1143,7 @@ class SyncRepositoryTest {
         val repo = newRepo(cloud)
 
         assertIs<Result.Err>(repo.sync())
-        assertEquals("syncFailed:CloudAuthException", repo.lastSyncError.value)
+        assertEquals(ErrorKind.CLOUD_AUTH, repo.lastSyncError.value)
 
         repo.clearSyncFailureState()
 
@@ -1161,7 +1162,7 @@ class SyncRepositoryTest {
 
         assertIs<Result.Err>(repo.sync())
 
-        assertEquals("syncFailed:CloudStorageException", repo.lastSyncError.value)
+        assertEquals(ErrorKind.CLOUD_STORAGE, repo.lastSyncError.value)
     }
 
     @Test
@@ -1179,12 +1180,12 @@ class SyncRepositoryTest {
 
         val notes = notificationCenter.items.value
         assertEquals(1, notes.size)
-        assertEquals("syncFailed:CloudAuthException", notes.first().message)
+        assertEquals(NotificationText.SyncFailed(ErrorKind.CLOUD_AUTH), notes.first().text)
     }
 
     @Test
     fun differentSyncFailureTypesRemainSeparateNotifications() = runTest {
-        // Distinct failure kinds carry distinct messages and must not coalesce into one entry.
+        // Distinct failure kinds carry distinct texts and must not coalesce into one entry.
         val cloud = FakeCloudStorage()
         cloud.queueExists(Result.Err(CloudAuthException("no token")))
         cloud.queueExists(Result.Err(CloudStorageException("network down")))
@@ -1192,10 +1193,10 @@ class SyncRepositoryTest {
 
         repeat(2) { assertIs<Result.Err>(repo.sync()) }
 
-        val messages = notificationCenter.items.value.map { it.message }.toSet()
+        val texts = notificationCenter.items.value.map { it.text }.toSet()
         assertEquals(
-            setOf("syncFailed:CloudAuthException", "syncFailed:CloudStorageException"),
-            messages,
+            setOf(NotificationText.SyncFailed(ErrorKind.CLOUD_AUTH), NotificationText.SyncFailed(ErrorKind.CLOUD_STORAGE)),
+            texts,
         )
     }
 
@@ -1220,7 +1221,6 @@ class SyncRepositoryTest {
             scope = backgroundScope,
             activityCenter = ActivityCenter(),
             notificationCenter = notificationCenter,
-            notificationMessages = FakeNotificationMessages(),
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
         )

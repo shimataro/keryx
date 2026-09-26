@@ -64,8 +64,15 @@ sealed class KeryxException(message: String) : Exception(message) {
 - **ViewModel 層**: `Result` を UI 状態へ変換。
 - **UI 層**: `ui/i18n/ErrorMessages.kt` の `userMessage(KeryxException)` は `KeryxException` を
   インライン表示用（購読追加時のエラーテキストなど）のメッセージ `String` にローカライズするだけで、
-  通知センターへは流さない。通知センターへのエントリは、Repository 層が `NotificationMessages`
-  経由で別途生成する（後述）。
+  通知センターへは流さない。変換は `core/NotificationText.kt` の `ErrorKind` を経由する——
+  `KeryxException.errorKind` が例外型 → 種別の唯一の対応表で、Apple アプリとも共有する——種別のローカライズは
+  `errorMessage(ErrorKind)` が行う。通知センターへのエントリは、Repository 層が別途生成する（後述）。
+
+**共有コードはローカライズ済みの文章を持たない。** UI が表示するものはすべて、`:shared` からデータとして出ていく——
+`ErrorKind`、または `NotificationText`（どのメッセージか + その引数）——各 UI が自分のリソースでローカライズする：
+Compose アプリは `ui/i18n/`（`notificationText` / `resolveNotificationText` / `infoDialogText` / `errorMessage`）、
+SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS 通知で、UI のないバックグラウンド処理から出すため、
+その文言は各 UI が実装する `NotificationMessages` インターフェース（`newArticles(count)` のみ）から取得する。
 
 ## 通知センター（`domain/NotificationCenter`）
 
@@ -90,7 +97,7 @@ sealed class KeryxException(message: String) : Exception(message) {
   Snackbar によっても通知する: バッジだけでは「ベルのあるペインを既に見ているユーザー」にしか
   届かず、これらのアラートは `runAndroidStartupTasks` や `FeedRefreshWorker` が非同期に積むため。
   `INFO` は対象外（新バージョン通知はアラートではない）。詳細:
-  - 提示済みの判定は `core/AppNotification.kt` の `AlertKey`（レベル + メッセージ + アクション）を
+  - 提示済みの判定は `core/AppNotification.kt` の `AlertKey`（レベル + テキスト + アクション）を
     キーにする。通知 id は `NotificationCenter.addCoalescing` が再発のたびに振り直すため使えない
     — 恒久的に失敗し続ける同期が、バックグラウンド試行のたびではなく一度だけ通知されるようにする。
     重複排除と提示済み判定は同じヘルパを通すので、両者が食い違うことはない。
@@ -116,9 +123,10 @@ sealed class KeryxException(message: String) : Exception(message) {
 | `ShowInfoDialog(detail)` | トークンをどこにも保存できなかったとき（`CloudSession`）——セキュアストアにも平文フォールバックファイルにも書き込めず `TokenSaveOutcome.NOT_PERSISTED` が返った場合。再起動後に再接続が必要 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
 
-`AppNotification(id, level: INFO|WARNING|ERROR, message, timestampMillis, action)`。
-Repository から通知を出す際、文言は `NotificationMessages`（`getString` ベース、テストでは Fake）で
-ローカライズする（ベタ書き禁止）。
+`AppNotification(id, level: INFO|WARNING|ERROR, text: NotificationText, timestampMillis, action)`。
+Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`、`NotificationText.SyncFailed(ErrorKind)` など）として
+出力し、文字列にはしない。行を描画する UI がローカライズする（ベタ書き禁止）。`ShowInfoDialog` の `detail` も同様に
+`InfoDialogText`。どちらも単純なデータクラス／enum なので、`AlertKey`（level + text + action）は構造的に比較できる。
 
 ## エラーの重大度と通知先（抜粋）
 

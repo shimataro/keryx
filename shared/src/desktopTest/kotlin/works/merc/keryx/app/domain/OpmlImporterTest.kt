@@ -134,7 +134,7 @@ class OpmlImporterTest {
         val ftsManager = ftsManagerIndexed(driver)
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
-            NotificationCenter(), FakeNotificationMessages(), clock, Dispatchers.Unconfined,
+            NotificationCenter(), clock, Dispatchers.Unconfined,
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
