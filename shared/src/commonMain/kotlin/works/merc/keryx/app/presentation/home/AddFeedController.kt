@@ -70,27 +70,40 @@ class AddFeedController(
      * The confirm action, which does double duty: previews when there is no result yet, subscribes
      * once there is. A no-op while a step is already in flight.
      *
+     * Safe to call concurrently (e.g. from a Swift caller not confined to the main actor, or a
+     * double-tap racing a recomposition): the in-flight check and the transition into the step are
+     * one atomic [MutableStateFlow.compareAndSet], so at most one call ever starts a step. A call
+     * whose snapshot went stale before it could claim the step is treated as "already in flight".
+     *
      * @return `true` when every requested feed was subscribed — the dialog's cue to close.
      */
     suspend fun submit(): Boolean {
         val s = _state.value
         return when {
             s.phase != null -> false
-            s.preview != null -> addFeedCanSubscribe(s.preview, s.selectedCandidates) && runSubscribe()
+            s.preview != null -> {
+                if (!addFeedCanSubscribe(s.preview, s.selectedCandidates)) return false
+                val started = s.copy(phase = AddFeedPhase.Subscribing, error = null, partialResult = null)
+                _state.compareAndSet(s, started) && runSubscribe(started)
+            }
             s.url.isNotBlank() -> {
-                runPreview()
+                val started = s.copy(phase = AddFeedPhase.Previewing, error = null)
+                if (_state.compareAndSet(s, started)) runPreview(started.url)
                 false
             }
             else -> false
         }
     }
 
-    private suspend fun runPreview() {
-        _state.update { it.copy(phase = AddFeedPhase.Previewing, error = null) }
+    /** Resolves [requestedUrl]; the caller has already moved [AddFeedState.phase] to Previewing. */
+    private suspend fun runPreview(requestedUrl: String) {
         // Resolved before the update, never inside it: update's lambda re-runs when the state moved
         // under it (e.g. the URL was edited meanwhile), which would repeat the network request.
-        val result = resolvePreview(_state.value.url)
+        val result = resolvePreview(requestedUrl)
         _state.update { s ->
+            // The URL was edited while this preview was in flight: setUrl already discarded the old
+            // preview, so the newer input wins and this stale result is dropped (only the phase ends).
+            if (s.url != requestedUrl) return@update s.copy(phase = null)
             when (result) {
                 is AddFeedPreview.Single -> s.copy(url = result.resolvedUrl, preview = result, selectedCandidates = emptySet())
                 is AddFeedPreview.Multiple -> s.copy(preview = result, selectedCandidates = result.candidates.map { it.url }.toSet())
@@ -99,9 +112,8 @@ class AddFeedController(
         }
     }
 
-    private suspend fun runSubscribe(): Boolean {
-        _state.update { it.copy(phase = AddFeedPhase.Subscribing, error = null, partialResult = null) }
-        val s = _state.value
+    /** Subscribes what [s] (the state the caller moved into Subscribing) had selected. */
+    private suspend fun runSubscribe(s: AddFeedState): Boolean {
         val outcome = when (val p = s.preview) {
             is AddFeedPreview.Single -> subscribeFeeds(listOf(p.resolvedUrl))
             is AddFeedPreview.Multiple -> subscribeFeeds(s.selectedCandidates.toList())
