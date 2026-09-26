@@ -41,6 +41,7 @@ import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.feedsForTag
 import works.merc.keryx.app.presentation.home.groupFeedsByFolder
+import works.merc.keryx.app.presentation.home.renameHomeKey
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_collapse
 import works.merc.keryx.app.resources.home_expand
@@ -48,13 +49,20 @@ import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
 /**
- * The bare key each OS's own file manager uses to start a rename (Finder: Return,
- * Explorer/Nautilus/Dolphin: F2). Single source of truth for this convention — also used by
- * `KeyboardNav.kt`'s rename shortcut and the native application menu's `FeedRename` accelerator.
+ * The Compose [Key] for the bare rename shortcut, derived from the shared [renameHomeKey] (the
+ * single source of truth that `homeShortcutFor` actually fires the rename on) by reverse-mapping
+ * it through [toHomeKey] — so the native application menu's `FeedRename` accelerator and
+ * [renameNativeShortcut] can never drift from what the keyboard handler in `KeyboardNav.kt` does.
  * [isMacOs] is overridable for tests only; production call sites use the platform default.
  */
-internal fun renameKey(isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs): Key =
-    if (isMacOs) Key.Enter else Key.F2
+internal fun renameKey(isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs): Key {
+    val target = renameHomeKey(isMacOs)
+    return renameKeyCandidates.firstOrNull { it.toHomeKey() == target }
+        ?: error("No Compose Key maps to rename HomeKey $target")
+}
+
+/** Compose keys [renameKey] may resolve to; must cover every value [renameHomeKey] can return. */
+private val renameKeyCandidates = listOf(Key.Enter, Key.F2)
 
 /**
  * The bare-key context-menu shortcut for rename/edit-type actions (feed/folder/tag), matching each

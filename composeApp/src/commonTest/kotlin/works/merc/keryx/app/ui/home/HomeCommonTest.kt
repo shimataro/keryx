@@ -21,10 +21,18 @@ import works.merc.keryx.app.presentation.home.groupFeedsByFolder
 import works.merc.keryx.app.presentation.home.hasHideableRead
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.nextFeedListRow
+import works.merc.keryx.app.presentation.home.renameHomeKey
 import works.merc.keryx.app.presentation.home.reorderTargetWithinScope
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 
 class HomeCommonTest {
+
+    @Test
+    fun renameKeyMatchesTheSharedRenameHomeKey() {
+        for (isMacOs in listOf(true, false)) {
+            assertEquals(renameHomeKey(isMacOs), renameKey(isMacOs).toHomeKey(), "isMacOs=$isMacOs")
+        }
+    }
 
     @Test
     fun pullRefreshAvailableOnlyOnTouchOutsideSearchWithFeeds() {
