@@ -31,6 +31,7 @@ import platform.CoreFoundation.kCFTypeDictionaryValueCallBacks
 import platform.Security.SecItemAdd
 import platform.Security.SecItemCopyMatching
 import platform.Security.SecItemDelete
+import platform.Security.SecItemUpdate
 import platform.Security.errSecItemNotFound
 import platform.Security.errSecSuccess
 import platform.Security.kSecAttrAccessible
@@ -43,14 +44,22 @@ import platform.Security.kSecMatchLimit
 import platform.Security.kSecMatchLimitOne
 import platform.Security.kSecReturnData
 import platform.Security.kSecValueData
+import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 
 /**
  * [TokenStorage] in the system Keychain, as one generic-password item per provider: service
- * [service] (the same `works.merc.keryx` the desktop app uses), account [account]
- * (`CloudStorageType.id`). Readable after the first unlock since boot, so a background refresh can
- * still sync. There is no plaintext fallback on Apple — the Keychain is always present — so a
- * failed write is [TokenSaveOutcome.NOT_PERSISTED].
+ * [service] (the same `works.merc.keryx` the desktop app uses), account [account]. Readable after
+ * the first unlock since boot, so a background refresh can still sync. There is no plaintext
+ * fallback on Apple — the Keychain is always present — so a failed write is
+ * [TokenSaveOutcome.NOT_PERSISTED].
+ *
+ * @param account The item's account; production code passes [appleKeychainAccount]. That is
+ *   `CloudStorageType.id` — shared with the desktop app on the same Mac, since Dropbox and OneDrive
+ *   use the same OAuth client on both — except for Google Drive, whose Apple client is a separate
+ *   "iOS"-type OAuth client from desktop's. A refresh token is bound to the client that issued it, so
+ *   sharing that account would let whichever app reconnected last overwrite the other's token and
+ *   break its authentication; Google Drive therefore gets an Apple-only account.
  */
 @OptIn(ExperimentalForeignApi::class)
 class KeychainTokenStorage(
@@ -59,14 +68,36 @@ class KeychainTokenStorage(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : TokenStorage {
 
+    /**
+     * Upserts this provider's item: updates the existing one in place, and adds it only when there
+     * is none. Never delete-then-add — that would leave a window where a concurrent [load] sees no
+     * token, and a failed add would already have destroyed the previously valid one.
+     */
     override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        delete()
         val payload = json.encodeToString(tokens).encodeToByteArray()
-        val status = withItemQuery { query ->
-            val data = payload.usePinned { CFDataCreate(null, it.addressOf(0).reinterpret(), payload.size.convert()) }
-            CFDictionaryAddValue(query, kSecValueData, data)
-            CFDictionaryAddValue(query, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock)
-            SecItemAdd(query, null).also { CFRelease(data) }
+        val data = payload.usePinned { CFDataCreate(null, it.addressOf(0).reinterpret(), payload.size.convert()) }
+        val status = try {
+            val updateStatus = withItemQuery { query ->
+                val attributes = CFDictionaryCreateMutable(null, 0, kCFTypeDictionaryKeyCallBacks.ptr, kCFTypeDictionaryValueCallBacks.ptr)
+                try {
+                    CFDictionaryAddValue(attributes, kSecValueData, data)
+                    CFDictionaryAddValue(attributes, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock)
+                    SecItemUpdate(query, attributes)
+                } finally {
+                    CFRelease(attributes)
+                }
+            }
+            if (updateStatus != errSecItemNotFound) {
+                updateStatus
+            } else {
+                withItemQuery { query ->
+                    CFDictionaryAddValue(query, kSecValueData, data)
+                    CFDictionaryAddValue(query, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock)
+                    SecItemAdd(query, null)
+                }
+            }
+        } finally {
+            CFRelease(data)
         }
         if (status != errSecSuccess) Log.warn(TOKEN_STORAGE_LOG_TAG, "Keychain write failed (OSStatus $status)")
         return if (status == errSecSuccess) TokenSaveOutcome.SECURE else TokenSaveOutcome.NOT_PERSISTED
@@ -122,4 +153,16 @@ class KeychainTokenStorage(
         /** The Keychain service every Keryx build stores its tokens under. */
         const val KEYCHAIN_SERVICE: String = "works.merc.keryx"
     }
+}
+
+/**
+ * The Keychain account the Apple app stores [type]'s tokens under: `type.id`, shared with the
+ * desktop app, for every provider whose OAuth client is the same on both — but an Apple-only
+ * account for Google Drive, whose Apple OAuth client differs from desktop's (see
+ * [KeychainTokenStorage]'s `account`). A developer who connected Google Drive on Apple before this
+ * split has to reconnect once.
+ */
+fun appleKeychainAccount(type: CloudStorageType): String = when (type) {
+    CloudStorageType.GOOGLE_DRIVE -> "${type.id}_apple"
+    else -> type.id
 }

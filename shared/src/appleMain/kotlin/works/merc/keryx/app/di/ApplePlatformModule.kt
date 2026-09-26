@@ -11,6 +11,7 @@ import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeychainTokenStorage
+import works.merc.keryx.app.data.cloud.appleKeychainAccount
 import works.merc.keryx.app.data.cloud.googleIosClientRedirectUri
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
@@ -35,7 +36,7 @@ fun applePlatformModule(
     single<NotificationMessages> { notificationMessages }
     single<OsNotificationSink> { osNotificationSink }
     cloudSessionSingles(
-        tokenStorage = { type -> KeychainTokenStorage(account = type.id) },
+        tokenStorage = { type -> KeychainTokenStorage(account = appleKeychainAccount(type)) },
         extraProviders = { client, callbackFlow ->
             if (AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()) {
                 mapOf(CloudStorageType.GOOGLE_DRIVE to appleGoogleDriveProvider(client, callbackFlow))
@@ -62,7 +63,7 @@ private fun appleGoogleDriveProvider(
     val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, clientSecret = null)
     return CloudSession.Provider(
         clientId = clientId,
-        tokenStorage = KeychainTokenStorage(account = CloudStorageType.GOOGLE_DRIVE.id),
+        tokenStorage = KeychainTokenStorage(account = appleKeychainAccount(CloudStorageType.GOOGLE_DRIVE)),
         authManager = driveAuth,
         connectFlow = OAuthConnectFlow(
             authManager = driveAuth,

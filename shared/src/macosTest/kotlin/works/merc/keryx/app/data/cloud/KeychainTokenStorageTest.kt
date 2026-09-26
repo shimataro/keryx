@@ -1,5 +1,6 @@
 package works.merc.keryx.app.data.cloud
 
+import works.merc.keryx.app.core.CloudStorageType
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -31,6 +32,29 @@ class KeychainTokenStorageTest {
         storage.save(OAuthTokens(accessToken = "new"))
 
         assertEquals("new", storage.load()?.accessToken)
+    }
+
+    @Test
+    fun savingOverAnExistingItemUpdatesItInPlace() {
+        val first = OAuthTokens(accessToken = "AT1", refreshToken = "RT1", expiresAtMillis = 1L)
+        val second = OAuthTokens(accessToken = "AT2", refreshToken = "RT2", expiresAtMillis = 2L)
+
+        // The first save adds the item; the second takes the update path (the item already exists).
+        assertEquals(TokenSaveOutcome.SECURE, storage.save(first))
+        assertEquals(TokenSaveOutcome.SECURE, storage.save(second))
+        assertEquals(second, storage.load())
+
+        // Still exactly one item: a single clear leaves nothing behind.
+        assertEquals(TokenClearOutcome.CLEARED, storage.clear())
+        assertNull(storage.load())
+    }
+
+    @Test
+    fun googleDriveGetsAnAppleOnlyKeychainAccount() {
+        assertEquals("google_drive_apple", appleKeychainAccount(CloudStorageType.GOOGLE_DRIVE))
+        for (type in CloudStorageType.entries - CloudStorageType.GOOGLE_DRIVE) {
+            assertEquals(type.id, appleKeychainAccount(type), "$type shares the desktop app's account")
+        }
     }
 
     @Test
