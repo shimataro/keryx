@@ -1054,3 +1054,47 @@ a list that's drifted from strictly-unread back to it without leaving unread-onl
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
 results while searching, the filter's own list otherwise, the same resolution `pagerArticles` uses
 — and the selection), so the action is a no-op once nothing but the selection is left pinned-read.
+
+## Apple Native Apps (SwiftUI)
+
+`external-spec.md` §2 plans a native SwiftUI app for macOS, and later iOS/iPadOS. This section
+records the decisions that the shared Kotlin code and the rest of these docs are being prepared
+around.
+
+### Distribution and coexistence
+
+- **Only the SwiftUI app is distributed to users on macOS.** The Compose Multiplatform macOS build
+  stays in the repo for internal verification; Windows, Linux and Android keep the Compose app.
+- The SwiftUI app ships through **both the Mac App Store and Developer ID** (GitHub Releases +
+  Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
+  Developer ID build adds Sparkle, which the App Store build must not contain.
+- **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
+  share the bundle ID (`works.merc.keryx`), the `keryx://` scheme and the OPML document types, and
+  may share the same data. Launching one through LaunchServices (Finder, `open`) while the other is
+  running just activates the running one. `./gradlew :composeApp:run` bypasses LaunchServices and
+  cannot detect the SwiftUI app, so not running both is an operating rule, not an enforced one.
+- Because the two may open the same `keryx.db` built from different commits, a database whose
+  `PRAGMA user_version` is **newer** than the running app's schema is refused rather than opened
+  (see "DatabaseDriverFactory" above).
+- Keychain tokens are not carried over from the Compose app: the SwiftUI app reconnects, and
+  synced data comes back from the cloud.
+
+### Shared Kotlin code
+
+The SwiftUI app consumes the shared Kotlin code as a Kotlin/Native framework. UI stays per
+platform:
+
+- **Shared** (Kotlin, UI-framework-free): core, data, domain, the SQLDelight schema, and the
+  *state holders* behind the screens — the filter, the selection, the article list, unread-only,
+  hide-read, sort order, search query and results, the new-article count, unread counts, and every
+  action on them. These implement `external-spec.md` behavior directly, so writing them twice would
+  let the two apps drift.
+- **Per UI**: pane layout and focus (`HomePane`, the focused pane, search-bar visibility, pane
+  widths), keyboard event handling, window restoration, and all rendering. SwiftUI covers these
+  with `NavigationSplitView`, `@FocusState`, `@SceneStorage` and its own window restoration; the
+  Compose app keeps its own implementations.
+- Swift observes the shared state holders' `StateFlow`s through a thin `@Observable` adapter.
+- **Localized text is resolved in the UI layer, never in shared code.** Shared code emits
+  message IDs plus arguments. The Compose app resolves them through Compose Resources, and the
+  SwiftUI app through a String Catalog generated from the same `strings.xml` files, so the two
+  locales keep one source.

@@ -1069,3 +1069,37 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 なら検索結果、そうでなければそのフィルタ自身の一覧で、`pagerArticles` と同じ解決方法——・選択状態を
 組み合わせた `StateFlow`）でゲートされているため、選択中の記事以外に既読ピンが残っていない状態では
 この操作は何もしない。
+
+## Apple ネイティブアプリ（SwiftUI）
+
+`external-spec.md` §2 では、macOS 向け（のちに iOS/iPadOS 向け）のネイティブ SwiftUI アプリを計画している。この節は、共有
+Kotlin コードとこれらのドキュメントを準備するうえで前提とする決定事項をまとめたもの。
+
+### 配布と共存
+
+- **macOS でユーザーに配布するのは SwiftUI アプリのみ。** Compose Multiplatform の macOS ビルドは内部の動作確認用としてリポジトリに
+  残す。Windows・Linux・Android は引き続き Compose アプリを使う。
+- SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
+  サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
+- **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）、`keryx://`
+  スキーム、OPML のドキュメントタイプを共有し、同じデータを共有してもよい。一方の起動中に LaunchServices（Finder、`open`）経由で
+  もう一方を起動しても、起動中のアプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI
+  アプリを検知できないので、同時に起動しないことは強制ではなく運用ルールである。
+- 両者は別々のコミットからビルドされた状態で同じ `keryx.db` を開きうるため、`PRAGMA user_version` が実行中アプリのスキーマより
+  **新しい**データベースは、開かずに拒否する（上記「DatabaseDriverFactory」を参照）。
+- Keychain のトークンは Compose アプリから引き継がない。SwiftUI アプリでは再接続し、同期済みのデータはクラウドから戻す。
+
+### 共有 Kotlin コード
+
+SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework として利用する。UI はプラットフォームごとに持つ。
+
+- **共有するもの**（Kotlin、UI フレームワーク非依存）：core・data・domain・SQLDelight スキーマ、そして画面の背後にある
+  *state holder*（フィルタ、選択、記事リスト、未読のみ、既読を隠す、並び順、検索クエリと結果、新着件数、未読数、それらに対する
+  すべての操作）。これらは `external-spec.md` の挙動そのものなので、2 回書くと 2 つのアプリの挙動がずれる。
+- **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、検索バーの表示、ペイン幅）、キーボードイベントの
+  処理、ウィンドウの復元、すべての描画。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
+  これらを担い、Compose アプリは独自の実装を持ち続ける。
+- Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
+- **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
+  Compose アプリは Compose Resources で、SwiftUI アプリは同じ `strings.xml` から生成した String Catalog で解決するので、2 つの
+  ロケールのソースは 1 つに保たれる。
