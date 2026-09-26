@@ -1146,10 +1146,13 @@ Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そして
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
 確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
-`CloudStorageType.id`、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、Apple 向けの
-OAuth クライアント（client secret なし）を登録するまで Apple では提供しない。Dropbox と OneDrive は desktop と同じ
-`keryx://oauth2/callback` リダイレクトを使う。アプリ内アップデート（`updateModule`）は組み込まない：このアプリは
-App Store または Sparkle が更新する。
+`CloudStorageType.id`、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
+`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
+設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
+共通 `keryx://oauth2/callback` リダイレクトとは異なり、そのクライアント自身のクライアント ID を逆順にした
+カスタムスキーム（`com.googleusercontent.apps.<id>:/oauth2redirect`）を使う。詳細は
+sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプリ内アップデート（`updateModule`）は
+組み込まない：このアプリは App Store または Sparkle が更新する。
 
 ### `KeryxSdk`：Swift からの入口
 

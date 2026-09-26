@@ -578,6 +578,46 @@ Android の Google Drive は、本ドキュメントの他のどのプロバイ�
 デスクトップ版が作成したファイルが見えることで確認済み。この性質が無ければ、デスクトップと Android は
 別々のファイルへ黙って同期してしまう。
 
+### Apple 版での Google Drive（secret 不要な「iOS」タイプの OAuth クライアント）
+
+Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は、Android のように Play 開発者
+サービスや端末側の認可 API を必要とせず、通常の `OAuthConnectFlow` + `CustomUriRedirectTransport`
+の経路をそのまま使う — ただし desktop 版とは別のクライアントを使う。
+
+- **desktop 版のクライアントを再利用できない理由。** desktop 版の「デスクトップ アプリ」クライアントは
+  loopback リダイレクトと `client_secret` を前提とする（上記「Google Drive（desktop のみ）— Loopback」
+  を参照）。secret をネイティブアプリのバイナリに同梱すると、バイナリ自体から抽出されてしまう。Google
+  がネイティブ Apple アプリ向けに用意している答えが **「iOS」アプリケーションタイプ**で、secret を一切
+  要求しない（「iOS」タイプは iOS/iPadOS 専用ではなく、ネイティブ macOS アプリにも使われる — 詳細は
+  [build.md](build.ja.md) を参照）。Google のトークンエンドポイントは、この種類のクライアントに対しては
+  `client_secret` なしのトークン交換・リフレッシュを受け入れる。これは「デスクトップ アプリ」クライアント
+  （PKCE でも `invalid_request: client_secret is missing` で拒否される。上記参照）とは異なる。
+  `GoogleDriveAuthManager.clientSecret` を nullable にしたのはこのためで、desktop 版は secret を渡し、
+  Apple 版は `null` を渡してリクエストからパラメーター自体を省く。
+- **リダイレクト URI。** 「iOS」タイプのクライアントが受け付けるリダイレクトは、Dropbox・OneDrive が使う
+  共通の `keryx://oauth2/callback` ではなく、クライアント ID を逆順にした自分専用のカスタム URL スキーム
+  だけ：`NNNN-xxxx.apps.googleusercontent.com` → `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`。
+  `googleIosClientRedirectUri(clientId)`（`data/cloud/GoogleDriveAuthManager.kt`）がこれを導出する純粋
+  関数で、`ApplePlatformModule.kt` の `appleGoogleDriveProvider` がその結果を `CustomUriRedirectTransport`
+  の `redirectUri` に渡す。`cloudSessionSingles` が Dropbox・OneDrive 用に用意する既存の
+  `MutableSharedFlow<OAuthCallbackParams>` をそのまま共用し、どちらのスキームでリダイレクトが届いても
+  `state` で判別する。Swift 側アプリの実装時には、この Dropbox・OneDrive 用の `keryx://` と並べて、
+  Info.plist の `CFBundleURLTypes`（または `ASWebAuthenticationSession` の `callbackURLScheme`）に
+  このスキームを登録する — 詳細は [build.md](build.ja.md) を参照。
+- **別クライアントだが同じ Cloud プロジェクト。** Apple 用クライアントは、上記の Android の場合と同様に
+  desktop 版とは別の OAuth クライアントだが、パッケージ署名で自動照合されるのではなく Cloud Console で
+  手動作成する — Google の「iOS」クライアントタイプには Android の SHA-1 照合に相当する仕組みが無いため、
+  クライアント ID はビルド時定数から読む（`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`。`DesktopBuildConfig`
+  と同じ方式で `appleMain` にだけ生成される — 詳細は [build.md](build.ja.md)）。上記と同じ理由で、
+  desktop・Android のクライアントと同じ Cloud プロジェクトに置く必要がある。別プロジェクトにすると、
+  Apple 版だけ他の端末と異なる隠しフォルダを読み書きしてしまう。
+- **有効化の判定。** `CloudStorageAvailability.apple.kt` の `googleDriveAvailable` は
+  `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()` — 他のプロバイダー／プラットフォームの組と同じ
+  「ID が空なら選択肢を隠す」という規約に従うので、Apple 用クライアントを設定していないビルドでは
+  Google Drive が単純に表示されない（未設定の Dropbox キーで Dropbox が隠れるのと同じ）。
+- **トークンとリフレッシュ。** Android の Play 開発者サービス経路とは異なり、Apple 版は本物のリフレッシュ
+  トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — Play 開発者サービス風の
+  `accessTokenProvider` による上書きはここには無い。
 
 ### トークン保存先
 

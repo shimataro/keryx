@@ -79,13 +79,15 @@ internal fun oneDriveProvider(
  * @param tokenStorage Builds one secure-store instance per provider — called once per provider, so
  *   it must never be memoized across calls (see [TokenStorage]'s own "never share an instance
  *   across providers" rule).
- * @param extraProviders Providers that exist on this platform only (desktop's Google Drive; none
- *   on Android). No default: a platform with none must say so explicitly (`{ emptyMap() }`) rather
- *   than silently omitting a provider slot.
+ * @param extraProviders Providers that exist on this platform only (desktop's and the Apple app's
+ *   own Google Drive clients; none on Android's `AuthorizationClient` path). The callback flow is
+ *   handed in for an extra provider that also uses [CustomUriRedirectTransport] (the Apple app's
+ *   Google Drive); desktop's loopback-based one simply ignores it. No default: a platform with none
+ *   must say so explicitly (`{ _, _ -> emptyMap() }`) rather than silently omitting a provider slot.
  */
 fun Module.cloudSessionSingles(
     tokenStorage: (CloudStorageType) -> TokenStorage,
-    extraProviders: (client: HttpClient) -> Map<CloudStorageType, CloudSession.Provider>,
+    extraProviders: (client: HttpClient, callbackFlow: MutableSharedFlow<OAuthCallbackParams>) -> Map<CloudStorageType, CloudSession.Provider>,
 ) {
     // Shared by each platform's own OS URI routing and the custom-URI (Dropbox/OneDrive) connect
     // transport.
@@ -100,7 +102,7 @@ fun Module.cloudSessionSingles(
             // matching CloudStorageType's own declaration order, which drives the UI display order.
             providers = buildMap {
                 put(CloudStorageType.DROPBOX, dropboxProvider(client, callbackFlow, tokenStorage(CloudStorageType.DROPBOX)))
-                putAll(extraProviders(client))
+                putAll(extraProviders(client, callbackFlow))
                 put(CloudStorageType.ONEDRIVE, oneDriveProvider(client, callbackFlow, tokenStorage(CloudStorageType.ONEDRIVE)))
             },
             selectedType = {

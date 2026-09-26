@@ -408,6 +408,49 @@ verified by listing `appDataFolder` from a second OAuth client in the same proje
 file the desktop app had created. Without that property, desktop and Android would silently sync to
 separate files.
 
+### Google Drive on Apple (secretless "iOS"-type OAuth client)
+
+The Apple app (`:shared`'s appleMain, covering macOS and, later, iOS) goes through the ordinary
+`OAuthConnectFlow` + `CustomUriRedirectTransport` path — unlike Android, it does not need Play
+services or any device-side authorization API — but with its own OAuth client rather than
+desktop's.
+
+- **Why desktop's client cannot be reused.** Desktop's "Desktop app" client requires a loopback
+  redirect and a `client_secret` (see "Google Drive (desktop only) — Loopback" above); shipping that
+  secret inside a native app binary would let it be extracted from the binary itself. Google's
+  policy answer for a native Apple app is the **"iOS" application type**: it takes no secret at all
+  ("iOS" also covers a native macOS app — see [build.md](build.md)), and Google's token endpoint
+  accepts a `client_secret`-less token exchange/refresh for this client type, unlike "Desktop app"
+  clients (which reject it with `invalid_request: client_secret is missing` even with PKCE — see
+  above). `GoogleDriveAuthManager.clientSecret` is nullable for exactly this: desktop passes its
+  secret, the Apple app passes `null` and the parameter is omitted from the request entirely.
+- **Redirect URI.** An "iOS"-type client's only valid redirect is its own reversed-client-id custom
+  scheme, not the shared `keryx://oauth2/callback` Dropbox/OneDrive use:
+  `NNNN-xxxx.apps.googleusercontent.com` → `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`.
+  `googleIosClientRedirectUri(clientId)` (`data/cloud/GoogleDriveAuthManager.kt`) is the pure
+  function that derives it, and `ApplePlatformModule.kt`'s `appleGoogleDriveProvider` passes the
+  result as `CustomUriRedirectTransport`'s `redirectUri`, reusing the same shared
+  `MutableSharedFlow<OAuthCallbackParams>` `cloudSessionSingles` already wires up for Dropbox/
+  OneDrive — the flow is disambiguated by `state` regardless of which scheme delivered the redirect.
+  The Swift app registers that scheme in its Info.plist `CFBundleURLTypes` (or as an
+  `ASWebAuthenticationSession` `callbackURLScheme`) alongside the shared `keryx://` one; see
+  [build.md](build.md).
+- **Separate client, same Cloud project.** The Apple client is a distinct OAuth client from
+  desktop's, exactly like the Android case above, but obtained by hand in the Cloud Console rather
+  than matched by package signature — Google's "iOS" client type has no signature-matching
+  equivalent to Android's SHA-1 check, so the client id *is* read from a build-time constant
+  (`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`, generated the same way as `DesktopBuildConfig`'s, into
+  `appleMain` only — see [build.md](build.md)). It must live in the same Cloud project as the
+  desktop/Android clients, for the same `appDataFolder`-is-per-project reason documented above; a
+  separate project would leave the Apple app reading and writing a different hidden folder than
+  every other device.
+- **Availability gate.** `CloudStorageAvailability.apple.kt`'s `googleDriveAvailable` is
+  `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()` — the same "empty id hides the option"
+  convention as every other provider/platform pair, so a build with no Apple client configured
+  simply doesn't offer Google Drive, the same way an unconfigured Dropbox key hides Dropbox.
+- **Tokens and refresh.** Unlike Android's Play-services path, the Apple app owns a real refresh
+  token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — there is no Play-services-style
+  `accessTokenProvider` override here.
 
 ### Token Storage
 

@@ -55,6 +55,17 @@ val resolvedGoogleDriveClientSecret: String =
         ?: localProperties.getProperty("googledrive.client.secret")
         ?: ""
 
+// --- Resolve GOOGLE_DRIVE_APPLE_CLIENT_ID: -PgoogleDriveAppleClientId > env var > local.properties > empty ---
+// The Apple app's own Google OAuth client (an "iOS"-type client, secretless — see
+// GoogleDriveAuthManager's KDoc), separate from the desktop "Desktop app" client above because
+// Google issues a distinct client per application type. An empty id hides the Google Drive option
+// on Apple (see CloudStorageAvailability.apple.kt) without disabling it on desktop.
+val resolvedGoogleDriveAppleClientId: String =
+    (project.findProperty("googleDriveAppleClientId") as String?)
+        ?: System.getenv("GOOGLE_DRIVE_APPLE_CLIENT_ID")
+        ?: localProperties.getProperty("googledrive.apple.client.id")
+        ?: ""
+
 // --- Resolve UPDATE_REPO: -PupdateRepo > env var > local.properties > default ---
 // GitHub "owner/repo" slug the update checker polls via the public releases/latest API.
 // Unlike the secrets above, an empty value here is not a meaningful "disabled" state —
@@ -165,6 +176,41 @@ val generateDesktopBuildConfig = tasks.register<GenerateDesktopBuildConfigTask>(
     googleDriveClientId.set(resolvedGoogleDriveClientId)
     googleDriveClientSecret.set(resolvedGoogleDriveClientSecret)
     outputDir.set(generatedDesktopBuildConfigDir)
+}
+
+// Apple-only counterpart holding the Apple app's own (secretless) Google Drive OAuth client id —
+// see resolvedGoogleDriveAppleClientId's own comment above for why this is a separate client from
+// desktop's, and GoogleDriveAuthManager's KDoc for why it carries no secret.
+val generatedAppleBuildConfigDir = layout.buildDirectory.dir("generated/appleBuildConfig/kotlin")
+
+abstract class GenerateAppleBuildConfigTask : DefaultTask() {
+    @get:Input
+    abstract val googleDriveClientId: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val pkgDir = outputDir.get().asFile.resolve("works/merc/keryx/app")
+        pkgDir.mkdirs()
+        pkgDir.resolve("AppleBuildConfig.kt").writeText(
+            """
+            |package works.merc.keryx.app
+            |
+            |// Auto-generated. Do not edit by hand.
+            |object AppleBuildConfig {
+            |    const val GOOGLE_DRIVE_CLIENT_ID: String = "${googleDriveClientId.get()}"
+            |}
+            |
+            """.trimMargin(),
+        )
+    }
+}
+
+val generateAppleBuildConfig = tasks.register<GenerateAppleBuildConfigTask>("generateAppleBuildConfig") {
+    googleDriveClientId.set(resolvedGoogleDriveAppleClientId)
+    outputDir.set(generatedAppleBuildConfigDir)
 }
 
 kotlin {
@@ -291,6 +337,9 @@ kotlin {
 
         // Apple actuals: CommonCrypto/zlib/Security/Foundation and the system sqlite3 come from the
         // Kotlin/Native platform libraries; only the HTTP engine and the SQLDelight driver are extra.
+        appleMain {
+            kotlin.srcDir(generatedAppleBuildConfigDir)
+        }
         appleMain.dependencies {
             implementation(libs.ktor.client.darwin)
             api(libs.sqldelight.driver.native)
@@ -341,6 +390,7 @@ kotlin {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
     dependsOn(generateBuildConfig)
     dependsOn(generateDesktopBuildConfig)
+    dependsOn(generateAppleBuildConfig)
 }
 
 sqldelight {

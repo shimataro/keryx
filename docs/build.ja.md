@@ -49,7 +49,7 @@
 APIキーが指定されていないクラウドサービスは連携機能が表示されず、どのサービスにも指定されなければ（設定ダイアログのタブなどに）連携機能自体が表れない。
 **連携できるクラウドストレージは同時に1つのみ**であり、複数のストレージに分散保存はできない。
 
-`shared/build.gradle.kts` の Gradle カスタムタスク（`generateBuildConfig`、および desktop 専用の Google Drive 認証情報向けの `generateDesktopBuildConfig`）で実現している。
+`shared/build.gradle.kts` の Gradle カスタムタスク（`generateBuildConfig`、desktop 専用の Google Drive 認証情報向けの `generateDesktopBuildConfig`、および Apple 版自身の secret 不要な Google Drive クライアント ID 向けの `generateAppleBuildConfig`——後述の「Apple（macOS / iOS）」参照）で実現している。
 
 以下に各サービスでのAPIキーの取得方法を示す。
 
@@ -157,6 +157,47 @@ Google Drive が提供されるのは `GoogleApiAvailability.isGooglePlayService
 `./gradlew :composeApp:run` のようなパッケージ済み/未パッケージの区別は無い。エミュレータで
 連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要——それを得る推奨手段が
 Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参照。
+
+### Apple（macOS / iOS）
+
+Dropbox と OneDrive は上記と同じ `local.properties` のキーを使う。どちらも desktop 版と同じ
+`keryx://oauth2/callback` リダイレクトを使う PKCE パブリッククライアントなので、Apple 向けに特別な
+対応は不要。
+
+**Google Drive だけは自前の OAuth クライアントが必要**——desktop 版の「デスクトップ アプリ」クライアントとは
+別物にする。理由は、ネイティブアプリのバイナリに client secret を同梱してはならない一方、Google の
+「デスクトップ アプリ」クライアント種別は secret を必須とするため（上記「Google Drive」節参照）。Google が
+ネイティブ Apple アプリ向けに用意している答えが **「iOS」**アプリケーションタイプ——secret を一切
+要求しない（この種類は iOS/iPadOS 専用ではなく、ネイティブ macOS アプリにも Google 自身が使わせている）。
+
+1. desktop 用（および Android 用）クライアントと **同じ Cloud プロジェクト**で——上記 Android の場合と同じ
+   理由：`appDataFolder` はプロジェクト単位でスコープされるため、プロジェクトを共有していることが Apple 版で
+   他の端末と同じ同期ファイルを見られる根拠になる。上記「Google Drive」節の Drive API 有効化や OAuth 同意
+   画面／スコープの設定も共有されるので、新たに設定することはない。
+2. 「Google Auth Platform」→「クライアント」→「クライアントを作成」からアプリケーションの種類
+   **「iOS」**を選ぶ。
+   - バンドル ID：`works.merc.keryx`（macOS 版のもの。将来の iOS 版も同じバンドル ID にするなら
+     このクライアントを共用できる。別のバンドル ID にする場合は、その時点で「iOS」クライアントを
+     もう一つ登録する）。
+   - App Store ID・チーム ID は省略可（あとから追記できる）。
+3. 作成後に表示される **クライアント ID**（`NNNN-xxxx.apps.googleusercontent.com`）を
+   `local.properties`（[local.properties.example](../local.properties.example) のコピー）の
+   `googledrive.apple.client.id` に指定する——または `-PgoogleDriveAppleClientId=...` や環境変数
+   `GOOGLE_DRIVE_APPLE_CLIENT_ID` でもよい（他のキーと同じ解決順）。これが
+   `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` に渡り、`shared/build.gradle.kts` の
+   `generateAppleBuildConfig` タスクが `appleMain` にだけ生成する——`generateDesktopBuildConfig` と
+   同じ方式だが、このクライアント種別には secret が無いので secret の対になるものは無い。
+4. リダイレクト URI を別途登録する必要はない——クライアント ID を逆順にした自分専用のカスタムスキーム
+   `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect` を Google 側が自動的に導出する
+   （`googleIosClientRedirectUri`、`data/cloud/GoogleDriveAuthManager.kt`）。Swift アプリを実装する際は、
+   Dropbox・OneDrive が使う共通の `keryx://` と並べて、Info.plist の `CFBundleURLTypes`
+   （または `ASWebAuthenticationSession` の `callbackURLScheme`）にこのスキームを登録する。
+
+`googledrive.apple.client.id` を空にすると Google Drive が Apple 版だけで隠れる——desktop 版や
+Android 版それぞれの Google Drive キーには影響しない（逆も同様）。仕組みの詳細は
+[sync-architecture.ja.md](sync-architecture.ja.md) の「Apple 版での Google Drive」を、`:shared` の
+appleMain の構成は [app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ
+（SwiftUI）」を参照。
 
 ## Apple アプリ用の String Catalog
 

@@ -91,6 +91,31 @@ class GoogleDriveAuthManagerTest {
     }
 
     @Test
+    fun exchangeCodeOmitsClientSecretWhenNull() = runTest {
+        // The Apple app's "iOS"-type OAuth client is secretless; sending an empty client_secret
+        // parameter would be wrong too, so this checks the parameter is absent entirely.
+        var sentBody: String? = null
+        val client = HttpClient(MockEngine { request ->
+            sentBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond("""{"access_token":"AT"}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+        }) { expectSuccess = false }
+        GoogleDriveAuthManager(client, clientSecret = null, clock = fixedClock)
+            .exchangeCode("CLIENTID", "code", "verifier", "http://127.0.0.1:1234/")
+        assertTrue(sentBody?.contains("client_secret") == false)
+    }
+
+    @Test
+    fun refreshOmitsClientSecretWhenNull() = runTest {
+        var sentBody: String? = null
+        val client = HttpClient(MockEngine { request ->
+            sentBody = (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond("""{"access_token":"AT2"}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+        }) { expectSuccess = false }
+        GoogleDriveAuthManager(client, clientSecret = null, clock = fixedClock).refresh("CLIENTID", "RT-old")
+        assertTrue(sentBody?.contains("client_secret") == false)
+    }
+
+    @Test
     fun revokeSendsTokenAsFormParameterAndReturnsOkOnSuccess() = runTest {
         var body: String? = null
         val m = manager { request ->
@@ -163,5 +188,15 @@ class GoogleDriveAuthManagerTest {
         job.cancel()
         job.join()
         assertNull(result)
+    }
+}
+
+class GoogleIosClientRedirectUriTest {
+    @Test
+    fun reversesClientIdIntoTheIosUrlScheme() {
+        assertEquals(
+            "com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect",
+            googleIosClientRedirectUri("NNNN-xxxx.apps.googleusercontent.com"),
+        )
     }
 }

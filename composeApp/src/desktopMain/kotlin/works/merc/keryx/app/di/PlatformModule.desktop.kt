@@ -75,7 +75,7 @@ actual val platformModule: Module = module {
 
     cloudSessionSingles(
         tokenStorage = { type -> providerTokenStorage(type, isMacOs, isSnap) },
-        extraProviders = { client -> mapOf(CloudStorageType.GOOGLE_DRIVE to googleDriveProvider(client)) },
+        extraProviders = { client, _ -> mapOf(CloudStorageType.GOOGLE_DRIVE to googleDriveProvider(client)) },
     )
 }
 

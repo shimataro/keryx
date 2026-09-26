@@ -48,7 +48,7 @@ Copy this file to `local.properties` and edit it during the build.
 Services without an API key will not show integration options. If no service is configured, the integration itself does not appear (e.g., tabs in the settings dialog).
 **Only one cloud storage can be connected at a time**, and data cannot be distributed across multiple storages.
 
-This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials).
+This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials and `generateAppleBuildConfig` for the Apple app's own, secretless Google Drive client id — see "Apple (macOS / iOS)" below).
 
 Below is how to obtain API keys for each service.
 
@@ -158,6 +158,47 @@ declaration — an `ACTION_VIEW` intent-filter (`scheme="keryx"` `host="oauth2"`
 the desktop `./gradlew :composeApp:run` limitation above. To verify linking in an emulator, it
 needs a real browser to actually complete the OAuth flow — a Google Play system image (Chrome) is
 the recommended way to get one — see [setup.md](setup.md).
+
+### Apple (macOS / iOS)
+
+Dropbox and OneDrive use the same `local.properties` keys as above; both are PKCE public clients
+over the same `keryx://oauth2/callback` redirect the desktop app uses, so nothing Apple-specific is
+needed for them.
+
+**Google Drive needs its own OAuth client**, separate from desktop's "Desktop app" one, because a
+native app binary must not ship a client secret and Google's "Desktop app" client type requires one
+(see the "Google Drive" section above). Google's answer for a native Apple app is the **"iOS"**
+application type — it takes no secret at all (Google also uses this type for a native macOS app,
+not just iOS/iPadOS).
+
+1. In the **same Cloud project** as the desktop (and Android) client — this matters, the same way it
+   does for Android above: `appDataFolder` is scoped per project, so sharing it is what lets the
+   Apple app see the same sync file as every other device. The Drive API and OAuth consent
+   screen/scope from the "Google Drive" section above are shared too; nothing new to set up there.
+2. "Google Auth Platform" → "Clients" → "Create client" → application type **"iOS"**.
+   - Bundle ID: `works.merc.keryx` (the macOS app's; a future iOS app can reuse this client if it
+     ships under the same bundle ID, otherwise register a second "iOS" client for it once that's
+     decided).
+   - App Store ID / Team ID are optional and can be filled in later.
+3. Copy the **Client ID** shown after creation (`NNNN-xxxx.apps.googleusercontent.com`) into
+   `local.properties` (copy of [local.properties.example](../local.properties.example)) as
+   `googledrive.apple.client.id` — or `-PgoogleDriveAppleClientId=...` / the
+   `GOOGLE_DRIVE_APPLE_CLIENT_ID` environment variable, same resolution order as every other key
+   here. This feeds `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`, generated into `appleMain` only by
+   `shared/build.gradle.kts`'s `generateAppleBuildConfig` task — analogous to
+   `generateDesktopBuildConfig`, but with no secret counterpart since this client type has none.
+4. No separate redirect-URI registration is needed: it is the client's own reversed-client-id custom
+   scheme, `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`, which Google derives from the
+   Client ID automatically (`googleIosClientRedirectUri`, `data/cloud/GoogleDriveAuthManager.kt`).
+   When building the Swift app, register that scheme in Info.plist's `CFBundleURLTypes` (or as an
+   `ASWebAuthenticationSession` `callbackURLScheme`) alongside the shared `keryx://` one Dropbox/
+   OneDrive use.
+
+Leaving `googledrive.apple.client.id` empty hides Google Drive on the Apple app only — it has no
+effect on desktop's or Android's own Google Drive keys, and vice versa. See
+[sync-architecture.md](sync-architecture.md)'s "Google Drive on Apple" for the full mechanism, and
+[app-architecture.md](app-architecture.md)'s "Apple Native Apps (SwiftUI)" for how `:shared`'s
+appleMain is structured.
 
 ## String Catalog for the Apple app
 

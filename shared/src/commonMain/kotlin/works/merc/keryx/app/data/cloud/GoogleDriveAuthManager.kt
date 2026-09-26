@@ -17,17 +17,17 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SystemClock
 
 /**
- * Handles the Google OAuth 2.0 authorization-code-with-PKCE flow for a "Desktop
- * app" client. `access_type=offline` (plus `prompt=consent`) requests a refresh
- * token. PKCE (`code_verifier`) is used throughout, but Google's token endpoint
- * still rejects "Desktop app" clients without [clientSecret] on the token
- * request (`invalid_request: client_secret is missing`) — unlike iOS/Android
- * clients, Desktop clients aren't treated as fully public. Only the
- * [GOOGLE_DRIVE_APPDATA_SCOPE] hidden app-data folder is requested.
+ * Handles the Google OAuth 2.0 authorization-code-with-PKCE flow. `access_type=offline` (plus
+ * `prompt=consent`) requests a refresh token. PKCE (`code_verifier`) is used throughout, but
+ * Google's token endpoint still rejects a "Desktop app" client without [clientSecret] on the token
+ * request (`invalid_request: client_secret is missing`) — Desktop clients aren't treated as fully
+ * public. An "iOS" client (the Apple app's, which also serves macOS) is: pass a `null`
+ * [clientSecret] and no `client_secret` is sent. Only the [GOOGLE_DRIVE_APPDATA_SCOPE] hidden
+ * app-data folder is requested.
  */
 class GoogleDriveAuthManager(
     private val client: HttpClient,
-    private val clientSecret: String,
+    private val clientSecret: String?,
     private val json: Json = Json { ignoreUnknownKeys = true },
     private val clock: Clock = SystemClock,
 ) : CloudAuthManager {
@@ -61,7 +61,7 @@ class GoogleDriveAuthManager(
             append("grant_type", "authorization_code")
             append("code", code)
             append("client_id", clientId)
-            append("client_secret", clientSecret)
+            clientSecret?.let { append("client_secret", it) }
             append("redirect_uri", redirectUri)
             append("code_verifier", codeVerifier)
         },
@@ -79,7 +79,7 @@ class GoogleDriveAuthManager(
             append("grant_type", "refresh_token")
             append("refresh_token", refreshToken)
             append("client_id", clientId)
-            append("client_secret", clientSecret)
+            clientSecret?.let { append("client_secret", it) }
         },
         keepRefreshToken = refreshToken,
     )
@@ -111,4 +111,14 @@ class GoogleDriveAuthManager(
     private companion object {
         const val TAG = "GoogleDriveAuth"
     }
+}
+
+/**
+ * The redirect URI of a Google "iOS" OAuth client: its client id reversed into a custom URL scheme
+ * (`NNNN-xxxx.apps.googleusercontent.com` → `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`),
+ * which Google accepts for that client without registering it separately.
+ */
+fun googleIosClientRedirectUri(clientId: String): String {
+    val scheme = clientId.split('.').reversed().joinToString(".")
+    return "$scheme:/oauth2redirect"
 }
