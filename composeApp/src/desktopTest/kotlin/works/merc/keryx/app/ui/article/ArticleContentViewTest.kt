@@ -7,7 +7,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
@@ -33,6 +32,10 @@ import java.awt.datatransfer.DataFlavor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.article.ArticleHtmlTheme
+import works.merc.keryx.app.presentation.article.articleNoContentHtml
+import works.merc.keryx.app.presentation.article.articlePlaceholderHtml
+import works.merc.keryx.app.presentation.article.wrapArticleHtml
 
 /**
  * Renders the Compose fallback reader, which stands in for the native web view on platforms that
@@ -42,10 +45,10 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class ArticleContentViewTest {
     private val theme = ArticleHtmlTheme(
-        surface = Color(1f, 1f, 1f),
-        onSurface = Color(0f, 0f, 0f),
-        linkColor = Color(0f, 0f, 1f),
-        mutedColor = Color(0.5f, 0.5f, 0.5f),
+        surface = 0xFFFFFFFF.toInt(),
+        onSurface = 0xFF000000.toInt(),
+        linkColor = 0xFF0000FF.toInt(),
+        mutedColor = 0xFF7F7F7F.toInt(),
         fontScale = 1.0f,
     )
 

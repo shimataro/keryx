@@ -589,7 +589,7 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 
 ### 診断
 
-`ui/article/ArticleWebViewHtml.kt` はフィード本文を、記事自身のオリジンを指す `<base href>` の下に
+`presentation/article/ArticleWebViewHtml.kt` (`:shared`) はフィード本文を、記事自身のオリジンを指す `<base href>` の下に
 無加工で埋め込んでおり、リーダーの WebView は JavaScript が有効（`composewebview` の
 `WebSettings.isJavaScriptEnabled` の既定が `true`。アプリは `desktopWebSettings.dataDirectory`
 しか上書きしていない）。

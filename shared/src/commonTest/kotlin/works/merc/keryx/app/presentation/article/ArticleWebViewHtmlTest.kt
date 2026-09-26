@@ -1,6 +1,5 @@
-package works.merc.keryx.app.ui.article
+package works.merc.keryx.app.presentation.article
 
-import androidx.compose.ui.graphics.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -9,10 +8,10 @@ import kotlin.test.assertTrue
 
 class ArticleWebViewHtmlTest {
     private val theme = ArticleHtmlTheme(
-        surface = Color(1f, 1f, 1f),
-        onSurface = Color(0f, 0f, 0f),
-        linkColor = Color(0f, 0f, 1f),
-        mutedColor = Color(0.5f, 0.5f, 0.5f),
+        surface = 0xFFFFFFFF.toInt(),
+        onSurface = 0xFF000000.toInt(),
+        linkColor = 0xFF0000FF.toInt(),
+        mutedColor = 0xFF7F7F7F.toInt(),
         fontScale = 1.0f,
     )
 
@@ -77,7 +76,7 @@ class ArticleWebViewHtmlTest {
 
     @Test
     fun wrapArticleHtmlContainsExpectedColorsAndFontSize() {
-        val customTheme = theme.copy(linkColor = Color(1f, 0f, 0f), fontScale = 1.5f)
+        val customTheme = theme.copy(linkColor = 0xFFFF0000.toInt(), fontScale = 1.5f)
         val result = wrapArticleHtml(customTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("background-color: #ffffff !important;"))
         assertTrue(result.contains("color: #000000 !important;"))
@@ -360,52 +359,52 @@ class ArticleWebViewHtmlTest {
 
     @Test
     fun toCssHexConvertsPureWhite() {
-        assertEquals("#ffffff", Color(1f, 1f, 1f).toCssHex())
+        assertEquals("#ffffff", 0xFFFFFFFF.toInt().toCssHex())
     }
 
     @Test
     fun toCssHexConvertsPureBlack() {
-        assertEquals("#000000", Color(0f, 0f, 0f).toCssHex())
+        assertEquals("#000000", 0xFF000000.toInt().toCssHex())
     }
 
     @Test
     fun toCssHexConvertsPureRed() {
-        assertEquals("#ff0000", Color(1f, 0f, 0f).toCssHex())
+        assertEquals("#ff0000", 0xFFFF0000.toInt().toCssHex())
     }
 
     @Test
     fun toCssHexConvertsMidGray() {
         // 128 / 255 -> 0x80
-        assertEquals("#808080", Color(128f / 255f, 128f / 255f, 128f / 255f).toCssHex())
+        assertEquals("#808080", 0xFF808080.toInt().toCssHex())
     }
 
     @Test
     fun darkThemeDeclaresADarkColorScheme() {
-        val darkTheme = theme.copy(surface = Color(0f, 0f, 0f))
+        val darkTheme = theme.copy(surface = 0xFF000000.toInt())
         val result = wrapArticleHtml(darkTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: dark !important;"))
     }
 
     @Test
     fun lightThemeDeclaresALightColorScheme() {
-        val lightTheme = theme.copy(surface = Color(1f, 1f, 1f))
+        val lightTheme = theme.copy(surface = 0xFFFFFFFF.toInt())
         val result = wrapArticleHtml(lightTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: light !important;"))
     }
 
     @Test
     fun aSurfaceJustBelowTheDarkThresholdDeclaresDark() {
-        // Relative luminance ~0.484 (just under the 0.5 cutoff) — pins where the boundary actually
+        // Relative luminance ~0.491 (just under the 0.5 cutoff) — pins where the boundary actually
         // sits, since pure black/white alone can't distinguish a 0.5 cutoff from e.g. 0.2 or 0.8.
-        val belowThreshold = theme.copy(surface = Color(0.73f, 0.73f, 0.73f))
+        val belowThreshold = theme.copy(surface = 0xFFBABABA.toInt())
         val result = wrapArticleHtml(belowThreshold, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: dark !important;"))
     }
 
     @Test
     fun aSurfaceJustAboveTheDarkThresholdDeclaresLight() {
-        // Relative luminance ~0.507 (just over the 0.5 cutoff) — the other side of the same pin.
-        val aboveThreshold = theme.copy(surface = Color(0.74f, 0.74f, 0.74f))
+        // Relative luminance ~0.509 (just over the 0.5 cutoff) — the other side of the same pin.
+        val aboveThreshold = theme.copy(surface = 0xFFBDBDBD.toInt())
         val result = wrapArticleHtml(aboveThreshold, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: light !important;"))
     }
@@ -415,21 +414,21 @@ class ArticleWebViewHtmlTest {
         // A 50%-channel gray has a relative luminance of only ~0.216 (the sRGB gamma curve is not
         // linear), so this would wrongly read as "light" if isDark compared the raw channel value
         // (0.5) against the threshold instead of the actual relative luminance.
-        val midGrayTheme = theme.copy(surface = Color(0.5f, 0.5f, 0.5f))
+        val midGrayTheme = theme.copy(surface = 0xFF808080.toInt())
         val result = wrapArticleHtml(midGrayTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: dark !important;"))
     }
 
     @Test
     fun aMaterialYouDarkSurfaceDeclaresDark() {
-        val dynamicDarkTheme = theme.copy(surface = Color(0xFF1C1B1F)) // M3's own default dark-scheme surface
+        val dynamicDarkTheme = theme.copy(surface = 0xFF1C1B1F.toInt()) // M3's own default dark-scheme surface
         val result = wrapArticleHtml(dynamicDarkTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: dark !important;"))
     }
 
     @Test
     fun aMaterialYouLightSurfaceDeclaresLight() {
-        val dynamicLightTheme = theme.copy(surface = Color(0xFFFEF7FF)) // M3's own default light-scheme surface
+        val dynamicLightTheme = theme.copy(surface = 0xFFFEF7FF.toInt()) // M3's own default light-scheme surface
         val result = wrapArticleHtml(dynamicLightTheme, title = "", meta = "", body = "<p>body</p>")
         assertTrue(result.contains("color-scheme: light !important;"))
     }
@@ -438,7 +437,7 @@ class ArticleWebViewHtmlTest {
     fun theColorSchemeDeclarationAppliesToThePlaceholderToo() {
         // articleNoContentHtml / articlePlaceholderHtml share articleDocument() with
         // wrapArticleHtml, so a dark theme must never flash a light-default placeholder either.
-        val darkTheme = theme.copy(surface = Color(0f, 0f, 0f))
+        val darkTheme = theme.copy(surface = 0xFF000000.toInt())
         val noContent = articleNoContentHtml(darkTheme, title = "Title", meta = "", message = "No content")
         val placeholder = articlePlaceholderHtml(darkTheme, "Select an article")
         assertTrue(noContent.contains("color-scheme: dark !important;"))
@@ -454,5 +453,17 @@ class ArticleWebViewHtmlTest {
         assertFalse(result.contains("::-webkit-scrollbar"), "should not define ::-webkit-scrollbar, disabling the overlay scrollbar")
         assertFalse(result.contains("scrollbar-width"), "should not define scrollbar-width, disabling the overlay scrollbar")
         assertFalse(result.contains("scrollbar-color"), "should not define scrollbar-color, disabling the overlay scrollbar")
+    }
+
+    @Test
+    fun relativeLuminanceMatchesTheSrgbDefinition() {
+        assertEquals(1f, relativeLuminance(0xFFFFFFFF.toInt()), 1e-6f)
+        assertEquals(0f, relativeLuminance(0xFF000000.toInt()), 1e-6f)
+        // Pure primaries weigh in at exactly their Rec. 709 coefficients.
+        assertEquals(0.2126f, relativeLuminance(0xFFFF0000.toInt()), 1e-4f)
+        assertEquals(0.7152f, relativeLuminance(0xFF00FF00.toInt()), 1e-4f)
+        assertEquals(0.0722f, relativeLuminance(0xFF0000FF.toInt()), 1e-4f)
+        // The alpha channel is ignored.
+        assertEquals(relativeLuminance(0xFF808080.toInt()), relativeLuminance(0x00808080), 1e-6f)
     }
 }

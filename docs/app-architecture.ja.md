@@ -372,7 +372,7 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 コンポーネントが追加・削除・移動されるたびに、このペインだけでなく**ウインドウ全体**を
 再検証＋再描画するため。その帰結として、
 描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
-WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
+WebView **内部**の HTML として描画する（`presentation/article/ArticleWebViewHtml.kt` (`:shared`) の
 `articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
 `<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。この共有 `<style>` ブロックは
 `color-scheme`（`dark` か `light` のどちらか一方——`themeMode` から直接ではなく
@@ -560,7 +560,7 @@ item 破棄そのものに内在するものだった。`ArticleWebViewCarousel`
 （上限 `ARTICLE_CONTENT_CACHE_LIMIT`、古いものから追い出し）へ格納する——全列には本文の
 HTML 除去済みコピーである `search_text` も含まれ、リーダーはそれを一切読まない。**本文のロードは
 選択ではない**: 既読化するのは `selectArticle` だけなので、隣のページは「開いた」ことにならずに
-描画される。キャッシュは選択中の記事をあえてスキップしない——`ui/home/ArticlePagerSync.kt` の
+描画される。キャッシュは選択中の記事をあえてスキップしない——`presentation/home/ReaderPaging.kt`（`:shared`）の
 `readerContents` が選択の正本をキャッシュより手前にマージするが、キャッシュ自身も自分のコピーを
 保持し続けており、これが選択が隣へ移った後も、直前までスワイプで見ていたページを（空白化・
 再読み込みさせず）描画され続けさせている。`readerPages` は一覧側の対になる仕組みで、選択中の

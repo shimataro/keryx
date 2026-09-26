@@ -60,7 +60,7 @@ directly rather than re-reading them.
 
 - Has anything outside the α scope (JSON Feed / mobile notifications) slipped
   in? (Note: the in-reader WebView article view *is* in scope — it's the shipped
-  reader, `ui/article/ArticleWebViewHtml.kt` + `composewebview`.)
+  reader, `presentation/article/ArticleWebViewHtml.kt` (`:shared`) + `composewebview`.)
 - Does the change contradict a decision recorded in the design docs? If a doc looks wrong, say so as
   a finding — do not silently accept the deviation.
 

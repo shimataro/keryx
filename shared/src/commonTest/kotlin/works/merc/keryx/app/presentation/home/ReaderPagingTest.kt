@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.domain.ArticleListRow
@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
  * selection keep each other in step — deliberately free of `PagerState` and of composition, in the
  * same shape as `ArticleDetailLoadGuardTest`.
  */
-class ArticlePagerSyncTest {
+class ReaderPagingTest {
 
     private fun rows(vararg ids: String): List<ArticleListRow> = ids.map { id ->
         ArticleListRow(

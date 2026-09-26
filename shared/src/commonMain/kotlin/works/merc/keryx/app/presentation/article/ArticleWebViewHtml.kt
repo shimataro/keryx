@@ -1,10 +1,9 @@
-package works.merc.keryx.app.ui.article
+package works.merc.keryx.app.presentation.article
 
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import com.fleeksoft.ksoup.Ksoup
 import works.merc.keryx.app.data.remote.UrlResolver
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
+import kotlin.math.pow
 
 /**
  * Absolute href of every `<a>` tag in [html], resolved against [baseUri] (the article's own URL)
@@ -25,13 +24,16 @@ fun extractLinks(html: String, baseUri: String = ""): Set<String> =
 /**
  * The app-theme inputs shared by every document the article reader's WebView renders. Bundled so
  * the placeholder, the "no content" notice and a real article are guaranteed to share the same
- * background/text/link colors and font scale as the surrounding Compose pane.
+ * background/text/link colors and font scale as the surrounding pane.
+ *
+ * Colors are opaque sRGB `0xAARRGGBB` ints, so any UI can supply them from its own color type (the
+ * Compose app via `Color.toArgb()`); the alpha channel is ignored.
  */
 data class ArticleHtmlTheme(
-    val surface: Color,
-    val onSurface: Color,
-    val linkColor: Color,
-    val mutedColor: Color,
+    val surface: Int,
+    val onSurface: Int,
+    val linkColor: Int,
+    val mutedColor: Int,
     val fontScale: Float,
 )
 
@@ -44,7 +46,7 @@ data class ArticleHtmlTheme(
  * without a second source of truth.
  */
 private val ArticleHtmlTheme.isDark: Boolean
-    get() = surface.luminance() < 0.5f
+    get() = relativeLuminance(surface) < 0.5f
 
 /**
  * Wraps article [body] HTML in a minimal document that applies [theme] (background/text/link
@@ -218,8 +220,25 @@ internal fun escapeHtml(s: String): String =
         .replace("\"", "&quot;")
         .replace("'", "&#39;")
 
-internal fun Color.toCssHex(): String =
-    "#${(red * 255).toInt().toHex2()}${(green * 255).toInt().toHex2()}${(blue * 255).toInt().toHex2()}"
+/** `#rrggbb` for an `0xAARRGGBB` color (alpha dropped). */
+internal fun Int.toCssHex(): String =
+    "#${((this shr 16) and 0xFF).toHex2()}${((this shr 8) and 0xFF).toHex2()}${(this and 0xFF).toHex2()}"
+
+/**
+ * The relative luminance (0 = black, 1 = white) of an sRGB `0xAARRGGBB` color — the same definition
+ * Compose's `Color.luminance()` uses for an sRGB color (linearize each channel, then weight it
+ * 0.2126 / 0.7152 / 0.0722).
+ */
+internal fun relativeLuminance(argb: Int): Float {
+    fun linear(channel: Int): Double {
+        val c = channel / 255.0
+        return if (c <= 0.04045) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
+    }
+    val r = linear((argb shr 16) and 0xFF)
+    val g = linear((argb shr 8) and 0xFF)
+    val b = linear(argb and 0xFF)
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b).toFloat()
+}
 
 private fun Int.toHex2(): String {
     val hexChars = "0123456789abcdef"

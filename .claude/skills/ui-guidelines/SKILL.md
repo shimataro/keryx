@@ -835,10 +835,10 @@ Whether the trailing half is pinned to the edge or stays inline is the `fill` fl
 | Context | Weight | Result |
 | --- | --- | --- |
 | List rows ([ArticleRowComponents.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/ArticleRowComponents.kt), `ArticleRow`) | `weight(1f)` (fill) | Timestamp pinned to the trailing edge, so dates align down the list |
-| Detail header ([ArticleWebViewHtml.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/article/ArticleWebViewHtml.kt), `.article-meta`) | n/a (flowing HTML) | Timestamp stays inline right after the leading value |
+| Detail header ([ArticleWebViewHtml.kt](../../../shared/src/commonMain/kotlin/works/merc/keryx/app/presentation/article/ArticleWebViewHtml.kt), `.article-meta`) | n/a (flowing HTML) | Timestamp stays inline right after the leading value |
 
 The detail header is rendered as flowing HTML text inside the article reader's own WebView
-(`.article-meta` in [ArticleWebViewHtml.kt](../../../composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/article/ArticleWebViewHtml.kt)),
+(`.article-meta` in [ArticleWebViewHtml.kt](../../../shared/src/commonMain/kotlin/works/merc/keryx/app/presentation/article/ArticleWebViewHtml.kt)),
 not as a Compose `Row` like the list row above — see "Popup vs. Dialog" below for why nothing in
 this pane is drawn by Compose. That `div` deliberately has no `white-space`/`text-overflow`/`overflow`
 rules — it wraps instead of clipping, so the timestamp is never lost there. Do not add single-line
@@ -1520,7 +1520,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   "Article Reader (native WebView)"). A narrow layout renders a `HorizontalPager` instead, where
   pages legitimately mount and unmount — that is an Android-only path, and Android's `WebView` is
   an ordinary in-tree view with no such interop cost. Consequently, empty/error states for this pane (no article selected, no content) are
-  rendered as HTML *inside* the WebView (`ui/article/ArticleWebViewHtml.kt`), not as Compose
+  rendered as HTML *inside* the WebView (`presentation/article/ArticleWebViewHtml.kt` (`:shared`)), not as Compose
   `Text`, and the toolbar above it keeps the exact same Compose structure (same buttons, only
   `enabled` toggles) across every state rather than conditionally hiding an action — hiding one
   would change the row's child count, and while that happens not to move this particular row's

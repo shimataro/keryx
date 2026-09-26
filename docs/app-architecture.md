@@ -362,7 +362,7 @@ composed unconditionally for the pane's lifetime — never behind an `if` — be
 `SwingInteropContainer` revalidates and repaints the *whole window* whenever a heavyweight
 component is added, removed, or moved, not just this pane. Consequently, states that have no article to render — "no article
 selected" and "no content" — are rendered as HTML *inside* the same WebView rather than as Compose
-`Text`, via `ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`
+`Text`, via `presentation/article/ArticleWebViewHtml.kt` (`:shared`)'s `articlePlaceholderHtml`/`articleNoContentHtml`
 (sharing one `<style>` block with the real-article `wrapArticleHtml` builder, so every state paints
 the same theme colors). That shared `<style>` block also declares a single `color-scheme` (`dark` or
 `light`, derived from `ArticleHtmlTheme.surface`'s own luminance via `ArticleHtmlTheme.isDark` rather
@@ -555,7 +555,7 @@ oldest evicted first) with a plain `getArticleById` read projected down to `Arti
 `search_text`, a second HTML-stripped copy of the body the reader never reads. **Loading a body is
 not selecting it**: `selectArticle` is the only path that marks an article read, so a neighbouring
 page renders without counting as opened. The cache deliberately does *not* skip the currently
-selected article — `ui/home/ArticlePagerSync.kt`'s `readerContents` merges the selection's own
+selected article — `presentation/home/ReaderPaging.kt`'s (`:shared`) `readerContents` merges the selection's own
 authoritative row in ahead of the cache, but the cache still holds its own copy, which is what keeps
 the page the user just swiped away from rendered (rather than blanking out and reloading) once the
 selection moves on to its neighbour. `readerPages` is the equivalent fallback on the list side: if
