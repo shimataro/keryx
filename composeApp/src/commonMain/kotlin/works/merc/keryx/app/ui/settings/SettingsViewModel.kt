@@ -4,17 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageAvailability
@@ -188,9 +190,14 @@ class SettingsViewModel(
     private val _manualSyncInFlight = MutableStateFlow(false)
 
     init {
+        // Derived, not stateIn'd: its value is recomputed from the inputs on every read, so it can
+        // never lag them (a stateIn copy would briefly show a stale answer right after an input
+        // changed), while collectors still hear about every change.
         val busy = combine(_disconnecting, _resetting, _lastSyncAuthFailed, _manualSyncInFlight) { a, b, c, d -> a || b || c || d }
-        canSyncNow = combine(_connectedType, _idle, _connectingType, _initialSyncingType, busy) { _, _, _, _, _ -> canSyncNowNow() }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, canSyncNowNow())
+        canSyncNow = DerivedStateFlow(
+            compute = ::canSyncNowNow,
+            changes = combine(_connectedType, _idle, _connectingType, _initialSyncingType, busy) { _, _, _, _, _ -> canSyncNowNow() },
+        )
     }
 
     init {
@@ -560,5 +567,24 @@ class SettingsViewModel(
 
     private companion object {
         const val TAG = "SettingsVM"
+    }
+}
+
+/**
+ * A read-only [StateFlow] whose [value] is [compute]d from other state flows on every read, and
+ * whose collectors receive [changes] (deduplicated) — a derived value that, unlike one produced by
+ * `stateIn`, can never be observed out of step with its inputs.
+ */
+@OptIn(ExperimentalForInheritanceCoroutinesApi::class)
+private class DerivedStateFlow<T>(
+    private val compute: () -> T,
+    private val changes: Flow<T>,
+) : StateFlow<T> {
+    override val value: T get() = compute()
+    override val replayCache: List<T> get() = listOf(value)
+
+    override suspend fun collect(collector: FlowCollector<T>): Nothing {
+        changes.distinctUntilChanged().collect(collector)
+        awaitCancellation()
     }
 }
