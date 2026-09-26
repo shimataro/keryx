@@ -16,6 +16,10 @@ kotlinx-io = "0.9.1"
 coil = "3.5.0"
 lifecycle = "2.11.0"
 ksoup = "0.2.6"
+# Swift-friendly export of :shared (sealed -> exhaustive enums, Flow -> AsyncSequence, suspend ->
+# async, default arguments). Must support the Kotlin version above — check SKIE's changelog when
+# bumping Kotlin.
+skie = "0.10.15"
 javakeyring = "1.0.4"
 jna = "5.19.1"
 composewebview = "1.0.0-beta-02"
@@ -185,3 +189,4 @@ composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-mu
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
+skie = { id = "co.touchlab.skie", version.ref = "skie" }

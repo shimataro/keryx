@@ -37,6 +37,7 @@ import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
+import works.merc.keryx.app.presentation.home.HomeViewModel
 
 /**
  * Bindings every app built on :shared needs — database, repositories, sync, notifications.
@@ -45,8 +46,12 @@ import works.merc.keryx.app.platform.selfUpdateCheckSupported
  * [io.ktor.client.HttpClient], token storage, [CloudSession] and the
  * [works.merc.keryx.app.domain.NotificationMessages] for OS notifications (the Compose app's
  * `platformModule` and `appModule` do).
+ *
+ * These are functions, not `val`s, on purpose: a Koin module caches its singletons inside its own
+ * definitions, so reusing one module instance for a second graph (a `KeryxSdk` started again after
+ * `close()`, or a test) would hand back the first graph's — possibly closed — instances.
  */
-val sharedModule: Module = module {
+fun sharedModule(): Module = module {
     single<SqlDriver> { DatabaseDriverFactory().create() }
     single { KeryxDatabase(get()) }
     single { FtsManager(get<SqlDriver>()) }
@@ -103,7 +108,7 @@ val sharedModule: Module = module {
  * [sharedModule] depends on it. The embedding app provides the
  * [works.merc.keryx.app.domain.UpdateInstaller].
  */
-val updateModule: Module = module {
+fun updateModule(): Module = module {
     // Resolved once here rather than left to each of UpdateChecker/UpdateRepository/
     // DesktopUpdateInstaller's own constructor-default detectInstallLocation() call: that default
     // exists only so tests can supply a fake location without DI, not as an invitation for three
@@ -114,4 +119,12 @@ val updateModule: Module = module {
     single { UpdateDownloader(get()) }
     single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), scope = get(), location = get()) }
     single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
+}
+
+/**
+ * The shared screen state holders (see `presentation/`), which every UI binds the same way: the
+ * Compose app's `appModule` and the Apple app's `KeryxSdk` both include it.
+ */
+fun presentationModule(): Module = module {
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 }

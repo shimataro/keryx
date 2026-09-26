@@ -14,6 +14,8 @@ plugins {
     id("com.android.kotlin.multiplatform.library")
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.sqldelight)
+    // Shapes the Apple framework's Swift API; no effect on the JVM/Android artifacts.
+    alias(libs.plugins.skie)
 }
 
 // --- Resolve DROPBOX_APP_KEY: -PdropboxAppKey > env var > local.properties > empty ---
@@ -280,7 +282,12 @@ kotlin {
         getByName("iosArm64Main").dependsOn(iosMain)
         getByName("iosSimulatorArm64Main").dependsOn(iosMain)
         val appleTest = create("appleTest") { dependsOn(commonTest.get()) }
-        listOf("macosArm64Test", "iosArm64Test", "iosSimulatorArm64Test").forEach { getByName(it).dependsOn(appleTest) }
+        // macOS-only tests: the Keychain round trip. Kotlin/Native runs iOS tests as a bare
+        // executable in the simulator, outside any app bundle, where no keychain is available
+        // (errSecNotAvailable); on macOS the test binary reaches the login keychain directly.
+        val macosTest = create("macosTest") { dependsOn(appleTest) }
+        getByName("macosArm64Test").dependsOn(macosTest)
+        listOf("iosArm64Test", "iosSimulatorArm64Test").forEach { getByName(it).dependsOn(appleTest) }
 
         // Apple actuals: CommonCrypto/zlib/Security/Foundation and the system sqlite3 come from the
         // Kotlin/Native platform libraries; only the HTTP engine and the SQLDelight driver are extra.

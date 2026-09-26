@@ -17,16 +17,26 @@ import works.merc.keryx.app.core.APP_NAME
  * `docs/app-architecture.md` for when the two may share data).
  */
 actual object AppDirs {
-    actual fun appDataDir(): String = userDirectory(NSApplicationSupportDirectory)
+    /**
+     * When set (by `KeryxSdk.start`'s `dataDirectory`), every app directory lives under it instead —
+     * for previews, tests and tooling that must never open the user's real data.
+     */
+    internal var rootOverride: String? = null
 
-    actual fun cacheDir(): String = userDirectory(NSCachesDirectory)
+    actual fun appDataDir(): String = rootOverride?.let { ensureDir(it) } ?: userDirectory(NSApplicationSupportDirectory)
+
+    actual fun cacheDir(): String = rootOverride?.let { ensureDir(FileIO.join(it, "Caches")) } ?: userDirectory(NSCachesDirectory)
 
     actual fun tempDir(): String = NSTemporaryDirectory().trimEnd('/')
 
     @OptIn(ExperimentalForeignApi::class)
     private fun userDirectory(directory: NSSearchPathDirectory): String {
         val base = NSSearchPathForDirectoriesInDomains(directory, NSUserDomainMask, true).first() as String
-        val dir = FileIO.join(base, APP_NAME)
+        return ensureDir(FileIO.join(base, APP_NAME))
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    private fun ensureDir(dir: String): String {
         NSFileManager.defaultManager.createDirectoryAtPath(dir, withIntermediateDirectories = true, attributes = null, error = null)
         return dir
     }
