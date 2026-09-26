@@ -10,6 +10,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -135,6 +137,18 @@ class SettingsRepository(
      */
     suspend fun flush() {
         withContext(writeDispatcher) { store.save(_localSettings.value) }
+    }
+
+    /**
+     * Persists the current settings ([flush]) and then stops the background writer, waiting for a
+     * write already in progress to finish. The repository must not be used afterwards: later saves
+     * still update [localSettings] in memory but never reach disk. For an owner that tears the object
+     * graph down while the process keeps running (the Apple `KeryxSdk.close()`), so the writer
+     * neither outlives the graph nor writes into a data directory that is no longer in use.
+     */
+    suspend fun close() {
+        flush()
+        writeScope.coroutineContext.job.cancelAndJoin()
     }
 
     fun isSetupComplete(): Boolean = store.isSetupComplete()

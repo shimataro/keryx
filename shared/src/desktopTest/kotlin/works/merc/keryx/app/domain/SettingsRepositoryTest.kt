@@ -2,6 +2,9 @@ package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
@@ -168,6 +171,32 @@ class SettingsRepositoryTest {
             assertEquals("dark", repo.localSettings.value.themeMode)
             // Confirm it's actually persisted to the store (disk write is off-thread; flush awaits it).
             runBlocking { repo.flush() }
+            assertEquals("dark", store.load().themeMode)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun closePersistsAPendingSaveAndThenStopsTheWriter() = runTest {
+        val (driver, db) = inMemoryDb()
+        try {
+            val store = LocalSettingsStore(dirOverride = dir)
+            // A queued dispatcher, so the save below is still pending when close() runs.
+            val repo = SettingsRepository(
+                db, store, SyncScheduler {}, Clock { 0L },
+                writeDispatcher = StandardTestDispatcher(testScheduler),
+            )
+            repo.saveLocalSettings(LocalSettings(themeMode = "dark"))
+            assertFalse(store.isSetupComplete())
+
+            repo.close()
+            assertEquals("dark", store.load().themeMode)
+
+            // The writer is gone: a later save stays in memory only.
+            repo.saveLocalSettings(LocalSettings(themeMode = "light"))
+            advanceUntilIdle()
+            assertEquals("light", repo.getLocalSettings().themeMode)
             assertEquals("dark", store.load().themeMode)
         } finally {
             driver.close()
