@@ -307,6 +307,22 @@ cause の循環に備えて深さ上限あり）。`SchemaVersionException` は�
 のみ呼ばれる。分類そのものにプラットフォーム固有の要素は無いので、数値エラーコードを公開しないドライバ
 （Android の `android.database.sqlite.SQLiteException`）を持つターゲットでも、同じカテゴリを与えるだけで済む。
 
+Apple の `actual`（`DatabaseMerger.apple.kt`）も同じ対応付けと同じ `MergeFailureClassifier` を使うが、コードの
+見つけ方が異なる。cause チェーンを（同じく深さ上限付きで）辿り、次の 2 種類の例外のどちらかを探す：
+`platform/RawSqliteConnection.kt`（マージ専用の接続）が投げる自前の `SqliteException`（エラーコードを直接持つ）、
+または、クラウドファイルを開いてマイグレーションする間に `NativeSqliteDriver` が投げる SQLiter の
+`SQLiteExceptionErrorCode`。SQLiter は生の `errorCode` を private にしているため、読める値は `errorType.code`
+（主コードのみ）だけである。この getter は SQLiter に enum の項目が無いコードに対しては例外を投げるので、その場合は
+「コードが見つからない」（そのまま再 throw）として扱う。
+
+ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドファイルを `NativeSqliteDriver` でロールバック
+ジャーナルモードのまま開き、ローカルのスキーマまで上げる。このドライバはファイルを最初の文で遅延して開く
+（つまりそこでマイグレーションする）——`DatabaseDriverFactory.apple.kt` が生成時に 1 文実行するのと同じ理由——ため、
+ドライバを閉じる前に些細な `SELECT 1` を実行し、その後ファイルの `user_version` を読み直して、まだローカルの
+スキーマバージョンでなければ `IllegalStateException` を投げる。この例外は意図的に SQLite のエラーコードを
+持たないので、マージはこれを未分類（一時的）のままにする：何もせずに終わったマイグレーションはアプリ側の
+不具合かもしれず、破壊的なクラウドデータのリセットで応じてはならない。
+
 | SQLite の主エラーコード | 分類 |
 | --- | --- |
 | `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **永続** → `CloudDataIncompatibleException`。ファイル自体が壊れている。 |

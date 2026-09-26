@@ -19,7 +19,7 @@
 
 | モジュール | 内容 |
 | --- | --- |
-| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule` と任意の `updateModule`）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
 | `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
 | `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
 | `:testing` | 両モジュールのテストが使うテスト専用ヘルパー（`DbTestSupport`、`CloudTestSupport`、`FakeNotificationMessages`、トークンストレージの fake）。main のソースからは決して依存しない。 |
@@ -38,7 +38,7 @@
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
-    di/           SharedModule（sharedModule + updateModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
+    di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
                   NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
@@ -1115,7 +1115,14 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   アプリを検知できないので、同時に起動しないことは強制ではなく運用ルールである。
 - 両者は別々のコミットからビルドされた状態で同じ `keryx.db` を開きうるため、`PRAGMA user_version` が実行中アプリのスキーマより
   **新しい**データベースは、開かずに拒否する（上記「DatabaseDriverFactory」を参照）。
-- Keychain のトークンは Compose アプリから引き継がない。SwiftUI アプリでは再接続し、同期済みのデータはクラウドから戻す。
+- どちらのアプリもトークンを Keychain の同じサービス（`works.merc.keryx`）に保存する。Dropbox と OneDrive は
+  両者で同じ OAuth クライアントを使うため、その項目はアカウント（`CloudStorageType.id`）も desktop アプリと共有する。
+  Google Drive は共有しない：Apple アプリの「iOS」タイプの OAuth クライアントは desktop のものとは別で、リフレッシュ
+  トークンは発行したクライアントに紐付くため、Apple 専用の別アカウント（`google_drive_apple`。
+  `data/cloud/KeychainTokenStorage.kt` の `appleKeychainAccount`）を使い、どちらのアプリも相手のトークンを上書きしない。
+  サービスとアカウントを共有するのは名前付けの仕組みにすぎず、一方のアプリが他方の項目を実際に読めるかどうかは
+  Keychain のアクセス制御で決まる（desktop アプリは `security` CLI 経由で書き込み、SwiftUI アプリはサンドボックス内で
+  動く）ため、保証はされない——読めない場合は SwiftUI アプリで再接続し、同期済みのデータはクラウドから戻す。
 
 ### 共有 Kotlin コード
 
@@ -1146,7 +1153,7 @@ Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そして
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
 確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
-`CloudStorageType.id`、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
+`appleKeychainAccount(type)`——`CloudStorageType.id`、ただし Google Drive は `google_drive_apple`。「配布と共存」参照——、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
 `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
 設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
 共通 `keryx://oauth2/callback` リダイレクトとは異なり、そのクライアント自身のクライアント ID を逆順にした
@@ -1159,10 +1166,22 @@ sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプ�
 `sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：
 `KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` がオブジェクトグラフ
 （`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`。Koin は内部に隠す）を構築し、DB を開き——
-`DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・`syncRepository`・
-`settingsRepository`・`cloudSession`・`newAddFeedController()`・`handleOAuthRedirect(url)` を提供する。`dataDirectory` は、
+`DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・
+`newArticleNotifier`（新着記事が見つかった更新ごとの新着テキスト。OS 通知の送り先にも渡される）・`syncRepository`・
+`settingsRepository`・`cloudSession`・`cloudConnectionService`・`availableCloudTypes`（このビルドで設定済みの
+クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`
+を提供する。`cloudConnectionService`（`domain/CloudConnectionService.kt`）は、どの UI の接続・切断も従うべき順序を
+保持し、Compose の設定画面・セットアップ画面とも共有する：`completeConnect(type, tokens)` はトークンを保存し、
+プロバイダーを選択し、同期を始める前にローカル設定をフラッシュする。`tearDown(type)` は切断（トークンを失効）し、
+同期失敗状態とプロバイダーごとの同期マーカーを消去し、プロバイダーの選択を解除する。対話的な OAuth フローの待機と
+初回同期の開始は各 UI に残る。どちらの呼び出しも Keychain でブロックしうるので、呼び出し側はメインスレッド外で実行する。`dataDirectory` は、
 すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。`close()` は、
-まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じる。Koin モジュールが `val` ではなく関数なのは、
+まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
+HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。
+`handleOAuthRedirect` は、接続フローがリダイレクトを待ち受けていなければ `false` を返し、そのリダイレクトは破棄する。
+`prepareSearchIndex()`（フォアグラウンド起動ごとに 1 回：FTS テーブルを作成し欠けている行を補完）と
+`prepareSearchIndexIfAbsent()`（軽量。プロセス起動やバックグラウンドでの起床のたびに呼ぶ用）は、どちらも
+Swift の呼び出し元スレッドではなく SDK 自身のバックグラウンドスコープで動く。Koin モジュールが `val` ではなく関数なのは、
 Koin のモジュールがシングルトンを定義の中にキャッシュするため。
 
 **SKIE** がフレームワークの Swift API を整える：`suspend` 関数は `async throws` に、sealed 階層は網羅的な `onEnum(of:)` の

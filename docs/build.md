@@ -9,8 +9,8 @@
   However, JavaExec tasks such as `:composeApp:run` are executed with the JVM that launched Gradle, so if it is older than 25 you will hit `UnsupportedClassVersionError` at runtime.
 - Use the bundled wrapper (`./gradlew`, Gradle 9.7.1).
 - **Android SDK** (`local.properties`' `sdk.dir` or the `ANDROID_HOME` environment variable) —
-  `:composeApp` itself configures an Android library target, so the root `./gradlew build` needs
-  the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD
+  both `:shared` and `:composeApp` configure an Android library target, so the root `./gradlew build`
+  needs the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD
   setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   avoids this requirement.
 
@@ -18,6 +18,11 @@
   (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`, output under
   `shared/build/XCFrameworks/release/`) and its macOS/iOS-simulator tests. Without Xcode (or on
   Linux/Windows) Gradle skips those targets and everything else builds as before.
+  One consequence is a known, accepted limitation rather than a bug: the CodeQL workflow
+  (`.github/workflows/codeql.yml`) runs on `ubuntu-latest`, where Gradle silently skips the Apple
+  targets, so Apple-target source (`shared/src/appleMain`, `macosMain`, `iosMain` — e.g.
+  `KeychainTokenStorage.kt`, `RawSqliteConnection.kt`, `DatabaseMerger.apple.kt`, `KeryxSdk.kt`)
+  is never compiled under CodeQL's build tracer and gets no CodeQL coverage.
 
 If toolchain auto-download is blocked in a sandbox:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`.

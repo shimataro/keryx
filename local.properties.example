@@ -38,7 +38,7 @@ googledrive.client.secret=
 
 # Google Drive OAuth Client ID for the Apple app, from a separate "iOS"-type OAuth client
 # (secretless — Google issues a distinct client per application type; see docs/build.md's
-# "Google Drive on Apple"). Not the same client or key as googledrive.client.id above.
+# "Apple (macOS / iOS)"). Not the same client or key as googledrive.client.id above.
 #   Gradle property: -PgoogleDriveAppleClientId=...
 #   Environment variable: GOOGLE_DRIVE_APPLE_CLIENT_ID
 #   Default: (empty)

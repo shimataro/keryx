@@ -21,7 +21,7 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 
 | Module | Contents |
 | --- | --- |
-| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule` + the optional `updateModule`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
 | `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
 | `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
 | `:testing` | Test-only helpers used by both modules' tests (`DbTestSupport`, `CloudTestSupport`, `FakeNotificationMessages`, token-storage fakes). Never a main-source dependency. |
@@ -40,7 +40,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
-    di/           SharedModule (sharedModule + updateModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
+    di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
                   actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
@@ -1106,8 +1106,16 @@ around.
 - Because the two may open the same `keryx.db` built from different commits, a database whose
   `PRAGMA user_version` is **newer** than the running app's schema is refused rather than opened
   (see "DatabaseDriverFactory" above).
-- Keychain tokens are not carried over from the Compose app: the SwiftUI app reconnects, and
-  synced data comes back from the cloud.
+- Both apps keep tokens in the Keychain under the same service (`works.merc.keryx`). Dropbox and
+  OneDrive use the same OAuth client on both, so their items also share the account
+  (`CloudStorageType.id`) with the desktop app. Google Drive does not: the Apple app's "iOS"-type
+  OAuth client differs from desktop's, and a refresh token is bound to the client that issued it,
+  so it uses a separate Apple-only account (`google_drive_apple`, `appleKeychainAccount` in
+  `data/cloud/KeychainTokenStorage.kt`) that neither app can overwrite for the other. Sharing a
+  service and account is only the naming mechanism: whether one app can actually read the other's
+  item is decided by Keychain access control (the desktop app writes through the `security` CLI,
+  the SwiftUI app runs sandboxed), so it is not guaranteed — when it can't, the SwiftUI app
+  reconnects, and synced data comes back from the cloud.
 
 ### Shared Kotlin code
 
@@ -1146,7 +1154,8 @@ sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
 `VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
 trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
 (3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
-(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `CloudStorageType.id`,
+(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `appleKeychainAccount(type)` —
+`CloudStorageType.id`, except `google_drive_apple` for Google Drive; see "Distribution and coexistence" —
 readable after first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
 ("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
 — gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/
@@ -1161,10 +1170,25 @@ Sparkle update this app.
 `KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` builds the object
 graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin kept internal),
 opens the database — a `DatabaseTooNewException` surfaces here as a Swift error — and hands out
-`homeViewModel`, `notificationCenter`, `syncRepository`, `settingsRepository`, `cloudSession`,
-`newAddFeedController()` and `handleOAuthRedirect(url)`. `dataDirectory` puts every app directory
+`homeViewModel`, `notificationCenter`, `newArticleNotifier` (the new-articles text of every refresh
+that found some, also passed to the OS notification sink), `syncRepository`, `settingsRepository`,
+`cloudSession`, `cloudConnectionService`, `availableCloudTypes` (the cloud providers configured in
+this build, in display order — `CloudStorageAvailability.available`), `newAddFeedController()` and
+`handleOAuthRedirect(url)`. `cloudConnectionService` (`domain/CloudConnectionService.kt`) holds the
+ordering every UI's connect/disconnect must follow, shared with the Compose settings and setup
+screens: `completeConnect(type, tokens)` saves the tokens, selects the provider and flushes the
+local settings before any sync may start, and `tearDown(type)` disconnects (revoking the tokens),
+clears the sync failure state and per-provider sync markers, and clears the provider selection.
+Awaiting the interactive OAuth flow and starting the initial sync stay with each UI. Both calls may
+block on the Keychain, so the caller runs them off its main thread. `dataDirectory` puts every app directory
 under a given path, for previews and tests that must not open the user's real data. `close()` stops
-and joins every coroutine that can still read the database before closing it. The Koin modules
+and joins every coroutine that can still read the database before closing it, flushes and stops
+the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
+`dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the
+redirect, when no connect flow is collecting it. `prepareSearchIndex()` (once per foreground
+launch: create the FTS table and backfill missing rows) and `prepareSearchIndexIfAbsent()` (cheap,
+for every process start or background wake) both run on the SDK's own background scope, never on
+the Swift caller's thread. The Koin modules
 are functions, not `val`s, because a Koin module caches its singletons inside its definitions.
 
 **SKIE** shapes the framework's Swift API: `suspend` functions become `async throws`, sealed

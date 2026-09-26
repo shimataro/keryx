@@ -10,7 +10,7 @@
   それが 25 未満だと実行時に `UnsupportedClassVersionError` になる。
 - Gradle は同梱の wrapper（`./gradlew`, Gradle 9.7.1）を使う。
 - **Android SDK**（`local.properties` の `sdk.dir`、または環境変数 `ANDROID_HOME`） —
-  `:composeApp` 自体が Android library ターゲットを構成しているため、デスクトップ側だけの変更
+  `:shared` と `:composeApp` の両方が Android library ターゲットを構成しているため、デスクトップ側だけの変更
   であってもルートの `./gradlew build` には SDK の解決が必要。インストールと AVD の作成は
   [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   のようなデスクトップ限定タスクはこの要件を回避できる。
@@ -19,6 +19,11 @@
   （`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`。出力は `shared/build/XCFrameworks/release/` 配下）と、その macOS／
   iOS シミュレータ向けテストに必要。Xcode がない場合（または Linux/Windows）は Gradle がそれらのターゲットをスキップし、それ以外は
   従来どおりビルドされる。
+  その帰結として、バグではなく既知の許容済み制約がある：CodeQL ワークフロー
+  （`.github/workflows/codeql.yml`）は `ubuntu-latest` 上で動くため Gradle が Apple ターゲットを黙って
+  スキップし、Apple ターゲットのソース（`shared/src/appleMain`、`macosMain`、`iosMain`——例：
+  `KeychainTokenStorage.kt`、`RawSqliteConnection.kt`、`DatabaseMerger.apple.kt`、`KeryxSdk.kt`）は
+  CodeQL のビルドトレーサー下で一度もコンパイルされず、CodeQL の解析対象にならない。
 
 サンドボックス等でツールチェーンの自動ダウンロードが必要な場合:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`。
