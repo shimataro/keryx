@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
@@ -48,6 +49,7 @@ import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
 import works.merc.keryx.app.core.WINDOW_STATE_PERSIST_DEBOUNCE_MS
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
@@ -69,6 +71,8 @@ import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
+import works.merc.keryx.app.resources.database_too_new_message
+import works.merc.keryx.app.resources.database_too_new_title
 import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
@@ -168,13 +172,55 @@ fun main(args: Array<String>) {
     startKoin { modules(appModule, platformModule) }
     val koin = KoinPlatform.getKoin()
 
+    // Install the Swing Look & Feel (and, on macOS, the appearance property) before the database is
+    // opened below, so the "database too new" message box — the first Swing surface this process can
+    // show — already renders in the app's own FlatLaf/system L&F rather than the default Metal one.
+    // The theme is read straight from LocalSettingsStore (local_settings.json only), not through
+    // SettingsRepository: that depends on KeryxDatabase, so resolving it here would open keryx.db
+    // before the too-new check below gets a chance to report it.
+    //
+    // Both still before any AWT/Compose initialization (SingleInstanceCoordinator/Koin/settings
+    // loading above don't touch AWT) — kept together since it's unconfirmed whether
+    // installLookAndFeel itself begins toolkit init, which would make setting the appearance
+    // property afterwards too late.
+    //
+    // "system" can't be resolved to dark/light here — isSystemInDarkTheme() is a Compose API and
+    // Compose hasn't started yet — so assume light and let the effect inside the window (which
+    // does have it) correct the choice. The only Swing surface that can exist before Compose's first
+    // composition is the "database too new" message box below; the menu bar is created inside the
+    // composition, and menus/dialog buttons are on demand.
+    val startupThemeMode = koin.get<LocalSettingsStore>().load().themeMode
+    installLookAndFeel(resolveDarkTheme(startupThemeMode, systemDark = false))
+    // Without this, Aqua's Swing L&F always paints light-mode colors regardless of the OS's
+    // actual Dark Mode setting (JDK-8235363), which looks mismatched against this app's own dark
+    // theme. Follow the app's own theme choice rather than a static "system" value so Swing's
+    // native buttons match the rest of the (Compose-themed) dialog card even when the user has
+    // overridden the app's theme independently of the OS. Note: changing the in-app theme without
+    // restarting won't update this — it's read once at startup.
+    if (isMacOs) {
+        System.setProperty(
+            "apple.awt.application.appearance",
+            when (startupThemeMode) {
+                "light" -> "NSAppearanceNameAqua"
+                "dark" -> "NSAppearanceNameDarkAqua"
+                else -> "system"
+            },
+        )
+    }
+
     // Open the database before anything can reach it from a background coroutine (an .opml
     // dispatched just below), so a keryx.db migrated by a newer build is reported here, once, rather
     // than failing inside whichever caller happened to touch it first.
     try {
         koin.get<SqlDriver>()
     } catch (e: Exception) {
-        showDatabaseTooNewAndExit(findDatabaseTooNew(e) ?: throw e)
+        val tooNew = findDatabaseTooNew(e) ?: throw e
+        // Resolved here rather than inside showDatabaseTooNewAndExit so the blocking resource read
+        // stays on this startup path, alongside main()'s other sanctioned runBlocking calls.
+        val (title, message) = runBlocking {
+            getString(Res.string.database_too_new_title) to getString(Res.string.database_too_new_message)
+        }
+        showDatabaseTooNewAndExit(tooNew, title, message)
     }
 
     // Register activation listener now that Koin is ready so we can emit incoming URIs into the
@@ -241,33 +287,6 @@ fun main(args: Array<String>) {
         },
     )
     val saved = settingsRepository.getLocalSettings()
-
-    // Both still before any AWT/Compose initialization (SingleInstanceCoordinator/Koin/settings
-    // loading above don't touch AWT) — kept together since it's unconfirmed whether
-    // installLookAndFeel itself begins toolkit init, which would make setting the appearance
-    // property afterwards too late.
-    //
-    // "system" can't be resolved to dark/light here — isSystemInDarkTheme() is a Compose API and
-    // Compose hasn't started yet — so assume light and let the effect inside the window (which
-    // does have it) correct the choice. No Swing surface exists before Compose's first
-    // composition: the menu bar is created inside it, and menus/dialog buttons are on demand.
-    installLookAndFeel(resolveDarkTheme(saved.themeMode, systemDark = false))
-    // Without this, Aqua's Swing L&F always paints light-mode colors regardless of the OS's
-    // actual Dark Mode setting (JDK-8235363), which looks mismatched against this app's own dark
-    // theme. Follow the app's own theme choice rather than a static "system" value so Swing's
-    // native buttons match the rest of the (Compose-themed) dialog card even when the user has
-    // overridden the app's theme independently of the OS. Note: changing the in-app theme without
-    // restarting won't update this — it's read once at startup.
-    if (isMacOs) {
-        System.setProperty(
-            "apple.awt.application.appearance",
-            when (saved.themeMode) {
-                "light" -> "NSAppearanceNameAqua"
-                "dark" -> "NSAppearanceNameDarkAqua"
-                else -> "system"
-            },
-        )
-    }
 
     val appScope = koin.get<CoroutineScope>()
 
