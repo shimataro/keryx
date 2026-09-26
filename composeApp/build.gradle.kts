@@ -239,6 +239,75 @@ kotlin {
     }
 }
 
+// --- String Catalog for the Apple app ---
+// The SwiftUI app localizes through an Xcode String Catalog; generating it from the same
+// composeResources/values*/strings.xml keeps one source of truth for both UIs' text (see
+// docs/app-architecture.md's "Apple Native Apps (SwiftUI)"). Japanese is the source/fallback
+// language, as it is here. Android-style positional placeholders become their Apple equivalents
+// (%1$s -> %1$@, %1$d -> %1$lld) and <plurals> become plural variations.
+abstract class GenerateStringCatalogTask : DefaultTask() {
+    @get:InputDirectory
+    abstract val resourcesDir: DirectoryProperty
+
+    @get:OutputFile
+    abstract val outputFile: RegularFileProperty
+
+    @TaskAction
+    fun generate() {
+        val locales = linkedMapOf("ja" to "values", "en" to "values-en")
+        val strings = sortedMapOf<String, MutableMap<String, Any>>()
+        for ((locale, dir) in locales) {
+            val file = resourcesDir.get().asFile.resolve("$dir/strings.xml")
+            val doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
+            val children = doc.documentElement.childNodes
+            for (i in 0 until children.length) {
+                val element = children.item(i) as? org.w3c.dom.Element ?: continue
+                val name = element.getAttribute("name")
+                val localization: Map<String, Any> = when (element.tagName) {
+                    "string" -> mapOf("stringUnit" to unit(element.textContent))
+                    "plurals" -> {
+                        val items = element.getElementsByTagName("item")
+                        val forms = sortedMapOf<String, Any>()
+                        for (j in 0 until items.length) {
+                            val item = items.item(j) as org.w3c.dom.Element
+                            forms[item.getAttribute("quantity")] = mapOf("stringUnit" to unit(item.textContent))
+                        }
+                        mapOf("variations" to mapOf("plural" to forms))
+                    }
+                    else -> continue
+                }
+                val entry = strings.getOrPut(name) { mutableMapOf("extractionState" to "manual", "localizations" to sortedMapOf<String, Any>()) }
+                @Suppress("UNCHECKED_CAST")
+                (entry["localizations"] as MutableMap<String, Any>)[locale] = localization
+            }
+        }
+        val catalog = mapOf("sourceLanguage" to "ja", "strings" to strings, "version" to "1.0")
+        outputFile.get().asFile.apply { parentFile.mkdirs() }
+            .writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(catalog)) + "\n")
+    }
+
+    private fun unit(raw: String) = mapOf("state" to "translated", "value" to appleValue(raw))
+
+    /** Android resource escapes resolved, and positional placeholders mapped to Apple's. */
+    private fun appleValue(raw: String): String = raw
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\'", "'")
+        .replace("\\\"", "\"")
+        .replace(Regex("%(\\d+)\\\$s")) { "%" + it.groupValues[1] + "\$@" }
+        .replace(Regex("%(\\d+)\\\$d")) { "%" + it.groupValues[1] + "\$lld" }
+}
+
+val generateStringCatalog = tasks.register<GenerateStringCatalogTask>("generateStringCatalog") {
+    resourcesDir.set(layout.projectDirectory.dir("src/commonMain/composeResources"))
+    outputFile.set(layout.buildDirectory.file("generated/stringCatalog/Localizable.xcstrings"))
+}
+
+// StringCatalogParityTest checks the generated catalog against strings.xml.
+tasks.matching { it.name == "desktopTest" }.configureEach {
+    dependsOn(generateStringCatalog)
+}
+
 compose.desktop {
     application {
         mainClass = "works.merc.keryx.app.MainKt"

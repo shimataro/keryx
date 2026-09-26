@@ -154,6 +154,23 @@ the desktop `./gradlew :composeApp:run` limitation above. To verify linking in a
 needs a real browser to actually complete the OAuth flow — a Google Play system image (Chrome) is
 the recommended way to get one — see [setup.md](setup.md).
 
+## String Catalog for the Apple app
+
+The SwiftUI app localizes through an Xcode String Catalog generated from the Compose app's own
+`composeResources/values/strings.xml` (Japanese, the source/fallback language) and
+`values-en/strings.xml`, so both UIs share one source of truth for every user-facing text:
+
+```bash
+./gradlew :composeApp:generateStringCatalog
+# -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+```
+
+The generator resolves Android resource escapes (`\n`, `\'`, …), maps positional placeholders to
+Apple's (`%1$s` → `%1$@`, `%1$d` → `%1$lld`) and turns `<plurals>` into plural variations. The file
+is a build output — never edit or commit it; change `strings.xml` instead.
+`StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
+catalog and the resources disagree on keys, plural forms or placeholders.
+
 ## Packaging
 
 Created under `composeApp/build/compose/binaries/main` (relative to the repo root, not this file's own

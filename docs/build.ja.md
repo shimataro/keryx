@@ -153,6 +153,22 @@ Google Drive が提供されるのは `GoogleApiAvailability.isGooglePlayService
 連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要——それを得る推奨手段が
 Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参照。
 
+## Apple アプリ用の String Catalog
+
+SwiftUI アプリは Xcode の String Catalog でローカライズする。この String Catalog は Compose アプリ自身の
+`composeResources/values/strings.xml`（日本語。ソース言語かつフォールバック）と `values-en/strings.xml` から生成するので、
+ユーザーに見えるすべての文言について、2 つの UI が単一の情報源を共有する：
+
+```bash
+./gradlew :composeApp:generateStringCatalog
+# -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+```
+
+生成処理は Android リソースのエスケープ（`\n`、`\'` など）を解決し、位置指定のプレースホルダを Apple 形式に変換し
+（`%1$s` → `%1$@`、`%1$d` → `%1$lld`）、`<plurals>` を plural バリエーションにする。このファイルはビルド成果物なので、
+編集もコミットもしない——変更は `strings.xml` に対して行う。`StringCatalogParityTest`（`desktopTest` で実行され、その前に
+カタログが生成される）は、カタログとリソースのキー・複数形・プレースホルダが食い違うと失敗する。
+
 ## パッケージング
 
 `composeApp/build/compose/binaries/main`（リポジトリルートからの相対パス。このファイル自身の
