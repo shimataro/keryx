@@ -32,10 +32,22 @@ actual class DatabaseDriverFactory {
      *
      * @return The configured and migrated SQLDelight database driver.
      */
-    actual fun create(): SqlDriver {
-        val dbFile = File(AppDirs.appDataDir(), DB_FILE_NAME)
+    actual fun create(): SqlDriver = createDriver(File(AppDirs.appDataDir(), DB_FILE_NAME))
+
+    /**
+     * Opens [dbFile] and brings it to the current schema.
+     *
+     * @throws DatabaseTooNewException if the file was migrated by a newer build; the driver is
+     *   closed before throwing and nothing is written to the file.
+     */
+    internal fun createDriver(dbFile: File): SqlDriver {
         val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}", sqliteConnectionProperties())
-        migrateIfNeeded(driver)
+        try {
+            migrateIfNeeded(driver)
+        } catch (e: DatabaseTooNewException) {
+            driver.close()
+            throw e
+        }
         return driver
     }
 
@@ -47,6 +59,7 @@ actual class DatabaseDriverFactory {
         val schema = KeryxDatabase.Schema
         val current = currentVersion(driver)
         val target = schema.version
+        requireSupportedSchemaVersion(current, target)
         when {
             current == 0L -> {
                 schema.create(driver)

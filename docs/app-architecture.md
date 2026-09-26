@@ -194,6 +194,15 @@ and `androidApp` depends on it to produce the installable APK.
 
 `expect class DatabaseDriverFactory { fun create(): SqlDriver }` in `commonMain`. The desktop `actual` creates a `JdbcSqliteDriver`, checks `PRAGMA user_version`, and manually drives `KeryxDatabase.Schema` create / migrate (because SQLDelight's JVM driver does not auto-track schema version).
 
+A `user_version` **newer** than `KeryxDatabase.Schema.version` means a newer build migrated the file
+(see "Apple Native Apps (SwiftUI)" below — the SwiftUI app and the internal Compose macOS build can
+share one data directory — or an older release reinstalled over a newer one). The desktop `actual`
+refuses it before writing anything: `requireSupportedSchemaVersion` (`data/local/DatabaseSchemaGuard.kt`)
+throws `DatabaseTooNewException`, and `main.kt` opens the driver eagerly right after Koin starts so
+the failure surfaces once, as a localized message box (`DatabaseTooNewDialog.kt`), before the app
+exits. Android needs no guard of its own: `SupportSQLiteOpenHelper.Callback.onDowngrade` already
+throws by default.
+
 The Android `actual` creates an `AndroidSqliteDriver`, which drives `Schema.create`/`migrate`
 automatically via its own `onCreate`/`onUpgrade` callbacks — no manual `PRAGMA user_version`
 handling needed, unlike desktop. It uses `com.github.requery:sqlite-android`'s bundled SQLite

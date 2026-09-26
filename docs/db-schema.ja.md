@@ -25,6 +25,8 @@
   （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
   `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）を
   新バージョンに追随させること。
+  `user_version` が実行中ビルドのスキーマより新しいファイルは決して開かない：desktop は何も書き込む前に
+  `DatabaseTooNewException`（`data/local/DatabaseSchemaGuard.kt`）を投げ、Android の open helper は既定でダウングレードを拒否する。
 
 ## テーブル一覧
 

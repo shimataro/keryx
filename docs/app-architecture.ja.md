@@ -195,6 +195,14 @@ composeApp/src/
 `JdbcSqliteDriver` を生成し、`PRAGMA user_version` を見て `KeryxDatabase.Schema` の create / migrate を
 自前で駆動する（SQLDelight の JVM ドライバはスキーマバージョンを自動追跡しないため）。
 
+`user_version` が `KeryxDatabase.Schema.version` より**新しい**場合は、より新しいビルドがファイルをマイグレーション
+したことを意味する（下記「Apple ネイティブアプリ（SwiftUI）」— SwiftUI アプリと内部用の Compose macOS ビルドは同じ
+データディレクトリを共有しうる — または、新しいリリースの上に古いリリースを入れ直した場合）。desktop の `actual` は
+何も書き込む前にこれを拒否する：`requireSupportedSchemaVersion`（`data/local/DatabaseSchemaGuard.kt`）が
+`DatabaseTooNewException` を投げる。`main.kt` は Koin の起動直後にドライバを先に開くので、この失敗は 1 回だけ、
+ローカライズされたメッセージボックス（`DatabaseTooNewDialog.kt`）として表示され、その後アプリは終了する。Android には
+独自のガードは不要：`SupportSQLiteOpenHelper.Callback.onDowngrade` が既定で例外を投げる。
+
 Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `onCreate`/`onUpgrade` コールバックで
 `Schema.create`/`migrate` を自動的に駆動するため、desktop のような `PRAGMA user_version` の手動管理は
 不要。端末標準の SQLite ではなく `com.github.requery:sqlite-android` のバンドル SQLite

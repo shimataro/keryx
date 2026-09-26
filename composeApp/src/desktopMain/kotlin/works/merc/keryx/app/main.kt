@@ -23,6 +23,7 @@ import androidx.compose.ui.window.WindowExceptionHandler
 import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
+import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,7 @@ import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
 import works.merc.keryx.app.core.WINDOW_STATE_PERSIST_DEBOUNCE_MS
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
 import works.merc.keryx.app.di.platformModule
@@ -167,6 +169,15 @@ fun main(args: Array<String>) {
 
     startKoin { modules(appModule, platformModule) }
     val koin = KoinPlatform.getKoin()
+
+    // Open the database before anything can reach it from a background coroutine (an .opml
+    // dispatched just below), so a keryx.db migrated by a newer build is reported here, once, rather
+    // than failing inside whichever caller happened to touch it first.
+    try {
+        koin.get<SqlDriver>()
+    } catch (e: Exception) {
+        showDatabaseTooNewAndExit(findDatabaseTooNew(e) ?: throw e)
+    }
 
     // Register activation listener now that Koin is ready so we can emit incoming URIs into the
     // shared callback flow. dispatchOpmlFile resolves its own CoroutineScope/repository/notification
