@@ -174,7 +174,6 @@ kotlin {
                 // "Google Drive on Android". Dropbox/OneDrive do not use this at all; they keep
                 // the same custom-URI PKCE flow desktop uses.
                 implementation(libs.play.services.auth)
-
             }
         }
 

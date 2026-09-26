@@ -94,6 +94,8 @@ reviews:
       instructions: *test_coverage_note
     - path: "composeApp/src/**/ui/**/*ViewModel.kt"
       instructions: *test_coverage_note
+    - path: "shared/src/commonMain/kotlin/**/presentation/**/*.kt"
+      instructions: *test_coverage_note
 
     - path: "gradle/libs.versions.toml"
       instructions: >
