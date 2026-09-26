@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
 import works.merc.keryx.app.domain.ArticleListRow
 
@@ -39,7 +39,7 @@ import works.merc.keryx.app.domain.ArticleListRow
  * @param insertedAfterRowId The `articles` rowid watermark taken when this instance was created
  *   (just before the filter's query first ran) — a row with a larger rowid was inserted since.
  */
-internal data class NewArticleTracking(
+data class NewArticleTracking(
     val knownIds: Set<String>? = null,
     val unseenIds: Set<String> = emptySet(),
     val insertedAfterRowId: Long = 0,
@@ -50,7 +50,7 @@ internal data class NewArticleTracking(
  * those not yet in [NewArticleTracking.knownIds]. Empty while the baseline is `null`/empty, since
  * [withList] only seeds it then — so a caller can skip the rowid lookup entirely.
  */
-internal fun NewArticleTracking.candidatesIn(ids: Set<String>): Set<String> {
+fun NewArticleTracking.candidatesIn(ids: Set<String>): Set<String> {
     val known = knownIds
     return if (known.isNullOrEmpty()) emptySet() else ids - known
 }
@@ -77,7 +77,7 @@ internal fun NewArticleTracking.candidatesIn(ids: Set<String>): Set<String> {
  * seeds the baseline, but the second then diffs against *that* non-empty baseline and correctly
  * (if perhaps confusingly, outside a transaction) reports the second insert as new.
  */
-internal fun NewArticleTracking.withList(ids: Set<String>, inserted: Set<String>): NewArticleTracking {
+fun NewArticleTracking.withList(ids: Set<String>, inserted: Set<String>): NewArticleTracking {
     val known = knownIds
     if (known.isNullOrEmpty()) return copy(knownIds = ids)
     val candidates = ids - known
@@ -101,25 +101,25 @@ internal fun NewArticleTracking.withList(ids: Set<String>, inserted: Set<String>
  * it ever to enter the filter later (its feed moved into the viewed folder, say) it shouldn't count
  * as new anyway.
  */
-internal fun NewArticleTracking.withAcknowledged(ids: Set<String>): NewArticleTracking {
+fun NewArticleTracking.withAcknowledged(ids: Set<String>): NewArticleTracking {
     val known = knownIds
     if (known.isNullOrEmpty() || ids.isEmpty()) return this
     return copy(knownIds = known + ids, unseenIds = unseenIds - ids)
 }
 
 /** Drops [ids] from [NewArticleTracking.unseenIds] — the list's own report of what's now on screen. */
-internal fun NewArticleTracking.withVisible(ids: Set<String>): NewArticleTracking =
+fun NewArticleTracking.withVisible(ids: Set<String>): NewArticleTracking =
     if (unseenIds.isEmpty()) this else copy(unseenIds = unseenIds - ids)
 
 /** Clears every unseen id — the pill's own tap action. */
-internal fun NewArticleTracking.allSeen(): NewArticleTracking =
+fun NewArticleTracking.allSeen(): NewArticleTracking =
     if (unseenIds.isEmpty()) this else copy(unseenIds = emptySet())
 
 /**
  * The article list's viewport as it last reported itself: the ids of its first and last visible
  * rows, in display order.
  */
-internal data class VisibleRange(val firstId: String, val lastId: String)
+data class VisibleRange(val firstId: String, val lastId: String)
 
 /**
  * The "new articles" pill's count: the [unseenIds] in [display] that sit beyond the [viewport] on
@@ -136,7 +136,7 @@ internal data class VisibleRange(val firstId: String, val lastId: String)
  * [display] counts — the pre-viewport behavior. That state is transient: a change to [display]
  * changes the visible rows too, so a fresh report follows on the next layout.
  */
-internal fun freshSideUnseenCount(
+fun freshSideUnseenCount(
     display: List<ArticleListRow>,
     unseenIds: Set<String>,
     viewport: VisibleRange?,

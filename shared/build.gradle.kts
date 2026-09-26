@@ -220,6 +220,10 @@ kotlin {
             api(libs.kotlinx.io.core)
 
             implementation(libs.ksoup)
+
+            // The shared state holders (presentation/) are ViewModels, which the Apple app can use
+            // too — this is the UI-framework-free artifact, not the Compose one.
+            api(libs.lifecycle.viewmodel)
         }
 
         // Shared by desktop and Android: the JVM-library-backed actuals (java.io.File,

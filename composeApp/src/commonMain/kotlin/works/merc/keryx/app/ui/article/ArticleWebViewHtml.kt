@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.fleeksoft.ksoup.Ksoup
 import works.merc.keryx.app.data.remote.UrlResolver
-import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
+import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 
 /**
  * Absolute href of every `<a>` tag in [html], resolved against [baseUri] (the article's own URL)

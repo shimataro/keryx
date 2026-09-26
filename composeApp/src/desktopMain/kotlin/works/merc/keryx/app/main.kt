@@ -66,6 +66,7 @@ import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
+import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.tray_icon
@@ -75,7 +76,6 @@ import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.shouldHideOnTrayAction
 import works.merc.keryx.app.tray.shouldOpenSettingsAfterUpdateCheck
 import works.merc.keryx.app.tray.SniConnection
-import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController

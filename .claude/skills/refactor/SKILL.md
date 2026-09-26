@@ -50,7 +50,7 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   Repository method that both fetches and persists unrelated state) is a split
   candidate even if it isn't long. Natural candidates: `ui/home/FeedListPane.kt`,
   `ui/settings/SettingsDialog.kt`, `desktopMain/main.kt`,
-  `ui/common/KeryxDialogs.desktop.kt`, `ui/home/HomeViewModel.kt` (examples, not
+  `ui/common/KeryxDialogs.desktop.kt`, `presentation/home/HomeViewModel.kt` (examples, not
   a mandate — split only where it improves clarity).
 - **Ambiguous ownership** → logic sitting in the wrong layer relative to
   `docs/app-architecture.md`'s layer-responsibility table — e.g. a ViewModel

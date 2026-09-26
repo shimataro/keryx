@@ -61,6 +61,10 @@ import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
+import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.presentation.home.nextFeedListRow
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
@@ -84,6 +88,7 @@ import works.merc.keryx.app.ui.menu.MenuController
 @Composable
 fun HomeScreen() {
     val vm = koinInject<HomeViewModel>()
+    val layoutVm = koinInject<HomeLayoutViewModel>()
     val notifVm = koinInject<NotificationCenterViewModel>()
     val menuController = koinInject<MenuController>()
 
@@ -101,8 +106,8 @@ fun HomeScreen() {
     val expandedTagIds by vm.expandedTagIds.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
     val selectedRowInstance by vm.selectedRowInstance.collectAsState()
-    val feedListPaneWidth by vm.feedListPaneWidth.collectAsState()
-    val articleListPaneWidth by vm.articleListPaneWidth.collectAsState()
+    val feedListPaneWidth by layoutVm.feedListPaneWidth.collectAsState()
+    val articleListPaneWidth by layoutVm.articleListPaneWidth.collectAsState()
 
     var showAddFeed by remember { mutableStateOf(false) }
     // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
@@ -128,7 +133,7 @@ fun HomeScreen() {
     var feedListRenameRequestId by remember { mutableStateOf(0) }
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
-    var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
+    var focusedPane by remember { mutableStateOf(layoutVm.getInitialFocusedPane()) }
     // Hoisted (not NarrowPaneRow's own internal default) so it isn't recreated across a
     // Triple<->narrow layout flip — declared outside BoxWithConstraints below, alongside
     // drawerState.
@@ -202,7 +207,7 @@ fun HomeScreen() {
     fun setFocusedPane(pane: HomePane) {
         if (pane == focusedPane) return
         focusedPane = pane
-        vm.setFocusedPane(pane)
+        layoutVm.setFocusedPane(pane)
     }
 
     // A pane's own onActivated always returns real Compose focus to the root Box, on top of
@@ -519,7 +524,7 @@ fun HomeScreen() {
                             deleteSelectedRequestId = feedListDeleteRequestId,
                         )
                         ResizableDivider(onDrag = { deltaPx ->
-                            vm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
+                            layoutVm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
                         })
                         ArticleListPane(
                             vm,
@@ -530,7 +535,7 @@ fun HomeScreen() {
                             onAddFeedClick = { showAddFeed = true },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
-                            vm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
+                            layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
                         })
                         ArticleDetailPane(
                             vm,

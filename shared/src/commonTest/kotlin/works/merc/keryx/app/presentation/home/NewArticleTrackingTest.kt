@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
 import kotlin.test.Test
 import works.merc.keryx.app.domain.ArticleListRow

@@ -1,7 +1,5 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
-import androidx.compose.ui.test.ComposeUiTest
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
@@ -53,7 +51,7 @@ import kotlin.random.Random
  * step with its teardown contract (see [HomeViewModelFixture.close]).
  */
 
-private class HomeViewModelFixtureTokenStorage : TokenStorage {
+class HomeViewModelFixtureTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
     override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         stored = tokens
@@ -78,7 +76,7 @@ private fun notFoundHttpClient(): HttpClient = HttpClient(MockEngine { respond("
  * channel-consumer scope, and the MockEngine [HttpClient]s — so a test can release all of them, in
  * the one order that's safe, via [close].
  */
-internal class HomeViewModelFixture(
+class HomeViewModelFixture(
     val vm: HomeViewModel,
     private val driver: SqlDriver,
     private val syncScope: CoroutineScope,
@@ -127,7 +125,7 @@ internal class HomeViewModelFixture(
  * [SyncRepository]'s channel-consumer scope — well before this function has a fixture to hand back
  * to a caller who could ever release them.
  */
-internal fun newHomeViewModel(
+fun newHomeViewModel(
     driver: SqlDriver,
     db: KeryxDatabase,
     syncScheduler: SyncScheduler = SyncScheduler {},
@@ -205,34 +203,5 @@ internal fun newHomeViewModel(
     } catch (e: Throwable) {
         cleanupOnFailure.asReversed().forEach { it() }
         throw e
-    }
-}
-
-/**
- * Builds a [HomeViewModel] over [driver]/[db], runs [block] against it, then tears the whole
- * fixture down — see [HomeViewModelFixture.close] for the order and why it matters.
- *
- * This is the only supported way to get a [HomeViewModel] in a Compose UI test: teardown cannot be
- * forgotten, cannot be placed outside the Compose test (where [ComposeUiTest.waitForIdle] isn't
- * available), and cannot be ordered wrongly.
- */
-@OptIn(ExperimentalTestApi::class)
-internal suspend fun <T> ComposeUiTest.useHomeViewModel(
-    driver: SqlDriver,
-    db: KeryxDatabase,
-    syncScheduler: SyncScheduler = SyncScheduler {},
-    clock: Clock = Clock { 0L },
-    activityCenter: ActivityCenter = ActivityCenter(),
-    tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
-    appKey: String = "",
-    block: suspend (HomeViewModelFixture) -> T,
-): T {
-    val fixture = newHomeViewModel(driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey)
-    return try {
-        // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and
-        // doing that from a `finally` would mask the assertion failure that actually ended [block].
-        block(fixture).also { waitForIdle() }
-    } finally {
-        fixture.close()
     }
 }

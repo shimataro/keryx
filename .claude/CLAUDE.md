@@ -148,6 +148,7 @@ shared/src/                      # UI-framework-free (also consumed by the Apple
 │   ├── data/       # DataSource (SQLDelight / FeedFetcher / CloudStorage / OPML)
 │   ├── domain/     # Repositories + sync (CloudSession, SyncRepository, MergeSql)
 │   ├── platform/   # non-Compose expect declarations (AppDirs, DatabaseMerger, Gzip, …)
+│   ├── presentation/ # UI-framework-free screen state (HomeViewModel, feed-list rules)
 │   └── di/         # sharedModule + updateModule, HttpClientFactory
 ├── commonMain/sqldelight/       # .sq schema + queries
 ├── jvmCommonMain/, desktopMain/, androidMain/   # actuals for the expects above
@@ -155,7 +156,7 @@ shared/src/                      # UI-framework-free (also consumed by the Apple
 └── desktopTest/                 # SQLDelight (in-memory / file) DB tests
 composeApp/src/                  # Compose UI for desktop + Android (depends on :shared)
 ├── commonMain/kotlin/works/merc/keryx/app/
-│   ├── ui/         # Compose screens + ViewModels + theme + i18n
+│   ├── ui/         # Compose screens + Compose-side ViewModels + theme + i18n
 │   ├── platform/   # Compose-typed expect declarations (NativeMenu, BackHandler, …)
 │   └── di/         # appModule + expect platformModule
 ├── commonMain/composeResources/ # values/strings.xml (i18n), drawable (tray icons)

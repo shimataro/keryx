@@ -40,6 +40,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_dismiss
 import works.merc.keryx.app.resources.notification_dismiss_all

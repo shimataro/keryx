@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
 import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
@@ -2321,21 +2321,6 @@ class HomeViewModelTest {
         assertTrue(vm.newestFirst.value)
     }
 
-    @Test
-    fun setFeedListPaneWidthAndSetArticleListPaneWidthPersistAfterDebounce() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-        testScheduler.advanceUntilIdle()
-
-        vm.setFeedListPaneWidth(300.0)
-        vm.setArticleListPaneWidth(400.0)
-        testScheduler.advanceUntilIdle()
-
-        val settings = LocalSettingsStore(dirOverride = dir).load()
-        assertEquals(300.0, settings.feedListPaneWidth)
-        assertEquals(400.0, settings.articleListPaneWidth)
-    }
-
     /**
      * The unread-only, sort and pinned-read inputs are pure display transforms over whatever the
      * article-list query returned, so only a filter change may re-execute that query. Guards against
@@ -3348,49 +3333,7 @@ class HomeViewModelTest {
         assertEquals(readAtAfterFirstSelection, db.articlesQueries.getById("a1").executeAsOne().read_at)
     }
 
-    // --- Focused pane / unread-only / newest-first restoration ---
-
-    @Test
-    fun setFocusedPanePersistsToLocalSettings() = runTest {
-        val store = LocalSettingsStore(dirOverride = dir)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        assertNull(store.load().lastFocusedPane)
-
-        vm.setFocusedPane(HomePane.FeedList)
-
-        assertEquals("FeedList", store.load().lastFocusedPane)
-    }
-
-    @Test
-    fun getInitialFocusedPaneDefaultsToArticleListWhenNothingSaved() = runTest {
-        val vm = newViewModel()
-        subscribeAll(vm)
-
-        assertEquals(HomePane.ArticleList, vm.getInitialFocusedPane())
-    }
-
-    @Test
-    fun restartRestoresFocusedPane() = runTest {
-        val vm1 = newViewModel()
-        subscribeAll(vm1)
-        vm1.setFocusedPane(HomePane.FeedList)
-
-        val vm2 = newViewModel()
-        subscribeAll(vm2)
-
-        assertEquals(HomePane.FeedList, vm2.getInitialFocusedPane())
-    }
-
-    @Test
-    fun getInitialFocusedPaneFallsBackToArticleListWhenPersistedValueIsInvalid() = runTest {
-        val store = LocalSettingsStore(dirOverride = dir)
-        store.save(store.load().copy(lastFocusedPane = "bogus"))
-        val vm = newViewModel()
-        subscribeAll(vm)
-
-        assertEquals(HomePane.ArticleList, vm.getInitialFocusedPane())
-    }
+    // --- Unread-only / newest-first restoration ---
 
     @Test
     fun setUnreadOnlyAndToggleSortPersistToLocalSettings() = runTest {

@@ -78,6 +78,10 @@ import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.platform.setNativeWebViewImportantForAccessibility
 import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
+import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
 import works.merc.keryx.app.resources.article_mark_as_unread

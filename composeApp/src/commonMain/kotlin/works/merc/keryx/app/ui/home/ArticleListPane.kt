@@ -73,6 +73,8 @@ import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds

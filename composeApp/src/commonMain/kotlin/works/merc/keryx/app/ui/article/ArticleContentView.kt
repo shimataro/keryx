@@ -31,9 +31,9 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeTextSelectionContextMenu
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
+import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_reader_simple_notice
-import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 /** `.article-title { margin: 0 0 4px }` — a fixed physical gap, not em-relative (see ArticleTextStyles.kt). */
 private val TITLE_BOTTOM_MARGIN = 4.dp

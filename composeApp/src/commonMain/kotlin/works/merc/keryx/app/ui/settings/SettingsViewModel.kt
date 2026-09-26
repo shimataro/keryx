@@ -40,8 +40,8 @@ import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.FileSelector
 import works.merc.keryx.app.platform.PlatformFileSelector
 
-import works.merc.keryx.app.ui.home.formatTimestamp
-import works.merc.keryx.app.ui.home.groupFeedsByFolder
+import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.groupFeedsByFolder
 
 /** A transient result of an OPML operation, surfaced inline near the action. */
 sealed interface OpmlResult {

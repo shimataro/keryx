@@ -49,11 +49,11 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_embed_open
 import works.merc.keryx.app.resources.menu_open_link
 import works.merc.keryx.app.ui.common.FlatTonalButton
-import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 private val QUOTE_BAR_WIDTH = 3.dp
 private val NESTED_SPACING = 6.dp

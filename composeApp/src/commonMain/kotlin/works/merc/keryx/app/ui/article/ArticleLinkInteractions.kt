@@ -33,10 +33,10 @@ import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.menu_copy_link_address
 import works.merc.keryx.app.resources.menu_open_link
-import works.merc.keryx.app.ui.home.isHttpOrHttpsUrl
 
 /**
  * A [Text] wrapper that adds a hover tooltip showing link URLs and a context menu

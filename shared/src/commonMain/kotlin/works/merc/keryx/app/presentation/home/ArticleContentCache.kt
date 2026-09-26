@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +45,7 @@ internal fun trimmedToCacheLimit(
  * @param limit How many bodies to keep; see [trimmedToCacheLimit].
  * @param load Reads one article by id, or returns `null` when it no longer exists.
  */
-internal class ArticleContentCache(
+class ArticleContentCache(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
     private val limit: Int = ARTICLE_CONTENT_CACHE_LIMIT,

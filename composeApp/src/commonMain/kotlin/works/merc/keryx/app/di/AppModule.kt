@@ -3,7 +3,8 @@ package works.merc.keryx.app.di
 import org.koin.core.module.Module
 import org.koin.dsl.module
 import works.merc.keryx.app.domain.NotificationMessages
-import works.merc.keryx.app.ui.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.ui.home.HomeLayoutViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.i18n.ComposeNotificationMessages
 import works.merc.keryx.app.ui.menu.MenuController
@@ -27,6 +28,7 @@ val appModule: Module = module {
     // ViewModels are app-scoped for this single-window desktop app.
     single { NotificationCenterViewModel(get()) }
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeLayoutViewModel(get()) }
     single { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SetupViewModel(get(), get(), get()) }
 }

@@ -47,6 +47,8 @@ import works.merc.keryx.app.insertTag
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.home.FeedListRowSelection
+import works.merc.keryx.app.presentation.home.HomeViewModel
 
 private val TEST_PANE_HEIGHT = 600.dp
 

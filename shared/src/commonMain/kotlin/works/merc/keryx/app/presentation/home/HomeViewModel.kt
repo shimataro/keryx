@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -27,13 +27,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
-import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
-import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.PANE_WIDTH_PERSIST_DEBOUNCE_MS
 import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
@@ -566,19 +561,6 @@ class HomeViewModel(
         _pendingSearchFocus.value = false
     }
 
-    // --- Pane widths ---
-    private val _feedListPaneWidth = MutableStateFlow(
-        settingsRepository.getLocalSettings().feedListPaneWidth
-            .coerceIn(FEED_LIST_PANE_MIN_WIDTH.toDouble(), FEED_LIST_PANE_MAX_WIDTH.toDouble()),
-    )
-    val feedListPaneWidth: StateFlow<Double> = _feedListPaneWidth.asStateFlow()
-
-    private val _articleListPaneWidth = MutableStateFlow(
-        settingsRepository.getLocalSettings().articleListPaneWidth
-            .coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble()),
-    )
-    val articleListPaneWidth: StateFlow<Double> = _articleListPaneWidth.asStateFlow()
-
     private val _collapsedFolderIds = MutableStateFlow(
         settingsRepository.getLocalSettings().collapsedFolderIds,
     )
@@ -639,26 +621,12 @@ class HomeViewModel(
             selectionCursorId = restoredArticle.id
         }
 
-        combine(_feedListPaneWidth, _articleListPaneWidth) { feed, article -> feed to article }
-            .debounce(PANE_WIDTH_PERSIST_DEBOUNCE_MS)
-            .onEach { (feed, article) ->
-                settingsRepository.mutateLocalSettings { it.copy(feedListPaneWidth = feed, articleListPaneWidth = article) }
-            }.launchIn(viewModelScope)
-
         // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
         // article currently pinned here; revalidate the pins so a deleted one can't stay visible.
         articleChangeSignal
             .onEach { reconcilePinnedArticlesAndSelection() }
             .flowOn(dispatcher)
             .launchIn(viewModelScope)
-    }
-
-    fun setFeedListPaneWidth(width: Double) {
-        _feedListPaneWidth.value = width.coerceIn(FEED_LIST_PANE_MIN_WIDTH.toDouble(), FEED_LIST_PANE_MAX_WIDTH.toDouble())
-    }
-
-    fun setArticleListPaneWidth(width: Double) {
-        _articleListPaneWidth.value = width.coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble())
     }
 
     /**
@@ -1139,25 +1107,6 @@ class HomeViewModel(
     fun toggleSort() {
         _newestFirst.value = !_newestFirst.value
         settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = _newestFirst.value) }
-    }
-
-    /**
-     * Retrieves the last focused home pane from local settings.
-     *
-     * @return The previously focused pane, or [HomePane.ArticleList] when no valid saved pane exists.
-     */
-    fun getInitialFocusedPane(): HomePane =
-        settingsRepository.getLocalSettings().lastFocusedPane
-            ?.let { raw -> HomePane.entries.firstOrNull { it.name == raw } }
-            ?: HomePane.ArticleList
-
-    /**
-     * Sets the pane that should receive focus.
-     *
-     * @param pane The pane to focus.
-     */
-    fun setFocusedPane(pane: HomePane) {
-        settingsRepository.mutateLocalSettings { it.copy(lastFocusedPane = pane.name) }
     }
 
     // --- Search controls ---

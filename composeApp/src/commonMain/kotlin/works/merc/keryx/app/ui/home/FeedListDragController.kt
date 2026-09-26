@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import org.jetbrains.compose.resources.painterResource
+import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.ui.common.KeryxIcons
 
 /** Test tag on [FeedDragGhost]'s inner chip `Box`, present only while a drag is in progress —

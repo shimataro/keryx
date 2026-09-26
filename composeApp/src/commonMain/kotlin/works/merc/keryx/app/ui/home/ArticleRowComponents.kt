@@ -44,6 +44,8 @@ import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
 import works.merc.keryx.app.resources.article_mark_as_read

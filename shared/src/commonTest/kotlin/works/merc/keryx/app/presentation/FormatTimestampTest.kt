@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.home
+package works.merc.keryx.app.presentation
 
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone

@@ -86,7 +86,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_export_opml
 import works.merc.keryx.app.resources.settings_import_opml
 import works.merc.keryx.app.singleProviderCloudSession
-import works.merc.keryx.app.ui.home.formatTimestamp
+import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random

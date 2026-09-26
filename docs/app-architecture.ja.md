@@ -19,7 +19,7 @@
 
 | モジュール | 内容 |
 | --- | --- |
-| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule` と任意の `updateModule`）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileIO, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android の actual、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule` と任意の `updateModule`）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileIO, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android の actual、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
 | `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
 | `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
 | `:testing` | 両モジュールのテストが使うテスト専用ヘルパー（`DbTestSupport`、`CloudTestSupport`、`FakeNotificationMessages`、トークンストレージの fake）。main のソースからは決して依存しない。 |
@@ -39,6 +39,10 @@
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
+    presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
+                  フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
+                  NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
+                  ArticleListModel）、Formatting（formatTimestamp）。ペイン構成・フォーカス・幅は UI ごと（`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -329,7 +333,7 @@ commonTest でカバーされる。デスクトップ側からは一度も呼ば
 上記の `selectUpdateAsset` と `updatePlan` に並ぶもう 1 つの純粋関数が、意図的に `domain/` の
 外に置かれている: `ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
 向けの Markdown → プレーンテキスト変換）は更新ポリシーではなく UI 層の表示整形であり、
-`ui/home/HomeCommon.kt` の `formatTimestamp` や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
+`:shared` の `presentation/Formatting.kt`（`formatTimestamp`）や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
 置かれているのと同じ理由による。唯一の呼び出し元も `ui/settings/UpdatesTab.kt` である。
 
 デスクトップと Android の `UpdateInstaller` actual はコードを一切共有していない——デスクトップ
@@ -550,7 +554,7 @@ item 破棄そのものに内在するものだった。`ArticleWebViewCarousel`
 でもある。
 
 各ページの本文は `HomeViewModel.requestArticleContent` が供給し、これは
-`ui/home/ArticleContentCache.kt`（`HomeViewModel` に直書きするのではなく、独立してテストできる
+`presentation/home/ArticleContentCache.kt`（`:shared`。`HomeViewModel` に直書きするのではなく、独立してテストできる
 小さな協力オブジェクト）に委譲する。`getArticleById` による純粋な読み取りを、`Articles` の全列
 ではなく `ArticleReaderRow`（`domain/ArticleRepository.kt`）に射影したうえで `articleContents`
 （上限 `ARTICLE_CONTENT_CACHE_LIMIT`、古いものから追い出し）へ格納する——全列には本文の

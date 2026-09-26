@@ -21,7 +21,7 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 
 | Module | Contents |
 | --- | --- |
-| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule` + the optional `updateModule`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileIO, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android actuals, all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule` + the optional `updateModule`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileIO, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android actuals, all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
 | `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
 | `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
 | `:testing` | Test-only helpers used by both modules' tests (`DbTestSupport`, `CloudTestSupport`, `FakeNotificationMessages`, token-storage fakes). Never a main-source dependency. |
@@ -41,6 +41,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
+    presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
+                  home screen's filter/selection/article list/search/unread-only/new-article state and
+                  actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
+                  FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel),
+                  Formatting (formatTimestamp). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -320,7 +325,7 @@ them.
 Another pure function sits alongside `selectUpdateAsset` and `updatePlan` above but deliberately
 outside `domain/`: `ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
 tab's read-only summary) is UI-layer presentation formatting, not update policy — the same
-reasoning that keeps `ui/home/HomeCommon.kt`'s `formatTimestamp` and `ui/i18n/ErrorMessages.kt` out
+reasoning that keeps `:shared`'s `presentation/Formatting.kt` (`formatTimestamp`) and `ui/i18n/ErrorMessages.kt` out
 of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
 
 The desktop and Android `UpdateInstaller` actuals share no code at all — desktop
@@ -543,7 +548,7 @@ also what keeps `PagerState.isScrollInProgress` from going false mid-drag, which
 `gestureInProgress` (above) has to be tracked separately rather than reusing it.
 
 Pages are hydrated by `HomeViewModel.requestArticleContent`, which delegates to
-`ui/home/ArticleContentCache.kt` — a small, independently-testable collaborator, not inline
+`presentation/home/ArticleContentCache.kt` (`:shared`) — a small, independently-testable collaborator, not inline
 `HomeViewModel` state — and fills `articleContents` (bounded at `ARTICLE_CONTENT_CACHE_LIMIT`,
 oldest evicted first) with a plain `getArticleById` read projected down to `ArticleReaderRow`
 (`domain/ArticleRepository.kt`) rather than the full `Articles` row: the full row also carries

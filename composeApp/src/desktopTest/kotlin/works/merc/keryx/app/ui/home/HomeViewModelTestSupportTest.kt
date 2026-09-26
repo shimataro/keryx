@@ -12,6 +12,7 @@ import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import works.merc.keryx.app.presentation.home.newHomeViewModel
 
 /**
  * Pins the invariant [ComposeUiTest.useHomeViewModel] exists to guarantee: once its block returns

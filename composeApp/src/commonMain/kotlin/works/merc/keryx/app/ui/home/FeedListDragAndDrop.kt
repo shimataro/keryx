@@ -46,6 +46,7 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.NativeSubMenu
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_copy_feed_url

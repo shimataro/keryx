@@ -29,6 +29,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.home.HomeViewModel
 
 /**
  * Coverage for `HomeScreen`'s narrow-layout `ModalNavigationDrawer` wiring — `ModalNavigationDrawer`

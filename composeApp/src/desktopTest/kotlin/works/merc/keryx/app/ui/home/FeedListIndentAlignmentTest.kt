@@ -21,6 +21,7 @@ import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
 import kotlin.test.Test
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.home.HomeViewModel
 
 /**
  * Verifies the feed list's hierarchy geometry actually lines up, end to end — the regression this
