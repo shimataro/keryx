@@ -141,7 +141,7 @@ class SetupViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertTrue(onDoneCalled)
-        assertEquals(SetupPhase.IDLE, vm.phase)
+        assertEquals(SetupPhase.IDLE, vm.phase.value)
     }
 
     @Test
@@ -169,8 +169,8 @@ class SetupViewModelTest {
         vm.connect(CloudStorageType.DROPBOX) { onDoneCalled = true }
         testScheduler.advanceUntilIdle()
 
-        assertEquals(SetupPhase.IDLE, vm.phase)
-        assertFalse(vm.canCancelConnect)
+        assertEquals(SetupPhase.IDLE, vm.phase.value)
+        assertFalse(vm.canCancelConnect.value)
         assertTrue(onDoneCalled)
         assertEquals("AT", tokenStorage.load()?.accessToken)
         assertEquals("dropbox", store.load().cloudStorageType)
@@ -186,8 +186,8 @@ class SetupViewModelTest {
         vm.connect(CloudStorageType.DROPBOX) { onDoneCalled = true }
         testScheduler.advanceUntilIdle()
 
-        assertEquals(SetupPhase.ERROR, vm.phase)
-        assertFalse(vm.canCancelConnect)
+        assertEquals(SetupPhase.ERROR, vm.phase.value)
+        assertFalse(vm.canCancelConnect.value)
         assertFalse(onDoneCalled)
     }
 
@@ -200,14 +200,14 @@ class SetupViewModelTest {
 
         vm.connect(CloudStorageType.DROPBOX) { onDoneCalled = true }
         testScheduler.advanceUntilIdle()
-        assertEquals(SetupPhase.CONNECTING, vm.phase)
-        assertTrue(vm.canCancelConnect)
+        assertEquals(SetupPhase.CONNECTING, vm.phase.value)
+        assertTrue(vm.canCancelConnect.value)
 
         vm.cancelConnect()
         testScheduler.advanceUntilIdle()
 
-        assertEquals(SetupPhase.IDLE, vm.phase)
-        assertFalse(vm.canCancelConnect)
+        assertEquals(SetupPhase.IDLE, vm.phase.value)
+        assertFalse(vm.canCancelConnect.value)
         assertFalse(onDoneCalled)
         assertNull(tokenStorage.load())
         assertNull(store.load().cloudStorageType)
@@ -224,7 +224,7 @@ class SetupViewModelTest {
         vm.connect(CloudStorageType.DROPBOX) {}
         testScheduler.advanceUntilIdle()
 
-        assertEquals(SetupPhase.IDLE, vm.phase)
+        assertEquals(SetupPhase.IDLE, vm.phase.value)
         // Three withContext(dispatcher) hops: saveTokens, settingsRepository.flush(), sync().
         assertTrue(counting.dispatchCount >= 3)
     }

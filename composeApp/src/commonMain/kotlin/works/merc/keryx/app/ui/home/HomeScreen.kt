@@ -723,7 +723,7 @@ internal fun PendingNotificationActionHost(
     layout: PaneLayout,
     onFocusPane: (HomePane) -> Unit,
 ) {
-    val pending = notifVm.pendingAction ?: return
+    val pending = notifVm.pendingAction.collectAsState().value ?: return
     when (val action = pending.action) {
         AppNotificationAction.ResetCloudData ->
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the

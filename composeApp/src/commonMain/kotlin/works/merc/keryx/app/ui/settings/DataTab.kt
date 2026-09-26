@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,11 +56,16 @@ private const val OPML_STATUS_MS = 4000L
  */
 @Composable
 internal fun DataTabContent(vm: SettingsViewModel) {
+    val readTimeoutSeconds by vm.readTimeoutSeconds.collectAsState()
+    val cacheRetentionDays by vm.cacheRetentionDays.collectAsState()
+    val opmlResult by vm.opmlResult.collectAsState()
+    val importingOpml by vm.importingOpml.collectAsState()
+    val exportingOpml by vm.exportingOpml.collectAsState()
     // Inline status shown right under the OPML import/export buttons (macOS-style transient text).
     var opmlStatus by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(vm.opmlResult) {
-        opmlStatus = when (val r = vm.opmlResult) {
+    LaunchedEffect(opmlResult) {
+        opmlStatus = when (val r = opmlResult) {
             is OpmlResult.Exported -> getString(Res.string.settings_export_success)
             is OpmlResult.Imported -> opmlImportedText(r.added, r.failed)
             OpmlResult.ExportFailed -> getString(Res.string.settings_export_error)
@@ -84,7 +90,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
                     90 to stringResource(Res.string.settings_days90),
                     (null as Int?) to stringResource(Res.string.settings_unlimited),
                 ),
-                selected = vm.cacheRetentionDays,
+                selected = cacheRetentionDays,
                 onSelect = { vm.updateCacheRetention(it) },
             )
         }
@@ -96,7 +102,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
                     30 to stringResource(Res.string.settings_seconds30),
                     60 to stringResource(Res.string.settings_seconds60),
                 ),
-                selected = vm.readTimeoutSeconds,
+                selected = readTimeoutSeconds,
                 onSelect = { vm.updateReadTimeout(it) },
             )
         }
@@ -105,11 +111,11 @@ internal fun DataTabContent(vm: SettingsViewModel) {
             // Disable both while either OPML op runs (import can take a while — one fetch per feed)
             // so the buttons don't look inert/re-triggerable; the running one shows a spinner in
             // place of its icon.
-            val opmlBusy = vm.importingOpml || vm.exportingOpml
+            val opmlBusy = importingOpml || exportingOpml
             Row {
                 FlatTonalButton(onClick = { vm.importOpml() }, enabled = !opmlBusy) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (vm.importingOpml) {
+                        if (importingOpml) {
                             SmallSpinner(size = 18.dp)
                         } else {
                             KeryxIcon(
@@ -125,7 +131,7 @@ internal fun DataTabContent(vm: SettingsViewModel) {
                 Spacer(Modifier.width(8.dp))
                 FlatTonalButton(onClick = { vm.exportOpml() }, enabled = !opmlBusy) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (vm.exportingOpml) {
+                        if (exportingOpml) {
                             SmallSpinner(size = 18.dp)
                         } else {
                             KeryxIcon(

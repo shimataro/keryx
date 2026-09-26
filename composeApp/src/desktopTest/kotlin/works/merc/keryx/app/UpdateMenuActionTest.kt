@@ -192,7 +192,7 @@ class UpdateMenuActionTest {
         assertTrue(openedUrls.isEmpty(), "an installable update must never open the release page")
         // Starting the download closes the tray/menu with no other feedback, so this also opens the
         // Updates tab — see main.kt's startAndShowUpdatesTab.
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction?.action)
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
     }
 
     @Test
@@ -207,7 +207,7 @@ class UpdateMenuActionTest {
         assertEquals(listOf(available.update.releaseUrl), openedUrls.toList())
         assertEquals(0, f.downloadRequestCount(), "nothing is downloadable here")
         assertIs<UpdateState.Available>(f.repo.state.value)
-        assertNull(f.viewModel.pendingAction, "the release page is the entire hand-off here")
+        assertNull(f.viewModel.pendingAction.value, "the release page is the entire hand-off here")
     }
 
     // --- Ready / Failed ---
@@ -225,7 +225,7 @@ class UpdateMenuActionTest {
         assertEquals(listOf("2.0.0"), f.installer.installedVersions.toList())
         // Install is followed shortly by the app restarting, so there's nothing worth opening the
         // Updates tab for here — unlike Available/Failed.
-        assertNull(f.viewModel.pendingAction)
+        assertNull(f.viewModel.pendingAction.value)
     }
 
     @Test
@@ -239,7 +239,7 @@ class UpdateMenuActionTest {
         click(f)
 
         await(describe = { "the retry never issued a second request" }) { f.downloadRequestCount() == 2 }
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction?.action)
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
     }
 
     // --- states with an action already in flight ---
@@ -272,8 +272,8 @@ class UpdateMenuActionTest {
         click(f, UpdateState.Idle)
 
         awaitState(f.repo) { it is UpdateState.Available }
-        await(describe = { "the updates tab was never requested" }) { f.viewModel.pendingAction != null }
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction?.action)
+        await(describe = { "the updates tab was never requested" }) { f.viewModel.pendingAction.value != null }
+        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
     }
 
     @Test
@@ -286,7 +286,7 @@ class UpdateMenuActionTest {
         settle()
 
         assertEquals(UpdateState.UpToDate, f.repo.state.value)
-        assertNull(f.viewModel.pendingAction)
+        assertNull(f.viewModel.pendingAction.value)
     }
 
     /**
@@ -301,6 +301,6 @@ class UpdateMenuActionTest {
 
         awaitState(f.repo) { it is UpdateState.Available }
         settle()
-        assertNull(f.viewModel.pendingAction)
+        assertNull(f.viewModel.pendingAction.value)
     }
 }

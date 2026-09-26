@@ -1,13 +1,11 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -25,8 +23,8 @@ class NotificationCenterViewModel(
 
     /** An action the user asked for, awaiting a host (HomeScreen / App) to resolve it (e.g. show a
      *  confirmation and run it). null when nothing is pending. */
-    var pendingAction by mutableStateOf<PendingNotificationAction?>(null)
-        private set
+    private val _pendingAction = MutableStateFlow<PendingNotificationAction?>(null)
+    val pendingAction: StateFlow<PendingNotificationAction?> = _pendingAction.asStateFlow()
 
     /**
      * Alerts already announced in a transient surface this session (Android's foreground
@@ -75,16 +73,16 @@ class NotificationCenterViewModel(
 
     /** Requests [notification]'s own action (a no-op for a notification with none). */
     fun requestAction(notification: AppNotification) {
-        pendingAction = notification.action?.let { PendingNotificationAction(notification.id, it) }
+        _pendingAction.value = notification.action?.let { PendingNotificationAction(notification.id, it) }
     }
 
     /** Requests [action] on its own, with no notification behind it (e.g. the app menu's "Updates"). */
     fun requestAction(action: AppNotificationAction) {
-        pendingAction = PendingNotificationAction(notificationId = null, action = action)
+        _pendingAction.value = PendingNotificationAction(notificationId = null, action = action)
     }
 
     fun clearPendingAction() {
-        pendingAction = null
+        _pendingAction.value = null
     }
 
     fun dismiss(id: String) = center.dismiss(id)

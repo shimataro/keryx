@@ -47,7 +47,7 @@ behind `commonMain` `expect` declarations, with `actual` in `desktopMain`.
   (`Result.Ok`/`Result.Err`) for "expected" errors (network, sync conflict, bad input).
 - At the DataSource layer, convert external exceptions (Ktor, SQLite) into
   `KeryxException` subclasses; don't leak raw exceptions upward.
-- ViewModels expose state via `StateFlow` / `mutableStateOf`; map `Result` to UI state.
+- ViewModels expose state via `StateFlow` only (no Compose `mutableStateOf` — the Apple app must be able to observe it too); map `Result` to UI state.
 
 ## Post-implementation checklist
 

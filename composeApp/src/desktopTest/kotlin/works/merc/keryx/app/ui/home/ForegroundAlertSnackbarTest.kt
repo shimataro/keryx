@@ -168,7 +168,7 @@ class ForegroundAlertSnackbarTest {
         hostState.currentSnackbarData?.performAction()
         waitForIdle()
 
-        assertEquals("a", vm.pendingAction?.notificationId)
+        assertEquals("a", vm.pendingAction.value?.notificationId)
     }
 
     @Test

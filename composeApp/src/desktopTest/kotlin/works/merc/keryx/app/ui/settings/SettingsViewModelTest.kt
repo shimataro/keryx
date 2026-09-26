@@ -463,7 +463,7 @@ class SettingsViewModelTest {
 
         vm.updateReadTimeout(60)
 
-        assertEquals(60, vm.readTimeoutSeconds)
+        assertEquals(60, vm.readTimeoutSeconds.value)
         assertEquals(60, db.global_settingsQueries.get("read_timeout_seconds").executeAsOne().toInt())
     }
 
@@ -473,7 +473,7 @@ class SettingsViewModelTest {
 
         vm.updateCacheRetention(null)
 
-        assertNull(vm.cacheRetentionDays)
+        assertNull(vm.cacheRetentionDays.value)
         assertEquals("null", db.global_settingsQueries.get("cache_retention_days").executeAsOne())
     }
 
@@ -483,7 +483,7 @@ class SettingsViewModelTest {
 
         vm.updateCacheRetention(7)
 
-        assertEquals(7, vm.cacheRetentionDays)
+        assertEquals(7, vm.cacheRetentionDays.value)
         assertEquals(7, db.global_settingsQueries.get("cache_retention_days").executeAsOne().toInt())
     }
 
@@ -494,15 +494,15 @@ class SettingsViewModelTest {
             connectResult = Result.Ok(OAuthTokens("AT")),
             tokenStorage = tokenStorage,
         )
-        assertNull(vm.connectedType)
-        assertNull(vm.connectingType)
+        assertNull(vm.connectedType.value)
+        assertNull(vm.connectingType.value)
 
         vm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
 
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
-        assertNull(vm.connectingType)
-        assertFalse(vm.canCancelConnect)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
+        assertNull(vm.connectingType.value)
+        assertFalse(vm.canCancelConnect.value)
         assertEquals("dropbox", vm.localSettings.value.cloudStorageType)
         assertEquals("AT", tokenStorage.load()?.accessToken)
     }
@@ -516,11 +516,11 @@ class SettingsViewModelTest {
         vm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
 
-        assertNull(vm.connectedType)
-        assertNull(vm.connectingType)
-        assertFalse(vm.canCancelConnect)
+        assertNull(vm.connectedType.value)
+        assertNull(vm.connectingType.value)
+        assertFalse(vm.canCancelConnect.value)
         assertNull(vm.localSettings.value.cloudStorageType)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectFailedType)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectFailedType.value)
     }
 
     @Test
@@ -530,16 +530,16 @@ class SettingsViewModelTest {
 
         vm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
-        assertEquals(CloudStorageType.DROPBOX, vm.connectingType)
-        assertTrue(vm.canCancelConnect)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectingType.value)
+        assertTrue(vm.canCancelConnect.value)
 
         vm.cancelConnect()
         testScheduler.advanceUntilIdle()
 
-        assertNull(vm.connectingType)
-        assertFalse(vm.canCancelConnect)
-        assertNull(vm.connectedType)
-        assertNull(vm.connectFailedType)
+        assertNull(vm.connectingType.value)
+        assertFalse(vm.canCancelConnect.value)
+        assertNull(vm.connectedType.value)
+        assertNull(vm.connectFailedType.value)
         assertNull(vm.localSettings.value.cloudStorageType)
         assertNull(tokenStorage.load())
     }
@@ -555,36 +555,36 @@ class SettingsViewModelTest {
     fun initialSyncKeepsConnectingTypeClearWhileSettingInitialSyncingType() = runTest {
         val gate = CompletableDeferred<Unit>()
         val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
-        assertNull(vm.initialSyncingType)
+        assertNull(vm.initialSyncingType.value)
 
         vm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
 
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
-        assertNull(vm.connectingType)
-        assertEquals(CloudStorageType.DROPBOX, vm.initialSyncingType)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
+        assertNull(vm.connectingType.value)
+        assertEquals(CloudStorageType.DROPBOX, vm.initialSyncingType.value)
 
         gate.complete(Unit)
         testScheduler.advanceUntilIdle()
 
-        assertNull(vm.initialSyncingType)
+        assertNull(vm.initialSyncingType.value)
     }
 
     @Test
     fun syncPhaseMirrorsSyncRepositoryDuringTheInitialSync() = runTest {
         val gate = CompletableDeferred<Unit>()
         val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
-        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
 
         vm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
 
-        assertEquals(SyncPhase.CHECKING, vm.syncPhase)
+        assertEquals(SyncPhase.CHECKING, vm.syncPhase.value)
 
         gate.complete(Unit)
         testScheduler.advanceUntilIdle()
 
-        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
     }
 
     /**
@@ -595,18 +595,18 @@ class SettingsViewModelTest {
     fun syncPhaseMirrorsSyncRepositoryDuringManualSync() = runTest {
         val gate = CompletableDeferred<Unit>()
         val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
-        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
 
         // Drive the sync through the repository directly, not through vm.connect().
         val syncJob = launch { createdSyncRepository.sync() }
         advanceUntilIdle()
 
-        assertEquals(SyncPhase.CHECKING, vm.syncPhase)
+        assertEquals(SyncPhase.CHECKING, vm.syncPhase.value)
 
         gate.complete(Unit)
         syncJob.join()
 
-        assertEquals(SyncPhase.IDLE, vm.syncPhase)
+        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -618,14 +618,14 @@ class SettingsViewModelTest {
     fun syncingMirrorsActivityCenter() {
         val activityCenter = ActivityCenter()
         val vm = newViewModel(activityCenter = activityCenter)
-        assertFalse(vm.syncing)
+        assertFalse(vm.syncing.value)
 
         val job = CoroutineScope(Dispatchers.Default).launch {
             activityCenter.trackSync { delay(200) }
         }
 
-        awaitTrue { vm.syncing }
-        awaitTrue { !vm.syncing }
+        awaitTrue { vm.syncing.value }
+        awaitTrue { !vm.syncing.value }
         runBlocking { job.join() }
     }
 
@@ -647,10 +647,10 @@ class SettingsViewModelTest {
         awaitTrue { activityCenter.activity.value.syncing }
 
         val vm = newViewModel(activityCenter = activityCenter)
-        assertTrue(vm.syncing)
+        assertTrue(vm.syncing.value)
 
         gate.complete(Unit)
-        awaitTrue { !vm.syncing }
+        awaitTrue { !vm.syncing.value }
         runBlocking { job.join() }
     }
 
@@ -662,14 +662,14 @@ class SettingsViewModelTest {
         val tokenStorage = FakeTokenStorage()
         tokenStorage.save(OAuthTokens("AT"))
         val vm = newViewModel(tokenStorage = tokenStorage)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
-        assertFalse(vm.disconnecting)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
+        assertFalse(vm.disconnecting.value)
 
         vm.disconnect()
-        assertTrue(vm.disconnecting)
+        assertTrue(vm.disconnecting.value)
 
-        awaitTrue { vm.connectedType == null && !vm.disconnecting }
-        assertFalse(vm.disconnecting)
+        awaitTrue { vm.connectedType.value == null && !vm.disconnecting.value }
+        assertFalse(vm.disconnecting.value)
     }
 
     @Test
@@ -681,7 +681,7 @@ class SettingsViewModelTest {
         )
         failedVm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
-        assertEquals(CloudStorageType.DROPBOX, failedVm.connectFailedType)
+        assertEquals(CloudStorageType.DROPBOX, failedVm.connectFailedType.value)
 
         val retriedVm = newViewModel(
             connectResult = Result.Ok(OAuthTokens("AT")),
@@ -689,8 +689,8 @@ class SettingsViewModelTest {
         retriedVm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
 
-        assertEquals(CloudStorageType.DROPBOX, retriedVm.connectedType)
-        assertNull(retriedVm.connectFailedType)
+        assertEquals(CloudStorageType.DROPBOX, retriedVm.connectedType.value)
+        assertNull(retriedVm.connectFailedType.value)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler. `disconnect`
@@ -701,12 +701,12 @@ class SettingsViewModelTest {
         val tokenStorage = FakeTokenStorage()
         tokenStorage.save(OAuthTokens("AT"))
         val vm = newViewModel(tokenStorage = tokenStorage)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
 
         vm.disconnect()
-        awaitTrue { vm.connectedType == null }
+        awaitTrue { vm.connectedType.value == null }
 
-        assertNull(vm.connectedType)
+        assertNull(vm.connectedType.value)
         assertNull(vm.localSettings.value.cloudStorageType)
         assertNull(tokenStorage.load())
     }
@@ -726,13 +726,13 @@ class SettingsViewModelTest {
             googleDriveConnectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT2"))),
         )
         val vm = newViewModel(cloudSession = session)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
 
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { vm.connectingType == null }
+        awaitTrue { vm.connectingType.value == null }
 
-        assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectedType)
-        assertNull(vm.connectingType)
+        assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectedType.value)
+        assertNull(vm.connectingType.value)
         assertNull(dropboxTokenStorage.load())
         assertEquals("AT2", googleDriveTokenStorage.load()?.accessToken)
         assertEquals("google_drive", vm.localSettings.value.cloudStorageType)
@@ -749,14 +749,14 @@ class SettingsViewModelTest {
             googleDriveConnectFlow = FakeCloudConnectFlow(Result.Err(CloudAuthException("connect failed"))),
         )
         val vm = newViewModel(cloudSession = session)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
 
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { vm.connectFailedType == CloudStorageType.GOOGLE_DRIVE }
+        awaitTrue { vm.connectFailedType.value == CloudStorageType.GOOGLE_DRIVE }
 
-        assertNull(vm.connectedType)
-        assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectFailedType)
-        assertNull(vm.connectingType)
+        assertNull(vm.connectedType.value)
+        assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectFailedType.value)
+        assertNull(vm.connectingType.value)
         // The Dropbox disconnect already happened (and is irreversible) before the Google Drive
         // connect attempt was made and failed — this is intentional per switchTo's design, not a bug.
         assertNull(dropboxTokenStorage.load())
@@ -771,7 +771,7 @@ class SettingsViewModelTest {
 
         val vm = newViewModel()
 
-        assertEquals(formatTimestamp(expectedMillis), vm.lastSyncedAtText)
+        assertEquals(formatTimestamp(expectedMillis), vm.lastSyncedAtText.value)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -782,7 +782,7 @@ class SettingsViewModelTest {
     fun lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion() {
         val activityCenter = ActivityCenter()
         val vm = newViewModel(activityCenter = activityCenter)
-        assertNull(vm.lastSyncedAtText)
+        assertNull(vm.lastSyncedAtText.value)
 
         // Simulate what SyncRepository.sync() does on success: write the new sync_state row, then
         // report a sync cycle through the same ActivityCenter the ViewModel observes. A short real
@@ -793,7 +793,7 @@ class SettingsViewModelTest {
         db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, newMillis.toString())
         runBlocking { activityCenter.trackSync { delay(50) } }
 
-        awaitTrue { vm.lastSyncedAtText == formatTimestamp(newMillis) }
+        awaitTrue { vm.lastSyncedAtText.value == formatTimestamp(newMillis) }
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -804,13 +804,13 @@ class SettingsViewModelTest {
         tokenStorage.save(OAuthTokens("AT"))
         db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, "1234567890123")
         val vm = newViewModel(tokenStorage = tokenStorage)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
-        assertNotNull(vm.lastSyncedAtText)
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
+        assertNotNull(vm.lastSyncedAtText.value)
 
         vm.disconnect()
-        awaitTrue { vm.connectedType == null }
+        awaitTrue { vm.connectedType.value == null }
 
-        assertNull(vm.lastSyncedAtText)
+        assertNull(vm.lastSyncedAtText.value)
     }
 
     /**
@@ -830,16 +830,16 @@ class SettingsViewModelTest {
 
         runBlocking { createdSyncRepository.sync() }
 
-        awaitTrue { vm.lastSyncAuthFailed }
-        assertTrue(vm.lastSyncAuthFailed)
+        awaitTrue { vm.lastSyncAuthFailed.value }
+        assertTrue(vm.lastSyncAuthFailed.value)
     }
 
     @Test
     fun canSyncNowIsFalseWithNoProviderConnected() {
         val vm = newViewModel()
-        assertNull(vm.connectedType)
+        assertNull(vm.connectedType.value)
 
-        assertFalse(vm.canSyncNow)
+        assertFalse(vm.canSyncNow.value)
     }
 
     /**
@@ -854,18 +854,18 @@ class SettingsViewModelTest {
         tokenStorage.save(OAuthTokens("AT"))
         val activityCenter = ActivityCenter()
         val vm = newViewModel(tokenStorage = tokenStorage, activityCenter = activityCenter)
-        assertTrue(vm.canSyncNow)
+        assertTrue(vm.canSyncNow.value)
 
         val gate = CompletableDeferred<Unit>()
         val job = CoroutineScope(Dispatchers.Default).launch {
             activityCenter.trackSync { gate.await() }
         }
-        awaitTrue { !vm.idle }
-        assertFalse(vm.canSyncNow)
+        awaitTrue { !vm.idle.value }
+        assertFalse(vm.canSyncNow.value)
 
         gate.complete(Unit)
-        awaitTrue { vm.idle }
-        assertTrue(vm.canSyncNow)
+        awaitTrue { vm.idle.value }
+        assertTrue(vm.canSyncNow.value)
         runBlocking { job.join() }
     }
 
@@ -882,12 +882,12 @@ class SettingsViewModelTest {
         tokenStorage.save(OAuthTokens("AT"))
         val cloud = AlwaysFailingCloudStorage()
         val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
-        assertTrue(vm.canSyncNow)
+        assertTrue(vm.canSyncNow.value)
 
         runBlocking { createdSyncRepository.sync() }
 
-        awaitTrue { vm.lastSyncAuthFailed }
-        assertFalse(vm.canSyncNow)
+        awaitTrue { vm.lastSyncAuthFailed.value }
+        assertFalse(vm.canSyncNow.value)
     }
 
     /**
@@ -906,18 +906,18 @@ class SettingsViewModelTest {
             syncCloudProvider = { GatedCloudStorage(gate) },
             dispatcher = Dispatchers.Default,
         )
-        assertFalse(vm.syncing)
+        assertFalse(vm.syncing.value)
 
         vm.syncNow()
 
         // Two separate collectors carry these, so wait on each rather than assume their order.
-        awaitTrue { vm.syncing }
-        awaitTrue { vm.syncPhase == SyncPhase.CHECKING }
-        assertFalse(vm.canSyncNow)
+        awaitTrue { vm.syncing.value }
+        awaitTrue { vm.syncPhase.value == SyncPhase.CHECKING }
+        assertFalse(vm.canSyncNow.value)
 
         gate.complete(Unit)
-        awaitTrue { !vm.syncing }
-        assertFalse(vm.syncing)
+        awaitTrue { !vm.syncing.value }
+        assertFalse(vm.syncing.value)
     }
 
     /**
@@ -941,14 +941,14 @@ class SettingsViewModelTest {
             syncCloudProvider = { GatedCloudStorage(gate, metadataCalls) },
             dispatcher = held,
         )
-        assertTrue(vm.canSyncNow)
+        assertTrue(vm.canSyncNow.value)
 
         vm.syncNow()
         try {
             // The sync body is held, so ActivityCenter hasn't seen it: idle is still true and only
             // the in-flight flag can be what disables the button.
-            assertTrue(vm.idle)
-            assertFalse(vm.canSyncNow)
+            assertTrue(vm.idle.value)
+            assertFalse(vm.canSyncNow.value)
 
             vm.syncNow() // must be ignored by the in-flight flag, not by idle
         } finally {
@@ -957,7 +957,7 @@ class SettingsViewModelTest {
             held.release()
             gate.complete(Unit)
         }
-        awaitTrue { vm.canSyncNow }
+        awaitTrue { vm.canSyncNow.value }
         // One sync's worth; a second sync queued behind the mutex would double this.
         assertEquals(2, metadataCalls.get())
     }
@@ -978,13 +978,13 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncAuthFailed }
+        awaitTrue { vm.lastSyncAuthFailed.value }
 
         vm.reconnect()
 
         // Back on the same provider, with the selection persisted again — the teardown cleared both.
-        awaitTrue { vm.connectedType == CloudStorageType.DROPBOX }
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType)
+        awaitTrue { vm.connectedType.value == CloudStorageType.DROPBOX }
+        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
         awaitTrue { vm.localSettings.value.cloudStorageType == CloudStorageType.DROPBOX.id }
         assertEquals(CloudStorageType.DROPBOX.id, vm.localSettings.value.cloudStorageType)
     }
@@ -998,16 +998,16 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError == ErrorKind.CLOUD_AUTH }
+        awaitTrue { vm.lastSyncError.value == ErrorKind.CLOUD_AUTH }
 
         vm.disconnect()
         // Await the actual condition being asserted, not just connectedType: lastSyncError is
         // updated by an independent collector coroutine (init block) reacting to
         // clearSyncFailureState()'s StateFlow write, so polling connectedType alone gives no
         // happens-before guarantee for it.
-        awaitTrue { vm.connectedType == null && vm.lastSyncError == null }
+        awaitTrue { vm.connectedType.value == null && vm.lastSyncError.value == null }
 
-        assertNull(vm.lastSyncError)
+        assertNull(vm.lastSyncError.value)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -1029,7 +1029,7 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         val vm = newViewModel(cloudSession = session, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError == ErrorKind.CLOUD_AUTH }
+        awaitTrue { vm.lastSyncError.value == ErrorKind.CLOUD_AUTH }
 
         vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
         // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
@@ -1038,9 +1038,9 @@ class SettingsViewModelTest {
         // await lastSyncError directly: it's updated by an independent collector coroutine
         // reacting to clearSyncFailureState()'s StateFlow write, so canCancelConnect alone gives no
         // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
-        awaitTrue { vm.canCancelConnect && vm.lastSyncError == null }
+        awaitTrue { vm.canCancelConnect.value && vm.lastSyncError.value == null }
 
-        assertNull(vm.lastSyncError)
+        assertNull(vm.lastSyncError.value)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -1054,15 +1054,15 @@ class SettingsViewModelTest {
         val cloud = AlwaysFailingCloudStorage()
         var failing = true
         val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { if (failing) cloud else null })
-        assertNull(vm.lastSyncError)
+        assertNull(vm.lastSyncError.value)
 
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError == ErrorKind.CLOUD_AUTH }
+        awaitTrue { vm.lastSyncError.value == ErrorKind.CLOUD_AUTH }
 
         // Local-only from here on, so the next sync is a success and must clear the reason.
         failing = false
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError == null }
+        awaitTrue { vm.lastSyncError.value == null }
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -1150,8 +1150,8 @@ class SettingsViewModelTest {
         vm.exportOpml()
 
         // The write runs on the injected (non-test) dispatcher, so it's a real, non-virtual hop.
-        awaitTrue { vm.opmlResult != null }
-        assertEquals(OpmlResult.Exported, vm.opmlResult)
+        awaitTrue { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.Exported, vm.opmlResult.value)
         val written = FileIO.readText(path)
         assertNotNull(written)
         assertEquals(listOf("https://a.com/feed"), OpmlCodec.import(written).map { it.xmlUrl })
@@ -1163,7 +1163,7 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        assertNull(vm.opmlResult)
+        assertNull(vm.opmlResult.value)
     }
 
     @Test
@@ -1192,8 +1192,8 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        awaitTrue { vm.opmlResult != null }
-        assertEquals(OpmlResult.Exported, vm.opmlResult)
+        awaitTrue { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.Exported, vm.opmlResult.value)
         assertTrue(counting.dispatchCount > 0)
     }
 
@@ -1206,8 +1206,8 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        awaitTrue { vm.opmlResult != null }
-        assertEquals(OpmlResult.ExportFailed, vm.opmlResult)
+        awaitTrue { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.ExportFailed, vm.opmlResult.value)
     }
 
     @Test
@@ -1217,8 +1217,8 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        assertNull(vm.opmlResult)
-        assertFalse(vm.exportingOpml)
+        assertNull(vm.opmlResult.value)
+        assertFalse(vm.exportingOpml.value)
     }
 
     @Test
@@ -1231,8 +1231,8 @@ class SettingsViewModelTest {
         vm.importOpml()
 
         // The read + import (network fetch, DB writes) run on the injected (non-test) dispatcher.
-        awaitTrue { vm.opmlResult != null }
-        val result = vm.opmlResult
+        awaitTrue { vm.opmlResult.value != null }
+        val result = vm.opmlResult.value
         assertIs<OpmlResult.Imported>(result)
         assertEquals(1, result.added)
         assertEquals(0, result.failed)
@@ -1244,7 +1244,7 @@ class SettingsViewModelTest {
 
         vm.importOpml()
 
-        assertNull(vm.opmlResult)
+        assertNull(vm.opmlResult.value)
     }
 
     @Test
@@ -1254,7 +1254,7 @@ class SettingsViewModelTest {
 
         vm.importOpml()
 
-        assertEquals(OpmlResult.ImportFailed, vm.opmlResult)
+        assertEquals(OpmlResult.ImportFailed, vm.opmlResult.value)
     }
 
     @Test
@@ -1265,8 +1265,8 @@ class SettingsViewModelTest {
 
         vm.importOpml()
 
-        assertNull(vm.opmlResult)
-        assertFalse(vm.importingOpml)
+        assertNull(vm.opmlResult.value)
+        assertFalse(vm.importingOpml.value)
     }
 
     @Test
@@ -1283,8 +1283,8 @@ class SettingsViewModelTest {
 
         vm.importOpml()
 
-        awaitTrue { vm.opmlResult != null }
-        assertIs<OpmlResult.Imported>(vm.opmlResult)
+        awaitTrue { vm.opmlResult.value != null }
+        assertIs<OpmlResult.Imported>(vm.opmlResult.value)
         assertTrue(counting.dispatchCount > 0)
     }
 
@@ -1294,15 +1294,15 @@ class SettingsViewModelTest {
         val vm = newViewModel(fileSelector = selector)
 
         vm.importOpml()
-        assertTrue(vm.importingOpml)
+        assertTrue(vm.importingOpml.value)
 
         // Guarded no-op: importingOpml is still true, so this must not touch exportingOpml at all.
         vm.exportOpml()
-        assertFalse(vm.exportingOpml)
+        assertFalse(vm.exportingOpml.value)
 
         selector.openDeferred.complete(null)
-        assertNull(vm.opmlResult)
-        assertFalse(vm.importingOpml)
+        assertNull(vm.opmlResult.value)
+        assertFalse(vm.importingOpml.value)
     }
 
     /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */

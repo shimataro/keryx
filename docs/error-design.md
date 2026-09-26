@@ -6,7 +6,7 @@
 
 - **Exceptions** are for "unexpected errors"; the **`Result` type** is for "expected errors".
 - Network and sync errors can occur frequently, so user notifications are kept restrained (notification center + inline expressions).
-- Errors propagate to the UI layer via ViewModel `StateFlow` / `mutableStateOf`.
+- Errors propagate to the UI layer via ViewModel `StateFlow` (never Compose `mutableStateOf`, which a non-Compose UI could not observe).
 
 ## Exception vs Result Type
 

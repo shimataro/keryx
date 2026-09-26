@@ -6,7 +6,7 @@
 
 - **例外は「予期しないエラー」、`Result` 型は「予期されるエラー」**という使い分け。
 - ネットワーク・同期エラーは頻繁に起きうるため、ユーザーへの通知は控えめ（通知センター + インライン表現）。
-- UI 層へは ViewModel の `StateFlow` / `mutableStateOf` 経由で伝達する。
+- UI 層へは ViewModel の `StateFlow` 経由で伝達する（Compose の `mutableStateOf` は使わない。Compose 以外の UI からは購読できないため）。
 
 ## 例外 vs Result 型
 
