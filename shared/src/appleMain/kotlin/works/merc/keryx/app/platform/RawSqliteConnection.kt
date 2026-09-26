@@ -36,9 +36,15 @@ import kotlinx.cinterop.value
 /** A failure from the system sqlite3, carrying its (extended) result code. */
 internal class SqliteException(val resultCode: Int, message: String) : Exception(message) {
     /** The primary result code's symbolic-ish name, e.g. "constraint failed" for SQLITE_CONSTRAINT. */
-    @OptIn(ExperimentalForeignApi::class)
-    val resultCodeName: String get() = sqlite3_errstr(resultCode)?.toKString() ?: "SQLite error $resultCode"
+    val resultCodeName: String get() = sqliteResultCodeName(resultCode)
 }
+
+/**
+ * sqlite3's own English description of result code [code] (`sqlite3_errstr`), e.g. "constraint failed"
+ * for SQLITE_CONSTRAINT — shared by [SqliteException] and any other failure that only carries a code.
+ */
+@OptIn(ExperimentalForeignApi::class)
+internal fun sqliteResultCodeName(code: Int): String = sqlite3_errstr(code)?.toKString() ?: "SQLite error $code"
 
 /**
  * One dedicated connection to a database file through the system sqlite3 C API — what

@@ -128,6 +128,61 @@ class AppleDatabaseTest {
         }
     }
 
+    /**
+     * A schema-version-1 cloud file: the current schema with `1.sqm`'s two columns dropped and
+     * `user_version` set back to 1, holding one feed and one article.
+     */
+    private fun writeVersion1CloudFile(name: String) {
+        val cloud = open(name)
+        cloud.insertFeed("cloud-feed")
+        cloud.insertArticle("cloud-article", "cloud-feed", "From an older build", "")
+        cloud.close()
+        drivers -= cloud
+        RawSqliteConnection.open(path(name)).use { db ->
+            db.exec("ALTER TABLE articles DROP COLUMN deleted_at")
+            db.exec("ALTER TABLE articles DROP COLUMN deleted_updated_at")
+            db.exec("PRAGMA user_version = 1")
+        }
+        assertEquals(1, RawSqliteConnection.userVersionOf(path(name)))
+    }
+
+    @Test
+    fun anOlderCloudFileIsMigratedBeforeTheMerge() {
+        open("main.db").close()
+        drivers.clear()
+        writeVersion1CloudFile("cloud-v1.db")
+
+        DatabaseMerger.merge(path("main.db"), path("cloud-v1.db"), KeryxDatabase.Schema.version, MergeSql.all)
+
+        assertEquals(KeryxDatabase.Schema.version, RawSqliteConnection.userVersionOf(path("cloud-v1.db")))
+        val cloudColumns = RawSqliteConnection.open(path("cloud-v1.db")).use {
+            it.queryColumn("PRAGMA table_info(articles)", "name")
+        }
+        assertTrue("deleted_at" in cloudColumns)
+        assertTrue("deleted_updated_at" in cloudColumns)
+        RawSqliteConnection.open(path("main.db")).use { db ->
+            assertEquals(1, db.queryLong("SELECT count(*) FROM articles WHERE id = 'cloud-article' AND deleted_at IS NULL"))
+        }
+    }
+
+    @Test
+    fun aCorruptCloudFileThatFailsDuringMigrationIsClassifiedAsIncompatible() {
+        open("main.db").close()
+        drivers.clear()
+        writeVersion1CloudFile("corrupt-v1.db")
+        // Garble page 1's b-tree (everything after the 100-byte file header, which keeps
+        // user_version readable): the version check still sees 1, so the failure surfaces only once
+        // NativeSqliteDriver opens the file to migrate it.
+        val bytes = FileIO.readBytes(path("corrupt-v1.db"))!!
+        for (i in 100 until minOf(bytes.size, 4096)) bytes[i] = 0xFF.toByte()
+        FileIO.writeBytes(path("corrupt-v1.db"), bytes)
+        assertEquals(1, RawSqliteConnection.userVersionOf(path("corrupt-v1.db")))
+
+        assertFailsWith<works.merc.keryx.app.core.CloudDataIncompatibleException> {
+            DatabaseMerger.merge(path("main.db"), path("corrupt-v1.db"), KeryxDatabase.Schema.version, MergeSql.all)
+        }
+    }
+
     @Test
     fun theSchemaCheckRecognisesTheAppsOwnSchema() {
         open("schema.db").close()

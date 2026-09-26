@@ -1,7 +1,9 @@
 package works.merc.keryx.app.platform
 
+import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import co.touchlab.sqliter.JournalMode
+import co.touchlab.sqliter.interop.SQLiteExceptionErrorCode
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SQLITE_BUSY_TIMEOUT_MS
@@ -26,8 +28,10 @@ actual object DatabaseMerger {
         try {
             mergeUnclassified(localDbPath, cloudDbPath, localSchemaVersion, mergeStatements)
         } catch (e: SchemaVersionException) {
+            // Already classified — must not fall into the catch-all below (it needs an app
+            // update, not a cloud-data reset).
             throw e
-        } catch (e: SqliteException) {
+        } catch (e: Throwable) {
             throw classifyMergeFailure(e, cloudDbPath, localSchemaVersion)
         }
     }
@@ -63,19 +67,48 @@ actual object DatabaseMerger {
         }
     }
 
-    private fun classifyMergeFailure(e: SqliteException, cloudDbPath: String, localSchemaVersion: Long): Throwable {
-        val category = e.failureCategory()
+    /**
+     * Classifies a merge failure as a permanently-unusable cloud DB
+     * ([CloudDataIncompatibleException]) or leaves it unchanged (transient / an app bug), from the
+     * SQLite result code found in its cause chain — the same policy as the desktop actual. A failure
+     * with no SQLite result code behind it is rethrown unchanged.
+     */
+    private fun classifyMergeFailure(e: Throwable, cloudDbPath: String, localSchemaVersion: Long): Throwable {
+        val code = e.findSqliteResultCode() ?: return e
+        val category = failureCategory(code)
+        val codeName = sqliteResultCodeName(code)
         val classified: CloudDataIncompatibleException = MergeFailureClassifier.classify(
             category = category,
-            errorCodeName = e.resultCodeName,
+            errorCodeName = codeName,
             validateCloudSchema = { validateSchema(cloudDbPath, localSchemaVersion) },
         ) ?: return e
-        Log.warn(TAG, "${classified.message} (category=$category, code=${e.resultCode}): ${e.message}")
+        Log.warn(TAG, "${classified.message} (category=$category, code=$code $codeName): ${e.message}")
         return classified
     }
 
-    /** Same mapping as the desktop actual, on the primary result code. */
-    private fun SqliteException.failureCategory(): SqliteFailureCategory =
+    /**
+     * Walks the cause chain for a SQLite result code: this file's own [SqliteException] (from
+     * [RawSqliteConnection]), or SQLiter's [SQLiteExceptionErrorCode], which is what
+     * [NativeSqliteDriver] throws while [migrateCloudIfOlder] opens and migrates the cloud file.
+     * SQLiter keeps the raw code private and exposes only its primary code, through `errorType`;
+     * that getter throws for a code it has no enum entry for, which is treated as "no code found".
+     * Bounded so a (theoretical) cause cycle cannot loop forever.
+     */
+    private fun Throwable.findSqliteResultCode(): Int? {
+        var current: Throwable? = this
+        repeat(CAUSE_CHAIN_MAX_DEPTH) {
+            val c = current ?: return null
+            when (c) {
+                is SqliteException -> return c.resultCode
+                is SQLiteExceptionErrorCode -> return runCatching { c.errorType.code }.getOrNull()
+            }
+            current = c.cause
+        }
+        return null
+    }
+
+    /** Same mapping as the desktop actual, on the primary result code (an extended code's low byte). */
+    private fun failureCategory(resultCode: Int): SqliteFailureCategory =
         when (resultCode and 0xFF) {
             SQLITE_NOTADB, SQLITE_CORRUPT, SQLITE_FORMAT, SQLITE_EMPTY, SQLITE_CONSTRAINT ->
                 SqliteFailureCategory.CORRUPT_OR_CONSTRAINT
@@ -101,6 +134,13 @@ actual object DatabaseMerger {
      * Brings an older cloud file up to [localSchemaVersion] with the app's own migrations before it
      * is attached. Opened through [NativeSqliteDriver] only for that migration, in rollback-journal
      * mode so the downloaded file is not switched to WAL.
+     *
+     * The driver opens (and so migrates) the file lazily, on its first statement — see
+     * `DatabaseDriverFactory.createDriver` — so one trivial query is run before it is closed.
+     *
+     * @throws IllegalStateException if the file is still not at [localSchemaVersion] afterwards.
+     * Deliberately carries no SQLite result code, so [merge] leaves it unclassified (transient),
+     * never offering a destructive cloud-data reset for what may be an app-side migration fault.
      */
     private fun migrateCloudIfOlder(cloudDbPath: String, localSchemaVersion: Long) {
         val cloudVersion = RawSqliteConnection.userVersionOf(cloudDbPath)
@@ -110,7 +150,7 @@ actual object DatabaseMerger {
         if (cloudVersion in 1 until localSchemaVersion) {
             val dir = cloudDbPath.substringBeforeLast('/')
             val name = cloudDbPath.substringAfterLast('/')
-            NativeSqliteDriver(
+            val driver = NativeSqliteDriver(
                 schema = KeryxDatabase.Schema,
                 name = name,
                 onConfiguration = { config ->
@@ -119,11 +159,24 @@ actual object DatabaseMerger {
                         extendedConfig = config.extendedConfig.copy(basePath = dir),
                     )
                 },
-            ).close()
+            )
+            try {
+                driver.executeQuery(null, "SELECT 1", { QueryResult.Unit }, 0)
+            } finally {
+                driver.close()
+            }
+            val migratedVersion = RawSqliteConnection.userVersionOf(cloudDbPath)
+            check(migratedVersion == localSchemaVersion) {
+                "Cloud DB migration did not reach schema version $localSchemaVersion " +
+                    "(from $cloudVersion, now $migratedVersion)"
+            }
         }
     }
 
     private const val TAG = "DatabaseMerger"
+
+    /** Bounds [findSqliteResultCode]'s cause-chain walk against a theoretical cause cycle. */
+    private const val CAUSE_CHAIN_MAX_DEPTH = 8
     private const val SQLITE_ERROR = 1
     private const val SQLITE_CORRUPT = 11
     private const val SQLITE_EMPTY = 16
