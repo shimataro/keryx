@@ -66,5 +66,5 @@ directly rather than re-reading them.
 
 ## Investigation
 
-    grep -rn "expect " composeApp/src/commonMain
-    grep -rn "java\.\(io\|awt\|sql\|nio\)\|javax\.swing" composeApp/src/commonMain
+    grep -rn "expect " shared/src/commonMain composeApp/src/commonMain
+    grep -rn "java\.\(io\|awt\|sql\|nio\)\|javax\.swing" shared/src/commonMain composeApp/src/commonMain

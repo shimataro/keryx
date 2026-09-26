@@ -11,11 +11,26 @@
 - Shared platform abstractions are declared in `commonMain` and implemented in
   `jvmCommonMain` when possible, or in target-specific source sets
   (`desktopMain` / `androidMain`) otherwise.
+- UI-framework-free code lives in the `:shared` module, the Compose UI in `:composeApp` (see
+  "Directory Structure" below).
 
 ## Directory Structure
 
+The code is split across four Gradle modules. All share the package root `works.merc.keryx.app`
+and the same source-set names, so the tree below is their combined `src/` tree:
+
+| Module | Contents |
+| --- | --- |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule` + the optional `updateModule`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileIO, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android actuals, all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
+| `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
+| `:testing` | Test-only helpers used by both modules' tests (`DbTestSupport`, `CloudTestSupport`, `FakeNotificationMessages`, token-storage fakes). Never a main-source dependency. |
+
+Tests live next to the code they test: `shared/src/{commonTest,desktopTest,androidDeviceTest}` and
+`composeApp/src/{commonTest,desktopTest,androidDeviceTest}`.
+
 ```text
-composeApp/src/
+{shared,composeApp}/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
                AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
@@ -25,7 +40,7 @@ composeApp/src/
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
-    di/           AppModule (+ expect platformModule), HttpClientFactory, ImageLoaderSetup
+    di/           SharedModule (sharedModule + updateModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,

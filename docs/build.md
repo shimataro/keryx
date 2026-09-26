@@ -11,7 +11,7 @@
 - **Android SDK** (`local.properties`' `sdk.dir` or the `ANDROID_HOME` environment variable) —
   `:composeApp` itself configures an Android library target, so the root `./gradlew build` needs
   the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD
-  setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:composeApp:desktopTest`
+  setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   avoids this requirement.
 
 If toolchain auto-download is blocked in a sandbox:
@@ -21,7 +21,7 @@ If toolchain auto-download is blocked in a sandbox:
 
 ```bash
 ./gradlew build                       # Compile all source sets + run tests
-./gradlew :composeApp:desktopTest     # Tests only
+./gradlew :shared:desktopTest :composeApp:desktopTest  # Tests only
 ./gradlew :composeApp:run             # Launch the desktop app
 
 ./gradlew :androidApp:assembleDebug        # Build a debug APK
@@ -43,7 +43,7 @@ Copy this file to `local.properties` and edit it during the build.
 Services without an API key will not show integration options. If no service is configured, the integration itself does not appear (e.g., tabs in the settings dialog).
 **Only one cloud storage can be connected at a time**, and data cannot be distributed across multiple storages.
 
-This is implemented via a Gradle custom task (`generateBuildConfig`).
+This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials).
 
 Below is how to obtain API keys for each service.
 
@@ -728,7 +728,8 @@ Flow:
 
    The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package.
 
-The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
+The **tag is the single source of truth for the version**. `appVersion` in `shared/build.gradle.kts` and
+`composeApp/build.gradle.kts` (the same resolution, in both) resolves
 `-PappVersion` > `APP_VERSION` env var > the literal in the file, and drives `BuildConfig.VERSION` (shown in the
 About screen, and used by the update checker) as the full tag, pre-release suffix included.
 `composeApp/build.gradle.kts` separately derives `appPackageVersion` from it by stripping any pre-release suffix,

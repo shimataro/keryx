@@ -3,7 +3,7 @@
 [English](db-schema.md)
 
 対象: ローカル SQLite（SQLDelight 管理）。`.sq` ファイルは
-`composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/` にある。
+`shared/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/` にある。
 
 実ファイルの実体パスはプラットフォームによって異なる: デスクトップの `JdbcSqliteDriver` は
 `AppDirs.appDataDir()/keryx.db` を直接開くが、Android の `AndroidSqliteDriver` は

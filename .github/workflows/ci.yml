@@ -237,6 +237,8 @@ jobs:
         with:
           name: test-reports-${{ matrix.os }}
           path: |
+            shared/build/reports/tests/
+            shared/build/test-results/
             composeApp/build/reports/tests/
             composeApp/build/test-results/
           if-no-files-found: warn
@@ -294,7 +296,7 @@ jobs:
         run: sudo apt-get install -y fakeroot rpm
 
       - name: Build & Test (desktop only)
-        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew :composeApp:desktopTest --no-configuration-cache
+        run: xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew :shared:desktopTest :composeApp:desktopTest --no-configuration-cache
         env:
           DROPBOX_APP_KEY: ""
           GOOGLE_DRIVE_CLIENT_ID: ""
@@ -319,6 +321,8 @@ jobs:
         with:
           name: test-reports-ubuntu-24.04-arm
           path: |
+            shared/build/reports/tests/
+            shared/build/test-results/
             composeApp/build/reports/tests/
             composeApp/build/test-results/
           if-no-files-found: warn

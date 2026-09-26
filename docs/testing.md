@@ -5,7 +5,7 @@
 ## Structure
 
 - `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io).
-- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`). This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
 - `androidDeviceTest/` — Instrumented tests that need Android's real, bundled SQLite or platform APIs and
   therefore cannot run as a plain JVM unit test — see `.claude/rules/android-sqlite-bundling.md`. Needs a
   connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this
@@ -102,7 +102,7 @@ defect that is deliberately not fixed, so it would fail every run. See
 upgrade has fixed the bug.
 
 ```bash
-./gradlew :composeApp:desktopTest
+./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
 Android has two separate instrumented suites, easy to conflate since only one of them is wired
@@ -110,7 +110,7 @@ into CI:
 
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
-| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite, plus the `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services authorization) | ✗ local only |
+| `shared/src/androidDeviceTest/`, `composeApp/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest`, `:composeApp:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite (`:shared`), plus the `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services authorization) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every push |
 
 Both need a connected device or a running emulator — see [setup.md](setup.md) for how to create an
@@ -118,7 +118,7 @@ AVD (`<name>` below):
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
-./gradlew :composeApp:connectedAndroidDeviceTest
+./gradlew :shared:connectedAndroidDeviceTest :composeApp:connectedAndroidDeviceTest
 ```
 
 (the task name comes from AGP 9's `com.android.kotlin.multiplatform.library` plugin's own
@@ -162,7 +162,7 @@ source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A de
 
 Project-wide, this is on top of the two Android suites above:
 
-- `commonTest`/`desktopTest` (run via `./gradlew :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML import/export paths — the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
+- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML import/export paths — the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
 - the Linux/macOS/Windows file-dialog backend split (`FilePickerTest` for `defaultFilePickerBackend`'s OS selection, the extension predicate agreeing with `FileNameExtensionFilter` including accepting directories, the overwrite-confirmation resolution, and dialog-owner selection)
 - the feed-list drag-and-drop rewrite (`parseFeedListDragSourceKey` in `HomeCommonTest.kt` for the pure key-parsing logic; `FeedListDragTest.kt` for the real end-to-end gesture via `performMouseInput`/`performKeyInput` against actual rendered composables — dragging a feed above another and asserting the persisted order, the sub-threshold-move-still-selects case, dropping onto a folder header / a tag row, a right-click landing mid-drag not opening the context menu or aborting the drag, the ghost overlay's appear/disappear lifecycle, Escape-cancel, folder-onto-folder reordering, and a drag pushed out past the pane's horizontal bounds never resolving to a valid target or applying a drop even when it lines up with a row's height)
 - the feed list's in-row rename editor (`InlineRenameValidationTest` in `commonTest` for the shared blank-is-not-an-error validation rule and `toInlineEditTarget` in `HomeCommonTest.kt`; `FeedListInlineRenameTest.kt` for the real end-to-end flow against rendered composables — F2 opening the editor and Enter committing, Escape and the "×" icon cancelling, blur committing a valid name, a duplicate folder name blocking Enter and reverting silently on blur, a blank folder name simply not committing, a blank feed title resetting `custom_title` with the feed's own title shown as the placeholder, renaming a tag leaving its color alone, the tag color dot's popover applying a color immediately both outside and during a rename, and the Feed-menu `RenameFeed` command opening the editor for the current selection)

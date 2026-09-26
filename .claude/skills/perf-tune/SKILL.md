@@ -34,8 +34,9 @@ left for the user to commit.
 
 - Argument (`$ARGUMENTS`) is an optional path to narrow the sweep (e.g.
   `/perf-tune domain/`, `/perf-tune composeApp/src/commonMain/kotlin/.../ui/home`).
-- **Default (no argument):** `composeApp/src/commonMain/kotlin`,
-  `composeApp/src/desktopMain/kotlin`, and `composeApp/src/commonMain/sqldelight`
+- **Default (no argument):** `shared/src/commonMain/kotlin`, `shared/src/desktopMain/kotlin`,
+  `shared/src/commonMain/sqldelight`, `composeApp/src/commonMain/kotlin`, and
+  `composeApp/src/desktopMain/kotlin`
   — unlike `refactor`, `.sq` files **are** in scope; they are where most of the
   hot paths live.
 - **Always excluded:** `build/` and generated code (SQLDelight, Compose
@@ -266,7 +267,7 @@ contaminate the baseline below and risk an unrelated file getting swept into
 or invoke the **`build` skill**:
 
 ```bash
-./gradlew :composeApp:desktopTest
+./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
 Record the baseline **from this run itself**: both the passing count and the set
@@ -390,7 +391,7 @@ For each approved item:
 2. Re-measure with that axis's method and confirm the improvement is real.
 3. Re-run the tests:
    ```bash
-   ./gradlew :composeApp:desktopTest
+   ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
    The full suite must be green **and the Step 1 baseline set must survive in
    full** — a matching count is not sufficient, since a deleted test can hide

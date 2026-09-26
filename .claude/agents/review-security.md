@@ -78,7 +78,7 @@ exception carries.
 
 Useful starting greps:
 
-    grep -rn "accessToken\|refreshToken\|clientSecret\|codeVerifier" composeApp/src --include=*.kt
+    grep -rn "accessToken\|refreshToken\|clientSecret\|codeVerifier" shared/src composeApp/src --include=*.kt
     grep -rn "Log\.\(e\|w\|i\|d\)" <changed files>
 
 Read `.claude/rules/cloud-oauth-transport.md` when the diff touches the OAuth redirect transport.

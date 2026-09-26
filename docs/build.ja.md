@@ -12,7 +12,7 @@
 - **Android SDK**（`local.properties` の `sdk.dir`、または環境変数 `ANDROID_HOME`） —
   `:composeApp` 自体が Android library ターゲットを構成しているため、デスクトップ側だけの変更
   であってもルートの `./gradlew build` には SDK の解決が必要。インストールと AVD の作成は
-  [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:composeApp:desktopTest`
+  [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   のようなデスクトップ限定タスクはこの要件を回避できる。
 
 サンドボックス等でツールチェーンの自動ダウンロードが必要な場合:
@@ -22,7 +22,7 @@
 
 ```bash
 ./gradlew build                       # 全ソースセットのコンパイル + テスト
-./gradlew :composeApp:desktopTest     # テストのみ
+./gradlew :shared:desktopTest :composeApp:desktopTest  # テストのみ
 ./gradlew :composeApp:run             # デスクトップアプリを起動
 
 ./gradlew :androidApp:assembleDebug        # デバッグ APK をビルド
@@ -44,7 +44,7 @@
 APIキーが指定されていないクラウドサービスは連携機能が表示されず、どのサービスにも指定されなければ（設定ダイアログのタブなどに）連携機能自体が表れない。
 **連携できるクラウドストレージは同時に1つのみ**であり、複数のストレージに分散保存はできない。
 
-Gradle のカスタムタスク（`generateBuildConfig`）で実現している。
+`shared/build.gradle.kts` の Gradle カスタムタスク（`generateBuildConfig`、および desktop 専用の Google Drive 認証情報向けの `generateDesktopBuildConfig`）で実現している。
 
 以下に各サービスでのAPIキーの取得方法を示す。
 
@@ -740,7 +740,7 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 
    `.zip` ファイルは `:composeApp:createDistributable` が出力する、インストーラ不要のアプリバンドル／イメージを圧縮したものである。パッケージを経由せずに使いたいユーザー向け。
 
-**バージョンはタグを正とする**。`composeApp/build.gradle.kts` の `appVersion` は
+**バージョンはタグを正とする**。`shared/build.gradle.kts` と `composeApp/build.gradle.kts`（どちらも同じ解決順）の `appVersion` は
 `-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決し、`BuildConfig.VERSION`
 （About 画面表示・更新チェックで使用）を決める — プレリリース接尾辞を含む完全なタグそのもの。
 `composeApp/build.gradle.kts` は別途、プレリリース接尾辞を除去した `appPackageVersion` を導出し、

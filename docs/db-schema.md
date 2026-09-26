@@ -3,7 +3,7 @@
 [日本語](db-schema.ja.md)
 
 Target: local SQLite (managed by SQLDelight). `.sq` files are located at
-`composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/`.
+`shared/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/`.
 
 The live file's actual path differs by platform: desktop's `JdbcSqliteDriver` opens
 `AppDirs.appDataDir()/keryx.db` directly, but Android's `AndroidSqliteDriver` places it at

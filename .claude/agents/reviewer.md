@@ -45,18 +45,18 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 | Changed path | Perspectives |
 | --- | --- |
 | any Kotlin file changed at all | security, quality, verification |
-| `composeApp/src/**/domain/**`, `composeApp/src/**/data/**`, `composeApp/src/**/*ViewModel.kt` | architecture, data-integrity, concurrency, performance, docs |
-| `**/domain/MergeSql.kt`, `**/domain/SyncRepository.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/DatabaseSnapshot*.kt`, `composeApp/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
-| `composeApp/src/**/sqldelight/**/*.sq`, `**/*.sqm`, `**/domain/MergeSchema.kt`, `**/DatabaseDriverFactory*.kt` | data-integrity, sync-merge, verification, docs |
+| `shared/src/**/domain/**`, `shared/src/**/data/**`, `composeApp/src/**/*ViewModel.kt` | architecture, data-integrity, concurrency, performance, docs |
+| `**/domain/MergeSql.kt`, `**/domain/SyncRepository.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/DatabaseSnapshot*.kt`, `{shared,composeApp}/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
+| `shared/src/**/sqldelight/**/*.sq`, `**/*.sqm`, `**/domain/MergeSchema.kt`, `**/DatabaseDriverFactory*.kt` | data-integrity, sync-merge, verification, docs |
 | `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml` | ui, docs |
 | `composeApp/src/**/ui/**`, `composeApp/src/**/*ViewModel.kt`, `**/data/local/LocalSettings.kt` | state-consistency |
 | a diff that adds or changes **user-visible text** — judged by content, not path: a new `Res.string.`, `getString(`, `stringResource(`, or a literal reaching a display path. `**/domain/NotificationMessages.kt` is the one outside `ui/` that gets missed | ui |
-| `composeApp/src/commonMain/**` gaining a platform API (`java.io`, `java.awt`, `java.sql`, `javax.swing`, Ktor CIO) | architecture |
-| `composeApp/src/**/platform/**` | architecture, concurrency, docs |
+| `shared/src/commonMain/**` or `composeApp/src/commonMain/**` gaining a platform API (`java.io`, `java.awt`, `java.sql`, `javax.swing`, Ktor CIO) | architecture |
+| `{shared,composeApp}/src/**/platform/**` | architecture, concurrency, docs |
 | `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md` | docs |
 | `gradle/libs.versions.toml`, `**/build.gradle.kts` | docs, verification, security |
 | `.github/workflows/**` | verification |
-| `composeApp/src/commonTest/**`, `composeApp/src/desktopTest/**` | verification |
+| `{shared,composeApp}/src/{commonTest,desktopTest}/**`, `testing/src/**` | verification |
 
 `docs` runs on code changes, not only doc changes: the commonest drift is code moving while
 `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
@@ -125,7 +125,7 @@ High 2 / Medium 3 / Low 1 (plus 2 needing confirmation)
 
 ### High
 
-#### 1. [Data integrity] `composeApp/src/.../FeedRepository.kt:214` — refresh overwrites `folder_updated_at`
+#### 1. [Data integrity] `shared/src/.../FeedRepository.kt:214` — refresh overwrites `folder_updated_at`
 
 - **Impact**: move a feed into a folder on device A, refresh that feed on device B, and the folder
   move is lost at the next sync

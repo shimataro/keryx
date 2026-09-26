@@ -10,11 +10,25 @@
 - 同期処理は Repository 層に閉じ込め、UI 層は同期の存在を意識しない
 - 共有のプラットフォーム抽象は `commonMain` で宣言し、可能な場合は `jvmCommonMain` に実装する。
   それ以外はターゲットごとのソースセット（`desktopMain` / `androidMain`）に実装する。
+- UI フレームワークに依存しないコードは `:shared` モジュールに、Compose UI は `:composeApp` に置く（下記「ディレクトリー構成」参照）。
 
 ## ディレクトリー構成
 
+コードは 4 つの Gradle モジュールに分かれている。いずれもパッケージルート `works.merc.keryx.app` と同じソースセット名を共有するので、
+以下のツリーはそれらの `src/` を合わせたものである：
+
+| モジュール | 内容 |
+| --- | --- |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule` と任意の `updateModule`）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileIO, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android の actual、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
+| `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
+| `:testing` | 両モジュールのテストが使うテスト専用ヘルパー（`DbTestSupport`、`CloudTestSupport`、`FakeNotificationMessages`、トークンストレージの fake）。main のソースからは決して依存しない。 |
+
+テストはテスト対象のコードと同じモジュールに置く：`shared/src/{commonTest,desktopTest,androidDeviceTest}` と
+`composeApp/src/{commonTest,desktopTest,androidDeviceTest}`。
+
 ```text
-composeApp/src/
+{shared,composeApp}/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
                AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
@@ -24,7 +38,7 @@ composeApp/src/
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
     domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
-    di/           AppModule（+ expect platformModule）, HttpClientFactory, ImageLoaderSetup
+    di/           SharedModule（sharedModule + updateModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,

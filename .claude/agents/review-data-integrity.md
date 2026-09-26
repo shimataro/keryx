@@ -78,7 +78,7 @@ A change here breaks users who upgrade, or devices on two different versions syn
 
 ## Investigation
 
-    ls composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/
-    grep -rn "EXPECTED_SCHEMAS" composeApp/src --include=*.kt
+    ls shared/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/
+    grep -rn "EXPECTED_SCHEMAS" shared/src --include=*.kt
 
 When the diff touches FTS, read `.claude/rules/fts-index.md`.

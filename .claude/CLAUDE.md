@@ -56,7 +56,7 @@ memory:
 
 ```bash
 ./gradlew build                      # Compile all source sets + run tests
-./gradlew :composeApp:desktopTest    # Run tests only
+./gradlew :shared:desktopTest :composeApp:desktopTest  # Run tests only
 ./gradlew :composeApp:run            # Run the desktop app
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
 ```
@@ -142,19 +142,26 @@ perspective) at the point they define it — see each skill's own constraint-rev
 Layered: UI (Compose) → ViewModel (androidx.lifecycle + Koin) → Repository → DataSource (SQLDelight / Ktor)
 
 ```text
-composeApp/src/
+shared/src/                      # UI-framework-free (also consumed by the Apple native app)
 ├── commonMain/kotlin/works/merc/keryx/app/
 │   ├── core/       # Constants, error types, Result, date parsing, Clock
 │   ├── data/       # DataSource (SQLDelight / FeedFetcher / CloudStorage / OPML)
 │   ├── domain/     # Repositories + sync (CloudSession, SyncRepository, MergeSql)
-│   ├── platform/   # expect declarations for platform-specific code
-│   ├── di/         # Koin modules
-│   └── ui/         # Compose screens + ViewModels + theme + i18n
+│   ├── platform/   # non-Compose expect declarations (AppDirs, DatabaseMerger, Gzip, …)
+│   └── di/         # sharedModule + updateModule, HttpClientFactory
 ├── commonMain/sqldelight/       # .sq schema + queries
-├── commonMain/composeResources/ # values/strings.xml (i18n), drawable (tray icons)
+├── jvmCommonMain/, desktopMain/, androidMain/   # actuals for the expects above
 ├── commonTest/                  # pure + MockEngine (Ktor) tests
-├── desktopMain/kotlin/…/        # actual platform implementations + main.kt
 └── desktopTest/                 # SQLDelight (in-memory / file) DB tests
+composeApp/src/                  # Compose UI for desktop + Android (depends on :shared)
+├── commonMain/kotlin/works/merc/keryx/app/
+│   ├── ui/         # Compose screens + ViewModels + theme + i18n
+│   ├── platform/   # Compose-typed expect declarations (NativeMenu, BackHandler, …)
+│   └── di/         # appModule + expect platformModule
+├── commonMain/composeResources/ # values/strings.xml (i18n), drawable (tray icons)
+├── desktopMain/kotlin/…/        # main.kt, tray, app menu, token storages, update installer
+└── commonTest/, desktopTest/    # UI + ViewModel tests
+testing/src/                     # test-only helpers (DbTestSupport, fakes) for both modules
 ```
 
 The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
@@ -187,10 +194,12 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Sha256`, `CloudStorageAvailability`,
    `platformModule`. That list is illustrative, not exhaustive: the real set is
    whatever `commonMain` declares `expect` (mostly under `platform/`, but also spanning
-   `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " composeApp/src/commonMain` for
+   `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " shared/src/commonMain composeApp/src/commonMain` for
    the current one, rather than trusting a count here that will drift.
    Desktop implementations live in `desktopMain`. This keeps the door open for
-   Android/iOS targets later.
+   Android/iOS targets later. Code with no Compose/UI dependency belongs in the
+   `:shared` module (never import Compose, Compose Resources, AWT/Swing or an
+   Android UI API there); `:composeApp` holds the Compose UI.
 5. **Follow the design docs.** Do not change the sync algorithm, merge SQL
    semantics, error taxonomy, or feature scope on your own judgment. If
    something in the docs seems wrong, ask before deviating. `docs/sync-architecture.md`

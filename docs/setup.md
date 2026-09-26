@@ -250,7 +250,7 @@ since `build` now also compiles and assembles `:androidApp`. This does not inclu
 separately-executed `androidDeviceTest` instrumented suite, which needs a real device/emulator
 (see Prerequisites above).
 
-For desktop-only work, a target-scoped task like `./gradlew :composeApp:desktopTest` avoids
+For desktop-only work, a target-scoped task like `./gradlew :shared:desktopTest :composeApp:desktopTest` avoids
 needing the Android SDK.
 
 ## Data Directory

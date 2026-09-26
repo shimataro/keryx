@@ -42,5 +42,5 @@ Place a new test under the same relative path as the code it targets.
 
 1. Read the code under test and one existing test in the same layer.
 2. Cover happy path, error paths, and boundaries.
-3. Run `./gradlew :composeApp:desktopTest` and confirm the new tests pass and
+3. Run `./gradlew :shared:desktopTest :composeApp:desktopTest` (or just the module the tests live in) and confirm the new tests pass and
    existing ones still pass.

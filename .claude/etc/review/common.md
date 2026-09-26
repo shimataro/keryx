@@ -42,7 +42,7 @@ Every finding uses exactly these fields, in this order:
 
 - **Severity**: `High` | `Medium` | `Low`
 - **Confidence**: `High` | `Medium` | `Low`
-- **Location**: repo-relative path and line — e.g. `composeApp/src/commonMain/kotlin/works/merc/keryx/app/domain/FeedRepository.kt:214`
+- **Location**: repo-relative path and line — e.g. `shared/src/commonMain/kotlin/works/merc/keryx/app/domain/FeedRepository.kt:214`
 - **Issue**: one sentence stating the defect
 - **Impact**: the concrete failure — inputs or state leading to the wrong result. Never "this could be a problem"
 - **Suggestion**: the fix direction. Do not write the code

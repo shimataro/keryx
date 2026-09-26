@@ -247,7 +247,7 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 ため、デスクトップと Android の両ターゲットについて確認できる。ただし別途実行する
 `androidDeviceTest` 計装スイート（実機/エミュレータが必要。前提を参照）はこれに含まれない。
 
-デスクトップの作業だけであれば、`./gradlew :composeApp:desktopTest` のようなターゲット限定
+デスクトップの作業だけであれば、`./gradlew :shared:desktopTest :composeApp:desktopTest` のようなターゲット限定
 タスクを使うことで、Android SDK を用意せずに済む。
 
 ## データディレクトリ
