@@ -13,7 +13,7 @@ Kotlin Multiplatform / Compose Multiplatform).
 - `commonTest/` — pure logic and anything using Ktor `MockEngine`
   (parser, fetcher, URL resolver, OPML, Dropbox storage/auth, local settings).
   Runs on the desktop target, so `expect` declarations resolve to the desktop
-  `actual` (e.g. `FileIO`, `AppDirs` are usable with a temp-dir override).
+  `actual` (e.g. `AppDirs` is usable with a temp-dir override; `FileIO` is plain kotlinx-io).
 - `desktopTest/` — anything needing a real SQLDelight driver
   (`JdbcSqliteDriver`): schema, article upsert, the ATTACH merge. Use the
   helpers in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`).

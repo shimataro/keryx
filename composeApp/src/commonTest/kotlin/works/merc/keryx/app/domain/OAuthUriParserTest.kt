@@ -64,10 +64,33 @@ class OAuthUriParserTest {
     @Test
     fun encodedPlusSignSurvivesAsALiteralPlus() {
         // A raw `+` in the query would itself mean space, so a value containing a literal `+`
-        // arrives percent-encoded as `%2B`. Decoding via uri.query (which already percent-decodes)
-        // and then URLDecoder.decode would double-decode it into a space instead.
+        // arrives percent-encoded as `%2B`. Percent-decoding twice would turn it into a space.
         val params = parseOAuthUri("keryx://oauth2/callback?code=abc%2Bdef")
 
         assertEquals("abc+def", params.code)
+    }
+
+    @Test
+    fun rawPlusSignDecodesAsASpace() {
+        val params = parseOAuthUri("keryx://oauth2/callback?error=access_denied&error_description=user+cancelled")
+
+        assertEquals("user cancelled", params.errorDescription)
+    }
+
+    @Test
+    fun fragmentIsNotPartOfTheLastParameter() {
+        val params = parseOAuthUri("keryx://oauth2/callback?code=abc&state=xyz#_=_")
+
+        assertEquals("abc", params.code)
+        assertEquals("xyz", params.state)
+    }
+
+    @Test
+    fun loopbackRequestUriIsParsed() {
+        // The Google Drive loopback transport rebuilds a full URI from the request line.
+        val params = parseOAuthUri("http://127.0.0.1/?state=s1&code=4%2F0Ab")
+
+        assertEquals("4/0Ab", params.code)
+        assertEquals("s1", params.state)
     }
 }

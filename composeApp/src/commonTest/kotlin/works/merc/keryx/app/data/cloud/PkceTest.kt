@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class PkceDesktopTest {
+class PkceTest {
     @Test
     fun generateVerifierProducesUrlSafeHighEntropyStrings() {
         val verifiers = (1..100).map { Pkce.generateVerifier() }

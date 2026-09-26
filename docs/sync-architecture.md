@@ -303,7 +303,7 @@ How the scheme is registered with the OS differs per platform. macOS declares it
   unlike Windows/Linux.
 - **Dispatch.** `MainActivity.onCreate`/`onNewIntent` forward the redirect's data URI to
   `dispatchOAuthCallbackIfPresent`, which classifies it via the same `classifyLaunchArg`
-  (commonMain) / `parseOAuthUri` (jvmCommonMain) code desktop's `main.kt` uses, then emits into the
+  (commonMain) / `parseOAuthUri` (commonMain) code desktop's `main.kt` uses, then emits into the
   same-shaped `MutableSharedFlow<OAuthCallbackParams>` (a separate instance registered in Android's
   own `platformModule`).
 - **Configuration changes.** `launchMode="singleTask"` means an already-running instance receives

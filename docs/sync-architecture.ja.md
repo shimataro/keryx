@@ -468,7 +468,7 @@ single-instance 経由で実行中インスタンスへ転送する。
   `scheme="keryx"` `host="oauth2"`）を持たせるだけで、Windows/Linux のような起動時登録処理は不要。
 - **ディスパッチ。** `MainActivity.onCreate`/`onNewIntent` がリダイレクトのデータ URI を
   `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と同じ
-  `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
+  `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（commonMain）で分類したうえで、同じ形の
   `MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
   へ流し込む。
 - **構成変更。** `launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく

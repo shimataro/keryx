@@ -6,7 +6,7 @@
 
 - `commonTest/` — 純粋ロジックと Ktor `MockEngine` を使うテスト（パーサ、フェッチャ、URL リゾルバ、
   OPML、Dropbox ストレージ/認証、ローカル設定）。デスクトップターゲット上で動くため、`expect` 宣言は
-  desktop の `actual` に解決される（`FileIO` / `AppDirs` を一時ディレクトリで利用可能）。
+  desktop の `actual` に解決される（`AppDirs` を一時ディレクトリで利用可能。`FileIO` は kotlinx-io による共通実装）。
 - `desktopTest/` — 実際の SQLDelight ドライバ（`JdbcSqliteDriver`）が必要なテスト（スキーマ、記事 upsert、
   ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。
   同ディレクトリには、実際に Composable をレンダリングして検証する Compose UI テスト

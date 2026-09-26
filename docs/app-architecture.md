@@ -21,12 +21,12 @@ composeApp/src/
                AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens,
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           AppModule (+ expect platformModule), HttpClientFactory, ImageLoaderSetup
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+    platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
@@ -44,12 +44,10 @@ composeApp/src/
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
     target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
-    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
+    target lacks: Gzip, Sha1, Sha256, SecureRandom (secureRandomBytes), ContentDigest, FileTokenStorage,
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
     update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
-    wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider),
-    domain/OAuthUriParser.kt (parseOAuthUri, shared by desktop's and Android's `keryx://` redirect
-    handling)
+    wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects
@@ -313,7 +311,7 @@ of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
 The desktop and Android `UpdateInstaller` actuals share no code at all — desktop
 (`platform/update/DesktopUpdateInstaller.kt`) extracts a ZIP via
 `platform/update/ArchiveExtractor.kt` (`ditto` on macOS, whose signed bundle seals its own symlinks;
-`platform/ZipExtractor.kt` — `jvmCommonMain`, shared with Android exactly like `FileIO`/`Gzip` —
+`platform/ZipExtractor.kt` — `jvmCommonMain`, shared with Android exactly like `Gzip` —
 everywhere else, see [background-update.md](background-update.md)), stages it next to the current
 install, and hands off to a detached helper script (`platform/update/UpdateScriptWriter.kt`, pure
 string templates — tested by asserting their text directly, never by running one) via

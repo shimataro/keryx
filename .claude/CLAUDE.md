@@ -183,8 +183,8 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    hardcoded *English* literal is now as much a violation as a Japanese one, so
    grepping for Japanese characters no longer finds every case.
 4. **Platform-specific code stays behind `commonMain` `expect` declarations** —
-   e.g. `AppDirs`, `FileIO`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
-   `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Pkce`, `CloudStorageAvailability`,
+   e.g. `AppDirs`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
+   `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Sha256`, `CloudStorageAvailability`,
    `platformModule`. That list is illustrative, not exhaustive: the real set is
    whatever `commonMain` declares `expect` (mostly under `platform/`, but also spanning
    `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " composeApp/src/commonMain` for
