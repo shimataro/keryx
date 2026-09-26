@@ -16,6 +16,9 @@
   current, authoritative numbers.
 - **Desktop-target-only work** needs only an environment that can run the JDK and the Gradle
   Wrapper — no extra headroom for the Android SDK or an emulator.
+- **Work on the shared code's Apple targets** (the `KeryxShared` XCFramework the native Apple app
+  links, and its macOS/iOS-simulator tests) needs a Mac on Apple Silicon with **Xcode** installed.
+  Elsewhere Gradle simply skips those targets.
 
 ### Recommended IDE
 

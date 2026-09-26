@@ -57,6 +57,9 @@ jobs:
       # plain, unconfigured `./gradlew build` should have. Only release.yml (which does publish)
       # passes -PandroidReleaseSigningRequired=true to turn that same unconfigured state into a
       # hard failure instead.
+      # On macOS this also compiles :shared for its Apple targets and runs its macOS and
+      # iOS-simulator test suites (Kotlin/Native); Linux and Windows skip those targets, which
+      # need Xcode.
       - name: Build & Test
         shell: bash
         run: |
@@ -78,6 +81,15 @@ jobs:
       # v3.14.1 preinstalled, which is all packageMsi needs.
       # createDistributable is run first so a jlink-assembly failure is distinguishable from a
       # jpackage-specific one; the second invocation is a no-op rebuild via Gradle's up-to-date check.
+      # The KeryxShared XCFramework the native Apple app links: every slice (macOS, iOS device,
+      # iOS simulator) including SKIE's generated Swift, which `build` alone never compiles.
+      - name: Verify Apple framework (macOS)
+        if: runner.os == 'macOS'
+        run: ./gradlew :shared:assembleKeryxSharedDebugXCFramework --no-configuration-cache
+        env:
+          DROPBOX_APP_KEY: ""
+          ONEDRIVE_CLIENT_ID: ""
+
       - name: Verify packaging (macOS)
         if: runner.os == 'macOS'
         shell: bash

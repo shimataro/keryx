@@ -591,6 +591,11 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`）。
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
   から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
+- ネイティブ Apple アプリ（macOS/iOS、`:shared` の appleMain）：`KeychainTokenStorage` が Security フレームワーク経由で
+  Keychain に直接書き込む——サービスもプロバイダーごとのアカウントも同じで、平文へのフォールバックはない（書き込みの失敗は
+  `NOT_PERSISTED`）。Compose 版 macOS が `security` CLI で保存したトークンは引き継がない：ネイティブアプリでは再接続し、
+  同期済みのデータはクラウドから戻る。Google Drive は、Apple 向けの OAuth クライアント（client secret なし）ができるまで
+  提供しない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」を参照。
 - Linux のうち Snap パッケージ内だけは、`KeyringTokenStorage` の代わりに `LibSecretTokenStorage` を使う
   （`platform.isSnap` で分岐）。JNA 経由で libsecret を直接呼び出す実装で、libsecret がサンドボックスを
   検知して生の Secret Service ではなく Secret portal（`org.freedesktop.portal.Secret`）経由にルーティング

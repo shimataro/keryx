@@ -6,6 +6,19 @@
 
 - `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io).
 - `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- **Apple targets (`:shared` only).** `commonTest` also runs natively as `:shared:macosArm64Test` and
+  `:shared:iosSimulatorArm64Test` (both part of `./gradlew build` on a Mac with Xcode; skipped on
+  Linux/Windows), so a common test must not use JVM APIs — temp files go through `:testing`'s
+  `tempFilePath()`/`tempFileWith()` (kotlinx-io); a test that genuinely needs the JVM belongs in
+  `desktopTest`. `appleTest/` holds what only the Apple actuals can show — `AppleDatabaseTest`
+  (NativeSqliteDriver, FTS5 trigram search, snapshot and a real merge on the system SQLite),
+  `ApplePlatformTest` (gzip, digests, files), `KeryxSdkTest`. `macosTest/` holds
+  `KeychainTokenStorageTest`: Kotlin/Native runs iOS tests as a bare executable outside any app
+  bundle, where no keychain exists (`errSecNotAvailable`), while on macOS it reaches the login
+  keychain (under a random, cleaned-up service name, never `works.merc.keryx`). **Never let an Apple
+  test reach `AppDirs.appDataDir()` unoverridden** — on macOS that is the user's real
+  `~/Library/Application Support/Keryx`; pass `dataDirectory` to `KeryxSdk.start` or build the
+  driver with `DatabaseDriverFactory().createDriver(dir)`.
 - `androidDeviceTest/` — Instrumented tests that need Android's real, bundled SQLite or platform APIs and
   therefore cannot run as a plain JVM unit test — see `.claude/rules/android-sqlite-bundling.md`. Needs a
   connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this

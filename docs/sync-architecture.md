@@ -415,6 +415,12 @@ separate files.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
 - macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead.
+- Native Apple app (macOS/iOS, `:shared`'s appleMain): `KeychainTokenStorage` writes the Keychain
+  directly through the Security framework — same service, same per-provider account — with no
+  plaintext fallback (a failed write is `NOT_PERSISTED`). Tokens the Compose macOS build stored via
+  the `security` CLI are not carried over: the native app reconnects, and synced data comes back
+  from the cloud. Google Drive is not offered there until an Apple-type OAuth client (no client
+  secret) exists; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md).
 - Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.
 - **Fallback file and outcome reporting**:
   - On failure for any of the above, fallback to a file in the data directory

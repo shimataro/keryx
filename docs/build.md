@@ -14,6 +14,11 @@
   setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   avoids this requirement.
 
+- **Xcode** (macOS only) for `:shared`'s Apple targets — the `KeryxShared` XCFramework
+  (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`, output under
+  `shared/build/XCFrameworks/release/`) and its macOS/iOS-simulator tests. Without Xcode (or on
+  Linux/Windows) Gradle skips those targets and everything else builds as before.
+
 If toolchain auto-download is blocked in a sandbox:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`.
 

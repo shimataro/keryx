@@ -1132,3 +1132,50 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 - **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
   Compose アプリは Compose Resources で、SwiftUI アプリは同じ `strings.xml` から生成した String Catalog で解決するので、2 つの
   ロケールのソースは 1 つに保たれる。
+
+### `:shared` の Apple ターゲット
+
+`:shared` は `macosArm64`・`iosArm64`・`iosSimulatorArm64` 向けにビルドされ（macOS のリリースと同じく Apple Silicon のみ。
+`lifecycle-viewmodel` に `macosX64` 版がないため）、静的な **`KeryxShared` XCFramework** を生成する
+（`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`）。ソースセットは手作業で組んでいる（独自の `jvmCommonMain` が
+Kotlin のデフォルト階層テンプレートを無効にするため）：`appleMain` → `macosMain`/`iosMain`、テストは `appleTest` → `macosTest`。
+
+Apple の actual はシステムライブラリだけを使う：CommonCrypto（SHA-1/SHA-256）、Security（乱数、Keychain）、zlib（gzip）、
+Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そしてシステムの sqlite3——アプリの DB には SQLDelight の
+`NativeSqliteDriver`、専用コネクションが必要な ATTACH マージと `VACUUM INTO` スナップショットには
+`platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
+FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
+確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
+`CloudStorageType.id`、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、Apple 向けの
+OAuth クライアント（client secret なし）を登録するまで Apple では提供しない。Dropbox と OneDrive は desktop と同じ
+`keryx://oauth2/callback` リダイレクトを使う。アプリ内アップデート（`updateModule`）は組み込まない：このアプリは
+App Store または Sparkle が更新する。
+
+### `KeryxSdk`：Swift からの入口
+
+`sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` がオブジェクトグラフ
+（`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`。Koin は内部に隠す）を構築し、DB を開き——
+`DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・`syncRepository`・
+`settingsRepository`・`cloudSession`・`newAddFeedController()`・`handleOAuthRedirect(url)` を提供する。`dataDirectory` は、
+すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。`close()` は、
+まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じる。Koin モジュールが `val` ではなく関数なのは、
+Koin のモジュールがシングルトンを定義の中にキャッシュするため。
+
+**SKIE** がフレームワークの Swift API を整える：`suspend` 関数は `async throws` に、sealed 階層は網羅的な `onEnum(of:)` の
+switch に、`StateFlow<T>` プロパティは `SkieSwiftStateFlow<T>`（同期的な `.value` を持つ `AsyncSequence`）として Swift に
+届く——`@Observable` アダプタはこれを反復する。キャンセル以外の理由で失敗しうるメンバーは `@Throws` を付けているので、
+失敗はプロセスの異常終了ではなく Swift で throw されるエラーになる。
+
+### スパイクの計測値（macOS 15、Apple Silicon、release ビルド）
+
+| 項目 | 結果 |
+| --- | --- |
+| リンク済み arm64 バイナリに対する共有コードの寄与 | 約 18 MB（strip 後 約 11 MB） |
+| DB を新規作成する `KeryxSdk.start` | 4〜12 ms |
+| 既存 DB での `KeryxSdk.start` | 約 1.5 ms |
+| 1 万行の `homeViewModel.articles` が購読開始から Swift に届くまで | 24〜28 ms |
+| 並び替えた 1 万行のリストが Swift に届くまで | 約 1 ms |
+| Swift から `articles.value`（1 万行）を読む | 1 ms 未満 |
+
+この規模では大きなリストの受け渡しは安価である。実際のリストが一桁大きくなった場合に限り、ページングを検討し直す。

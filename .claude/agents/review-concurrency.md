@@ -45,6 +45,11 @@ they survive testing and reach users as intermittent freezes, corrupted state, o
 - **AWT/Swing EDT vs Compose.** Tray, native menus, file dialogs, WebView, and the D-Bus objects run
   on or interact with the EDT while Compose uses `Dispatchers.Main.immediate`. Flag state touched
   from both without a defined owner.
+- **Apple (Kotlin/Native).** `Dispatchers.Main` is the main dispatch queue — a test without a run
+  loop must `setMain` a test dispatcher. Closing a `NativeSqliteDriver` while a coroutine may still
+  query it corrupts its pool: stop *and join* every scope that reads the DB first (see
+  `KeryxSdk.close`). Never run a suspend call inside `MutableStateFlow.update {}` — the lambda is
+  retried on contention, repeating the side effect.
 - **Flow sharing.** Does a `StateFlow`/`SharedFlow` use a sharing strategy that matches its
   lifetime? A hot flow that never stops, or a `WhileSubscribed` that drops state the UI still needs,
   are both findings.

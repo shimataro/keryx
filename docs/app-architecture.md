@@ -1130,3 +1130,56 @@ platform:
   message IDs plus arguments. The Compose app resolves them through Compose Resources, and the
   SwiftUI app through a String Catalog generated from the same `strings.xml` files, so the two
   locales keep one source.
+
+### Apple targets in `:shared`
+
+`:shared` builds for `macosArm64`, `iosArm64` and `iosSimulatorArm64` (Apple Silicon only, like
+the macOS release; `lifecycle-viewmodel` has no `macosX64` variant) and assembles the static
+**`KeryxShared` XCFramework** (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`). The
+source sets are wired by hand (the custom `jvmCommonMain` disables Kotlin's default hierarchy
+template): `appleMain` → `macosMain`/`iosMain`, and `appleTest` → `macosTest` for tests.
+
+The Apple actuals use system libraries only: CommonCrypto (SHA-1/SHA-256), Security (random
+bytes, Keychain), zlib (gzip), Foundation/POSIX (files), AppKit/UIKit (open a URL), and the system
+sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
+`platform/RawSqliteConnection.kt` (SQLiter's sqlite3 bindings) for the ATTACH merge and the
+`VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
+trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
+(3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
+(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `CloudStorageType.id`,
+readable after first unlock; no plaintext fallback). Google Drive is not offered on Apple until an
+Apple-type OAuth client (no client secret) is registered for it; Dropbox and OneDrive use the same
+`keryx://oauth2/callback` redirect as desktop. The in-app updater (`updateModule`) is not installed:
+the App Store or Sparkle update this app.
+
+### `KeryxSdk`: the Swift entry point
+
+`sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` builds the object
+graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin kept internal),
+opens the database — a `DatabaseTooNewException` surfaces here as a Swift error — and hands out
+`homeViewModel`, `notificationCenter`, `syncRepository`, `settingsRepository`, `cloudSession`,
+`newAddFeedController()` and `handleOAuthRedirect(url)`. `dataDirectory` puts every app directory
+under a given path, for previews and tests that must not open the user's real data. `close()` stops
+and joins every coroutine that can still read the database before closing it. The Koin modules
+are functions, not `val`s, because a Koin module caches its singletons inside its definitions.
+
+**SKIE** shapes the framework's Swift API: `suspend` functions become `async throws`, sealed
+hierarchies get an exhaustive `onEnum(of:)` switch, and a `StateFlow<T>` property reaches Swift as
+`SkieSwiftStateFlow<T>` — an `AsyncSequence` with a synchronous `.value` — which is what the
+`@Observable` adapter iterates. Members that can fail for a reason other than cancellation are
+`@Throws`, so a failure is a thrown Swift error rather than a process abort.
+
+### Spike measurements (macOS 15, Apple Silicon, release build)
+
+| Measure | Result |
+| --- | --- |
+| Shared code's contribution to a linked arm64 binary | ~18 MB (~11 MB stripped) |
+| `KeryxSdk.start` creating a new database | 4–12 ms |
+| `KeryxSdk.start` on an existing database | ~1.5 ms |
+| 10,000-row `homeViewModel.articles` reaching Swift after subscribing | 24–28 ms |
+| Re-sorted 10,000-row list reaching Swift | ~1 ms |
+| Reading `articles.value` (10,000 rows) from Swift | <1 ms |
+
+Bridging a large list is cheap at this size; revisit with paging only if real lists grow by an
+order of magnitude.

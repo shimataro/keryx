@@ -13,6 +13,17 @@
   （`androidx.compose.ui.test.runDesktopComposeUiTest`、JUnit4 ルール不要）も置く
   （例: `ArticleListPaneTest.kt`）。実 Skia/AWT レンダラが必要なため `commonTest` ではなく
   `desktopTest` に置く。
+- **Apple ターゲット（`:shared` のみ）。** `commonTest` は `:shared:macosArm64Test` と `:shared:iosSimulatorArm64Test` として
+  ネイティブでも実行される（どちらも Xcode のある Mac では `./gradlew build` に含まれ、Linux/Windows ではスキップされる）。
+  そのため共通テストで JVM の API を使ってはならない——一時ファイルは `:testing` の `tempFilePath()`/`tempFileWith()`
+  （kotlinx-io）を使い、本当に JVM が必要なテストは `desktopTest` に置く。`appleTest/` には Apple の actual でしか確かめられないもの
+  を置く——`AppleDatabaseTest`（システム SQLite 上の NativeSqliteDriver、FTS5 trigram 検索、スナップショット、実際のマージ）、
+  `ApplePlatformTest`（gzip、ダイジェスト、ファイル）、`KeryxSdkTest`。`macosTest/` には `KeychainTokenStorageTest` を置く：
+  Kotlin/Native は iOS のテストをアプリバンドル外の裸の実行ファイルとして動かすのでキーチェーンが存在しない
+  （`errSecNotAvailable`）が、macOS ではログインキーチェーンに届く（ランダムで後片付けするサービス名を使い、
+  `works.merc.keryx` には触れない）。**Apple のテストから、上書きしていない `AppDirs.appDataDir()` に触れてはならない**——
+  macOS ではユーザーの実データ `~/Library/Application Support/Keryx` を指す。`KeryxSdk.start` に `dataDirectory` を渡すか、
+  `DatabaseDriverFactory().createDriver(dir)` でドライバを作ること。
 - `androidDeviceTest/` — Android 実機の SQLite やプラットフォーム API を必要とし、プレーンな JVM
   ユニットテストとしては実行できない計装テスト（`.claude/rules/android-sqlite-bundling.md` 参照）。
   実機または起動中のエミュレータが必要。`composeApp` には `androidUnitTest`/`androidHostTest`

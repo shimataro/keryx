@@ -41,6 +41,12 @@ directly rather than re-reading them.
   a `commonMain` `expect` with its `actual` in `desktopMain`, rather than leaking
   into `commonMain`? This is what keeps the planned Android/iOS targets viable.
   (CLAUDE.md constraint #4)
+- **`:shared` stays UI-framework-free and Apple-buildable.** No Compose, Compose
+  Resources, AWT/Swing or Android UI import in `shared/src`; a new `:shared`
+  `expect` needs an `appleMain` actual too (`shared/src/appleMain`, with
+  `macosMain`/`iosMain` only for AppKit/UIKit differences); no localized text
+  produced in shared code (emit `NotificationText`/`ErrorKind`). Logic every UI
+  needs belongs in `presentation/`, not re-derived in a composable.
 - Does new platform-branching logic sit where it can be replaced per target? OS branches that already
   live in `commonMain` (`platform/PlatformOs.kt`, `ui/home/HomeCommon.kt`, `ui/home/KeyboardNav.kt`)
   are deliberate — a *new* one in `commonMain` needs a reason.

@@ -59,6 +59,8 @@ memory:
 ./gradlew :shared:desktopTest :composeApp:desktopTest  # Run tests only
 ./gradlew :composeApp:run            # Run the desktop app
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
+./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test  # Apple-target tests (Mac + Xcode)
+./gradlew :shared:assembleKeryxSharedReleaseXCFramework         # Framework for the SwiftUI app
 ```
 
 ## Branching
@@ -201,8 +203,9 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    whatever `commonMain` declares `expect` (mostly under `platform/`, but also spanning
    `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " shared/src/commonMain composeApp/src/commonMain` for
    the current one, rather than trusting a count here that will drift.
-   Desktop implementations live in `desktopMain`. This keeps the door open for
-   Android/iOS targets later. Code with no Compose/UI dependency belongs in the
+   Desktop implementations live in `desktopMain`, Android ones in `androidMain`,
+   and Apple (macOS/iOS) ones in `shared/src/appleMain` (`macosMain`/`iosMain`
+   for AppKit/UIKit differences) — a new `:shared` expect needs all three. Code with no Compose/UI dependency belongs in the
    `:shared` module (never import Compose, Compose Resources, AWT/Swing or an
    Android UI API there); `:composeApp` holds the Compose UI.
 5. **Follow the design docs.** Do not change the sync algorithm, merge SQL
@@ -249,4 +252,6 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
   foojay-resolver plugin, but `:composeApp:run` executes with whatever JVM
   launched Gradle — if that's older than 25, you'll hit `UnsupportedClassVersionError`.
 - SQLDelight 2.3.2, sqlite-jdbc 3.53.4.0, Ktor 3.5.2, Koin 4.2.2, coroutines 1.11.0
+- Apple targets (`:shared` only): Xcode on an Apple Silicon Mac; SKIE 0.10.15
+  shapes the framework's Swift API (check its Kotlin support before bumping Kotlin).
 - Config cache is disabled (the `generateBuildConfig` task isn't cache-safe yet).

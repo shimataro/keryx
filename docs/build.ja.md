@@ -15,6 +15,11 @@
   [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   のようなデスクトップ限定タスクはこの要件を回避できる。
 
+- **Xcode**（macOS のみ）—— `:shared` の Apple ターゲット、つまり `KeryxShared` XCFramework
+  （`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`。出力は `shared/build/XCFrameworks/release/` 配下）と、その macOS／
+  iOS シミュレータ向けテストに必要。Xcode がない場合（または Linux/Windows）は Gradle がそれらのターゲットをスキップし、それ以外は
+  従来どおりビルドされる。
+
 サンドボックス等でツールチェーンの自動ダウンロードが必要な場合:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`。
 
