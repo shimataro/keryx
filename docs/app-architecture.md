@@ -39,7 +39,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
@@ -1159,16 +1159,28 @@ trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 
 readable after first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
 ("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
 — gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/
-OneDrive's shared `keryx://oauth2/callback` redirect, uses that client's own reversed-client-id
-custom scheme (`com.googleusercontent.apps.<id>:/oauth2redirect`); see sync-architecture.md's
-"Google Drive on Apple". The in-app updater (`updateModule`) is not installed: the App Store or
-Sparkle update this app.
+OneDrive's shared `keryx://oauth2/callback` redirect (a scheme the Apple app itself never registers
+— see below), uses that client's own reversed-client-id custom scheme
+(`com.googleusercontent.apps.<id>:/oauth2redirect`); see sync-architecture.md's "Google Drive on
+Apple". The in-app updater (`updateModule`) is not installed: the App Store or Sparkle update this
+app.
+
+Every provider's connect flow still builds its authorize URL and redirect URI exactly as desktop
+does (`OAuthConnectFlow` + `CustomUriRedirectTransport`), but the Apple app never opens a browser
+and never registers a custom URI scheme with the OS: `KeryxSdk.start`'s `openAuthorization` closure
+supplies an `AuthorizationLauncher` that hands the URL straight to Swift, which opens an
+`ASWebAuthenticationSession` — `domain/schemeOf` derives that session's required
+`callbackURLScheme` from the connect flow's own redirect URI, so Swift needs no separate, hardcoded
+copy of each provider's scheme. The session's callback URL is handed to `handleOAuthRedirect`
+exactly like an OS-routed `keryx://` redirect would be; desktop and Android are unaffected
+(`AuthorizationLauncher` defaults to opening the system browser, their existing behavior).
 
 ### `KeryxSdk`: the Swift entry point
 
 `sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
-`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` builds the object
-graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin kept internal),
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:openAuthorization:)`
+builds the object graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin
+kept internal),
 opens the database — a `DatabaseTooNewException` surfaces here as a Swift error — and hands out
 `homeViewModel`, `notificationCenter`, `newArticleNotifier` (the new-articles text of every refresh
 that found some, also passed to the OS notification sink), `syncRepository`, `settingsRepository`,
@@ -1185,7 +1197,11 @@ the Keychain, so — like `prepareSearchIndex()` below — `KeryxSdk` runs them 
 background scope itself and awaits the result, rather than exposing the raw service and trusting a
 Swift `@MainActor` call site to dispatch off its own thread the way the Compose UI's
 `withContext(dispatcher)` does. `dataDirectory` puts every app directory
-under a given path, for previews and tests that must not open the user's real data. `close()` stops
+under a given path, for previews and tests that must not open the user's real data.
+`openAuthorization` is `((url: String, callbackScheme: String) -> Unit)?` — `null` (the default)
+falls back to opening the system browser, which previews and tests that never actually connect a
+provider can safely ignore; the shipping app passes a closure that opens an
+`ASWebAuthenticationSession` (see "Apple targets in `:shared`" above). `close()` stops
 and joins every coroutine that can still read the database before closing it, flushes and stops
 the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
 `dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the

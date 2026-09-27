@@ -13,8 +13,10 @@ import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeychainTokenStorage
 import works.merc.keryx.app.data.cloud.appleKeychainAccount
 import works.merc.keryx.app.data.cloud.googleIosClientRedirectUri
+import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
+import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
@@ -27,10 +29,15 @@ import works.merc.keryx.app.domain.OsNotificationSink
  *
  * @param notificationMessages The new-articles OS-notification text, localized by the Swift app.
  * @param osNotificationSink Posts that notification; the Swift app decides how (UserNotifications).
+ * @param authorizationLauncher How every provider's connect flow opens the authorize URL. Defaults
+ *   to [DefaultAuthorizationLauncher] (a browser) for tests/previews that call this directly; the
+ *   shipping app always passes the launcher `KeryxSdk.start`'s `openAuthorization` closure builds,
+ *   which hands the URL to Swift for an `ASWebAuthenticationSession`.
  */
 fun applePlatformModule(
     notificationMessages: NotificationMessages,
     osNotificationSink: OsNotificationSink,
+    authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ): Module = module {
     single { keryxHttpClient(Darwin) }
     single<NotificationMessages> { notificationMessages }
@@ -39,11 +46,12 @@ fun applePlatformModule(
         tokenStorage = { type -> KeychainTokenStorage(account = appleKeychainAccount(type)) },
         extraProviders = { client, callbackFlow ->
             if (AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()) {
-                mapOf(CloudStorageType.GOOGLE_DRIVE to appleGoogleDriveProvider(client, callbackFlow))
+                mapOf(CloudStorageType.GOOGLE_DRIVE to appleGoogleDriveProvider(client, callbackFlow, authorizationLauncher))
             } else {
                 emptyMap()
             }
         },
+        authorizationLauncher = authorizationLauncher,
     )
 }
 
@@ -58,6 +66,7 @@ fun applePlatformModule(
 private fun appleGoogleDriveProvider(
     client: HttpClient,
     callbackFlow: MutableSharedFlow<OAuthCallbackParams>,
+    authorizationLauncher: AuthorizationLauncher,
 ): CloudSession.Provider {
     val clientId = AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID
     val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, clientSecret = null)
@@ -69,6 +78,7 @@ private fun appleGoogleDriveProvider(
             authManager = driveAuth,
             clientId = clientId,
             transport = CustomUriRedirectTransport(callbackFlow, redirectUri = googleIosClientRedirectUri(clientId)),
+            authorizationLauncher = authorizationLauncher,
         ),
         createStorage = { tokenProvider -> GoogleDriveStorage(client, tokenProvider) },
     )

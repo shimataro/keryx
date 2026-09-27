@@ -424,13 +424,15 @@ desktop の起動時は `main.kt` の `runBlocking` から `FtsManager.ensureInd
 
 ## クラウド認証（OAuth PKCE + オフラインアクセス）
 
-OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・ブラウザー起動・
-state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（`commonMain`、desktop と Android で共有）
-に集約する。プロバイダー差は
+OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・その URL を開く・
+state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（`commonMain`、Apple 版を含む全プラット
+フォームで共有）に集約する。プロバイダー差は
 **リダイレクトの受け取り方（`OAuthRedirectTransport`）とエンドポイント/スコープ（`CloudAuthManager` 実装）**
 だけで、`DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` が `CloudAuthManager` を実装する。いずれも
 オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を
-指定し**リフレッシュトークンを取得・保存**する。
+指定し**リフレッシュトークンを取得・保存**する。認可 URL を開く処理自体は、注入された
+`domain/AuthorizationLauncher` を経由する（既定はシステムのブラウザ。desktop/Android の従来どおりの動作）
+——Apple 版が自前のものをどう渡すかは、後述の「Apple 版での OAuth 認可」を参照。
 
 **唯一の例外が Android の Google Drive で、このフローをまったく通らない** —— `OAuthConnectFlow` も
 `OAuthRedirectTransport` も使わず、リフレッシュトークンも持たない。Play 開発者サービスの
@@ -442,8 +444,10 @@ Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android �
 
 - **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）:
   - **仕組み。** リダイレクト URI は `keryx://oauth2/callback`。両プロバイダーで共有し `state` で識別
-    する。認可 URL は既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送する（`main.kt` が
-    `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+    する。desktop/Android では認可 URL を既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送
+    する（`main.kt` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+    Apple 版は代わりに `ASWebAuthenticationSession` を使う——詳細は後述の「Apple 版での OAuth 認可」
+    を参照。
   - **OneDrive 固有の事情。** Microsoft Identity platform（`consumers` テナント）と Microsoft Graph を
     使い、Google と違い**クライアントシークレット不要の PKCE パブリッククライアント**。同期 DB は
     アプリ専用フォルダー（`/me/drive/special/approot`、スコープ `Files.ReadWrite.AppFolder`）に保存する。
@@ -617,9 +621,10 @@ Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は�
   関数で、`ApplePlatformModule.kt` の `appleGoogleDriveProvider` がその結果を `CustomUriRedirectTransport`
   の `redirectUri` に渡す。`cloudSessionSingles` が Dropbox・OneDrive 用に用意する既存の
   `MutableSharedFlow<OAuthCallbackParams>` をそのまま共用し、どちらのスキームでリダイレクトが届いても
-  `state` で判別する。Swift 側アプリの実装時には、この Dropbox・OneDrive 用の `keryx://` と並べて、
-  Info.plist の `CFBundleURLTypes`（または `ASWebAuthenticationSession` の `callbackURLScheme`）に
-  このスキームを登録する — 詳細は [build.md](build.ja.md) を参照。
+  `state` で判別する。Swift 側アプリは、このスキームも `keryx://` も Info.plist に登録しない——OS が
+  カスタムスキームのリダイレクトをルーティングする代わりに `ASWebAuthenticationSession` を開くので、
+  必要なのはそのセッション自身の `callbackURLScheme` だけ——詳細は後述の「Apple 版での OAuth 認可」
+  を参照。
 - **別クライアントだが同じ Cloud プロジェクト。** Apple 用クライアントは、上記の Android の場合と同様に
   desktop 版とは別の OAuth クライアントだが、パッケージ署名で自動照合されるのではなく Cloud Console で
   手動作成する — Google の「iOS」クライアントタイプには Android の SHA-1 照合に相当する仕組みが無いため、
@@ -634,6 +639,31 @@ Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は�
 - **トークンとリフレッシュ。** Android の Play 開発者サービス経路とは異なり、Apple 版は本物のリフレッシュ
   トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — Play 開発者サービス風の
   `accessTokenProvider` による上書きはここには無い。
+
+### Apple 版での OAuth 認可（`ASWebAuthenticationSession`）
+
+Apple 版のどのプロバイダーも、`OAuthConnectFlow` + `OAuthRedirectTransport` の組み合わせ自体は desktop と
+同じ（Dropbox・OneDrive は `keryx://`、Google Drive は自分専用のクライアント ID 逆順スキーム、いずれも
+カスタム URI スキーム）。違うのは**認可 URL をどう開き、リダイレクトをどう受け取るか**——Apple 版はカスタム
+URI スキームを OS に登録せず、ブラウザも自分では開かない：
+
+- `OAuthConnectFlow` は認可 URL を、`platform/BrowserOpener` を直接呼ぶのではなく、注入された
+  `domain/AuthorizationLauncher`（`fun interface { fun launch(authorizeUrl: String, redirectUri: String) }`）
+  経由で開く。`domain/DefaultAuthorizationLauncher`——どのプラットフォームでも既定——はシステムのブラウザ
+  で開く。この仕組みが入る前と同じ挙動のまま変わらない。
+- `KeryxSdk.start` の `openAuthorization: ((url: String, callbackScheme: String) -> Unit)?` 引数で、
+  Swift 側が自前のランチャーを渡せる。渡された場合、`KeryxSdk` はこれを `AuthorizationLauncher` として
+  ラップし、接続フロー自身の `redirectUri` から `domain/schemeOf`（先頭の `:` より前をすべて取る）で
+  `callbackScheme` を導出してからクロージャーに両方を渡す。Swift 側アプリは
+  `ASWebAuthenticationSession(url:callbackURLScheme:)` を開く——OS がスキームをルーティングするのではなく
+  セッションが直接コールバックを受け取るので、どのプロバイダーについても Info.plist の
+  `CFBundleURLTypes` 登録は不要。
+- セッションの完了ハンドラーは、そのコールバック URL を `KeryxSdk.handleOAuthRedirect(url)` に渡す——
+  desktop/Android で OS がルーティングする `keryx://` リダイレクトとまったく同じ扱いで、両者とも同じ
+  `MutableSharedFlow<OAuthCallbackParams>` を `state` で識別して流れるだけなので、`OAuthConnectFlow`
+  自身はどちらが届いたのか区別できない。
+- ユーザーがセッションをキャンセルした場合は、Swift 側が接続フロー自身のコルーチン（`Task`）をキャンセル
+  する。`OAuthConnectFlow` 自体には別途呼び出すキャンセル経路は無い。
 
 ### トークン保存先
 

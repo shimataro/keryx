@@ -18,8 +18,10 @@ import works.merc.keryx.app.di.applePlatformModule
 import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
@@ -28,6 +30,7 @@ import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.parseOAuthUri
+import works.merc.keryx.app.domain.schemeOf
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.presentation.home.AddFeedController
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -162,6 +165,12 @@ class KeryxSdk private constructor(private val koin: Koin) {
          * @param postOsNotification Posts that notification (message, count); may do nothing.
          * @param dataDirectory Where to keep all app data instead of Application Support — for
          *   previews and tests; `null` in the shipping app.
+         * @param openAuthorization Opens a cloud provider's OAuth authorize URL for the user —
+         *   the shipping app hands both arguments to an `ASWebAuthenticationSession`
+         *   (`callbackScheme` is that session's `callbackURLScheme`, derived from the connect
+         *   flow's own redirect URI, e.g. `keryx` or a Google reversed-client-id scheme). `null`
+         *   (the default) falls back to opening the system browser, which previews and tests that
+         *   never actually connect a provider can safely ignore.
          * @throws works.merc.keryx.app.data.local.DatabaseTooNewException if a newer build migrated
          *   the database.
          */
@@ -170,14 +179,20 @@ class KeryxSdk private constructor(private val koin: Koin) {
             newArticlesText: (count: Int) -> String,
             postOsNotification: (message: String, count: Int) -> Unit,
             dataDirectory: String?,
+            openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
         ): KeryxSdk {
             AppDirs.rootOverride = dataDirectory
             val messages = object : NotificationMessages {
                 override suspend fun newArticles(count: Int): String = newArticlesText(count)
             }
             val sink = OsNotificationSink { message, count -> postOsNotification(message, count) }
+            val authorizationLauncher = openAuthorization?.let { open ->
+                AuthorizationLauncher { authorizeUrl, redirectUri ->
+                    open(authorizeUrl, schemeOf(redirectUri).orEmpty())
+                }
+            } ?: DefaultAuthorizationLauncher
             val koin = koinApplication {
-                modules(sharedModule(), presentationModule(), applePlatformModule(messages, sink))
+                modules(sharedModule(), presentationModule(), applePlatformModule(messages, sink, authorizationLauncher))
             }.koin
             // Open the database now, so a too-new file is reported here, as a Swift error — unwrapped
             // from Koin's own instance-creation wrapper so the app can recognise it. A failed start

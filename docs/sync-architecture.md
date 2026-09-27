@@ -269,7 +269,7 @@ on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `arti
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 
-OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, browser launch, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by desktop and Android). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**.
+OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, opening that URL, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by every platform including the Apple app). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**. Opening the authorize URL itself goes through an injected `domain/AuthorizationLauncher` (default: the system browser, `desktop`/Android's unchanged behavior) — see "OAuth authorization on Apple" below for how the Apple app supplies its own.
 
 **The one exception is Google Drive on Android, which does not go through this flow at all** — no `OAuthConnectFlow`, no `OAuthRedirectTransport`, and no refresh token. Play services' `AuthorizationClient` runs the whole consent interaction and hands the app a short-lived access token directly, re-issuing one on demand instead. Everything in this section up to "Token Storage" therefore describes desktop's three providers plus Android's Dropbox and OneDrive; see "Google Drive on Android" below for the remaining case.
 
@@ -277,9 +277,10 @@ Redirect reception method is chosen per provider (see the `.claude/rules/cloud-o
 
 - **Dropbox / OneDrive — Custom URI scheme** (`CustomUriRedirectTransport`):
   - **Mechanism.** Redirect URI is `keryx://oauth2/callback`, shared by both providers and
-    disambiguated by `state`. The authorization URL is opened in the default browser, and the OS
-    delivers the URL to the running instance (`main.kt` parses via `parseOAuthUri` and feeds a
-    shared `MutableSharedFlow<OAuthCallbackParams>`).
+    disambiguated by `state`. On desktop/Android the authorization URL is opened in the default
+    browser, and the OS delivers the URL to the running instance (`main.kt` parses via
+    `parseOAuthUri` and feeds a shared `MutableSharedFlow<OAuthCallbackParams>`); the Apple app
+    instead uses an `ASWebAuthenticationSession` — see "OAuth authorization on Apple" below.
   - **OneDrive specifics.** Uses the Microsoft Identity platform (`consumers` tenant) and Microsoft
     Graph; it is a **PKCE public client with no client secret** (unlike Google), and stores the sync
     DB in the hidden app folder (`/me/drive/special/approot`, scope `Files.ReadWrite.AppFolder`).
@@ -436,9 +437,9 @@ desktop's.
   result as `CustomUriRedirectTransport`'s `redirectUri`, reusing the same shared
   `MutableSharedFlow<OAuthCallbackParams>` `cloudSessionSingles` already wires up for Dropbox/
   OneDrive — the flow is disambiguated by `state` regardless of which scheme delivered the redirect.
-  The Swift app registers that scheme in its Info.plist `CFBundleURLTypes` (or as an
-  `ASWebAuthenticationSession` `callbackURLScheme`) alongside the shared `keryx://` one; see
-  [build.md](build.md).
+  The Swift app never registers this scheme (or `keryx://`) in its Info.plist: it opens an
+  `ASWebAuthenticationSession` instead of the OS routing a custom-scheme redirect, so the session's
+  own `callbackURLScheme` parameter is all that's needed — see "AuthorizationLauncher" below.
 - **Separate client, same Cloud project.** The Apple client is a distinct OAuth client from
   desktop's, exactly like the Android case above, but obtained by hand in the Cloud Console rather
   than matched by package signature — Google's "iOS" client type has no signature-matching
@@ -455,6 +456,32 @@ desktop's.
 - **Tokens and refresh.** Unlike Android's Play-services path, the Apple app owns a real refresh
   token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — there is no Play-services-style
   `accessTokenProvider` override here.
+
+### OAuth authorization on Apple (`ASWebAuthenticationSession`)
+
+Every provider on the Apple app runs the same `OAuthConnectFlow` + `OAuthRedirectTransport` pairing
+as desktop (custom URI scheme for all three: Dropbox/OneDrive on `keryx://`, Google Drive on its
+own reversed-client-id scheme). What differs is **how the authorize URL gets opened and how the
+redirect comes back** — the Apple app never registers a custom URI scheme with the OS and never
+opens a browser directly:
+
+- `OAuthConnectFlow` opens the authorize URL through an injected `domain/AuthorizationLauncher`
+  (`fun interface { fun launch(authorizeUrl: String, redirectUri: String) }`) rather than calling
+  `platform/BrowserOpener` itself. `domain/DefaultAuthorizationLauncher` — the default on every
+  platform — opens it in the system browser, unchanged from before this seam existed.
+- `KeryxSdk.start`'s `openAuthorization: ((url: String, callbackScheme: String) -> Unit)?` parameter
+  lets Swift supply its own launcher. When set, `KeryxSdk` wraps it into an `AuthorizationLauncher`
+  that derives `callbackScheme` from the connect flow's own `redirectUri` via `domain/schemeOf`
+  (everything before the first `:`) and hands both to the closure. The Swift app opens an
+  `ASWebAuthenticationSession(url:callbackURLScheme:)` with them — no Info.plist `CFBundleURLTypes`
+  entry is needed for any provider, since the session receives the callback URL directly rather
+  than the OS routing it through a registered scheme.
+- The session's completion handler passes its callback URL to `KeryxSdk.handleOAuthRedirect(url)`,
+  exactly like an OS-routed `keryx://` redirect would be on desktop/Android — `OAuthConnectFlow`
+  itself cannot tell the two apart, since both arrive through the same
+  `MutableSharedFlow<OAuthCallbackParams>` disambiguated by `state`.
+- If the user cancels the session, Swift cancels the connect flow's own coroutine (its `Task`);
+  `OAuthConnectFlow` has no separate cancel path of its own to call.
 
 ### Token Storage
 

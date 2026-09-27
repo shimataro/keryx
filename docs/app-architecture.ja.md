@@ -37,7 +37,7 @@
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
@@ -1156,15 +1156,26 @@ FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLi
 `appleKeychainAccount(type)`——`CloudStorageType.id`、ただし Google Drive は `google_drive_apple`。「配布と共存」参照——、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
 `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
 設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
-共通 `keryx://oauth2/callback` リダイレクトとは異なり、そのクライアント自身のクライアント ID を逆順にした
+共通 `keryx://oauth2/callback` リダイレクト（このスキーム自体、Apple アプリは登録しない。後述）とは異なり、
+そのクライアント自身のクライアント ID を逆順にした
 カスタムスキーム（`com.googleusercontent.apps.<id>:/oauth2redirect`）を使う。詳細は
 sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプリ内アップデート（`updateModule`）は
 組み込まない：このアプリは App Store または Sparkle が更新する。
 
+どのプロバイダーも、認可 URL とリダイレクト URI の組み立て自体はデスクトップと同じ
+（`OAuthConnectFlow` + `CustomUriRedirectTransport`）。ただし Apple アプリはブラウザを開かず、カスタム URI
+スキームを OS に登録もしない：`KeryxSdk.start` の `openAuthorization` クロージャが `AuthorizationLauncher`
+を渡し、URL をそのまま Swift に手渡す。Swift は `ASWebAuthenticationSession` を開く——このセッションに
+必要な `callbackURLScheme` は `domain/schemeOf` が接続フロー自身のリダイレクト URI から導出するので、
+Swift 側が各プロバイダーのスキームを別途ハードコードする必要はない。セッションのコールバック URL は、OS が
+ルーティングする `keryx://` リダイレクトとまったく同じように `handleOAuthRedirect` に渡す。デスクトップと
+Android は影響を受けない（`AuthorizationLauncher` の既定はシステムのブラウザを開く、従来どおりの動作）。
+
 ### `KeryxSdk`：Swift からの入口
 
 `sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：
-`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` がオブジェクトグラフ
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:openAuthorization:)`
+がオブジェクトグラフ
 （`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`。Koin は内部に隠す）を構築し、DB を開き——
 `DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・
 `newArticleNotifier`（新着記事が見つかった更新ごとの新着テキスト。OS 通知の送り先にも渡される）・`syncRepository`・
@@ -1179,7 +1190,11 @@ sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプ�
 ——`KeryxSdk` がその実行を SDK 自身のバックグラウンドスコープに乗せて結果を待つ。生のサービスをそのまま渡して
 Swift の `@MainActor` 呼び出し元がメインスレッド外へのディスパッチ（Compose 側の `withContext(dispatcher)` に相当
 するもの）を自前で行うことは期待していない。`dataDirectory` は、
-すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。`close()` は、
+すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。
+`openAuthorization` は `((url: String, callbackScheme: String) -> Unit)?`——`null`（既定）ならシステムのブラウザに
+フォールバックする。これは、実際にプロバイダーへ接続することのないプレビューやテストが安全に無視できる値。
+出荷版アプリは `ASWebAuthenticationSession` を開くクロージャを渡す（上記「`:shared` 内の Apple ターゲット」参照）。
+`close()` は、
 まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
 HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。
 `handleOAuthRedirect` は、接続フローがリダイレクトを待ち受けていなければ `false` を返し、そのリダイレクトは破棄する。
