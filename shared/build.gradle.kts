@@ -399,10 +399,13 @@ sqldelight {
             packageName.set("works.merc.keryx.app.data.local.db")
             srcDirs.setFrom("src/commonMain/sqldelight")
             dialect(libs.sqldelight.dialect.sqlite338)
-            // Disables build-time migration verification. This should remain off until
-            // `.sqm` migration files are introduced; without them, verification will
-            // fail because it cannot reconstruct a migration chain. Re-enable when you
-            // add your first migration file.
+            // Disables build-time migration verification. `1.sqm` (version 1 -> 2) already
+            // exists, but SQLDelight's verifier checks a migration by replaying it against a
+            // captured schema snapshot file, and this project has never set up the sibling
+            // Gradle task (generateCommonMainKeryxDatabaseSchema) that produces and commits that
+            // snapshot — turning this on as-is fails immediately with "Verifying a migration
+            // requires a database file to be present". Re-enable once that snapshot-generation
+            // step is wired in.
             verifyMigrations.set(false)
         }
     }
