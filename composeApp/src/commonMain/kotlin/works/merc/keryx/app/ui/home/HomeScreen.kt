@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -173,9 +174,12 @@ fun HomeScreen() {
     var paneLayout by remember { mutableStateOf(PaneLayout.Triple) }
     // Whether HomeScreen has already clamped focusedPane for a narrow layout at least once this
     // session — see the one-shot LaunchedEffect inside BoxWithConstraints below for why this must
-    // never re-fire (a mid-session narrow<->Triple flip, e.g. a window resize or an Android
-    // rotation, must not yank the user off whatever article they're reading).
-    var initialPaneClamped by remember { mutableStateOf(false) }
+    // never re-fire (a mid-session narrow<->Triple flip, e.g. a window resize, must not yank the
+    // user off whatever article they're reading). rememberSaveable, not remember: on Android, a
+    // rotation (with no configChanges declared in the manifest) recreates the whole Activity —
+    // and with it this composition — from scratch, so plain `remember` would reset to false and
+    // the clamp/drawer-auto-open effect below would fire again on every rotation.
+    var initialPaneClamped by rememberSaveable { mutableStateOf(false) }
     // Arrow keys only actually reach a pane when this window has real OS focus (not a modal dialog,
     // Settings/About, or another application) and the search field isn't the one consuming them —
     // panes must render their selection dimmed in every other case, not just when focus moved to a
