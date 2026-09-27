@@ -34,8 +34,13 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.ui.common.KeryxIcons
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
@@ -180,22 +185,30 @@ class ArticleListPaneTest {
     fun refreshListAccessibilityActionIsExposedAndStartsAPull() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("f1")
-        useHomeViewModel(driver, db) { fixture ->
-            val vm = fixture.vm
-            setContent {
-                ArticleListPane(vm = vm, focused = true, onActivated = {}, isTouchPrimary = true)
-            }
-            waitForIdle()
+        val activityCenter = ActivityCenter()
+        val busyScope = CoroutineScope(Dispatchers.Unconfined)
+        try {
+            useHomeViewModel(driver, db, activityCenter = activityCenter) { fixture ->
+                val vm = fixture.vm
+                setContent {
+                    ArticleListPane(vm = vm, focused = true, onActivated = {}, isTouchPrimary = true)
+                }
+                waitForIdle()
 
-            val action = onNode(hasRefreshListAction).fetchSemanticsNode()
-                .config[SemanticsActions.CustomActions].single { it.label == refreshListLabel }
-            // Assert inside the same runOnIdle call as the trigger: pullToRefresh's cleanup runs on
-            // viewModelScope (the real EDT), and a gap between firing and asserting here is a race
-            // window for that coroutine to finish and clear the filter before the check runs.
-            runOnIdle {
-                action.action()
+                val action = onNode(hasRefreshListAction).fetchSemanticsNode()
+                    .config[SemanticsActions.CustomActions].single { it.label == refreshListLabel }
+                // A real refresh cycle against MockEngine can complete synchronously on the EDT before
+                // the assertion runs; an in-flight refresh makes the pull deterministically wait for idle.
+                val busyGate = CompletableDeferred<Unit>()
+                busyScope.launch { activityCenter.trackFeedRefresh { busyGate.await() } }
+                runOnIdle { action.action() }
                 assertTrue(vm.filter.value in vm.pullRefreshingFilters.value, "the action must start the same pull")
+
+                busyGate.complete(Unit)
+                waitUntil { vm.filter.value !in vm.pullRefreshingFilters.value }
             }
+        } finally {
+            busyScope.cancel()
         }
     }
 

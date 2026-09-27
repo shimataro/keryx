@@ -663,15 +663,32 @@ class SettingsViewModelTest {
     fun disconnectSetsDisconnectingUntilTeardownCompletes() {
         val tokenStorage = FakeTokenStorage()
         tokenStorage.save(OAuthTokens("AT"))
-        val vm = newViewModel(tokenStorage = tokenStorage)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-        assertFalse(vm.disconnecting.value)
+        // Holds the revoke open so the teardown cannot finish on Ktor's IO thread before the
+        // in-flight assertion below runs.
+        val revokeGate = CompletableDeferred<Unit>()
+        val authClient = HttpClient(MockEngine { revokeGate.await(); respond("{}", HttpStatusCode.OK) }) {
+            expectSuccess = false
+        }
+        try {
+            val session = singleProviderCloudSession(
+                client = authClient,
+                tokenStorage = tokenStorage,
+                authManager = DropboxAuthManager(authClient, clock = Clock { 0L }),
+            )
+            val vm = newViewModel(tokenStorage = tokenStorage, cloudSession = session)
+            assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
+            assertFalse(vm.disconnecting.value)
 
-        vm.disconnect()
-        assertTrue(vm.disconnecting.value)
+            vm.disconnect()
+            assertTrue(vm.disconnecting.value)
 
-        awaitTrue { vm.connectedType.value == null && !vm.disconnecting.value }
-        assertFalse(vm.disconnecting.value)
+            revokeGate.complete(Unit)
+            awaitTrue { vm.connectedType.value == null && !vm.disconnecting.value }
+            assertFalse(vm.disconnecting.value)
+        } finally {
+            revokeGate.complete(Unit)
+            authClient.close()
+        }
     }
 
     @Test
