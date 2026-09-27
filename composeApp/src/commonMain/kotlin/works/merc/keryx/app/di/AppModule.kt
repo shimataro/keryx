@@ -24,7 +24,7 @@ val appModule: Module = module {
     single<NotificationMessages> { ComposeNotificationMessages() }
 
     // ViewModels are app-scoped for this single-window desktop app.
-    single { NotificationCenterViewModel(get()) }
+    single { NotificationCenterViewModel(get(), get()) }
     single { HomeLayoutViewModel(get()) }
     single { SettingsViewModel(get(), get(), get(), get()) }
 }

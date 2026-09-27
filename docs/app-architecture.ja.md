@@ -43,7 +43,9 @@
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
                   NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
-                  ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表）、article/（ArticleWebViewHtml——
+                  ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
+                  サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
+                  あるかどうか）、article/（ArticleWebViewHtml——
                   リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——

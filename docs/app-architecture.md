@@ -46,7 +46,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
                   the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
-                  HomeShortcuts — the keyboard-shortcut table over logical keys), article/ (ArticleWebViewHtml —
+                  HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
+                  which warning/error still needs announcing in a transient surface with no queue of
+                  its own, e.g. Android's foreground Snackbar), article/ (ArticleWebViewHtml —
                   the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/

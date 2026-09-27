@@ -12,6 +12,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.NotificationText
+import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.domain.NotificationCenter
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,7 +45,7 @@ class ForegroundAlertSnackbarTest {
     @Test
     fun anAlertRaisedWhileTheWindowIsFocusedIsAnnounced() = runDesktopComposeUiTest {
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -60,7 +61,7 @@ class ForegroundAlertSnackbarTest {
     fun anInfoNotificationIsLeftToTheBellsBadge() = runDesktopComposeUiTest {
         // A new-version notice or a finished OPML import is not an alert.
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -76,7 +77,7 @@ class ForegroundAlertSnackbarTest {
         // The app backgrounded, the notification shade pulled down, or the settings dialog open:
         // announcing there would time the Snackbar out unseen and burn the alert for good.
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         var focused by mutableStateOf(false)
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = focused) }
@@ -96,7 +97,7 @@ class ForegroundAlertSnackbarTest {
     fun onlyTheNewestOfSeveralSimultaneousAlertsIsAnnounced() = runDesktopComposeUiTest {
         // Material 3 shows one Snackbar at a time, and the bell's badge already carries the count.
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -118,7 +119,7 @@ class ForegroundAlertSnackbarTest {
         // SyncRepository coalesces its errors, which mints a fresh id on every attempt — keying the
         // already-announced bookkeeping on the id would Snackbar every background sync.
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -137,7 +138,7 @@ class ForegroundAlertSnackbarTest {
     @Test
     fun aDifferentAlertStillGetsAnnouncedAfterAnEarlierOneWasHandled() = runDesktopComposeUiTest {
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -156,7 +157,7 @@ class ForegroundAlertSnackbarTest {
     @Test
     fun tappingTheActionHandsTheNotificationToTheHost() = runDesktopComposeUiTest {
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -176,7 +177,7 @@ class ForegroundAlertSnackbarTest {
         // Archiving and recreating the cloud database must go through its own confirmation in the
         // notification center, never a one-tap Snackbar.
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         val hostState = SnackbarHostState()
         setContent { ForegroundAlertSnackbar(vm, hostState, windowFocused = true) }
         waitForIdle()
@@ -192,7 +193,7 @@ class ForegroundAlertSnackbarTest {
     fun aNullHostIsANoOpRatherThanACrash() = runDesktopComposeUiTest {
         // Desktop's own steady state: no in-app snackbar convention, so no host is ever created.
         val center = NotificationCenter()
-        val vm = NotificationCenterViewModel(center)
+        val vm = NotificationCenterViewModel(center, NotificationAlerts(center))
         setContent { ForegroundAlertSnackbar(vm, hostState = null, windowFocused = true) }
         waitForIdle()
 
