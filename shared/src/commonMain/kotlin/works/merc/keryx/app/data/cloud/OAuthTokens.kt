@@ -86,7 +86,12 @@ internal suspend fun requestOAuthTokens(
 } catch (e: CancellationException) {
     throw e
 } catch (e: Throwable) {
-    Result.Err(CloudAuthException(e.message ?: "Token request failed"))
+    // Never interpolate e.message here: on a malformed/unexpected token response,
+    // kotlinx.serialization's JsonDecodingException embeds the offending input — the token
+    // payload itself — in its own message, and that message ends up in CloudAuthException's
+    // messageText, which reaches the notification center and the log file (see SyncRepository's
+    // `exception.message` logging). Only the exception's type name is safe to surface.
+    Result.Err(CloudAuthException("Token request failed (${e::class.simpleName})"))
 }
 
 /**
@@ -105,5 +110,6 @@ suspend fun revokeOAuthToken(makeRequest: suspend () -> HttpResponse): Result<Un
 } catch (e: CancellationException) {
     throw e
 } catch (e: Throwable) {
-    Result.Err(CloudAuthException(e.message ?: "Revoke failed"))
+    // See requestOAuthTokens's own comment: e.message must never be surfaced here either.
+    Result.Err(CloudAuthException("Revoke failed (${e::class.simpleName})"))
 }

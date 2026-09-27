@@ -107,6 +107,22 @@ class DropboxAuthManagerTest {
     }
 
     @Test
+    fun exchangeCodeErrorMessageNeverEmbedsTheResponseBody() = runTest {
+        // A 200 response whose JSON shape doesn't match OAuthTokenResponseDto (e.g. a provider
+        // quirk returning expires_in as a string) makes kotlinx.serialization's
+        // JsonDecodingException embed the offending input - i.e. this response body, which could
+        // carry a live access/refresh token - in its own message. That message must never surface
+        // in CloudAuthException.messageText, since it reaches the notification center and logs.
+        val leakedToken = "SECRET_REFRESH_TOKEN_VALUE"
+        val body = """{"access_token":"AT","refresh_token":"$leakedToken","expires_in":"not-a-number"}"""
+        val m = manager { respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
+        val r = m.exchangeCode("APPKEY", "code", "verifier", "http://127.0.0.1/callback")
+        assertIs<Result.Err>(r)
+        assertIs<CloudAuthException>(r.exception)
+        assertTrue(!r.exception.messageText.contains(leakedToken))
+    }
+
+    @Test
     fun exchangeCodeReturnsErrWhenAccessTokenMissing() = runTest {
         val body = """{"refresh_token":"RT","expires_in":14400}"""
         val m = manager { respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
