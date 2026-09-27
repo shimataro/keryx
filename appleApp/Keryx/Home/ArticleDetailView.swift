@@ -19,7 +19,7 @@ struct ArticleDetailView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            ArticleWebView(html: documentHtml, baseUrl: baseUrl, outboundLinks: outboundLinks)
+            ArticleWebView(html: documentHtml, outboundLinks: outboundLinks)
         }
         .focused(focusedPane, equals: .reader)
         .onChange(of: selectedArticleId, initial: true) { _, id in
@@ -82,11 +82,6 @@ struct ArticleDetailView: View {
             titleUrl: article.url,
             titleTooltip: article.url
         )
-    }
-
-    private var baseUrl: URL? {
-        guard let article = home.selectedArticle else { return nil }
-        return URL(string: article.url)
     }
 
     private var outboundLinks: Set<String> {

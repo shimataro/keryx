@@ -9,7 +9,6 @@ import WebKit
 /// embed's own internal navigation) is left to load inside the WebView untouched.
 struct ArticleWebView {
     let html: String
-    let baseUrl: URL?
     let outboundLinks: Set<String>
 
     @MainActor
@@ -21,12 +20,17 @@ struct ArticleWebView {
     private func configure(_ webView: WKWebView, coordinator: Coordinator) {
         webView.navigationDelegate = coordinator
         coordinator.outboundLinks = outboundLinks
-        webView.loadHTMLString(html, baseURL: baseUrl)
+        // SwiftUI calls update on every re-evaluation; reloading an unchanged document would reset
+        // the scroll position.
+        guard html != coordinator.loadedHtml else { return }
+        coordinator.loadedHtml = html
+        webView.loadHTMLString(html, baseURL: ArticleNavigationPolicy.documentBaseURL)
     }
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         var outboundLinks: Set<String>
+        var loadedHtml: String?
 
         init(outboundLinks: Set<String>) {
             self.outboundLinks = outboundLinks
@@ -37,11 +41,8 @@ struct ArticleWebView {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            guard let url = navigationAction.request.url else {
-                decisionHandler(.allow)
-                return
-            }
-            if outboundLinks.contains(url.absoluteString) {
+            if let url = navigationAction.request.url,
+               ArticleNavigationPolicy.isOutboundClick(url: url, outboundLinks: outboundLinks) {
                 openInBrowser(url.absoluteString)
                 decisionHandler(.cancel)
             } else {

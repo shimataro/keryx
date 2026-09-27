@@ -99,6 +99,7 @@ targets:
     # inside Keryx.app. Revisit if a test genuinely needs the running app.
     sources:
       - path: KeryxTests
+      - path: Keryx/Home/ArticleNavigationPolicy.swift
 
 schemes:
   Keryx:
