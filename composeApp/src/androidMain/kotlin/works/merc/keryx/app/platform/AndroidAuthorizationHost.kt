@@ -60,7 +60,7 @@ object AndroidAuthorizationHost {
      *
      * **The `finally` releases the slot only when [ActivityResultLauncher.launch] itself failed**,
      * because that is the one case where the request can never complete on its own. Cancelling the
-     * waiting coroutine (`SettingsViewModel`/`SetupViewModel` do that when the user aborts the
+     * waiting coroutine (`SettingsViewModel`/`SetupController` do that when the user aborts the
      * connect dialog) does *not* cancel an already-launched consent Activity, so clearing [pending]
      * there would leave that still-live Activity's eventual result free to complete whichever
      * request happens to occupy the slot next — [onResult] has no request id to match on. After a

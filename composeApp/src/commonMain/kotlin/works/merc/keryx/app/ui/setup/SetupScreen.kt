@@ -36,6 +36,8 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
+import works.merc.keryx.app.presentation.setup.SetupController
+import works.merc.keryx.app.presentation.setup.SetupPhase
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
@@ -77,7 +79,7 @@ private fun CloudStorageType.setupOption(): CloudSetupOption = when (this) {
 
 @Composable
 fun SetupScreen(onComplete: () -> Unit) {
-    val vm = koinInject<SetupViewModel>()
+    val vm = koinInject<SetupController>()
 
     // Confirmation-dialog trigger for aborting an in-flight OAuth wait.
     var confirmingAbortConnect by remember { mutableStateOf(false) }

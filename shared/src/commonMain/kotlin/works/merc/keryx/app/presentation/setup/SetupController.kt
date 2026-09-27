@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.setup
+package works.merc.keryx.app.presentation.setup
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,14 +21,21 @@ import works.merc.keryx.app.domain.awaitCancellableConnect
 
 enum class SetupPhase { IDLE, CONNECTING, ERROR }
 
-class SetupViewModel(
+/**
+ * The setup/onboarding screen's shared state holder: choosing local-only vs. a cloud provider, and
+ * running the interactive connect flow through to the initial sync. Shared with the SwiftUI app
+ * (via `KeryxSdk.setupController`) so both UIs follow the same "flush settings before completing
+ * setup" and "sync before opening Home" ordering — see `docs/app-architecture.md`'s "Apple Native
+ * Apps (SwiftUI)".
+ */
+class SetupController(
     private val settingsRepository: SettingsRepository,
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
     private val cloudConnectionService: CloudConnectionService,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher —
-    // same rationale as SettingsViewModel's own dispatcher.
+    // same rationale as CloudSyncController's own dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 

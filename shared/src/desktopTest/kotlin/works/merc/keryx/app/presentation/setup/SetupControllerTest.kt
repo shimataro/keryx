@@ -1,4 +1,4 @@
-package works.merc.keryx.app.ui.setup
+package works.merc.keryx.app.presentation.setup
 
 import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
@@ -67,7 +67,7 @@ private class CountingDispatcher : CoroutineDispatcher() {
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-class SetupViewModelTest {
+class SetupControllerTest {
 
     private lateinit var driver: SqlDriver
     private lateinit var db: KeryxDatabase
@@ -77,7 +77,7 @@ class SetupViewModelTest {
     // so it must be cancelled explicitly before driver.close() — otherwise in-flight coroutines
     // outlive the test and can throw against the closed driver, surfacing (flakily, on another
     // test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
-    private val createdViewModels = mutableListOf<SetupViewModel>()
+    private val createdViewModels = mutableListOf<SetupController>()
 
     @BeforeTest
     fun setUp() {
@@ -102,7 +102,7 @@ class SetupViewModelTest {
         clock: Clock = Clock { 0L },
         connectFlow: CloudConnectFlow? = null,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-    ): SetupViewModel {
+    ): SetupController {
         val syncScheduler = SyncScheduler {}
         // Unconfined write dispatcher so SettingsRepository.flush() (called on setup completion)
         // runs its disk write inline, keeping the store.load() assertions deterministic under runTest.
@@ -129,7 +129,7 @@ class SetupViewModelTest {
             clock = clock,
             connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
         )
-        return SetupViewModel(
+        return SetupController(
             settingsRepository, cloudSession, syncRepository,
             CloudConnectionService(cloudSession, settingsRepository, syncRepository), dispatcher,
         )

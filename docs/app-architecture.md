@@ -47,7 +47,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
                   the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys), article/ (ArticleWebViewHtml —
-                  the reader's HTML document, CSP and theme CSS), Formatting (formatTimestamp). Pane
+                  the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
+                  local-only vs. a cloud provider and running the connect flow through to the initial
+                  sync), Formatting (formatTimestamp). Pane
                   layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,

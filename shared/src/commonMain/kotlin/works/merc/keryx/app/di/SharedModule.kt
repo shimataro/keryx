@@ -39,6 +39,7 @@ import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.setup.SetupController
 
 /**
  * Bindings every app built on :shared needs — database, repositories, sync, notifications.
@@ -129,4 +130,5 @@ fun updateModule(): Module = module {
  */
 fun presentationModule(): Module = module {
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SetupController(get(), get(), get(), get()) }
 }
