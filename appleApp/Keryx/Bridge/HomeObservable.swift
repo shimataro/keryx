@@ -16,6 +16,9 @@ import Observation
 @Observable
 final class HomeObservable {
     let viewModel: HomeViewModel
+    /// Builds a fresh `AddFeedController` for one presentation of the add-feed sheet — never
+    /// cached, since `KeryxSdk.newAddFeedController()` itself returns a new instance every call.
+    let makeAddFeedController: () -> AddFeedController
 
     private(set) var feeds: [Feeds] = []
     private(set) var tags: [Tags] = []
@@ -51,8 +54,9 @@ final class HomeObservable {
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
 
-    init(viewModel: HomeViewModel) {
+    init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
+        self.makeAddFeedController = makeAddFeedController
     }
 
     /// Starts every field's observation loop concurrently. Call once from a `.task` on the view

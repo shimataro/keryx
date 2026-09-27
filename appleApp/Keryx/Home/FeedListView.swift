@@ -1,16 +1,35 @@
 import KeryxShared
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The sidebar pane: All / Starred, folders (collapsible, with unread badges), unfoldered feeds,
 /// and tags (expandable, with color + attached feeds) — see `external-spec.md` §9's "3-pane width"
 /// and `docs/app-architecture.md`. Desktop/macOS is unconditionally the 3-pane steady state, so
 /// this pane (and its permanent search field) is always on screen — there is no narrower-width
 /// drawer variant to reproduce here (that only applies to Android; see M2's research notes).
+///
+/// M3 adds feed/folder/tag management here: add-feed sheet, folder/tag create+rename+delete
+/// (`NamePromptSheet`, shared with duplicate-name validation via `NameValidation.kt`), context
+/// menus, and drag-and-drop (feed reorder/move-to-folder/tag-attach, folder reorder).
 struct FeedListView: View {
     let home: HomeObservable
+    @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
     var body: some View {
+        listContent
+            .listStyle(.sidebar)
+            .searchable(text: searchQueryBinding, placement: .sidebar, prompt: Text("Search"))
+            .focused(focusedPane, equals: .feedList)
+            .navigationTitle("Keryx")
+            .toolbar { toolbarContent }
+            .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
+            .modifier(SidebarRenameSheets(home: home, dialogs: dialogs))
+            .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
         List {
             Section {
                 allRow
@@ -30,10 +49,19 @@ struct FeedListView: View {
                 tagSection(tag)
             }
         }
-        .listStyle(.sidebar)
-        .searchable(text: searchQueryBinding, placement: .sidebar, prompt: Text("Search"))
-        .focused(focusedPane, equals: .feedList)
-        .navigationTitle("Keryx")
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem {
+            Menu {
+                Button("Add Feed…") { dialogs.isAddingFeed = true }
+                Button("New Folder…") { dialogs.isAddingFolder = true }
+                Button("New Tag…") { dialogs.isAddingTag = true }
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
     }
 
     private var searchQueryBinding: Binding<String> {
@@ -97,6 +125,20 @@ struct FeedListView: View {
                 }
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button("Rename…") { dialogs.renamingFolder = folder }
+                Button("Delete", role: .destructive) { dialogs.deletingFolder = folder }
+            }
+            .draggable(folder.id)
+            .dropDestination(for: String.self) { items, _ in
+                guard let draggedId = items.first else { return false }
+                if home.folders.contains(where: { $0.id == draggedId }) {
+                    home.viewModel.reorderFolders(draggedFolderId: draggedId, targetFolderId: folder.id)
+                } else {
+                    home.viewModel.moveFeed(feedId: draggedId, folderId: folder.id, targetFeedId: nil)
+                }
+                return true
+            }
 
             if !isCollapsed {
                 ForEach(feedsIn(folder: folder), id: \.id) { feed in
@@ -127,7 +169,7 @@ struct FeedListView: View {
             } label: {
                 HStack {
                     Circle()
-                        .fill(tagColor(tag.color))
+                        .fill(colorFromHex(tag.color ?? "#808080"))
                         .frame(width: 10, height: 10)
                     Text(tag.name)
                     Spacer()
@@ -138,6 +180,15 @@ struct FeedListView: View {
                 }
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button("Rename / Edit Color…") { dialogs.renamingTag = tag }
+                Button("Delete", role: .destructive) { dialogs.deletingTag = tag }
+            }
+            .dropDestination(for: String.self) { items, _ in
+                guard let feedId = items.first, home.feeds.contains(where: { $0.id == feedId }) else { return false }
+                home.viewModel.setFeedTag(feedId: feedId, tagId: tag.id, attached: true)
+                return true
+            }
 
             if isExpanded {
                 ForEach(feeds(taggedWith: tag), id: \.id) { feed in
@@ -145,16 +196,6 @@ struct FeedListView: View {
                 }
             }
         }
-    }
-
-    private func tagColor(_ hex: String?) -> Color {
-        guard let hex else { return .secondary }
-        var value: UInt64 = 0
-        Scanner(string: hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))).scanHexInt64(&value)
-        let r = Double((value & 0xFF0000) >> 16) / 255
-        let g = Double((value & 0x00FF00) >> 8) / 255
-        let b = Double(value & 0x0000FF) / 255
-        return Color(red: r, green: g, blue: b)
     }
 
     // MARK: - Rows
@@ -169,6 +210,29 @@ struct FeedListView: View {
             isGone: feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE,
             instance: instance,
         )
+        .draggable(feed.id)
+        .dropDestination(for: String.self) { items, _ in
+            guard let draggedId = items.first, draggedId != feed.id,
+                  home.feeds.contains(where: { $0.id == draggedId }) else { return false }
+            home.viewModel.moveFeed(feedId: draggedId, folderId: feed.folder_id, targetFeedId: feed.id)
+            return true
+        }
+        .contextMenu {
+            Button("Rename…") { dialogs.renamingFeed = feed }
+            Button("Refresh") { home.viewModel.refreshFeed(feed: feed) }
+            Menu("Tags") {
+                ForEach(sortedTags, id: \.id) { tag in
+                    let attached = home.feedTagMap[feed.id]?.contains(tag.id) ?? false
+                    Button {
+                        home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: !attached)
+                    } label: {
+                        Label(tag.name, systemImage: attached ? "checkmark" : "")
+                    }
+                }
+            }
+            Divider()
+            Button("Unsubscribe", role: .destructive) { dialogs.unsubscribingFeed = feed }
+        }
     }
 
     @ViewBuilder
@@ -253,5 +317,108 @@ struct FaviconView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             )
+    }
+}
+
+/// The three sidebar `ViewModifier`s below exist only to keep `FeedListView.body`'s own modifier
+/// chain short — chaining all of M3's sheets/alerts directly onto `body` made a single expression
+/// too complex for the type checker ("unable to type-check this expression in reasonable time").
+
+private struct SidebarCreateSheets: ViewModifier {
+    let home: HomeObservable
+    @Bindable var dialogs: SidebarDialogState
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $dialogs.isAddingFeed) {
+                AddFeedSheet(home: home, isPresented: $dialogs.isAddingFeed)
+            }
+            .sheet(isPresented: $dialogs.isAddingFolder) {
+                NamePromptSheet(
+                    title: "New Folder",
+                    isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: nil) },
+                    onConfirm: { name, _ in _ = home.viewModel.createFolder(name: name) },
+                    isPresented: $dialogs.isAddingFolder
+                )
+            }
+            .sheet(isPresented: $dialogs.isAddingTag) {
+                NamePromptSheet(
+                    title: "New Tag",
+                    initialColor: tagColorPalette[0],
+                    showColorPicker: true,
+                    isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: nil) },
+                    onConfirm: { name, color in _ = home.viewModel.createTag(name: name, color: color) },
+                    isPresented: $dialogs.isAddingTag
+                )
+            }
+    }
+}
+
+private struct SidebarRenameSheets: ViewModifier {
+    let home: HomeObservable
+    @Bindable var dialogs: SidebarDialogState
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $dialogs.renamingFolder) { folder in
+                NamePromptSheet(
+                    title: "Rename Folder",
+                    initialName: folder.name,
+                    isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: folder.id) },
+                    onConfirm: { name, _ in home.viewModel.updateFolder(id: folder.id, name: name) },
+                    isPresented: Binding(get: { dialogs.renamingFolder != nil }, set: { if !$0 { dialogs.renamingFolder = nil } })
+                )
+            }
+            .sheet(item: $dialogs.renamingTag) { tag in
+                NamePromptSheet(
+                    title: "Rename Tag",
+                    initialName: tag.name,
+                    initialColor: tag.color ?? tagColorPalette[0],
+                    showColorPicker: true,
+                    isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: tag.id) },
+                    onConfirm: { name, color in home.viewModel.updateTag(id: tag.id, name: name, color: color) },
+                    isPresented: Binding(get: { dialogs.renamingTag != nil }, set: { if !$0 { dialogs.renamingTag = nil } })
+                )
+            }
+            .sheet(item: $dialogs.renamingFeed) { feed in
+                NamePromptSheet(
+                    title: "Rename Feed",
+                    initialName: feed.custom_title ?? feed.title,
+                    isDuplicate: { _ in false },
+                    onConfirm: { name, _ in home.viewModel.renameFeed(id: feed.id, title: name) },
+                    isPresented: Binding(get: { dialogs.renamingFeed != nil }, set: { if !$0 { dialogs.renamingFeed = nil } })
+                )
+            }
+    }
+}
+
+private struct SidebarDeleteAlerts: ViewModifier {
+    let home: HomeObservable
+    @Bindable var dialogs: SidebarDialogState
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Delete Folder?", isPresented: isPresentedBinding($dialogs.deletingFolder), presenting: dialogs.deletingFolder) { folder in
+                Button("Delete", role: .destructive) { home.viewModel.deleteFolder(id: folder.id) }
+                Button("Cancel", role: .cancel) {}
+            } message: { folder in
+                Text("\"\(folder.name)\" will be removed. Its feeds are kept, unfiled.")
+            }
+            .alert("Delete Tag?", isPresented: isPresentedBinding($dialogs.deletingTag), presenting: dialogs.deletingTag) { tag in
+                Button("Delete", role: .destructive) { home.viewModel.deleteTag(id: tag.id) }
+                Button("Cancel", role: .cancel) {}
+            } message: { tag in
+                Text("\"\(tag.name)\" will be removed.")
+            }
+            .alert("Unsubscribe?", isPresented: isPresentedBinding($dialogs.unsubscribingFeed), presenting: dialogs.unsubscribingFeed) { feed in
+                Button("Unsubscribe", role: .destructive) { home.viewModel.unsubscribeFeed(id: feed.id) }
+                Button("Cancel", role: .cancel) {}
+            } message: { feed in
+                Text("\"\(feed.custom_title ?? feed.title)\" will be removed from your subscriptions.")
+            }
+    }
+
+    private func isPresentedBinding<T>(_ source: Binding<T?>) -> Binding<Bool> {
+        Binding(get: { source.wrappedValue != nil }, set: { if !$0 { source.wrappedValue = nil } })
     }
 }

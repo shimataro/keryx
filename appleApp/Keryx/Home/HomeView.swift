@@ -9,10 +9,11 @@ struct HomeView: View {
     let home: HomeObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
+    @State private var sidebarDialogs = SidebarDialogState()
 
     var body: some View {
         NavigationSplitView {
-            FeedListView(home: home, focusedPane: $focusedPane)
+            FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
         } content: {
             ArticleListView(home: home, focusedPane: $focusedPane)
         } detail: {
@@ -47,12 +48,17 @@ struct HomeView: View {
                 home.viewModel.setSearchBarVisible(visible: false)
             }
         case .up:
-            // Sidebar keyboard navigation (moving among feed-list rows) is not yet wired — see
-            // FeedListView's own TODO. Everywhere else, Up/Down move the article cursor exactly
-            // like J/K, matching ordinary list-navigation expectations.
-            if focusedPane != .feedList { home.viewModel.selectPrevious() }
+            if focusedPane == .feedList {
+                moveFeedListSelection(by: -1)
+            } else {
+                home.viewModel.selectPrevious()
+            }
         case .down:
-            if focusedPane != .feedList { home.viewModel.selectNext() }
+            if focusedPane == .feedList {
+                moveFeedListSelection(by: 1)
+            } else {
+                home.viewModel.selectNext()
+            }
         case .nextArticle:
             home.viewModel.selectNext()
         case .previousArticle:
@@ -62,11 +68,54 @@ struct HomeView: View {
         case .search:
             home.viewModel.setSearchBarVisible(visible: true)
             home.viewModel.requestSearchFocus()
-        case .renameFeedListItem, .deleteFeedListItem:
-            break // feed rename/delete UI is M3 scope
+        case .renameFeedListItem:
+            requestRename()
+        case .deleteFeedListItem:
+            requestDelete()
         case .refreshList:
             home.viewModel.pullToRefresh()
         }
         return .handled
+    }
+
+    /// Moves the sidebar's own selection by `delta` positions in `buildOrderedFeedListRows`'
+    /// visual order (`FeedListModel.kt`), the same order the sidebar itself renders in.
+    private func moveFeedListSelection(by delta: Int) {
+        let orderedRows = FeedListModelKt.buildOrderedFeedListRows(
+            tags: home.tags,
+            folders: home.folders,
+            feeds: home.feeds,
+            collapsedFolderIds: home.collapsedFolderIds,
+            expandedTagIds: home.expandedTagIds,
+            feedTagMap: home.feedTagMap
+        )
+        guard let next = FeedListModelKt.nextFeedListRow(
+            current: home.selectedRowInstance,
+            orderedRows: orderedRows,
+            delta: Int32(delta)
+        ) else { return }
+        home.viewModel.selectFilter(filter: next.filter, instance: next)
+    }
+
+    private func requestRename() {
+        guard let target = FeedListModelKt.resolveFeedListSelectionTarget(
+            filter: home.filter, feeds: home.feeds, folders: home.folders, tags: home.tags
+        ) else { return }
+        switch onEnum(of: target) {
+        case .feed(let f): sidebarDialogs.renamingFeed = f.feed
+        case .folder(let f): sidebarDialogs.renamingFolder = f.folder
+        case .tag(let t): sidebarDialogs.renamingTag = t.tag
+        }
+    }
+
+    private func requestDelete() {
+        guard let target = FeedListModelKt.resolveFeedListSelectionTarget(
+            filter: home.filter, feeds: home.feeds, folders: home.folders, tags: home.tags
+        ) else { return }
+        switch onEnum(of: target) {
+        case .feed(let f): sidebarDialogs.unsubscribingFeed = f.feed
+        case .folder(let f): sidebarDialogs.deletingFolder = f.folder
+        case .tag(let t): sidebarDialogs.deletingTag = t.tag
+        }
     }
 }

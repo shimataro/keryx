@@ -28,7 +28,13 @@ final class AppModel {
                 useDataProtectionKeychain: true
             )
             self.sdk = sdk
-            self.home = HomeObservable(viewModel: sdk.homeViewModel)
+            self.home = HomeObservable(
+                viewModel: sdk.homeViewModel,
+                // `newAddFeedController` in Kotlin — Swift sees `doNewAddFeedController()` because
+                // ObjC's "new"-prefix method-family convention (implicitly-owned return) requires
+                // Kotlin/Native's ObjC export to rename any Kotlin method literally named `newXxx`.
+                makeAddFeedController: { sdk.doNewAddFeedController() }
+            )
             try sdk.startMaintenance()
         } catch {
             self.startupError = error
