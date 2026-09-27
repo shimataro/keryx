@@ -65,16 +65,17 @@ internal fun oneDriveProvider(
 }
 
 /**
- * Registers the DI singles every JVM platform's `platformModule` shares: the OAuth callback flow
- * both `main.kt`'s (desktop) / `MainActivity`'s (Android) own OS URI routing and the custom-URI
- * connect transport deliver into, and the [CloudSession] built over Dropbox + OneDrive (both
- * custom-URI providers, identical on every JVM target) plus whatever [extraProviders] this
- * platform alone supports.
+ * Registers the DI singles every platform's own `platformModule` shares: the OAuth callback flow
+ * both `main.kt`'s (desktop) / `MainActivity`'s (Android) / the Apple app's own OS URI routing and
+ * the custom-URI connect transport deliver into, and the [CloudSession] built over Dropbox +
+ * OneDrive (both custom-URI providers, identical on every platform that offers them) plus whatever
+ * [extraProviders] this platform alone supports.
  *
- * In `jvmCommonMain` rather than `commonMain`: [BuildConfig] (the Dropbox/OneDrive client
- * ids) is generated per-platform into this shared JVM source set (see
- * `composeApp/build.gradle.kts`'s `generatedBuildConfigDir` wiring), so it is not visible from
- * `commonMain`.
+ * In `commonMain` (this function is called from `PlatformModule.desktop.kt`,
+ * `PlatformModule.android.kt`, and appleMain's `ApplePlatformModule.kt` alike): [BuildConfig] (the
+ * Dropbox/OneDrive client ids) is generated straight into `:shared`'s own `commonMain` (see
+ * `shared/build.gradle.kts`'s `generatedBuildConfigDir` wiring), readable from every target
+ * including Apple, which has no `jvmCommonMain`.
  *
  * @param tokenStorage Builds one secure-store instance per provider — called once per provider, so
  *   it must never be memoized across calls (see [TokenStorage]'s own "never share an instance
