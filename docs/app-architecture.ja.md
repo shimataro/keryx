@@ -45,7 +45,8 @@
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
                   ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
                   サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
-                  あるかどうか）、article/（ArticleWebViewHtml——
+                  あるかどうか。NameValidation——フォルダ・タグの新規作成/リネームダイアログが共有する
+                  重複名チェック）、article/（ArticleWebViewHtml——
                   リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——

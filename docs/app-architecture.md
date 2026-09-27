@@ -48,7 +48,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
                   which warning/error still needs announcing in a transient surface with no queue of
-                  its own, e.g. Android's foreground Snackbar), article/ (ArticleWebViewHtml —
+                  its own, e.g. Android's foreground Snackbar; NameValidation — the folder/tag
+                  duplicate-name check every create/rename dialog shares), article/ (ArticleWebViewHtml —
                   the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
