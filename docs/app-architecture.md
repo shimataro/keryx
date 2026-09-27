@@ -1275,7 +1275,12 @@ under a given path, for previews and tests that must not open the user's real da
 `openAuthorization` is `((url: String, callbackScheme: String) -> Unit)?` — `null` (the default)
 falls back to opening the system browser, which previews and tests that never actually connect a
 provider can safely ignore; the shipping app passes a closure that opens an
-`ASWebAuthenticationSession` (see "Apple targets in `:shared`" above). `close()` stops
+`ASWebAuthenticationSession` (see "Apple targets in `:shared`" above). **All three callbacks
+(`newArticlesText`, `postOsNotification`, `openAuthorization`) must be built in a `nonisolated`
+context** — Kotlin invokes them from its own background dispatchers (e.g. a background/startup
+refresh's `NewArticleNotifier` runs on `Dispatchers.Default`), and a closure literal written
+inside a `@MainActor` type/method would inherit that isolation; Swift 6 then guards it with a
+runtime executor check that traps when Kotlin calls it off the main thread. `close()` stops
 and joins every coroutine that can still read the database before closing it, flushes and stops
 the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
 `dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the

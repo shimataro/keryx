@@ -30,21 +30,7 @@ final class AppModel {
 
     init() {
         do {
-            let sdk = try KeryxSdk.companion.start(
-                newArticlesText: { count in LF("apple_new_articles_pill", Int64(count)) },
-                postOsNotification: { message, _ in OsNotificationPoster.post(message: message) },
-                // KERYX_DATA_DIR lets a manual verification run point at a scratch directory
-                // instead of the real ~/Library/Application Support/Keryx — unset (nil) in every
-                // normal launch, which keeps production behavior unchanged.
-                dataDirectory: ProcessInfo.processInfo.environment["KERYX_DATA_DIR"],
-                // Captures `oauthCoordinator` directly (not `self`), since `self` isn't fully
-                // initialized yet at this point — the coordinator's own `sdk` back-reference is
-                // wired below, once `start()` has actually returned an instance to point it at.
-                openAuthorization: { [oauthCoordinator] url, scheme in
-                    oauthCoordinator.open(url: url, callbackScheme: scheme)
-                },
-                useDataProtectionKeychain: true
-            )
+            let sdk = try Self.startSdk(oauthCoordinator: oauthCoordinator)
             self.sdk = sdk
             oauthCoordinator.sdk = sdk
             self.home = HomeObservable(
@@ -66,6 +52,29 @@ final class AppModel {
         } catch {
             self.startupError = error
         }
+    }
+
+    /// `nonisolated` on purpose: Kotlin invokes these callbacks from its own background dispatchers
+    /// (e.g. `NewArticleNotifier` runs on `Dispatchers.Default` when a background/startup refresh
+    /// finds new articles). Closures written inside the `@MainActor` `init` would inherit main-actor
+    /// isolation, and Swift 6 guards each such closure with a runtime executor check that traps when
+    /// Kotlin calls it off the main thread — see `docs/app-architecture.md`'s "`KeryxSdk`: the Swift
+    /// entry point" for the calling convention this satisfies. Every callee below is safe on any
+    /// thread (see each type's own doc): `L`/`LF`, `OsNotificationPoster.post`, and
+    /// `OAuthSessionCoordinator.open` (which itself hops to `@MainActor` internally).
+    nonisolated private static func startSdk(oauthCoordinator: OAuthSessionCoordinator) throws -> KeryxSdk {
+        try KeryxSdk.companion.start(
+            newArticlesText: { count in LF("apple_new_articles_pill", Int64(count)) },
+            postOsNotification: { message, _ in OsNotificationPoster.post(message: message) },
+            // KERYX_DATA_DIR lets a manual verification run point at a scratch directory instead
+            // of the real ~/Library/Application Support/Keryx — unset (nil) in every normal
+            // launch, which keeps production behavior unchanged.
+            dataDirectory: ProcessInfo.processInfo.environment["KERYX_DATA_DIR"],
+            openAuthorization: { url, scheme in
+                oauthCoordinator.open(url: url, callbackScheme: scheme)
+            },
+            useDataProtectionKeychain: true
+        )
     }
 
     func completeSetup() {

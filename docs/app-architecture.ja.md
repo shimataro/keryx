@@ -1269,6 +1269,12 @@ Swift の `@MainActor` 呼び出し元がメインスレッド外へのディス
 `openAuthorization` は `((url: String, callbackScheme: String) -> Unit)?`——`null`（既定）ならシステムのブラウザに
 フォールバックする。これは、実際にプロバイダーへ接続することのないプレビューやテストが安全に無視できる値。
 出荷版アプリは `ASWebAuthenticationSession` を開くクロージャを渡す（上記「`:shared` 内の Apple ターゲット」参照）。
+**3 つのコールバック（`newArticlesText`・`postOsNotification`・`openAuthorization`）はすべて
+`nonisolated` な文脈で組み立てなければならない**——Kotlin 側はこれらを自身のバックグラウンド
+ディスパッチャから呼び出す（例えばバックグラウンド/起動時の更新で見つかった新着記事を伝える
+`NewArticleNotifier` は `Dispatchers.Default` 上で動く）。`@MainActor` な型・メソッドの中で書いた
+クロージャリテラルはその分離を引き継いでしまい、Swift 6 はそこに実行時の「実行キューが一致して
+いるか」のチェックを入れるため、Kotlin がメインスレッド外から呼ぶとトラップしてクラッシュする。
 `close()` は、
 まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
 HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。
