@@ -1115,14 +1115,17 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   アプリを検知できないので、同時に起動しないことは強制ではなく運用ルールである。
 - 両者は別々のコミットからビルドされた状態で同じ `keryx.db` を開きうるため、`PRAGMA user_version` が実行中アプリのスキーマより
   **新しい**データベースは、開かずに拒否する（上記「DatabaseDriverFactory」を参照）。
-- どちらのアプリもトークンを Keychain の同じサービス（`works.merc.keryx`）に保存する。Dropbox と OneDrive は
-  両者で同じ OAuth クライアントを使うため、その項目はアカウント（`CloudStorageType.id`）も desktop アプリと共有する。
-  Google Drive は共有しない：Apple アプリの「iOS」タイプの OAuth クライアントは desktop のものとは別で、リフレッシュ
-  トークンは発行したクライアントに紐付くため、Apple 専用の別アカウント（`google_drive_apple`。
-  `data/cloud/KeychainTokenStorage.kt` の `appleKeychainAccount`）を使い、どちらのアプリも相手のトークンを上書きしない。
-  サービスとアカウントを共有するのは名前付けの仕組みにすぎず、一方のアプリが他方の項目を実際に読めるかどうかは
-  Keychain のアクセス制御で決まる（desktop アプリは `security` CLI 経由で書き込み、SwiftUI アプリはサンドボックス内で
-  動く）ため、保証はされない——読めない場合は SwiftUI アプリで再接続し、同期済みのデータはクラウドから戻す。
+- **どちらのアプリも、同じ Keychain 項目には書き込まない。** 共有すると、一方のアプリが切断した際
+  （プロバイダーのリフレッシュトークンも失効させる）に、もう一方の同期が黙って壊れてしまう。しかも
+  Compose 版は、SwiftUI 版がこの Bundle ID を持つより前から存在している。Compose デスクトップ版自身の
+  サービス名は `works.merc.keryx.compose`（`data/cloud/KeychainCoordinates.kt`）で、この分離より前に
+  使っていた共通の `works.merc.keryx` から移行する（移行の詳細は `SecurityCliTokenStorage` 自身の doc
+  を参照）。SwiftUI 版はサービス名として `works.merc.keryx` を保ち続けるが、`security` CLI が読み書き
+  する通常のログイン Keychain ではなく、**Data Protection Keychain**（`kSecUseDataProtectionKeychain`。
+  `keychain-access-groups` エンタイトルメントが前提）にすべての項目を保存する——同じ入れ物の中で
+  サービス名を分けるだけでなく、Compose 版がまったく到達できない別の入れ物そのものになる。詳細は
+  sync-architecture.ja.md の「トークン保存先」と `data/cloud/KeychainTokenStorage.kt` 自身の doc を
+  参照。
 
 ### 共有 Kotlin コード
 
@@ -1153,7 +1156,9 @@ Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そして
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
 確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
-`appleKeychainAccount(type)`——`CloudStorageType.id`、ただし Google Drive は `google_drive_apple`。「配布と共存」参照——、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
+`type.id`——保存先が Data Protection Keychain である時点で Compose 版自身のサービスとはすでに分かれて
+いるので、どのプロバイダーも同じアカウント名でよい。「配布と共存」参照——、初回ロック解除後に読み取り
+可能。平文へのフォールバックはない）。Google Drive は、
 `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
 設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
 共通 `keryx://oauth2/callback` リダイレクト（このスキーム自体、Apple アプリは登録しない。後述）とは異なり、

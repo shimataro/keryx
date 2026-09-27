@@ -11,7 +11,6 @@ import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
 import works.merc.keryx.app.data.cloud.KeychainTokenStorage
-import works.merc.keryx.app.data.cloud.appleKeychainAccount
 import works.merc.keryx.app.data.cloud.googleIosClientRedirectUri
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudSession
@@ -33,20 +32,30 @@ import works.merc.keryx.app.domain.OsNotificationSink
  *   to [DefaultAuthorizationLauncher] (a browser) for tests/previews that call this directly; the
  *   shipping app always passes the launcher `KeryxSdk.start`'s `openAuthorization` closure builds,
  *   which hands the URL to Swift for an `ASWebAuthenticationSession`.
+ * @param useDataProtectionKeychain Passed straight through to every [KeychainTokenStorage] this
+ *   builds — see that class's own doc for why the shipping app and tests/previews differ here.
  */
 fun applePlatformModule(
     notificationMessages: NotificationMessages,
     osNotificationSink: OsNotificationSink,
     authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
+    useDataProtectionKeychain: Boolean = false,
 ): Module = module {
     single { keryxHttpClient(Darwin) }
     single<NotificationMessages> { notificationMessages }
     single<OsNotificationSink> { osNotificationSink }
     cloudSessionSingles(
-        tokenStorage = { type -> KeychainTokenStorage(account = appleKeychainAccount(type)) },
+        tokenStorage = { type -> KeychainTokenStorage(account = type.id, useDataProtectionKeychain = useDataProtectionKeychain) },
         extraProviders = { client, callbackFlow ->
             if (AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()) {
-                mapOf(CloudStorageType.GOOGLE_DRIVE to appleGoogleDriveProvider(client, callbackFlow, authorizationLauncher))
+                mapOf(
+                    CloudStorageType.GOOGLE_DRIVE to appleGoogleDriveProvider(
+                        client,
+                        callbackFlow,
+                        authorizationLauncher,
+                        useDataProtectionKeychain,
+                    ),
+                )
             } else {
                 emptyMap()
             }
@@ -67,12 +76,16 @@ private fun appleGoogleDriveProvider(
     client: HttpClient,
     callbackFlow: MutableSharedFlow<OAuthCallbackParams>,
     authorizationLauncher: AuthorizationLauncher,
+    useDataProtectionKeychain: Boolean,
 ): CloudSession.Provider {
     val clientId = AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID
     val driveAuth: CloudAuthManager = GoogleDriveAuthManager(client, clientSecret = null)
     return CloudSession.Provider(
         clientId = clientId,
-        tokenStorage = KeychainTokenStorage(account = appleKeychainAccount(CloudStorageType.GOOGLE_DRIVE)),
+        tokenStorage = KeychainTokenStorage(
+            account = CloudStorageType.GOOGLE_DRIVE.id,
+            useDataProtectionKeychain = useDataProtectionKeychain,
+        ),
         authManager = driveAuth,
         connectFlow = OAuthConnectFlow(
             authManager = driveAuth,

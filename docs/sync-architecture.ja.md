@@ -671,17 +671,27 @@ URI スキームを OS に登録せず、ブラウザも自分では開かない
 複数プロバイダーで共有しない。`SecurityCliTokenStorage`/`KeystoreTokenStorage` は結果をインスタンスに
 キャッシュするため共有すると壊れる）。
 Keychain のアカウント名とフォールバックファイル名は `CloudStorageType.id` から導出する（Dropbox は `"dropbox"` で
-従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。`KEYCHAIN_SERVICE` は
-両者共通。
+従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。
 
-- Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`）。
+- Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service,
+  `KeyringTokenStorage`。サービスは `KEYCHAIN_SERVICE` = `works.merc.keryx`）。
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
-  から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
+  から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。自分専用のサービス名
+  `KEYCHAIN_SERVICE_MACOS` = `works.merc.keryx.compose`（`data/cloud/KeychainCoordinates.kt`）を使い、
+  上記の共通 `KEYCHAIN_SERVICE` は使わない——理由は下のネイティブ Apple アプリの項目を参照。`load()` は、
+  新しい名前の項目がまだ無いときに限り、`KEYCHAIN_SERVICE` 側に残っている項目からの移行を一度だけ行う：
+  項目を新しい名前へコピーし（`save()` と同じ方法で書き込みを確かめる）、そのコピーを確認できてから
+  初めて旧項目を削除する——正確な手順と、`clear()` が旧項目のベストエフォートな後始末も行う点は
+  `SecurityCliTokenStorage` 自身の doc を参照。
 - ネイティブ Apple アプリ（macOS/iOS、`:shared` の appleMain）：`KeychainTokenStorage` が Security フレームワーク経由で
-  Keychain に直接書き込む——サービスもプロバイダーごとのアカウントも同じで、平文へのフォールバックはない（書き込みの失敗は
-  `NOT_PERSISTED`）。Compose 版 macOS が `security` CLI で保存したトークンは引き継がない：ネイティブアプリでは再接続し、
-  同期済みのデータはクラウドから戻る。Google Drive は、Apple 向けの OAuth クライアント（client secret なし）ができるまで
-  提供しない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」を参照。
+  Keychain に直接書き込む——サービスは `works.merc.keryx`、アカウントはどのプロバイダーも同じ。ただし
+  `security` が読み書きする通常のログイン Keychain ではなく、**Data Protection Keychain**
+  （`kSecUseDataProtectionKeychain`。出荷版アプリの `keychain-access-groups` エンタイトルメントが前提）
+  に保存するので、サービス名にかかわらず Compose 版がそもそも到達できない別の入れ物になる。平文への
+  フォールバックはない（書き込みの失敗は `NOT_PERSISTED`）。Compose 版が保存した項目からの移行は行わない：
+  ネイティブアプリは常に再接続から始まり、同期済みのデータはクラウドから戻る。Google Drive は、Apple 向けの
+  OAuth クライアント（client secret なし）ができるまで提供しない。[app-architecture.ja.md](app-architecture.ja.md)
+  の「Apple ネイティブアプリ（SwiftUI）」を参照。
 - Linux のうち Snap パッケージ内だけは、`KeyringTokenStorage` の代わりに `LibSecretTokenStorage` を使う
   （`platform.isSnap` で分岐）。JNA 経由で libsecret を直接呼び出す実装で、libsecret がサンドボックスを
   検知して生の Secret Service ではなく Secret portal（`org.freedesktop.portal.Secret`）経由にルーティング

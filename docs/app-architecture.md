@@ -1106,16 +1106,18 @@ around.
 - Because the two may open the same `keryx.db` built from different commits, a database whose
   `PRAGMA user_version` is **newer** than the running app's schema is refused rather than opened
   (see "DatabaseDriverFactory" above).
-- Both apps keep tokens in the Keychain under the same service (`works.merc.keryx`). Dropbox and
-  OneDrive use the same OAuth client on both, so their items also share the account
-  (`CloudStorageType.id`) with the desktop app. Google Drive does not: the Apple app's "iOS"-type
-  OAuth client differs from desktop's, and a refresh token is bound to the client that issued it,
-  so it uses a separate Apple-only account (`google_drive_apple`, `appleKeychainAccount` in
-  `data/cloud/KeychainTokenStorage.kt`) that neither app can overwrite for the other. Sharing a
-  service and account is only the naming mechanism: whether one app can actually read the other's
-  item is decided by Keychain access control (the desktop app writes through the `security` CLI,
-  the SwiftUI app runs sandboxed), so it is not guaranteed — when it can't, the SwiftUI app
-  reconnects, and synced data comes back from the cloud.
+- **The two apps never write to the same Keychain item.** Sharing one would let either app's
+  disconnect (which also revokes the provider's refresh token) silently break the other's sync, and
+  the Compose build predates the SwiftUI app owning this bundle ID at all. The Compose desktop
+  build's own service name is `works.merc.keryx.compose` (`data/cloud/KeychainCoordinates.kt`),
+  migrated from the shared `works.merc.keryx` name it used before this split
+  (`SecurityCliTokenStorage`'s own doc covers the migration). The SwiftUI app keeps
+  `works.merc.keryx` as its service, but stores every item in the **Data Protection Keychain**
+  (`kSecUseDataProtectionKeychain`, gated on the `keychain-access-groups` entitlement) rather than
+  the ordinary login Keychain the `security` CLI reads and writes — a separate store the Compose
+  build cannot reach at all, not just a different service name inside the same one. See
+  "Token Storage" in [sync-architecture.md](sync-architecture.md) and
+  `data/cloud/KeychainTokenStorage.kt`'s own doc.
 
 ### Shared Kotlin code
 
@@ -1154,9 +1156,10 @@ sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
 `VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
 trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
 (3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
-(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `appleKeychainAccount(type)` —
-`CloudStorageType.id`, except `google_drive_apple` for Google Drive; see "Distribution and coexistence" —
-readable after first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
+(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `type.id` — the same
+account every provider uses, since the Data Protection Keychain this app stores in already keeps it
+apart from the Compose build's own service; see "Distribution and coexistence" — readable after
+first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
 ("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
 — gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/
 OneDrive's shared `keryx://oauth2/callback` redirect (a scheme the Apple app itself never registers

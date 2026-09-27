@@ -485,14 +485,24 @@ opens a browser directly:
 
 ### Token Storage
 
-**Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`). `KEYCHAIN_SERVICE` is shared.
+**Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`).
 
-- Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
-- macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead.
+- Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`, service `KEYCHAIN_SERVICE` = `works.merc.keryx`).
+- macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead. Its own service is `KEYCHAIN_SERVICE_MACOS` = `works.merc.keryx.compose`
+  (`data/cloud/KeychainCoordinates.kt`), not the shared `KEYCHAIN_SERVICE` above — see the native
+  Apple app bullet below for why. `load()` migrates an existing item from `KEYCHAIN_SERVICE`
+  the first time it doesn't find one under the new name: it copies the item over (verified the same
+  way a fresh `save()` is), then removes the old one only once that copy is confirmed — see
+  `SecurityCliTokenStorage`'s own doc for the exact sequence and its `clear()`'s best-effort cleanup
+  of a leftover legacy item.
 - Native Apple app (macOS/iOS, `:shared`'s appleMain): `KeychainTokenStorage` writes the Keychain
-  directly through the Security framework — same service, same per-provider account — with no
-  plaintext fallback (a failed write is `NOT_PERSISTED`). Tokens the Compose macOS build stored via
-  the `security` CLI are not carried over: the native app reconnects, and synced data comes back
+  directly through the Security framework, service `works.merc.keryx`, same per-provider account for
+  every provider — but into the **Data Protection Keychain**
+  (`kSecUseDataProtectionKeychain`, gated on the shipping app's `keychain-access-groups`
+  entitlement) rather than the ordinary login Keychain `security` reads and writes, so it is a
+  separate store the Compose build cannot reach at all regardless of service name. There is no
+  plaintext fallback (a failed write is `NOT_PERSISTED`). No migration from the Compose build's own
+  items is attempted — the native app always starts by reconnecting, and synced data comes back
   from the cloud. Google Drive is not offered there until an Apple-type OAuth client (no client
   secret) exists; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md).
 - Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.

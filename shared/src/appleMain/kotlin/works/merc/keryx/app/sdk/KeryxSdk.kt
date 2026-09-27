@@ -171,6 +171,11 @@ class KeryxSdk private constructor(private val koin: Koin) {
          *   flow's own redirect URI, e.g. `keryx` or a Google reversed-client-id scheme). `null`
          *   (the default) falls back to opening the system browser, which previews and tests that
          *   never actually connect a provider can safely ignore.
+         * @param useDataProtectionKeychain Whether cloud tokens go in the Data Protection Keychain
+         *   rather than the ordinary login Keychain — see `data/cloud/KeychainTokenStorage.kt`'s own
+         *   doc for why. The shipping app passes `true`; it needs the `keychain-access-groups`
+         *   entitlement and a real code signature, so this defaults to `false` for tests/previews
+         *   that build with an ad-hoc or no signature at all.
          * @throws works.merc.keryx.app.data.local.DatabaseTooNewException if a newer build migrated
          *   the database.
          */
@@ -180,6 +185,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
             postOsNotification: (message: String, count: Int) -> Unit,
             dataDirectory: String?,
             openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
+            useDataProtectionKeychain: Boolean = false,
         ): KeryxSdk {
             AppDirs.rootOverride = dataDirectory
             val messages = object : NotificationMessages {
@@ -192,7 +198,11 @@ class KeryxSdk private constructor(private val koin: Koin) {
                 }
             } ?: DefaultAuthorizationLauncher
             val koin = koinApplication {
-                modules(sharedModule(), presentationModule(), applePlatformModule(messages, sink, authorizationLauncher))
+                modules(
+                    sharedModule(),
+                    presentationModule(),
+                    applePlatformModule(messages, sink, authorizationLauncher, useDataProtectionKeychain),
+                )
             }.koin
             // Open the database now, so a too-new file is reported here, as a Swift error — unwrapped
             // from Koin's own instance-creation wrapper so the app can recognise it. A failed start

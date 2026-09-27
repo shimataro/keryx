@@ -43,28 +43,29 @@ import platform.Security.kSecClassGenericPassword
 import platform.Security.kSecMatchLimit
 import platform.Security.kSecMatchLimitOne
 import platform.Security.kSecReturnData
+import platform.Security.kSecUseDataProtectionKeychain
 import platform.Security.kSecValueData
-import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
 
 /**
  * [TokenStorage] in the system Keychain, as one generic-password item per provider: service
- * [service] (the same `works.merc.keryx` the desktop app uses), account [account]. Readable after
- * the first unlock since boot, so a background refresh can still sync. There is no plaintext
- * fallback on Apple — the Keychain is always present — so a failed write is
- * [TokenSaveOutcome.NOT_PERSISTED].
+ * [service] (`works.merc.keryx`), account [account] (`CloudStorageType.id`). Readable after the
+ * first unlock since boot, so a background refresh can still sync. There is no plaintext fallback
+ * on Apple — the Keychain is always present — so a failed write is [TokenSaveOutcome.NOT_PERSISTED].
  *
- * @param account The item's account; production code passes [appleKeychainAccount]. That is
- *   `CloudStorageType.id` — shared with the desktop app on the same Mac, since Dropbox and OneDrive
- *   use the same OAuth client on both — except for Google Drive, whose Apple client is a separate
- *   "iOS"-type OAuth client from desktop's. A refresh token is bound to the client that issued it, so
- *   sharing that account would let whichever app reconnected last overwrite the other's token and
- *   break its authentication; Google Drive therefore gets an Apple-only account.
+ * @param useDataProtectionKeychain When true, every query also sets `kSecUseDataProtectionKeychain`
+ *   — a store the Compose desktop build's `security`-CLI-based storage cannot reach at all, unlike
+ *   plain login-Keychain items which share one flat namespace by service+account alone. The
+ *   shipping app always passes true (see `KeryxSdk.start`'s own parameter); it needs the
+ *   `keychain-access-groups` entitlement and a real (not ad-hoc) code signature, so tests and
+ *   previews pass false and use the ordinary login Keychain instead — see
+ *   "Distribution and coexistence" in `docs/app-architecture.md`.
  */
 @OptIn(ExperimentalForeignApi::class)
 class KeychainTokenStorage(
     private val account: String,
     private val service: String = KEYCHAIN_SERVICE,
+    private val useDataProtectionKeychain: Boolean = false,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : TokenStorage {
 
@@ -141,6 +142,7 @@ class KeychainTokenStorage(
             CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword)
             CFDictionaryAddValue(query, kSecAttrService, serviceRef)
             CFDictionaryAddValue(query, kSecAttrAccount, accountRef)
+            if (useDataProtectionKeychain) CFDictionaryAddValue(query, kSecUseDataProtectionKeychain, kCFBooleanTrue)
             return block(query)
         } finally {
             CFRelease(serviceRef)
@@ -153,16 +155,4 @@ class KeychainTokenStorage(
         /** The Keychain service every Keryx build stores its tokens under. */
         const val KEYCHAIN_SERVICE: String = "works.merc.keryx"
     }
-}
-
-/**
- * The Keychain account the Apple app stores [type]'s tokens under: `type.id`, shared with the
- * desktop app, for every provider whose OAuth client is the same on both — but an Apple-only
- * account for Google Drive, whose Apple OAuth client differs from desktop's (see
- * [KeychainTokenStorage]'s `account`). A developer who connected Google Drive on Apple before this
- * split has to reconnect once.
- */
-fun appleKeychainAccount(type: CloudStorageType): String = when (type) {
-    CloudStorageType.GOOGLE_DRIVE -> "${type.id}_apple"
-    else -> type.id
 }
