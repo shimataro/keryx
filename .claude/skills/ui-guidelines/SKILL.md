@@ -1124,9 +1124,10 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   entirely, since a visible M3 ripple on those components is exactly the point there. For buttons
   specifically, prefer
   `ui/common/FlatButtons.kt`'s `FlatButton` (primary/filled — `primary` fill),
-  `FlatTonalButton` (secondary — `secondaryContainer` fill + hairline
-  `outlineVariant` border, for actions that still need clear button affordance
-  like OPML import/export, Dropbox disconnect, update check, setup cards), and
+  `FlatTonalButton` (secondary — on desktop a neutral `surfaceContainerHighest`
+  fill + hairline `outlineVariant` border, for actions that still need clear
+  button affordance like OPML import/export, cloud disconnect, update check,
+  setup cards), and
   `FlatTextButton` (bare, inline) over M3's `Button`/`FilledTonalButton`/
   `TextButton` at a **`commonMain` call site** — they're `expect`/`actual`
   (like `KeryxTextField`/`KeryxDialogs` below), and the desktop `actual`s are
@@ -1153,9 +1154,17 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   worded differently then measure differently on one machine and identically on another — which is
   how the Updates tab's headline row came to be 36dp beside "ダウンロード" and 40dp beside
   "再起動しています…" on a CI runner and nowhere else. `desktopTest`'s `FlatButtonsTest` pins the
-  invariant (a flat button is 40dp tall regardless of its label). It also means these labels go
+  invariant (a flat button is 32dp tall regardless of its label — desktop's label style is
+  `labelLarge` scaled to 13sp on an 18sp line, plus 7dp vertical padding). It also means these labels go
   through the app's `Typography`, hence its OS-native font family (`AppFont.kt`), like every other
   string in the app.
+  **Desktop button sizing and color follow a macOS push button, not M3.** Keep the rounded
+  rectangle (`shapes.small`): macOS keeps mini–medium controls rectangular and rounds only
+  large/extra-large ones into a capsule (WWDC25 "Build an AppKit app with the new design"), so a
+  capsule would drift further from the dialogs' native `JButton` row, not closer. Keep the
+  secondary fill neutral too — painting it `primary` would make a button indistinguishable from a
+  selected `SegmentedControl` segment or a checked `ToggleChip`, and erase the primary/secondary
+  distinction.
   **A button whose action destroys data takes `FlatTonalButton(destructive = true)`**
   (`CloudSyncTab`'s "reset sync data", `NotificationCenterSheet`'s
   `ResetCloudData` row button), which paints the container

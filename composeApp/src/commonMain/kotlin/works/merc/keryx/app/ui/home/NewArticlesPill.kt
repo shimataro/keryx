@@ -87,7 +87,7 @@ internal fun NewArticlesPill(
                 contentDescription = null,
                 modifier = Modifier.padding(end = 4.dp),
             )
-            // FlatTonalButton's own content already carries labelLarge (see its KDoc); no
+            // FlatTonalButton's own content already carries its label style (see its KDoc); no
             // explicit style needed here.
             Text(pluralStringResource(Res.plurals.home_new_articles, count, count))
         }

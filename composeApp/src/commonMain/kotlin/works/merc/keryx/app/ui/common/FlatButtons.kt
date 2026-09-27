@@ -20,11 +20,14 @@ expect fun FlatButton(
 )
 
 /**
- * Tonal-filled secondary button (mirrors M3's `FilledTonalButton`). The desktop `actual`'s solid
- * `secondaryContainer` fill plus a hairline border reads as an obviously tactile "button" — unlike
- * a transparent outlined box, which can be mistaken for a link/label. Use for secondary actions
- * that still need clear button affordance (OPML import/export, Dropbox disconnect, update check,
- * setup cards); [FlatButton] stays the primary/filled action.
+ * Filled secondary button (mirrors M3's `FilledTonalButton`, which the Android `actual` delegates
+ * to). The desktop `actual`'s solid neutral `surfaceContainerHighest` fill plus a hairline border
+ * reads as an obviously tactile "button" — unlike a transparent outlined box, which can be mistaken
+ * for a link/label. The fill is deliberately neutral rather than teal-tinted: like a macOS push
+ * button, only the primary action ([FlatButton]) carries color, and a tinted fill looked like an
+ * unfocused selection. Use for secondary actions that still need clear button affordance (OPML
+ * import/export, cloud disconnect, update check, setup cards); [FlatButton] stays the primary
+ * action.
  *
  * @param destructive Paints the container `errorContainer`/`onErrorContainer` on both platforms, for
  *   an action that destroys data (see the `ui-guidelines` skill for why `errorContainer` and not
