@@ -78,7 +78,7 @@ struct FeedListView: View {
 
     private var allRow: some View {
         row(
-            title: "All Feeds",
+            title: L("home_all_feeds"),
             systemImage: "tray.full",
             unreadCount: home.totalUnread,
             instance: FeedListRowSelectionAll(),
@@ -87,7 +87,7 @@ struct FeedListView: View {
 
     private var starredRow: some View {
         row(
-            title: "Starred",
+            title: L("home_starred"),
             systemImage: "star.fill",
             unreadCount: home.starredUnreadCount,
             instance: FeedListRowSelectionStarred(),
@@ -264,7 +264,7 @@ struct FeedListView: View {
                 if isErroring {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                        .help(isGone ? "This feed has been permanently removed by its publisher (410 Gone)" : "This feed failed to update")
+                        .help(L(isGone ? "home_feed_gone" : "home_feed_error"))
                 }
                 unreadBadge(unreadCount)
             }
