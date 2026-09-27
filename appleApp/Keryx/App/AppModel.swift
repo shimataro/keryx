@@ -20,12 +20,16 @@ final class AppModel {
             let sdk = try KeryxSdk.companion.start(
                 newArticlesText: { count in "\(count) new articles" },
                 postOsNotification: { _, _ in },
-                dataDirectory: nil,
+                // KERYX_DATA_DIR lets a manual verification run point at a scratch directory
+                // instead of the real ~/Library/Application Support/Keryx — unset (nil) in every
+                // normal launch, which keeps production behavior unchanged.
+                dataDirectory: ProcessInfo.processInfo.environment["KERYX_DATA_DIR"],
                 openAuthorization: nil,
                 useDataProtectionKeychain: true
             )
             self.sdk = sdk
             self.home = HomeObservable(viewModel: sdk.homeViewModel)
+            try sdk.startMaintenance()
         } catch {
             self.startupError = error
         }
