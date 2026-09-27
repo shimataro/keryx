@@ -363,4 +363,6 @@
     <string name="apple_new_articles_pill">新着記事 %1$d 件</string>
     <string name="apple_rename_feed_hint">フィード名を入力</string>
     <string name="apple_loading">読み込み中…</string>
+    <string name="apple_opml_import_success">%1$d 件のフィードを追加しました</string>
+    <string name="apple_opml_import_failed">%1$d 件のフィードの追加に失敗しました</string>
 </resources>

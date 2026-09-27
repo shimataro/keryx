@@ -7,3 +7,4 @@ import KeryxShared
 /// escape hatch for this exact KMP/SKIE + Swift 6 friction point — it tells the compiler what
 /// Kotlin's coroutine model already guarantees, rather than working around a real data race.
 extension AddFeedController: @unchecked Sendable {}
+extension OpmlTransfer: @unchecked Sendable {}

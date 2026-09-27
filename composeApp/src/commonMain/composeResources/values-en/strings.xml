@@ -371,4 +371,6 @@
     <string name="apple_new_articles_pill">%1$d new articles</string>
     <string name="apple_rename_feed_hint">Enter feed title</string>
     <string name="apple_loading">Loading…</string>
+    <string name="apple_opml_import_success">Added %1$d feeds</string>
+    <string name="apple_opml_import_failed">Failed to add %1$d feeds</string>
 </resources>
