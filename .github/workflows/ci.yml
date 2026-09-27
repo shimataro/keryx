@@ -389,7 +389,12 @@ jobs:
           # the REQUEST_INSTALL_PACKAGES manifest permission). There's no "play" debug variant to
           # fall back to either way: build.gradle.kts disables playDebug entirely, so
           # connectedAndroidTest (no flavor) now runs only githubDebug, same as this explicit task.
-          script: ./gradlew :androidApp:connectedGithubDebugAndroidTest --no-configuration-cache
+          # :shared:connectedAndroidDeviceTest runs on the same emulator: DatabaseMerger/
+          # DatabaseSnapshot against the real bundled SQLite (see docs/testing.md's instrumented-
+          # suite table). It was previously "local only". :composeApp's own androidDeviceTest
+          # suite (SAF writes, Keystore token storage, Play services token-scope checks) is left
+          # out of this change — bringing it into CI too is a separate follow-up.
+          script: ./gradlew :androidApp:connectedGithubDebugAndroidTest :shared:connectedAndroidDeviceTest --no-configuration-cache
         # No GOOGLE_DRIVE_CLIENT_ID/SECRET: Google Drive's client secret now generates into
         # DesktopBuildConfig, attached only to desktopMain's srcDir, so it isn't a build input for
         # :androidApp — see the same comment in release.yml's "Build Android release packages" step.
@@ -405,4 +410,6 @@ jobs:
           path: |
             androidApp/build/reports/androidTests/
             androidApp/build/outputs/androidTest-results/
+            shared/build/reports/androidTests/
+            shared/build/outputs/androidTest-results/
           if-no-files-found: warn

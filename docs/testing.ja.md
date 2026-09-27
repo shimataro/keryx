@@ -139,12 +139,13 @@
 ./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
-Android には計装テストスイートが 2 つある。CI に組み込まれているのは片方だけなので混同
+Android には計装テストスイートが 3 つある。CI に組み込まれていないものもあるので混同
 しやすい:
 
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/`、`composeApp/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest`、`:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot`（`:shared`）、および他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、Play 開発者サービスの認可） | ✗ ローカルのみ |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ 毎プッシュ（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、Play 開発者サービスのスコープチェック） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は

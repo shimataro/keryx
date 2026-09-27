@@ -118,12 +118,13 @@ upgrade has fixed the bug.
 ./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
-Android has two separate instrumented suites, easy to conflate since only one of them is wired
+Android has three separate instrumented suites, easy to conflate since not all of them are wired
 into CI:
 
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/`, `composeApp/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest`, `:composeApp:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite (`:shared`), plus the `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services authorization) | ✗ local only |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every push (`android-instrumented-test` job, same emulator as the row below) |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services token-scope checks) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every push |
 
 Both need a connected device or a running emulator — see [setup.md](setup.md) for how to create an
