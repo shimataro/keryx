@@ -11,9 +11,9 @@ struct StartupErrorView: View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
-            Text("Keryx couldn't start")
+            Text(L("database_too_new_title"))
                 .font(.headline)
-            Text(error?.localizedDescription ?? "Unknown error")
+            Text(error?.localizedDescription ?? L("error_generic"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

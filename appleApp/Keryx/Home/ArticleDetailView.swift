@@ -56,11 +56,11 @@ struct ArticleDetailView: View {
 
     private var documentHtml: String {
         guard let article = home.selectedArticle else {
-            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: "Select an article")
+            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("home_no_article_selected"))
         }
         guard let row = readerRow else {
             // Still loading — requestArticleContent was just dispatched in onChange above.
-            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: "Loading…")
+            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("apple_loading"))
         }
         let meta = [feedName, formattedDate(row.published_at)].compactMap { $0 }.joined(separator: " · ")
         if let body = row.readerBody(), !body.isEmpty {
@@ -78,7 +78,7 @@ struct ArticleDetailView: View {
             theme: theme,
             title: row.title,
             meta: meta,
-            message: "This article has no content. Open it in your browser to read it.",
+            message: L("article_no_content"),
             titleUrl: article.url,
             titleTooltip: article.url
         )
@@ -113,14 +113,14 @@ struct ArticleDetailView: View {
                 } label: {
                     Image(systemName: article.is_starred == 1 ? "star.fill" : "star")
                 }
-                .help(article.is_starred == 1 ? "Unstar" : "Star")
+                .help(L(article.is_starred == 1 ? "article_unstar" : "article_star"))
 
                 Button {
                     home.viewModel.markSelectedUnread()
                 } label: {
                     Image(systemName: "envelope.badge")
                 }
-                .help("Mark Unread")
+                .help(L("article_mark_as_unread"))
 
                 if ArticleListModelKt.hasUsableUrl(url: article.url) {
                     Button {
@@ -133,14 +133,14 @@ struct ArticleDetailView: View {
                     } label: {
                         Image(systemName: copyConfirmed ? "checkmark" : "link")
                     }
-                    .help("Copy URL")
+                    .help(L("article_copy_url"))
 
                     Button {
                         openInBrowser(article.url)
                     } label: {
                         Image(systemName: "safari")
                     }
-                    .help("Open in Browser")
+                    .help(L("article_open_in_browser"))
                 }
             }
             Spacer()

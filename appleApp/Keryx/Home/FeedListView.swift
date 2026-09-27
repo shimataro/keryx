@@ -19,9 +19,9 @@ struct FeedListView: View {
     var body: some View {
         listContent
             .listStyle(.sidebar)
-            .searchable(text: searchQueryBinding, placement: .sidebar, prompt: Text("Search"))
+            .searchable(text: searchQueryBinding, placement: .sidebar, prompt: Text(L("home_search_placeholder")))
             .focused(focusedPane, equals: .feedList)
-            .navigationTitle("Keryx")
+            .navigationTitle(L("app_name"))
             .toolbar { toolbarContent }
             .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
             .modifier(SidebarRenameSheets(home: home, dialogs: dialogs))
@@ -55,9 +55,9 @@ struct FeedListView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem {
             Menu {
-                Button("Add Feed…") { dialogs.isAddingFeed = true }
-                Button("New Folder…") { dialogs.isAddingFolder = true }
-                Button("New Tag…") { dialogs.isAddingTag = true }
+                Button(L("menu_file_add_feed")) { dialogs.isAddingFeed = true }
+                Button(L("menu_file_add_folder")) { dialogs.isAddingFolder = true }
+                Button(L("menu_file_add_tag")) { dialogs.isAddingTag = true }
             } label: {
                 Image(systemName: "plus")
             }
@@ -126,8 +126,8 @@ struct FeedListView: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button("Rename…") { dialogs.renamingFolder = folder }
-                Button("Delete", role: .destructive) { dialogs.deletingFolder = folder }
+                Button(L("home_menu_rename_folder")) { dialogs.renamingFolder = folder }
+                Button(L("home_menu_delete_folder"), role: .destructive) { dialogs.deletingFolder = folder }
             }
             .draggable(folder.id)
             .dropDestination(for: String.self) { items, _ in
@@ -181,8 +181,8 @@ struct FeedListView: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button("Rename / Edit Color…") { dialogs.renamingTag = tag }
-                Button("Delete", role: .destructive) { dialogs.deletingTag = tag }
+                Button(L("home_menu_rename_tag")) { dialogs.renamingTag = tag }
+                Button(L("home_menu_delete_tag"), role: .destructive) { dialogs.deletingTag = tag }
             }
             .dropDestination(for: String.self) { items, _ in
                 guard let feedId = items.first, home.feeds.contains(where: { $0.id == feedId }) else { return false }
@@ -218,9 +218,9 @@ struct FeedListView: View {
             return true
         }
         .contextMenu {
-            Button("Rename…") { dialogs.renamingFeed = feed }
-            Button("Refresh") { home.viewModel.refreshFeed(feed: feed) }
-            Menu("Tags") {
+            Button(L("home_rename_feed")) { dialogs.renamingFeed = feed }
+            Button(L("home_refresh")) { home.viewModel.refreshFeed(feed: feed) }
+            Menu(L("home_assign_tags")) {
                 ForEach(sortedTags, id: \.id) { tag in
                     let attached = home.feedTagMap[feed.id]?.contains(tag.id) ?? false
                     Button {
@@ -231,7 +231,7 @@ struct FeedListView: View {
                 }
             }
             Divider()
-            Button("Unsubscribe", role: .destructive) { dialogs.unsubscribingFeed = feed }
+            Button(L("home_unsubscribe_menu"), role: .destructive) { dialogs.unsubscribingFeed = feed }
         }
     }
 
@@ -335,7 +335,9 @@ private struct SidebarCreateSheets: ViewModifier {
             }
             .sheet(isPresented: $dialogs.isAddingFolder) {
                 NamePromptSheet(
-                    title: "New Folder",
+                    titleKey: "home_add_folder",
+                    placeholderKey: "home_new_folder_hint",
+                    duplicateMessageKey: "home_folder_name_duplicate",
                     isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: nil) },
                     onConfirm: { name, _ in _ = home.viewModel.createFolder(name: name) },
                     isPresented: $dialogs.isAddingFolder
@@ -343,7 +345,9 @@ private struct SidebarCreateSheets: ViewModifier {
             }
             .sheet(isPresented: $dialogs.isAddingTag) {
                 NamePromptSheet(
-                    title: "New Tag",
+                    titleKey: "home_add_tag",
+                    placeholderKey: "home_new_tag_hint",
+                    duplicateMessageKey: "home_tag_name_duplicate",
                     initialColor: tagColorPalette[0],
                     showColorPicker: true,
                     isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: nil) },
@@ -362,7 +366,9 @@ private struct SidebarRenameSheets: ViewModifier {
         content
             .sheet(item: $dialogs.renamingFolder) { folder in
                 NamePromptSheet(
-                    title: "Rename Folder",
+                    titleKey: "home_menu_rename_folder",
+                    placeholderKey: "home_new_folder_hint",
+                    duplicateMessageKey: "home_folder_name_duplicate",
                     initialName: folder.name,
                     isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: folder.id) },
                     onConfirm: { name, _ in home.viewModel.updateFolder(id: folder.id, name: name) },
@@ -371,7 +377,9 @@ private struct SidebarRenameSheets: ViewModifier {
             }
             .sheet(item: $dialogs.renamingTag) { tag in
                 NamePromptSheet(
-                    title: "Rename Tag",
+                    titleKey: "home_menu_rename_tag",
+                    placeholderKey: "home_new_tag_hint",
+                    duplicateMessageKey: "home_tag_name_duplicate",
                     initialName: tag.name,
                     initialColor: tag.color ?? tagColorPalette[0],
                     showColorPicker: true,
@@ -382,7 +390,8 @@ private struct SidebarRenameSheets: ViewModifier {
             }
             .sheet(item: $dialogs.renamingFeed) { feed in
                 NamePromptSheet(
-                    title: "Rename Feed",
+                    titleKey: "home_rename_feed",
+                    placeholderKey: "apple_rename_feed_hint",
                     initialName: feed.custom_title ?? feed.title,
                     isDuplicate: { _ in false },
                     onConfirm: { name, _ in home.viewModel.renameFeed(id: feed.id, title: name) },
@@ -398,23 +407,31 @@ private struct SidebarDeleteAlerts: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert("Delete Folder?", isPresented: isPresentedBinding($dialogs.deletingFolder), presenting: dialogs.deletingFolder) { folder in
-                Button("Delete", role: .destructive) { home.viewModel.deleteFolder(id: folder.id) }
-                Button("Cancel", role: .cancel) {}
-            } message: { folder in
-                Text("\"\(folder.name)\" will be removed. Its feeds are kept, unfiled.")
+            .alert(
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                isPresented: isPresentedBinding($dialogs.deletingFolder),
+                presenting: dialogs.deletingFolder
+            ) { folder in
+                Button(L("common_delete"), role: .destructive) { home.viewModel.deleteFolder(id: folder.id) }
+                Button(L("common_cancel"), role: .cancel) {}
             }
-            .alert("Delete Tag?", isPresented: isPresentedBinding($dialogs.deletingTag), presenting: dialogs.deletingTag) { tag in
-                Button("Delete", role: .destructive) { home.viewModel.deleteTag(id: tag.id) }
-                Button("Cancel", role: .cancel) {}
-            } message: { tag in
-                Text("\"\(tag.name)\" will be removed.")
+            .alert(
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                isPresented: isPresentedBinding($dialogs.deletingTag),
+                presenting: dialogs.deletingTag
+            ) { tag in
+                Button(L("common_delete"), role: .destructive) { home.viewModel.deleteTag(id: tag.id) }
+                Button(L("common_cancel"), role: .cancel) {}
             }
-            .alert("Unsubscribe?", isPresented: isPresentedBinding($dialogs.unsubscribingFeed), presenting: dialogs.unsubscribingFeed) { feed in
-                Button("Unsubscribe", role: .destructive) { home.viewModel.unsubscribeFeed(id: feed.id) }
-                Button("Cancel", role: .cancel) {}
-            } message: { feed in
-                Text("\"\(feed.custom_title ?? feed.title)\" will be removed from your subscriptions.")
+            .alert(
+                dialogs.unsubscribingFeed.map { LF("home_unsubscribe_title", $0.custom_title ?? $0.title) } ?? "",
+                isPresented: isPresentedBinding($dialogs.unsubscribingFeed),
+                presenting: dialogs.unsubscribingFeed
+            ) { feed in
+                Button(L("home_unsubscribe_menu"), role: .destructive) { home.viewModel.unsubscribeFeed(id: feed.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            } message: { _ in
+                Text(L("home_unsubscribe_body"))
             }
     }
 

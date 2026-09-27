@@ -232,6 +232,23 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 編集もコミットもしない——変更は `strings.xml` に対して行う。`StringCatalogParityTest`（`desktopTest` で実行され、その前に
 カタログが生成される）は、カタログとリソースのキー・複数形・プレースホルダが食い違うと失敗する。
 
+`appleApp/project.yml` の `sources:` は生成済みファイル
+（`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`）を直接参照するので、
+`xcodegen generate` は `build-shared.sh` の prebuild ステップが最後に書き出した内容をそのまま
+取り込む——このファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。**Swift の
+呼び出し側は、通常の `Text("Some Label")` のように英語のリテラル文字列をキーとして使うことはない**：
+このカタログのトップレベルキーは Android のリソース名そのもの（`home_all_feeds`、`common_cancel` など）
+なので、`appleApp/Keryx/Platform/Localized.swift` の `L(_ key: String) -> String` /
+`LF(_ key: String, _ args: CVarArg...) -> String` が `String(localized:)` 経由でキーを解決し、すでに
+ローカライズ済みの素の `String` を返す——これを `String` を受け取る側の初期化子に渡す
+（`Text(L("home_all_feeds"))`、`.help(L("article_star"))`、`.alert(LF("home_delete_folder_confirm",
+folder.name), …)` のタイトルなど）のであって、`LocalizedStringKey` を受け取る側のオーバーロードには
+渡さない——キーの文字列そのものを表示する意図ではないため。Android の `<plurals>` が引数を2つ以上取る
+場合（例：「%1$d 件成功、%2$d 件失敗」）は Foundation 側に直接対応する仕組みが無い——`.xcstrings` の
+plural variation は単一の引数の複数形カテゴリだけをキーにする——ので、Apple 側はその Android
+plural をそのまま流用しようとせず、代わりに独自のプレーンな（plural ではない）文字列を追加する
+（`strings.xml` の `apple_add_feed_partial_result` 自身のコメント参照）。
+
 ## SwiftUI アプリ（`appleApp/`）のビルド
 
 `appleApp/project.yml` が正となる情報源で、`.xcodeproj` は生成物であり、コミットしない

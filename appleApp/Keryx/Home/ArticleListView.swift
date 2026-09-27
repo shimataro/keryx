@@ -66,7 +66,7 @@ struct ArticleListView: View {
             } label: {
                 Image(systemName: home.unreadOnly ? "circle.inset.filled" : "circle")
             }
-            .help("Unread Only")
+            .help(L("home_unread_only"))
 
             Button {
                 home.viewModel.hideRead()
@@ -74,14 +74,14 @@ struct ArticleListView: View {
                 Image(systemName: "eye.slash")
             }
             .disabled(!home.canHideRead)
-            .help("Hide Read")
+            .help(L("home_hide_read"))
 
             Button {
                 home.viewModel.toggleSort()
             } label: {
                 Image(systemName: home.newestFirst ? "arrow.down" : "arrow.up")
             }
-            .help(home.newestFirst ? "Newest First" : "Oldest First")
+            .help(L(home.newestFirst ? "home_sort_newest" : "home_sort_oldest"))
 
             Spacer()
 
@@ -90,7 +90,7 @@ struct ArticleListView: View {
             } label: {
                 Image(systemName: "checkmark.circle")
             }
-            .help("Mark All Read")
+            .help(L("home_mark_all_read"))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)
@@ -103,23 +103,23 @@ struct ArticleListView: View {
     private var content: some View {
         if home.feeds.isEmpty {
             ContentUnavailableView(
-                "No Feeds Yet",
-                systemImage: "tray",
-                description: Text("Add a feed to start reading.")
+                L("home_no_feeds"),
+                systemImage: "tray"
             )
         } else if home.searchActive && home.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).count < Int(ConstantsKt.SEARCH_MIN_TERM_LENGTH) {
             ContentUnavailableView(
-                "Keep Typing",
-                systemImage: "magnifyingglass",
-                description: Text("Enter at least \(ConstantsKt.SEARCH_MIN_TERM_LENGTH) characters to search.")
+                L("home_search_too_short"),
+                systemImage: "magnifyingglass"
             )
         } else if home.searchActive && !home.searching && home.searchResults.isEmpty {
-            ContentUnavailableView.search
+            ContentUnavailableView(
+                L("home_search_no_results"),
+                systemImage: "magnifyingglass"
+            )
         } else if displayedRows.isEmpty {
             ContentUnavailableView(
-                "No Articles",
-                systemImage: "doc.text",
-                description: Text("Nothing to show here yet.")
+                L("home_no_articles"),
+                systemImage: "doc.text"
             )
         } else {
             List(displayedRows, id: \.id) { article in
@@ -180,17 +180,17 @@ struct ArticleListView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button(article.is_starred == 1 ? "Unstar" : "Star") {
+            Button(L(article.is_starred == 1 ? "article_unstar" : "article_star")) {
                 home.viewModel.toggleStar(article: article)
             }
-            Button(article.is_read == 1 ? "Mark Unread" : "Mark Read") {
+            Button(L(article.is_read == 1 ? "article_mark_as_unread" : "article_mark_as_read")) {
                 home.viewModel.toggleRead(article: article)
             }
             if ArticleListModelKt.hasUsableUrl(url: article.url) {
-                Button("Copy URL") {
+                Button(L("article_copy_url")) {
                     copyToPasteboard(article.url)
                 }
-                Button("Open in Browser") {
+                Button(L("article_open_in_browser")) {
                     openInBrowser(article.url)
                 }
             }
@@ -230,7 +230,7 @@ struct ArticleListView: View {
             home.viewModel.markAllArticlesSeen()
             scrollToFreshEnd(proxy)
         } label: {
-            Text("\(home.newArticleCount) new articles")
+            Text(LF("apple_new_articles_pill", Int64(home.newArticleCount)))
                 .font(.callout)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

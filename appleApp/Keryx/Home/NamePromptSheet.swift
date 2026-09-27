@@ -12,7 +12,9 @@ let tagColorPalette: [String] = [
 /// a color swatch picker. One shared component rather than separate folder/tag/rename dialogs,
 /// since the shape (name + optional color + duplicate check + confirm/cancel) is identical.
 struct NamePromptSheet: View {
-    let title: String
+    let titleKey: String
+    let placeholderKey: String
+    let duplicateMessageKey: String
     let showColorPicker: Bool
     let isDuplicate: (String) -> Bool
     let onConfirm: (String, String?) -> Void
@@ -22,7 +24,9 @@ struct NamePromptSheet: View {
     @State private var color: String?
 
     init(
-        title: String,
+        titleKey: String,
+        placeholderKey: String,
+        duplicateMessageKey: String = "",
         initialName: String = "",
         initialColor: String? = nil,
         showColorPicker: Bool = false,
@@ -30,7 +34,9 @@ struct NamePromptSheet: View {
         onConfirm: @escaping (String, String?) -> Void,
         isPresented: Binding<Bool>
     ) {
-        self.title = title
+        self.titleKey = titleKey
+        self.placeholderKey = placeholderKey
+        self.duplicateMessageKey = duplicateMessageKey
         self.showColorPicker = showColorPicker
         self.isDuplicate = isDuplicate
         self.onConfirm = onConfirm
@@ -44,14 +50,14 @@ struct NamePromptSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.headline)
+            Text(L(titleKey)).font(.headline)
 
-            TextField("Name", text: $name)
+            TextField(L(placeholderKey), text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(confirm)
 
             if duplicate {
-                Text("That name is already in use.")
+                Text(L(duplicateMessageKey))
                     .font(.caption)
                     .foregroundStyle(.red)
             }
@@ -72,8 +78,8 @@ struct NamePromptSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { isPresented = false }
-                Button("OK", action: confirm)
+                Button(L("common_cancel"), role: .cancel) { isPresented = false }
+                Button(L("common_ok"), action: confirm)
                     .keyboardShortcut(.defaultAction)
                     .disabled(trimmedName.isEmpty || duplicate)
             }

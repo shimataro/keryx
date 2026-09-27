@@ -18,10 +18,10 @@ struct AddFeedSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add Feed")
+            Text(L("home_add_feed"))
                 .font(.headline)
 
-            TextField("Feed URL", text: urlBinding)
+            TextField(L("home_add_feed_hint"), text: urlBinding)
                 .textFieldStyle(.roundedBorder)
                 .disabled(addFeed.state.phase != nil)
                 .onSubmit { submit() }
@@ -33,21 +33,25 @@ struct AddFeedSheet: View {
             }
 
             if let partial = addFeed.state.partialResult {
-                Text("\(partial.first?.intValue ?? 0) succeeded, \(partial.second?.intValue ?? 0) failed")
+                Text(LF("apple_add_feed_partial_result", Int64(partial.first?.intValue ?? 0), Int64(partial.second?.intValue ?? 0)))
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
 
             candidatesList
 
-            if addFeed.state.phase != nil {
-                ProgressView()
+            if let phase = addFeed.state.phase {
+                HStack(spacing: 6) {
+                    ProgressView()
+                    Text(L(phase == .previewing ? "home_add_feed_loading_preview" : "home_add_feed_loading_subscribe"))
+                        .font(.caption)
+                }
             }
 
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { isPresented = false }
-                Button(addFeed.state.hasResult ? "Subscribe" : "Preview") { submit() }
+                Button(L("common_cancel"), role: .cancel) { isPresented = false }
+                Button(L(addFeed.state.hasResult ? "home_add_feed_subscribe" : "home_add_feed_confirm")) { submit() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!addFeed.state.confirmEnabled)
             }
@@ -67,15 +71,28 @@ struct AddFeedSheet: View {
     @ViewBuilder
     private var candidatesList: some View {
         if let preview = addFeed.state.preview, case let .multiple(multiple) = onEnum(of: preview) {
-            List(multiple.candidates, id: \.url) { candidate in
-                Toggle(isOn: candidateBinding(candidate.url)) {
-                    VStack(alignment: .leading) {
-                        Text(candidate.title ?? candidate.url)
-                        Text(candidate.url).font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("home_add_feed_links_found"))
+                    .font(.subheadline.bold())
+                Text(L("home_add_feed_select_links"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                List(multiple.candidates, id: \.url) { candidate in
+                    Toggle(isOn: candidateBinding(candidate.url)) {
+                        VStack(alignment: .leading) {
+                            Text(candidate.title ?? candidate.url)
+                            Text(candidate.url).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
+                .frame(minHeight: 120, maxHeight: 240)
+
+                HStack {
+                    Button(L("home_add_feed_select_all")) { addFeed.controller.selectAllCandidates() }
+                    Button(L("home_add_feed_clear_all")) { addFeed.controller.clearCandidates() }
+                }
             }
-            .frame(minHeight: 120, maxHeight: 240)
         }
     }
 

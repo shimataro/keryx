@@ -235,6 +235,22 @@ is a build output — never edit or commit it; change `strings.xml` instead.
 `StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
 catalog and the resources disagree on keys, plural forms or placeholders.
 
+`appleApp/project.yml`'s `sources:` list references the generated file directly
+(`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`), so `xcodegen generate` bundles
+whatever `build-shared.sh`'s prebuild step most recently wrote — the file only needs to exist once,
+before the first `xcodegen generate`. **A Swift call site never uses a literal English string as the
+key** the way `Text("Some Label")` ordinarily would: the catalog's own top-level keys are exactly the
+Android resource names (`home_all_feeds`, `common_cancel`, …), so `appleApp/Keryx/Platform/Localized.swift`'s
+`L(_ key: String) -> String` / `LF(_ key: String, _ args: CVarArg...) -> String` resolve a key through
+`String(localized:)` and hand back a plain, already-localized `String` — pass that into whichever
+view initializer takes a bare `String` (`Text(L("home_all_feeds"))`, `.help(L("article_star"))`, an
+`.alert(LF("home_delete_folder_confirm", folder.name), …)` title, etc.), never the `LocalizedStringKey`-taking
+overload, since the key text itself is not meant to be shown. A resource whose Android `<plurals>` form
+takes more than one argument (e.g. "%1$d succeeded, %2$d failed") has no direct Foundation counterpart —
+its `.xcstrings` variation is keyed on a single argument's plural category — so the Apple side adds its
+own plain (non-plural) string instead of trying to reuse the Android plural as-is (see
+`apple_add_feed_partial_result`'s comment in `strings.xml`).
+
 ## Building the SwiftUI app (`appleApp/`)
 
 `appleApp/project.yml` is the source of truth; the `.xcodeproj` is a generated artifact and is
