@@ -12,8 +12,7 @@ import works.merc.keryx.app.ui.menu.AppMenuShortcut
 import works.merc.keryx.app.ui.menu.MenuBarToggle
 import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
-import works.merc.keryx.app.ui.menu.computeMenuUiState
-import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import java.awt.Frame
 import java.awt.Panel
 import java.awt.event.InputEvent
@@ -64,7 +63,7 @@ class MenuBarVisibilityTest {
 
     private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
         ui = computeMenuUiState(
-            screen = Screen.Home, hasSelectedArticle = true, selectedArticleHasUrl = true,
+            onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true,
             activity = ActivitySnapshot(), cloudConnected = true,
             searchActive = false, unreadOnly = false,
             hasSelectedFeed = true, hasRenamableSelection = true,

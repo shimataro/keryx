@@ -50,7 +50,9 @@
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
-                  組み立て・解析。ファイルの選択は各 UI が担当）、Formatting（formatTimestamp）。
+                  組み立て・解析。ファイルの選択は各 UI が担当）、menu/（MenuUiState + computeMenuUiState——
+                  メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
+                  `onHome: Boolean` を受け取る）、Formatting（formatTimestamp）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,

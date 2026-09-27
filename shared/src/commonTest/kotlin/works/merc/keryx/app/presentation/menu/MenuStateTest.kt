@@ -1,16 +1,15 @@
-package works.merc.keryx.app.ui.menu
+package works.merc.keryx.app.presentation.menu
 
 import works.merc.keryx.app.domain.ActivitySnapshot
-import works.merc.keryx.app.ui.navigation.Screen
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class MenuUiStateTest {
+class MenuStateTest {
 
     private fun state(
-        screen: Screen = Screen.Home,
+        onHome: Boolean = true,
         hasSelectedArticle: Boolean = false,
         selectedArticleHasUrl: Boolean = false,
         activity: ActivitySnapshot = ActivitySnapshot(),
@@ -22,7 +21,7 @@ class MenuUiStateTest {
         hasRenamableSelection: Boolean = false,
         selectedFeedHasSiteUrl: Boolean = false,
     ) = computeMenuUiState(
-        screen = screen,
+        onHome = onHome,
         hasSelectedArticle = hasSelectedArticle,
         selectedArticleHasUrl = selectedArticleHasUrl,
         activity = activity,
@@ -35,11 +34,11 @@ class MenuUiStateTest {
         selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
     )
 
-    // --- Screen gating ---
+    // --- Home gating ---
 
     @Test
     fun home_enables_home_scoped_items() {
-        val ui = state(screen = Screen.Home)
+        val ui = state(onHome = true)
         assertTrue(ui.addItemsEnabled)
         assertTrue(ui.opmlEnabled)
         assertTrue(ui.searchEnabled)
@@ -52,7 +51,7 @@ class MenuUiStateTest {
     @Test
     fun setup_disables_everything_including_opml() {
         val ui = state(
-            screen = Screen.Setup,
+            onHome = false,
             hasSelectedArticle = true,
             selectedArticleHasUrl = true,
             cloudConnected = true,
@@ -93,7 +92,7 @@ class MenuUiStateTest {
 
     @Test
     fun article_actions_disabled_away_from_home_even_with_selection() {
-        val ui = state(screen = Screen.Setup, hasSelectedArticle = true, selectedArticleHasUrl = true)
+        val ui = state(onHome = false, hasSelectedArticle = true, selectedArticleHasUrl = true)
         assertFalse(ui.articleActionsEnabled)
         assertFalse(ui.urlActionsEnabled)
     }
@@ -126,7 +125,7 @@ class MenuUiStateTest {
 
     @Test
     fun unread_only_disabled_away_from_home() {
-        assertFalse(state(screen = Screen.Setup).unreadOnlyEnabled)
+        assertFalse(state(onHome = false).unreadOnlyEnabled)
     }
 
     // --- Refresh / sync gating ---
@@ -171,7 +170,7 @@ class MenuUiStateTest {
     @Test
     fun feed_actions_require_home_and_a_selected_feed() {
         assertTrue(state(hasSelectedFeed = true).feedActionsEnabled)
-        assertFalse(state(screen = Screen.Setup, hasSelectedFeed = true).feedActionsEnabled)
+        assertFalse(state(onHome = false, hasSelectedFeed = true).feedActionsEnabled)
         assertFalse(state(hasSelectedFeed = false).feedActionsEnabled)
     }
 
@@ -194,7 +193,7 @@ class MenuUiStateTest {
 
     @Test
     fun feed_site_url_actions_disabled_away_from_home_even_with_a_site_url() {
-        val ui = state(screen = Screen.Setup, hasSelectedFeed = true, selectedFeedHasSiteUrl = true)
+        val ui = state(onHome = false, hasSelectedFeed = true, selectedFeedHasSiteUrl = true)
         assertFalse(ui.feedSiteUrlActionsEnabled)
     }
 
@@ -209,7 +208,7 @@ class MenuUiStateTest {
     @Test
     fun rename_or_delete_requires_home_and_a_renamable_selection() {
         assertTrue(state(hasRenamableSelection = true).renameOrDeleteEnabled)
-        assertFalse(state(screen = Screen.Setup, hasRenamableSelection = true).renameOrDeleteEnabled)
+        assertFalse(state(onHome = false, hasRenamableSelection = true).renameOrDeleteEnabled)
         assertFalse(state(hasRenamableSelection = false).renameOrDeleteEnabled)
     }
 
@@ -242,6 +241,6 @@ class MenuUiStateTest {
     @Test
     fun unread_only_checked_reflects_state_even_off_home() {
         // The checkbox reflects the persisted toggle regardless of the active screen.
-        assertEquals(true, state(screen = Screen.Setup, unreadOnly = true).unreadOnlyChecked)
+        assertEquals(true, state(onHome = false, unreadOnly = true).unreadOnlyChecked)
     }
 }

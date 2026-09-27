@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.home.renameKey
 

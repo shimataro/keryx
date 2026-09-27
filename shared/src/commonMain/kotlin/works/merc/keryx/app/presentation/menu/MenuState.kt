@@ -1,13 +1,15 @@
-package works.merc.keryx.app.ui.menu
+package works.merc.keryx.app.presentation.menu
 
 import works.merc.keryx.app.domain.ActivitySnapshot
-import works.merc.keryx.app.ui.navigation.Screen
 
 /**
- * Enabled/checked state for every dynamic item in the desktop application menu bar.
+ * Enabled/checked state for every dynamic item in the desktop application menu bar (and, for the
+ * SwiftUI app, its `Commands` menu). Split out of what was `ui/menu/MenuUiState.kt`
+ * (composeApp-only); [computeMenuUiState] took a Compose-only `Screen` there, replaced here by the
+ * plain [onHome] boolean each UI already knows how to compute for its own navigation state.
  *
  * Kept as a plain data class computed by the pure [computeMenuUiState] so the logic is unit-testable
- * without rendering the (desktop-only, untestable) `MenuBar` composable.
+ * without rendering the platform's own menu-bar UI.
  */
 data class MenuUiState(
     /** Add feed/folder/tag — only meaningful on Home. */
@@ -49,18 +51,18 @@ data class MenuUiState(
 /**
  * Computes [MenuUiState] from the current app/UI state. Pure so it can be tested directly.
  *
- * Most items are gated on being on the Home screen (their targets live in Home's composition).
- * Article/URL actions additionally require a selection (and a non-blank URL for the latter). Sort
- * can't be toggled while the Search scope is active (search order is fixed to relevance rank).
- * Refresh/sync are suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while either
- * operation, or a refresh-then-sync cycle (which also covers the gap between the two), is already
- * in flight — and sync additionally requires a connected cloud account.
+ * Most items are gated on [onHome] (their targets live in Home's composition). Article/URL actions
+ * additionally require a selection (and a non-blank URL for the latter). Sort can't be toggled
+ * while the Search scope is active (search order is fixed to relevance rank). Refresh/sync are
+ * suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while either operation, or a
+ * refresh-then-sync cycle (which also covers the gap between the two), is already in flight — and
+ * sync additionally requires a connected cloud account.
  *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
  */
 fun computeMenuUiState(
-    screen: Screen,
+    onHome: Boolean,
     hasSelectedArticle: Boolean,
     selectedArticleHasUrl: Boolean,
     activity: ActivitySnapshot,
@@ -71,23 +73,20 @@ fun computeMenuUiState(
     textInputFocused: Boolean = false,
     hasRenamableSelection: Boolean = false,
     selectedFeedHasSiteUrl: Boolean = false,
-): MenuUiState {
-    val onHome = screen == Screen.Home
-    return MenuUiState(
-        addItemsEnabled = onHome,
-        opmlEnabled = onHome,
-        searchEnabled = onHome,
-        unreadOnlyEnabled = onHome,
-        unreadOnlyChecked = unreadOnly,
-        toggleSortEnabled = onHome && !searchActive,
-        markAllReadEnabled = onHome,
-        articleActionsEnabled = onHome && hasSelectedArticle,
-        urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
-        refreshAllEnabled = onHome && activity.idle,
-        syncEnabled = onHome && cloudConnected && activity.idle,
-        openSettingsEnabled = onHome,
-        feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
-        renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
-        feedSiteUrlActionsEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
-    )
-}
+): MenuUiState = MenuUiState(
+    addItemsEnabled = onHome,
+    opmlEnabled = onHome,
+    searchEnabled = onHome,
+    unreadOnlyEnabled = onHome,
+    unreadOnlyChecked = unreadOnly,
+    toggleSortEnabled = onHome && !searchActive,
+    markAllReadEnabled = onHome,
+    articleActionsEnabled = onHome && hasSelectedArticle,
+    urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
+    refreshAllEnabled = onHome && activity.idle,
+    syncEnabled = onHome && cloudConnected && activity.idle,
+    openSettingsEnabled = onHome,
+    feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
+    renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
+    feedSiteUrlActionsEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
+)

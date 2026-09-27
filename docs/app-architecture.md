@@ -54,7 +54,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
                   sync-now and `canSyncNow`; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
-                  leaving file picking to each UI), Formatting (formatTimestamp). Pane
+                  leaving file picking to each UI), menu/ (MenuUiState + computeMenuUiState — enabled/
+                  checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
+                  than Compose's own `Screen` type), Formatting (formatTimestamp). Pane
                   layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
