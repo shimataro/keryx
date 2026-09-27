@@ -15,19 +15,24 @@ final class AppModel {
     private(set) var home: HomeObservable?
     private(set) var preferences: PreferencesObservable?
     private(set) var cloudSync: CloudSyncObservable?
+    private(set) var notifications: NotificationCenterObservable?
     private(set) var startupError: (any Error)?
     /// Whether the first-launch Setup screen should show instead of Home — read once at startup;
     /// `SetupView`'s `onDone` flips this directly rather than this property re-polling
     /// `isSetupComplete()` reactively (there is nothing else that would change it mid-session).
     private(set) var needsSetup = false
 
+    /// Sidebar dialog state (add feed / create-rename-delete folder-tag / unsubscribe confirm) —
+    /// owned here rather than by `HomeView` so both `FeedListView`'s own context menus and the
+    /// app-level `Commands`/keyboard handling can trigger the same dialogs.
+    let sidebarDialogs = SidebarDialogState()
     let oauthCoordinator = OAuthSessionCoordinator()
 
     init() {
         do {
             let sdk = try KeryxSdk.companion.start(
                 newArticlesText: { count in LF("apple_new_articles_pill", Int64(count)) },
-                postOsNotification: { _, _ in },
+                postOsNotification: { message, _ in OsNotificationPoster.post(message: message) },
                 // KERYX_DATA_DIR lets a manual verification run point at a scratch directory
                 // instead of the real ~/Library/Application Support/Keryx — unset (nil) in every
                 // normal launch, which keeps production behavior unchanged.
@@ -51,8 +56,13 @@ final class AppModel {
             )
             self.preferences = PreferencesObservable(controller: sdk.preferences)
             self.cloudSync = CloudSyncObservable(controller: sdk.cloudSyncController)
+            self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
+            OsNotificationPoster.requestAuthorization()
             try sdk.startMaintenance()
+            Task {
+                try? await sdk.prepareSearchIndex()
+            }
         } catch {
             self.startupError = error
         }
@@ -60,5 +70,17 @@ final class AppModel {
 
     func completeSetup() {
         needsSetup = false
+    }
+
+    /// Imports an `.opml` document the app was opened with (`onOpenURL`) — see
+    /// `KeryxSdk.importOpenedOpml`'s own doc.
+    func importOpenedOpml(url: URL) {
+        guard let sdk else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+        guard let xml = try? String(contentsOf: url, encoding: .utf8) else { return }
+        Task {
+            try? await sdk.importOpenedOpml(xml: xml)
+        }
     }
 }

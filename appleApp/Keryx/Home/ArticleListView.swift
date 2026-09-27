@@ -4,14 +4,13 @@ import SwiftUI
 private let markStart: Character = "\u{0002}"
 private let markEnd: Character = "\u{0003}"
 
-/// The center pane: toolbar (unread-only, hide-read, sort, mark-all-read), the article rows
-/// themselves (search-highlighted when a query is active), the "new articles" pill, and the four
-/// empty states — see `external-spec.md` §7's article-list bullets and the M2 research notes.
-///
-/// The notification-center bell that lives in this pane's header on every platform (per
-/// `error-design.md`'s "Notification Center") is added in M5, once `NotificationAlerts` is wired up.
+/// The center pane: toolbar (unread-only, hide-read, sort, mark-all-read, the notification bell),
+/// the article rows themselves (search-highlighted when a query is active), the "new articles"
+/// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
+/// research notes.
 struct ArticleListView: View {
     let home: HomeObservable
+    let notifications: NotificationCenterObservable
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
     @State private var appearedIds: Set<String> = []
@@ -91,6 +90,8 @@ struct ArticleListView: View {
                 Image(systemName: "checkmark.circle")
             }
             .help(L("home_mark_all_read"))
+
+            NotificationBell(home: home, notifications: notifications)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)

@@ -97,7 +97,7 @@ struct CloudSyncSettingsTab: View {
                         .foregroundStyle(.secondary)
                 }
                 if let error = cloudSync.lastSyncError {
-                    Text(errorMessage(error))
+                    Text(errorKindMessage(error))
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
@@ -146,22 +146,6 @@ struct CloudSyncSettingsTab: View {
         }
     }
 
-    private func errorMessage(_ kind: ErrorKind) -> String {
-        switch kind {
-        case .feedTimeout: return L("error_feed_timeout")
-        case .feedFetch: return L("error_feed_fetch")
-        case .feedParse: return L("error_feed_parse")
-        case .feedGone: return L("error_feed_gone")
-        case .feedNotFound: return L("error_feed_not_found")
-        case .cloudAuth: return L("error_cloud_auth")
-        case .cloudDataIncompatible: return L("error_cloud_data_incompatible")
-        case .cloudStorage: return L("error_cloud_storage")
-        case .syncConflict: return L("error_sync_conflict")
-        case .schemaVersion: return L("error_schema_version")
-        case .update: return L("error_update")
-        case .generic: return L("error_generic")
-        }
-    }
 
     private func titleKey(_ type: CloudStorageType) -> String {
         switch type {

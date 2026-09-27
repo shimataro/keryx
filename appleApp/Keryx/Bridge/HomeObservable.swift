@@ -53,6 +53,7 @@ final class HomeObservable {
     private(set) var selectedFeedName: String?
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
+    private(set) var cloudConnected: Bool = false
 
     init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
@@ -97,10 +98,11 @@ final class HomeObservable {
         async let t26: () = observeSelectedFeedName()
         async let t27: () = observeSelectedFeedFaviconUrl()
         async let t28: () = observeArticleContents()
+        async let t29: () = observeCloudConnected()
         _ = await (
             t1, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
-            t21, t22, t23, t24, t25, t26, t27, t28
+            t21, t22, t23, t24, t25, t26, t27, t28, t29
         )
     }
 
@@ -214,5 +216,9 @@ final class HomeObservable {
 
     private func observeArticleContents() async {
         for await v in viewModel.articleContents { articleContents = v }
+    }
+
+    private func observeCloudConnected() async {
+        for await v in viewModel.cloudConnected { cloudConnected = v.boolValue }
     }
 }

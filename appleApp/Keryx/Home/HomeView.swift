@@ -7,15 +7,16 @@ import SwiftUI
 /// no narrower-layout branch to reproduce.
 struct HomeView: View {
     let home: HomeObservable
+    let sidebarDialogs: SidebarDialogState
+    let notifications: NotificationCenterObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
-    @State private var sidebarDialogs = SidebarDialogState()
 
     var body: some View {
         NavigationSplitView {
             FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
         } content: {
-            ArticleListView(home: home, focusedPane: $focusedPane)
+            ArticleListView(home: home, notifications: notifications, focusedPane: $focusedPane)
         } detail: {
             ArticleDetailView(home: home, focusedPane: $focusedPane)
         }
