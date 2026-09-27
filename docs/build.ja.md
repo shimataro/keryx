@@ -195,46 +195,20 @@ Dropbox と OneDrive は上記と同じ `local.properties` のキーを使う。
 4. Google の場合、リダイレクト URI を別途登録する必要はない——クライアント ID を逆順にした自分専用の
    カスタムスキーム `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect` を Google 側が自動的に
    導出する（`googleIosClientRedirectUri`、`data/cloud/GoogleDriveAuthManager.kt`）。
-5. **Swift アプリの Info.plist にカスタム URL スキームを登録する。** 登録が必要なスキームは2つ：
-   共有の `keryx` スキーム（Dropbox・OneDrive、そして今回から Google Drive も——3つとも `state` で
-   判別）と、ステップ4の Google クライアント専用の逆順クライアント ID スキーム。`CFBundleURLTypes`
-   には、スキームごとに1つの `<dict>`（`CFBundleURLName` + 1スキームだけを含む `CFBundleURLSchemes`
-   配列）を追加する——desktop 版の Compose パッケージングが `keryx` に対してすでに使っている書式と
-   同じ（`composeApp/build.gradle.kts` の `nativeDistributions.macOS.infoPlist.extraKeysRawXml`）：
-
-   ```xml
-   <key>CFBundleURLTypes</key>
-   <array>
-       <dict>
-           <key>CFBundleURLName</key>
-           <string>works.merc.keryx.oauth</string>
-           <key>CFBundleURLSchemes</key>
-           <array>
-               <string>keryx</string>
-           </array>
-       </dict>
-       <dict>
-           <key>CFBundleURLName</key>
-           <string>works.merc.keryx.oauth.googledrive</string>
-           <key>CFBundleURLSchemes</key>
-           <array>
-               <string>com.googleusercontent.apps.NNNN-xxxx</string>
-           </array>
-       </dict>
-   </array>
-   ```
-
-   `com.googleusercontent.apps.NNNN-xxxx` はステップ4で得た実際の逆順クライアント ID に置き換える。
-   Xcode の Info タブの「URL Types」セクション（「+」ボタン）から GUI で追加しても同じ2つのキーが
-   書き込まれるので、XML を手で書く代わりに使える。
-
-   **この登録が必要なのは、desktop 版と同じ経路でリダイレクトを受け取る場合だけ**——ユーザーが
-   システムブラウザーでサインインを完了した後、OS が実行中のアプリに URL を渡す経路
-   （macOS の `NSApplicationDelegate.application(_:open:)`、iOS の `onOpenURL`/
-   `scene(_:openURLContexts:)`）。Swift アプリが代わりに `ASWebAuthenticationSession` で認可 URL を
-   開き、そのスキームを `callbackURLScheme` パラメーターに渡す場合は、セッション自身がリダイレクトを
-   横取りするため、そのスキームに `CFBundleURLTypes` のエントリは不要——両者は択一の受け取り方式で、
-   両方必要というわけではない。
+5. **実際に配布する `appleApp/` プロジェクトは `CFBundleURLTypes` を一切登録しない**——共有の
+   `keryx` スキームも、ステップ4の Google クライアント専用の逆順クライアント ID スキームも登録しない。
+   どちらも、desktop 版が使う経路（ユーザーがシステムブラウザーでサインインを完了した後、OS が
+   実行中のアプリに URL を渡す `NSApplicationDelegate.application(_:open:)`）でだけ必要になるもの。
+   `appleApp/` は代わりに、どのプロバイダーも `ASWebAuthenticationSession` で認可 URL を開き、
+   そのスキームを `callbackURLScheme` パラメーターに渡す（`domain/schemeOf` が接続フロー自身の
+   リダイレクト URI から導出するので、Swift 側がスキームを別途ハードコードすることはない）——
+   セッション自身がリダイレクトを横取りするため、`CFBundleURLTypes` のエントリは不要になる。詳細は
+   [app-architecture.ja.md](app-architecture.ja.md) の「`:shared` の Apple ターゲット」を参照。
+   （もし将来 OS 経由のリダイレクト受け取りが必要になった場合は、`CFBundleURLTypes` にスキームごとの
+   `<dict>`（`CFBundleURLName` + 1 スキームだけを含む `CFBundleURLSchemes` 配列）を追加する——desktop
+   版の Compose パッケージングが `keryx` に対してすでに使っている書式と同じ
+   （`composeApp/build.gradle.kts` の `nativeDistributions.macOS.infoPlist.extraKeysRawXml`）——が、
+   現在のアプリはこの方式を採っていない。）
 
 `googledrive.apple.client.id` を空にすると Google Drive が Apple 版だけで隠れる——desktop 版や
 Android 版それぞれの Google Drive キーには影響しない（逆も同様）。仕組みの詳細は
@@ -257,6 +231,59 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 （`%1$s` → `%1$@`、`%1$d` → `%1$lld`）、`<plurals>` を plural バリエーションにする。このファイルはビルド成果物なので、
 編集もコミットもしない——変更は `strings.xml` に対して行う。`StringCatalogParityTest`（`desktopTest` で実行され、その前に
 カタログが生成される）は、カタログとリソースのキー・複数形・プレースホルダが食い違うと失敗する。
+
+## SwiftUI アプリ（`appleApp/`）のビルド
+
+`appleApp/project.yml` が正となる情報源で、`.xcodeproj` は生成物であり、コミットしない
+（`.gitignore` 参照）。Xcode 本体に加えて **XcodeGen**（`brew install xcodegen`）が必要。
+
+```bash
+cd appleApp
+xcodegen generate                              # project.yml から Keryx.xcodeproj を書き出す
+xcodebuild -scheme Keryx -destination 'platform=macOS' build
+xcodebuild -scheme Keryx -destination 'platform=macOS' test
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
+```
+
+`project.yml` の `prebuildScripts` 項目（`Scripts/build-shared.sh`）が、ビルドのたびに
+`:shared:assembleKeryxSharedReleaseXCFramework` と `:composeApp:generateStringCatalog` を自動的に
+実行するので、普通にビルドするだけで最新の Kotlin ソースが反映される——別途手動の手順は要らない。
+XCFramework の Debug 版は配線しておらず、どの構成でビルドしても Release 版をリンクする。
+`dependencies:`（フレームワークリンク）を `FRAMEWORK_SEARCH_PATHS` や Kotlin/Native の
+`embedAndSignAppleFrameworkForXcode` の代わりに使う理由、`KeryxTests` が単体で完結する
+（アプリに寄生しない）テストバンドルである理由は、
+[app-architecture.ja.md](app-architecture.ja.md) の「`appleApp/` の Xcode プロジェクト」を参照。
+
+### 署名
+
+このアプリのエンタイトルメント（`Keryx/Keryx.entitlements`：`app-sandbox`、
+`keychain-access-groups` など）は、**実在する Apple Development / Developer ID の証明書とチームでの
+署名を必要とする**——アドホック署名（`CODE_SIGN_IDENTITY=-`）では、`CODE_SIGN_STYLE=Manual` にしても
+実行可能なサンドボックスビルドを作れない（「requires a provisioning profile」で失敗する）。ローカルで
+ビルド・実行するには：
+
+1. `appleApp/Local.xcconfig.example` を `appleApp/Local.xcconfig`（Git 管理外）としてコピーする。
+2. `DEVELOPMENT_TEAM`（Apple ID のチーム。無料の「Personal Team」でよい）と `CODE_SIGN_IDENTITY`
+   （通常は `Apple Development`）を書き込む。
+3. `appleApp/Config/Shared.xcconfig` がこのファイルを `#include?` しているので、次に
+   `xcodegen generate` を実行すれば他の変更なしに反映される。
+
+`Local.xcconfig` が無い場合、`Shared.xcconfig` のアドホックな既定値が使われる——これはコンパイルと
+リンクはできるが、サンドボックス化されたバイナリの署名はできない。下記の CI での確認には十分だが、
+実際に起動できるバイナリにはならない。
+
+### CI
+
+macOS の CI ジョブには Apple ID・チームが無いため、実際に署名したビルドではなく
+`CODE_SIGNING_ALLOWED=NO`（コンパイルとリンクは行うがコード署名を完全に省く）でビルドを確認する：
+
+```bash
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+`KeryxTests`（Swift Testing、単体で完結するテストバンドル）は、サンドボックス化されたアプリではなく
+`.xctest` バンドルを生成するだけなので、CI のアドホック ID のまま署名して実行できる。
 
 ## パッケージング
 

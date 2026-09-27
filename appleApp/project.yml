@@ -1,0 +1,110 @@
+name: Keryx
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    GENERATE_INFOPLIST_FILE: YES
+    # Apple Silicon only, matching :shared's own Apple targets (macosArm64/iosArm64/
+    # iosSimulatorArm64 — see docs/app-architecture.md's "Apple targets in :shared"): the
+    # XCFramework has no x86_64 simulator slice, so building for it would fail to link.
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+  configs:
+    Debug: {}
+    Release: {}
+
+configFiles:
+  Debug: Config/Shared.xcconfig
+  Release: Config/Shared.xcconfig
+
+targets:
+  Keryx:
+    type: application
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Keryx
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: works.merc.keryx
+        PRODUCT_NAME: Keryx
+        INFOPLIST_KEY_CFBundleDisplayName: Keryx
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright (c) 2026 Mercury Works"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.news
+        CODE_SIGN_ENTITLEMENTS: Keryx/Keryx.entitlements
+        OTHER_LDFLAGS: "-lsqlite3 -ObjC $(inherited)"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    dependencies:
+      - framework: ../shared/build/XCFrameworks/release/KeryxShared.xcframework
+        embed: false
+        link: true
+    info:
+      path: Generated-Info.plist
+      properties:
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: OPML Document
+            LSHandlerRank: Default
+            LSItemContentTypes:
+              - org.opml.opml
+              - com.reederapp.opml
+              - unofficial.opml
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.opml.opml
+            UTTypeDescription: OPML Document
+            UTTypeConformsTo:
+              - public.xml
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - opml
+          - UTTypeIdentifier: com.reederapp.opml
+            UTTypeDescription: OPML Document
+            UTTypeConformsTo:
+              - public.xml
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - opml
+          - UTTypeIdentifier: unofficial.opml
+            UTTypeDescription: OPML Document
+            UTTypeConformsTo:
+              - public.xml
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - opml
+    prebuildScripts:
+      - name: Build KeryxShared
+        script: "\"$SRCROOT/Scripts/build-shared.sh\"\n"
+        basedOnDependencyAnalysis: false
+
+  KeryxTests:
+    type: bundle.unit-test
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    # Logic-only test bundle (no TEST_HOST/app dependency): sidesteps a cross-platform
+    # (supportedDestinations) TEST_HOST path mismatch between macOS's Contents/MacOS/ bundle
+    # layout and iOS's flat one. Sources that need testing are added to this target's own
+    # `sources:` list directly (see Bridge/Localization once they exist) rather than hosted
+    # inside Keryx.app. Revisit if a test genuinely needs the running app.
+    sources:
+      - path: KeryxTests
+
+schemes:
+  Keryx:
+    build:
+      targets:
+        Keryx: all
+        KeryxTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - KeryxTests

@@ -196,47 +196,21 @@ not just iOS/iPadOS).
    reversed-client-id custom scheme, `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`, which
    Google derives from the Client ID automatically (`googleIosClientRedirectUri`,
    `data/cloud/GoogleDriveAuthManager.kt`).
-5. **Register the custom URL schemes in the Swift app's Info.plist.** Two schemes need to be
-   registered: the shared `keryx` scheme (Dropbox/OneDrive, and now Google Drive too — all three
-   disambiguated by `state`) and the Google client's own reversed-client-id scheme from step 4.
-   `CFBundleURLTypes` takes one `<dict>` per scheme, each with its own `CFBundleURLName` and a
-   `CFBundleURLSchemes` array holding just that one scheme string — the same shape the desktop app's
-   Compose packaging already uses for `keryx` (`composeApp/build.gradle.kts`'s
-   `nativeDistributions.macOS.infoPlist.extraKeysRawXml`):
-
-   ```xml
-   <key>CFBundleURLTypes</key>
-   <array>
-       <dict>
-           <key>CFBundleURLName</key>
-           <string>works.merc.keryx.oauth</string>
-           <key>CFBundleURLSchemes</key>
-           <array>
-               <string>keryx</string>
-           </array>
-       </dict>
-       <dict>
-           <key>CFBundleURLName</key>
-           <string>works.merc.keryx.oauth.googledrive</string>
-           <key>CFBundleURLSchemes</key>
-           <array>
-               <string>com.googleusercontent.apps.NNNN-xxxx</string>
-           </array>
-       </dict>
-   </array>
-   ```
-
-   Replace `com.googleusercontent.apps.NNNN-xxxx` with the actual reversed client ID from step 4.
-   Xcode's own editor (target → **Info** tab → **URL Types**, "+") writes the same two keys and can
-   be used instead of hand-editing the XML.
-
-   **This registration is only needed for the redirect-delivery path desktop uses today** — the OS
-   handing the URL to the running app (`NSApplicationDelegate.application(_:open:)` on macOS,
-   `onOpenURL`/`scene(_:openURLContexts:)` on iOS) after the user completes sign-in in the system
-   browser. If the Swift app instead opens the authorization URL through
-   `ASWebAuthenticationSession` and passes the scheme as its `callbackURLScheme` parameter, that
-   session intercepts the redirect itself and needs no `CFBundleURLTypes` entry for it — the two are
-   alternative delivery mechanisms, not both required.
+5. **The shipped `appleApp/` project registers no `CFBundleURLTypes` at all — neither the shared
+   `keryx` scheme nor the Google client's reversed-client-id scheme from step 4.** Both would only
+   be needed for the OS redirect-delivery path desktop uses (`NSApplicationDelegate.application
+   (_:open:)` handing the URL to the already-running app after the user finishes sign-in in the
+   system browser). `appleApp/` instead opens every provider's authorize URL through
+   `ASWebAuthenticationSession`, passing the scheme as its `callbackURLScheme` parameter
+   (`domain/schemeOf` derives it from the connect flow's own redirect URI, so Swift never
+   hardcodes a copy of it) — that session intercepts the redirect itself and needs no
+   `CFBundleURLTypes` entry for it. See [app-architecture.md](app-architecture.md)'s "Apple targets
+   in `:shared`" for the launcher wiring. (If a future need for the OS redirect-delivery path ever
+   arises instead, `CFBundleURLTypes` would take one `<dict>` per scheme, each with its own
+   `CFBundleURLName` and a `CFBundleURLSchemes` array holding just that one scheme string — the same
+   shape the desktop app's Compose packaging already uses for `keryx`
+   (`composeApp/build.gradle.kts`'s `nativeDistributions.macOS.infoPlist.extraKeysRawXml`) — but
+   this is not what the app does today.)
 
 Leaving `googledrive.apple.client.id` empty hides Google Drive on the Apple app only — it has no
 effect on desktop's or Android's own Google Drive keys, and vice versa. See
@@ -260,6 +234,60 @@ Apple's (`%1$s` → `%1$@`, `%1$d` → `%1$lld`) and turns `<plurals>` into plur
 is a build output — never edit or commit it; change `strings.xml` instead.
 `StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
 catalog and the resources disagree on keys, plural forms or placeholders.
+
+## Building the SwiftUI app (`appleApp/`)
+
+`appleApp/project.yml` is the source of truth; the `.xcodeproj` is a generated artifact and is
+never committed (see `.gitignore`). Requires **XcodeGen** (`brew install xcodegen`) in addition to
+Xcode itself.
+
+```bash
+cd appleApp
+xcodegen generate                              # writes Keryx.xcodeproj from project.yml
+xcodebuild -scheme Keryx -destination 'platform=macOS' build
+xcodebuild -scheme Keryx -destination 'platform=macOS' test
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
+```
+
+`project.yml`'s `prebuildScripts` entry (`Scripts/build-shared.sh`) runs
+`:shared:assembleKeryxSharedReleaseXCFramework` and `:composeApp:generateStringCatalog`
+automatically before each Xcode/`xcodebuild` build, so a plain build picks up the current Kotlin
+source without a separate manual step — there is no Debug variant of the XCFramework wired in;
+every configuration links Release. See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
+Xcode project" for why the dependency is wired through `dependencies:` (framework linking) rather
+than `FRAMEWORK_SEARCH_PATHS` or Kotlin/Native's `embedAndSignAppleFrameworkForXcode`, and why
+`KeryxTests` is a standalone (non-hosted) test bundle.
+
+### Signing
+
+The app's entitlements (`Keryx/Keryx.entitlements`: `app-sandbox`, `keychain-access-groups`, …)
+**require signing with a real Apple Development or Developer ID identity and team** — ad-hoc
+signing (`CODE_SIGN_IDENTITY=-`) cannot produce a runnable sandboxed build, even under
+`CODE_SIGN_STYLE=Manual` (fails with "requires a provisioning profile"). To build and run locally:
+
+1. Copy `appleApp/Local.xcconfig.example` to `appleApp/Local.xcconfig` (gitignored).
+2. Fill in `DEVELOPMENT_TEAM` (your Apple ID's team — a free "Personal Team" works) and
+   `CODE_SIGN_IDENTITY` (`Apple Development` is usually right).
+3. `appleApp/Config/Shared.xcconfig` `#include?`s this file, so XcodeGen/Xcode picks it up on the
+   next `xcodegen generate` with no other change.
+
+Without a `Local.xcconfig`, `Shared.xcconfig`'s ad-hoc defaults apply, which compile and link but
+cannot codesign a sandboxed binary — fine for CI verification (below), not for a binary you can
+actually launch.
+
+### CI
+
+The macOS CI job has no Apple ID/team available, so it verifies the build with
+`CODE_SIGNING_ALLOWED=NO` (compiles and links, skips codesigning entirely) rather than a real
+signed build:
+
+```bash
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+`KeryxTests` (Swift Testing, standalone/non-hosted) still runs signed with the CI's ad-hoc identity
+since it produces a `.xctest` bundle rather than a sandboxed app.
 
 ## Packaging
 

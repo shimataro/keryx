@@ -1109,13 +1109,22 @@ around.
   Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
   Developer ID build adds Sparkle, which the App Store build must not contain.
 - **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
-  share the bundle ID (`works.merc.keryx`), the `keryx://` scheme and the OPML document types, and
-  may share the same data. Launching one through LaunchServices (Finder, `open`) while the other is
-  running just activates the running one. `./gradlew :composeApp:run` bypasses LaunchServices and
-  cannot detect the SwiftUI app, so not running both is an operating rule, not an enforced one.
-- Because the two may open the same `keryx.db` built from different commits, a database whose
-  `PRAGMA user_version` is **newer** than the running app's schema is refused rather than opened
-  (see "DatabaseDriverFactory" above).
+  share the bundle ID (`works.merc.keryx`) and the OPML document types. Launching one through
+  LaunchServices (Finder, `open`) while the other is running just activates the running one.
+  `./gradlew :composeApp:run` bypasses LaunchServices and cannot detect the SwiftUI app, so not
+  running both is an operating rule, not an enforced one.
+- **The two apps do not share data.** The SwiftUI app is sandboxed, so its container
+  (`~/Library/Containers/works.merc.keryx/Data/...`) is a different filesystem location than the
+  Compose build's `~/Library/Application Support/Keryx`, and there is no migration between them —
+  a deliberate decision, not a gap: the two remain independent installs indefinitely, and the
+  Compose macOS build stays available for internal/development use after the SwiftUI app ships
+  (see the bullet above). Each app's own `PRAGMA user_version` guard (see "DatabaseDriverFactory"
+  above) exists for the ordinary case of two builds of the *same* app disagreeing on schema
+  version, not for cross-app access, since neither app ever opens the other's database file.
+- **The SwiftUI app does not register the `keryx://` scheme.** It has no use for it: OAuth is
+  driven by Swift's own `ASWebAuthenticationSession` with each provider's own callback scheme (see
+  "Apple targets in `:shared`" below), never the custom-URI redirect desktop/Android use. Only the
+  Compose build owns `keryx://`.
 - **The two apps never write to the same Keychain item.** Sharing one would let either app's
   disconnect (which also revokes the provider's refresh token) silently break the other's sync, and
   the Compose build predates the SwiftUI app owning this bundle ID at all. The Compose desktop
@@ -1187,6 +1196,48 @@ supplies an `AuthorizationLauncher` that hands the URL straight to Swift, which 
 copy of each provider's scheme. The session's callback URL is handed to `handleOAuthRedirect`
 exactly like an OS-routed `keryx://` redirect would be; desktop and Android are unaffected
 (`AuthorizationLauncher` defaults to opening the system browser, their existing behavior).
+
+### The `appleApp/` Xcode project
+
+`appleApp/` holds the SwiftUI app, sitting beside `composeApp/`/`androidApp/`. The `.xcodeproj` is
+never committed — **XcodeGen** generates it from `appleApp/project.yml` (`xcodegen generate`), the
+same way SQLDelight/Compose Resources generate code from their own source files elsewhere in the
+repo. One target, `Keryx`, covers both platforms (`supportedDestinations: [macOS, iOS]`); there is
+no separate iOS target to keep in sync.
+
+- **Consuming `:shared`**: `project.yml`'s `dependencies:` links the prebuilt
+  `KeryxShared.xcframework` (`embed: false, link: true` — appropriate for a *static* framework,
+  which has nothing to embed at runtime). This is XcodeGen's native framework-dependency mechanism,
+  not `FRAMEWORK_SEARCH_PATHS`/`OTHER_LDFLAGS -framework` (which only resolves a bare `.framework`
+  bundle, not an `.xcframework`'s per-platform slices) and not Kotlin/Native's
+  `embedAndSignAppleFrameworkForXcode` convenience task (built for live-embedding a *dynamic*
+  framework into a single-platform target; it does not resolve against this repo's
+  `supportedDestinations`-grouped multiplatform target at all). A `prebuildScripts` entry
+  (`Scripts/build-shared.sh`) runs `:shared:assembleKeryxSharedReleaseXCFramework` and
+  `:composeApp:generateStringCatalog` before every build, so the Xcode project always links the
+  current Kotlin source — **always the Release XCFramework variant**, even for an Xcode Debug
+  build of the Swift app, since there is no separate debug slice wired in `project.yml`.
+- **Signing and entitlements**: `Keryx/Keryx.entitlements` declares `app-sandbox`,
+  `network.client`, `files.user-selected.read-write`, and `keychain-access-groups`
+  (`$(AppIdentifierPrefix)works.merc.keryx`, the Data Protection Keychain access group — see
+  "Distribution and coexistence" above). **A sandboxed entitlement can only be signed by a real
+  Apple Development/Developer ID identity and team** — ad-hoc signing (`CODE_SIGN_IDENTITY=-`)
+  fails even under `CODE_SIGN_STYLE=Manual` ("requires a provisioning profile"), so there is no way
+  to produce a runnable, entitled build without one. `Config/Shared.xcconfig` sets ad-hoc/no-team
+  defaults and then `#include?`s a gitignored `Local.xcconfig` (templated by
+  `Local.xcconfig.example`), so a developer's own team overrides cleanly without touching the
+  committed config. CI has no team available, so it builds with `CODE_SIGNING_ALLOWED=NO` instead —
+  this compiles and links but never codesigns, so it verifies the build only, not a runnable
+  sandboxed app (see `docs/testing.md`).
+- **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
+  `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
+  `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
+  computation uses the iOS-style flat `Keryx.app/Keryx` layout even when the active destination is
+  macOS, whose bundle actually nests the executable under `Keryx.app/Contents/MacOS/Keryx`, so the
+  test bundle fails to find its host. Being host-less means `KeryxTests` cannot exercise `AppModel`/
+  `HomeView` directly; it covers the `Bridge/`/`Localization/` adapters in isolation instead.
+- iOS Simulator only ships an arm64 slice (`EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64` in
+  `project.yml`), matching the rest of the repo's Apple-Silicon-only convention.
 
 ### `KeryxSdk`: the Swift entry point
 

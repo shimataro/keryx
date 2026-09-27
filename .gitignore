@@ -8,6 +8,14 @@
 /composeApp/unused
 /shared/unused
 
+# appleApp (XcodeGen-generated project + build artifacts)
+/appleApp/*.xcodeproj/
+/appleApp/Local.xcconfig
+/appleApp/Generated-Info.plist
+/appleApp/build/
+xcuserdata/
+DerivedData/
+
 # Local settings
 local.properties
 *.local.*

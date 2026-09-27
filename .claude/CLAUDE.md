@@ -61,6 +61,12 @@ memory:
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
 ./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test  # Apple-target tests (Mac + Xcode)
 ./gradlew :shared:assembleKeryxSharedReleaseXCFramework         # Framework for the SwiftUI app
+
+# appleApp/ (SwiftUI, macOS + iOS — XcodeGen project, see docs/build.md)
+cd appleApp && xcodegen generate                                # (re)generate Keryx.xcodeproj from project.yml
+xcodebuild -scheme Keryx -destination 'platform=macOS' build     # Build the SwiftUI app (macOS)
+xcodebuild -scheme Keryx -destination 'platform=macOS' test      # Run KeryxTests (Swift Testing)
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build  # Build (iOS Simulator)
 ```
 
 ## Branching
@@ -165,6 +171,15 @@ composeApp/src/                  # Compose UI for desktop + Android (depends on 
 ├── desktopMain/kotlin/…/        # main.kt, tray, app menu, token storages, update installer
 └── commonTest/, desktopTest/    # UI + ViewModel tests
 testing/src/                     # test-only helpers (DbTestSupport, fakes) for both modules
+appleApp/                        # SwiftUI app (macOS + iOS), consumes :shared as KeryxShared.xcframework
+├── project.yml                  # XcodeGen source of truth — Keryx.xcodeproj is generated, never committed
+├── Scripts/                     # build-shared.sh (prebuild: assembles the XCFramework + string catalog)
+├── Config/                      # Shared.xcconfig (+ gitignored Local.xcconfig for real signing team)
+├── Keryx/
+│   ├── App/        # KeryxApp, AppModel (owns KeryxSdk), startup-failure view
+│   ├── Bridge/     # StateFlow -> @Observable adapters
+│   └── Home/       # SwiftUI screens
+└── KeryxTests/                  # Swift Testing, standalone (non-hosted) bundle
 ```
 
 The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).

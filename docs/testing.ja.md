@@ -66,6 +66,21 @@
   絞っているため、Compose を実際にレンダリングするテストは、実際に Android アプリケーションである
   唯一のモジュールであるこちらに置く。
 
+- `appleApp/KeryxTests/` ——SwiftUI アプリ自身に対する Swift Testing（`import Testing`、
+  `@Suite`/`@Test`/`#expect`）で、上記の `:shared` の Kotlin `appleTest`/`macosTest` とは別物。
+  **単体で完結する（アプリに寄生しない）テストバンドル**——`project.yml` はこのターゲットに
+  `dependencies: [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS,
+  iOS]` のターゲットに寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：ビルド対象が
+  macOS であっても `TEST_HOST` のパス計算は iOS 流のフラットな `Keryx.app/Keryx` レイアウトを
+  使ってしまい、macOS の実際のバンドルは実行ファイルを `Keryx.app/Contents/MacOS/Keryx` の下に
+  ネストするため（[app-architecture.ja.md](app-architecture.ja.md) の「`appleApp/` の Xcode
+  プロジェクト」参照）。アプリに寄生しないということは、これらのテストが `AppModel`/`HomeView` を
+  直接動かせないということでもある——代わりに `Bridge/` の `StateFlow` → `@Observable` アダプタと、
+  `Localization/` の `NotificationText`/`ErrorKind` → String Catalog キーの対応づけを、フェイクや
+  既知の enum ケースを与えて単体で検証する。実行は
+  `xcodebuild -scheme Keryx -destination 'platform=macOS' test`（[build.ja.md](build.ja.md) の
+  「SwiftUI アプリ（`appleApp/`）のビルド」参照）。
+
 新しいテストは対象コードと同じ相対パスに置く。
 
 ## 規約

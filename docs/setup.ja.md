@@ -146,6 +146,21 @@
 - **NDK は不要**（プロジェクト内でネイティブコードのビルドは行っていない。誤って導入しない
   よう注意）。
 
+#### Apple（macOS / iOS）ターゲット向け
+
+`:shared` の Apple ターゲットと SwiftUI アプリ（`appleApp/`）のビルドには、Apple Silicon の Mac が必要。
+
+- **Xcode**（App Store か [developer.apple.com](https://developer.apple.com/xcode/) からインストール）。
+- **XcodeGen**（`brew install xcodegen`）——`appleApp/project.yml` から `appleApp/Keryx.xcodeproj` を
+  生成する。Git で管理するのは `project.yml` の方で、生成される `.xcodeproj` は管理しない。
+- **チーム付きの Apple ID**（無料の「Personal Team」でよい）。ローカルで実行可能な `appleApp/`
+  をビルドするために必要——サンドボックスのエンタイトルメントはそもそもアドホック署名できない
+  （[build.ja.md](build.ja.md)の「SwiftUI アプリ（`appleApp/`）のビルド」内「署名」参照）。`:shared`
+  自身の Apple ターゲット（`:shared:macosArm64Test`、`:shared:iosSimulatorArm64Test`、
+  `:shared:assembleKeryxSharedReleaseXCFramework`）はエンタイトルメントを持たないのでこれは不要——
+  `appleApp/` に対して実際に `xcodegen generate`/`xcodebuild` を実行し、コンパイル・リンクの確認以上の
+  ことをしたい場合にだけ必要になる。
+
 #### Linux 固有
 
 - **Xvfb**: ヘッドレス環境（SSH セッション、コンテナ、CI 等）で `./gradlew build` を通すのに

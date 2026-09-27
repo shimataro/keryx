@@ -1119,12 +1119,20 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   残す。Windows・Linux・Android は引き続き Compose アプリを使う。
 - SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
   サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
-- **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）、`keryx://`
-  スキーム、OPML のドキュメントタイプを共有し、同じデータを共有してもよい。一方の起動中に LaunchServices（Finder、`open`）経由で
-  もう一方を起動しても、起動中のアプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI
-  アプリを検知できないので、同時に起動しないことは強制ではなく運用ルールである。
-- 両者は別々のコミットからビルドされた状態で同じ `keryx.db` を開きうるため、`PRAGMA user_version` が実行中アプリのスキーマより
-  **新しい**データベースは、開かずに拒否する（上記「DatabaseDriverFactory」を参照）。
+- **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）と OPML の
+  ドキュメントタイプを共有する。一方の起動中に LaunchServices（Finder、`open`）経由でもう一方を起動しても、起動中の
+  アプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI アプリを検知できないので、
+  同時に起動しないことは強制ではなく運用ルールである。
+- **両者はデータを共有しない。** SwiftUI アプリはサンドボックス化されているため、そのコンテナ
+  （`~/Library/Containers/works.merc.keryx/Data/...`）は Compose ビルドの `~/Library/Application Support/Keryx` とは
+  別のファイルシステム上の場所にあり、両者の間に移行処理は無い——これは埋め忘れではなく意図した決定であり、2 つの
+  インストールは今後もずっと独立したままになる（Compose 版 macOS ビルドは、SwiftUI アプリ公開後も内部・開発用として
+  残る。上のひとつ上の箇条書きを参照）。それぞれの `PRAGMA user_version` ガード（上記「DatabaseDriverFactory」参照）は、
+  同じアプリの異なるビルドどうしがスキーマの新旧で食い違う通常のケース向けであり、アプリをまたいだアクセス向けでは
+  ない——どちらのアプリも、もう一方の DB ファイルを開くことは決してないため。
+- **SwiftUI アプリは `keryx://` スキームを登録しない。** 使い道が無いため：OAuth はデスクトップ・Android が使うカスタム
+  URI リダイレクトではなく、Swift 自身の `ASWebAuthenticationSession` と各プロバイダー自身のコールバックスキームで
+  駆動する（下記「`:shared` の Apple ターゲット」参照）。`keryx://` を所有するのは Compose ビルドのみ。
 - **どちらのアプリも、同じ Keychain 項目には書き込まない。** 共有すると、一方のアプリが切断した際
   （プロバイダーのリフレッシュトークンも失効させる）に、もう一方の同期が黙って壊れてしまう。しかも
   Compose 版は、SwiftUI 版がこの Bundle ID を持つより前から存在している。Compose デスクトップ版自身の
@@ -1185,6 +1193,49 @@ sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプ�
 Swift 側が各プロバイダーのスキームを別途ハードコードする必要はない。セッションのコールバック URL は、OS が
 ルーティングする `keryx://` リダイレクトとまったく同じように `handleOAuthRedirect` に渡す。デスクトップと
 Android は影響を受けない（`AuthorizationLauncher` の既定はシステムのブラウザを開く、従来どおりの動作）。
+
+### `appleApp/` の Xcode プロジェクト
+
+`appleApp/` は SwiftUI アプリを収め、`composeApp/`/`androidApp/` と並んで置かれている。`.xcodeproj` は
+コミットしない——**XcodeGen** が `appleApp/project.yml` から生成する（`xcodegen generate`）。これは
+SQLDelight・Compose Resources がリポジトリの他の場所で自分のソースファイルからコードを生成するのと
+同じ考え方である。ターゲットは `Keryx` の 1 つだけで両プラットフォームをカバーし
+（`supportedDestinations: [macOS, iOS]`）、同期を保つべき別の iOS ターゲットは存在しない。
+
+- **`:shared` の取り込み**：`project.yml` の `dependencies:` が、あらかじめビルドした
+  `KeryxShared.xcframework` をリンクする（`embed: false, link: true`——静的フレームワークには実行時に
+  埋め込むものが無いため、これが適切）。これは XcodeGen 本来のフレームワーク依存の仕組みであり、
+  `FRAMEWORK_SEARCH_PATHS`/`OTHER_LDFLAGS -framework`（`.framework` バンドル単体しか解決できず、
+  `.xcframework` のプラットフォームごとのスライスは解決できない）でも、Kotlin/Native の
+  `embedAndSignAppleFrameworkForXcode` 便利タスク（*動的*フレームワークを単一プラットフォームの
+  ターゲットへライブ埋め込みするためのものであり、このリポジトリの `supportedDestinations` でまとめた
+  マルチプラットフォームターゲットに対してはそもそも解決できない）でもない。`prebuildScripts` の1項目
+  （`Scripts/build-shared.sh`）がビルドのたびに `:shared:assembleKeryxSharedReleaseXCFramework` と
+  `:composeApp:generateStringCatalog` を実行するので、Xcode プロジェクトは常に最新の Kotlin ソースを
+  リンクする——**常に Release 版の XCFramework** を使う。Swift アプリを Xcode の Debug 構成でビルドして
+  も同様で、`project.yml` に別の Debug 用スライスは配線していない。
+- **署名とエンタイトルメント**：`Keryx/Keryx.entitlements` は `app-sandbox`・`network.client`・
+  `files.user-selected.read-write`・`keychain-access-groups`（`$(AppIdentifierPrefix)works.merc.keryx`。
+  Data Protection Keychain のアクセスグループ。上の「配布と共存」参照）を宣言する。**サンドボックスの
+  エンタイトルメントは、実在する Apple Development / Developer ID の証明書とチームでしか署名できない**
+  ——アドホック署名（`CODE_SIGN_IDENTITY=-`）は `CODE_SIGN_STYLE=Manual` にしても失敗する
+  （「requires a provisioning profile」）ので、チームが無い状態で実行可能なエンタイトルメント付きビルドを
+  作る方法は無い。`Config/Shared.xcconfig` がアドホック・チーム無しの既定値を設定したうえで、Git 管理外の
+  `Local.xcconfig`（見本は `Local.xcconfig.example`）を `#include?` するので、開発者自身のチームは
+  コミット済みの設定に触れずにきれいに上書きできる。CI にはチームが無いため、代わりに
+  `CODE_SIGNING_ALLOWED=NO` でビルドする——これはコンパイルとリンクは行うがコード署名は一切行わないので、
+  ビルドが通ることだけを確認し、実行可能なサンドボックスアプリまでは確認しない（`docs/testing.ja.md`
+  参照）。
+- **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
+  [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
+  寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS
+  であっても `TEST_HOST` のパス計算は iOS 流のフラットな `Keryx.app/Keryx` レイアウトを使ってしまい、
+  macOS の実際のバンドルは実行ファイルを `Keryx.app/Contents/MacOS/Keryx` の下にネストするため、テスト
+  バンドルがホストを見つけられない。アプリに寄生しないということは、`KeryxTests` が `AppModel`/`HomeView`
+  を直接検証できないということでもある——代わりに `Bridge/`/`Localization/` のアダプタを単体で検証する。
+- iOS シミュレータは arm64 スライスのみを出荷する（`project.yml` の
+  `EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64`）。リポジトリの他の部分と同じ Apple Silicon 専用の
+  方針に合わせている。
 
 ### `KeryxSdk`：Swift からの入口
 

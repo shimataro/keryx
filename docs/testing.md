@@ -59,6 +59,20 @@
   concerns that don't need a Compose UI tree, so a Compose-rendering test lives here instead, in
   the one module that is an actual Android application.
 
+- `appleApp/KeryxTests/` — Swift Testing (`import Testing`, `@Suite`/`@Test`/`#expect`) for the
+  SwiftUI app itself, distinct from `:shared`'s Kotlin `appleTest`/`macosTest` above. **A standalone
+  (non-hosted) unit-test bundle** — `project.yml` declares no `dependencies: [{target: Keryx}]`/
+  `TEST_HOST` for it, because a hosted bundle on a `supportedDestinations: [macOS, iOS]` target hits
+  a real XcodeGen/Xcode bug where `TEST_HOST` path computation uses iOS's flat `Keryx.app/Keryx`
+  layout even when building for macOS, whose bundle actually nests the executable under
+  `Keryx.app/Contents/MacOS/Keryx` (see [app-architecture.md](app-architecture.md)'s "The
+  `appleApp/` Xcode project"). Being host-less means these tests cannot drive `AppModel`/`HomeView`
+  directly — they cover the `Bridge/` `StateFlow`-to-`@Observable` adapters and the
+  `Localization/` `NotificationText`/`ErrorKind`-to-string-catalog-key mapping in isolation, feeding
+  them fakes/known enum cases rather than a running `KeryxSdk`. Run via
+  `xcodebuild -scheme Keryx -destination 'platform=macOS' test` (see
+  [build.md](build.md)'s "Building the SwiftUI app").
+
 New tests are placed at the same relative path as the code under test.
 
 ## Conventions

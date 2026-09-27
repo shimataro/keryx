@@ -90,6 +90,30 @@ jobs:
           DROPBOX_APP_KEY: ""
           ONEDRIVE_CLIENT_ID: ""
 
+      # Builds the appleApp/ SwiftUI project (XcodeGen-generated from project.yml; the
+      # .xcodeproj itself is never committed — see .gitignore) for macOS and iOS Simulator, and
+      # runs its Swift Testing target on macOS. Signing is skipped outright
+      # (CODE_SIGNING_ALLOWED=NO), not just ad-hoc: Keryx.entitlements' app sandbox always
+      # requires a real Apple Development/Developer ID certificate to embed (confirmed locally —
+      # an ad-hoc identity with no team fails with "requires a provisioning profile" even under
+      # CODE_SIGN_STYLE=Manual), and no CI runner has one configured. This only verifies Swift
+      # compiles and links against KeryxShared; it does not confirm the sandboxed app runs, which
+      # is the same limitation `docs/build.md`'s "Building the SwiftUI app" documents for a local
+      # build with no Local.xcconfig team configured either.
+      - name: Verify SwiftUI app (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install xcodegen
+          cd appleApp
+          xcodegen generate
+          xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+        env:
+          DROPBOX_APP_KEY: ""
+          ONEDRIVE_CLIENT_ID: ""
+
       - name: Verify packaging (macOS)
         if: runner.os == 'macOS'
         shell: bash
