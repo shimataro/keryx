@@ -49,7 +49,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   HomeShortcuts — the keyboard-shortcut table over logical keys), article/ (ArticleWebViewHtml —
                   the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
-                  sync), Formatting (formatTimestamp). Pane
+                  sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
+                  sync-now and `canSyncNow`; PreferencesController — typed setters over `LocalSettings`
+                  and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
+                  leaving file picking to each UI), Formatting (formatTimestamp). Pane
                   layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,

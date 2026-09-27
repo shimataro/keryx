@@ -39,6 +39,9 @@ import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.settings.CloudSyncController
+import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 
 /**
@@ -131,4 +134,7 @@ fun updateModule(): Module = module {
 fun presentationModule(): Module = module {
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SetupController(get(), get(), get(), get()) }
+    single { CloudSyncController(get(), get(), get(), get()) }
+    single { PreferencesController(get()) }
+    single { OpmlTransfer(get(), get(), get(), get()) }
 }

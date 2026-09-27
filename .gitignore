@@ -6,6 +6,7 @@
 /testing/build/
 /androidApp/build/
 /composeApp/unused
+/shared/unused
 
 # Local settings
 local.properties
