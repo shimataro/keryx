@@ -15,7 +15,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * The content color plus the label text style, shared by all three `actual`s below.
@@ -28,17 +30,27 @@ import androidx.compose.ui.unit.dp
  * "再起動しています…" at 20dp, which is what made the Updates tab's headline row change height
  * between `UpdateState.Available` and `UpdateState.Installing` there and nowhere else (see
  * `FlatButtonsTest` and `UpdatesTabTest.theHeadlineRowIsTheSameHeightWithOrWithoutATrailingButton`).
- * `labelLarge` pins the line height at 20sp — so a flat button is 40dp tall regardless of its
- * label — and is the same style M3's own `Button` provides to its label, which is what the
- * Android `actual`s delegate to. A label that needs its own style still passes `style = ...`
- * itself; this only supplies the default.
+ * [FlatButtonLabelStyle] pins the line height at 18sp — so a flat button is 32dp tall regardless of
+ * its label. A label that needs its own style still passes `style = ...` itself; this only
+ * supplies the default.
  */
 @Composable
 private fun FlatButtonContent(contentColor: Color, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalContentColor provides contentColor) {
-        ProvideTextStyle(MaterialTheme.typography.labelLarge) { content() }
+        ProvideTextStyle(FlatButtonLabelStyle) { content() }
     }
 }
+
+/**
+ * `labelLarge` (the style M3's own `Button` gives its label, which the Android `actual`s delegate
+ * to) scaled down to 13sp on an 18sp line: with [FLAT_BUTTON_VERTICAL_PADDING] that makes a 32dp
+ * button, closer to a macOS push button than M3's 40dp, which read as web-app-sized next to the
+ * dialogs' native `JButton` row.
+ */
+private val FlatButtonLabelStyle: TextStyle
+    @Composable get() = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp, lineHeight = 18.sp)
+
+private val FLAT_BUTTON_VERTICAL_PADDING = 7.dp
 
 @Composable
 actual fun FlatButton(
@@ -62,7 +74,7 @@ actual fun FlatButton(
             .clip(MaterialTheme.shapes.small)
             .background(background)
             .clickable(onClick = onClick, enabled = enabled, role = Role.Button)
-            .padding(horizontal = 24.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = FLAT_BUTTON_VERTICAL_PADDING),
         contentAlignment = Alignment.Center,
     ) {
         FlatButtonContent(contentColor, content)
@@ -82,12 +94,14 @@ actual fun FlatTonalButton(
     val background = when {
         !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
         destructive -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
+        // Neutral, not a teal-tinted secondaryContainer: like a macOS push button, only the primary
+        // action carries color, and the fill can't be mistaken for an unfocused selection.
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val contentColor = when {
         !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         destructive -> MaterialTheme.colorScheme.onErrorContainer
-        else -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
     }
     Box(
         modifier
@@ -95,7 +109,7 @@ actual fun FlatTonalButton(
             .background(background)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.small)
             .clickable(onClick = onClick, enabled = enabled, role = Role.Button)
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = FLAT_BUTTON_VERTICAL_PADDING),
         contentAlignment = Alignment.Center,
     ) {
         FlatButtonContent(contentColor, content)
@@ -118,7 +132,7 @@ actual fun FlatTextButton(
         modifier
             .clip(MaterialTheme.shapes.small)
             .clickable(onClick = onClick, enabled = enabled, role = Role.Button)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = FLAT_BUTTON_VERTICAL_PADDING),
         contentAlignment = Alignment.Center,
     ) {
         FlatButtonContent(contentColor, content)

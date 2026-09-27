@@ -17,8 +17,8 @@ import kotlin.test.assertEquals
  * the Latin one below — see [aFlatButtonsHeightDoesNotDependOnItsLabel]. */
 private const val CJK_LABEL = "再起動しています…"
 
-/** `labelLarge`'s 20sp line height plus [FlatButton]'s own 10dp vertical padding, twice. */
-private val EXPECTED_BUTTON_HEIGHT = 40.dp
+/** The flat label style's 18sp line height plus the flat buttons' own 7dp vertical padding, twice. */
+private val EXPECTED_BUTTON_HEIGHT = 32.dp
 
 @OptIn(ExperimentalTestApi::class)
 class FlatButtonsTest {
@@ -41,6 +41,25 @@ class FlatButtonsTest {
             Column {
                 FlatButton(onClick = {}, modifier = Modifier.testTag("latin")) { Text("OK") }
                 FlatButton(onClick = {}, modifier = Modifier.testTag("cjk")) { Text(CJK_LABEL) }
+            }
+        }
+        waitForIdle()
+
+        val latinHeight = onNodeWithTag("latin").getBoundsInRoot().height
+        val cjkHeight = onNodeWithTag("cjk").getBoundsInRoot().height
+
+        assertEquals(latinHeight, cjkHeight)
+        assertEquals(EXPECTED_BUTTON_HEIGHT, latinHeight)
+    }
+
+    /** Same invariant for [FlatTonalButton], which sits beside [FlatButton] in the same rows (a
+     * cloud provider's actions, the Updates tab) and so must match its height exactly. */
+    @Test
+    fun aFlatTonalButtonsHeightDoesNotDependOnItsLabel() = runDesktopComposeUiTest {
+        setContent {
+            Column {
+                FlatTonalButton(onClick = {}, modifier = Modifier.testTag("latin")) { Text("OK") }
+                FlatTonalButton(onClick = {}, modifier = Modifier.testTag("cjk")) { Text(CJK_LABEL) }
             }
         }
         waitForIdle()
