@@ -24,7 +24,7 @@ reviews:
   # picked up automatically by knowledge_base.code_guidelines (see below) — these are a
   # reinforcement, not a duplicate of the whole file.
   path_instructions:
-    - path: "composeApp/src/**/data/local/**"
+    - path: "shared/src/**/data/local/**"
       instructions: >
         articles_fts is runtime-only raw SQL owned by FtsManager — it must never be added to a
         .sq file, and the live table must never be DROPped. Hot paths (feed refresh, sync merge)
@@ -32,7 +32,7 @@ reviews:
         allowed in the daily idle heal in StartupTasks.kt. Flag any change that DROPs
         articles_fts on the live DB or calls 'rebuild' from a hot path.
 
-    - path: "composeApp/src/**/domain/SyncRepository.kt"
+    - path: "shared/src/**/domain/SyncRepository.kt"
       instructions: &sync_merge_note >
         The ATTACH-DATABASE sync merge must run through platform/DatabaseMerger on a single
         dedicated JDBC connection, never through the SQLDelight driver (which opens a fresh
@@ -40,12 +40,12 @@ reviews:
         statement). Merge SQL must explicitly list columns (never SELECT *, to avoid column-count
         mismatch across schema versions) and follow the last-write-wins / OR-merge policy per
         field described in docs/sync-architecture.md.
-    - path: "composeApp/src/**/domain/MergeSql.kt"
+    - path: "shared/src/**/domain/MergeSql.kt"
       instructions: *sync_merge_note
-    - path: "composeApp/src/**/platform/DatabaseMerger*.kt"
+    - path: "shared/src/**/platform/DatabaseMerger*.kt"
       instructions: *sync_merge_note
 
-    - path: "composeApp/src/commonMain/**"
+    - path: "{shared,composeApp}/src/commonMain/**"
       instructions: >
         Platform-specific code (file IO, AWT/Swing, OS keyring, D-Bus, etc.) must stay behind an
         `expect` declaration here, with the real implementation as `actual` in desktopMain. Flag
@@ -76,7 +76,7 @@ reviews:
     - path: "composeApp/src/**/ui/**/*ViewModel.kt"
       instructions: *state_consistency_note
 
-    - path: "composeApp/src/**/*.kt"
+    - path: "{shared,composeApp,testing}/src/**/*.kt"
       instructions: >
         Comments, KDoc, log/exception messages, and non-UI string literals must be written in
         English regardless of the language used elsewhere in the project, with one exception:
@@ -84,15 +84,17 @@ reviews:
         onNodeWithText("...") against an actual strings.xml value) legitimately contain that
         Japanese string.
 
-    - path: "composeApp/src/{commonMain,desktopMain}/kotlin/**/domain/**/*.kt"
+    - path: "shared/src/{commonMain,desktopMain}/kotlin/**/domain/**/*.kt"
       instructions: &test_coverage_note >
         New or changed logic here (excluding UI-only visual/layout tweaks with no runtime logic)
         needs a corresponding test in commonTest/ or desktopTest/ per docs/testing.md's
         conventions (kotlin-test, Ktor MockEngine, DbTestSupport helpers, Clock/SyncScheduler
         fakes). Flag a non-trivial logic change with no accompanying test change.
-    - path: "composeApp/src/{commonMain,desktopMain}/kotlin/**/data/**/*.kt"
+    - path: "{shared,composeApp}/src/{commonMain,desktopMain}/kotlin/**/data/**/*.kt"
       instructions: *test_coverage_note
     - path: "composeApp/src/**/ui/**/*ViewModel.kt"
+      instructions: *test_coverage_note
+    - path: "shared/src/commonMain/kotlin/**/presentation/**/*.kt"
       instructions: *test_coverage_note
 
     - path: "gradle/libs.versions.toml"
@@ -102,7 +104,7 @@ reviews:
         the same PR (library name / SPDX identifier / project URL). Test-only dependencies are
         excluded from this requirement.
 
-    - path: "composeApp/src/commonMain/sqldelight/**/*.sq"
+    - path: "shared/src/commonMain/sqldelight/**/*.sq"
       instructions: >
         A schema change needs a new `<from-version>.sqm` migration file rather than editing an
         already-shipped .sq/.sqm in place, and platform/DatabaseMerger's EXPECTED_SCHEMA /
@@ -141,31 +143,31 @@ knowledge_base:
       # auto-detect, scoped to the source areas they actually describe. Only the English (.md)
       # doc is referenced, not its .ja.md sibling, to avoid doubling near-duplicate context.
       - files: "docs/app-architecture.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/error-design.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/db-schema.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/sync-architecture.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/background-update.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/testing.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/known-issues.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/external-spec.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/build.md"
-        applyTo: "composeApp/**"
+        applyTo: "{shared,composeApp,testing}/**"
       - files: "docs/setup.md"
-        applyTo: "composeApp/**"
+        applyTo: "{shared,composeApp,testing}/**"
       - files: ".claude/rules/fts-index.md"
-        applyTo: "composeApp/src/**/data/local/**"
+        applyTo: "shared/src/**/data/local/**"
       - files: ".claude/rules/sync-merge.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: ".claude/rules/cloud-oauth-transport.md"
-        applyTo: "composeApp/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**"
       - files: ".claude/skills/ui-guidelines/SKILL.md"
         applyTo: "composeApp/src/**/ui/**"
 

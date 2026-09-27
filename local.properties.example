@@ -36,6 +36,16 @@ googledrive.client.id=
 # Google's token endpoint requires secret even though the flow uses PKCE.
 googledrive.client.secret=
 
+# Google Drive OAuth Client ID for the Apple app, from a separate "iOS"-type OAuth client
+# (secretless — Google issues a distinct client per application type; see docs/build.md's
+# "Apple (macOS / iOS)"). Not the same client or key as googledrive.client.id above.
+#   Gradle property: -PgoogleDriveAppleClientId=...
+#   Environment variable: GOOGLE_DRIVE_APPLE_CLIENT_ID
+#   Default: (empty)
+# Leave empty (or omit) to disable Google Drive sync on the Apple app — the Google Drive
+# option is then hidden from its Setup / Settings screens, independent of the desktop key above.
+googledrive.apple.client.id=
+
 # OneDrive (Microsoft Identity platform) OAuth Client ID, from an Azure
 # "Mobile and desktop applications" app registration (public client).
 #   Gradle property: -PoneDriveClientId=...

@@ -20,6 +20,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +81,8 @@ fun SetupScreen(onComplete: () -> Unit) {
 
     // Confirmation-dialog trigger for aborting an in-flight OAuth wait.
     var confirmingAbortConnect by remember { mutableStateOf(false) }
+    val phase by vm.phase.collectAsState()
+    val canCancelConnect by vm.canCancelConnect.collectAsState()
 
     val scrollState = rememberScrollState()
     // safeDrawingPadding() keeps this content clear of the status/navigation bars on Android
@@ -99,7 +102,7 @@ fun SetupScreen(onComplete: () -> Unit) {
             )
             Spacer(Modifier.height(24.dp))
 
-            val enabled = vm.phase != SetupPhase.CONNECTING
+            val enabled = phase != SetupPhase.CONNECTING
 
             // Local-only card
             KeryxRaisedSurface(modifier = Modifier.widthIn(max = 420.dp)) {
@@ -174,12 +177,12 @@ fun SetupScreen(onComplete: () -> Unit) {
             }
 
             Spacer(Modifier.height(16.dp))
-            when (vm.phase) {
+            when (phase) {
                 SetupPhase.CONNECTING -> {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(8.dp))
                     Text(stringResource(Res.string.setup_connecting))
-                    if (vm.canCancelConnect) {
+                    if (canCancelConnect) {
                         Spacer(Modifier.height(12.dp))
                         FlatTonalButton(onClick = { confirmingAbortConnect = true }) {
                             Text(stringResource(Res.string.common_abort))

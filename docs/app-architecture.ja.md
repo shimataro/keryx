@@ -10,22 +10,43 @@
 - 同期処理は Repository 層に閉じ込め、UI 層は同期の存在を意識しない
 - 共有のプラットフォーム抽象は `commonMain` で宣言し、可能な場合は `jvmCommonMain` に実装する。
   それ以外はターゲットごとのソースセット（`desktopMain` / `androidMain`）に実装する。
+- UI フレームワークに依存しないコードは `:shared` モジュールに、Compose UI は `:composeApp` に置く（下記「ディレクトリー構成」参照）。
 
 ## ディレクトリー構成
 
+コードは 4 つの Gradle モジュールに分かれている。いずれもパッケージルート `works.merc.keryx.app` と同じソースセット名を共有するので、
+以下のツリーはそれらの `src/` を合わせたものである：
+
+| モジュール | 内容 |
+| --- | --- |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
+| `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
+| `:testing` | 両モジュールのテストが使うテスト専用ヘルパー（`DbTestSupport`、`CloudTestSupport`、`FakeNotificationMessages`、トークンストレージの fake）。main のソースからは決して依存しない。 |
+
+テストはテスト対象のコードと同じモジュールに置く：`shared/src/{commonTest,desktopTest,androidDeviceTest}` と
+`composeApp/src/{commonTest,desktopTest,androidDeviceTest}`。
+
 ```text
-composeApp/src/
+{shared,composeApp}/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
                AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource（アプリ内アップデート——後述の「アプリ内アップデート」参照）
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens,
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
-    di/           AppModule（+ expect platformModule）, HttpClientFactory, ImageLoaderSetup
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
+    presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
+                  フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
+                  NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
+                  ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
+                  ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表）、article/（ArticleWebViewHtml——
+                  リーダーの HTML 文書・CSP・テーマ CSS）、Formatting（formatTimestamp）。ペイン構成・フォーカス・幅は UI ごと
+                  （`ui/home/HomeLayoutViewModel`）
+    platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
@@ -41,12 +62,11 @@ composeApp/src/
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
     *ベクター*形式——ビットマップ資産（`app_icon.png`、`onedrive.png`、トレイの PNG 群）は対象外）
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
-    API にも依存しない）: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
+    API にも依存しない）: Gzip, Sha1, Sha256, SecureRandom（secureRandomBytes）, ContentDigest, FileTokenStorage,
     AppInfo（共有生成 BuildConfig を読むだけ）, FileSystemExtras,
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
-    ——cloudSessionSingles, dropboxProvider, oneDriveProvider）,
-    domain/OAuthUriParser.kt（parseOAuthUri。デスクトップと Android の `keryx://` リダイレクト処理が共有）
+    ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト
@@ -195,6 +215,14 @@ composeApp/src/
 `JdbcSqliteDriver` を生成し、`PRAGMA user_version` を見て `KeryxDatabase.Schema` の create / migrate を
 自前で駆動する（SQLDelight の JVM ドライバはスキーマバージョンを自動追跡しないため）。
 
+`user_version` が `KeryxDatabase.Schema.version` より**新しい**場合は、より新しいビルドがファイルをマイグレーション
+したことを意味する（下記「Apple ネイティブアプリ（SwiftUI）」— SwiftUI アプリと内部用の Compose macOS ビルドは同じ
+データディレクトリを共有しうる — または、新しいリリースの上に古いリリースを入れ直した場合）。desktop の `actual` は
+何も書き込む前にこれを拒否する：`requireSupportedSchemaVersion`（`data/local/DatabaseSchemaGuard.kt`）が
+`DatabaseTooNewException` を投げる。`main.kt` は Koin の起動直後にドライバを先に開くので、この失敗は 1 回だけ、
+ローカライズされたメッセージボックス（`DatabaseTooNewDialog.kt`）として表示され、その後アプリは終了する。Android には
+独自のガードは不要：`SupportSQLiteOpenHelper.Callback.onDowngrade` が既定で例外を投げる。
+
 Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `onCreate`/`onUpgrade` コールバックで
 `Schema.create`/`migrate` を自動的に駆動するため、desktop のような `PRAGMA user_version` の手動管理は
 不要。端末標準の SQLite ではなく `com.github.requery:sqlite-android` のバンドル SQLite
@@ -308,13 +336,13 @@ commonTest でカバーされる。デスクトップ側からは一度も呼ば
 上記の `selectUpdateAsset` と `updatePlan` に並ぶもう 1 つの純粋関数が、意図的に `domain/` の
 外に置かれている: `ui/settings/ReleaseNotesText.kt` の `plainTextReleaseNotes`（Updates タブの読み取り専用サマリー
 向けの Markdown → プレーンテキスト変換）は更新ポリシーではなく UI 層の表示整形であり、
-`ui/home/HomeCommon.kt` の `formatTimestamp` や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
+`:shared` の `presentation/Formatting.kt`（`formatTimestamp`）や `ui/i18n/ErrorMessages.kt` が `domain/` の外に
 置かれているのと同じ理由による。唯一の呼び出し元も `ui/settings/UpdatesTab.kt` である。
 
 デスクトップと Android の `UpdateInstaller` actual はコードを一切共有していない——デスクトップ
 （`platform/update/DesktopUpdateInstaller.kt`）は `platform/update/ArchiveExtractor.kt` 経由で ZIP を
 展開し（macOS は `ditto`——署名済みバンドルが自身の symlink を封印しているため。それ以外は
-`platform/ZipExtractor.kt`（`jvmCommonMain`。`FileIO`/`Gzip` とまったく同じ形で Android と共有）。
+`platform/ZipExtractor.kt`（`jvmCommonMain`。`Gzip` とまったく同じ形で Android と共有）。
 [background-update.ja.md](background-update.ja.md) 参照）、現在のインストール先の
 隣にステージングしてから、`platform/update/UpdateScriptWriter.kt`（純粋な文字列テンプレート——
 本文そのものを直接アサーションで検証し、実際に起動することは無い）が生成した detached ヘルパー
@@ -347,7 +375,7 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 コンポーネントが追加・削除・移動されるたびに、このペインだけでなく**ウインドウ全体**を
 再検証＋再描画するため。その帰結として、
 描画すべき記事が無い状態（「記事未選択」「本文なし」）は Compose の `Text` ではなく、同じ
-WebView **内部**の HTML として描画する（`ui/article/ArticleWebViewHtml.kt` の
+WebView **内部**の HTML として描画する（`presentation/article/ArticleWebViewHtml.kt` (`:shared`) の
 `articlePlaceholderHtml`／`articleNoContentHtml`。実記事用の `wrapArticleHtml` と同じ
 `<style>` ブロックを共有し、どの状態でも同じテーマ色で塗られる）。この共有 `<style>` ブロックは
 `color-scheme`（`dark` か `light` のどちらか一方——`themeMode` から直接ではなく
@@ -529,13 +557,13 @@ item 破棄そのものに内在するものだった。`ArticleWebViewCarousel`
 でもある。
 
 各ページの本文は `HomeViewModel.requestArticleContent` が供給し、これは
-`ui/home/ArticleContentCache.kt`（`HomeViewModel` に直書きするのではなく、独立してテストできる
+`presentation/home/ArticleContentCache.kt`（`:shared`。`HomeViewModel` に直書きするのではなく、独立してテストできる
 小さな協力オブジェクト）に委譲する。`getArticleById` による純粋な読み取りを、`Articles` の全列
 ではなく `ArticleReaderRow`（`domain/ArticleRepository.kt`）に射影したうえで `articleContents`
 （上限 `ARTICLE_CONTENT_CACHE_LIMIT`、古いものから追い出し）へ格納する——全列には本文の
 HTML 除去済みコピーである `search_text` も含まれ、リーダーはそれを一切読まない。**本文のロードは
 選択ではない**: 既読化するのは `selectArticle` だけなので、隣のページは「開いた」ことにならずに
-描画される。キャッシュは選択中の記事をあえてスキップしない——`ui/home/ArticlePagerSync.kt` の
+描画される。キャッシュは選択中の記事をあえてスキップしない——`presentation/home/ReaderPaging.kt`（`:shared`）の
 `readerContents` が選択の正本をキャッシュより手前にマージするが、キャッシュ自身も自分のコピーを
 保持し続けており、これが選択が隣へ移った後も、直前までスワイプで見ていたページを（空白化・
 再読み込みさせず）描画され続けさせている。`readerPages` は一覧側の対になる仕組みで、選択中の
@@ -1069,3 +1097,111 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 なら検索結果、そうでなければそのフィルタ自身の一覧で、`pagerArticles` と同じ解決方法——・選択状態を
 組み合わせた `StateFlow`）でゲートされているため、選択中の記事以外に既読ピンが残っていない状態では
 この操作は何もしない。
+
+## Apple ネイティブアプリ（SwiftUI）
+
+`external-spec.md` §2 では、macOS 向け（のちに iOS/iPadOS 向け）のネイティブ SwiftUI アプリを計画している。この節は、共有
+Kotlin コードとこれらのドキュメントを準備するうえで前提とする決定事項をまとめたもの。
+
+### 配布と共存
+
+- **macOS でユーザーに配布するのは SwiftUI アプリのみ。** Compose Multiplatform の macOS ビルドは内部の動作確認用としてリポジトリに
+  残す。Windows・Linux・Android は引き続き Compose アプリを使う。
+- SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
+  サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
+- **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）、`keryx://`
+  スキーム、OPML のドキュメントタイプを共有し、同じデータを共有してもよい。一方の起動中に LaunchServices（Finder、`open`）経由で
+  もう一方を起動しても、起動中のアプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI
+  アプリを検知できないので、同時に起動しないことは強制ではなく運用ルールである。
+- 両者は別々のコミットからビルドされた状態で同じ `keryx.db` を開きうるため、`PRAGMA user_version` が実行中アプリのスキーマより
+  **新しい**データベースは、開かずに拒否する（上記「DatabaseDriverFactory」を参照）。
+- どちらのアプリもトークンを Keychain の同じサービス（`works.merc.keryx`）に保存する。Dropbox と OneDrive は
+  両者で同じ OAuth クライアントを使うため、その項目はアカウント（`CloudStorageType.id`）も desktop アプリと共有する。
+  Google Drive は共有しない：Apple アプリの「iOS」タイプの OAuth クライアントは desktop のものとは別で、リフレッシュ
+  トークンは発行したクライアントに紐付くため、Apple 専用の別アカウント（`google_drive_apple`。
+  `data/cloud/KeychainTokenStorage.kt` の `appleKeychainAccount`）を使い、どちらのアプリも相手のトークンを上書きしない。
+  サービスとアカウントを共有するのは名前付けの仕組みにすぎず、一方のアプリが他方の項目を実際に読めるかどうかは
+  Keychain のアクセス制御で決まる（desktop アプリは `security` CLI 経由で書き込み、SwiftUI アプリはサンドボックス内で
+  動く）ため、保証はされない——読めない場合は SwiftUI アプリで再接続し、同期済みのデータはクラウドから戻す。
+
+### 共有 Kotlin コード
+
+SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework として利用する。UI はプラットフォームごとに持つ。
+
+- **共有するもの**（Kotlin、UI フレームワーク非依存）：core・data・domain・SQLDelight スキーマ、そして画面の背後にある
+  *state holder*（フィルタ、選択、記事リスト、未読のみ、既読を隠す、並び順、検索クエリと結果、新着件数、未読数、それらに対する
+  すべての操作）。これらは `external-spec.md` の挙動そのものなので、2 回書くと 2 つのアプリの挙動がずれる。
+- **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、ペイン幅）、キーボードイベントの処理（各 UI は
+  自分のキーイベントを共有のショートカット対応表 `presentation/home/HomeShortcuts.kt` に対応付ける）、ウィンドウの復元、すべての描画。
+  検索バーの表示状態は、UI が共有状態に設定する入力（クエリの結果を表示するかどうかを決める）であり、UI が所有する状態ではない。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
+  これらを担い、Compose アプリは独自の実装を持ち続ける。
+- Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
+- **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
+  Compose アプリは Compose Resources で、SwiftUI アプリは同じ `strings.xml` から生成した String Catalog で解決するので、2 つの
+  ロケールのソースは 1 つに保たれる。
+
+### `:shared` の Apple ターゲット
+
+`:shared` は `macosArm64`・`iosArm64`・`iosSimulatorArm64` 向けにビルドされ（macOS のリリースと同じく Apple Silicon のみ。
+`lifecycle-viewmodel` に `macosX64` 版がないため）、静的な **`KeryxShared` XCFramework** を生成する
+（`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`）。ソースセットは手作業で組んでいる（独自の `jvmCommonMain` が
+Kotlin のデフォルト階層テンプレートを無効にするため）：`appleMain` → `macosMain`/`iosMain`、テストは `appleTest` → `macosTest`。
+
+Apple の actual はシステムライブラリだけを使う：CommonCrypto（SHA-1/SHA-256）、Security（乱数、Keychain）、zlib（gzip）、
+Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そしてシステムの sqlite3——アプリの DB には SQLDelight の
+`NativeSqliteDriver`、専用コネクションが必要な ATTACH マージと `VACUUM INTO` スナップショットには
+`platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
+FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
+確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
+`appleKeychainAccount(type)`——`CloudStorageType.id`、ただし Google Drive は `google_drive_apple`。「配布と共存」参照——、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
+`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
+設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
+共通 `keryx://oauth2/callback` リダイレクトとは異なり、そのクライアント自身のクライアント ID を逆順にした
+カスタムスキーム（`com.googleusercontent.apps.<id>:/oauth2redirect`）を使う。詳細は
+sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプリ内アップデート（`updateModule`）は
+組み込まない：このアプリは App Store または Sparkle が更新する。
+
+### `KeryxSdk`：Swift からの入口
+
+`sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` がオブジェクトグラフ
+（`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`。Koin は内部に隠す）を構築し、DB を開き——
+`DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・
+`newArticleNotifier`（新着記事が見つかった更新ごとの新着テキスト。OS 通知の送り先にも渡される）・`syncRepository`・
+`settingsRepository`・`cloudSession`・`availableCloudTypes`（このビルドで設定済みの
+クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`
+を提供する。`completeConnect(type, tokens)` と `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
+（どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
+`suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を
+フラッシュする。`tearDown` は切断（トークンを失効）し、同期失敗状態とプロバイダーごとの同期マーカーを消去し、
+プロバイダーの選択を解除する。対話的な OAuth フローの待機と初回同期の開始は各 UI に残る。
+`CloudConnectionService` 自体の呼び出しは Keychain でブロックしうるので——下記の `prepareSearchIndex()` と同様に
+——`KeryxSdk` がその実行を SDK 自身のバックグラウンドスコープに乗せて結果を待つ。生のサービスをそのまま渡して
+Swift の `@MainActor` 呼び出し元がメインスレッド外へのディスパッチ（Compose 側の `withContext(dispatcher)` に相当
+するもの）を自前で行うことは期待していない。`dataDirectory` は、
+すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。`close()` は、
+まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
+HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。
+`handleOAuthRedirect` は、接続フローがリダイレクトを待ち受けていなければ `false` を返し、そのリダイレクトは破棄する。
+`prepareSearchIndex()`（フォアグラウンド起動ごとに 1 回：FTS テーブルを作成し欠けている行を補完）と
+`prepareSearchIndexIfAbsent()`（軽量。プロセス起動やバックグラウンドでの起床のたびに呼ぶ用）は、どちらも
+Swift の呼び出し元スレッドではなく SDK 自身のバックグラウンドスコープで動く。Koin モジュールが `val` ではなく関数なのは、
+Koin のモジュールがシングルトンを定義の中にキャッシュするため。
+
+**SKIE** がフレームワークの Swift API を整える：`suspend` 関数は `async throws` に、sealed 階層は網羅的な `onEnum(of:)` の
+switch に、`StateFlow<T>` プロパティは `SkieSwiftStateFlow<T>`（同期的な `.value` を持つ `AsyncSequence`）として Swift に
+届く——`@Observable` アダプタはこれを反復する。キャンセル以外の理由で失敗しうるメンバーは `@Throws` を付けているので、
+失敗はプロセスの異常終了ではなく Swift で throw されるエラーになる。
+
+### スパイクの計測値（macOS 15、Apple Silicon、release ビルド）
+
+| 項目 | 結果 |
+| --- | --- |
+| リンク済み arm64 バイナリに対する共有コードの寄与 | 約 18 MB（strip 後 約 11 MB） |
+| DB を新規作成する `KeryxSdk.start` | 4〜12 ms |
+| 既存 DB での `KeryxSdk.start` | 約 1.5 ms |
+| 1 万行の `homeViewModel.articles` が購読開始から Swift に届くまで | 24〜28 ms |
+| 並び替えた 1 万行のリストが Swift に届くまで | 約 1 ms |
+| Swift から `articles.value`（1 万行）を読む | 1 ms 未満 |
+
+この規模では大きなリストの受け渡しは安価である。実際のリストが一桁大きくなった場合に限り、ページングを検討し直す。

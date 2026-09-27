@@ -187,6 +187,10 @@ else NULL. It is not included in feeds INSERT. `sort_order` / `custom_title` / `
 
 The split between the two layers is: the desktop `actual` only reduces `resultCode.code and 0xFF` to a driver-independent `SqliteFailureCategory` (`CORRUPT_OR_CONSTRAINT` / `STATEMENT_ERROR` / `OTHER`) and logs the verdict; the policy in the table below is `domain/MergeFailureClassifier.classify` in `commonMain` — a pure function of (category, error-code name, a lazily-invoked `validateSchema` callback) returning a `CloudDataIncompatibleException` or `null` (= rethrow the original failure unchanged). The `validateSchema` callback is invoked only for the ambiguous `STATEMENT_ERROR` case, since it reopens the downloaded file. Nothing about the classification itself is platform-specific, so a target whose driver exposes no numeric error code (Android's `android.database.sqlite.SQLiteException`) only has to produce the same category.
 
+The Apple `actual` (`DatabaseMerger.apple.kt`) applies the same mapping and the same `MergeFailureClassifier`, but finds the code differently, walking the cause chain (bounded the same way) for either of two exception types: its own `SqliteException` from `platform/RawSqliteConnection.kt` (the dedicated merge connection), which carries the result code directly, or SQLiter's `SQLiteExceptionErrorCode`, which `NativeSqliteDriver` throws while the cloud file is being opened and migrated. SQLiter keeps the raw `errorCode` private, so `errorType.code` — the primary code only — is the one readable value; that getter throws for a code SQLiter has no enum entry for, which is treated as "no code found" (rethrown unchanged).
+
+Before attaching, the Apple `migrateCloudIfOlder` brings an older cloud file up to the local schema by opening it through `NativeSqliteDriver` in rollback-journal mode. That driver opens (and so migrates) the file lazily, on its first statement — the same reason `DatabaseDriverFactory.apple.kt` runs one on creation — so it runs a trivial `SELECT 1` before closing the driver, then re-reads the file's `user_version` and throws an `IllegalStateException` if it still isn't the local schema version. That exception deliberately carries no SQLite result code, so the merge leaves it unclassified (transient): a migration that silently did nothing may be an app-side fault, and must never be answered with the destructive cloud-data reset.
+
 | SQLite primary result code | Classification |
 | --- | --- |
 | `SQLITE_NOTADB`, `SQLITE_CORRUPT`, `SQLITE_FORMAT`, `SQLITE_EMPTY` | **Permanent** → `CloudDataIncompatibleException`. The file itself is broken. |
@@ -303,7 +307,7 @@ How the scheme is registered with the OS differs per platform. macOS declares it
   unlike Windows/Linux.
 - **Dispatch.** `MainActivity.onCreate`/`onNewIntent` forward the redirect's data URI to
   `dispatchOAuthCallbackIfPresent`, which classifies it via the same `classifyLaunchArg`
-  (commonMain) / `parseOAuthUri` (jvmCommonMain) code desktop's `main.kt` uses, then emits into the
+  (commonMain) / `parseOAuthUri` (commonMain) code desktop's `main.kt` uses, then emits into the
   same-shaped `MutableSharedFlow<OAuthCallbackParams>` (a separate instance registered in Android's
   own `platformModule`).
 - **Configuration changes.** `launchMode="singleTask"` means an already-running instance receives
@@ -408,6 +412,49 @@ verified by listing `appDataFolder` from a second OAuth client in the same proje
 file the desktop app had created. Without that property, desktop and Android would silently sync to
 separate files.
 
+### Google Drive on Apple (secretless "iOS"-type OAuth client)
+
+The Apple app (`:shared`'s appleMain, covering macOS and, later, iOS) goes through the ordinary
+`OAuthConnectFlow` + `CustomUriRedirectTransport` path — unlike Android, it does not need Play
+services or any device-side authorization API — but with its own OAuth client rather than
+desktop's.
+
+- **Why desktop's client cannot be reused.** Desktop's "Desktop app" client requires a loopback
+  redirect and a `client_secret` (see "Google Drive (desktop only) — Loopback" above); shipping that
+  secret inside a native app binary would let it be extracted from the binary itself. Google's
+  policy answer for a native Apple app is the **"iOS" application type**: it takes no secret at all
+  ("iOS" also covers a native macOS app — see [build.md](build.md)), and Google's token endpoint
+  accepts a `client_secret`-less token exchange/refresh for this client type, unlike "Desktop app"
+  clients (which reject it with `invalid_request: client_secret is missing` even with PKCE — see
+  above). `GoogleDriveAuthManager.clientSecret` is nullable for exactly this: desktop passes its
+  secret, the Apple app passes `null` and the parameter is omitted from the request entirely.
+- **Redirect URI.** An "iOS"-type client's only valid redirect is its own reversed-client-id custom
+  scheme, not the shared `keryx://oauth2/callback` Dropbox/OneDrive use:
+  `NNNN-xxxx.apps.googleusercontent.com` → `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`.
+  `googleIosClientRedirectUri(clientId)` (`data/cloud/GoogleDriveAuthManager.kt`) is the pure
+  function that derives it, and `ApplePlatformModule.kt`'s `appleGoogleDriveProvider` passes the
+  result as `CustomUriRedirectTransport`'s `redirectUri`, reusing the same shared
+  `MutableSharedFlow<OAuthCallbackParams>` `cloudSessionSingles` already wires up for Dropbox/
+  OneDrive — the flow is disambiguated by `state` regardless of which scheme delivered the redirect.
+  The Swift app registers that scheme in its Info.plist `CFBundleURLTypes` (or as an
+  `ASWebAuthenticationSession` `callbackURLScheme`) alongside the shared `keryx://` one; see
+  [build.md](build.md).
+- **Separate client, same Cloud project.** The Apple client is a distinct OAuth client from
+  desktop's, exactly like the Android case above, but obtained by hand in the Cloud Console rather
+  than matched by package signature — Google's "iOS" client type has no signature-matching
+  equivalent to Android's SHA-1 check, so the client id *is* read from a build-time constant
+  (`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`, generated the same way as `DesktopBuildConfig`'s, into
+  `appleMain` only — see [build.md](build.md)). It must live in the same Cloud project as the
+  desktop/Android clients, for the same `appDataFolder`-is-per-project reason documented above; a
+  separate project would leave the Apple app reading and writing a different hidden folder than
+  every other device.
+- **Availability gate.** `CloudStorageAvailability.apple.kt`'s `googleDriveAvailable` is
+  `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()` — the same "empty id hides the option"
+  convention as every other provider/platform pair, so a build with no Apple client configured
+  simply doesn't offer Google Drive, the same way an unconfigured Dropbox key hides Dropbox.
+- **Tokens and refresh.** Unlike Android's Play-services path, the Apple app owns a real refresh
+  token, stored through `KeychainTokenStorage` like Dropbox/OneDrive — there is no Play-services-style
+  `accessTokenProvider` override here.
 
 ### Token Storage
 
@@ -415,6 +462,12 @@ separate files.
 
 - Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
 - macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead.
+- Native Apple app (macOS/iOS, `:shared`'s appleMain): `KeychainTokenStorage` writes the Keychain
+  directly through the Security framework — same service, same per-provider account — with no
+  plaintext fallback (a failed write is `NOT_PERSISTED`). Tokens the Compose macOS build stored via
+  the `security` CLI are not carried over: the native app reconnects, and synced data comes back
+  from the cloud. Google Drive is not offered there until an Apple-type OAuth client (no client
+  secret) exists; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md).
 - Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.
 - **Fallback file and outcome reporting**:
   - On failure for any of the above, fallback to a file in the data directory

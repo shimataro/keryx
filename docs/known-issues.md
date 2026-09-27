@@ -584,7 +584,7 @@ became a blue-violet button. Desktop did not reproduce it.
 
 ### Diagnosis
 
-`ui/article/ArticleWebViewHtml.kt` embeds the feed body raw beneath a `<base href>` at the
+`presentation/article/ArticleWebViewHtml.kt` (`:shared`) embeds the feed body raw beneath a `<base href>` at the
 article's own origin, and the reader's WebView has JavaScript enabled (`composewebview`'s
 `WebSettings.isJavaScriptEnabled` defaults to `true`; the app overrides only
 `desktopWebSettings.dataDirectory`).

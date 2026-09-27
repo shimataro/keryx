@@ -13,7 +13,11 @@ Kotlin Multiplatform / Compose Multiplatform).
 - `commonTest/` — pure logic and anything using Ktor `MockEngine`
   (parser, fetcher, URL resolver, OPML, Dropbox storage/auth, local settings).
   Runs on the desktop target, so `expect` declarations resolve to the desktop
-  `actual` (e.g. `FileIO`, `AppDirs` are usable with a temp-dir override).
+  `actual` (e.g. `AppDirs` is usable with a temp-dir override; `FileIO` is plain kotlinx-io).
+- `:shared`'s `commonTest` also runs natively on macOS and the iOS simulator —
+  no JVM APIs there (temp files via `:testing`'s `tempFilePath()`/`tempFileWith()`).
+  Apple-actual behavior goes in `shared/src/appleTest` (Keychain: `macosTest`), and
+  must never touch the real `AppDirs.appDataDir()` — see `docs/testing.md`.
 - `desktopTest/` — anything needing a real SQLDelight driver
   (`JdbcSqliteDriver`): schema, article upsert, the ATTACH merge. Use the
   helpers in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`).
@@ -42,5 +46,5 @@ Place a new test under the same relative path as the code it targets.
 
 1. Read the code under test and one existing test in the same layer.
 2. Cover happy path, error paths, and boundaries.
-3. Run `./gradlew :composeApp:desktopTest` and confirm the new tests pass and
+3. Run `./gradlew :shared:desktopTest :composeApp:desktopTest` (or just the module the tests live in) and confirm the new tests pass and
    existing ones still pass.

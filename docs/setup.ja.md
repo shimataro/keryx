@@ -14,6 +14,9 @@
   [Android Studio のシステム要件](https://developer.android.com/studio/install)を参照。
 - **デスクトップターゲットのみ**を触る場合は、JDK と Gradle Wrapper が動く程度の環境で十分
   （Android SDK やエミュレータ分の追加リソースは不要）。
+- **共有コードの Apple ターゲット**（ネイティブ Apple アプリがリンクする `KeryxShared` XCFramework と、その macOS／iOS
+  シミュレータ向けテスト）を扱う場合は、**Xcode** を入れた Apple Silicon の Mac が必要。それ以外の環境では、Gradle が
+  それらのターゲットをスキップするだけ。
 
 ### 推奨IDE
 
@@ -247,7 +250,7 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 ため、デスクトップと Android の両ターゲットについて確認できる。ただし別途実行する
 `androidDeviceTest` 計装スイート（実機/エミュレータが必要。前提を参照）はこれに含まれない。
 
-デスクトップの作業だけであれば、`./gradlew :composeApp:desktopTest` のようなターゲット限定
+デスクトップの作業だけであれば、`./gradlew :shared:desktopTest :composeApp:desktopTest` のようなターゲット限定
 タスクを使うことで、Android SDK を用意せずに済む。
 
 ## データディレクトリ

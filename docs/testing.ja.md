@@ -6,13 +6,24 @@
 
 - `commonTest/` — 純粋ロジックと Ktor `MockEngine` を使うテスト（パーサ、フェッチャ、URL リゾルバ、
   OPML、Dropbox ストレージ/認証、ローカル設定）。デスクトップターゲット上で動くため、`expect` 宣言は
-  desktop の `actual` に解決される（`FileIO` / `AppDirs` を一時ディレクトリで利用可能）。
+  desktop の `actual` に解決される（`AppDirs` を一時ディレクトリで利用可能。`FileIO` は kotlinx-io による共通実装）。
 - `desktopTest/` — 実際の SQLDelight ドライバ（`JdbcSqliteDriver`）が必要なテスト（スキーマ、記事 upsert、
-  ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。
+  ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。`:shared` と `:composeApp` の両方のテストから使えるよう `:testing` モジュールに置いている。
   同ディレクトリには、実際に Composable をレンダリングして検証する Compose UI テスト
   （`androidx.compose.ui.test.runDesktopComposeUiTest`、JUnit4 ルール不要）も置く
   （例: `ArticleListPaneTest.kt`）。実 Skia/AWT レンダラが必要なため `commonTest` ではなく
   `desktopTest` に置く。
+- **Apple ターゲット（`:shared` のみ）。** `commonTest` は `:shared:macosArm64Test` と `:shared:iosSimulatorArm64Test` として
+  ネイティブでも実行される（どちらも Xcode のある Mac では `./gradlew build` に含まれ、Linux/Windows ではスキップされる）。
+  そのため共通テストで JVM の API を使ってはならない——一時ファイルは `:testing` の `tempFilePath()`/`tempFileWith()`
+  （kotlinx-io）を使い、本当に JVM が必要なテストは `desktopTest` に置く。`appleTest/` には Apple の actual でしか確かめられないもの
+  を置く——`AppleDatabaseTest`（システム SQLite 上の NativeSqliteDriver、FTS5 trigram 検索、スナップショット、実際のマージ）、
+  `ApplePlatformTest`（gzip、ダイジェスト、ファイル）、`KeryxSdkTest`。`macosTest/` には `KeychainTokenStorageTest` を置く：
+  Kotlin/Native は iOS のテストをアプリバンドル外の裸の実行ファイルとして動かすのでキーチェーンが存在しない
+  （`errSecNotAvailable`）が、macOS ではログインキーチェーンに届く（ランダムで後片付けするサービス名を使い、
+  `works.merc.keryx` には触れない）。**Apple のテストから、上書きしていない `AppDirs.appDataDir()` に触れてはならない**——
+  macOS ではユーザーの実データ `~/Library/Application Support/Keryx` を指す。`KeryxSdk.start` に `dataDirectory` を渡すか、
+  `DatabaseDriverFactory().createDriver(dir)` でドライバを作ること。
 - `androidDeviceTest/` — Android 実機の SQLite やプラットフォーム API を必要とし、プレーンな JVM
   ユニットテストとしては実行できない計装テスト（`.claude/rules/android-sqlite-bundling.md` 参照）。
   実機または起動中のエミュレータが必要。`composeApp` には `androidUnitTest`/`androidHostTest`
@@ -78,7 +89,7 @@
   を呼ぶ（`HomeViewModelTest.kt` が最初の導入例）。`StateFlow` が `SharingStarted.WhileSubscribed(...)`
   の場合、テスト側で明示的に `collect` して購読を開始しないと値が更新されない点に注意。
 - 実際の `HomeViewModel` を必要とする Compose UI テストは、自前の `try`/`finally` ではなく必ず
-  `ui/home/HomeViewModelTestSupport.kt` の `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`
+  `ui/home/ComposeHomeViewModelTestSupport.kt` の `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`
   を経由すること。`HomeViewModel` の DB 購読は `SharingStarted.Eagerly` なので、`viewModelScope` を
   `cancelAndJoin` せずに driver を閉じると、EDT にキューされていた継続が閉じた接続に対して再開してしまう
   ——この未捕捉例外は、たまたま次に走った**別の**テストで `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`
@@ -125,15 +136,16 @@
 修正されたかを確認する手順は [known-issues.ja.md](known-issues.ja.md) を参照。
 
 ```bash
-./gradlew :composeApp:desktopTest
+./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
-Android には計装テストスイートが 2 つある。CI に組み込まれているのは片方だけなので混同
+Android には計装テストスイートが 3 つある。CI に組み込まれていないものもあるので混同
 しやすい:
 
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
-| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot`、および他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、Play 開発者サービスの認可） | ✗ ローカルのみ |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ 毎プッシュ（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、Play 開発者サービスのスコープチェック） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
@@ -141,7 +153,7 @@ Android には計装テストスイートが 2 つある。CI に組み込まれ
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
-./gradlew :composeApp:connectedAndroidDeviceTest
+./gradlew :shared:connectedAndroidDeviceTest :composeApp:connectedAndroidDeviceTest
 ```
 
 （タスク名は AGP 9 の `com.android.kotlin.multiplatform.library` プラグイン自身の
@@ -188,7 +200,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 プロジェクト全体で見ると——
 
-- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、ViewModel 層（Home/Settings/Setup/NotificationCenter。`SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
+- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、ViewModel 層（Home/Settings/Setup/NotificationCenter。`SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
 - Linux/macOS/Windows のファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、上書き確認の解決、ダイアログの親ウインドウ選択）
 - フィード一覧のドラッグ&ドロップの書き直し（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt` で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際のエンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と判定されずドロップも適用されないこと）
 - フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）

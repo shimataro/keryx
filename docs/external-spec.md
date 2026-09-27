@@ -18,8 +18,8 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform (current) |
 | Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md)) |
-| iOS / iPadOS | Planned (initially Compose, then native SwiftUI) |
-| macOS (native) | Planned — a separate native SwiftUI macOS app alongside the existing Compose one above |
+| iOS / iPadOS | Planned (native SwiftUI UI, sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md)) |
+| macOS (native) | Planned — a native SwiftUI macOS app (Apple Silicon) that replaces the Compose one above for users; the shared logic is already built for it |
 
 ## 3. Supported Formats
 

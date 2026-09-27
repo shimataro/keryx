@@ -18,6 +18,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +84,7 @@ import works.merc.keryx.app.resources.settings_onedrive_connect
 import works.merc.keryx.app.resources.settings_onedrive_disconnect
 import works.merc.keryx.app.resources.settings_last_synced
 import works.merc.keryx.app.resources.setup_auth_failed
+import works.merc.keryx.app.ui.i18n.errorMessage
 
 /**
  * Cloud sync tab: provider connect/disconnect/switch, with the three confirmation dialogs.
@@ -91,6 +93,19 @@ import works.merc.keryx.app.resources.setup_auth_failed
  */
 @Composable
 internal fun CloudSyncTabContent(vm: SettingsViewModel) {
+    val connectedType by vm.connectedType.collectAsState()
+    val connectingType by vm.connectingType.collectAsState()
+    val initialSyncingType by vm.initialSyncingType.collectAsState()
+    val connectFailedType by vm.connectFailedType.collectAsState()
+    val canCancelConnect by vm.canCancelConnect.collectAsState()
+    val resetting by vm.resetting.collectAsState()
+    val lastSyncedAtText by vm.lastSyncedAtText.collectAsState()
+    val lastSyncError by vm.lastSyncError.collectAsState()
+    val lastSyncAuthFailed by vm.lastSyncAuthFailed.collectAsState()
+    val syncing by vm.syncing.collectAsState()
+    val syncPhase by vm.syncPhase.collectAsState()
+    val disconnecting by vm.disconnecting.collectAsState()
+    val canSyncNow by vm.canSyncNow.collectAsState()
     // Confirmation-dialog triggers for the two disruptive cloud-storage actions (disconnect an
     // established connection, or abort an in-flight OAuth wait). Starting a fresh connect stays
     // immediate — it's low-risk (just opens a browser).
@@ -105,7 +120,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     var confirmingResetCloudData by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        val connected = vm.connectedType
+        val connected = connectedType
         // Only one provider can be connected at a time. Reinforce that in words.
         Text(
             stringResource(Res.string.settings_cloud_sync_hint),
@@ -121,24 +136,24 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                 CloudProviderRow(
                     type = type,
                     connected = connected == type,
-                    connecting = vm.connectingType == type,
-                    canCancel = vm.canCancelConnect,
+                    connecting = connectingType == type,
+                    canCancel = canCancelConnect,
                     // "Reset"/"switch provider" stay blocked through the OAuth wait, the initial
                     // sync that follows a fresh connect, and a disconnect tearing this row down —
                     // each would race state the other is still writing. "Disconnect" is looser
                     // (leaveEnabled below): it stays available through the initial sync, since
                     // leaving is always a safe exit regardless of what a sync is doing.
-                    idleEnabled = vm.connectingType == null && vm.initialSyncingType == null && !vm.disconnecting,
-                    leaveEnabled = vm.connectingType == null && !vm.disconnecting,
-                    failed = vm.connectFailedType == type,
-                    lastSyncedAtText = if (connected == type) vm.lastSyncedAtText else null,
+                    idleEnabled = connectingType == null && initialSyncingType == null && !disconnecting,
+                    leaveEnabled = connectingType == null && !disconnecting,
+                    failed = connectFailedType == type,
+                    lastSyncedAtText = if (connected == type) lastSyncedAtText else null,
                     // Only meaningful for the connected provider: it's why its background syncs
                     // are currently failing (an expired token, a transient outage, bad cloud data).
-                    lastSyncErrorText = if (connected == type) vm.lastSyncErrorText else null,
+                    lastSyncErrorText = if (connected == type) lastSyncError?.let { errorMessage(it) } else null,
                     // Swaps this row's recovery action from "reset sync data" to "reconnect" — see
                     // CloudProviderRow's own comment for why the two are mutually exclusive.
-                    authFailed = connected == type && vm.lastSyncAuthFailed,
-                    resetting = vm.resetting,
+                    authFailed = connected == type && lastSyncAuthFailed,
+                    resetting = resetting,
                     // Live progress for the connected row, in priority order: an in-flight
                     // disconnect (waiting out a sync it must let finish first — see
                     // SettingsViewModel.disconnect's KDoc), then a running sync's current phase.
@@ -147,9 +162,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     statusText = cloudProviderRowStatusText(
                         type = type,
                         connectedType = connected,
-                        disconnecting = vm.disconnecting,
-                        syncing = vm.syncing,
-                        syncPhase = vm.syncPhase,
+                        disconnecting = disconnecting,
+                        syncing = syncing,
+                        syncPhase = syncPhase,
                     ),
                     // No provider connected yet: a fresh connect is low-risk, so do it directly. A
                     // different provider connected: confirm the switch first.
@@ -170,8 +185,8 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         // an auth failure the row's own "reconnect" must fix first), per the layout-stability rule.
         // Kept out of CloudProviderRow: a third labelled action would overrun that row's width.
         SyncNowButton(
-            enabled = vm.canSyncNow,
-            busy = vm.syncing && connected != null,
+            enabled = canSyncNow,
+            busy = syncing && connected != null,
             onClick = { vm.syncNow() },
         )
     }
@@ -215,7 +230,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                 Text(
                     stringResource(
                         Res.string.settings_cloud_switch_confirm_body,
-                        vm.connectedType?.brandLabel().orEmpty(),
+                        connectedType?.brandLabel().orEmpty(),
                     ),
                 )
             },
@@ -595,7 +610,7 @@ internal fun CloudProviderRow(
                 )
             }
         }
-        // An in-progress sync failure (already localized per exception type) takes precedence: it
+        // An in-progress sync failure (localized per ErrorKind by the caller) takes precedence: it
         // describes the live state of a working connection, whereas `failed` only reports that the
         // last connect attempt didn't complete.
         val errorText = lastSyncErrorText ?: stringResource(Res.string.setup_auth_failed).takeIf { failed }

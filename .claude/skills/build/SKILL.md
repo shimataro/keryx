@@ -9,7 +9,7 @@ Run Keryx KMP's standard build flow in sequence.
 
 1. If any `.sq` file changed, regenerate the SQLDelight interface explicitly first:
    ```bash
-   ./gradlew :composeApp:generateCommonMainKeryxDatabaseInterface
+   ./gradlew :shared:generateCommonMainKeryxDatabaseInterface
    ```
 2. Run the full build (compiles all source sets, runs `check`):
    ```bash
@@ -19,7 +19,7 @@ Run Keryx KMP's standard build flow in sequence.
    file, line, and message, and stop here.
 3. Run tests explicitly (also part of step 2's `check`, but useful to isolate):
    ```bash
-   ./gradlew :composeApp:desktopTest
+   ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
    If any tests fail, summarize the failing test names and the reason (assertion
    diffs / exceptions). Pay special attention to `SchemaTest` and

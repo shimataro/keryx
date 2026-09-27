@@ -29,6 +29,8 @@ import org.koin.dsl.module
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.newHomeViewModel
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.TooltipIconButton

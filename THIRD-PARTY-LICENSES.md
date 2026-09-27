@@ -19,6 +19,8 @@ its respective license.
 | Koin | Apache-2.0 | <https://github.com/InsertKoinIO/koin> |
 | SQLDelight | Apache-2.0 | <https://github.com/sqldelight/sqldelight> |
 | SQLite JDBC | Apache-2.0 | <https://github.com/xerial/sqlite-jdbc> |
+| SQLiter (Apple builds) | Apache-2.0 | <https://github.com/touchlab/SQLiter> |
+| SKIE runtime (Apple builds) | Apache-2.0 | <https://github.com/touchlab/SKIE> |
 | Ktor | Apache-2.0 | <https://github.com/ktorio/ktor> |
 | Ksoup | Apache-2.0 | <https://github.com/fleeksoft/ksoup> |
 | Coil | Apache-2.0 | <https://github.com/coil-kt/coil> |

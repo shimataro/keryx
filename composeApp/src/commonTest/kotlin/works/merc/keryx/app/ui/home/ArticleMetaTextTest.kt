@@ -2,6 +2,7 @@ package works.merc.keryx.app.ui.home
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import works.merc.keryx.app.presentation.formatTimestamp
 
 /**
  * Pure-logic cases for `articleMetaText`, split out of the former `ArticleDetailMetaLine`

@@ -9,10 +9,20 @@
   However, JavaExec tasks such as `:composeApp:run` are executed with the JVM that launched Gradle, so if it is older than 25 you will hit `UnsupportedClassVersionError` at runtime.
 - Use the bundled wrapper (`./gradlew`, Gradle 9.7.1).
 - **Android SDK** (`local.properties`' `sdk.dir` or the `ANDROID_HOME` environment variable) —
-  `:composeApp` itself configures an Android library target, so the root `./gradlew build` needs
-  the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD
-  setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:composeApp:desktopTest`
+  both `:shared` and `:composeApp` configure an Android library target, so the root `./gradlew build`
+  needs the SDK resolvable even for a desktop-only change. See [setup.md](setup.md) for install/AVD
+  setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   avoids this requirement.
+
+- **Xcode** (macOS only) for `:shared`'s Apple targets — the `KeryxShared` XCFramework
+  (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`, output under
+  `shared/build/XCFrameworks/release/`) and its macOS/iOS-simulator tests. Without Xcode (or on
+  Linux/Windows) Gradle skips those targets and everything else builds as before.
+  One consequence is a known, accepted limitation rather than a bug: the CodeQL workflow
+  (`.github/workflows/codeql.yml`) runs on `ubuntu-latest`, where Gradle silently skips the Apple
+  targets, so Apple-target source (`shared/src/appleMain`, `macosMain`, `iosMain` — e.g.
+  `KeychainTokenStorage.kt`, `RawSqliteConnection.kt`, `DatabaseMerger.apple.kt`, `KeryxSdk.kt`)
+  is never compiled under CodeQL's build tracer and gets no CodeQL coverage.
 
 If toolchain auto-download is blocked in a sandbox:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`.
@@ -21,7 +31,7 @@ If toolchain auto-download is blocked in a sandbox:
 
 ```bash
 ./gradlew build                       # Compile all source sets + run tests
-./gradlew :composeApp:desktopTest     # Tests only
+./gradlew :shared:desktopTest :composeApp:desktopTest  # Tests only
 ./gradlew :composeApp:run             # Launch the desktop app
 
 ./gradlew :androidApp:assembleDebug        # Build a debug APK
@@ -43,7 +53,7 @@ Copy this file to `local.properties` and edit it during the build.
 Services without an API key will not show integration options. If no service is configured, the integration itself does not appear (e.g., tabs in the settings dialog).
 **Only one cloud storage can be connected at a time**, and data cannot be distributed across multiple storages.
 
-This is implemented via a Gradle custom task (`generateBuildConfig`).
+This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials and `generateAppleBuildConfig` for the Apple app's own, secretless Google Drive client id — see "Apple (macOS / iOS)" below).
 
 Below is how to obtain API keys for each service.
 
@@ -153,6 +163,103 @@ declaration — an `ACTION_VIEW` intent-filter (`scheme="keryx"` `host="oauth2"`
 the desktop `./gradlew :composeApp:run` limitation above. To verify linking in an emulator, it
 needs a real browser to actually complete the OAuth flow — a Google Play system image (Chrome) is
 the recommended way to get one — see [setup.md](setup.md).
+
+### Apple (macOS / iOS)
+
+Dropbox and OneDrive use the same `local.properties` keys as above; both are PKCE public clients
+over the same `keryx://oauth2/callback` redirect the desktop app uses, so nothing Apple-specific is
+needed for them.
+
+**Google Drive needs its own OAuth client**, separate from desktop's "Desktop app" one, because a
+native app binary must not ship a client secret and Google's "Desktop app" client type requires one
+(see the "Google Drive" section above). Google's answer for a native Apple app is the **"iOS"**
+application type — it takes no secret at all (Google also uses this type for a native macOS app,
+not just iOS/iPadOS).
+
+1. In the **same Cloud project** as the desktop (and Android) client — this matters, the same way it
+   does for Android above: `appDataFolder` is scoped per project, so sharing it is what lets the
+   Apple app see the same sync file as every other device. The Drive API and OAuth consent
+   screen/scope from the "Google Drive" section above are shared too; nothing new to set up there.
+2. "Google Auth Platform" → "Clients" → "Create client" → application type **"iOS"**.
+   - Bundle ID: `works.merc.keryx` (the macOS app's; a future iOS app can reuse this client if it
+     ships under the same bundle ID, otherwise register a second "iOS" client for it once that's
+     decided).
+   - App Store ID / Team ID are optional and can be filled in later.
+3. Copy the **Client ID** shown after creation (`NNNN-xxxx.apps.googleusercontent.com`) into
+   `local.properties` (copy of [local.properties.example](../local.properties.example)) as
+   `googledrive.apple.client.id` — or `-PgoogleDriveAppleClientId=...` / the
+   `GOOGLE_DRIVE_APPLE_CLIENT_ID` environment variable, same resolution order as every other key
+   here. This feeds `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`, generated into `appleMain` only by
+   `shared/build.gradle.kts`'s `generateAppleBuildConfig` task — analogous to
+   `generateDesktopBuildConfig`, but with no secret counterpart since this client type has none.
+4. No separate redirect-URI registration is needed with Google: it is the client's own
+   reversed-client-id custom scheme, `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`, which
+   Google derives from the Client ID automatically (`googleIosClientRedirectUri`,
+   `data/cloud/GoogleDriveAuthManager.kt`).
+5. **Register the custom URL schemes in the Swift app's Info.plist.** Two schemes need to be
+   registered: the shared `keryx` scheme (Dropbox/OneDrive, and now Google Drive too — all three
+   disambiguated by `state`) and the Google client's own reversed-client-id scheme from step 4.
+   `CFBundleURLTypes` takes one `<dict>` per scheme, each with its own `CFBundleURLName` and a
+   `CFBundleURLSchemes` array holding just that one scheme string — the same shape the desktop app's
+   Compose packaging already uses for `keryx` (`composeApp/build.gradle.kts`'s
+   `nativeDistributions.macOS.infoPlist.extraKeysRawXml`):
+
+   ```xml
+   <key>CFBundleURLTypes</key>
+   <array>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>keryx</string>
+           </array>
+       </dict>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth.googledrive</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>com.googleusercontent.apps.NNNN-xxxx</string>
+           </array>
+       </dict>
+   </array>
+   ```
+
+   Replace `com.googleusercontent.apps.NNNN-xxxx` with the actual reversed client ID from step 4.
+   Xcode's own editor (target → **Info** tab → **URL Types**, "+") writes the same two keys and can
+   be used instead of hand-editing the XML.
+
+   **This registration is only needed for the redirect-delivery path desktop uses today** — the OS
+   handing the URL to the running app (`NSApplicationDelegate.application(_:open:)` on macOS,
+   `onOpenURL`/`scene(_:openURLContexts:)` on iOS) after the user completes sign-in in the system
+   browser. If the Swift app instead opens the authorization URL through
+   `ASWebAuthenticationSession` and passes the scheme as its `callbackURLScheme` parameter, that
+   session intercepts the redirect itself and needs no `CFBundleURLTypes` entry for it — the two are
+   alternative delivery mechanisms, not both required.
+
+Leaving `googledrive.apple.client.id` empty hides Google Drive on the Apple app only — it has no
+effect on desktop's or Android's own Google Drive keys, and vice versa. See
+[sync-architecture.md](sync-architecture.md)'s "Google Drive on Apple" for the full mechanism, and
+[app-architecture.md](app-architecture.md)'s "Apple Native Apps (SwiftUI)" for how `:shared`'s
+appleMain is structured.
+
+## String Catalog for the Apple app
+
+The SwiftUI app localizes through an Xcode String Catalog generated from the Compose app's own
+`composeResources/values/strings.xml` (Japanese, the source/fallback language) and
+`values-en/strings.xml`, so both UIs share one source of truth for every user-facing text:
+
+```bash
+./gradlew :composeApp:generateStringCatalog
+# -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+```
+
+The generator resolves Android resource escapes (`\n`, `\'`, …), maps positional placeholders to
+Apple's (`%1$s` → `%1$@`, `%1$d` → `%1$lld`) and turns `<plurals>` into plural variations. The file
+is a build output — never edit or commit it; change `strings.xml` instead.
+`StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
+catalog and the resources disagree on keys, plural forms or placeholders.
 
 ## Packaging
 
@@ -728,7 +835,8 @@ Flow:
 
    The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package.
 
-The **tag is the single source of truth for the version**. `appVersion` in `composeApp/build.gradle.kts` resolves
+The **tag is the single source of truth for the version**. `appVersion` in `shared/build.gradle.kts` and
+`composeApp/build.gradle.kts` (the same resolution, in both) resolves
 `-PappVersion` > `APP_VERSION` env var > the literal in the file, and drives `BuildConfig.VERSION` (shown in the
 About screen, and used by the update checker) as the full tag, pre-release suffix included.
 `composeApp/build.gradle.kts` separately derives `appPackageVersion` from it by stripping any pre-release suffix,

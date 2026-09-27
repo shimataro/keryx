@@ -11,22 +11,45 @@
 - Shared platform abstractions are declared in `commonMain` and implemented in
   `jvmCommonMain` when possible, or in target-specific source sets
   (`desktopMain` / `androidMain`) otherwise.
+- UI-framework-free code lives in the `:shared` module, the Compose UI in `:composeApp` (see
+  "Directory Structure" below).
 
 ## Directory Structure
 
+The code is split across four Gradle modules. All share the package root `works.merc.keryx.app`
+and the same source-set names, so the tree below is their combined `src/` tree:
+
+| Module | Contents |
+| --- | --- |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
+| `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
+| `:testing` | Test-only helpers used by both modules' tests (`DbTestSupport`, `CloudTestSupport`, `FakeNotificationMessages`, token-storage fakes). Never a main-source dependency. |
+
+Tests live next to the code they test: `shared/src/{commonTest,desktopTest,androidDeviceTest}` and
+`composeApp/src/{commonTest,desktopTest,androidDeviceTest}`.
+
 ```text
-composeApp/src/
+{shared,composeApp}/src/
   commonMain/kotlin/works/merc/keryx/app/
     core/      Constants, Result, KeryxException, ArticleFilter, AppNotification, Clock, DateTimeParser, CloudStorageAvailability(expect),
                AppInfo, CloudBackupPath, HtmlText, Log, SearchQuery, SemVer, SqliteFile, UntrustedText, UpdateDistribution
     data/local/   DatabaseDriverFactory(expect), FtsManager, FtsSearch, LocalSettings(Store)
     data/remote/  FeedFetcher, FeedParser, FeedDiscovery, FaviconResolver, UrlResolver, FeedModels, UpdateDownloader, ReleaseFeedSource (in-app update — see "In-App Update" below)
-    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce(expect), TokenStorage, OAuthTokens,
+    data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
-    di/           AppModule (+ expect platformModule), HttpClientFactory, ImageLoaderSetup
-    platform/     AppDirs, FileIO, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
+    presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
+                  home screen's filter/selection/article list/search/unread-only/new-article state and
+                  actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
+                  FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
+                  the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
+                  HomeShortcuts — the keyboard-shortcut table over logical keys), article/ (ArticleWebViewHtml —
+                  the reader's HTML document, CSP and theme CSS), Formatting (formatTimestamp). Pane
+                  layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+    platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
@@ -44,12 +67,10 @@ composeApp/src/
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
     target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
-    target lacks: FileIO, Gzip, Sha1, ContentDigest, Pkce, FileTokenStorage,
+    target lacks: Gzip, Sha1, Sha256, SecureRandom (secureRandomBytes), ContentDigest, FileTokenStorage,
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
     update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
-    wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider),
-    domain/OAuthUriParser.kt (parseOAuthUri, shared by desktop's and Android's `keryx://` redirect
-    handling)
+    wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects
@@ -194,6 +215,15 @@ and `androidApp` depends on it to produce the installable APK.
 
 `expect class DatabaseDriverFactory { fun create(): SqlDriver }` in `commonMain`. The desktop `actual` creates a `JdbcSqliteDriver`, checks `PRAGMA user_version`, and manually drives `KeryxDatabase.Schema` create / migrate (because SQLDelight's JVM driver does not auto-track schema version).
 
+A `user_version` **newer** than `KeryxDatabase.Schema.version` means a newer build migrated the file
+(see "Apple Native Apps (SwiftUI)" below — the SwiftUI app and the internal Compose macOS build can
+share one data directory — or an older release reinstalled over a newer one). The desktop `actual`
+refuses it before writing anything: `requireSupportedSchemaVersion` (`data/local/DatabaseSchemaGuard.kt`)
+throws `DatabaseTooNewException`, and `main.kt` opens the driver eagerly right after Koin starts so
+the failure surfaces once, as a localized message box (`DatabaseTooNewDialog.kt`), before the app
+exits. Android needs no guard of its own: `SupportSQLiteOpenHelper.Callback.onDowngrade` already
+throws by default.
+
 The Android `actual` creates an `AndroidSqliteDriver`, which drives `Schema.create`/`migrate`
 automatically via its own `onCreate`/`onUpgrade` callbacks — no manual `PRAGMA user_version`
 handling needed, unlike desktop. It uses `com.github.requery:sqlite-android`'s bundled SQLite
@@ -298,13 +328,13 @@ them.
 Another pure function sits alongside `selectUpdateAsset` and `updatePlan` above but deliberately
 outside `domain/`: `ui/settings/ReleaseNotesText.kt`'s `plainTextReleaseNotes` (Markdown-to-plain-text for the Updates
 tab's read-only summary) is UI-layer presentation formatting, not update policy — the same
-reasoning that keeps `ui/home/HomeCommon.kt`'s `formatTimestamp` and `ui/i18n/ErrorMessages.kt` out
+reasoning that keeps `:shared`'s `presentation/Formatting.kt` (`formatTimestamp`) and `ui/i18n/ErrorMessages.kt` out
 of `domain/` too, and its sole caller (`ui/settings/UpdatesTab.kt`).
 
 The desktop and Android `UpdateInstaller` actuals share no code at all — desktop
 (`platform/update/DesktopUpdateInstaller.kt`) extracts a ZIP via
 `platform/update/ArchiveExtractor.kt` (`ditto` on macOS, whose signed bundle seals its own symlinks;
-`platform/ZipExtractor.kt` — `jvmCommonMain`, shared with Android exactly like `FileIO`/`Gzip` —
+`platform/ZipExtractor.kt` — `jvmCommonMain`, shared with Android exactly like `Gzip` —
 everywhere else, see [background-update.md](background-update.md)), stages it next to the current
 install, and hands off to a detached helper script (`platform/update/UpdateScriptWriter.kt`, pure
 string templates — tested by asserting their text directly, never by running one) via
@@ -335,7 +365,7 @@ composed unconditionally for the pane's lifetime — never behind an `if` — be
 `SwingInteropContainer` revalidates and repaints the *whole window* whenever a heavyweight
 component is added, removed, or moved, not just this pane. Consequently, states that have no article to render — "no article
 selected" and "no content" — are rendered as HTML *inside* the same WebView rather than as Compose
-`Text`, via `ui/article/ArticleWebViewHtml.kt`'s `articlePlaceholderHtml`/`articleNoContentHtml`
+`Text`, via `presentation/article/ArticleWebViewHtml.kt` (`:shared`)'s `articlePlaceholderHtml`/`articleNoContentHtml`
 (sharing one `<style>` block with the real-article `wrapArticleHtml` builder, so every state paints
 the same theme colors). That shared `<style>` block also declares a single `color-scheme` (`dark` or
 `light`, derived from `ArticleHtmlTheme.surface`'s own luminance via `ArticleHtmlTheme.isDark` rather
@@ -521,14 +551,14 @@ also what keeps `PagerState.isScrollInProgress` from going false mid-drag, which
 `gestureInProgress` (above) has to be tracked separately rather than reusing it.
 
 Pages are hydrated by `HomeViewModel.requestArticleContent`, which delegates to
-`ui/home/ArticleContentCache.kt` — a small, independently-testable collaborator, not inline
+`presentation/home/ArticleContentCache.kt` (`:shared`) — a small, independently-testable collaborator, not inline
 `HomeViewModel` state — and fills `articleContents` (bounded at `ARTICLE_CONTENT_CACHE_LIMIT`,
 oldest evicted first) with a plain `getArticleById` read projected down to `ArticleReaderRow`
 (`domain/ArticleRepository.kt`) rather than the full `Articles` row: the full row also carries
 `search_text`, a second HTML-stripped copy of the body the reader never reads. **Loading a body is
 not selecting it**: `selectArticle` is the only path that marks an article read, so a neighbouring
 page renders without counting as opened. The cache deliberately does *not* skip the currently
-selected article — `ui/home/ArticlePagerSync.kt`'s `readerContents` merges the selection's own
+selected article — `presentation/home/ReaderPaging.kt`'s (`:shared`) `readerContents` merges the selection's own
 authoritative row in ahead of the cache, but the cache still holds its own copy, which is what keeps
 the page the user just swiped away from rendered (rather than blanking out and reloading) once the
 selection moves on to its neighbour. `readerPages` is the equivalent fallback on the list side: if
@@ -1054,3 +1084,133 @@ a list that's drifted from strictly-unread back to it without leaving unread-onl
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
 results while searching, the filter's own list otherwise, the same resolution `pagerArticles` uses
 — and the selection), so the action is a no-op once nothing but the selection is left pinned-read.
+
+## Apple Native Apps (SwiftUI)
+
+`external-spec.md` §2 plans a native SwiftUI app for macOS, and later iOS/iPadOS. This section
+records the decisions that the shared Kotlin code and the rest of these docs are being prepared
+around.
+
+### Distribution and coexistence
+
+- **Only the SwiftUI app is distributed to users on macOS.** The Compose Multiplatform macOS build
+  stays in the repo for internal verification; Windows, Linux and Android keep the Compose app.
+- The SwiftUI app ships through **both the Mac App Store and Developer ID** (GitHub Releases +
+  Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
+  Developer ID build adds Sparkle, which the App Store build must not contain.
+- **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
+  share the bundle ID (`works.merc.keryx`), the `keryx://` scheme and the OPML document types, and
+  may share the same data. Launching one through LaunchServices (Finder, `open`) while the other is
+  running just activates the running one. `./gradlew :composeApp:run` bypasses LaunchServices and
+  cannot detect the SwiftUI app, so not running both is an operating rule, not an enforced one.
+- Because the two may open the same `keryx.db` built from different commits, a database whose
+  `PRAGMA user_version` is **newer** than the running app's schema is refused rather than opened
+  (see "DatabaseDriverFactory" above).
+- Both apps keep tokens in the Keychain under the same service (`works.merc.keryx`). Dropbox and
+  OneDrive use the same OAuth client on both, so their items also share the account
+  (`CloudStorageType.id`) with the desktop app. Google Drive does not: the Apple app's "iOS"-type
+  OAuth client differs from desktop's, and a refresh token is bound to the client that issued it,
+  so it uses a separate Apple-only account (`google_drive_apple`, `appleKeychainAccount` in
+  `data/cloud/KeychainTokenStorage.kt`) that neither app can overwrite for the other. Sharing a
+  service and account is only the naming mechanism: whether one app can actually read the other's
+  item is decided by Keychain access control (the desktop app writes through the `security` CLI,
+  the SwiftUI app runs sandboxed), so it is not guaranteed — when it can't, the SwiftUI app
+  reconnects, and synced data comes back from the cloud.
+
+### Shared Kotlin code
+
+The SwiftUI app consumes the shared Kotlin code as a Kotlin/Native framework. UI stays per
+platform:
+
+- **Shared** (Kotlin, UI-framework-free): core, data, domain, the SQLDelight schema, and the
+  *state holders* behind the screens — the filter, the selection, the article list, unread-only,
+  hide-read, sort order, search query and results, the new-article count, unread counts, and every
+  action on them. These implement `external-spec.md` behavior directly, so writing them twice would
+  let the two apps drift.
+- **Per UI**: pane layout and focus (`HomePane`, the focused pane, pane widths), keyboard event
+  handling (each UI maps its own key events onto the shared shortcut table, `presentation/home/HomeShortcuts.kt`),
+  window restoration, and all rendering. Search-bar visibility is an input the UI sets on the shared
+  state (it decides whether a query is showing results), not state it owns. SwiftUI covers these
+  with `NavigationSplitView`, `@FocusState`, `@SceneStorage` and its own window restoration; the
+  Compose app keeps its own implementations.
+- Swift observes the shared state holders' `StateFlow`s through a thin `@Observable` adapter.
+- **Localized text is resolved in the UI layer, never in shared code.** Shared code emits
+  message IDs plus arguments. The Compose app resolves them through Compose Resources, and the
+  SwiftUI app through a String Catalog generated from the same `strings.xml` files, so the two
+  locales keep one source.
+
+### Apple targets in `:shared`
+
+`:shared` builds for `macosArm64`, `iosArm64` and `iosSimulatorArm64` (Apple Silicon only, like
+the macOS release; `lifecycle-viewmodel` has no `macosX64` variant) and assembles the static
+**`KeryxShared` XCFramework** (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`). The
+source sets are wired by hand (the custom `jvmCommonMain` disables Kotlin's default hierarchy
+template): `appleMain` → `macosMain`/`iosMain`, and `appleTest` → `macosTest` for tests.
+
+The Apple actuals use system libraries only: CommonCrypto (SHA-1/SHA-256), Security (random
+bytes, Keychain), zlib (gzip), Foundation/POSIX (files), AppKit/UIKit (open a URL), and the system
+sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
+`platform/RawSqliteConnection.kt` (SQLiter's sqlite3 bindings) for the ATTACH merge and the
+`VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
+trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
+(3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
+(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `appleKeychainAccount(type)` —
+`CloudStorageType.id`, except `google_drive_apple` for Google Drive; see "Distribution and coexistence" —
+readable after first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
+("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
+— gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/
+OneDrive's shared `keryx://oauth2/callback` redirect, uses that client's own reversed-client-id
+custom scheme (`com.googleusercontent.apps.<id>:/oauth2redirect`); see sync-architecture.md's
+"Google Drive on Apple". The in-app updater (`updateModule`) is not installed: the App Store or
+Sparkle update this app.
+
+### `KeryxSdk`: the Swift entry point
+
+`sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` builds the object
+graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin kept internal),
+opens the database — a `DatabaseTooNewException` surfaces here as a Swift error — and hands out
+`homeViewModel`, `notificationCenter`, `newArticleNotifier` (the new-articles text of every refresh
+that found some, also passed to the OS notification sink), `syncRepository`, `settingsRepository`,
+`cloudSession`, `availableCloudTypes` (the cloud providers configured in this build, in display
+order — `CloudStorageAvailability.available`), `newAddFeedController()` and
+`handleOAuthRedirect(url)`. `completeConnect(type, tokens)` and `tearDownConnection(type)` are
+`suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
+connect/disconnect must follow, shared with the Compose settings and setup screens:
+`completeConnect` saves the tokens, selects the provider and flushes the local settings before any
+sync may start, and `tearDown` disconnects (revoking the tokens), clears the sync failure state and
+per-provider sync markers, and clears the provider selection. Awaiting the interactive OAuth flow
+and starting the initial sync stay with each UI. `CloudConnectionService`'s own calls may block on
+the Keychain, so — like `prepareSearchIndex()` below — `KeryxSdk` runs them on the SDK's own
+background scope itself and awaits the result, rather than exposing the raw service and trusting a
+Swift `@MainActor` call site to dispatch off its own thread the way the Compose UI's
+`withContext(dispatcher)` does. `dataDirectory` puts every app directory
+under a given path, for previews and tests that must not open the user's real data. `close()` stops
+and joins every coroutine that can still read the database before closing it, flushes and stops
+the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
+`dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the
+redirect, when no connect flow is collecting it. `prepareSearchIndex()` (once per foreground
+launch: create the FTS table and backfill missing rows) and `prepareSearchIndexIfAbsent()` (cheap,
+for every process start or background wake) both run on the SDK's own background scope, never on
+the Swift caller's thread. The Koin modules
+are functions, not `val`s, because a Koin module caches its singletons inside its definitions.
+
+**SKIE** shapes the framework's Swift API: `suspend` functions become `async throws`, sealed
+hierarchies get an exhaustive `onEnum(of:)` switch, and a `StateFlow<T>` property reaches Swift as
+`SkieSwiftStateFlow<T>` — an `AsyncSequence` with a synchronous `.value` — which is what the
+`@Observable` adapter iterates. Members that can fail for a reason other than cancellation are
+`@Throws`, so a failure is a thrown Swift error rather than a process abort.
+
+### Spike measurements (macOS 15, Apple Silicon, release build)
+
+| Measure | Result |
+| --- | --- |
+| Shared code's contribution to a linked arm64 binary | ~18 MB (~11 MB stripped) |
+| `KeryxSdk.start` creating a new database | 4–12 ms |
+| `KeryxSdk.start` on an existing database | ~1.5 ms |
+| 10,000-row `homeViewModel.articles` reaching Swift after subscribing | 24–28 ms |
+| Re-sorted 10,000-row list reaching Swift | ~1 ms |
+| Reading `articles.value` (10,000 rows) from Swift | <1 ms |
+
+Bridging a large list is cheap at this size; revisit with paging only if real lists grow by an
+order of magnitude.

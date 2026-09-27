@@ -98,8 +98,9 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
     grep -rn "keyboardPaneFor\|visiblePanes\|feedListIsDrawer\|focusedPane\|drawerState" <changed files>
     grep -rn "focused = \|selected = \|remember {\|rememberSaveable" <changed files>
     grep -rn "selectionCursorId\|_selectedRowInstance\|_selectedArticle\|browsingEpoch" \
-      composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/HomeViewModel.kt
+      shared/src/commonMain/kotlin/works/merc/keryx/app/presentation/home/HomeViewModel.kt
 
-`git log --oneline -- composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/` is unusually
+`git log --oneline --follow -- shared/src/commonMain/kotlin/works/merc/keryx/app/presentation/home/HomeViewModel.kt`
+and `git log --oneline -- composeApp/src/commonMain/kotlin/works/merc/keryx/app/ui/home/` are unusually
 worth running: this class has recurred often enough that a `git show` of a nearby fix usually names
 the invariant the current diff is about to break.

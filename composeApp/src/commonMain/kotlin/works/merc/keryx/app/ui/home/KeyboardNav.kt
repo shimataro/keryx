@@ -9,6 +9,10 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import works.merc.keryx.app.presentation.home.HomeKey
+import works.merc.keryx.app.presentation.home.HomeShortcut
+import works.merc.keryx.app.presentation.home.KeyModifiers
+import works.merc.keryx.app.presentation.home.homeShortcutFor
 
 /**
  * Which kind of text input currently holds focus inside `FeedListPane`/`ArticleListPane` — reported
@@ -104,37 +108,56 @@ fun Modifier.homeKeyboardShortcuts(
     isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs,
 ): Modifier = onPreviewKeyEvent { event ->
     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-    if (event.key == Key.Escape) return@onPreviewKeyEvent onEscape()
-    if (textInputFocused) {
-        // Only ↓/↑ pass through here — see this function's own KDoc for why. A real hardware key
-        // still reached this handler either way, so it still latches onKeyboardEngaged.
-        return@onPreviewKeyEvent when (event.key) {
-            Key.DirectionDown -> { onKeyboardEngaged(); onDown(); true }
-            Key.DirectionUp -> { onKeyboardEngaged(); onUp(); true }
-            else -> false
-        }
+    val shortcut = homeShortcutFor(
+        key = event.key.toHomeKey(),
+        modifiers = KeyModifiers(shift = event.isShiftPressed, ctrl = event.isCtrlPressed, meta = event.isMetaPressed),
+        textInputFocused = textInputFocused,
+        refreshListAvailable = onRefreshList != null,
+        isMacOs = isMacOs,
+    )
+    if (shortcut == HomeShortcut.Escape) return@onPreviewKeyEvent onEscape()
+    // A real hardware key reached this handler: every key while no text field is focused, and the
+    // ↓/↑ that pass through a focused one (a soft-keyboard key routed to the field never does).
+    if (!textInputFocused || shortcut != null) onKeyboardEngaged()
+    when (shortcut) {
+        HomeShortcut.Search -> onSearch()
+        HomeShortcut.RefreshList -> onRefreshList?.invoke()
+        HomeShortcut.Down -> onDown()
+        HomeShortcut.Up -> onUp()
+        HomeShortcut.Left -> onLeft()
+        HomeShortcut.Right -> onRight()
+        HomeShortcut.PageUp -> onPageUp()
+        HomeShortcut.PageDown -> onPageDown()
+        HomeShortcut.Home -> onHome()
+        HomeShortcut.End -> onEnd()
+        HomeShortcut.NextArticle -> onNextArticle()
+        HomeShortcut.PreviousArticle -> onPreviousArticle()
+        HomeShortcut.RenameFeedListItem -> onFeedListRename()
+        HomeShortcut.DeleteFeedListItem -> onFeedListDelete()
+        HomeShortcut.Escape, null -> return@onPreviewKeyEvent false
     }
-    onKeyboardEngaged()
-    when {
-        (event.isMetaPressed || event.isCtrlPressed) && event.key == Key.F -> { onSearch(); true }
-        onRefreshList != null && event.isCtrlPressed && event.isShiftPressed && !event.isMetaPressed &&
-            event.key == Key.R -> { onRefreshList(); true }
-        event.key == Key.DirectionDown -> { onDown(); true }
-        event.key == Key.DirectionUp -> { onUp(); true }
-        event.key == Key.DirectionLeft -> { onLeft(); true }
-        event.key == Key.DirectionRight -> { onRight(); true }
-        event.key == Key.PageUp -> { onPageUp(); true }
-        event.key == Key.PageDown -> { onPageDown(); true }
-        event.key == Key.Spacebar && event.isShiftPressed -> { onPageUp(); true }
-        event.key == Key.Spacebar && !event.isShiftPressed -> { onPageDown(); true }
-        event.key == Key.MoveHome -> { onHome(); true }
-        event.key == Key.MoveEnd -> { onEnd(); true }
-        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.J -> { onNextArticle(); true }
-        !event.isCtrlPressed && !event.isMetaPressed && event.key == Key.K -> { onPreviousArticle(); true }
-        !event.isCtrlPressed && !event.isMetaPressed &&
-            event.key == renameKey(isMacOs) -> { onFeedListRename(); true }
-        !event.isCtrlPressed && !event.isMetaPressed &&
-            (event.key == Key.Delete || event.key == Key.Backspace) -> { onFeedListDelete(); true }
-        else -> false
-    }
+    true
+}
+
+/** This Compose key as the shared shortcut table's [HomeKey] ([HomeKey.Other] for any other key). */
+internal fun Key.toHomeKey(): HomeKey = when (this) {
+    Key.Escape -> HomeKey.Escape
+    Key.DirectionUp -> HomeKey.Up
+    Key.DirectionDown -> HomeKey.Down
+    Key.DirectionLeft -> HomeKey.Left
+    Key.DirectionRight -> HomeKey.Right
+    Key.PageUp -> HomeKey.PageUp
+    Key.PageDown -> HomeKey.PageDown
+    Key.Spacebar -> HomeKey.Space
+    Key.MoveHome -> HomeKey.Home
+    Key.MoveEnd -> HomeKey.End
+    Key.J -> HomeKey.J
+    Key.K -> HomeKey.K
+    Key.F -> HomeKey.F
+    Key.R -> HomeKey.R
+    Key.F2 -> HomeKey.F2
+    Key.Enter -> HomeKey.Enter
+    Key.Delete -> HomeKey.Delete
+    Key.Backspace -> HomeKey.Backspace
+    else -> HomeKey.Other
 }

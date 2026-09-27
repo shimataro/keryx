@@ -7,6 +7,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.article.ArticleHtmlTheme
+import works.merc.keryx.app.presentation.article.articleNoContentHtml
+import works.merc.keryx.app.presentation.article.articlePlaceholderHtml
+import works.merc.keryx.app.presentation.article.wrapArticleHtml
 
 /**
  * The parser is fed the reader's own assembled documents rather than bare body fragments, since
@@ -14,10 +18,10 @@ import kotlin.test.assertTrue
  */
 class ArticleContentParserTest {
     private val theme = ArticleHtmlTheme(
-        surface = Color(1f, 1f, 1f),
-        onSurface = Color(0f, 0f, 0f),
-        linkColor = Color(0f, 0f, 1f),
-        mutedColor = Color(0.5f, 0.5f, 0.5f),
+        surface = 0xFFFFFFFF.toInt(),
+        onSurface = 0xFF000000.toInt(),
+        linkColor = 0xFF0000FF.toInt(),
+        mutedColor = 0xFF7F7F7F.toInt(),
         fontScale = 1.0f,
     )
 

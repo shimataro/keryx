@@ -45,6 +45,7 @@ import works.merc.keryx.app.insertTag
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.home.HomeViewModel
 
 /**
  * Every list row's clickable band must exactly cover its own layout bounds — no dead strip inside

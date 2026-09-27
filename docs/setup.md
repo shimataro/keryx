@@ -16,6 +16,9 @@
   current, authoritative numbers.
 - **Desktop-target-only work** needs only an environment that can run the JDK and the Gradle
   Wrapper — no extra headroom for the Android SDK or an emulator.
+- **Work on the shared code's Apple targets** (the `KeryxShared` XCFramework the native Apple app
+  links, and its macOS/iOS-simulator tests) needs a Mac on Apple Silicon with **Xcode** installed.
+  Elsewhere Gradle simply skips those targets.
 
 ### Recommended IDE
 
@@ -250,7 +253,7 @@ since `build` now also compiles and assembles `:androidApp`. This does not inclu
 separately-executed `androidDeviceTest` instrumented suite, which needs a real device/emulator
 (see Prerequisites above).
 
-For desktop-only work, a target-scoped task like `./gradlew :composeApp:desktopTest` avoids
+For desktop-only work, a target-scoped task like `./gradlew :shared:desktopTest :composeApp:desktopTest` avoids
 needing the Android SDK.
 
 ## Data Directory

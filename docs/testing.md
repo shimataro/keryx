@@ -4,8 +4,21 @@
 
 ## Structure
 
-- `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`FileIO` / `AppDirs` available with temp directories).
-- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`). This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io).
+- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- **Apple targets (`:shared` only).** `commonTest` also runs natively as `:shared:macosArm64Test` and
+  `:shared:iosSimulatorArm64Test` (both part of `./gradlew build` on a Mac with Xcode; skipped on
+  Linux/Windows), so a common test must not use JVM APIs — temp files go through `:testing`'s
+  `tempFilePath()`/`tempFileWith()` (kotlinx-io); a test that genuinely needs the JVM belongs in
+  `desktopTest`. `appleTest/` holds what only the Apple actuals can show — `AppleDatabaseTest`
+  (NativeSqliteDriver, FTS5 trigram search, snapshot and a real merge on the system SQLite),
+  `ApplePlatformTest` (gzip, digests, files), `KeryxSdkTest`. `macosTest/` holds
+  `KeychainTokenStorageTest`: Kotlin/Native runs iOS tests as a bare executable outside any app
+  bundle, where no keychain exists (`errSecNotAvailable`), while on macOS it reaches the login
+  keychain (under a random, cleaned-up service name, never `works.merc.keryx`). **Never let an Apple
+  test reach `AppDirs.appDataDir()` unoverridden** — on macOS that is the user's real
+  `~/Library/Application Support/Keryx`; pass `dataDirectory` to `KeryxSdk.start` or build the
+  driver with `DatabaseDriverFactory().createDriver(dir)`.
 - `androidDeviceTest/` — Instrumented tests that need Android's real, bundled SQLite or platform APIs and
   therefore cannot run as a plain JVM unit test — see `.claude/rules/android-sqlite-bundling.md`. Needs a
   connected device or running emulator; there is no `androidUnitTest`/`androidHostTest` source set in this
@@ -65,7 +78,7 @@ New tests are placed at the same relative path as the code under test.
   flipped corrupt file, a `PRAGMA user_version` newer than local), and assert the thrown exception
   type; `SyncRepositoryTest.kt` covers the same classification end-to-end through `sync()`.
 - `androidx.lifecycle.ViewModel` tests (depending on `viewModelScope` using `Dispatchers.Main.immediate`) must call `Dispatchers.setMain(StandardTestDispatcher())` in `@BeforeTest` and `Dispatchers.resetMain()` in `@AfterTest` (`HomeViewModelTest.kt` is the first example). If the `StateFlow` uses `SharingStarted.WhileSubscribed(...)`, the test must explicitly `collect` to start subscription, or values will not update.
-- A Compose UI test that needs a real `HomeViewModel` must go through `ui/home/HomeViewModelTestSupport.kt`'s `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`, never a hand-rolled `try`/`finally`. `HomeViewModel`'s DB collectors use `SharingStarted.Eagerly`, and closing the driver without first `cancelAndJoin`-ing `viewModelScope` lets an already-queued continuation on the EDT resume against the closed connection — an *uncaught* exception that surfaces flakily, on whichever *other* test runs next, as `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`. `ComposeUiTest.waitForIdle()` does not help here: it only advances Compose's own test clock, it never pumps the AWT event queue.
+- A Compose UI test that needs a real `HomeViewModel` must go through `ui/home/ComposeHomeViewModelTestSupport.kt`'s `ComposeUiTest.useHomeViewModel(driver, db) { fixture -> … }`, never a hand-rolled `try`/`finally`. `HomeViewModel`'s DB collectors use `SharingStarted.Eagerly`, and closing the driver without first `cancelAndJoin`-ing `viewModelScope` lets an already-queued continuation on the EDT resume against the closed connection — an *uncaught* exception that surfaces flakily, on whichever *other* test runs next, as `kotlinx.coroutines.test.UncaughtExceptionsBeforeTest`. `ComposeUiTest.waitForIdle()` does not help here: it only advances Compose's own test clock, it never pumps the AWT event queue.
 - Classes that directly use `CloudStorage` like `SyncRepository` are verified by swapping `CloudStorage` with a hand-rolled fake (in-memory Map + rev management) instead of mocking the HTTP layer (`SyncRepositoryTest.kt`). `DropboxStorage`/`DropboxAuthManager` tests themselves mock the HTTP layer via Ktor `MockEngine` as usual.
 - Combining `runTest` (virtual time) with Ktor `MockEngine`'s `HttpTimeout` or real socket I/O can cause false timeout detection and flakiness. Affected tests switch to `kotlinx.coroutines.runBlocking` (or real-time polling) (`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`, `OAuthConnectFlowTest.kt`, etc.).
 - **Never assert that two collectors of the same `StateFlow` observed an identical sequence.** A
@@ -102,15 +115,16 @@ defect that is deliberately not fixed, so it would fail every run. See
 upgrade has fixed the bug.
 
 ```bash
-./gradlew :composeApp:desktopTest
+./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
-Android has two separate instrumented suites, easy to conflate since only one of them is wired
+Android has three separate instrumented suites, easy to conflate since not all of them are wired
 into CI:
 
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
-| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite, plus the `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services authorization) | ✗ local only |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every push (`android-instrumented-test` job, same emulator as the row below) |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services token-scope checks) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every push |
 
 Both need a connected device or a running emulator — see [setup.md](setup.md) for how to create an
@@ -118,7 +132,7 @@ AVD (`<name>` below):
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
-./gradlew :composeApp:connectedAndroidDeviceTest
+./gradlew :shared:connectedAndroidDeviceTest :composeApp:connectedAndroidDeviceTest
 ```
 
 (the task name comes from AGP 9's `com.android.kotlin.multiplatform.library` plugin's own
@@ -162,7 +176,7 @@ source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A de
 
 Project-wide, this is on top of the two Android suites above:
 
-- `commonTest`/`desktopTest` (run via `./gradlew :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML import/export paths — the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
+- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML import/export paths — the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
 - the Linux/macOS/Windows file-dialog backend split (`FilePickerTest` for `defaultFilePickerBackend`'s OS selection, the extension predicate agreeing with `FileNameExtensionFilter` including accepting directories, the overwrite-confirmation resolution, and dialog-owner selection)
 - the feed-list drag-and-drop rewrite (`parseFeedListDragSourceKey` in `HomeCommonTest.kt` for the pure key-parsing logic; `FeedListDragTest.kt` for the real end-to-end gesture via `performMouseInput`/`performKeyInput` against actual rendered composables — dragging a feed above another and asserting the persisted order, the sub-threshold-move-still-selects case, dropping onto a folder header / a tag row, a right-click landing mid-drag not opening the context menu or aborting the drag, the ghost overlay's appear/disappear lifecycle, Escape-cancel, folder-onto-folder reordering, and a drag pushed out past the pane's horizontal bounds never resolving to a valid target or applying a drop even when it lines up with a row's height)
 - the feed list's in-row rename editor (`InlineRenameValidationTest` in `commonTest` for the shared blank-is-not-an-error validation rule and `toInlineEditTarget` in `HomeCommonTest.kt`; `FeedListInlineRenameTest.kt` for the real end-to-end flow against rendered composables — F2 opening the editor and Enter committing, Escape and the "×" icon cancelling, blur committing a valid name, a duplicate folder name blocking Enter and reverting silently on blur, a blank folder name simply not committing, a blank feed title resetting `custom_title` with the feed's own title shown as the placeholder, renaming a tag leaving its color alone, the tag color dot's popover applying a color immediately both outside and during a rename, and the Feed-menu `RenameFeed` command opening the editor for the current selection)

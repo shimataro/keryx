@@ -1,18 +1,19 @@
 package works.merc.keryx.app.ui.setup
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
@@ -24,6 +25,7 @@ class SetupViewModel(
     private val settingsRepository: SettingsRepository,
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
+    private val cloudConnectionService: CloudConnectionService,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher —
     // same rationale as SettingsViewModel's own dispatcher.
@@ -33,14 +35,14 @@ class SetupViewModel(
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
 
-    var phase by mutableStateOf(SetupPhase.IDLE)
-        private set
+    private val _phase = MutableStateFlow(SetupPhase.IDLE)
+    val phase = _phase.asStateFlow()
 
     private var authorizationJob: Job? = null
 
     /** True only while actively waiting on the OAuth browser redirect — the window [cancelConnect] can interrupt. */
-    var canCancelConnect by mutableStateOf(false)
-        private set
+    private val _canCancelConnect = MutableStateFlow(false)
+    val canCancelConnect = _canCancelConnect.asStateFlow()
 
     /**
      * Selects local-only storage and completes setup after persisting the setting.
@@ -65,31 +67,31 @@ class SetupViewModel(
      */
     fun connect(type: CloudStorageType, onDone: () -> Unit) {
         viewModelScope.launch {
-            phase = SetupPhase.CONNECTING
+            _phase.value = SetupPhase.CONNECTING
             val flow = cloudSession.connectFlow(type)
             if (flow == null) {
-                phase = SetupPhase.ERROR
+                _phase.value = SetupPhase.ERROR
                 return@launch
             }
             val result = awaitCancellableConnect(
                 flow,
                 onJobChange = { authorizationJob = it },
-                onCanCancelChange = { canCancelConnect = it },
+                onCanCancelChange = { _canCancelConnect.value = it },
             ) ?: run {
-                phase = SetupPhase.IDLE
+                _phase.value = SetupPhase.IDLE
                 return@launch
             }
             when (result) {
                 is Result.Ok -> {
-                    withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
-                    settingsRepository.mutateLocalSettings { it.copy(cloudStorageType = type.id) }
-                    withContext(dispatcher) { settingsRepository.flush() }
+                    // Saves the tokens and flushes the provider selection to disk before the sync
+                    // below starts — see CloudConnectionService.completeConnect.
+                    withContext(dispatcher) { cloudConnectionService.completeConnect(type, result.value) }
                     // Merge whatever already exists in the cloud (imports on first sync).
                     withContext(dispatcher) { syncRepository.sync() }
-                    phase = SetupPhase.IDLE
+                    _phase.value = SetupPhase.IDLE
                     onDone()
                 }
-                is Result.Err -> phase = SetupPhase.ERROR
+                is Result.Err -> _phase.value = SetupPhase.ERROR
             }
         }
     }

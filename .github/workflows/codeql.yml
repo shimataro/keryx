@@ -57,15 +57,20 @@ jobs:
 
       # The generic Gradle autobuilder Default setup used fails here: this is a Kotlin
       # Multiplatform project, so there is no root-level `testClasses` task - the real
-      # tasks are namespaced per target (e.g. `composeApp:compileTestKotlinDesktop`).
+      # tasks are namespaced per module and target (e.g. `shared:compileTestKotlinDesktop`).
       # Analysis only needs compiled code, not executed tests, so tests never run here.
       # --no-build-cache is required: the Gradle build cache setup-gradle restores can
       # satisfy these tasks with no compiler invocation at all (a cache hit from ci.yml's
       # own build of the same commit), which leaves CodeQL's build tracer with nothing to
       # observe and fails the whole analysis ("didn't build any of it").
+      # Known, accepted limitation: Apple-target source (shared/src/appleMain, macosMain,
+      # iosMain - e.g. KeychainTokenStorage.kt, RawSqliteConnection.kt,
+      # DatabaseMerger.apple.kt, KeryxSdk.kt) gets zero CodeQL coverage. Those source sets
+      # only compile with Xcode present, and this workflow runs on ubuntu-latest, where
+      # Gradle silently skips the Apple targets, so the tracer never sees them compiled.
       - name: Compile Kotlin sources for analysis
         if: matrix.build-mode == 'manual'
-        run: ./gradlew :composeApp:assemble :composeApp:compileTestKotlinDesktop --no-configuration-cache --no-build-cache
+        run: ./gradlew :shared:assemble :shared:compileTestKotlinDesktop :testing:assemble :composeApp:assemble :composeApp:compileTestKotlinDesktop --no-configuration-cache --no-build-cache
         env:
           DROPBOX_APP_KEY: ""
           GOOGLE_DRIVE_CLIENT_ID: ""

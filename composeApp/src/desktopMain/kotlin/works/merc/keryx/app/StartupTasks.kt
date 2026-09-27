@@ -1,13 +1,14 @@
 package works.merc.keryx.app
 
 import kotlinx.coroutines.delay
-import org.jetbrains.compose.resources.getString
 import org.koin.core.Koin
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_MINUTE
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
@@ -23,9 +24,6 @@ import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.update.cleanUpStaleSelfReplaceArtifacts
-import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.notification_app_translocated
-import works.merc.keryx.app.resources.notification_app_translocated_detail
 
 private const val LOG_TAG = "StartupTasks"
 
@@ -100,13 +98,11 @@ private suspend fun warnIfAppTranslocated(koin: Koin) {
         AppNotification(
             id = IdGenerator.newId(),
             level = AppNotificationLevel.WARNING,
-            message = getString(Res.string.notification_app_translocated),
+            text = NotificationText.AppTranslocated,
             timestampMillis = SystemClock.nowMillis(),
             // Nothing to navigate to — the useful next step is understanding the cause and the fix,
             // so acting on it opens an explanatory dialog in place.
-            action = AppNotificationAction.ShowInfoDialog(
-                getString(Res.string.notification_app_translocated_detail),
-            ),
+            action = AppNotificationAction.ShowInfoDialog(InfoDialogText.APP_TRANSLOCATED),
         ),
     )
 }

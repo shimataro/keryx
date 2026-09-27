@@ -56,9 +56,11 @@ memory:
 
 ```bash
 ./gradlew build                      # Compile all source sets + run tests
-./gradlew :composeApp:desktopTest    # Run tests only
+./gradlew :shared:desktopTest :composeApp:desktopTest  # Run tests only
 ./gradlew :composeApp:run            # Run the desktop app
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
+./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test  # Apple-target tests (Mac + Xcode)
+./gradlew :shared:assembleKeryxSharedReleaseXCFramework         # Framework for the SwiftUI app
 ```
 
 ## Branching
@@ -142,19 +144,27 @@ perspective) at the point they define it — see each skill's own constraint-rev
 Layered: UI (Compose) → ViewModel (androidx.lifecycle + Koin) → Repository → DataSource (SQLDelight / Ktor)
 
 ```text
-composeApp/src/
+shared/src/                      # UI-framework-free (also consumed by the Apple native app)
 ├── commonMain/kotlin/works/merc/keryx/app/
 │   ├── core/       # Constants, error types, Result, date parsing, Clock
 │   ├── data/       # DataSource (SQLDelight / FeedFetcher / CloudStorage / OPML)
 │   ├── domain/     # Repositories + sync (CloudSession, SyncRepository, MergeSql)
-│   ├── platform/   # expect declarations for platform-specific code
-│   ├── di/         # Koin modules
-│   └── ui/         # Compose screens + ViewModels + theme + i18n
+│   ├── platform/   # non-Compose expect declarations (AppDirs, DatabaseMerger, Gzip, …)
+│   ├── presentation/ # UI-framework-free screen state (HomeViewModel, feed-list rules)
+│   └── di/         # sharedModule + updateModule, HttpClientFactory
 ├── commonMain/sqldelight/       # .sq schema + queries
-├── commonMain/composeResources/ # values/strings.xml (i18n), drawable (tray icons)
+├── jvmCommonMain/, desktopMain/, androidMain/   # actuals for the expects above
 ├── commonTest/                  # pure + MockEngine (Ktor) tests
-├── desktopMain/kotlin/…/        # actual platform implementations + main.kt
 └── desktopTest/                 # SQLDelight (in-memory / file) DB tests
+composeApp/src/                  # Compose UI for desktop + Android (depends on :shared)
+├── commonMain/kotlin/works/merc/keryx/app/
+│   ├── ui/         # Compose screens + Compose-side ViewModels + theme + i18n
+│   ├── platform/   # Compose-typed expect declarations (NativeMenu, BackHandler, …)
+│   └── di/         # appModule + expect platformModule
+├── commonMain/composeResources/ # values/strings.xml (i18n), drawable (tray icons)
+├── desktopMain/kotlin/…/        # main.kt, tray, app menu, token storages, update installer
+└── commonTest/, desktopTest/    # UI + ViewModel tests
+testing/src/                     # test-only helpers (DbTestSupport, fakes) for both modules
 ```
 
 The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
@@ -181,16 +191,23 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    applies to every string a user can see — including tray/notification text built
    outside composition (see `NotificationMessages` + `getString`). Note that a
    hardcoded *English* literal is now as much a violation as a Japanese one, so
-   grepping for Japanese characters no longer finds every case.
+   grepping for Japanese characters no longer finds every case. The Apple app's
+   String Catalog is **generated** from these same files
+   (`./gradlew :composeApp:generateStringCatalog`); never hand-edit a
+   `.xcstrings`, and never let shared (`:shared`) code produce user-facing text —
+   it emits `NotificationText`/`ErrorKind` data that each UI localizes.
 4. **Platform-specific code stays behind `commonMain` `expect` declarations** —
-   e.g. `AppDirs`, `FileIO`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
-   `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Pkce`, `CloudStorageAvailability`,
+   e.g. `AppDirs`, `BrowserOpener`, `FilePicker`, `DatabaseDriverFactory`,
+   `DatabaseMerger`, `DatabaseSnapshot`, `Gzip`, `Sha256`, `CloudStorageAvailability`,
    `platformModule`. That list is illustrative, not exhaustive: the real set is
    whatever `commonMain` declares `expect` (mostly under `platform/`, but also spanning
-   `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " composeApp/src/commonMain` for
+   `core/`, `data/cloud/`, and `di/`) — `grep -rn "expect " shared/src/commonMain composeApp/src/commonMain` for
    the current one, rather than trusting a count here that will drift.
-   Desktop implementations live in `desktopMain`. This keeps the door open for
-   Android/iOS targets later.
+   Desktop implementations live in `desktopMain`, Android ones in `androidMain`,
+   and Apple (macOS/iOS) ones in `shared/src/appleMain` (`macosMain`/`iosMain`
+   for AppKit/UIKit differences) — a new `:shared` expect needs all three. Code with no Compose/UI dependency belongs in the
+   `:shared` module (never import Compose, Compose Resources, AWT/Swing or an
+   Android UI API there); `:composeApp` holds the Compose UI.
 5. **Follow the design docs.** Do not change the sync algorithm, merge SQL
    semantics, error taxonomy, or feature scope on your own judgment. If
    something in the docs seems wrong, ask before deviating. `docs/sync-architecture.md`
@@ -235,4 +252,6 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
   foojay-resolver plugin, but `:composeApp:run` executes with whatever JVM
   launched Gradle — if that's older than 25, you'll hit `UnsupportedClassVersionError`.
 - SQLDelight 2.3.2, sqlite-jdbc 3.53.4.0, Ktor 3.5.2, Koin 4.2.2, coroutines 1.11.0
+- Apple targets (`:shared` only): Xcode on an Apple Silicon Mac; SKIE 0.10.15
+  shapes the framework's Swift API (check its Kotlin support before bumping Kotlin).
 - Config cache is disabled (the `generateBuildConfig` task isn't cache-safe yet).

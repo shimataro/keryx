@@ -86,8 +86,9 @@ fun App() {
         // A notification's "open this settings tab" action is resolved here, because the settings
         // dialog lives in this composition (HomeScreen resolves the actions targeting its own panes).
         val notifVm = koinInject<NotificationCenterViewModel>()
-        LaunchedEffect(notifVm.pendingAction) {
-            val action = notifVm.pendingAction?.action
+        val pendingAction by notifVm.pendingAction.collectAsState()
+        LaunchedEffect(pendingAction) {
+            val action = pendingAction?.action
             if (action is AppNotificationAction.ShowSettingsTab) {
                 settingsInitialTab = action.tabId
                 settingsTabRequestToken++

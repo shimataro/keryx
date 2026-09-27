@@ -18,8 +18,8 @@
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform（現行） |
 | Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
-| iOS / iPadOS | 予定（最初は Compose、その後 SwiftUI ネイティブ UI） |
-| macOS（ネイティブ） | 予定 — 上記の Compose 版とは別に、ネイティブ SwiftUI 版 macOS アプリを提供予定 |
+| iOS / iPadOS | 予定（SwiftUI ネイティブ UI。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照） |
+| macOS（ネイティブ） | 予定 — ユーザー向けには上記の Compose 版に代わる、ネイティブ SwiftUI 版 macOS アプリ（Apple Silicon）。共有ロジックはすでに対応済み |
 
 ## 3. 対応フォーマット
 

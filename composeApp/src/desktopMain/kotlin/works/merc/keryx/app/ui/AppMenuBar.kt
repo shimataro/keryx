@@ -16,6 +16,10 @@ import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.onUpdateMenuItemClicked
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_copy_feed_url
@@ -59,11 +63,7 @@ import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
 import works.merc.keryx.app.tray.updateMenuEntry
-import works.merc.keryx.app.ui.home.FeedListSelectionTarget
-import works.merc.keryx.app.ui.home.HomeViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
-import works.merc.keryx.app.ui.home.hasUsableUrl
-import works.merc.keryx.app.ui.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode

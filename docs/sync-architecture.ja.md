@@ -307,6 +307,22 @@ cause の循環に備えて深さ上限あり）。`SchemaVersionException` は�
 のみ呼ばれる。分類そのものにプラットフォーム固有の要素は無いので、数値エラーコードを公開しないドライバ
 （Android の `android.database.sqlite.SQLiteException`）を持つターゲットでも、同じカテゴリを与えるだけで済む。
 
+Apple の `actual`（`DatabaseMerger.apple.kt`）も同じ対応付けと同じ `MergeFailureClassifier` を使うが、コードの
+見つけ方が異なる。cause チェーンを（同じく深さ上限付きで）辿り、次の 2 種類の例外のどちらかを探す：
+`platform/RawSqliteConnection.kt`（マージ専用の接続）が投げる自前の `SqliteException`（エラーコードを直接持つ）、
+または、クラウドファイルを開いてマイグレーションする間に `NativeSqliteDriver` が投げる SQLiter の
+`SQLiteExceptionErrorCode`。SQLiter は生の `errorCode` を private にしているため、読める値は `errorType.code`
+（主コードのみ）だけである。この getter は SQLiter に enum の項目が無いコードに対しては例外を投げるので、その場合は
+「コードが見つからない」（そのまま再 throw）として扱う。
+
+ATTACH する前に、Apple の `migrateCloudIfOlder` は古いクラウドファイルを `NativeSqliteDriver` でロールバック
+ジャーナルモードのまま開き、ローカルのスキーマまで上げる。このドライバはファイルを最初の文で遅延して開く
+（つまりそこでマイグレーションする）——`DatabaseDriverFactory.apple.kt` が生成時に 1 文実行するのと同じ理由——ため、
+ドライバを閉じる前に些細な `SELECT 1` を実行し、その後ファイルの `user_version` を読み直して、まだローカルの
+スキーマバージョンでなければ `IllegalStateException` を投げる。この例外は意図的に SQLite のエラーコードを
+持たないので、マージはこれを未分類（一時的）のままにする：何もせずに終わったマイグレーションはアプリ側の
+不具合かもしれず、破壊的なクラウドデータのリセットで応じてはならない。
+
 | SQLite の主エラーコード | 分類 |
 | --- | --- |
 | `SQLITE_NOTADB`、`SQLITE_CORRUPT`、`SQLITE_FORMAT`、`SQLITE_EMPTY` | **永続** → `CloudDataIncompatibleException`。ファイル自体が壊れている。 |
@@ -468,7 +484,7 @@ single-instance 経由で実行中インスタンスへ転送する。
   `scheme="keryx"` `host="oauth2"`）を持たせるだけで、Windows/Linux のような起動時登録処理は不要。
 - **ディスパッチ。** `MainActivity.onCreate`/`onNewIntent` がリダイレクトのデータ URI を
   `dispatchOAuthCallbackIfPresent` に渡し、これがデスクトップの `main.kt` と同じ
-  `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（jvmCommonMain）で分類したうえで、同じ形の
+  `classifyLaunchArg`（commonMain）/ `parseOAuthUri`（commonMain）で分類したうえで、同じ形の
   `MutableSharedFlow<OAuthCallbackParams>`（Android 自身の `platformModule` に登録された別インスタンス）
   へ流し込む。
 - **構成変更。** `launchMode="singleTask"` により、既に起動中のインスタンスは新規 `onCreate` ではなく
@@ -578,6 +594,46 @@ Android の Google Drive は、本ドキュメントの他のどのプロバイ�
 デスクトップ版が作成したファイルが見えることで確認済み。この性質が無ければ、デスクトップと Android は
 別々のファイルへ黙って同期してしまう。
 
+### Apple 版での Google Drive（secret 不要な「iOS」タイプの OAuth クライアント）
+
+Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は、Android のように Play 開発者
+サービスや端末側の認可 API を必要とせず、通常の `OAuthConnectFlow` + `CustomUriRedirectTransport`
+の経路をそのまま使う — ただし desktop 版とは別のクライアントを使う。
+
+- **desktop 版のクライアントを再利用できない理由。** desktop 版の「デスクトップ アプリ」クライアントは
+  loopback リダイレクトと `client_secret` を前提とする（上記「Google Drive（desktop のみ）— Loopback」
+  を参照）。secret をネイティブアプリのバイナリに同梱すると、バイナリ自体から抽出されてしまう。Google
+  がネイティブ Apple アプリ向けに用意している答えが **「iOS」アプリケーションタイプ**で、secret を一切
+  要求しない（「iOS」タイプは iOS/iPadOS 専用ではなく、ネイティブ macOS アプリにも使われる — 詳細は
+  [build.md](build.ja.md) を参照）。Google のトークンエンドポイントは、この種類のクライアントに対しては
+  `client_secret` なしのトークン交換・リフレッシュを受け入れる。これは「デスクトップ アプリ」クライアント
+  （PKCE でも `invalid_request: client_secret is missing` で拒否される。上記参照）とは異なる。
+  `GoogleDriveAuthManager.clientSecret` を nullable にしたのはこのためで、desktop 版は secret を渡し、
+  Apple 版は `null` を渡してリクエストからパラメーター自体を省く。
+- **リダイレクト URI。** 「iOS」タイプのクライアントが受け付けるリダイレクトは、Dropbox・OneDrive が使う
+  共通の `keryx://oauth2/callback` ではなく、クライアント ID を逆順にした自分専用のカスタム URL スキーム
+  だけ：`NNNN-xxxx.apps.googleusercontent.com` → `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`。
+  `googleIosClientRedirectUri(clientId)`（`data/cloud/GoogleDriveAuthManager.kt`）がこれを導出する純粋
+  関数で、`ApplePlatformModule.kt` の `appleGoogleDriveProvider` がその結果を `CustomUriRedirectTransport`
+  の `redirectUri` に渡す。`cloudSessionSingles` が Dropbox・OneDrive 用に用意する既存の
+  `MutableSharedFlow<OAuthCallbackParams>` をそのまま共用し、どちらのスキームでリダイレクトが届いても
+  `state` で判別する。Swift 側アプリの実装時には、この Dropbox・OneDrive 用の `keryx://` と並べて、
+  Info.plist の `CFBundleURLTypes`（または `ASWebAuthenticationSession` の `callbackURLScheme`）に
+  このスキームを登録する — 詳細は [build.md](build.ja.md) を参照。
+- **別クライアントだが同じ Cloud プロジェクト。** Apple 用クライアントは、上記の Android の場合と同様に
+  desktop 版とは別の OAuth クライアントだが、パッケージ署名で自動照合されるのではなく Cloud Console で
+  手動作成する — Google の「iOS」クライアントタイプには Android の SHA-1 照合に相当する仕組みが無いため、
+  クライアント ID はビルド時定数から読む（`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`。`DesktopBuildConfig`
+  と同じ方式で `appleMain` にだけ生成される — 詳細は [build.md](build.ja.md)）。上記と同じ理由で、
+  desktop・Android のクライアントと同じ Cloud プロジェクトに置く必要がある。別プロジェクトにすると、
+  Apple 版だけ他の端末と異なる隠しフォルダを読み書きしてしまう。
+- **有効化の判定。** `CloudStorageAvailability.apple.kt` の `googleDriveAvailable` は
+  `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID.isNotEmpty()` — 他のプロバイダー／プラットフォームの組と同じ
+  「ID が空なら選択肢を隠す」という規約に従うので、Apple 用クライアントを設定していないビルドでは
+  Google Drive が単純に表示されない（未設定の Dropbox キーで Dropbox が隠れるのと同じ）。
+- **トークンとリフレッシュ。** Android の Play 開発者サービス経路とは異なり、Apple 版は本物のリフレッシュ
+  トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — Play 開発者サービス風の
+  `accessTokenProvider` による上書きはここには無い。
 
 ### トークン保存先
 
@@ -591,6 +647,11 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
 - Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`）。
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
   から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
+- ネイティブ Apple アプリ（macOS/iOS、`:shared` の appleMain）：`KeychainTokenStorage` が Security フレームワーク経由で
+  Keychain に直接書き込む——サービスもプロバイダーごとのアカウントも同じで、平文へのフォールバックはない（書き込みの失敗は
+  `NOT_PERSISTED`）。Compose 版 macOS が `security` CLI で保存したトークンは引き継がない：ネイティブアプリでは再接続し、
+  同期済みのデータはクラウドから戻る。Google Drive は、Apple 向けの OAuth クライアント（client secret なし）ができるまで
+  提供しない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」を参照。
 - Linux のうち Snap パッケージ内だけは、`KeyringTokenStorage` の代わりに `LibSecretTokenStorage` を使う
   （`platform.isSnap` で分岐）。JNA 経由で libsecret を直接呼び出す実装で、libsecret がサンドボックスを
   検知して生の Secret Service ではなく Secret portal（`org.freedesktop.portal.Secret`）経由にルーティング

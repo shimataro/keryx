@@ -41,7 +41,9 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
   reach logs or exception messages. Watch error paths that echo a response body.
   (`build.gradle.kts`, `main.kt`, token storage)
 - Does token storage stay hardened — the file fallback owner-only, and no store
-  logging token payloads or loosening permissions? See
+  logging token payloads or loosening permissions? On Apple, `KeychainTokenStorage`
+  must keep a Keychain-only path (no plaintext fallback) and an accessibility no
+  looser than after-first-unlock. See
   `docs/sync-architecture.md` "Token Storage" — that file is not in your context, read that section.
 - Are the OAuth CSRF/PKCE checks intact — `state` verified on the redirect and
   the PKCE verifier from a secure RNG? Flag any path that accepts a redirect
@@ -78,7 +80,7 @@ exception carries.
 
 Useful starting greps:
 
-    grep -rn "accessToken\|refreshToken\|clientSecret\|codeVerifier" composeApp/src --include=*.kt
+    grep -rn "accessToken\|refreshToken\|clientSecret\|codeVerifier" shared/src composeApp/src --include=*.kt
     grep -rn "Log\.\(e\|w\|i\|d\)" <changed files>
 
 Read `.claude/rules/cloud-oauth-transport.md` when the diff touches the OAuth redirect transport.

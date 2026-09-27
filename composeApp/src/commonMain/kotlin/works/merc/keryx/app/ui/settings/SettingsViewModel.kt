@@ -1,28 +1,33 @@
 package works.merc.keryx.app.ui.settings
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.awaitCancellableConnect
 import works.merc.keryx.app.domain.displayTitle
@@ -36,20 +41,10 @@ import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.FileSelector
-import works.merc.keryx.app.platform.OpenFileRequest
 import works.merc.keryx.app.platform.PlatformFileSelector
-import works.merc.keryx.app.platform.SaveFileRequest
-import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_cancel
-import works.merc.keryx.app.resources.file_filter_opml
-import works.merc.keryx.app.resources.file_overwrite_message
-import works.merc.keryx.app.resources.file_overwrite_replace
-import works.merc.keryx.app.resources.file_overwrite_title
-import works.merc.keryx.app.resources.settings_export_opml
-import works.merc.keryx.app.resources.settings_import_opml
 
-import works.merc.keryx.app.ui.home.formatTimestamp
-import works.merc.keryx.app.ui.home.groupFeedsByFolder
+import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.groupFeedsByFolder
 
 /** A transient result of an OPML operation, surfaced inline near the action. */
 sealed interface OpmlResult {
@@ -63,6 +58,7 @@ class SettingsViewModel(
     private val settingsRepository: SettingsRepository,
     private val cloudSession: CloudSession,
     private val syncRepository: SyncRepository,
+    private val cloudConnectionService: CloudConnectionService,
     private val feedRepository: FeedRepository,
     private val folderRepository: FolderRepository,
     private val tagRepository: TagRepository,
@@ -73,6 +69,7 @@ class SettingsViewModel(
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val fileSelector: FileSelector = PlatformFileSelector,
+    private val opmlFileRequests: OpmlFileRequests = ComposeOpmlFileRequests,
 ) : ViewModel() {
 
     val localSettings = settingsRepository.localSettings
@@ -80,44 +77,45 @@ class SettingsViewModel(
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
 
-    var readTimeoutSeconds by mutableStateOf(settingsRepository.getReadTimeoutSeconds())
-        private set
+    private val _readTimeoutSeconds = MutableStateFlow(settingsRepository.getReadTimeoutSeconds())
+    val readTimeoutSeconds = _readTimeoutSeconds.asStateFlow()
 
     /** null == unlimited. */
-    var cacheRetentionDays by mutableStateOf(settingsRepository.getCacheRetentionDays())
-        private set
+    private val _cacheRetentionDays = MutableStateFlow(settingsRepository.getCacheRetentionDays())
+    val cacheRetentionDays = _cacheRetentionDays.asStateFlow()
 
     /** The currently-connected provider, or null (local-only). At most one at a time. */
-    var connectedType by mutableStateOf(cloudSession.connectedType())
-        private set
+    private val _connectedType = MutableStateFlow(cloudSession.connectedType())
+    val connectedType = _connectedType.asStateFlow()
 
     /** The provider whose connect flow is currently running, or null. */
-    var connectingType by mutableStateOf<CloudStorageType?>(null)
-        private set
+    private val _connectingType = MutableStateFlow<CloudStorageType?>(null)
+    val connectingType: StateFlow<CloudStorageType?> = _connectingType.asStateFlow()
 
     /** The provider whose connect-time initial sync is running, or null (see [connect]). */
-    var initialSyncingType by mutableStateOf<CloudStorageType?>(null)
-        private set
+    private val _initialSyncingType = MutableStateFlow<CloudStorageType?>(null)
+    val initialSyncingType: StateFlow<CloudStorageType?> = _initialSyncingType.asStateFlow()
 
     /** The provider whose last connect attempt failed, or null. */
-    var connectFailedType by mutableStateOf<CloudStorageType?>(null)
-        private set
+    private val _connectFailedType = MutableStateFlow<CloudStorageType?>(null)
+    val connectFailedType: StateFlow<CloudStorageType?> = _connectFailedType.asStateFlow()
 
     private var authorizationJob: Job? = null
 
     /** True only while actively waiting on the OAuth browser redirect for [connectingType]. */
-    var canCancelConnect by mutableStateOf(false)
-        private set
+    private val _canCancelConnect = MutableStateFlow(false)
+    val canCancelConnect = _canCancelConnect.asStateFlow()
 
-    var opmlResult by mutableStateOf<OpmlResult?>(null)
+    private val _opmlResult = MutableStateFlow<OpmlResult?>(null)
+    val opmlResult: StateFlow<OpmlResult?> = _opmlResult.asStateFlow()
 
     /** True while an OPML import is running (a native file dialog then per-feed fetches). */
-    var importingOpml by mutableStateOf(false)
-        private set
+    private val _importingOpml = MutableStateFlow(false)
+    val importingOpml = _importingOpml.asStateFlow()
 
     /** True while an OPML export is running. */
-    var exportingOpml by mutableStateOf(false)
-        private set
+    private val _exportingOpml = MutableStateFlow(false)
+    val exportingOpml = _exportingOpml.asStateFlow()
 
     /** The in-app update's state machine (idle/checking/available/downloading/…), shared
      * process-wide via [UpdateRepository] — the tray and notification center read the same
@@ -125,28 +123,27 @@ class SettingsViewModel(
     val updateState: StateFlow<UpdateState> = updateRepository.state
 
     /** True while a "reset cloud data" (delete + fresh re-upload) is running. */
-    var resetting by mutableStateOf(false)
-        private set
+    private val _resetting = MutableStateFlow(false)
+    val resetting = _resetting.asStateFlow()
 
     /** Timestamp of the last successful sync, formatted for display. null when never synced or not connected. */
-    var lastSyncedAtText by mutableStateOf<String?>(null)
-        private set
+    private val _lastSyncedAtText = MutableStateFlow<String?>(null)
+    val lastSyncedAtText: StateFlow<String?> = _lastSyncedAtText.asStateFlow()
 
     /**
      * Why the last sync failed, or null when sync is healthy. Mirrors [SyncRepository.lastSyncError],
      * so the cloud-sync tab shows the current reason even after the notification was dismissed.
      * Distinct from [connectFailedType], which only covers a failed connect (OAuth) flow.
      */
-    var lastSyncErrorText by mutableStateOf<String?>(null)
-        private set
+    private val _lastSyncError = MutableStateFlow<ErrorKind?>(null)
+    val lastSyncError: StateFlow<ErrorKind?> = _lastSyncError.asStateFlow()
 
     /**
-     * Whether [lastSyncErrorText] is an authentication failure specifically. Mirrors
-     * [SyncRepository.lastSyncAuthFailed]; see that property for why it travels separately from the
-     * message rather than being matched out of it.
+     * Whether [lastSyncError] is an authentication failure specifically. Mirrors
+     * [SyncRepository.lastSyncAuthFailed].
      */
-    var lastSyncAuthFailed by mutableStateOf(false)
-        private set
+    private val _lastSyncAuthFailed = MutableStateFlow(false)
+    val lastSyncAuthFailed = _lastSyncAuthFailed.asStateFlow()
 
     /**
      * Mirrors [ActivityCenter.activity]'s [works.merc.keryx.app.domain.ActivitySnapshot.syncing] —
@@ -155,23 +152,23 @@ class SettingsViewModel(
      * ViewModel initiates. The cloud-sync tab
      * pairs this with [syncPhase] to show live progress on the connected provider's row.
      */
-    var syncing by mutableStateOf(activityCenter.activity.value.syncing)
-        private set
+    private val _syncing = MutableStateFlow(activityCenter.activity.value.syncing)
+    val syncing = _syncing.asStateFlow()
 
     /** Mirrors [SyncRepository.syncPhase] — the step the current (or most recent) sync is on. */
-    var syncPhase by mutableStateOf(syncRepository.syncPhase.value)
-        private set
+    private val _syncPhase = MutableStateFlow(syncRepository.syncPhase.value)
+    val syncPhase = _syncPhase.asStateFlow()
 
     /** True while [disconnect] is tearing down the connected provider — see that function's KDoc. */
-    var disconnecting by mutableStateOf(false)
-        private set
+    private val _disconnecting = MutableStateFlow(false)
+    val disconnecting = _disconnecting.asStateFlow()
 
     /**
      * Mirrors [works.merc.keryx.app.domain.ActivitySnapshot.idle] — no refresh or sync running
      * anywhere. Gates [canSyncNow] the same way Home's cloud button is gated.
      */
-    var idle by mutableStateOf(activityCenter.activity.value.idle)
-        private set
+    private val _idle = MutableStateFlow(activityCenter.activity.value.idle)
+    val idle = _idle.asStateFlow()
 
     /**
      * Whether the cloud-sync tab's "sync now" button is enabled: a provider is connected, nothing
@@ -179,9 +176,12 @@ class SettingsViewModel(
      * would race the sync), and the last sync did not fail on authorization — a sync then would
      * only repeat that failure, and the row's own "reconnect" is the action that fixes it.
      */
-    val canSyncNow: Boolean
-        get() = connectedType != null && idle && connectingType == null && initialSyncingType == null &&
-            !disconnecting && !resetting && !lastSyncAuthFailed && !manualSyncInFlight
+    val canSyncNow: StateFlow<Boolean>
+
+    /** [canSyncNow]'s condition, read synchronously — what [syncNow]'s own guard checks. */
+    private fun canSyncNowNow(): Boolean =
+        _connectedType.value != null && _idle.value && _connectingType.value == null && _initialSyncingType.value == null &&
+            !_disconnecting.value && !_resetting.value && !_lastSyncAuthFailed.value && !_manualSyncInFlight.value
 
     /**
      * True while a manual sync started by [syncNow] is in flight. Prevents a second click from
@@ -189,18 +189,29 @@ class SettingsViewModel(
      * call would otherwise queue behind the mutex in [syncRepository.sync] and run a second sync
      * once the first finishes.
      */
-    private var manualSyncInFlight by mutableStateOf(false)
+    private val _manualSyncInFlight = MutableStateFlow(false)
+
+    init {
+        // Derived, not stateIn'd: its value is recomputed from the inputs on every read, so it can
+        // never lag them (a stateIn copy would briefly show a stale answer right after an input
+        // changed), while collectors still hear about every change.
+        val busy = combine(_disconnecting, _resetting, _lastSyncAuthFailed, _manualSyncInFlight) { a, b, c, d -> a || b || c || d }
+        canSyncNow = DerivedStateFlow(
+            compute = ::canSyncNowNow,
+            changes = combine(_connectedType, _idle, _connectingType, _initialSyncingType, busy) { _, _, _, _, _ -> canSyncNowNow() },
+        )
+    }
 
     init {
         refreshLastSyncedAt()
         viewModelScope.launch {
-            syncRepository.lastSyncError.collect { lastSyncErrorText = it }
+            syncRepository.lastSyncError.collect { _lastSyncError.value = it }
         }
         viewModelScope.launch {
-            syncRepository.lastSyncAuthFailed.collect { lastSyncAuthFailed = it }
+            syncRepository.lastSyncAuthFailed.collect { _lastSyncAuthFailed.value = it }
         }
         viewModelScope.launch {
-            syncRepository.syncPhase.collect { syncPhase = it }
+            syncRepository.syncPhase.collect { _syncPhase.value = it }
         }
         viewModelScope.launch {
             // Collects the subscription-time replay too, not just later changes: the property
@@ -211,7 +222,7 @@ class SettingsViewModel(
             // window; collecting it is safe since it just repeats work this ViewModel already does
             // at startup (refreshLastSyncedAt() is a pure, idempotent read).
             activityCenter.activity.map { it.syncing }.distinctUntilChanged().collect { isSyncing ->
-                syncing = isSyncing
+                _syncing.value = isSyncing
                 // Guarded: a transient read failure must not kill this long-lived collector (which
                 // would silently stop all future last-synced refreshes) or leak as an uncaught
                 // exception. Best-effort UI state — log and carry on.
@@ -222,18 +233,18 @@ class SettingsViewModel(
             }
         }
         viewModelScope.launch {
-            activityCenter.activity.map { it.idle }.distinctUntilChanged().collect { idle = it }
+            activityCenter.activity.map { it.idle }.distinctUntilChanged().collect { _idle.value = it }
         }
     }
 
     /**
      * Runs a manual sync — the same [SyncRepository.sync] Home's cloud button triggers. Progress,
      * the new last-synced time and any failure all surface through the state this ViewModel
-     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncErrorText]).
+     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncError]).
      */
     fun syncNow() {
-        if (!canSyncNow) return
-        manualSyncInFlight = true
+        if (!canSyncNowNow()) return
+        _manualSyncInFlight.value = true
         viewModelScope.launch {
             try {
                 withContext(dispatcher) { syncRepository.sync() }
@@ -242,7 +253,7 @@ class SettingsViewModel(
             } catch (e: Throwable) {
                 Log.error(TAG, "Manual sync failed", e)
             } finally {
-                manualSyncInFlight = false
+                _manualSyncInFlight.value = false
             }
         }
     }
@@ -286,12 +297,12 @@ class SettingsViewModel(
 
     fun updateReadTimeout(seconds: Int) {
         settingsRepository.setReadTimeoutSeconds(seconds)
-        readTimeoutSeconds = seconds
+        _readTimeoutSeconds.value = seconds
     }
 
     fun updateCacheRetention(days: Int?) {
         settingsRepository.setCacheRetentionDays(days)
-        cacheRetentionDays = days
+        _cacheRetentionDays.value = days
     }
 
     /**
@@ -312,14 +323,14 @@ class SettingsViewModel(
     fun connect(type: CloudStorageType) {
         viewModelScope.launch {
             val connected = try {
-                connectingType = type
-                connectFailedType = null
+                _connectingType.value = type
+                _connectFailedType.value = null
                 runConnectFlow(type)
             } finally {
-                connectingType = null
+                _connectingType.value = null
             }
             if (!connected) return@launch
-            initialSyncingType = type
+            _initialSyncingType.value = type
             try {
                 withContext(dispatcher) { syncRepository.sync() }
             } catch (e: CancellationException) {
@@ -327,7 +338,7 @@ class SettingsViewModel(
             } catch (e: Throwable) {
                 Log.error(TAG, "Initial sync failed", e)
             } finally {
-                initialSyncingType = null
+                _initialSyncingType.value = null
             }
         }
     }
@@ -341,29 +352,26 @@ class SettingsViewModel(
     private suspend fun runConnectFlow(type: CloudStorageType): Boolean {
         val flow = cloudSession.connectFlow(type)
         if (flow == null) {
-            connectFailedType = type
+            _connectFailedType.value = type
             return false
         }
         val result = coroutineScope {
             awaitCancellableConnect(
                 flow,
                 onJobChange = { authorizationJob = it },
-                onCanCancelChange = { canCancelConnect = it },
+                onCanCancelChange = { _canCancelConnect.value = it },
             )
         } ?: return false
         return when (result) {
             is Result.Ok -> {
-                withContext(dispatcher) { cloudSession.saveTokens(type, result.value) }
-                update { it.copy(cloudStorageType = type.id) }
-                // Persist the provider selection to disk before the initial sync. Tokens are
-                // saved durably to the keychain above, so without this flush a crash could leave
-                // tokens present but cloudStorageType null → every later sync a silent no-op.
-                withContext(dispatcher) { settingsRepository.flush() }
-                connectedType = type
+                // Saves the tokens and flushes the provider selection to disk before [connect]
+                // starts the initial sync — see CloudConnectionService.completeConnect.
+                withContext(dispatcher) { cloudConnectionService.completeConnect(type, result.value) }
+                _connectedType.value = type
                 true
             }
             is Result.Err -> {
-                connectFailedType = type
+                _connectFailedType.value = type
                 false
             }
         }
@@ -374,17 +382,16 @@ class SettingsViewModel(
     }
 
     /**
-     * Disconnects [type] and clears everything a subsequent connect must not inherit: the sync
-     * failure reason (so a fresh connect doesn't start out showing the old provider's error), the
-     * persisted provider setting, and the last-synced timestamp. Shared by [disconnect] and
+     * Disconnects [type] and clears everything a subsequent connect must not inherit: the domain
+     * state via [CloudConnectionService.tearDown] (tokens, sync failure reason — so a fresh connect
+     * doesn't start out showing the old provider's error — and the persisted provider setting),
+     * then this screen's connected state and last-synced timestamp. Shared by [disconnect] and
      * [switchTo], which differ only in what runs before/after this teardown.
      */
     private suspend fun tearDownConnection(type: CloudStorageType) {
-        withContext(dispatcher) { cloudSession.disconnect(type) }
-        syncRepository.clearSyncFailureState()
-        update { it.copy(cloudStorageType = null) }
-        connectedType = null
-        lastSyncedAtText = null
+        withContext(dispatcher) { cloudConnectionService.tearDown(type) }
+        _connectedType.value = null
+        _lastSyncedAtText.value = null
     }
 
     /**
@@ -395,13 +402,13 @@ class SettingsViewModel(
      * the row would look exactly as stuck as the bug this whole feature exists to fix.
      */
     fun disconnect() {
-        val type = connectedType ?: return
+        val type = _connectedType.value ?: return
         viewModelScope.launch {
-            disconnecting = true
+            _disconnecting.value = true
             try {
                 tearDownConnection(type)
             } finally {
-                disconnecting = false
+                _disconnecting.value = false
             }
         }
     }
@@ -419,9 +426,9 @@ class SettingsViewModel(
      * connecting back to the provider it just tore down.
      */
     fun reconnect() {
-        val type = connectedType ?: return
+        val type = _connectedType.value ?: return
         viewModelScope.launch {
-            connectingType = type
+            _connectingType.value = type
             tearDownConnection(type)
             connect(type)
         }
@@ -433,13 +440,13 @@ class SettingsViewModel(
      * [SyncRepository]); on success a new sync timestamp is shown.
      */
     fun resetCloudData() {
-        if (connectedType == null) return
+        if (_connectedType.value == null) return
         viewModelScope.launch {
-            resetting = true
+            _resetting.value = true
             try {
                 withContext(dispatcher) { syncRepository.resetCloudData() }
             } finally {
-                resetting = false
+                _resetting.value = false
             }
             refreshLastSyncedAt()
         }
@@ -452,16 +459,16 @@ class SettingsViewModel(
      * caller, matching [resetCloudData]'s own style.
      */
     fun switchTo(newType: CloudStorageType) {
-        val oldType = connectedType ?: return
+        val oldType = _connectedType.value ?: return
         viewModelScope.launch {
-            connectingType = newType
+            _connectingType.value = newType
             tearDownConnection(oldType)
             connect(newType)
         }
     }
 
     private fun refreshLastSyncedAt() {
-        lastSyncedAtText = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
+        _lastSyncedAtText.value = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
     }
 
     /**
@@ -471,24 +478,16 @@ class SettingsViewModel(
      * or `null` if the user cancels the file picker.
      */
     fun exportOpml() {
-        if (exportingOpml || importingOpml) return
+        if (_exportingOpml.value || _importingOpml.value) return
         viewModelScope.launch {
-            exportingOpml = true
+            _exportingOpml.value = true
             try {
-                val request = SaveFileRequest(
-                    title = getString(Res.string.settings_export_opml),
-                    defaultName = "keryx.opml",
-                    overwriteTitle = getString(Res.string.file_overwrite_title),
-                    overwriteMessage = getString(Res.string.file_overwrite_message),
-                    overwriteReplaceLabel = getString(Res.string.file_overwrite_replace),
-                    overwriteCancelLabel = getString(Res.string.common_cancel),
-                )
-                val target = fileSelector.pickSaveFile(request)
+                val target = fileSelector.pickSaveFile(opmlFileRequests.export())
                 if (target == null) {
-                    opmlResult = null
+                    _opmlResult.value = null
                     return@launch
                 }
-                opmlResult = try {
+                _opmlResult.value = try {
                     withContext(dispatcher) { target.writeText(buildOpmlDocument()) }
                     OpmlResult.Exported
                 } catch (e: CancellationException) {
@@ -498,7 +497,7 @@ class SettingsViewModel(
                     OpmlResult.ExportFailed
                 }
             } finally {
-                exportingOpml = false
+                _exportingOpml.value = false
             }
         }
     }
@@ -533,21 +532,16 @@ class SettingsViewModel(
      * Imports feeds, folders, and tags from a selected OPML or XML file.
      */
     fun importOpml() {
-        if (importingOpml || exportingOpml) return
+        if (_importingOpml.value || _exportingOpml.value) return
         viewModelScope.launch {
-            importingOpml = true
+            _importingOpml.value = true
             try {
-                val request = OpenFileRequest(
-                    title = getString(Res.string.settings_import_opml),
-                    extensions = listOf("opml", "xml"),
-                    filterLabel = getString(Res.string.file_filter_opml),
-                )
-                val source = fileSelector.pickOpenFile(request)
+                val source = fileSelector.pickOpenFile(opmlFileRequests.import())
                 if (source == null) {
-                    opmlResult = null
+                    _opmlResult.value = null
                     return@launch
                 }
-                opmlResult = try {
+                _opmlResult.value = try {
                     val outcome = withContext(dispatcher) { source.readText()?.let { opmlImporter.import(it) } }
                     if (outcome == null) OpmlResult.ImportFailed else OpmlResult.Imported(outcome.added, outcome.failed)
                 } catch (e: CancellationException) {
@@ -557,7 +551,7 @@ class SettingsViewModel(
                     OpmlResult.ImportFailed
                 }
             } finally {
-                importingOpml = false
+                _importingOpml.value = false
             }
         }
     }
@@ -566,10 +560,29 @@ class SettingsViewModel(
      * Clears the latest OPML import or export result.
      */
     fun clearOpmlResult() {
-        opmlResult = null
+        _opmlResult.value = null
     }
 
     private companion object {
         const val TAG = "SettingsVM"
+    }
+}
+
+/**
+ * A read-only [StateFlow] whose [value] is [compute]d from other state flows on every read, and
+ * whose collectors receive [changes] (deduplicated) — a derived value that, unlike one produced by
+ * `stateIn`, can never be observed out of step with its inputs.
+ */
+@OptIn(ExperimentalForInheritanceCoroutinesApi::class)
+private class DerivedStateFlow<T>(
+    private val compute: () -> T,
+    private val changes: Flow<T>,
+) : StateFlow<T> {
+    override val value: T get() = compute()
+    override val replayCache: List<T> get() = listOf(value)
+
+    override suspend fun collect(collector: FlowCollector<T>): Nothing {
+        changes.distinctUntilChanged().collect(collector)
+        awaitCancellation()
     }
 }

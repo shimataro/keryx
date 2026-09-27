@@ -23,6 +23,7 @@ import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFeedTag
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.insertTag
+import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_all_feeds
 import kotlin.test.Test

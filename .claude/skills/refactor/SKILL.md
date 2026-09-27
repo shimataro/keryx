@@ -26,7 +26,8 @@ here.
 - Argument (`$ARGUMENTS`) is an optional path to narrow the sweep (e.g.
   `/refactor domain/`, `/refactor composeApp/src/commonMain/kotlin/.../ui/home`).
 - **Default (no argument):** production source under
-  `composeApp/src/commonMain/kotlin` + `composeApp/src/desktopMain/kotlin`.
+  `shared/src/{commonMain,jvmCommonMain,desktopMain}/kotlin` + `composeApp/src/commonMain/kotlin` +
+  `composeApp/src/desktopMain/kotlin`.
 - **Always excluded (every invocation, even an explicit path argument):**
   `build/` and generated code (SQLDelight, Compose Resources, `BuildConfig`) —
   those are regenerated, never hand-edited.
@@ -49,7 +50,7 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   Repository method that both fetches and persists unrelated state) is a split
   candidate even if it isn't long. Natural candidates: `ui/home/FeedListPane.kt`,
   `ui/settings/SettingsDialog.kt`, `desktopMain/main.kt`,
-  `ui/common/KeryxDialogs.desktop.kt`, `ui/home/HomeViewModel.kt` (examples, not
+  `ui/common/KeryxDialogs.desktop.kt`, `presentation/home/HomeViewModel.kt` (examples, not
   a mandate — split only where it improves clarity).
 - **Ambiguous ownership** → logic sitting in the wrong layer relative to
   `docs/app-architecture.md`'s layer-responsibility table — e.g. a ViewModel
@@ -173,7 +174,7 @@ contaminate the baseline below and risk an unrelated file getting swept into
 or invoke the **`build` skill**:
 
 ```bash
-./gradlew :composeApp:desktopTest
+./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
 Record the baseline **from this run itself**, not from the `527` literal in
@@ -228,7 +229,7 @@ For each approved batch:
 1. Make one cohesive change set — small enough to review and revert on its own.
 2. Recompile and re-run tests:
    ```bash
-   ./gradlew :composeApp:desktopTest
+   ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
 3. The **full suite must stay green** and the **Step 1 baseline set must survive
    in full** — every recorded baseline test still runs and passes. A

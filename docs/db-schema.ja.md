@@ -3,7 +3,7 @@
 [English](db-schema.md)
 
 対象: ローカル SQLite（SQLDelight 管理）。`.sq` ファイルは
-`composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/` にある。
+`shared/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/` にある。
 
 実ファイルの実体パスはプラットフォームによって異なる: デスクトップの `JdbcSqliteDriver` は
 `AppDirs.appDataDir()/keryx.db` を直接開くが、Android の `AndroidSqliteDriver` は
@@ -25,6 +25,11 @@
   （`<移行元バージョン>.sqm`）を追加すればバージョンは自動で上がる。あわせて
   `domain/MergeSchema.EXPECTED_SCHEMAS`（`DatabaseMerger.validateSchema` が参照する期待スキーマ）を
   新バージョンに追随させること。
+  `user_version` が実行中ビルドのスキーマより新しいファイルは決して開かない：desktop は何も書き込む前に
+  `DatabaseTooNewException`（`data/local/DatabaseSchemaGuard.kt`）を投げる。Apple も同じガードで同様に拒否する——
+  `DatabaseDriverFactory.apple.kt` の `createDriver` が `NativeSqliteDriver` でファイルを開く前に、ファイルの
+  `user_version` に対して `requireSupportedSchemaVersion` を呼び、`KeryxSdk.start()` が（desktop の `main.kt` と同じく）
+  `findDatabaseTooNew` で Koin のラップから取り出して Swift にエラーとして投げる。Android の open helper は既定でダウングレードを拒否する。
 
 ## テーブル一覧
 

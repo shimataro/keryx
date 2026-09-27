@@ -1,0 +1,119 @@
+package works.merc.keryx.app.data.cloud
+
+import kotlinx.serialization.json.Json
+import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.platform.AppDirs
+import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
+/**
+ * Fallback token storage used when no OS secret store is available (e.g. a
+ * headless Linux box with no Secret Service). Writes JSON to a 0600 file whose
+ * name is per-provider ([fileName], e.g. `.dropbox_tokens.json` /
+ * `.google_drive_tokens.json`).
+ */
+class FileTokenStorage(
+    dirOverride: String? = null,
+    private val fileName: String = ".${CloudStorageType.DROPBOX.id}_tokens.json",
+    private val json: Json = Json { ignoreUnknownKeys = true },
+) : TokenStorage {
+
+    private val file = File(dirOverride ?: AppDirs.appDataDir(), fileName)
+
+    /**
+     * Never reports [TokenSaveOutcome.SECURE]: this class *is* the plaintext fallback, so a token
+     * persisted here was never in a secure store. It does distinguish a write that landed
+     * ([TokenSaveOutcome.PLAINTEXT_FILE]) from one that failed outright
+     * ([TokenSaveOutcome.NOT_PERSISTED]) — only the latter loses the tokens when the app exits, so
+     * the caller warns about the two differently.
+     */
+    override fun save(tokens: OAuthTokens): TokenSaveOutcome {
+        // Persisting must never throw: this is the last-resort store, and a failure here (unwritable
+        // data dir, a pre-existing root-owned/read-only token file) would otherwise propagate up
+        // through CloudSession.saveTokens() and abort the connect flow *after* the token is already
+        // held in memory — leaving the user unable to link at all. Swallow and log instead; the
+        // in-memory session still works, only cross-restart persistence is lost.
+        val result = runCatching {
+            file.parentFile?.mkdirs()
+            // Write to a sibling temp file, then atomically replace the target. writeText()
+            // straight into the token file would truncate it first, so a crash or failed write
+            // mid-way left a corrupt file that load() rejects, forcing the user to re-authorize.
+            val tmp = File(file.parentFile, "${file.name}.tmp")
+            try {
+                // Restrict the file to owner-only *before* writing the refresh token into it. Creating
+                // it empty first and tightening permissions up front closes the brief window in which a
+                // freshly-written token file was group/world-readable (umask-dependent): writeText into
+                // an already-existing file preserves its permissions rather than recreating it.
+                if (!tmp.exists()) tmp.createNewFile()
+                if (!restrictToOwnerOnly(tmp)) {
+                    throw IOException("Failed to restrict token file to owner-only permissions: $tmp")
+                }
+                tmp.writeText(json.encodeToString(tokens))
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: Exception) {
+                tmp.delete()
+                throw e
+            }
+        }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be written", e) }
+        return if (result.isSuccess) TokenSaveOutcome.PLAINTEXT_FILE else TokenSaveOutcome.NOT_PERSISTED
+    }
+
+    /**
+     * On a POSIX filesystem, denies read/write to non-owners (defense against a permissive
+     * umask) and confirms the owner itself retains access. `java.io.File`'s boolean permission
+     * API cannot express "deny to non-owner" on a non-POSIX filesystem (Windows/NTFS) —
+     * `setReadable(false, false)`/`setWritable(false, false)` are unsupported there and always
+     * return false — so on that path this only confirms the owner retains access; the
+     * owner-only guarantee itself then comes from Windows' own per-user ACL inheritance on
+     * %APPDATA%/%LOCALAPPDATA%.
+     */
+    private fun restrictToOwnerOnly(target: File): Boolean {
+        val isPosix = try {
+            Files.getPosixFilePermissions(target.toPath())
+            true
+        } catch (_: UnsupportedOperationException) {
+            false
+        }
+        return if (isPosix) {
+            target.setReadable(false, false) && target.setReadable(true, true) &&
+                target.setWritable(false, false) && target.setWritable(true, true)
+        } else {
+            target.setReadable(true, true) && target.setWritable(true, true)
+        }
+    }
+
+    override fun load(): OAuthTokens? =
+        file.takeIf { it.exists() }
+            ?.let {
+                runCatching { json.decodeFromString<OAuthTokens>(it.readText()) }
+                    // Logs only the exception's type, never the exception itself: kotlinx.serialization's
+                    // JsonDecodingException embeds the offending input (i.e. the token payload) in its
+                    // own message, which Log.warn(tag, message, throwable) would otherwise write
+                    // straight into the log file — same fix as SecretStoreTokenStorage.load().
+                    .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be decoded (${e::class.simpleName})") }
+                    .getOrNull()
+            }
+
+    /**
+     * Reports the postcondition that actually matters — whether the file is still on disk — rather
+     * than `File.delete()`'s own return value. A surviving file holds readable token text whether or
+     * not its JSON still decodes, which is exactly why a caller cannot substitute [load] returning
+     * null for this answer.
+     */
+    override fun clear(): TokenClearOutcome {
+        val gone = runCatching {
+            // File.delete() returns false rather than throwing when it fails, which runCatching
+            // alone would not observe — a lingering token file would then be reported as cleared.
+            if (file.exists() && !file.delete()) {
+                Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete returned false")
+            }
+            !file.exists()
+        }.onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file delete failed", e) }
+            // A throw left the file's fate unknown, so assume the worse of the two.
+            .getOrDefault(false)
+        return if (gone) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
+    }
+}

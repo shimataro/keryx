@@ -18,11 +18,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -38,7 +37,9 @@ import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.AddFeedPreview
 import works.merc.keryx.app.domain.addFeedAlreadySubscribed
-import works.merc.keryx.app.domain.addFeedCanSubscribe
+import works.merc.keryx.app.presentation.home.AddFeedController
+import works.merc.keryx.app.presentation.home.AddFeedPhase
+import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.home_add_feed
@@ -63,8 +64,6 @@ import works.merc.keryx.app.ui.common.FlatCheckbox
 import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.i18n.userMessage
 
-internal enum class AddFeedPhase { Previewing, Subscribing }
-
 /**
  * Displays a dialog for previewing a feed URL, selecting discovered feeds, and subscribing to feeds.
  *
@@ -80,108 +79,38 @@ internal fun AddFeedDialog(
     onDismiss: () -> Unit,
     onSubscribed: () -> Unit,
 ) {
-    var url by remember { mutableStateOf("") }
-    var phase by remember { mutableStateOf<AddFeedPhase?>(null) }
-    var preview by remember { mutableStateOf<AddFeedPreview?>(null) }
-    var selectedCandidates by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var errorException by remember { mutableStateOf<KeryxException?>(null) }
-    var partialResult by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val controller = remember(vm) { AddFeedController(vm::resolvePreview, vm::subscribeFeeds) }
+    val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
-
-    suspend fun runPreview() {
-        phase = AddFeedPhase.Previewing
-        errorException = null
-        when (val result = vm.resolvePreview(url)) {
-            is AddFeedPreview.Single -> {
-                if (result.resolvedUrl != url) url = result.resolvedUrl
-                preview = result
-                selectedCandidates = emptySet()
-            }
-            is AddFeedPreview.Multiple -> {
-                preview = result
-                selectedCandidates = result.candidates.map { it.url }.toSet()
-            }
-            is AddFeedPreview.Failed -> {
-                preview = null
-                selectedCandidates = emptySet()
-                errorException = result.exception
-            }
-        }
-        phase = null
-    }
-
-    suspend fun runSubscribe() {
-        phase = AddFeedPhase.Subscribing
-        errorException = null
-        partialResult = null
-        val outcome = when (val p = preview) {
-            is AddFeedPreview.Single -> vm.subscribeFeeds(listOf(p.resolvedUrl))
-            is AddFeedPreview.Multiple -> vm.subscribeFeeds(selectedCandidates.toList())
-            else -> null
-        }
-        phase = null
-        if (outcome != null) {
-            when {
-                outcome.successCount > 0 && outcome.failCount == 0 -> onSubscribed()
-                outcome.successCount > 0 -> partialResult = outcome.successCount to outcome.failCount
-                else -> errorException = outcome.firstError
-            }
-        }
-    }
-
-    // Enter/confirm does double duty: preview when there's no result yet, subscribe once there is.
-    suspend fun submit() {
-        when {
-            phase != null -> return
-            preview != null -> if (addFeedCanSubscribe(preview, selectedCandidates)) runSubscribe()
-            url.isNotBlank() -> runPreview()
-        }
-    }
-
-    val hasResult = preview != null
-    val confirmEnabled = phase == null &&
-        if (hasResult) addFeedCanSubscribe(preview, selectedCandidates) else url.isNotBlank()
-    val alreadySubscribed = addFeedAlreadySubscribed(url, feeds)
+    val submit: () -> Unit = { scope.launch { if (controller.submit()) onSubscribed() } }
+    val alreadySubscribed = addFeedAlreadySubscribed(state.url, feeds)
 
     KeryxAlertDialog(
         onDismissRequest = onDismiss,
         title = stringResource(Res.string.home_add_feed),
         text = {
             AddFeedDialogContent(
-                url = url,
-                onUrlChange = {
-                    url = it
-                    preview = null
-                    selectedCandidates = emptySet()
-                    errorException = null
-                    partialResult = null
-                },
+                url = state.url,
+                onUrlChange = controller::setUrl,
                 alreadySubscribed = alreadySubscribed,
-                phase = phase,
-                preview = preview,
-                selectedCandidates = selectedCandidates,
-                onToggleCandidate = { candidateUrl, checked ->
-                    selectedCandidates =
-                        if (checked) selectedCandidates + candidateUrl else selectedCandidates - candidateUrl
-                },
-                onSelectAll = {
-                    (preview as? AddFeedPreview.Multiple)?.let {
-                        selectedCandidates = it.candidates.map { link -> link.url }.toSet()
-                    }
-                },
-                onClearAll = { selectedCandidates = emptySet() },
-                errorException = errorException,
-                partialResult = partialResult,
-                onSubmit = { scope.launch { submit() } },
+                phase = state.phase,
+                preview = state.preview,
+                selectedCandidates = state.selectedCandidates,
+                onToggleCandidate = controller::toggleCandidate,
+                onSelectAll = controller::selectAllCandidates,
+                onClearAll = controller::clearCandidates,
+                errorException = state.error,
+                partialResult = state.partialResult,
+                onSubmit = submit,
             )
         },
-        confirmText = if (hasResult) {
+        confirmText = if (state.hasResult) {
             stringResource(Res.string.home_add_feed_subscribe)
         } else {
             stringResource(Res.string.home_add_feed_confirm)
         },
-        onConfirm = { scope.launch { submit() } },
-        confirmEnabled = confirmEnabled,
+        onConfirm = submit,
+        confirmEnabled = state.confirmEnabled,
         dismissText = stringResource(Res.string.common_cancel),
     )
 }

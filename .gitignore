@@ -2,6 +2,8 @@
 /.kotlin/
 /build/
 /composeApp/build/
+/shared/build/
+/testing/build/
 /androidApp/build/
 /composeApp/unused
 

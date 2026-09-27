@@ -41,6 +41,12 @@ directly rather than re-reading them.
   a `commonMain` `expect` with its `actual` in `desktopMain`, rather than leaking
   into `commonMain`? This is what keeps the planned Android/iOS targets viable.
   (CLAUDE.md constraint #4)
+- **`:shared` stays UI-framework-free and Apple-buildable.** No Compose, Compose
+  Resources, AWT/Swing or Android UI import in `shared/src`; a new `:shared`
+  `expect` needs an `appleMain` actual too (`shared/src/appleMain`, with
+  `macosMain`/`iosMain` only for AppKit/UIKit differences); no localized text
+  produced in shared code (emit `NotificationText`/`ErrorKind`). Logic every UI
+  needs belongs in `presentation/`, not re-derived in a composable.
 - Does new platform-branching logic sit where it can be replaced per target? OS branches that already
   live in `commonMain` (`platform/PlatformOs.kt`, `ui/home/HomeCommon.kt`, `ui/home/KeyboardNav.kt`)
   are deliberate — a *new* one in `commonMain` needs a reason.
@@ -60,11 +66,11 @@ directly rather than re-reading them.
 
 - Has anything outside the α scope (JSON Feed / mobile notifications) slipped
   in? (Note: the in-reader WebView article view *is* in scope — it's the shipped
-  reader, `ui/article/ArticleWebViewHtml.kt` + `composewebview`.)
+  reader, `presentation/article/ArticleWebViewHtml.kt` (`:shared`) + `composewebview`.)
 - Does the change contradict a decision recorded in the design docs? If a doc looks wrong, say so as
   a finding — do not silently accept the deviation.
 
 ## Investigation
 
-    grep -rn "expect " composeApp/src/commonMain
-    grep -rn "java\.\(io\|awt\|sql\|nio\)\|javax\.swing" composeApp/src/commonMain
+    grep -rn "expect " shared/src/commonMain composeApp/src/commonMain
+    grep -rn "java\.\(io\|awt\|sql\|nio\)\|javax\.swing" shared/src/commonMain composeApp/src/commonMain

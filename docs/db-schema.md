@@ -3,7 +3,7 @@
 [日本語](db-schema.ja.md)
 
 Target: local SQLite (managed by SQLDelight). `.sq` files are located at
-`composeApp/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/`.
+`shared/src/commonMain/sqldelight/works/merc/keryx/app/data/local/db/`.
 
 The live file's actual path differs by platform: desktop's `JdbcSqliteDriver` opens
 `AppDirs.appDataDir()/keryx.db` directly, but Android's `AndroidSqliteDriver` places it at
@@ -24,6 +24,12 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
   (SQLDelight derives the version from the highest migration file + 1). When the schema changes, add a `.sqm` file
   (`<from-version>.sqm`) and the version bumps automatically; `domain/MergeSchema.EXPECTED_SCHEMAS` (which
   `DatabaseMerger.validateSchema` checks against) must be updated to the new version in lockstep.
+  A file whose `user_version` is newer than the running build's schema is never opened: desktop throws
+  `DatabaseTooNewException` (`data/local/DatabaseSchemaGuard.kt`) before writing anything; Apple does the same through
+  the same guard — `DatabaseDriverFactory.apple.kt`'s `createDriver` calls `requireSupportedSchemaVersion` on the
+  file's `user_version` before `NativeSqliteDriver` opens it, and `KeryxSdk.start()` unwraps it from Koin's wrapping
+  with `findDatabaseTooNew` (as desktop's `main.kt` does) so it reaches Swift as a thrown error; and Android's open
+  helper refuses a downgrade by default.
 
 ## Table List
 

@@ -90,7 +90,7 @@ actual val platformModule: Module = module {
         // Registered only where Play services can actually serve it. A device without it (a
         // de-Googled ROM) never sees Google Drive offered, which is the same answer
         // CloudStorageAvailability gives the UI — the two read the same flag so they cannot drift.
-        extraProviders = { client ->
+        extraProviders = { client, _ ->
             if (CloudStorageAvailability.googleDriveAvailable) {
                 mapOf(CloudStorageType.GOOGLE_DRIVE to googleDriveProvider(client))
             } else {

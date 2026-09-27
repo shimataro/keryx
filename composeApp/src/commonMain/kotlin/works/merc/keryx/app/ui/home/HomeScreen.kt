@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,6 +62,10 @@ import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
+import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
+import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.presentation.home.nextFeedListRow
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
@@ -73,6 +78,8 @@ import works.merc.keryx.app.ui.article.ArticleScrollUnit
 import works.merc.keryx.app.ui.article.FallbackReaderScrollHost
 import works.merc.keryx.app.ui.article.LocalFallbackReaderScrollHost
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.i18n.infoDialogText
+import works.merc.keryx.app.ui.i18n.resolveNotificationText
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 
@@ -82,6 +89,7 @@ import works.merc.keryx.app.ui.menu.MenuController
 @Composable
 fun HomeScreen() {
     val vm = koinInject<HomeViewModel>()
+    val layoutVm = koinInject<HomeLayoutViewModel>()
     val notifVm = koinInject<NotificationCenterViewModel>()
     val menuController = koinInject<MenuController>()
 
@@ -99,8 +107,8 @@ fun HomeScreen() {
     val expandedTagIds by vm.expandedTagIds.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
     val selectedRowInstance by vm.selectedRowInstance.collectAsState()
-    val feedListPaneWidth by vm.feedListPaneWidth.collectAsState()
-    val articleListPaneWidth by vm.articleListPaneWidth.collectAsState()
+    val feedListPaneWidth by layoutVm.feedListPaneWidth.collectAsState()
+    val articleListPaneWidth by layoutVm.articleListPaneWidth.collectAsState()
 
     var showAddFeed by remember { mutableStateOf(false) }
     // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
@@ -126,7 +134,7 @@ fun HomeScreen() {
     var feedListRenameRequestId by remember { mutableStateOf(0) }
     var feedListDeleteRequestId by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
-    var focusedPane by remember { mutableStateOf(vm.getInitialFocusedPane()) }
+    var focusedPane by remember { mutableStateOf(layoutVm.getInitialFocusedPane()) }
     // Hoisted (not NarrowPaneRow's own internal default) so it isn't recreated across a
     // Triple<->narrow layout flip — declared outside BoxWithConstraints below, alongside
     // drawerState.
@@ -166,9 +174,12 @@ fun HomeScreen() {
     var paneLayout by remember { mutableStateOf(PaneLayout.Triple) }
     // Whether HomeScreen has already clamped focusedPane for a narrow layout at least once this
     // session — see the one-shot LaunchedEffect inside BoxWithConstraints below for why this must
-    // never re-fire (a mid-session narrow<->Triple flip, e.g. a window resize or an Android
-    // rotation, must not yank the user off whatever article they're reading).
-    var initialPaneClamped by remember { mutableStateOf(false) }
+    // never re-fire (a mid-session narrow<->Triple flip, e.g. a window resize, must not yank the
+    // user off whatever article they're reading). rememberSaveable, not remember: on Android, a
+    // rotation (with no configChanges declared in the manifest) recreates the whole Activity —
+    // and with it this composition — from scratch, so plain `remember` would reset to false and
+    // the clamp/drawer-auto-open effect below would fire again on every rotation.
+    var initialPaneClamped by rememberSaveable { mutableStateOf(false) }
     // Arrow keys only actually reach a pane when this window has real OS focus (not a modal dialog,
     // Settings/About, or another application) and the search field isn't the one consuming them —
     // panes must render their selection dimmed in every other case, not just when focus moved to a
@@ -200,7 +211,7 @@ fun HomeScreen() {
     fun setFocusedPane(pane: HomePane) {
         if (pane == focusedPane) return
         focusedPane = pane
-        vm.setFocusedPane(pane)
+        layoutVm.setFocusedPane(pane)
     }
 
     // A pane's own onActivated always returns real Compose focus to the root Box, on top of
@@ -517,7 +528,7 @@ fun HomeScreen() {
                             deleteSelectedRequestId = feedListDeleteRequestId,
                         )
                         ResizableDivider(onDrag = { deltaPx ->
-                            vm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
+                            layoutVm.setFeedListPaneWidth(feedListPaneWidth + with(density) { deltaPx.toDp().value })
                         })
                         ArticleListPane(
                             vm,
@@ -528,7 +539,7 @@ fun HomeScreen() {
                             onAddFeedClick = { showAddFeed = true },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
-                            vm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
+                            layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
                         })
                         ArticleDetailPane(
                             vm,
@@ -721,7 +732,7 @@ internal fun PendingNotificationActionHost(
     layout: PaneLayout,
     onFocusPane: (HomePane) -> Unit,
 ) {
-    val pending = notifVm.pendingAction ?: return
+    val pending = notifVm.pendingAction.collectAsState().value ?: return
     when (val action = pending.action) {
         AppNotificationAction.ResetCloudData ->
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
@@ -733,7 +744,7 @@ internal fun PendingNotificationActionHost(
                 confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
                 onConfirm = {
                     vm.resetCloudData()
-                    notifVm.dismiss(pending.id)
+                    pending.notificationId?.let(notifVm::dismiss)
                     notifVm.clearPendingAction()
                 },
                 dismissText = stringResource(Res.string.common_cancel),
@@ -741,7 +752,7 @@ internal fun PendingNotificationActionHost(
         // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
         // where that list is a screen of its own and focusing it would navigate backwards; see
         // paneForFeedDetail's own KDoc.
-        is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending.id) {
+        is AppNotificationAction.ShowFeedDetail -> LaunchedEffect(pending) {
             vm.selectFilter(ArticleFilter.Feed(action.feedId))
             onFocusPane(paneForFeedDetail(layout))
             notifVm.clearPendingAction()
@@ -751,7 +762,7 @@ internal fun PendingNotificationActionHost(
             KeryxAlertDialog(
                 onDismissRequest = { notifVm.clearPendingAction() },
                 title = stringResource(Res.string.notification_detail_title),
-                text = { Text(action.detail) },
+                text = { Text(infoDialogText(action.detail)) },
                 confirmText = stringResource(Res.string.common_ok),
                 onConfirm = { notifVm.clearPendingAction() },
             )
@@ -799,7 +810,7 @@ internal fun ForegroundAlertSnackbar(
                 onNavigated = {},
             )
             val result = hostState.showSnackbar(
-                message = alert.message,
+                message = resolveNotificationText(alert.text),
                 actionLabel = actionLabel.takeIf { act != null },
                 withDismissAction = true,
                 duration = SnackbarDuration.Long,

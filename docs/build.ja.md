@@ -10,10 +10,20 @@
   それが 25 未満だと実行時に `UnsupportedClassVersionError` になる。
 - Gradle は同梱の wrapper（`./gradlew`, Gradle 9.7.1）を使う。
 - **Android SDK**（`local.properties` の `sdk.dir`、または環境変数 `ANDROID_HOME`） —
-  `:composeApp` 自体が Android library ターゲットを構成しているため、デスクトップ側だけの変更
+  `:shared` と `:composeApp` の両方が Android library ターゲットを構成しているため、デスクトップ側だけの変更
   であってもルートの `./gradlew build` には SDK の解決が必要。インストールと AVD の作成は
-  [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:composeApp:desktopTest`
+  [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   のようなデスクトップ限定タスクはこの要件を回避できる。
+
+- **Xcode**（macOS のみ）—— `:shared` の Apple ターゲット、つまり `KeryxShared` XCFramework
+  （`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`。出力は `shared/build/XCFrameworks/release/` 配下）と、その macOS／
+  iOS シミュレータ向けテストに必要。Xcode がない場合（または Linux/Windows）は Gradle がそれらのターゲットをスキップし、それ以外は
+  従来どおりビルドされる。
+  その帰結として、バグではなく既知の許容済み制約がある：CodeQL ワークフロー
+  （`.github/workflows/codeql.yml`）は `ubuntu-latest` 上で動くため Gradle が Apple ターゲットを黙って
+  スキップし、Apple ターゲットのソース（`shared/src/appleMain`、`macosMain`、`iosMain`——例：
+  `KeychainTokenStorage.kt`、`RawSqliteConnection.kt`、`DatabaseMerger.apple.kt`、`KeryxSdk.kt`）は
+  CodeQL のビルドトレーサー下で一度もコンパイルされず、CodeQL の解析対象にならない。
 
 サンドボックス等でツールチェーンの自動ダウンロードが必要な場合:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`。
@@ -22,7 +32,7 @@
 
 ```bash
 ./gradlew build                       # 全ソースセットのコンパイル + テスト
-./gradlew :composeApp:desktopTest     # テストのみ
+./gradlew :shared:desktopTest :composeApp:desktopTest  # テストのみ
 ./gradlew :composeApp:run             # デスクトップアプリを起動
 
 ./gradlew :androidApp:assembleDebug        # デバッグ APK をビルド
@@ -44,7 +54,7 @@
 APIキーが指定されていないクラウドサービスは連携機能が表示されず、どのサービスにも指定されなければ（設定ダイアログのタブなどに）連携機能自体が表れない。
 **連携できるクラウドストレージは同時に1つのみ**であり、複数のストレージに分散保存はできない。
 
-Gradle のカスタムタスク（`generateBuildConfig`）で実現している。
+`shared/build.gradle.kts` の Gradle カスタムタスク（`generateBuildConfig`、desktop 専用の Google Drive 認証情報向けの `generateDesktopBuildConfig`、および Apple 版自身の secret 不要な Google Drive クライアント ID 向けの `generateAppleBuildConfig`——後述の「Apple（macOS / iOS）」参照）で実現している。
 
 以下に各サービスでのAPIキーの取得方法を示す。
 
@@ -152,6 +162,101 @@ Google Drive が提供されるのは `GoogleApiAvailability.isGooglePlayService
 `./gradlew :composeApp:run` のようなパッケージ済み/未パッケージの区別は無い。エミュレータで
 連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要——それを得る推奨手段が
 Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参照。
+
+### Apple（macOS / iOS）
+
+Dropbox と OneDrive は上記と同じ `local.properties` のキーを使う。どちらも desktop 版と同じ
+`keryx://oauth2/callback` リダイレクトを使う PKCE パブリッククライアントなので、Apple 向けに特別な
+対応は不要。
+
+**Google Drive だけは自前の OAuth クライアントが必要**——desktop 版の「デスクトップ アプリ」クライアントとは
+別物にする。理由は、ネイティブアプリのバイナリに client secret を同梱してはならない一方、Google の
+「デスクトップ アプリ」クライアント種別は secret を必須とするため（上記「Google Drive」節参照）。Google が
+ネイティブ Apple アプリ向けに用意している答えが **「iOS」**アプリケーションタイプ——secret を一切
+要求しない（この種類は iOS/iPadOS 専用ではなく、ネイティブ macOS アプリにも Google 自身が使わせている）。
+
+1. desktop 用（および Android 用）クライアントと **同じ Cloud プロジェクト**で——上記 Android の場合と同じ
+   理由：`appDataFolder` はプロジェクト単位でスコープされるため、プロジェクトを共有していることが Apple 版で
+   他の端末と同じ同期ファイルを見られる根拠になる。上記「Google Drive」節の Drive API 有効化や OAuth 同意
+   画面／スコープの設定も共有されるので、新たに設定することはない。
+2. 「Google Auth Platform」→「クライアント」→「クライアントを作成」からアプリケーションの種類
+   **「iOS」**を選ぶ。
+   - バンドル ID：`works.merc.keryx`（macOS 版のもの。将来の iOS 版も同じバンドル ID にするなら
+     このクライアントを共用できる。別のバンドル ID にする場合は、その時点で「iOS」クライアントを
+     もう一つ登録する）。
+   - App Store ID・チーム ID は省略可（あとから追記できる）。
+3. 作成後に表示される **クライアント ID**（`NNNN-xxxx.apps.googleusercontent.com`）を
+   `local.properties`（[local.properties.example](../local.properties.example) のコピー）の
+   `googledrive.apple.client.id` に指定する——または `-PgoogleDriveAppleClientId=...` や環境変数
+   `GOOGLE_DRIVE_APPLE_CLIENT_ID` でもよい（他のキーと同じ解決順）。これが
+   `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` に渡り、`shared/build.gradle.kts` の
+   `generateAppleBuildConfig` タスクが `appleMain` にだけ生成する——`generateDesktopBuildConfig` と
+   同じ方式だが、このクライアント種別には secret が無いので secret の対になるものは無い。
+4. Google の場合、リダイレクト URI を別途登録する必要はない——クライアント ID を逆順にした自分専用の
+   カスタムスキーム `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect` を Google 側が自動的に
+   導出する（`googleIosClientRedirectUri`、`data/cloud/GoogleDriveAuthManager.kt`）。
+5. **Swift アプリの Info.plist にカスタム URL スキームを登録する。** 登録が必要なスキームは2つ：
+   共有の `keryx` スキーム（Dropbox・OneDrive、そして今回から Google Drive も——3つとも `state` で
+   判別）と、ステップ4の Google クライアント専用の逆順クライアント ID スキーム。`CFBundleURLTypes`
+   には、スキームごとに1つの `<dict>`（`CFBundleURLName` + 1スキームだけを含む `CFBundleURLSchemes`
+   配列）を追加する——desktop 版の Compose パッケージングが `keryx` に対してすでに使っている書式と
+   同じ（`composeApp/build.gradle.kts` の `nativeDistributions.macOS.infoPlist.extraKeysRawXml`）：
+
+   ```xml
+   <key>CFBundleURLTypes</key>
+   <array>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>keryx</string>
+           </array>
+       </dict>
+       <dict>
+           <key>CFBundleURLName</key>
+           <string>works.merc.keryx.oauth.googledrive</string>
+           <key>CFBundleURLSchemes</key>
+           <array>
+               <string>com.googleusercontent.apps.NNNN-xxxx</string>
+           </array>
+       </dict>
+   </array>
+   ```
+
+   `com.googleusercontent.apps.NNNN-xxxx` はステップ4で得た実際の逆順クライアント ID に置き換える。
+   Xcode の Info タブの「URL Types」セクション（「+」ボタン）から GUI で追加しても同じ2つのキーが
+   書き込まれるので、XML を手で書く代わりに使える。
+
+   **この登録が必要なのは、desktop 版と同じ経路でリダイレクトを受け取る場合だけ**——ユーザーが
+   システムブラウザーでサインインを完了した後、OS が実行中のアプリに URL を渡す経路
+   （macOS の `NSApplicationDelegate.application(_:open:)`、iOS の `onOpenURL`/
+   `scene(_:openURLContexts:)`）。Swift アプリが代わりに `ASWebAuthenticationSession` で認可 URL を
+   開き、そのスキームを `callbackURLScheme` パラメーターに渡す場合は、セッション自身がリダイレクトを
+   横取りするため、そのスキームに `CFBundleURLTypes` のエントリは不要——両者は択一の受け取り方式で、
+   両方必要というわけではない。
+
+`googledrive.apple.client.id` を空にすると Google Drive が Apple 版だけで隠れる——desktop 版や
+Android 版それぞれの Google Drive キーには影響しない（逆も同様）。仕組みの詳細は
+[sync-architecture.ja.md](sync-architecture.ja.md) の「Apple 版での Google Drive」を、`:shared` の
+appleMain の構成は [app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ
+（SwiftUI）」を参照。
+
+## Apple アプリ用の String Catalog
+
+SwiftUI アプリは Xcode の String Catalog でローカライズする。この String Catalog は Compose アプリ自身の
+`composeResources/values/strings.xml`（日本語。ソース言語かつフォールバック）と `values-en/strings.xml` から生成するので、
+ユーザーに見えるすべての文言について、2 つの UI が単一の情報源を共有する：
+
+```bash
+./gradlew :composeApp:generateStringCatalog
+# -> composeApp/build/generated/stringCatalog/Localizable.xcstrings
+```
+
+生成処理は Android リソースのエスケープ（`\n`、`\'` など）を解決し、位置指定のプレースホルダを Apple 形式に変換し
+（`%1$s` → `%1$@`、`%1$d` → `%1$lld`）、`<plurals>` を plural バリエーションにする。このファイルはビルド成果物なので、
+編集もコミットもしない——変更は `strings.xml` に対して行う。`StringCatalogParityTest`（`desktopTest` で実行され、その前に
+カタログが生成される）は、カタログとリソースのキー・複数形・プレースホルダが食い違うと失敗する。
 
 ## パッケージング
 
@@ -740,7 +845,7 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 
    `.zip` ファイルは `:composeApp:createDistributable` が出力する、インストーラ不要のアプリバンドル／イメージを圧縮したものである。パッケージを経由せずに使いたいユーザー向け。
 
-**バージョンはタグを正とする**。`composeApp/build.gradle.kts` の `appVersion` は
+**バージョンはタグを正とする**。`shared/build.gradle.kts` と `composeApp/build.gradle.kts`（どちらも同じ解決順）の `appVersion` は
 `-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決し、`BuildConfig.VERSION`
 （About 画面表示・更新チェックで使用）を決める — プレリリース接尾辞を含む完全なタグそのもの。
 `composeApp/build.gradle.kts` は別途、プレリリース接尾辞を除去した `appPackageVersion` を導出し、

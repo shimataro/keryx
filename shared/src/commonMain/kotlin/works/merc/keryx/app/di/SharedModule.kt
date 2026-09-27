@@ -1,0 +1,132 @@
+package works.merc.keryx.app.di
+
+import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.koin.core.module.Module
+import org.koin.dsl.module
+import works.merc.keryx.app.core.AppInfo
+import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.SystemClock
+import works.merc.keryx.app.data.local.DatabaseDriverFactory
+import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.FtsSearch
+import works.merc.keryx.app.data.local.LocalSettingsStore
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.data.remote.FaviconResolver
+import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.data.remote.UpdateDownloader
+import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.CloudConnectionService
+import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.FeedRepository
+import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.OpmlImporter
+import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.domain.UpdateChecker
+import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import works.merc.keryx.app.platform.detectInstallLocation
+import works.merc.keryx.app.platform.selfUpdateCheckSupported
+import works.merc.keryx.app.presentation.home.HomeViewModel
+
+/**
+ * Bindings every app built on :shared needs — database, repositories, sync, notifications.
+ *
+ * Not self-contained: the embedding app's own modules must also provide the
+ * [io.ktor.client.HttpClient], token storage, [CloudSession] and the
+ * [works.merc.keryx.app.domain.NotificationMessages] for OS notifications (the Compose app's
+ * `platformModule` and `appModule` do).
+ *
+ * These are functions, not `val`s, on purpose: a Koin module caches its singletons inside its own
+ * definitions, so reusing one module instance for a second graph (a `KeryxSdk` started again after
+ * `close()`, or a test) would hand back the first graph's — possibly closed — instances.
+ */
+fun sharedModule(): Module = module {
+    single<SqlDriver> { DatabaseDriverFactory().create() }
+    single { KeryxDatabase(get()) }
+    single { FtsManager(get<SqlDriver>()) }
+    single { FtsSearch(get<SqlDriver>()) }
+    single { LocalSettingsStore() }
+    single<Clock> { SystemClock }
+    single { NotificationCenter() }
+    single { ActivityCenter() }
+    single { NewArticleNotifier(get()) }
+
+    // Long-lived scope for debounced sync + background work. The handler doesn't change any
+    // existing behavior (SupervisorJob's semantics and every launch/async's own exception handling
+    // are unaffected) — it only keeps an exception that would otherwise reach the platform default
+    // handler (stderr, invisible in a packaged .app with no attached console) from vanishing
+    // without a trace. That silence is exactly what made a launch()-time IllegalArgumentException
+    // in the in-app updater look like a hang instead of a logged failure (see DetachedProcess.kt).
+    single {
+        val exceptionHandler = CoroutineExceptionHandler { _, e -> Log.error("AppScope", "Uncaught coroutine exception", e) }
+        CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
+    }
+
+    single {
+        SyncRepository(
+            driver = get(),
+            db = get(),
+            ftsManager = get(),
+            cloudProvider = { get<CloudSession>().current() },
+            clock = get(),
+            scope = get(),
+            activityCenter = get(),
+            notificationCenter = get(),
+            // localDbPath left at its constructor default (platform/DatabaseFile.kt's
+            // databaseFilePath(), already the platform-correct real DB path on both desktop and
+            // Android) rather than passed here — see that function's own KDoc for why it exists.
+        )
+    }
+    single<SyncScheduler> { get<SyncRepository>() }
+    single { CloudConnectionService(get(), get(), get()) }
+
+    single { FeedFetcher(get()) { get<SettingsRepository>().getReadTimeoutSeconds() } }
+    single { FaviconResolver(get()) }
+
+    single { SettingsRepository(get(), get(), get(), get()) }
+    single { ArticleRepository(get(), get(), get(), get()) }
+    single { TagRepository(get(), get(), get()) }
+    single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { FolderRepository(get(), get(), get(), get()) }
+    single { OpmlImporter(get(), get(), get()) }
+    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
+}
+
+/**
+ * The in-app updater (check → download → install), for apps that update themselves: the Compose
+ * desktop and sideloaded-Android builds. An app store or Sparkle build leaves it out — nothing in
+ * [sharedModule] depends on it. The embedding app provides the
+ * [works.merc.keryx.app.domain.UpdateInstaller].
+ */
+fun updateModule(): Module = module {
+    // Resolved once here rather than left to each of UpdateChecker/UpdateRepository/
+    // DesktopUpdateInstaller's own constructor-default detectInstallLocation() call: that default
+    // exists only so tests can supply a fake location without DI, not as an invitation for three
+    // independent live filesystem probes (InstallLocation.parentWritable actually creates and
+    // deletes a temp file) to disagree with each other, or to run three times on the startup path.
+    single { detectInstallLocation() }
+    single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo, location = get()) }
+    single { UpdateDownloader(get()) }
+    single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), scope = get(), location = get()) }
+    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
+}
+
+/**
+ * The shared screen state holders (see `presentation/`), which every UI binds the same way: the
+ * Compose app's `appModule` and the Apple app's `KeryxSdk` both include it.
+ */
+fun presentationModule(): Module = module {
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+}

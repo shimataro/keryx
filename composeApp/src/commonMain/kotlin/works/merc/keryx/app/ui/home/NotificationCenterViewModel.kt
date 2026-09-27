@@ -1,18 +1,17 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import works.merc.keryx.app.core.AlertKey
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.alertKey
 import works.merc.keryx.app.domain.NotificationCenter
@@ -22,10 +21,10 @@ class NotificationCenterViewModel(
 ) : ViewModel() {
     val items = center.items
 
-    /** A notification whose inline action the user tapped, awaiting a host (HomeScreen) to resolve
-     *  it (e.g. show a confirmation and run it). null when nothing is pending. */
-    var pendingAction by mutableStateOf<AppNotification?>(null)
-        private set
+    /** An action the user asked for, awaiting a host (HomeScreen / App) to resolve it (e.g. show a
+     *  confirmation and run it). null when nothing is pending. */
+    private val _pendingAction = MutableStateFlow<PendingNotificationAction?>(null)
+    val pendingAction: StateFlow<PendingNotificationAction?> = _pendingAction.asStateFlow()
 
     /**
      * Alerts already announced in a transient surface this session (Android's foreground
@@ -72,15 +71,30 @@ class NotificationCenterViewModel(
         surfacedAlerts.update { it + keys }
     }
 
+    /** Requests [notification]'s own action (a no-op for a notification with none). */
     fun requestAction(notification: AppNotification) {
-        pendingAction = notification
+        _pendingAction.value = notification.action?.let { PendingNotificationAction(notification.id, it) }
+    }
+
+    /** Requests [action] on its own, with no notification behind it (e.g. the app menu's "Updates"). */
+    fun requestAction(action: AppNotificationAction) {
+        _pendingAction.value = PendingNotificationAction(notificationId = null, action = action)
     }
 
     fun clearPendingAction() {
-        pendingAction = null
+        _pendingAction.value = null
     }
 
     fun dismiss(id: String) = center.dismiss(id)
 
     fun dismissAll() = center.dismissAll()
 }
+
+/**
+ * A pending [action]. [notificationId] is the notification-center row it came from — so resolving
+ * it can dismiss that row — or null when it was requested without one.
+ */
+data class PendingNotificationAction(
+    val notificationId: String?,
+    val action: AppNotificationAction,
+)

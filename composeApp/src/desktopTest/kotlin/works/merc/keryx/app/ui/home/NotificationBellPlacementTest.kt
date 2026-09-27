@@ -18,6 +18,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import works.merc.keryx.app.presentation.home.HomeViewModel
 
 /**
  * The notification bell's entry point must be reachable from every list-level destination, and

@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.domain.ArticleListRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import works.merc.keryx.app.presentation.formatTimestamp
 
 /**
  * The article card's metadata line used to be a single [androidx.compose.material3.Text] joining
