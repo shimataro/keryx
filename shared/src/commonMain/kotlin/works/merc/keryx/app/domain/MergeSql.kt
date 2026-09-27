@@ -41,8 +41,14 @@ object MergeSql {
     // The user-editable fields folder_id / sort_order / custom_title / deleted_at are intentionally
     // NOT merged in the ON CONFLICT here — each rides its own last-wins timestamp and is handled by
     // a dedicated mergeFeed* statement, so a content refresh that makes this row "newer" can never
-    // clobber a folder move / reorder / rename / unsubscribe from another device. Their values are
-    // still carried in the INSERT so a brand-new feed gets its initial values.
+    // clobber a folder move / reorder / rename / unsubscribe from another device. sort_order /
+    // custom_title / deleted_at are still carried in the INSERT's column list so a brand-new feed
+    // gets its initial values. folder_id / folder_updated_at are the one exception: they are
+    // deliberately absent from the column list entirely (a brand-new feed is inserted with no
+    // folder), because their value can't just be copied verbatim like the others — cloud.folder_id
+    // may reference a folder this device has never seen (main.folders gets its own row from
+    // insertFolders, which must run before this), and only mergeFeedFolderId's FK-safe resolution
+    // (folders before feeds, mergeFeedFolderId after both) is allowed to set it.
     private val feeds = """
         INSERT INTO main.feeds (
             id, url, site_url, title, description, favicon_url, etag, last_modified,
