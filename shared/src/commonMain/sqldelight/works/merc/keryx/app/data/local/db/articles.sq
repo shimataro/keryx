@@ -194,8 +194,16 @@ UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ?;
 updateStarStatus:
 UPDATE articles SET is_starred = ?, starred_at = ?, updated_at = ? WHERE id = ?;
 
+-- The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
+-- the corresponding plain list query (watchAll/watchByTag, both INNER JOIN feeds ... f.deleted_at
+-- IS NULL): otherwise "mark all read" on All Feeds / a tag would also mark read an article
+-- belonging to an unsubscribed (soft-deleted) feed, which never appears in that list. Unlike
+-- watchAll/watchByTag, markAllReadByFeed/markAllReadByFolder don't need this — a soft-deleted
+-- feed can't be the one directly selected, nor carry a folder assignment worth acting on.
 markAllReadAll:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE is_read = 0 AND deleted_at IS NULL;
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
+WHERE is_read = 0 AND deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM feeds f WHERE f.id = articles.feed_id AND f.deleted_at IS NULL);
 
 markAllReadByFeed:
 UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE feed_id = ? AND is_read = 0 AND deleted_at IS NULL;
@@ -203,7 +211,9 @@ UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE feed_id = ? A
 markAllReadByTag:
 UPDATE articles SET is_read = 1, read_at = ?, updated_at = ?
 WHERE is_read = 0 AND deleted_at IS NULL AND feed_id IN (
-    SELECT feed_id FROM feed_tags WHERE tag_id = ? AND deleted_at IS NULL
+    SELECT ft.feed_id FROM feed_tags ft
+    INNER JOIN feeds f ON f.id = ft.feed_id
+    WHERE ft.tag_id = ? AND ft.deleted_at IS NULL AND f.deleted_at IS NULL
 );
 
 markAllReadByFolder:

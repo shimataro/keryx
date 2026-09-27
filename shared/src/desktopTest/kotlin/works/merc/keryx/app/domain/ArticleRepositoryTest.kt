@@ -548,6 +548,54 @@ class ArticleRepositoryTest {
     }
 
     @Test
+    fun markAllAsReadAllSkipsArticlesOfAnUnsubscribedFeed() {
+        // watchAll (the plain All Feeds list) INNER JOINs feeds and requires f.deleted_at IS NULL,
+        // so an article whose feed was unsubscribed never appears there — markAllAsRead(All) must
+        // act on the same row set, or it silently marks read an article the user never saw listed
+        // (e.g. one still reachable from Starred, which doesn't join feeds).
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2", deletedAt = 5L)
+            db.insertArticle("a1", "f1")
+            db.insertArticle("a2", "f2", isStarred = 1L)
+            val repo = newRepo(db, driver)
+
+            repo.markAllAsRead(ArticleFilter.All)
+
+            assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+            assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun markAllAsReadTagSkipsArticlesOfAnUnsubscribedFeed() {
+        // Mirrors watchByTag, which INNER JOINs feeds (f.deleted_at IS NULL) in addition to
+        // feed_tags — an unsubscribed feed's article must stay untouched even if it still carries
+        // the tag link.
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertFeed("f2", deletedAt = 5L)
+            db.insertTag("t1", "Tag1")
+            db.insertFeedTag("f1", "t1")
+            db.insertFeedTag("f2", "t1")
+            db.insertArticle("a1", "f1")
+            db.insertArticle("a2", "f2", isStarred = 1L)
+            val repo = newRepo(db, driver)
+
+            repo.markAllAsRead(ArticleFilter.Tag("t1"))
+
+            assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+            assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun markAllAsReadStarredIsNoOp() {
         val (driver, db) = inMemoryDb()
         try {
