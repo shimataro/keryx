@@ -89,7 +89,11 @@ class FileTokenStorage(
         file.takeIf { it.exists() }
             ?.let {
                 runCatching { json.decodeFromString<OAuthTokens>(it.readText()) }
-                    .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be read/decoded", e) }
+                    // Logs only the exception's type, never the exception itself: kotlinx.serialization's
+                    // JsonDecodingException embeds the offending input (i.e. the token payload) in its
+                    // own message, which Log.warn(tag, message, throwable) would otherwise write
+                    // straight into the log file — same fix as SecretStoreTokenStorage.load().
+                    .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Token file could not be decoded (${e::class.simpleName})") }
                     .getOrNull()
             }
 
