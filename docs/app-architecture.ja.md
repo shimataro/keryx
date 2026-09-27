@@ -1168,13 +1168,17 @@ sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプ�
 （`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`。Koin は内部に隠す）を構築し、DB を開き——
 `DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・
 `newArticleNotifier`（新着記事が見つかった更新ごとの新着テキスト。OS 通知の送り先にも渡される）・`syncRepository`・
-`settingsRepository`・`cloudSession`・`cloudConnectionService`・`availableCloudTypes`（このビルドで設定済みの
+`settingsRepository`・`cloudSession`・`availableCloudTypes`（このビルドで設定済みの
 クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`
-を提供する。`cloudConnectionService`（`domain/CloudConnectionService.kt`）は、どの UI の接続・切断も従うべき順序を
-保持し、Compose の設定画面・セットアップ画面とも共有する：`completeConnect(type, tokens)` はトークンを保存し、
-プロバイダーを選択し、同期を始める前にローカル設定をフラッシュする。`tearDown(type)` は切断（トークンを失効）し、
-同期失敗状態とプロバイダーごとの同期マーカーを消去し、プロバイダーの選択を解除する。対話的な OAuth フローの待機と
-初回同期の開始は各 UI に残る。どちらの呼び出しも Keychain でブロックしうるので、呼び出し側はメインスレッド外で実行する。`dataDirectory` は、
+を提供する。`completeConnect(type, tokens)` と `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
+（どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
+`suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を
+フラッシュする。`tearDown` は切断（トークンを失効）し、同期失敗状態とプロバイダーごとの同期マーカーを消去し、
+プロバイダーの選択を解除する。対話的な OAuth フローの待機と初回同期の開始は各 UI に残る。
+`CloudConnectionService` 自体の呼び出しは Keychain でブロックしうるので——下記の `prepareSearchIndex()` と同様に
+——`KeryxSdk` がその実行を SDK 自身のバックグラウンドスコープに乗せて結果を待つ。生のサービスをそのまま渡して
+Swift の `@MainActor` 呼び出し元がメインスレッド外へのディスパッチ（Compose 側の `withContext(dispatcher)` に相当
+するもの）を自前で行うことは期待していない。`dataDirectory` は、
 すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。`close()` は、
 まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
 HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。

@@ -17,6 +17,7 @@ import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.applePlatformModule
 import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
+import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.NewArticleNotifier
@@ -57,9 +58,6 @@ class KeryxSdk private constructor(private val koin: Koin) {
     val settingsRepository: SettingsRepository get() = koin.get()
 
     val cloudSession: CloudSession get() = koin.get()
-
-    /** Saves a connect's tokens and provider selection, and tears a connection down, in the required order. */
-    val cloudConnectionService: CloudConnectionService get() = koin.get()
 
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> get() = CloudStorageAvailability.available
@@ -128,6 +126,32 @@ class KeryxSdk private constructor(private val koin: Koin) {
     @Throws(Exception::class, CancellationException::class)
     suspend fun prepareSearchIndexIfAbsent() {
         koin.get<CoroutineScope>().async { koin.get<FtsManager>().ensureIndexedIfTableAbsent() }.await()
+    }
+
+    /**
+     * Records a successful authorization: saves [tokens], selects [type] as the active provider,
+     * and flushes local settings before any sync may start — see [CloudConnectionService.completeConnect].
+     * Runs on the app's background scope, like [prepareSearchIndex]: [CloudConnectionService]'s own
+     * KDoc requires its caller to run off the main thread (it may block on the Keychain), and unlike
+     * the Compose UI — which wraps every call in its own `withContext(dispatcher)` — a Swift caller
+     * has no equivalent dispatcher to switch onto, so the SDK does it here instead of leaving Swift
+     * to invoke this straight from its `@MainActor` call site.
+     */
+    @Throws(Exception::class, CancellationException::class)
+    suspend fun completeConnect(type: CloudStorageType, tokens: OAuthTokens) {
+        val service = koin.get<CloudConnectionService>()
+        koin.get<CoroutineScope>().async { service.completeConnect(type, tokens) }.await()
+    }
+
+    /**
+     * Disconnects [type] and clears everything a subsequent connect must not inherit — see
+     * [CloudConnectionService.tearDown]. Runs on the app's background scope; see [completeConnect]'s
+     * own KDoc for why.
+     */
+    @Throws(Exception::class, CancellationException::class)
+    suspend fun tearDownConnection(type: CloudStorageType) {
+        val service = koin.get<CloudConnectionService>()
+        koin.get<CoroutineScope>().async { service.tearDown(type) }.await()
     }
 
     companion object {

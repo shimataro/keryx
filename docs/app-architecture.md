@@ -1172,15 +1172,19 @@ graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, K
 opens the database — a `DatabaseTooNewException` surfaces here as a Swift error — and hands out
 `homeViewModel`, `notificationCenter`, `newArticleNotifier` (the new-articles text of every refresh
 that found some, also passed to the OS notification sink), `syncRepository`, `settingsRepository`,
-`cloudSession`, `cloudConnectionService`, `availableCloudTypes` (the cloud providers configured in
-this build, in display order — `CloudStorageAvailability.available`), `newAddFeedController()` and
-`handleOAuthRedirect(url)`. `cloudConnectionService` (`domain/CloudConnectionService.kt`) holds the
-ordering every UI's connect/disconnect must follow, shared with the Compose settings and setup
-screens: `completeConnect(type, tokens)` saves the tokens, selects the provider and flushes the
-local settings before any sync may start, and `tearDown(type)` disconnects (revoking the tokens),
-clears the sync failure state and per-provider sync markers, and clears the provider selection.
-Awaiting the interactive OAuth flow and starting the initial sync stay with each UI. Both calls may
-block on the Keychain, so the caller runs them off its main thread. `dataDirectory` puts every app directory
+`cloudSession`, `availableCloudTypes` (the cloud providers configured in this build, in display
+order — `CloudStorageAvailability.available`), `newAddFeedController()` and
+`handleOAuthRedirect(url)`. `completeConnect(type, tokens)` and `tearDownConnection(type)` are
+`suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
+connect/disconnect must follow, shared with the Compose settings and setup screens:
+`completeConnect` saves the tokens, selects the provider and flushes the local settings before any
+sync may start, and `tearDown` disconnects (revoking the tokens), clears the sync failure state and
+per-provider sync markers, and clears the provider selection. Awaiting the interactive OAuth flow
+and starting the initial sync stay with each UI. `CloudConnectionService`'s own calls may block on
+the Keychain, so — like `prepareSearchIndex()` below — `KeryxSdk` runs them on the SDK's own
+background scope itself and awaits the result, rather than exposing the raw service and trusting a
+Swift `@MainActor` call site to dispatch off its own thread the way the Compose UI's
+`withContext(dispatcher)` does. `dataDirectory` puts every app directory
 under a given path, for previews and tests that must not open the user's real data. `close()` stops
 and joins every coroutine that can still read the database before closing it, flushes and stops
 the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
