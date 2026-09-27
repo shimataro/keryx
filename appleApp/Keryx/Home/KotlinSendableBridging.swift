@@ -8,3 +8,4 @@ import KeryxShared
 /// Kotlin's coroutine model already guarantees, rather than working around a real data race.
 extension AddFeedController: @unchecked Sendable {}
 extension OpmlTransfer: @unchecked Sendable {}
+extension KeryxSdk: @unchecked Sendable {}

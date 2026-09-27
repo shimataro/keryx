@@ -111,18 +111,20 @@ struct FeedListView: View {
     @ViewBuilder
     private func folderSection(_ folder: Folders) -> some View {
         let isCollapsed = home.collapsedFolderIds.contains(folder.id)
+        let instance = FeedListRowSelectionFolder(folderId: folder.id)
         Section {
             Button {
-                home.viewModel.toggleFolderCollapsed(folderId: folder.id)
+                home.viewModel.selectFilter(filter: instance.filter, instance: instance)
             } label: {
                 HStack {
-                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
+                    expandChevron(expanded: !isCollapsed) {
+                        home.viewModel.toggleFolderCollapsed(folderId: folder.id)
+                    }
                     Text(folder.name)
                     Spacer()
                     unreadBadge(home.unreadByFolder[folder.id] ?? 0)
                 }
+                .selectableRowLabel(selectionBackground(for: instance))
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -163,9 +165,10 @@ struct FeedListView: View {
     @ViewBuilder
     private func tagSection(_ tag: Tags) -> some View {
         let isExpanded = home.expandedTagIds.contains(tag.id)
+        let instance = FeedListRowSelectionTag(tagId: tag.id)
         Section {
             Button {
-                home.viewModel.toggleTagExpanded(tagId: tag.id)
+                home.viewModel.selectFilter(filter: instance.filter, instance: instance)
             } label: {
                 HStack {
                     Circle()
@@ -174,10 +177,11 @@ struct FeedListView: View {
                     Text(tag.name)
                     Spacer()
                     unreadBadge(home.unreadByTag[tag.id] ?? 0)
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
+                    expandChevron(expanded: isExpanded) {
+                        home.viewModel.toggleTagExpanded(tagId: tag.id)
+                    }
                 }
+                .selectableRowLabel(selectionBackground(for: instance))
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -245,9 +249,6 @@ struct FeedListView: View {
         isGone: Bool = false,
         instance: FeedListRowSelection,
     ) -> some View {
-        let isPrimary = feedListRowSelectionsEqual(instance, home.selectedRowInstance)
-        let isSecondary = !isPrimary && articleFiltersEqual(instance.filter, home.filter)
-
         Button {
             home.viewModel.selectFilter(filter: instance.filter, instance: instance)
         } label: {
@@ -268,13 +269,37 @@ struct FeedListView: View {
                 unreadBadge(unreadCount)
             }
             .padding(.vertical, 2)
-            .listRowBackground(
-                isPrimary ? Color.accentColor.opacity(0.25)
-                    : isSecondary ? Color.accentColor.opacity(0.10)
-                    : Color.clear
-            )
+            .selectableRowLabel(selectionBackground(for: instance))
         }
         .buttonStyle(.plain)
+    }
+
+    /// Mirrors the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s `toneFor`): the instance
+    /// actually clicked/navigated to is the strong PRIMARY tint (dimmed while the sidebar lacks
+    /// focus), and every other rendered copy of the same filter — a feed shown under both its
+    /// folder group and an expanded tag — is a faint SECONDARY echo.
+    private func selectionBackground(for instance: FeedListRowSelection) -> Color {
+        if feedListRowSelectionsEqual(instance, home.selectedRowInstance) {
+            return focusedPane.wrappedValue == .feedList ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.2)
+        }
+        if articleFiltersEqual(instance.filter, home.filter) {
+            return Color.accentColor.opacity(0.10)
+        }
+        return .clear
+    }
+
+    /// A folder/tag header's expand/collapse control — a button of its own so that clicking the
+    /// rest of the header selects it instead, as in the Compose app.
+    private func expandChevron(expanded: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+                .frame(width: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L(expanded ? "home_collapse" : "home_expand"))
     }
 
     @ViewBuilder
@@ -284,6 +309,18 @@ struct FeedListView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private extension View {
+    /// Paints a row label's selection tint as a capsule background (macOS source-list style) and
+    /// widens the tap/click target to the row's full width — `.listRowBackground` does not reliably
+    /// paint through `.sidebar`-style `List` rows, so the tint has to live on the label itself.
+    func selectableRowLabel(_ background: Color) -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .padding(.horizontal, 4)
+            .background(RoundedRectangle(cornerRadius: 5).fill(background))
     }
 }
 
