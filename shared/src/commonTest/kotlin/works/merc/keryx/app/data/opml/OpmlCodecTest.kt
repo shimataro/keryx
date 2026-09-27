@@ -120,6 +120,29 @@ class OpmlCodecTest {
     }
 
     @Test
+    fun exportDropsC0ControlCharactersThatWouldBreakWellFormedXml() {
+        // U+0001 (SOH) and U+0007 (BEL) have no XML 1.0 entity and are illegal outright; tab/LF/CR
+        // are the only C0 controls XML permits and must survive untouched.
+        val groups = listOf(
+            null to listOf(
+                OpmlCodec.ExportFeed(
+                    title = "Bad\u0001Title\u0007Here\tTab",
+                    xmlUrl = "https://a.com/feed",
+                    htmlUrl = null,
+                ),
+            ),
+        )
+        val xml = OpmlCodec.export(groups)
+        assertFalse(xml.contains('\u0001'))
+        assertFalse(xml.contains('\u0007'))
+        assertTrue(xml.contains('\t'))
+
+        val reimported = OpmlCodec.import(xml)
+        assertEquals(1, reimported.size)
+        assertEquals("BadTitleHere\tTab", reimported[0].title)
+    }
+
+    @Test
     fun exportOfFlatUnfolderedFeedsEmitsThemAtTopLevelWithoutAnyFolderOutline() {
         val groups = listOf(
             null to listOf(

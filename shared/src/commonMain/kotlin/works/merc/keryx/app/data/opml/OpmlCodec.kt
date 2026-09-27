@@ -127,13 +127,21 @@ object OpmlCodec {
         return null
     }
 
+    /**
+     * Escapes [s] for use inside an XML attribute value, dropping any C0 control character
+     * (U+0000–U+001F other than tab/LF/CR) that XML 1.0 forbids outright — there is no entity
+     * that escapes them, so a feed title/folder name/URL that happens to contain one (e.g. copied
+     * from a terminal's control sequence, or a feed's own malformed metadata) would otherwise
+     * produce a non-well-formed document that other RSS readers refuse to import.
+     */
     private fun escape(s: String): String = buildString(s.length) {
-        for (c in s) when (c) {
-            '&' -> append("&amp;")
-            '<' -> append("&lt;")
-            '>' -> append("&gt;")
-            '"' -> append("&quot;")
-            '\'' -> append("&apos;")
+        for (c in s) when {
+            c == '&' -> append("&amp;")
+            c == '<' -> append("&lt;")
+            c == '>' -> append("&gt;")
+            c == '"' -> append("&quot;")
+            c == '\'' -> append("&apos;")
+            c.code < 0x20 && c != '\t' && c != '\n' && c != '\r' -> Unit
             else -> append(c)
         }
     }
