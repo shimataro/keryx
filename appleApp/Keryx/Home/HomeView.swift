@@ -134,9 +134,9 @@ struct HomeView: View {
 
         switch shortcut {
         case .escape:
-            // Cancelling an in-progress drag (matching Compose's own `onEscape`, `HomeScreen.kt`)
-            // isn't wired up here — that state (`draggingItem`/`activeBoundary`) lives in
-            // `FeedListView`, not `HomeView` — so this never actually does anything yet. Reporting
+            // An in-progress sidebar drag is a system drag session, which cancels itself on Escape
+            // before this handler sees the key (Compose's own `onEscape`, `HomeScreen.kt`, has to
+            // do that by hand), so there is nothing to do here. Reporting
             // `.ignored` (rather than `.handled` for a key that does nothing) lets the key still
             // reach macOS's own responder chain, e.g. to exit full screen. Does not hide search
             // results either way: a hidden bar with the query still in the field would show stale

@@ -84,8 +84,12 @@ targets:
               public.filename-extension:
                 - opml
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: works.merc.keryx.app.feedlistitem
-            UTTypeDescription: Keryx Feed List Drag Item
+          - UTTypeIdentifier: works.merc.keryx.app.feedlistitem.feed
+            UTTypeDescription: Keryx Feed List Feed
+            UTTypeConformsTo:
+              - public.data
+          - UTTypeIdentifier: works.merc.keryx.app.feedlistitem.folder
+            UTTypeDescription: Keryx Feed List Folder
             UTTypeConformsTo:
               - public.data
     prebuildScripts:

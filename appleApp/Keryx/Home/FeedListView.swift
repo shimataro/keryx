@@ -20,12 +20,13 @@ struct FeedListView: View {
     /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
     @State private var appearedRowKeys: Set<String> = []
 
-    // Drag-and-drop state, shared across every row/header via `feedListDropTarget` — mirrors
-    // Compose's own `activeBoundaryState`/`hoveredAttachTagIdState`/`draggedFeedIdState`
-    // (`FeedListDragController.kt`). See `FeedListDragAndDrop.swift` for the shared drop-resolution
-    // wiring and `FeedListDropPresentation.swift` for how a hover maps to macOS drag feedback.
+    // Drag-and-drop state: the item being dragged, and which row a dragged feed is over for the
+    // drop-onto highlight and spring-loading — mirrors Compose's own
+    // `draggedFeedIdState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`). Insertion
+    // between rows is the outline's own `.onInsert`, which draws the insertion line itself. See
+    // `FeedListDragAndDrop.swift` for the drop wiring and `FeedListDropPresentation.swift` for the
+    // rules behind it.
     @State private var draggingItem: FeedListDragPayload?
-    @State private var activeBoundary: DropBoundary?
     @State private var dropOnKey: FeedListHoverKey?
     @State private var hoveredKey: FeedListHoverKey?
 
@@ -130,6 +131,9 @@ struct FeedListView: View {
                     ForEach(sortedFolders, id: \.id) { folder in
                         folderGroup(folder)
                     }
+                    .onInsert(of: [feedListFolderDragType]) { offset, _ in
+                        insert(into: .folders(folderIds: sortedFolders.map(\.id)), at: offset)
+                    }
                 }
             }
             // Always present — even with no unassigned feeds — so a feed can still be dragged out
@@ -139,6 +143,9 @@ struct FeedListView: View {
             Section {
                 ForEach(unassignedFeeds, id: \.id) { feed in
                     feedRow(feed, instance: FeedListRowSelectionFeedInFolderGroup(feedId: feed.id))
+                }
+                .onInsert(of: [feedListFeedDragType]) { offset, _ in
+                    insert(into: .feeds(folderId: nil, feedIds: unassignedFeeds.map(\.id)), at: offset)
                 }
             } header: {
                 noFolderHeader
@@ -174,6 +181,13 @@ struct FeedListView: View {
                 home.viewModel.selectFilter(filter: instance.filter, instance: instance)
             }
         )
+    }
+
+    /// A drop between rows, from a `ForEach`'s `.onInsert` — see `performFeedListInsert`.
+    private func insert(into group: FeedListInsertGroup, at offset: Int) {
+        dropOnKey = nil
+        hoveredKey = nil
+        performFeedListInsert(into: group, at: offset, draggingItem: $draggingItem, index: dropIndex, home: home)
     }
 
     private var orderedRows: [FeedListRowSelection] {
@@ -300,21 +314,12 @@ struct FeedListView: View {
         Text(L("home_no_folder"))
             .feedListDropHighlight(dropOnKey == .noFolder)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // The folder level's "append after the last folder" boundary: this header is always
-            // the first row after the last folder's group, expanded or not. A feed dropped onto this
-            // header is highlighted instead (`dropOnKey`), with no line.
-            .overlay(alignment: .top) {
-                if dropBoundariesEqual(activeBoundary, DropBoundaryAppendFolders.shared) {
-                    FeedListInsertionLine()
-                }
-            }
             .feedListDropTarget(
                 FeedListDropTargetNoFolderHeader.shared,
                 hoverKey: .noFolder,
                 home: home,
                 index: dropIndex,
                 draggingItem: $draggingItem,
-                activeBoundary: $activeBoundary,
                 dropOnKey: $dropOnKey,
                 hoveredKey: $hoveredKey
             )
@@ -338,6 +343,9 @@ struct FeedListView: View {
             ForEach(feedsIn(folder: folder), id: \.id) { feed in
                 feedRow(feed, instance: FeedListRowSelectionFeedInFolderGroup(feedId: feed.id))
             }
+            .onInsert(of: [feedListFeedDragType]) { offset, _ in
+                insert(into: .feeds(folderId: folder.id, feedIds: feedsIn(folder: folder).map(\.id)), at: offset)
+            }
         } label: {
             Label(folder.name, systemImage: "folder")
                 .lineLimit(1)
@@ -354,21 +362,12 @@ struct FeedListView: View {
                     Button(L("home_delete_folder_menu"), role: .destructive) { dialogs.deletingFolder = folder }
                 }
                 .feedListDraggable(FeedListDragPayload(kind: .folder, id: folder.id), draggingItem: $draggingItem)
-                // Only the folder-level boundary is drawn on a folder row. A feed dropped onto it is
-                // highlighted instead (`dropOnKey`); the "after the last folder" boundary is drawn by
-                // the "No folder" header that always follows (`noFolderHeader`).
-                .overlay(alignment: .top) {
-                    if dropBoundariesEqual(activeBoundary, DropBoundaryBeforeFolder(folderId: folder.id)) {
-                        FeedListInsertionLine()
-                    }
-                }
                 .feedListDropTarget(
                     FeedListDropTargetFolderHeader(folderId: folder.id),
                     hoverKey: .folder(folder.id),
                     home: home,
                     index: dropIndex,
                     draggingItem: $draggingItem,
-                    activeBoundary: $activeBoundary,
                     dropOnKey: $dropOnKey,
                     hoveredKey: $hoveredKey
                 )
@@ -402,7 +401,7 @@ struct FeedListView: View {
         let instance = FeedListRowSelectionTag(tagId: tag.id)
         return DisclosureGroup(isExpanded: tagExpandedBinding(tag.id)) {
             ForEach(feeds(taggedWith: tag), id: \.id) { feed in
-                feedRow(feed, instance: FeedListRowSelectionFeedInTag(feedId: feed.id, tagId: tag.id), isDropTarget: false)
+                feedRow(feed, instance: FeedListRowSelectionFeedInTag(feedId: feed.id, tagId: tag.id))
             }
         } label: {
             TagRowLabel(
@@ -414,7 +413,6 @@ struct FeedListView: View {
                 echoBackground: echoBackground(for:),
                 dropIndex: dropIndex,
                 draggingItem: $draggingItem,
-                activeBoundary: $activeBoundary,
                 dropOnKey: $dropOnKey,
                 hoveredKey: $hoveredKey
             )
@@ -423,12 +421,12 @@ struct FeedListView: View {
 
     // MARK: - Rows
 
-    /// - Parameter isDropTarget: `false` for a feed's copy nested under an expanded tag — such a
-    ///   row can still be *dragged* (moved into a folder, reordered), but is never itself a drop
-    ///   target, matching Compose's own `FeedListRowKey.Other` classification for it
-    ///   (`FeedListDragAndDrop.kt`'s own `parseFeedListRowKey`).
-    @ViewBuilder
-    private func feedRow(_ feed: Feeds, instance: FeedListRowSelection, isDropTarget: Bool = true) -> some View {
+    /// A feed row is only ever a drag *source*: a feed is dropped between feed rows (the
+    /// enclosing `ForEach`'s `.onInsert`), never onto one. A copy nested under an expanded tag is
+    /// draggable too, but its tag's `ForEach` takes no insertions — matching Compose's own
+    /// `FeedListRowKey.Other` classification for it (`FeedListDragAndDrop.kt`'s own
+    /// `parseFeedListRowKey`).
+    private func feedRow(_ feed: Feeds, instance: FeedListRowSelection) -> some View {
         row(
             title: feed.displayTitle(),
             faviconUrl: feed.favicon_url,
@@ -438,34 +436,6 @@ struct FeedListView: View {
             instance: instance,
         )
         .feedListDraggable(FeedListDragPayload(kind: .feed, id: feed.id), draggingItem: $draggingItem)
-        .overlay(alignment: .top) {
-            // Guarded by `isDropTarget` for the same reason as the bottom overlay below: a feed's
-            // copy nested under an expanded tag is never itself a drop target, so it must never draw
-            // the `BeforeFeed` boundary its folder-group copy already draws for the same feed.
-            if isDropTarget, dropBoundariesEqual(activeBoundary, DropBoundaryBeforeFeed(feedId: feed.id)) {
-                FeedListInsertionLine()
-            }
-        }
-        .overlay(alignment: .bottom) {
-            // The last feed in its group also carries the group's own "append to the end" boundary
-            // — matches Compose's own paired top/bottom markers resolving to the same boundary
-            // from either side (`FeedListDragAndDrop.kt`'s `insertionMarkers`).
-            if isDropTarget, dropIndex.nextFeedInGroup[feed.id] == nil,
-               dropBoundariesEqual(activeBoundary, DropBoundaryAppendFeeds(folderId: feed.folder_id)) {
-                FeedListInsertionLine()
-            }
-        }
-        .modifier(ConditionalFeedListDropTarget(
-            isEnabled: isDropTarget,
-            target: FeedListDropTargetFeedRow(feedId: feed.id),
-            hoverKey: .feed(feed.id),
-            home: home,
-            index: dropIndex,
-            draggingItem: $draggingItem,
-            activeBoundary: $activeBoundary,
-            dropOnKey: $dropOnKey,
-            hoveredKey: $hoveredKey
-        ))
         .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
@@ -655,7 +625,6 @@ private struct TagRowLabel: View {
     let echoBackground: (FeedListRowSelection) -> Color
     let dropIndex: FeedListDropIndex
     @Binding var draggingItem: FeedListDragPayload?
-    @Binding var activeBoundary: DropBoundary?
     @Binding var dropOnKey: FeedListHoverKey?
     @Binding var hoveredKey: FeedListHoverKey?
 
@@ -687,7 +656,6 @@ private struct TagRowLabel: View {
             home: home,
             index: dropIndex,
             draggingItem: $draggingItem,
-            activeBoundary: $activeBoundary,
             dropOnKey: $dropOnKey,
             hoveredKey: $hoveredKey
         )

@@ -1,3 +1,4 @@
+import Foundation
 import KeryxShared
 import Testing
 
@@ -9,49 +10,112 @@ struct FeedListDropPresentationTests {
     // MARK: - feedListDropFeedback
 
     @Test
-    func noBoundaryAndNoTagIsInvalid() {
-        #expect(feedListDropFeedback(isFeedDrag: false, hoverKey: .folder("d1"), boundary: nil, attachTagId: nil) == .invalid)
-        #expect(feedListDropFeedback(isFeedDrag: true, hoverKey: .feed("f1"), boundary: nil, attachTagId: nil) == .invalid)
+    func onlyAFeedIsDroppedOntoARow() {
+        #expect(feedListDropFeedback(for: .feed) == .dropOn)
+        #expect(feedListDropFeedback(for: .folder) == .invalid)
+    }
+
+    // MARK: - FeedListInsertGroup.accepts
+
+    @Test
+    func eachGroupAcceptsOnlyItsOwnKind() {
+        #expect(FeedListInsertGroup.feeds(folderId: "d1", feedIds: []).accepts(.feed))
+        #expect(!FeedListInsertGroup.feeds(folderId: "d1", feedIds: []).accepts(.folder))
+        #expect(FeedListInsertGroup.folders(folderIds: []).accepts(.folder))
+        #expect(!FeedListInsertGroup.folders(folderIds: []).accepts(.feed))
+    }
+
+    // MARK: - feedListInsertTarget
+
+    private func feedRowTarget(_ insert: (target: FeedListDropTarget, half: FeedListRowHalf)?) -> (String, FeedListRowHalf)? {
+        guard let insert, let row = insert.target as? FeedListDropTargetFeedRow else { return nil }
+        return (row.feedId, insert.half)
+    }
+
+    private func folderHeaderTarget(_ insert: (target: FeedListDropTarget, half: FeedListRowHalf)?) -> (String, FeedListRowHalf)? {
+        guard let insert, let header = insert.target as? FeedListDropTargetFolderHeader else { return nil }
+        return (header.folderId, insert.half)
     }
 
     @Test
-    func feedOverHeaderIsDropOn() {
-        #expect(feedListDropFeedback(
-            isFeedDrag: true, hoverKey: .folder("d1"), boundary: DropBoundaryBeforeFeed(feedId: "f1"), attachTagId: nil
-        ) == .dropOn)
-        #expect(feedListDropFeedback(
-            isFeedDrag: true, hoverKey: .noFolder, boundary: DropBoundaryAppendFeeds(folderId: nil), attachTagId: nil
-        ) == .dropOn)
-        #expect(feedListDropFeedback(isFeedDrag: true, hoverKey: .tag("t1"), boundary: nil, attachTagId: "t1") == .dropOn)
+    func insertingBeforeAFeedIsThatFeedsTopHalf() {
+        let group = FeedListInsertGroup.feeds(folderId: "d1", feedIds: ["f1", "f2", "f3"])
+        #expect(feedRowTarget(feedListInsertTarget(in: group, at: 0)).map { $0 == ("f1", .top) } == true)
+        #expect(feedRowTarget(feedListInsertTarget(in: group, at: 2)).map { $0 == ("f3", .top) } == true)
     }
 
     @Test
-    func feedOverFeedRowIsInsertion() {
-        #expect(feedListDropFeedback(
-            isFeedDrag: true, hoverKey: .feed("f2"), boundary: DropBoundaryBeforeFeed(feedId: "f2"), attachTagId: nil
-        ) == .insertion)
+    func insertingAtTheEndIsTheLastFeedsBottomHalf() {
+        let group = FeedListInsertGroup.feeds(folderId: nil, feedIds: ["f1", "f2"])
+        #expect(feedRowTarget(feedListInsertTarget(in: group, at: 2)).map { $0 == ("f2", .bottom) } == true)
     }
 
     @Test
-    func folderOverFolderHeaderIsInsertion() {
-        #expect(feedListDropFeedback(
-            isFeedDrag: false, hoverKey: .folder("d2"), boundary: DropBoundaryBeforeFolder(folderId: "d2"), attachTagId: nil
-        ) == .insertion)
-    }
-
-    // MARK: - feedListRowHalf
-
-    @Test
-    func rowHalfSplitsAtMidpoint() {
-        #expect(feedListRowHalf(locationY: 0, rowHeight: 20) == .top)
-        #expect(feedListRowHalf(locationY: 9.9, rowHeight: 20) == .top)
-        #expect(feedListRowHalf(locationY: 10, rowHeight: 20) == .bottom)
-        #expect(feedListRowHalf(locationY: 19, rowHeight: 20) == .bottom)
+    func insertingIntoAnEmptyGroupTargetsItsHeader() {
+        let folder = feedListInsertTarget(in: .feeds(folderId: "d1", feedIds: []), at: 0)
+        #expect(folderHeaderTarget(folder).map { $0 == ("d1", .top) } == true)
+        let unfoldered = feedListInsertTarget(in: .feeds(folderId: nil, feedIds: []), at: 0)
+        #expect(unfoldered?.target is FeedListDropTargetNoFolderHeader)
     }
 
     @Test
-    func unmeasuredRowResolvesToTop() {
-        #expect(feedListRowHalf(locationY: 15, rowHeight: 0) == .top)
+    func insertingAmongFoldersTargetsFolderHeaders() {
+        let group = FeedListInsertGroup.folders(folderIds: ["d1", "d2"])
+        #expect(folderHeaderTarget(feedListInsertTarget(in: group, at: 1)).map { $0 == ("d2", .top) } == true)
+        #expect(folderHeaderTarget(feedListInsertTarget(in: group, at: 2)).map { $0 == ("d2", .bottom) } == true)
+        #expect(feedListInsertTarget(in: .folders(folderIds: []), at: 0) == nil)
+    }
+
+    // MARK: - feedListInsertTarget through the shared rules
+
+    /// Folder `d1` holds `f1`, `f2`; `f3` is unfoldered; folders are `d1`, `d2`. A Kotlin `null`
+    /// map value is `NSNull` on this side.
+    private let dropIndex = FeedListDropIndex(
+        folderIdOfFeed: ["f1": "d1", "f2": "d1", "f3": NSNull()],
+        nextFeedInGroup: ["f1": "f2", "f2": NSNull(), "f3": NSNull()],
+        firstFeedIdOfGroup: ["d1": "f1", "d2": NSNull(), NSNull(): "f3"],
+        nextFolderId: ["d1": "d2", "d2": NSNull()]
+    )
+
+    private func resolvedMove(_ feedId: String, into group: FeedListInsertGroup, at offset: Int) -> FeedListDropActionMoveFeed? {
+        guard let insert = feedListInsertTarget(in: group, at: offset) else { return nil }
+        return FeedListDragKt.resolveFeedListDropAction(
+            item: FeedListDraggedItemFeed(feedId: feedId), target: insert.target, half: insert.half, index: dropIndex
+        ) as? FeedListDropActionMoveFeed
+    }
+
+    @Test
+    func movingAFeedToTheEndOfAFolderAppends() {
+        let move = resolvedMove("f3", into: .feeds(folderId: "d1", feedIds: ["f1", "f2"]), at: 2)
+        #expect(move?.folderId == "d1")
+        #expect(move != nil && move?.targetFeedId == nil)
+    }
+
+    @Test
+    func movingAFeedBetweenFeedsInsertsBeforeTheNextOne() {
+        let move = resolvedMove("f3", into: .feeds(folderId: "d1", feedIds: ["f1", "f2"]), at: 1)
+        #expect(move?.folderId == "d1")
+        #expect(move?.targetFeedId == "f2")
+    }
+
+    @Test
+    func movingAFeedIntoAnEmptyFolderLandsInIt() {
+        let move = resolvedMove("f3", into: .feeds(folderId: "d2", feedIds: []), at: 0)
+        #expect(move?.folderId == "d2")
+        #expect(move != nil && move?.targetFeedId == nil)
+    }
+
+    @Test
+    func reorderingAFolderToTheEndAppends() {
+        guard let insert = feedListInsertTarget(in: .folders(folderIds: ["d1", "d2"]), at: 2) else {
+            Issue.record("no insert target")
+            return
+        }
+        let reorder = FeedListDragKt.resolveFeedListDropAction(
+            item: FeedListDraggedItemFolder(folderId: "d1"), target: insert.target, half: insert.half, index: dropIndex
+        ) as? FeedListDropActionReorderFolder
+        #expect(reorder?.draggedFolderId == "d1")
+        #expect(reorder != nil && reorder?.targetFolderId == nil)
     }
 
     // MARK: - springLoadingDelay

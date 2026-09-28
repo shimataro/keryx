@@ -1,57 +1,109 @@
-import CoreGraphics
 import Foundation
 import KeryxShared
+import UniformTypeIdentifiers
 
-/// Swift-native mirror of which row/header is currently the drop target, used only for `@State`
-/// identity (which row's highlight to clear on `dropExited`) — the bridged `FeedListDropTarget`
-/// Kotlin types aren't `Equatable` across the existential.
-enum FeedListHoverKey: Equatable {
-    case folder(String)
-    case noFolder
-    case feed(String)
-    case tag(String)
+/// What a feed-list drag carries — the dragged row's kind and id, resolved on the drop side into
+/// the shared `FeedListDraggedItem` the drop-resolution functions take.
+struct FeedListDragPayload: Codable, Equatable {
+    enum Kind: String, Codable {
+        case feed
+        case folder
+    }
+    let kind: Kind
+    let id: String
 
-    /// A folder, "No folder" or tag header — the rows a feed is dropped *onto* (moved into the
-    /// folder, or tagged) rather than *between*.
-    var isHeader: Bool {
-        switch self {
-        case .folder, .noFolder, .tag: return true
-        case .feed: return false
+    /// The pasteboard type the drag is published under. Feeds and folders get distinct types so
+    /// each `ForEach`'s `.onInsert(of:)` names only the kind it accepts, and the outline itself
+    /// then refuses — and draws no insertion line for — a folder between feeds or a feed between
+    /// folders.
+    var contentType: UTType {
+        switch kind {
+        case .feed: return feedListFeedDragType
+        case .folder: return feedListFolderDragType
+        }
+    }
+
+    func toShared() -> FeedListDraggedItem {
+        switch kind {
+        case .feed: return FeedListDraggedItemFeed(feedId: id)
+        case .folder: return FeedListDraggedItemFolder(folderId: id)
         }
     }
 }
 
-/// How the hovered row answers a drag, following macOS's own source-list conventions
-/// (`NSOutlineView`'s drop feedback): an insertion line between rows, a highlight on the row the
-/// item would be dropped onto, or nothing at all where releasing would do nothing.
+/// Exported (`UTExportedTypeDeclarations` in `project.yml`) so a drag carrying anything else —
+/// plain text from another app, say — is never taken for a feed-list reorder.
+let feedListFeedDragType = UTType(exportedAs: "works.merc.keryx.app.feedlistitem.feed")
+let feedListFolderDragType = UTType(exportedAs: "works.merc.keryx.app.feedlistitem.folder")
+
+/// Swift-native mirror of which row a dragged feed is currently over, used only for `@State`
+/// identity (which row's highlight to clear on `dropExited`) — the bridged `FeedListDropTarget`
+/// Kotlin types aren't `Equatable` across the existential. Only the rows a feed is dropped *onto*
+/// are listed; dropping between rows is the outline's own `.onInsert`.
+enum FeedListHoverKey: Equatable {
+    case folder(String)
+    case noFolder
+    case tag(String)
+}
+
+/// How a row a dragged item is *over* (rather than between) answers it. Insertion between rows is
+/// the outline's own `.onInsert`, so only the drop-onto case is decided here.
 enum FeedListDropFeedback: Equatable {
     /// Releasing here does nothing — the drag is refused, so a release slides the item back.
     case invalid
-    /// Draw the insertion line at the resolved boundary.
-    case insertion
-    /// Highlight the hovered header itself; no insertion line.
+    /// Highlight the hovered row: the feed would be moved into that folder or the unfoldered group,
+    /// or tagged.
     case dropOn
 }
 
-/// Resolves the feedback for one hover from the shared `resolveFeedListDropHighlight` result.
-/// A feed over a header is "dropped onto" it (moved into that folder / the unfoldered group, or
-/// tagged): Compose draws the folder's front-insertion line there as well, but macOS's drop-on
-/// convention is the highlight alone. A folder over a folder header reorders, so it stays an
-/// insertion.
-func feedListDropFeedback(
-    isFeedDrag: Bool,
-    hoverKey: FeedListHoverKey,
-    boundary: DropBoundary?,
-    attachTagId: String?
-) -> FeedListDropFeedback {
-    if boundary == nil && attachTagId == nil { return .invalid }
-    return isFeedDrag && hoverKey.isHeader ? .dropOn : .insertion
+/// A feed dropped onto a folder row, tag row or the "No folder" header lands in it; a folder is
+/// never dropped *onto* a row — it is reordered between folders instead.
+func feedListDropFeedback(for kind: FeedListDragPayload.Kind) -> FeedListDropFeedback {
+    kind == .feed ? .dropOn : .invalid
 }
 
-/// Which half of a row the pointer is over — the top half inserts before the row, the bottom half
-/// after it. A row whose height isn't known yet resolves to the top half.
-func feedListRowHalf(locationY: CGFloat, rowHeight: CGFloat) -> FeedListRowHalf {
-    rowHeight > 0 && locationY >= rowHeight / 2 ? .bottom : .top
+/// A `ForEach` in the sidebar that items can be inserted into, with its rows in display order.
+enum FeedListInsertGroup {
+    /// The feeds of one folder, or the unfoldered feeds when `folderId` is `nil`.
+    case feeds(folderId: String?, feedIds: [String])
+    /// The folders themselves.
+    case folders(folderIds: [String])
+
+    /// Whether a dragged item of `kind` can be inserted here — each group's `.onInsert(of:)`
+    /// already names only its own kind's type; this re-checks it before acting.
+    func accepts(_ kind: FeedListDragPayload.Kind) -> Bool {
+        switch self {
+        case .feeds: return kind == .feed
+        case .folders: return kind == .folder
+        }
+    }
+}
+
+/// Translates an `.onInsert` position into the shared drop target and half
+/// (`resolveFeedListDropAction`'s input): inserting before row `offset` is that row's top half,
+/// inserting after the last row is the last row's bottom half, and a group with no rows is its own
+/// header (the folder's row, or the "No folder" header). `nil` when there is nothing to insert
+/// relative to — an empty folder list.
+func feedListInsertTarget(
+    in group: FeedListInsertGroup,
+    at offset: Int
+) -> (target: FeedListDropTarget, half: FeedListRowHalf)? {
+    switch group {
+    case .feeds(let folderId, let feedIds):
+        if feedIds.isEmpty {
+            let header: FeedListDropTarget = folderId.map { FeedListDropTargetFolderHeader(folderId: $0) }
+                ?? FeedListDropTargetNoFolderHeader.shared
+            return (header, .top)
+        }
+        return offset < feedIds.count
+            ? (FeedListDropTargetFeedRow(feedId: feedIds[max(offset, 0)]), .top)
+            : (FeedListDropTargetFeedRow(feedId: feedIds[feedIds.count - 1]), .bottom)
+    case .folders(let folderIds):
+        guard !folderIds.isEmpty else { return nil }
+        return offset < folderIds.count
+            ? (FeedListDropTargetFolderHeader(folderId: folderIds[max(offset, 0)]), .top)
+            : (FeedListDropTargetFolderHeader(folderId: folderIds[folderIds.count - 1]), .bottom)
+    }
 }
 
 /// The system's spring-loading preference (System Settings > Accessibility > Pointer Control),
