@@ -46,7 +46,10 @@ final class AppModel {
             self.opmlTransfer = OpmlTransferObservable(opml: sdk.opml)
             self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
-            OsNotificationPoster.requestAuthorization()
+            // Requesting authorization is `KeryxApp`'s job now, gated on `notificationEnabled`
+            // (both at startup and whenever the setting is switched on) — see its own
+            // `.onChange(of: model.preferences?.localSettings?.notificationEnabled)`, matching
+            // desktop's own gate (`App.kt:69-72`).
             try sdk.startMaintenance()
             Task {
                 try? await sdk.prepareSearchIndex()
@@ -87,8 +90,11 @@ final class AppModel {
     /// `KeryxSdk.importOpenedOpml`'s own doc.
     func importOpenedOpml(url: URL) {
         guard let sdk else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
+        // Ignores the boolean result: LaunchServices delivering a document this way already grants
+        // the access `.fileImporter`'s own security-scoped URLs need `startAccessing…` to unlock, so
+        // requiring it to return `true` here silently dropped every normal file-association open.
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
         guard let xml = try? String(contentsOf: url, encoding: .utf8) else { return }
         Task {
             try? await sdk.importOpenedOpml(xml: xml)

@@ -13,7 +13,10 @@ struct StartupErrorView: View {
                 .font(.largeTitle)
             Text(L("database_too_new_title"))
                 .font(.headline)
-            Text(error?.localizedDescription ?? L("error_generic"))
+            // The one documented failure (`DatabaseTooNewException`) always gets this message —
+            // matches desktop's own `DatabaseTooNewDialog.kt`, which never shows the raw exception
+            // text either.
+            Text(L("database_too_new_message"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

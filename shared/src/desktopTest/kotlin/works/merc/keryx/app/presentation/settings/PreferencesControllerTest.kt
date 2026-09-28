@@ -2,7 +2,11 @@ package works.merc.keryx.app.presentation.settings
 
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.Dispatchers
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
+import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.SettingsRepository
@@ -141,5 +145,42 @@ class PreferencesControllerTest {
 
         assertEquals(7, controller.cacheRetentionDays.value)
         assertEquals(7, db.global_settingsQueries.get("cache_retention_days").executeAsOne().toInt())
+    }
+
+    @Test
+    fun feedListPaneWidthSetterPersistsAndClampsToTheSharedRange() {
+        val controller = newController()
+
+        controller.setFeedListPaneWidth(300.0)
+        assertEquals(300.0, controller.localSettings.value.feedListPaneWidth)
+
+        controller.setFeedListPaneWidth(10.0)
+        assertEquals(FEED_LIST_PANE_MIN_WIDTH.toDouble(), controller.localSettings.value.feedListPaneWidth)
+
+        controller.setFeedListPaneWidth(10_000.0)
+        assertEquals(FEED_LIST_PANE_MAX_WIDTH.toDouble(), controller.localSettings.value.feedListPaneWidth)
+    }
+
+    @Test
+    fun articleListPaneWidthSetterPersistsAndClampsToTheSharedRange() {
+        val controller = newController()
+
+        controller.setArticleListPaneWidth(400.0)
+        assertEquals(400.0, controller.localSettings.value.articleListPaneWidth)
+
+        controller.setArticleListPaneWidth(10.0)
+        assertEquals(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), controller.localSettings.value.articleListPaneWidth)
+
+        controller.setArticleListPaneWidth(10_000.0)
+        assertEquals(ARTICLE_LIST_PANE_MAX_WIDTH.toDouble(), controller.localSettings.value.articleListPaneWidth)
+    }
+
+    @Test
+    fun lastFocusedPaneSetterPersistsToLocalSettings() {
+        val controller = newController()
+
+        controller.setLastFocusedPane("ArticleDetail")
+
+        assertEquals("ArticleDetail", controller.localSettings.value.lastFocusedPane)
     }
 }

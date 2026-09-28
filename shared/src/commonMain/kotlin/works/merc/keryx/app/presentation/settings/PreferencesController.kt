@@ -2,6 +2,10 @@ package works.merc.keryx.app.presentation.settings
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MAX_WIDTH
+import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.FEED_LIST_PANE_MAX_WIDTH
+import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.domain.SettingsRepository
 
@@ -48,4 +52,21 @@ class PreferencesController(
         settingsRepository.setCacheRetentionDays(days)
         _cacheRetentionDays.value = days
     }
+
+    /**
+     * Persists the sidebar's own pane width, clamped the same way Compose's own
+     * `HomeLayoutViewModel` clamps it before ever storing it — a UI-owned width (not read back
+     * reactively from here; each UI keeps its own live `@State`/`StateFlow` for that) written on a
+     * debounce by whichever UI is dragging its own divider.
+     */
+    fun setFeedListPaneWidth(width: Double) =
+        update { it.copy(feedListPaneWidth = width.coerceIn(FEED_LIST_PANE_MIN_WIDTH.toDouble(), FEED_LIST_PANE_MAX_WIDTH.toDouble())) }
+
+    /** See [setFeedListPaneWidth]. */
+    fun setArticleListPaneWidth(width: Double) =
+        update { it.copy(articleListPaneWidth = width.coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble())) }
+
+    /** [pane] is the raw name of whichever pane enum the calling UI defines (Compose's `HomePane`,
+     * the Apple app's `HomeFocusedPane`) — stored as plain text so neither UI needs the other's type. */
+    fun setLastFocusedPane(pane: String) = update { it.copy(lastFocusedPane = pane) }
 }

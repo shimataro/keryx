@@ -8,10 +8,18 @@ struct KeryxApp: App {
     @State private var model = AppModel()
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.openWindow) private var openWindow
     #endif
 
     var body: some Scene {
-        WindowGroup {
+        #if os(macOS)
+        // `AppDelegate` has no access to the SDK or to SwiftUI's environment on its own — handing
+        // it both here runs before any of its own launch callbacks fire, since `body` must be
+        // evaluated to build the scene tree that starts the run loop.
+        let _ = configureAppDelegate()
+        #endif
+
+        WindowGroup(id: "main") {
             Group {
                 if let sdk = model.sdk, let home = model.home, let preferences = model.preferences {
                     if model.needsSetup {
@@ -22,20 +30,26 @@ struct KeryxApp: App {
                         )
                     } else if let notifications = model.notifications {
                         HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, preferences: preferences)
-                            .onOpenURL { url in
-                                if url.pathExtension.lowercased() == "opml" {
-                                    model.importOpenedOpml(url: url)
-                                }
-                            }
                             #if os(macOS)
                             .onChange(of: home.totalUnread, initial: true) { _, count in
                                 updateDockBadge(count)
+                                appDelegate.updateStatusItemAppearance(unreadCount: count)
                             }
                             #endif
                     }
                 } else {
                     StartupErrorView(error: model.startupError)
                 }
+            }
+            // Handled at this level (not nested inside the Home-only branch above) so a document
+            // opened during Setup — or before `sdk` even finishes starting — isn't silently dropped.
+            .onOpenURL { url in
+                guard url.pathExtension.lowercased() == "opml" else { return }
+                model.importOpenedOpml(url: url)
+                #if os(macOS)
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first { $0.title != L("menu_help_about") }?.makeKeyAndOrderFront(nil)
+                #endif
             }
             // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About
             // scenes read it independently through their own environment inheritance. Started here
@@ -47,6 +61,11 @@ struct KeryxApp: App {
             #if os(macOS)
             .onChange(of: model.preferences?.localSettings?.themeMode, initial: true) { _, mode in
                 applyAppearance(mode)
+            }
+            // Requested at startup (if already on) and the moment it's switched on — never
+            // unconditionally at every launch — matching desktop's own gate (`App.kt:69-72`).
+            .onChange(of: model.preferences?.localSettings?.notificationEnabled, initial: true) { _, enabled in
+                if enabled == true { OsNotificationPoster.requestAuthorization() }
             }
             #endif
         }
@@ -70,26 +89,15 @@ struct KeryxApp: App {
             AboutView()
         }
         .windowResizability(.contentSize)
-
-        MenuBarExtra {
-            Button(L("tray_show")) {
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-                for window in NSApp.windows { window.makeKeyAndOrderFront(nil) }
-            }
-            Button(L("tray_hide")) {
-                for window in NSApp.windows { window.orderOut(nil) }
-                NSApp.setActivationPolicy(.accessory)
-            }
-            Divider()
-            Button(L("tray_quit")) { NSApp.terminate(nil) }
-        } label: {
-            Image(systemName: (model.home?.totalUnread ?? 0) > 0 ? "envelope.badge.fill" : "envelope")
-        }
         #endif
     }
 
     #if os(macOS)
+    private func configureAppDelegate() {
+        appDelegate.model = model
+        appDelegate.showMainWindow = { openWindow(id: "main") }
+    }
+
     private func updateDockBadge(_ count: Int64) {
         NSApp.dockTile.badgeLabel = count <= 0 ? nil : (count > 99 ? "99+" : "\(count)")
     }

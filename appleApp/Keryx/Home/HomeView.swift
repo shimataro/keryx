@@ -12,12 +12,30 @@ struct HomeView: View {
     let preferences: PreferencesObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
+    @State private var feedListWidthSaveTask: Task<Void, Never>?
+    @State private var articleListWidthSaveTask: Task<Void, Never>?
 
     var body: some View {
         NavigationSplitView {
             FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
+                .navigationSplitViewColumnWidth(
+                    min: CGFloat(ConstantsKt.FEED_LIST_PANE_MIN_WIDTH),
+                    ideal: CGFloat(preferences.localSettings?.feedListPaneWidth ?? Double(ConstantsKt.FEED_LIST_PANE_WIDTH_DEFAULT)),
+                    max: CGFloat(ConstantsKt.FEED_LIST_PANE_MAX_WIDTH)
+                )
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
+                    debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(width)) }
+                }
         } content: {
             ArticleListView(home: home, notifications: notifications, dialogs: sidebarDialogs, focusedPane: $focusedPane)
+                .navigationSplitViewColumnWidth(
+                    min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
+                    ideal: CGFloat(preferences.localSettings?.articleListPaneWidth ?? Double(ConstantsKt.ARTICLE_LIST_PANE_WIDTH_DEFAULT)),
+                    max: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MAX_WIDTH)
+                )
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
+                    debounceSave(&articleListWidthSaveTask) { preferences.controller.setArticleListPaneWidth(width: Double(width)) }
+                }
         } detail: {
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane)
         }
@@ -26,13 +44,58 @@ struct HomeView: View {
             await home.startObserving()
         }
         .onAppear {
-            if focusedPane == nil { focusedPane = .articleList }
+            if focusedPane == nil {
+                focusedPane = HomeView.focusedPane(fromRaw: preferences.localSettings?.lastFocusedPane)
+            }
         }
         // Mirrors into `HomeObservable` so `HomeCommands.menuState` (a different `View` entirely,
         // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
         // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.
         .onChange(of: focusedPane, initial: true) { _, pane in
             home.textInputFocused = pane == .search
+        }
+        // Restored on next launch by the `.onAppear` above — matches Compose's own
+        // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
+        // `HomePane` counterpart (the field lives in the sidebar, not a pane of its own here), so it
+        // is never persisted — the previously saved real pane is simply left in place instead.
+        .onChange(of: focusedPane) { _, pane in
+            if let raw = HomeView.rawValue(for: pane) {
+                preferences.controller.setLastFocusedPane(pane: raw)
+            }
+        }
+    }
+
+    /// A debounced save — cancels any pending save for the same pane and starts a fresh one, so
+    /// only the width the divider settles on for `PANE_WIDTH_PERSIST_DEBOUNCE_MS` actually gets
+    /// written, matching Compose's own `HomeLayoutViewModel` (`debounce(PANE_WIDTH_PERSIST_DEBOUNCE_MS)`).
+    private func debounceSave(_ task: inout Task<Void, Never>?, _ save: @escaping () -> Void) {
+        task?.cancel()
+        task = Task {
+            try? await Task.sleep(for: .milliseconds(Int(ConstantsKt.PANE_WIDTH_PERSIST_DEBOUNCE_MS)))
+            guard !Task.isCancelled else { return }
+            save()
+        }
+    }
+
+    /// Compose's own `HomePane` names (`FeedList`/`ArticleList`/`ArticleDetail`) — the raw values
+    /// `lastFocusedPane` is stored as, shared with desktop's `HomeLayoutViewModel`. `.search` has no
+    /// counterpart, since Compose's search field lives inside the sidebar pane rather than being a
+    /// distinct pane of the 3-pane layout.
+    private static func rawValue(for pane: HomeFocusedPane?) -> String? {
+        switch pane {
+        case .feedList: return "FeedList"
+        case .articleList: return "ArticleList"
+        case .reader: return "ArticleDetail"
+        case .search, nil: return nil
+        }
+    }
+
+    private static func focusedPane(fromRaw raw: String?) -> HomeFocusedPane {
+        switch raw {
+        case "FeedList": return .feedList
+        case "ArticleList": return .articleList
+        case "ArticleDetail": return .reader
+        default: return .articleList
         }
     }
 
