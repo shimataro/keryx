@@ -55,9 +55,20 @@ final class HomeObservable {
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
     private(set) var cloudConnected: Bool = false
 
+    /// Bumped by every URL-copy action (the reader's own button, and eventually the menu bar's/
+    /// keyboard's Copy URL command — see `HomeCommands.swift`) so any UI observing it can flash a
+    /// "copied" confirmation, matching Compose's own `copyPulse` (`HomeScreen.kt`). Not itself a
+    /// `HomeViewModel` `StateFlow` — this is UI-only feedback state, kept here alongside it for the
+    /// same reason `HomeScreen.kt`'s own `copyPulse` lives in the Compose screen, not the ViewModel.
+    private(set) var copyPulse: Int = 0
+
     init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
         self.makeAddFeedController = makeAddFeedController
+    }
+
+    func pulseCopy() {
+        copyPulse += 1
     }
 
     /// Starts every field's observation loop concurrently. Call once from a `.task` on the view

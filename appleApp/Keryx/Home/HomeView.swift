@@ -9,6 +9,7 @@ struct HomeView: View {
     let home: HomeObservable
     let sidebarDialogs: SidebarDialogState
     let notifications: NotificationCenterObservable
+    let preferences: PreferencesObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
 
@@ -18,7 +19,7 @@ struct HomeView: View {
         } content: {
             ArticleListView(home: home, notifications: notifications, dialogs: sidebarDialogs, focusedPane: $focusedPane)
         } detail: {
-            ArticleDetailView(home: home, focusedPane: $focusedPane)
+            ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane)
         }
         .onKeyPress { press in handleKeyPress(press) }
         .task {

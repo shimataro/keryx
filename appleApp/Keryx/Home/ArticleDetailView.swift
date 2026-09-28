@@ -11,8 +11,10 @@ import UIKit
 /// back control and stays mounted across selections, swapping only the WebView's document.
 struct ArticleDetailView: View {
     let home: HomeObservable
+    let preferences: PreferencesObservable
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var copyConfirmed = false
 
     var body: some View {
@@ -22,36 +24,27 @@ struct ArticleDetailView: View {
             ArticleWebView(html: documentHtml, outboundLinks: outboundLinks)
         }
         .focused(focusedPane, equals: .reader)
-        .onChange(of: selectedArticleId, initial: true) { _, id in
-            guard let id else { return }
-            home.viewModel.requestArticleContent(id: id)
+        .onChange(of: home.copyPulse) { _, _ in
+            copyConfirmed = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                copyConfirmed = false
+            }
         }
     }
 
-    private var selectedArticleId: String? { home.selectedArticle?.id }
+    /// Rendered straight from the already-loaded `selectedArticle`, matching Compose's own
+    /// 3-pane (non-pager) reader (`ArticleDetailPane.kt`'s `singleReaderDocument`) — there is no
+    /// separate content cache or loading state to keep in sync here, since `Articles` (the
+    /// `StateFlow` this comes from) already carries the full body.
+    private var readerRow: ArticleReaderRow? { home.selectedArticle?.toReaderRow() }
 
-    private var readerRow: ArticleReaderRow? {
-        selectedArticleId.flatMap { home.articleContents[$0] }
-    }
-
+    /// Rebuilt whenever the in-app theme or font-size setting changes, following the app's own
+    /// light/dark setting rather than the OS's raw appearance — see `PreferencesObservable`.
+    /// `colorScheme` already reflects `KeryxApp`'s own `.preferredColorScheme` override, so this
+    /// needs no separate read of `localSettings.themeMode`.
     private var theme: ArticleHtmlTheme {
-        #if os(macOS)
-        ArticleHtmlTheme(
-            surface: argb(.windowBackgroundColor),
-            onSurface: argb(.labelColor),
-            linkColor: argb(.linkColor),
-            mutedColor: argb(.secondaryLabelColor),
-            fontScale: 1.0
-        )
-        #else
-        ArticleHtmlTheme(
-            surface: argb(.systemBackground),
-            onSurface: argb(.label),
-            linkColor: argb(.link),
-            mutedColor: argb(.secondaryLabel),
-            fontScale: 1.0
-        )
-        #endif
+        themeFor(colorScheme: colorScheme, fontScale: Float(preferences.localSettings?.fontSizeScale ?? 1.0))
     }
 
     private var documentHtml: String {
@@ -59,93 +52,123 @@ struct ArticleDetailView: View {
             return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("home_no_article_selected"))
         }
         guard let row = readerRow else {
-            // Still loading — requestArticleContent was just dispatched in onChange above.
-            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("apple_loading"))
+            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("home_no_article_selected"))
         }
-        let meta = [feedName, formattedDate(row.published_at)].compactMap { $0 }.joined(separator: " · ")
-        if let body = row.readerBody(), !body.isEmpty {
+        let title = row.title.isEmpty ? L("article_no_title") : row.title
+        let meta = FormattingKt.articleMetaText(author: row.author, publishedAt: row.published_at)
+        let openInBrowserTooltip = L("article_open_in_browser")
+        if let body = row.readerBody(), !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return ArticleWebViewHtmlKt.wrapArticleHtml(
                 theme: theme,
-                title: row.title,
+                title: title,
                 meta: meta,
                 body: body,
                 baseUrl: article.url,
                 titleUrl: article.url,
-                titleTooltip: article.url
+                titleTooltip: openInBrowserTooltip
             )
         }
         return ArticleWebViewHtmlKt.articleNoContentHtml(
             theme: theme,
-            title: row.title,
+            title: title,
             meta: meta,
             message: L("article_no_content"),
             titleUrl: article.url,
-            titleTooltip: article.url
+            titleTooltip: openInBrowserTooltip
         )
     }
 
+    /// Only an http(s) article URL counts as an outbound link — matches Compose's own
+    /// `hasUsableUrl`-gated set (`ArticleDetailPane.kt:754-757`); a `keryx://`-scheme or empty URL
+    /// must not be added, since WebKit would then treat a click that happens to normalize to the
+    /// same string as "open externally" instead of loading it in the reader.
     private var outboundLinks: Set<String> {
         guard let article = home.selectedArticle, let body = readerRow?.readerBody() else { return [] }
-        return ArticleWebViewHtmlKt.extractLinks(html: body, baseUri: article.url).union([article.url])
+        var links = ArticleWebViewHtmlKt.extractLinks(html: body, baseUri: article.url)
+        if ArticleListModelKt.isHttpOrHttpsUrl(url: article.url) {
+            links.insert(article.url)
+        }
+        return links
     }
 
     private var feedName: String? { home.selectedFeedName }
-
-    private func formattedDate(_ epochMillis: KotlinLong?) -> String? {
-        guard let epochMillis else { return nil }
-        let date = Date(timeIntervalSince1970: Double(epochMillis.int64Value) / 1000)
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
 
     // MARK: - Toolbar
 
     @ViewBuilder
     private var toolbar: some View {
         HStack(spacing: 12) {
-            if let article = home.selectedArticle {
-                Button {
-                    home.viewModel.toggleStarSelected()
-                } label: {
-                    Image(systemName: article.is_starred == 1 ? "star.fill" : "star")
-                }
-                .help(L(article.is_starred == 1 ? "article_unstar" : "article_star"))
-
-                Button {
-                    home.viewModel.markSelectedUnread()
-                } label: {
-                    Image(systemName: "envelope.badge")
-                }
-                .help(L("article_mark_as_unread"))
-
-                if ArticleListModelKt.hasUsableUrl(url: article.url) {
-                    Button {
-                        copyToPasteboard(article.url)
-                        copyConfirmed = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(1.5))
-                            copyConfirmed = false
-                        }
-                    } label: {
-                        Image(systemName: copyConfirmed ? "checkmark" : "link")
-                    }
-                    .help(L("article_copy_url"))
-
-                    Button {
-                        openInBrowser(article.url)
-                    } label: {
-                        Image(systemName: "safari")
-                    }
-                    .help(L("article_open_in_browser"))
-                }
+            if let feedName {
+                Text(feedName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
+
+            let article = home.selectedArticle
+            let hasUsableUrl = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+
+            Button {
+                home.viewModel.toggleStarSelected()
+            } label: {
+                Image(systemName: article?.is_starred == 1 ? "star.fill" : "star")
+            }
+            .disabled(article == nil)
+            .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
+
+            Button {
+                home.viewModel.markSelectedUnread()
+            } label: {
+                Image(systemName: "envelope.badge")
+            }
+            .disabled(article == nil)
+            .help(L("article_mark_as_unread"))
+
+            Button {
+                guard let article else { return }
+                copyToPasteboard(article.url)
+                home.pulseCopy()
+            } label: {
+                Image(systemName: copyConfirmed ? "checkmark" : "link")
+            }
+            .disabled(!hasUsableUrl)
+            .help(L("article_copy_url"))
+
+            Button {
+                if let article { openInBrowser(article.url) }
+            } label: {
+                Image(systemName: "safari")
+            }
+            .disabled(!hasUsableUrl)
+            .help(L("article_open_in_browser"))
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
+    /// Resolves the reader's colors under `colorScheme` explicitly — via
+    /// `NSAppearance.performAsCurrentDrawingAppearance` on macOS, and a `UITraitCollection` on iOS —
+    /// rather than reading whatever the OS's own current appearance happens to be, so the reader
+    /// follows `colorScheme` (which already reflects the in-app theme override) even for a frame
+    /// where the system appearance has not caught up yet.
     #if os(macOS)
+    private func themeFor(colorScheme: ColorScheme, fontScale: Float) -> ArticleHtmlTheme {
+        let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua) ?? NSAppearance.currentDrawing()
+        var theme: ArticleHtmlTheme?
+        appearance.performAsCurrentDrawingAppearance {
+            theme = ArticleHtmlTheme(
+                surface: argb(.windowBackgroundColor),
+                onSurface: argb(.labelColor),
+                linkColor: argb(.linkColor),
+                mutedColor: argb(.secondaryLabelColor),
+                fontScale: fontScale
+            )
+        }
+        return theme ?? ArticleHtmlTheme(surface: 0, onSurface: 0, linkColor: 0, mutedColor: 0, fontScale: fontScale)
+    }
+
     private func argb(_ color: NSColor) -> Int32 {
         guard let rgb = color.usingColorSpace(.deviceRGB) else { return 0 }
         let r = Int32(rgb.redComponent * 255)
@@ -154,6 +177,18 @@ struct ArticleDetailView: View {
         return (Int32(0xFF) << 24) | (r << 16) | (g << 8) | b
     }
     #else
+    private func themeFor(colorScheme: ColorScheme, fontScale: Float) -> ArticleHtmlTheme {
+        let trait = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+        func resolved(_ color: UIColor) -> UIColor { color.resolvedColor(with: trait) }
+        return ArticleHtmlTheme(
+            surface: argb(resolved(.systemBackground)),
+            onSurface: argb(resolved(.label)),
+            linkColor: argb(resolved(.link)),
+            mutedColor: argb(resolved(.secondaryLabel)),
+            fontScale: fontScale
+        )
+    }
+
     private func argb(_ color: UIColor) -> Int32 {
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
         color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)

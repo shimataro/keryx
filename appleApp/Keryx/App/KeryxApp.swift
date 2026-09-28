@@ -13,7 +13,7 @@ struct KeryxApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let sdk = model.sdk, let home = model.home {
+                if let sdk = model.sdk, let home = model.home, let preferences = model.preferences {
                     if model.needsSetup {
                         SetupView(
                             controller: sdk.setupController,
@@ -21,7 +21,7 @@ struct KeryxApp: App {
                             onDone: { model.completeSetup() }
                         )
                     } else if let notifications = model.notifications {
-                        HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications)
+                        HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, preferences: preferences)
                             .onOpenURL { url in
                                 if url.pathExtension.lowercased() == "opml" {
                                     model.importOpenedOpml(url: url)
@@ -37,6 +37,18 @@ struct KeryxApp: App {
                     StartupErrorView(error: model.startupError)
                 }
             }
+            // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About
+            // scenes read it independently through their own environment inheritance. Started here
+            // (not only inside `SettingsView`'s own `.task`) so it takes effect before Settings is
+            // ever opened. `NSApp.appearance` additionally covers the surfaces `preferredColorScheme`
+            // does not reach: native menus, and any AppKit chrome outside this scene's own view tree.
+            .task { await model.preferences?.startObserving() }
+            .preferredColorScheme(colorScheme(for: model.preferences?.localSettings?.themeMode))
+            #if os(macOS)
+            .onChange(of: model.preferences?.localSettings?.themeMode, initial: true) { _, mode in
+                applyAppearance(mode)
+            }
+            #endif
         }
         .commands { HomeCommands(model: model) }
 
@@ -77,5 +89,25 @@ struct KeryxApp: App {
     private func updateDockBadge(_ count: Int64) {
         NSApp.dockTile.badgeLabel = count <= 0 ? nil : (count > 99 ? "99+" : "\(count)")
     }
+
+    /// Mirrors `resolveDarkTheme`'s `"light"`/`"dark"`/else (follow system) rule (`KeryxTheme.kt`),
+    /// applied to native (non-SwiftUI) surfaces `.preferredColorScheme` does not reach.
+    private func applyAppearance(_ mode: String?) {
+        switch mode {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
+    }
     #endif
+
+    /// Mirrors `resolveDarkTheme`'s same rule for SwiftUI's own `.preferredColorScheme` — `nil`
+    /// leaves the system setting in charge.
+    private func colorScheme(for mode: String?) -> ColorScheme? {
+        switch mode {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
 }
