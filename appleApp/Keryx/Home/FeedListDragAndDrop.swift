@@ -113,24 +113,19 @@ extension View {
         ))
     }
 
-    /// Marks this row/header as draggable, carrying `item` — the drag payload is built lazily (only
-    /// once a drag actually starts), which doubles as this row's only signal that a drag of `item`
-    /// began, since SwiftUI's `.draggable` has no separate "drag started" callback. `draggingItem`
-    /// is what every `feedListDropTarget` on the same pane reads to resolve its own hover highlight.
+    /// Marks this row/header as draggable, carrying `item`. Uses `.onDrag` rather than
+    /// `.draggable`: `onDrag`'s closure is documented to run exactly when a drag begins, which is
+    /// this pane's only "drag started" signal — every `feedListDropTarget` on the pane reads
+    /// `draggingItem` to validate and highlight, so it must be set before the first hover, not
+    /// whenever `.draggable`'s payload autoclosure happens to be evaluated.
     func feedListDraggable(_ item: FeedListDragPayload, draggingItem: Binding<FeedListDragPayload?>) -> some View {
-        // `.draggable(_:)` takes an `@autoclosure`, which only wraps a single expression — passing
-        // this function call (rather than a `{ ... }` block) is what makes the side effect run
-        // lazily, on drag start, instead of eagerly on every body evaluation.
-        draggable(markDragStarted(item, into: draggingItem))
+        onDrag {
+            draggingItem.wrappedValue = item
+            let provider = NSItemProvider()
+            provider.register(item)
+            return provider
+        }
     }
-}
-
-/// Records `item` as the drag in progress and returns it, for `feedListDraggable`'s own
-/// `@autoclosure` trick above.
-@MainActor
-private func markDragStarted(_ item: FeedListDragPayload, into draggingItem: Binding<FeedListDragPayload?>) -> FeedListDragPayload {
-    draggingItem.wrappedValue = item
-    return item
 }
 
 /// Applies `feedListDropTarget` only when `isEnabled` — lets a feed row that shouldn't itself be a

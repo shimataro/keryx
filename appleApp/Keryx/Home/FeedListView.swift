@@ -274,22 +274,16 @@ struct FeedListView: View {
         let isCollapsed = home.collapsedFolderIds.contains(folder.id)
         let instance = FeedListRowSelectionFolder(folderId: folder.id)
         Section {
-            Button {
-                focusedPane.wrappedValue = .feedList
-                home.viewModel.selectFilter(filter: instance.filter, instance: instance)
-            } label: {
-                HStack {
-                    expandChevron(expanded: !isCollapsed) {
-                        home.viewModel.toggleFolderCollapsed(folderId: folder.id)
-                    }
-                    Text(folder.name)
-                    Spacer()
-                    unreadBadge(home.unreadByFolder[folder.id] ?? 0)
+            HStack {
+                expandChevron(expanded: !isCollapsed) {
+                    home.viewModel.toggleFolderCollapsed(folderId: folder.id)
                 }
-                .selectableRowLabel(selectionBackground(for: instance))
+                Text(folder.name)
+                Spacer()
+                unreadBadge(home.unreadByFolder[folder.id] ?? 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(feedListRowSelectionsEqual(instance, home.selectedRowInstance) ? .isSelected : [])
+            .selectableRowLabel(selectionBackground(for: instance))
+            .selectsOnClick(isSelected: feedListRowSelectionsEqual(instance, home.selectedRowInstance)) { select(instance) }
             .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
             .contextMenu {
                 // Opening the menu selects the row first, matching Compose's own
@@ -479,41 +473,41 @@ struct FeedListView: View {
         isGone: Bool = false,
         instance: FeedListRowSelection,
     ) -> some View {
-        Button {
-            focusedPane.wrappedValue = .feedList
-            home.viewModel.selectFilter(filter: instance.filter, instance: instance)
-        } label: {
-            HStack {
-                if let systemImage {
-                    Image(systemName: systemImage).frame(width: 18)
-                } else {
-                    FaviconView(url: faviconUrl, letter: title.first)
-                        .frame(width: 18, height: 18)
-                }
-                Text(title).lineLimit(1)
-                Spacer()
-                if isErroring {
-                    // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
-                    // Compose's own `FeedErrorIndicator` (`FeedListDragAndDrop.kt:655-676`) — an
-                    // ordinary fetch error gets no tooltip, only the accessibility label below.
-                    Group {
-                        if isGone {
-                            Image(systemName: "exclamationmark.triangle.fill").help(L("home_feed_gone"))
-                        } else {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                        }
-                    }
-                    .foregroundStyle(.orange)
-                    .accessibilityLabel(L(isGone ? "home_feed_gone" : "home_feed_error"))
-                }
-                unreadBadge(unreadCount)
+        HStack {
+            if let systemImage {
+                Image(systemName: systemImage).frame(width: 18)
+            } else {
+                FaviconView(url: faviconUrl, letter: title.first)
+                    .frame(width: 18, height: 18)
             }
-            .padding(.vertical, 2)
-            .selectableRowLabel(selectionBackground(for: instance))
+            Text(title).lineLimit(1)
+            Spacer()
+            if isErroring {
+                // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
+                // Compose's own `FeedErrorIndicator` (`FeedListDragAndDrop.kt:655-676`) — an
+                // ordinary fetch error gets no tooltip, only the accessibility label below.
+                Group {
+                    if isGone {
+                        Image(systemName: "exclamationmark.triangle.fill").help(L("home_feed_gone"))
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                }
+                .foregroundStyle(.orange)
+                .accessibilityLabel(L(isGone ? "home_feed_gone" : "home_feed_error"))
+            }
+            unreadBadge(unreadCount)
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(feedListRowSelectionsEqual(instance, home.selectedRowInstance) ? .isSelected : [])
+        .padding(.vertical, 2)
+        .selectableRowLabel(selectionBackground(for: instance))
+        .selectsOnClick(isSelected: feedListRowSelectionsEqual(instance, home.selectedRowInstance)) { select(instance) }
         .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+    }
+
+    /// A row's primary click action: focuses the sidebar and selects `instance`'s filter.
+    private func select(_ instance: FeedListRowSelection) {
+        focusedPane.wrappedValue = .feedList
+        home.viewModel.selectFilter(filter: instance.filter, instance: instance)
     }
 
     /// Selects `instance` if it isn't already the primary selection — called when a row's context
@@ -565,6 +559,18 @@ private func unreadBadge(_ count: Int64) -> some View {
 }
 
 private extension View {
+    /// A sidebar row's click-to-select, deliberately *not* a `Button`: on macOS a `Button` runs its
+    /// own mouse-tracking loop from mouse-down to mouse-up, which swallows the drag gesture, so a
+    /// row wrapped in one can never start a feed-list drag. A tap gesture fails as soon as the
+    /// pointer moves, leaving the drag free to begin. The button trait and default action keep the
+    /// row announced and activatable exactly as a `Button` was under VoiceOver.
+    func selectsOnClick(isSelected: Bool, perform select: @escaping () -> Void) -> some View {
+        onTapGesture(perform: select)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction(.default, select)
+    }
+
     /// Paints a row label's selection tint as a capsule background (macOS source-list style) and
     /// widens the tap/click target to the row's full width — `.listRowBackground` does not reliably
     /// paint through `.sidebar`-style `List` rows, so the tint has to live on the label itself.
@@ -638,26 +644,23 @@ private struct TagHeaderRow: View {
     @State private var showingColorPicker = false
 
     var body: some View {
-        Button {
+        HStack {
+            colorDot
+            Text(tag.name)
+            Spacer()
+            unreadBadge(home.unreadByTag[tag.id] ?? 0)
+            expandChevron(expanded: isExpanded) {
+                home.viewModel.toggleTagExpanded(tagId: tag.id)
+            }
+        }
+        .selectableRowLabel(selectionBackground(instance))
+        // Highlights while a feed hovers for attachment — matches Compose's own
+        // `dropTargetBackground` (`FeedListPane.kt`'s tag row).
+        .background(hoveredTagId == tag.id ? Color.accentColor.opacity(0.15) : Color.clear)
+        .selectsOnClick(isSelected: feedListRowSelectionsEqual(instance, home.selectedRowInstance)) {
             focusedPane.wrappedValue = .feedList
             home.viewModel.selectFilter(filter: instance.filter, instance: instance)
-        } label: {
-            HStack {
-                colorDot
-                Text(tag.name)
-                Spacer()
-                unreadBadge(home.unreadByTag[tag.id] ?? 0)
-                expandChevron(expanded: isExpanded) {
-                    home.viewModel.toggleTagExpanded(tagId: tag.id)
-                }
-            }
-            .selectableRowLabel(selectionBackground(instance))
-            // Highlights while a feed hovers for attachment — matches Compose's own
-            // `dropTargetBackground` (`FeedListPane.kt`'s tag row).
-            .background(hoveredTagId == tag.id ? Color.accentColor.opacity(0.15) : Color.clear)
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(feedListRowSelectionsEqual(instance, home.selectedRowInstance) ? .isSelected : [])
         .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu() }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
