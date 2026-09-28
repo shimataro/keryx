@@ -69,7 +69,11 @@
   `appleApp/` Xcode project"). Being host-less means these tests cannot drive `AppModel`/`HomeView`
   directly — they cover the `Bridge/` `StateFlow`-to-`@Observable` adapters and the
   `Localization/` `NotificationText`/`ErrorKind`-to-string-catalog-key mapping in isolation, feeding
-  them fakes/known enum cases rather than a running `KeryxSdk`. Run via
+  them fakes/known enum cases rather than a running `KeryxSdk`. It does statically link
+  `KeryxShared.xcframework` (`project.yml`'s own `dependencies:` for this target), so a test can also
+  build and compare real Kotlin sealed-type values directly — see `FeedListSelectionEqualityTests`,
+  which exercises `FeedListSelectionEquality.swift`'s own `ArticleFilter`/`FeedListRowSelection`/
+  `DropBoundary` comparison and keying functions this way. Run via
   `xcodebuild -scheme Keryx -destination 'platform=macOS' test` (see
   [build.md](build.md)'s "Building the SwiftUI app").
 

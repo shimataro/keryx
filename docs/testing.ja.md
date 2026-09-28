@@ -77,7 +77,11 @@
   プロジェクト」参照）。アプリに寄生しないということは、これらのテストが `AppModel`/`HomeView` を
   直接動かせないということでもある——代わりに `Bridge/` の `StateFlow` → `@Observable` アダプタと、
   `Localization/` の `NotificationText`/`ErrorKind` → String Catalog キーの対応づけを、フェイクや
-  既知の enum ケースを与えて単体で検証する。実行は
+  既知の enum ケースを与えて単体で検証する。`KeryxShared.xcframework` は静的リンクしている
+  （`project.yml` のこのターゲット自身の `dependencies:`）ため、Kotlin の sealed 型の値を
+  実際に組み立てて比較するテストも書ける——`FeedListSelectionEquality.swift` の
+  `ArticleFilter`/`FeedListRowSelection`/`DropBoundary` の比較・キー生成関数をこの方法で検証する
+  `FeedListSelectionEqualityTests` を参照。実行は
   `xcodebuild -scheme Keryx -destination 'platform=macOS' test`（[build.ja.md](build.ja.md) の
   「SwiftUI アプリ（`appleApp/`）のビルド」参照）。
 
