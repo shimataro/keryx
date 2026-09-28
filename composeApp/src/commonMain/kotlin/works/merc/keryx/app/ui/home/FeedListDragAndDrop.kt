@@ -66,6 +66,7 @@ import works.merc.keryx.app.resources.home_unsubscribe_menu
 import works.merc.keryx.app.ui.common.FlatTooltipContent
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.presentation.home.DropBoundary
 
 /** Background for a row that may be an active drop target: [containerColor] while a feed is being
  * dragged over it, otherwise the normal selection background. When the row is the drag source,
@@ -116,17 +117,6 @@ internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
  * over the header on the way somewhere else. */
 private const val FOLDER_AUTO_EXPAND_DELAY_MS = 700L
 
-/**
- * A single drop-and-reorder insertion point, shared (lifted) across all rows/headers in the pane
- * so that hovering the bottom half of one item and the top half of the next item — which are the
- * same logical boundary — light up exactly one indicator rather than two independent ones.
- */
-internal sealed interface DropBoundary {
-    data class BeforeFeed(val feedId: String) : DropBoundary
-    data class AppendFeeds(val folderId: String?) : DropBoundary
-    data class BeforeFolder(val folderId: String) : DropBoundary
-    data object AppendFolders : DropBoundary
-}
 
 /**
  * A drag insertion marker to draw at one edge (top or bottom) of a list row's band, via

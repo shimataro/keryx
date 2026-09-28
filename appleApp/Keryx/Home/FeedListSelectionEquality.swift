@@ -26,6 +26,19 @@ func feedListRowSelectionsEqual(_ a: FeedListRowSelection, _ b: FeedListRowSelec
     }
 }
 
+/// `DropBoundary` (the feed-list drag-and-drop insertion point) is a Kotlin sealed type too —
+/// compared here the same way, for the same reason.
+func dropBoundariesEqual(_ a: DropBoundary?, _ b: DropBoundary?) -> Bool {
+    guard let a, let b else { return a == nil && b == nil }
+    switch (onEnum(of: a), onEnum(of: b)) {
+    case (.beforeFeed(let x), .beforeFeed(let y)): return x.feedId == y.feedId
+    case (.appendFeeds(let x), .appendFeeds(let y)): return x.folderId == y.folderId
+    case (.beforeFolder(let x), .beforeFolder(let y)): return x.folderId == y.folderId
+    case (.appendFolders, .appendFolders): return true
+    default: return false
+    }
+}
+
 /// A stable `String` identity for one rendered copy of a `FeedListRowSelection` — the same feed
 /// shown under both its folder group and an expanded tag renders as two distinct rows/keys, so
 /// `ScrollViewProxy.scrollTo` and appeared-row tracking can tell them apart (`FeedListView`'s own

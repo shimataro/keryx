@@ -24,6 +24,8 @@ import works.merc.keryx.app.presentation.home.nextFeedListRow
 import works.merc.keryx.app.presentation.home.renameHomeKey
 import works.merc.keryx.app.presentation.home.reorderTargetWithinScope
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
+import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.buildFeedListDropIndex
 
 class HomeCommonTest {
 

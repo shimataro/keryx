@@ -121,6 +121,8 @@ import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
+import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.buildFeedListDropIndex
 
 /** How close to the feed list's top/bottom edge a drag must come before the list auto-scrolls, so a
  * drop target outside the current viewport can still be reached without letting go of the drag. */
