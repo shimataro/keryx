@@ -14,12 +14,17 @@ struct AboutView: View {
             Text(LF("settings_version", appVersion))
                 .foregroundStyle(.secondary)
 
+            // Order and grouping matches Compose's own AboutDialog.kt: support links (website,
+            // project page, contact) first, then the legal documents (terms, privacy, licenses).
             VStack(spacing: 4) {
                 Link(L("settings_website"), destination: URL(string: L("website_url"))!)
                 Link(L("settings_project_page"), destination: URL(string: projectUrl)!)
-                Link(L("settings_licenses"), destination: URL(string: licensesUrl)!)
-                Link(L("settings_privacy_policy"), destination: URL(string: L("privacy_policy_url"))!)
+                Link(L("settings_contact"), destination: URL(string: "mailto:\(L("contact_email"))")!)
+            }
+            VStack(spacing: 4) {
                 Link(L("settings_terms"), destination: URL(string: L("terms_url"))!)
+                Link(L("settings_privacy_policy"), destination: URL(string: L("privacy_policy_url"))!)
+                Link(L("settings_licenses"), destination: URL(string: licensesUrl)!)
             }
         }
         .padding(32)

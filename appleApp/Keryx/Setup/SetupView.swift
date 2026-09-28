@@ -34,20 +34,27 @@ struct SetupView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
+                .disabled(setup.phase == .connecting)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("setup_cloud_sync_section_title")).font(.headline)
-                Text(L("setup_cloud_sync_section_desc")).font(.caption).foregroundStyle(.secondary)
+            // Hidden entirely (not just emptied) when no provider is configured for this build —
+            // matches Compose's own `SetupScreen.kt:137`. The auto-local-only choice below covers
+            // this same case, so this branch and that `.task` are never both relevant to the user.
+            if !setup.controller.availableCloudTypes.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L("setup_cloud_sync_section_title")).font(.headline)
+                    Text(L("setup_cloud_sync_section_desc")).font(.caption).foregroundStyle(.secondary)
 
-                ForEach(setup.controller.availableCloudTypes, id: \.self) { type in
-                    Button {
-                        setup.controller.connect(type: type) { onDone() }
-                    } label: {
-                        Text(L(providerKey(type)))
-                            .frame(maxWidth: .infinity)
+                    ForEach(setup.controller.availableCloudTypes, id: \.self) { type in
+                        Button {
+                            setup.controller.connect(type: type) { onDone() }
+                        } label: {
+                            Text(L(providerKey(type)))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(setup.phase == .connecting)
                     }
-                    .buttonStyle(.bordered)
                 }
             }
 
@@ -69,6 +76,14 @@ struct SetupView: View {
         .padding(40)
         .frame(minWidth: 480, minHeight: 420)
         .task { await setup.startObserving() }
+        // Skips Setup entirely when no cloud provider is configured for this build — matches
+        // Compose's own auto-choice (`App.kt:43-54`), rather than showing a cloud section with no
+        // providers in it and making the user pick "local only" for themselves regardless.
+        .task {
+            if setup.controller.availableCloudTypes.isEmpty {
+                setup.controller.chooseLocalOnly { onDone() }
+            }
+        }
         .alert(L("setup_abort_connect_confirm_title"), isPresented: $showAbortConfirm) {
             Button(L("common_abort"), role: .destructive) {
                 setup.controller.cancelConnect()
