@@ -21,6 +21,7 @@ final class HomeObservable {
     let makeAddFeedController: () -> AddFeedController
 
     private(set) var feeds: [Feeds] = []
+    private(set) var feedsById: [String: Feeds] = [:]
     private(set) var tags: [Tags] = []
     private(set) var folders: [Folders] = []
     private(set) var feedTagMap: [String: Set<String>] = [:]
@@ -128,7 +129,10 @@ final class HomeObservable {
     }
 
     private func observeFeeds() async {
-        for await v in viewModel.feeds { feeds = v }
+        for await v in viewModel.feeds {
+            feeds = v
+            feedsById = Dictionary(uniqueKeysWithValues: v.map { ($0.id, $0) })
+        }
     }
 
     private func observeTags() async {

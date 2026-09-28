@@ -19,14 +19,16 @@ struct ArticleListView: View {
     /// itself — see `pillShowDelayTask`'s own KDoc for why.
     @State private var pillShown = false
 
-    private var displayedRows: [ArticleListRow] {
-        home.searchActive ? home.searchResults.map(\.article) : home.articles
-    }
+    /// Debounced task for reporting visible article ids. Rapid `onAppear`/`onDisappear` pairs from
+    /// scrolling are coalesced into a single report after a short delay — mirroring Compose's
+    /// `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
+    @State private var visibleReportTask: Task<Void, Never>? = nil
 
-    private var titleMarks: [String: String] {
-        guard home.searchActive else { return [:] }
-        return Dictionary(uniqueKeysWithValues: home.searchResults.map { ($0.article.id, $0.titleMarked) })
-    }
+    @State private var cachedDisplayedRows: [ArticleListRow] = []
+    @State private var cachedTitleMarks: [String: String] = [:]
+
+    private var displayedRows: [ArticleListRow] { cachedDisplayedRows }
+    private var titleMarks: [String: String] { cachedTitleMarks }
 
     /// A plain `String` key for `home.filter` (a Kotlin sealed-type protocol value), so
     /// `.onChange(of:)` — which requires a genuinely `Equatable` value type, not a bridged
@@ -69,6 +71,9 @@ struct ArticleListView: View {
                     .task(id: home.newArticleCount) {
                         await updatePillShown()
                     }
+                    .onChange(of: home.articles) { _, _ in recacheDisplayedRows() }
+                    .onChange(of: home.searchResults) { _, _ in recacheDisplayedRows() }
+                    .onChange(of: home.searchActive) { _, _ in recacheDisplayedRows() }
             }
         }
         .focused(focusedPane, equals: .articleList)
@@ -197,14 +202,26 @@ struct ArticleListView: View {
             row(article)
                 .onAppear {
                     appearedIds.insert(article.id)
-                    reportVisible()
+                    scheduleReportVisible()
                 }
                 .onDisappear {
                     appearedIds.remove(article.id)
-                    reportVisible()
+                    scheduleReportVisible()
                 }
         }
         .listStyle(.plain)
+    }
+
+    /// Schedules a debounced report of visible article ids. Rapid `onAppear`/`onDisappear` pairs
+    /// from a single scroll gesture are coalesced into one `markArticlesSeen` call after a short
+    /// delay, mirroring Compose's own `distinctUntilChanged` behaviour.
+    private func scheduleReportVisible() {
+        visibleReportTask?.cancel()
+        visibleReportTask = Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            reportVisible()
+        }
     }
 
     /// Suppressed during search: the visible rows are search results, not the underlying filter's
@@ -216,6 +233,18 @@ struct ArticleListView: View {
         home.viewModel.markArticlesSeen(ids: ordered)
     }
 
+    /// Updates the cached `displayedRows` and `titleMarks` so they are not recomputed on every
+    /// body evaluation. Called by `.onChange` observers on the underlying data sources.
+    private func recacheDisplayedRows() {
+        if home.searchActive {
+            cachedDisplayedRows = home.searchResults.map(\.article)
+            cachedTitleMarks = Dictionary(uniqueKeysWithValues: home.searchResults.map { ($0.article.id, $0.titleMarked) })
+        } else {
+            cachedDisplayedRows = home.articles
+            cachedTitleMarks = [:]
+        }
+    }
+
     // MARK: - Row
 
     @ViewBuilder
@@ -225,14 +254,14 @@ struct ArticleListView: View {
             home.viewModel.selectArticle(article: article)
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                FaviconView(url: feedFor(article)?.favicon_url, letter: article.title.first)
+                FaviconView(url: home.feedsById[article.feed_id]?.favicon_url, letter: article.title.first)
                     .frame(width: 20, height: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(article.title.isEmpty ? AttributedString(L("article_no_title")) : titleAttributedString(article))
                         .font(article.is_read == 1 ? .body : .body.bold())
                         .lineLimit(2)
                     HStack(spacing: 6) {
-                        if let feedTitle = feedFor(article)?.keryxDisplayTitle() {
+                        if let feedTitle = home.feedsById[article.feed_id]?.keryxDisplayTitle() {
                             Text(feedTitle)
                         }
                         Text(formattedDate(article.published_at))
@@ -283,10 +312,6 @@ struct ArticleListView: View {
         }
     }
 
-    private func feedFor(_ article: ArticleListRow) -> Feeds? {
-        home.feeds.first { $0.id == article.feed_id }
-    }
-
     /// Falls back to the plain title when a search-marked title is blank — matches Compose's own
     /// `markedToAnnotatedString(it.ifBlank { article.title })` (`ArticleListPane.kt`).
     private func titleAttributedString(_ article: ArticleListRow) -> AttributedString {
@@ -298,14 +323,22 @@ struct ArticleListView: View {
 
     private func highlighted(_ marked: String) -> AttributedString {
         var result = AttributedString()
+        var remaining = marked[...]
         var highlighting = false
-        for ch in marked {
-            if ch == markStart { highlighting = true; continue }
-            if ch == markEnd { highlighting = false; continue }
-            var piece = AttributedString(String(ch))
-            if highlighting {
-                piece.backgroundColor = .yellow.opacity(0.4)
+        while let markerIndex = remaining.firstIndex(where: { $0 == markStart || $0 == markEnd }) {
+            let plain = remaining[..<markerIndex]
+            if !plain.isEmpty {
+                var piece = AttributedString(String(plain))
+                if highlighting { piece.backgroundColor = .yellow.opacity(0.4) }
+                result += piece
             }
+            let marker = remaining[markerIndex]
+            highlighting = (marker == markStart)
+            remaining = remaining[remaining.index(after: markerIndex)...]
+        }
+        if !remaining.isEmpty {
+            var piece = AttributedString(String(remaining))
+            if highlighting { piece.backgroundColor = .yellow.opacity(0.4) }
             result += piece
         }
         return result
