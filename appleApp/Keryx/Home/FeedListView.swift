@@ -16,13 +16,28 @@ struct FeedListView: View {
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
+    /// Rows currently on screen, keyed by `feedListRowSelectionKey` — read by the scroll-to-
+    /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
+    @State private var appearedRowKeys: Set<String> = []
+
+    private var selectedRowKey: String { feedListRowSelectionKey(home.selectedRowInstance) }
+
     var body: some View {
         VStack(spacing: 0) {
             searchField
             Divider()
-            listContent
-                .listStyle(.sidebar)
-                .focused(focusedPane, equals: .feedList)
+            ScrollViewReader { proxy in
+                listContent
+                    .listStyle(.sidebar)
+                    .focused(focusedPane, equals: .feedList)
+                    // Only when the selection actually moved off-screen (arrow-key navigation, a
+                    // restored selection) — mirrors the article list's own scroll-to-selection
+                    // effect (`ArticleListView.body`) and Compose's `FeedListPane.kt:370-373`.
+                    .onChange(of: selectedRowKey, initial: false) { _, key in
+                        guard !appearedRowKeys.contains(key) else { return }
+                        proxy.scrollTo(key)
+                    }
+            }
         }
         .navigationTitle(L("app_name"))
         .toolbar { toolbarContent }
@@ -178,6 +193,7 @@ struct FeedListView: View {
                 }
                 return true
             }
+            .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
 
             if !isCollapsed {
                 ForEach(feedsIn(folder: folder), id: \.id) { feed in
@@ -231,6 +247,7 @@ struct FeedListView: View {
                 home.viewModel.setFeedTag(feedId: feedId, tagId: tag.id, attached: true)
                 return true
             }
+            .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
 
             if isExpanded {
                 ForEach(feeds(taggedWith: tag), id: \.id) { feed in
@@ -311,6 +328,7 @@ struct FeedListView: View {
             .selectableRowLabel(selectionBackground(for: instance))
         }
         .buttonStyle(.plain)
+        .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
     }
 
     /// Mirrors the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s `toneFor`): the instance
@@ -360,6 +378,15 @@ private extension View {
             .contentShape(Rectangle())
             .padding(.horizontal, 4)
             .background(RoundedRectangle(cornerRadius: 5).fill(background))
+    }
+
+    /// Tags a sidebar row with `key` for `ScrollViewProxy.scrollTo` and records whether it is
+    /// currently on screen in `appearedKeys`, so the scroll-to-selection effect in
+    /// `FeedListView.body` only ever scrolls a row that actually needs it.
+    func trackAppearance(_ key: String, in appearedKeys: Binding<Set<String>>) -> some View {
+        id(key)
+            .onAppear { appearedKeys.wrappedValue.insert(key) }
+            .onDisappear { appearedKeys.wrappedValue.remove(key) }
     }
 }
 

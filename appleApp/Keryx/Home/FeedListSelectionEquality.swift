@@ -25,3 +25,18 @@ func feedListRowSelectionsEqual(_ a: FeedListRowSelection, _ b: FeedListRowSelec
     default: return false
     }
 }
+
+/// A stable `String` identity for one rendered copy of a `FeedListRowSelection` — the same feed
+/// shown under both its folder group and an expanded tag renders as two distinct rows/keys, so
+/// `ScrollViewProxy.scrollTo` and appeared-row tracking can tell them apart (`FeedListView`'s own
+/// scroll-to-selection effect).
+func feedListRowSelectionKey(_ instance: FeedListRowSelection) -> String {
+    switch onEnum(of: instance) {
+    case .all: return "all"
+    case .starred: return "starred"
+    case .folder(let f): return "folder:\(f.folderId)"
+    case .tag(let t): return "tag:\(t.tagId)"
+    case .feedInFolderGroup(let f): return "feed-in-folder:\(f.feedId)"
+    case .feedInTag(let f): return "feed-in-tag:\(f.tagId):\(f.feedId)"
+    }
+}

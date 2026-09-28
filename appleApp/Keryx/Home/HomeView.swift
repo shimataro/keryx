@@ -16,7 +16,7 @@ struct HomeView: View {
         NavigationSplitView {
             FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
         } content: {
-            ArticleListView(home: home, notifications: notifications, focusedPane: $focusedPane)
+            ArticleListView(home: home, notifications: notifications, dialogs: sidebarDialogs, focusedPane: $focusedPane)
         } detail: {
             ArticleDetailView(home: home, focusedPane: $focusedPane)
         }

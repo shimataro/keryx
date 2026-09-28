@@ -11,9 +11,13 @@ private let markEnd: Character = "\u{0003}"
 struct ArticleListView: View {
     let home: HomeObservable
     let notifications: NotificationCenterObservable
+    @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
     @State private var appearedIds: Set<String> = []
+    /// Whether the new-articles pill is actually shown, debounced against `home.newArticleCount`
+    /// itself — see `pillShowDelayTask`'s own KDoc for why.
+    @State private var pillShown = false
 
     private var displayedRows: [ArticleListRow] {
         home.searchActive ? home.searchResults.map(\.article) : home.articles
@@ -43,17 +47,46 @@ struct ArticleListView: View {
             Divider()
             ScrollViewReader { proxy in
                 content
+                    // Resets to the top on every filter switch, whatever the sort order — unlike
+                    // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
+                    // vs. `NewArticlesPill`'s own "fresh end"). `initial: false` keeps the first
+                    // composition — including a restored `lastArticleId` selection — from being
+                    // scrolled out from under it.
                     .onChange(of: filterKey, initial: false) { _, _ in
-                        scrollToFreshEnd(proxy)
+                        if let first = displayedRows.first?.id { proxy.scrollTo(first) }
+                    }
+                    // Only when the selection actually moved off-screen (keyboard navigation, a
+                    // restored selection) — a row already visible (e.g. just clicked) never jumps.
+                    .onChange(of: home.selectedArticle?.id) { _, id in
+                        guard let id, !appearedIds.contains(id) else { return }
+                        proxy.scrollTo(id)
                     }
                     .overlay(alignment: home.newestFirst ? .top : .bottom) {
-                        if home.newArticleCount > 0 {
+                        if pillShown {
                             newArticlesPill(proxy: proxy)
                         }
+                    }
+                    .task(id: home.newArticleCount) {
+                        await updatePillShown()
                     }
             }
         }
         .focused(focusedPane, equals: .articleList)
+    }
+
+    /// The pill's count going from `0` to positive is deliberately not shown immediately — the
+    /// article list's own visible-id report lands a frame after a new query result does, so an
+    /// article landing *inside* the current viewport would otherwise flash the pill for a single
+    /// frame before the visibility report catches up and drops it back out of the count. Going
+    /// back to `0` is always immediate. Mirrors Compose's own `NewArticlesPill` (`NewArticlesPill.kt`).
+    private func updatePillShown() async {
+        guard home.newArticleCount > 0 else {
+            pillShown = false
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+        guard !Task.isCancelled else { return }
+        pillShown = true
     }
 
     // MARK: - Toolbar
@@ -80,7 +113,8 @@ struct ArticleListView: View {
             } label: {
                 Image(systemName: home.newestFirst ? "arrow.down" : "arrow.up")
             }
-            .help(L(home.newestFirst ? "home_sort_newest" : "home_sort_oldest"))
+            .disabled(home.searchActive)
+            .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
 
             Spacer()
 
@@ -103,10 +137,11 @@ struct ArticleListView: View {
     @ViewBuilder
     private var content: some View {
         if home.feeds.isEmpty {
-            ContentUnavailableView(
-                L("home_no_feeds"),
-                systemImage: "tray"
-            )
+            ContentUnavailableView {
+                Label(L("home_no_feeds"), systemImage: "tray")
+            } actions: {
+                Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
+            }
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
@@ -193,7 +228,7 @@ struct ArticleListView: View {
                 FaviconView(url: feedFor(article)?.favicon_url, letter: article.title.first)
                     .frame(width: 20, height: 20)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(titleAttributedString(article))
+                    Text(article.title.isEmpty ? AttributedString(L("article_no_title")) : titleAttributedString(article))
                         .font(article.is_read == 1 ? .body : .body.bold())
                         .lineLimit(2)
                     HStack(spacing: 6) {
@@ -220,20 +255,31 @@ struct ArticleListView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
+            // (`ArticleRowComponents.kt`) — a `let` inside a `@ViewBuilder` menu-content closure
+            // runs as a plain side effect, not a view, and this closure is rebuilt each time the
+            // menu is requested.
+            let _ = selectForContextMenu(article)
             Button(L(article.is_starred == 1 ? "article_unstar" : "article_star")) {
                 home.viewModel.toggleStar(article: article)
             }
             Button(L(article.is_read == 1 ? "article_mark_as_unread" : "article_mark_as_read")) {
                 home.viewModel.toggleRead(article: article)
             }
-            if ArticleListModelKt.hasUsableUrl(url: article.url) {
-                Button(L("article_copy_url")) {
-                    copyToPasteboard(article.url)
-                }
-                Button(L("article_open_in_browser")) {
-                    openInBrowser(article.url)
-                }
+            Button(L("article_copy_url")) {
+                copyToPasteboard(article.url)
             }
+            .disabled(!ArticleListModelKt.hasUsableUrl(url: article.url))
+            Button(L("article_open_in_browser")) {
+                openInBrowser(article.url)
+            }
+            .disabled(!ArticleListModelKt.hasUsableUrl(url: article.url))
+        }
+    }
+
+    private func selectForContextMenu(_ article: ArticleListRow) {
+        if home.selectedArticle?.id != article.id {
+            home.viewModel.selectArticle(article: article)
         }
     }
 
@@ -293,9 +339,7 @@ struct ArticleListView: View {
 
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
-        withAnimation {
-            proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
-        }
+        proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
     }
 }
 
