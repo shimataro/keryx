@@ -46,14 +46,20 @@
                   ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
                   サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
                   あるかどうか。NameValidation——フォルダ・タグの新規作成/リネームダイアログが共有する
-                  重複名チェック）、article/（ArticleWebViewHtml——
+                  重複名チェック。FeedListDrag——DropBoundary/FeedListDropIndex/buildFeedListDropIndex/
+                  resolveFeedListDropAction/resolveFeedListDropHighlight。フィードリストのドラッグ＆
+                  ドロップにおけるドロップ先の判定で、Compose と Apple アプリが共有する。TagColors——
+                  TAG_COLOR_PALETTE。タグの色選択が共有する 8 色のパレット）、article/（ArticleWebViewHtml——
                   リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
                   組み立て・解析。ファイルの選択は各 UI が担当）、menu/（MenuUiState + computeMenuUiState——
                   メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
-                  `onHome: Boolean` を受け取る）、Formatting（formatTimestamp）。
+                  `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
+                  リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
+                  リーダーが共有）、RelativeTime（relativeTimeOf——タイムスタンプの経過時間を
+                  now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,

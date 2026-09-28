@@ -49,7 +49,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
                   which warning/error still needs announcing in a transient surface with no queue of
                   its own, e.g. Android's foreground Snackbar; NameValidation — the folder/tag
-                  duplicate-name check every create/rename dialog shares), article/ (ArticleWebViewHtml —
+                  duplicate-name check every create/rename dialog shares; FeedListDrag —
+                  DropBoundary/FeedListDropIndex/buildFeedListDropIndex/resolveFeedListDropAction/
+                  resolveFeedListDropHighlight, the feed-list drag-and-drop drop-target resolution
+                  shared by Compose and the Apple app; TagColors — TAG_COLOR_PALETTE, the tag
+                  color-picker's shared 8-color palette), article/ (ArticleWebViewHtml —
                   the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
@@ -57,8 +61,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
                   leaving file picking to each UI), menu/ (MenuUiState + computeMenuUiState — enabled/
                   checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
-                  than Compose's own `Screen` type), Formatting (formatTimestamp). Pane
-                  layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  than Compose's own `Screen` type), Formatting (formatTimestamp, articleMetaText —
+                  the reader's "author · date" meta line, shared by Compose's 3-pane reader and the
+                  Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
+                  into now/minutes/hours/days/absolute, shared by both apps' notification center
+                  rows). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,

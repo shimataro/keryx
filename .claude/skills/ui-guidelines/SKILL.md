@@ -1400,15 +1400,26 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     filter is selected — `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results
     states); at a narrow layout, `ArticleListPane`'s own `KeryxExpandedSearchBar`
     (`ui/common/KeryxSearchBar.kt`) instead, reached through `ArticleListTopBar`'s search icon — see
-    "Adaptive pane layout & touch affordances" below → either way, SwiftUI's `.searchable()`.
+    "Adaptive pane layout & touch affordances" below → **already ported, deliberately not to
+    `.searchable()`**: `FeedListView.searchField` (`appleApp/Keryx/Home/FeedListView.swift`) is a
+    plain `TextField`, because `.searchable()` cannot report its own focus state before macOS 15
+    (`.searchFocused(_:)`), which the shortcut/focus-handoff logic (`HomeShortcutsKt.homeShortcutFor`'s
+    `textInputFocused`, and moving into the results with ↓/↑) needs. Revisit `.searchable()` once the
+    deployment target reaches macOS 15.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
   - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
-    `DropBoundary`, `RowHalf`, `resolveRowHalf`) — hand-computed row-half hit-testing and a manually
-    drawn insertion line (explicitly modeled on macOS Notes' reorder UI) → SwiftUI `List`'s native `.onMove`/`.onInsert`
-    reordering, which draws insertion indicators and row-shift animation for free.
+    `RowHalf`, `resolveRowHalf`) and the shared `presentation/home/FeedListDrag.kt` (`DropBoundary`,
+    `FeedListDropIndex`, `resolveFeedListDropAction`/`resolveFeedListDropHighlight`) — hand-computed
+    row-half hit-testing and a manually drawn insertion line (explicitly modeled on macOS Notes'
+    reorder UI) → **already ported, deliberately not to `.onMove`/`.onInsert`**: the Apple app
+    (`appleApp/Keryx/Home/FeedListDragAndDrop.swift`) calls the same shared `FeedListDrag.kt`
+    functions through a custom `DropDelegate`, so both UIs resolve an identical drop to an identical
+    action/insertion line — porting to `List`'s native reordering would mean re-deriving that same
+    logic a second time in SwiftUI's own terms, and still wouldn't cover this feature's other drop
+    kinds (move-to-folder, tag-attach) that `.onMove` has no equivalent for.
   - `homeKeyboardShortcuts` (`ui/home/KeyboardNav.kt`) — an `onPreviewKeyEvent` key trap for app
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
     menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard
