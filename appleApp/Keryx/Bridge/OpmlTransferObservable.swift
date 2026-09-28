@@ -26,6 +26,20 @@ struct OpmlDocument: FileDocument {
     }
 }
 
+/// What `OpmlTransferObservable` needs from Kotlin's `OpmlTransfer` — pulled out as a protocol
+/// (rather than depending on `OpmlTransfer` directly) purely so `OpmlTransferObservableTests` can
+/// substitute a fake and exercise the busy-guard/result-reporting logic below without a running
+/// `KeryxSdk`. `Sendable`: `importOpml(from:)` captures `self.opml` into a plain `Task { }`, which
+/// requires everything it captures to be `Sendable` — `OpmlTransfer` itself already satisfies this
+/// (every K/N-bridged Kotlin type does), so this only makes that requirement explicit for the
+/// existential `any OpmlTransferring` the property is now typed as.
+protocol OpmlTransferring: Sendable {
+    func exportOpml() -> String
+    func importOpml(xml: String) async throws -> OpmlImportOutcome
+}
+
+extension OpmlTransfer: OpmlTransferring {}
+
 /// Shared OPML import/export status and busy-guard — used by both the Data settings tab
 /// (`DataSettingsTab.swift`) and the File menu's Import/Export commands (`HomeCommands.swift`), one
 /// instance owned by `AppModel`, matching Compose's own single `SettingsViewModel` routing both
@@ -35,12 +49,12 @@ struct OpmlDocument: FileDocument {
 @MainActor
 @Observable
 final class OpmlTransferObservable {
-    let opml: OpmlTransfer
+    let opml: OpmlTransferring
     private(set) var isBusy = false
     private(set) var statusMessage: String?
     private(set) var statusIsError = false
 
-    init(opml: OpmlTransfer) {
+    init(opml: OpmlTransferring) {
         self.opml = opml
     }
 
@@ -64,15 +78,13 @@ final class OpmlTransferObservable {
     }
 
     func reportImportPanelFailure() {
-        statusMessage = L("settings_import_error")
-        statusIsError = true
+        reportImportFailure()
     }
 
     func importOpml(from url: URL) {
         guard !isBusy else { return }
         guard url.startAccessingSecurityScopedResource() else {
-            statusMessage = L("settings_import_error")
-            statusIsError = true
+            reportImportFailure()
             return
         }
         isBusy = true
@@ -82,23 +94,29 @@ final class OpmlTransferObservable {
                 isBusy = false
             }
             guard let xml = try? String(contentsOf: url, encoding: .utf8) else {
-                statusMessage = L("settings_import_error")
-                statusIsError = true
+                reportImportFailure()
                 return
             }
             do {
-                let outcome = try await opml.importOpml(xml: xml)
-                if outcome.failed > 0 {
-                    statusMessage = LF("settings_import_failed", Int64(outcome.failed))
-                    statusIsError = true
-                } else {
-                    statusMessage = LF("settings_import_success", Int64(outcome.added))
-                    statusIsError = false
-                }
+                report(outcome: try await opml.importOpml(xml: xml))
             } catch {
-                statusMessage = L("settings_import_error")
-                statusIsError = true
+                reportImportFailure()
             }
         }
+    }
+
+    private func report(outcome: OpmlImportOutcome) {
+        if outcome.failed > 0 {
+            statusMessage = LF("settings_import_failed", Int64(outcome.failed))
+            statusIsError = true
+        } else {
+            statusMessage = LF("settings_import_success", Int64(outcome.added))
+            statusIsError = false
+        }
+    }
+
+    private func reportImportFailure() {
+        statusMessage = L("settings_import_error")
+        statusIsError = true
     }
 }
