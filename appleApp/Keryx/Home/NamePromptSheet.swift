@@ -1,39 +1,25 @@
 import KeryxShared
 import SwiftUI
 
-/// A reusable name-entry sheet for creating/renaming a folder, tag, or feed, with live
-/// duplicate-name validation (`NameValidation.kt`'s `isDuplicateFolderName`/`isDuplicateTagName`)
-/// and, for a tag, a color swatch picker. One shared component rather than separate folder/tag/
-/// rename dialogs, since the shape (name + optional color + duplicate check + confirm/cancel) is
-/// identical.
+/// A reusable name-entry sheet for creating a folder or tag, with live duplicate-name validation
+/// (`NameValidation.kt`'s `isDuplicateFolderName`/`isDuplicateTagName`) and, for a tag, a color
+/// swatch picker. Renaming is not done here: it happens in the row itself (`InlineRenameField`).
 struct NamePromptSheet: View {
     let titleKey: String
     let placeholderKey: String
-    /// Overrides the localized `placeholderKey` with literal text — used only by the feed-rename
-    /// sheet, whose placeholder is the feed's own parsed title (what a cleared name reverts to),
-    /// not a fixed hint string.
-    let placeholderText: String?
     let duplicateMessageKey: String
-    /// Whether an empty name can be confirmed — only a feed rename allows this, to clear its
-    /// `custom_title` back to the feed's own fetched title (`FeedRepository.renameFeed`'s
-    /// `takeIf { isNotBlank }`); a folder or tag always needs a name.
-    let allowBlank: Bool
     let showColorPicker: Bool
     let isDuplicate: (String) -> Bool
     let onConfirm: (String, String?) -> Void
     @Binding var isPresented: Bool
 
-    @State private var name: String
+    @State private var name = ""
     @State private var color: String?
 
     init(
         titleKey: String,
         placeholderKey: String,
-        placeholderText: String? = nil,
         duplicateMessageKey: String = "",
-        initialName: String = "",
-        initialColor: String? = nil,
-        allowBlank: Bool = false,
         showColorPicker: Bool = false,
         isDuplicate: @escaping (String) -> Bool,
         onConfirm: @escaping (String, String?) -> Void,
@@ -41,26 +27,22 @@ struct NamePromptSheet: View {
     ) {
         self.titleKey = titleKey
         self.placeholderKey = placeholderKey
-        self.placeholderText = placeholderText
         self.duplicateMessageKey = duplicateMessageKey
-        self.allowBlank = allowBlank
         self.showColorPicker = showColorPicker
         self.isDuplicate = isDuplicate
         self.onConfirm = onConfirm
         self._isPresented = isPresented
-        self._name = State(initialValue: initialName)
-        self._color = State(initialValue: initialColor)
     }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var duplicate: Bool { !trimmedName.isEmpty && isDuplicate(trimmedName) }
-    private var canConfirm: Bool { (allowBlank || !trimmedName.isEmpty) && !duplicate }
+    private var canConfirm: Bool { !trimmedName.isEmpty && !duplicate }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L(titleKey)).font(.headline)
 
-            TextField(placeholderText ?? L(placeholderKey), text: $name)
+            TextField(L(placeholderKey), text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(confirm)
 

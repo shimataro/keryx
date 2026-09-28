@@ -362,5 +362,4 @@
          plural (article count, new-articles count, OPML import result, relative time) reuses the
          matching Compose <plurals> resource directly instead of a fixed-wording key like this one. -->
     <string name="apple_add_feed_partial_result">%1$d 件成功、%2$d 件失敗</string>
-    <string name="apple_rename_feed_hint">フィード名を入力</string>
 </resources>
