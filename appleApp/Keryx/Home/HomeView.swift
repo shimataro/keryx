@@ -69,7 +69,7 @@ struct HomeView: View {
         // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
         // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.
         .onChange(of: focusedPane, initial: true) { _, pane in
-            home.textInputFocused = pane == .search
+            home.textInputFocused = pane == .search || pane == .rowNameEditor
         }
         // Restored on next launch by the `.onAppear` above — matches Compose's own
         // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
@@ -103,7 +103,7 @@ struct HomeView: View {
         case .feedList: return "FeedList"
         case .articleList: return "ArticleList"
         case .reader: return "ArticleDetail"
-        case .search, nil: return nil
+        case .search, .rowNameEditor, nil: return nil
         }
     }
 
@@ -124,7 +124,7 @@ struct HomeView: View {
             // The sidebar's `.searchable` field reports its focus through this same `focusedPane`
             // via `.searchFocused` on macOS 15 / iOS 18+; before that its focus cannot be seen, so
             // this stays false there — see `FeedListView`'s `SearchFocusModifier`.
-            textInputFocused: focusedPane == .search,
+            textInputFocused: focusedPane == .search || focusedPane == .rowNameEditor,
             // Ctrl+Shift+R belongs to the Feed menu's "Refresh selected feed" item on desktop
             // Compose (`AppMenuTree.kt`), not the sidebar-refresh key touch-only platforms bind it
             // to — see `HomeCommands.swift`'s `refreshSelectedFeed`.
@@ -149,6 +149,10 @@ struct HomeView: View {
             // "Article Reader (native WebView)" in app-architecture.md) — never change the
             // selection out from under it.
             case .reader: return .ignored
+            // The row name editor is a single-line field: ↑/↓ have no use there, and must not move
+            // the article selection out from under it (`homeShortcutFor` still reports them while a
+            // text input is focused, for the search field's hand-off just below).
+            case .rowNameEditor: return .ignored
             // Descends into the results list rather than moving the sidebar's own selection, even
             // though the field visually sits in the sidebar — matches Compose's own
             // `moveArticleSelectionFromSearchField` (`HomeScreen.kt`).
@@ -158,7 +162,7 @@ struct HomeView: View {
         case .down:
             switch focusedPane {
             case .feedList: moveFeedListSelection(by: 1)
-            case .reader: return .ignored
+            case .reader, .rowNameEditor: return .ignored
             case .search: moveArticleSelectionFromSearchField(by: 1)
             default: home.viewModel.selectNext()
             }
@@ -231,14 +235,7 @@ struct HomeView: View {
     }
 
     private func requestRename() {
-        guard let target = FeedListModelKt.resolveFeedListSelectionTarget(
-            filter: home.filter, feeds: home.feeds, folders: home.folders, tags: home.tags
-        ) else { return }
-        switch onEnum(of: target) {
-        case .feed(let f): sidebarDialogs.renamingFeed = f.feed
-        case .folder(let f): sidebarDialogs.renamingFolder = f.folder
-        case .tag(let t): sidebarDialogs.renamingTag = t.tag
-        }
+        sidebarDialogs.startRename(home.selectedRowInstance)
     }
 
     private func requestDelete() {

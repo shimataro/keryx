@@ -278,12 +278,7 @@ struct HomeCommands: Commands {
     }
 
     private func performRename(_ home: HomeObservable) {
-        guard let target = selectionTarget(home) else { return }
-        switch onEnum(of: target) {
-        case .feed(let f): model.sidebarDialogs.renamingFeed = f.feed
-        case .folder(let f): model.sidebarDialogs.renamingFolder = f.folder
-        case .tag(let t): model.sidebarDialogs.renamingTag = t.tag
-        }
+        model.sidebarDialogs.startRename(home.selectedRowInstance)
     }
 
     private func performDelete(_ home: HomeObservable) {

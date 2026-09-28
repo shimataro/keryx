@@ -58,6 +58,12 @@ struct FeedListView: View {
                         guard !appearedRowKeys.contains(key) else { return }
                         proxy.scrollTo(key)
                     }
+                    // Starting an in-place rename scrolls its row into view, like Compose's
+                    // `LaunchedEffect(inlineEdit)` (`FeedListPane.kt`).
+                    .onChange(of: dialogs.renamingRowKey) { _, key in
+                        guard let key, !appearedRowKeys.contains(key) else { return }
+                        proxy.scrollTo(key)
+                    }
             }
         }
         .navigationTitle(L("app_name"))
@@ -85,7 +91,14 @@ struct FeedListView: View {
             }
         }
         .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
-        .modifier(SidebarRenameSheets(home: home, dialogs: dialogs))
+        // Ends an in-place rename whose row stopped being rendered — deleted, removed by a sync
+        // merge, or a tag/folder collapsed over it — otherwise confirming would write to a row that
+        // is no longer there. Mirrors Compose's own auto-cancel (`FeedListPane.kt:402-413`).
+        .onChange(of: orderedRows.map(feedListRowSelectionKey)) { _, keys in
+            if let key = dialogs.renamingRowKey, !keys.contains(key) {
+                dialogs.renamingRowKey = nil
+            }
+        }
         .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
         // The 3-pane desktop/macOS layout keeps this field permanently visible (mirrors Compose's
         // own `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
@@ -246,6 +259,32 @@ struct FeedListView: View {
         )
     }
 
+    // MARK: - In-place rename
+
+    /// The name editor for the row `instance`, or `nil` when that row isn't being renamed.
+    private func renameEditor(
+        for instance: FeedListRowSelection,
+        initialName: String,
+        placeholder: String = "",
+        allowBlank: Bool = false,
+        blockingError: @escaping (String) -> String? = { _ in nil },
+        commit: @escaping (String) -> Void
+    ) -> InlineRenameField? {
+        guard dialogs.renamingRowKey == feedListRowSelectionKey(instance) else { return nil }
+        return InlineRenameField(
+            initialName: initialName,
+            placeholder: placeholder,
+            allowBlank: allowBlank,
+            blockingError: blockingError,
+            onCommit: { name in
+                dialogs.renamingRowKey = nil
+                commit(name)
+            },
+            onCancel: { dialogs.renamingRowKey = nil },
+            focusedPane: focusedPane
+        )
+    }
+
     // MARK: - All / Starred
 
     private var allRow: some View {
@@ -333,8 +372,20 @@ struct FeedListView: View {
                 insert(into: .feeds(folderId: folder.id, feedIds: feedsIn(folder: folder).map(\.id)), at: offset)
             }
         } label: {
-            Label(folder.name, systemImage: "folder")
-                .lineLimit(1)
+            Label {
+                if let editor = renameEditor(
+                    for: instance,
+                    initialName: folder.name,
+                    blockingError: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: folder.id) ? L("home_folder_name_duplicate") : nil },
+                    commit: { home.viewModel.updateFolder(id: folder.id, name: $0) }
+                ) {
+                    editor
+                } else {
+                    Text(folder.name).lineLimit(1)
+                }
+            } icon: {
+                Image(systemName: "folder")
+            }
                 .sidebarRowHighlight(dropOnKey == .folder(folder.id) ? .drop : highlight(for: instance))
                 .badge(Int(home.unreadByFolder[folder.id] ?? 0))
                 .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
@@ -344,10 +395,14 @@ struct FeedListView: View {
                     // selection runs on a right-click/Control-click via `.selectsOnContextMenu` above,
                     // not as a side effect of this builder (see `ContextMenuSelectionTracker`'s own doc
                     // for why).
-                    Button(L("home_edit_folder_menu")) { dialogs.renamingFolder = folder }
+                    Button(L("home_edit_folder_menu")) { dialogs.startRename(instance) }
                     Button(L("home_delete_folder_menu"), role: .destructive) { dialogs.deletingFolder = folder }
                 }
-                .feedListDraggable(FeedListDragPayload(kind: .folder, id: folder.id), draggingItem: $draggingItem)
+                .feedListDraggable(
+                    FeedListDragPayload(kind: .folder, id: folder.id),
+                    draggingItem: $draggingItem,
+                    enabled: dialogs.renamingRowKey != feedListRowSelectionKey(instance)
+                )
                 .feedListDropTarget(
                     FeedListDropTargetFolderHeader(folderId: folder.id),
                     hoverKey: .folder(folder.id),
@@ -395,6 +450,7 @@ struct FeedListView: View {
                 dialogs: dialogs,
                 tag: tag,
                 instance: instance,
+                focusedPane: focusedPane,
                 appearedRowKeys: $appearedRowKeys,
                 highlight: highlight(for:),
                 dropIndex: dropIndex,
@@ -420,8 +476,21 @@ struct FeedListView: View {
             isErroring: feed.error_count > 0 || feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE,
             isGone: feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE,
             instance: instance,
+            editor: renameEditor(
+                for: instance,
+                initialName: feed.displayTitle(),
+                // What clearing the name falls back to: the feed's own parsed title.
+                placeholder: feed.title,
+                // Blank clears `custom_title` (`FeedRepository.renameFeed`); there is no duplicate check.
+                allowBlank: true,
+                commit: { home.viewModel.renameFeed(id: feed.id, title: $0) }
+            ),
         )
-        .feedListDraggable(FeedListDragPayload(kind: .feed, id: feed.id), draggingItem: $draggingItem)
+        .feedListDraggable(
+            FeedListDragPayload(kind: .feed, id: feed.id),
+            draggingItem: $draggingItem,
+            enabled: dialogs.renamingRowKey != feedListRowSelectionKey(instance)
+        )
         .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
@@ -461,7 +530,7 @@ struct FeedListView: View {
             Button(L("home_open_site")) { if let site = feed.site_url { openInBrowser(site) } }
                 .disabled(!ArticleListModelKt.hasUsableUrl(url: feed.site_url))
             Divider()
-            Button(L("home_rename_feed")) { dialogs.renamingFeed = feed }
+            Button(L("home_rename_feed")) { dialogs.startRename(instance) }
             Divider()
             Button(L("home_unsubscribe_menu"), role: .destructive) { dialogs.unsubscribingFeed = feed }
         }
@@ -475,10 +544,15 @@ struct FeedListView: View {
         isErroring: Bool = false,
         isGone: Bool = false,
         instance: FeedListRowSelection,
+        editor: InlineRenameField? = nil,
     ) -> some View {
         Label {
             HStack(spacing: 4) {
-                Text(title).lineLimit(1)
+                if let editor {
+                    editor
+                } else {
+                    Text(title).lineLimit(1)
+                }
                 if isErroring {
                     Spacer(minLength: 0)
                     // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
@@ -590,6 +664,7 @@ private struct TagRowLabel: View {
     let dialogs: SidebarDialogState
     let tag: Tags
     let instance: FeedListRowSelection
+    var focusedPane: FocusState<HomeFocusedPane?>.Binding
     @Binding var appearedRowKeys: Set<String>
     let highlight: (FeedListRowSelection) -> SidebarRowHighlight
     let dropIndex: FeedListDropIndex
@@ -601,7 +676,21 @@ private struct TagRowLabel: View {
 
     var body: some View {
         Label {
-            Text(tag.name).lineLimit(1)
+            if dialogs.renamingRowKey == feedListRowSelectionKey(instance) {
+                InlineRenameField(
+                    initialName: tag.name,
+                    blockingError: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: tag.id) ? L("home_tag_name_duplicate") : nil },
+                    // The tag's color is kept as it is — it has its own menu item and dot popover.
+                    onCommit: { name in
+                        dialogs.renamingRowKey = nil
+                        home.viewModel.updateTag(id: tag.id, name: name, color: tag.color)
+                    },
+                    onCancel: { dialogs.renamingRowKey = nil },
+                    focusedPane: focusedPane
+                )
+            } else {
+                Text(tag.name).lineLimit(1)
+            }
         } icon: {
             colorDot
         }
@@ -615,7 +704,7 @@ private struct TagRowLabel: View {
             // `onOpen = { if (!selected) onClick() }` (`FeedListPane.kt`) — the actual selection
             // runs on a right-click/Control-click via `.selectsOnContextMenu` above, not as a side
             // effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
-            Button(L("home_edit_tag_menu")) { dialogs.renamingTag = tag }
+            Button(L("home_edit_tag_menu")) { dialogs.startRename(instance) }
             Button(L("home_change_tag_color_menu")) { showingColorPicker = true }
             Button(L("home_delete_tag_menu"), role: .destructive) { dialogs.deletingTag = tag }
         }
@@ -674,7 +763,7 @@ private struct TagRowLabel: View {
     }
 }
 
-/// The three sidebar `ViewModifier`s below exist only to keep `FeedListView.body`'s own modifier
+/// The two sidebar `ViewModifier`s below exist only to keep `FeedListView.body`'s own modifier
 /// chain short — chaining all of M3's sheets/alerts directly onto `body` made a single expression
 /// too complex for the type checker ("unable to type-check this expression in reasonable time").
 
@@ -741,80 +830,6 @@ private struct SidebarCreateSheets: ViewModifier {
                     },
                     isPresented: Binding(get: { dialogs.creatingTagForFeed != nil }, set: { if !$0 { dialogs.creatingTagForFeed = nil } })
                 )
-            }
-    }
-}
-
-private struct SidebarRenameSheets: ViewModifier {
-    let home: HomeObservable
-    @Bindable var dialogs: SidebarDialogState
-
-    func body(content: Content) -> some View {
-        content
-            .sheet(item: $dialogs.renamingFolder) { folder in
-                NamePromptSheet(
-                    titleKey: "home_edit_folder_menu",
-                    placeholderKey: "home_new_folder_hint",
-                    duplicateMessageKey: "home_folder_name_duplicate",
-                    initialName: folder.name,
-                    isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: folder.id) },
-                    onConfirm: { name, _ in home.viewModel.updateFolder(id: folder.id, name: name) },
-                    isPresented: Binding(get: { dialogs.renamingFolder != nil }, set: { if !$0 { dialogs.renamingFolder = nil } })
-                )
-            }
-            .sheet(item: $dialogs.renamingTag) { tag in
-                NamePromptSheet(
-                    titleKey: "home_edit_tag_menu",
-                    placeholderKey: "home_new_tag_hint",
-                    duplicateMessageKey: "home_tag_name_duplicate",
-                    initialName: tag.name,
-                    // Keeps the tag's existing color (nil included) unless the user actually picks
-                    // one — Compose's own rename never changes `tag.color` on its own
-                    // (`FeedListPane.kt`'s `onEdit`), so pre-selecting a default here would apply a
-                    // color the user never touched.
-                    initialColor: tag.color,
-                    showColorPicker: true,
-                    isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: tag.id) },
-                    onConfirm: { name, color in home.viewModel.updateTag(id: tag.id, name: name, color: color) },
-                    isPresented: Binding(get: { dialogs.renamingTag != nil }, set: { if !$0 { dialogs.renamingTag = nil } })
-                )
-            }
-            .sheet(item: $dialogs.renamingFeed) { feed in
-                NamePromptSheet(
-                    titleKey: "home_rename_feed",
-                    placeholderKey: "apple_rename_feed_hint",
-                    // The placeholder shown once the field is cleared is the feed's own parsed
-                    // title — what confirming a blank name reverts `custom_title` to (below) —
-                    // matching Compose's own inline-rename placeholder (`FeedListDragAndDrop.kt`).
-                    placeholderText: feed.title,
-                    initialName: feed.displayTitle(),
-                    // A blank name is allowed here (unlike a folder/tag): it clears `custom_title`
-                    // back to the feed's own fetched title (`FeedRepository.renameFeed`'s
-                    // `takeIf { isNotBlank }`, which already treats "" the same as nil).
-                    allowBlank: true,
-                    isDuplicate: { _ in false },
-                    onConfirm: { name, _ in home.viewModel.renameFeed(id: feed.id, title: name) },
-                    isPresented: Binding(get: { dialogs.renamingFeed != nil }, set: { if !$0 { dialogs.renamingFeed = nil } })
-                )
-            }
-            // Closes a rename sheet if its target is deleted mid-edit (e.g. a sync merge removes
-            // the folder/tag/feed while the sheet is open) — otherwise confirming would write to a
-            // row that no longer exists. Mirrors Compose's own auto-cancel when the row stops being
-            // rendered (`FeedListPane.kt:400-412`).
-            .onChange(of: home.folders) { _, folders in
-                if let id = dialogs.renamingFolder?.id, !folders.contains(where: { $0.id == id }) {
-                    dialogs.renamingFolder = nil
-                }
-            }
-            .onChange(of: home.tags) { _, tags in
-                if let id = dialogs.renamingTag?.id, !tags.contains(where: { $0.id == id }) {
-                    dialogs.renamingTag = nil
-                }
-            }
-            .onChange(of: home.feeds) { _, feeds in
-                if let id = dialogs.renamingFeed?.id, !feeds.contains(where: { $0.id == id }) {
-                    dialogs.renamingFeed = nil
-                }
             }
     }
 }

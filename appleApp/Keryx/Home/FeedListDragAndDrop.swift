@@ -80,7 +80,23 @@ extension View {
     /// signal — every drop target reads `draggingItem` to validate and act, so it must be set
     /// before the first hover. The payload is registered under its kind's own type
     /// (`FeedListDragPayload.contentType`), visible to this process only.
-    func feedListDraggable(_ item: FeedListDragPayload, draggingItem: Binding<FeedListDragPayload?>) -> some View {
+    ///
+    /// `enabled` is off while the row's name is being edited in place, so a press-and-sweep to select
+    /// text isn't taken as a row drag (Compose's `feedListReorderDrag(enabled = inlineEdit == null)`).
+    @ViewBuilder
+    func feedListDraggable(
+        _ item: FeedListDragPayload,
+        draggingItem: Binding<FeedListDragPayload?>,
+        enabled: Bool = true
+    ) -> some View {
+        if enabled {
+            feedListDraggableProvider(item, draggingItem: draggingItem)
+        } else {
+            self
+        }
+    }
+
+    private func feedListDraggableProvider(_ item: FeedListDragPayload, draggingItem: Binding<FeedListDragPayload?>) -> some View {
         itemProvider {
             draggingItem.wrappedValue = item
             let provider = NSItemProvider()

@@ -8,6 +8,8 @@ enum HomeFocusedPane: Hashable {
     case feedList
     case articleList
     case reader
+    /// A sidebar row's in-place name editor (`InlineRenameField`) — a text input, like `.search`.
+    case rowNameEditor
     case search
 }
 

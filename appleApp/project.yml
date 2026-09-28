@@ -112,6 +112,7 @@ targets:
       - path: Keryx/Home/ArticleNavigationPolicy.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/FeedListDropPresentation.swift
+      - path: Keryx/Home/SidebarDialogState.swift
       - path: Keryx/Bridge/OpmlTransferObservable.swift
       - path: Keryx/Platform/Localized.swift
     # KeryxShared statically linked (same as the Keryx target's own dependency) so
