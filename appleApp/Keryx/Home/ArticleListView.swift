@@ -325,7 +325,7 @@ struct ArticleListView: View {
             home.viewModel.markAllArticlesSeen()
             scrollToFreshEnd(proxy)
         } label: {
-            Text(LF("apple_new_articles_pill", Int64(home.newArticleCount)))
+            Text(LF("home_new_articles", Int64(home.newArticleCount)))
                 .font(.callout)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

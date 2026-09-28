@@ -69,7 +69,7 @@ final class AppModel {
     /// `OAuthSessionCoordinator.open` (which itself hops to `@MainActor` internally).
     nonisolated private static func startSdk(oauthCoordinator: OAuthSessionCoordinator) throws -> KeryxSdk {
         try KeryxSdk.companion.start(
-            newArticlesText: { count in LF("apple_new_articles_pill", Int64(count)) },
+            newArticlesText: { count in LF("home_new_articles", Int64(count)) },
             postOsNotification: { message, _ in OsNotificationPoster.post(message: message) },
             // KERYX_DATA_DIR lets a manual verification run point at a scratch directory instead
             // of the real ~/Library/Application Support/Keryx — unset (nil) in every normal

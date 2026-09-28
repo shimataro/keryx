@@ -89,10 +89,10 @@ final class OpmlTransferObservable {
             do {
                 let outcome = try await opml.importOpml(xml: xml)
                 if outcome.failed > 0 {
-                    statusMessage = LF("apple_opml_import_failed", Int64(outcome.failed))
+                    statusMessage = LF("settings_import_failed", Int64(outcome.failed))
                     statusIsError = true
                 } else {
-                    statusMessage = LF("apple_opml_import_success", Int64(outcome.added))
+                    statusMessage = LF("settings_import_success", Int64(outcome.added))
                     statusIsError = false
                 }
             } catch {

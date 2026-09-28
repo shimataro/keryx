@@ -363,18 +363,12 @@
     <string name="error_generic">An error occurred</string>
     <string name="error_update">Update failed</string>
 
-    <!-- Apple (SwiftUI) app only — a non-plural counterpart to a Compose <plurals> resource whose
-         two-argument form (home_add_feed_partial) / count-driven wording (home_new_articles) has
-         no direct equivalent in Foundation's String Catalog plural mechanism (its keyed variations
-         assume a single argument drives the plural category). Formatted via String(format:). -->
+    <!-- Apple (SwiftUI) app only — a non-plural counterpart to Compose's own two-argument
+         home_add_feed_partial, which has no direct equivalent in Foundation's String Catalog
+         plural mechanism (its keyed variations assume a single argument drives the plural
+         category). Formatted via LF, same as every other Apple-only string here. A single-argument
+         plural (article count, new-articles count, OPML import result, relative time) reuses the
+         matching Compose <plurals> resource directly instead of a fixed-wording key like this one. -->
     <string name="apple_add_feed_partial_result">%1$d succeeded, %2$d failed</string>
-    <string name="apple_add_feed_article_count">%1$d articles</string>
-    <string name="apple_time_minutes_ago">%1$d minutes ago</string>
-    <string name="apple_time_hours_ago">%1$d hours ago</string>
-    <string name="apple_time_days_ago">%1$d days ago</string>
-    <string name="apple_new_articles_pill">%1$d new articles</string>
     <string name="apple_rename_feed_hint">Enter feed title</string>
-    <string name="apple_loading">Loading…</string>
-    <string name="apple_opml_import_success">Added %1$d feeds</string>
-    <string name="apple_opml_import_failed">Failed to add %1$d feeds</string>
 </resources>

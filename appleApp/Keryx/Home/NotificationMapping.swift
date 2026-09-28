@@ -12,8 +12,8 @@ func notificationText(_ text: NotificationText) -> String {
     case .syncFailed(let t): return errorKindMessage(t.reason)
     case .opmlImported(let t):
         return t.failed > 0
-            ? LF("apple_opml_import_failed", Int64(t.failed))
-            : LF("apple_opml_import_success", Int64(t.added))
+            ? LF("settings_import_failed", Int64(t.failed))
+            : LF("settings_import_success", Int64(t.added))
     case .tokenStorageFallback: return L("notification_token_storage_fallback")
     case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted")
     case .appTranslocated: return L("notification_app_translocated")

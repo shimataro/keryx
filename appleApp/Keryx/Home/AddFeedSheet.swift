@@ -92,7 +92,7 @@ struct AddFeedSheet: View {
             case .single(let single):
                 VStack(alignment: .leading, spacing: 2) {
                     Text(single.title).font(.subheadline.bold())
-                    Text(LF("apple_add_feed_article_count", Int64(single.articleCount)))
+                    Text(LF("home_add_feed_article_count", Int64(single.articleCount)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -157,17 +157,15 @@ struct NotificationBell: View {
     }
 
     /// Mirrors Compose's own `formatRelativeTime` (`NotificationCenterSheet.kt`), bucketing through
-    /// the shared `relativeTimeOf` so both apps choose the same label for the same age. The
-    /// minutes/hours/days wording is a fixed-plural counterpart to Compose's own `<plurals>`
-    /// resources (`time_minutes_ago`/`time_hours_ago`/`time_days_ago`), the same pattern
-    /// `apple_add_feed_partial_result` already follows, since Foundation's String Catalog plural
-    /// mechanism has no equivalent for an opaque, argument-free lookup key.
+    /// the shared `relativeTimeOf` so both apps choose the same label for the same age, and reusing
+    /// Compose's own `<plurals>` resources (`time_minutes_ago`/`time_hours_ago`/`time_days_ago`)
+    /// directly — `LF` resolves the right plural form itself (see its own doc).
     private func relativeTimeText(_ timestampMillis: Int64) -> String {
         switch onEnum(of: RelativeTimeKt.relativeTimeOf(diffMillis: Int64(nowMillis) - timestampMillis)) {
         case .now: return L("time_now")
-        case .minutes(let m): return LF("apple_time_minutes_ago", Int64(m.count))
-        case .hours(let h): return LF("apple_time_hours_ago", Int64(h.count))
-        case .days(let d): return LF("apple_time_days_ago", Int64(d.count))
+        case .minutes(let m): return LF("time_minutes_ago", Int64(m.count))
+        case .hours(let h): return LF("time_hours_ago", Int64(h.count))
+        case .days(let d): return LF("time_days_ago", Int64(d.count))
         case .absolute:
             let date = Date(timeIntervalSince1970: Double(timestampMillis) / 1000)
             return date.formatted(date: .abbreviated, time: .shortened)
