@@ -245,11 +245,9 @@ struct FeedListView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .top) {
-                if dropBoundariesEqual(activeBoundary, DropBoundaryBeforeFeed(feedId: unassignedFeeds.first?.id ?? "")) {
-                    FeedListInsertionLine()
-                }
-            }
+            // No top overlay here: when there's at least one unassigned feed, its own row already
+            // draws this exact `BeforeFeed` boundary at its top (`feedRow`'s own top overlay above) —
+            // drawing it here too would show the same insertion line twice at once.
             .overlay(alignment: .bottom) {
                 if unassignedFeeds.isEmpty, dropBoundariesEqual(activeBoundary, DropBoundaryAppendFeeds(folderId: nil)) {
                     FeedListInsertionLine()
@@ -394,7 +392,10 @@ struct FeedListView: View {
         )
         .feedListDraggable(FeedListDragPayload(kind: .feed, id: feed.id), draggingItem: $draggingItem)
         .overlay(alignment: .top) {
-            if dropBoundariesEqual(activeBoundary, DropBoundaryBeforeFeed(feedId: feed.id)) {
+            // Guarded by `isDropTarget` for the same reason as the bottom overlay below: a feed's
+            // copy nested under an expanded tag is never itself a drop target, so it must never draw
+            // the `BeforeFeed` boundary its folder-group copy already draws for the same feed.
+            if isDropTarget, dropBoundariesEqual(activeBoundary, DropBoundaryBeforeFeed(feedId: feed.id)) {
                 FeedListInsertionLine()
             }
         }

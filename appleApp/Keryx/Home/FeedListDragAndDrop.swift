@@ -16,7 +16,7 @@ struct FeedListDragPayload: Codable, Transferable {
     let id: String
 
     static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: UTType(exportedAs: "works.merc.keryx.app.feedlistitem"))
+        CodableRepresentation(contentType: feedListDragUTType)
     }
 
     func toShared() -> FeedListDraggedItem {
@@ -26,6 +26,12 @@ struct FeedListDragPayload: Codable, Transferable {
         }
     }
 }
+
+/// Shared between `FeedListDragPayload`'s own `Transferable` conformance and
+/// `FeedListDropTargetModifier`'s `.onDrop(of:delegate:)`, so both sides agree on exactly one
+/// exported type — a drag carrying anything else (plain text from another app, say) is rejected by
+/// `FeedListRowDropDelegate.validateDrop` rather than mistaken for a feed-list reorder.
+let feedListDragUTType = UTType(exportedAs: "works.merc.keryx.app.feedlistitem")
 
 /// Swift-native mirror of which row/header is currently the drop target, used only for `@State`
 /// identity (which row's highlight to clear on `isTargeted(false)`) — see `feedListDropTarget`'s
@@ -55,13 +61,11 @@ extension View {
     /// (`target`), sharing the pane-wide `activeBoundary`/`hoveredTagId`/`hoveredKey` state so every
     /// row's own highlight and the floating insertion line agree on one boundary at a time — mirrors
     /// Compose's own `activeBoundaryState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`).
-    ///
-    /// **Simplification** (the drag-and-drop batch deliberately keeps visuals minimal — see the
-    /// plan): the *live* highlight while hovering always resolves as if the pointer were over the
-    /// row's top half, since SwiftUI's `isTargeted` callback carries no drop location — only
-    /// `performDrop`'s own location (read via `rowHeight`, captured by `onGeometryChange`) does, so
-    /// the actual drop position (top vs. bottom half) is still fully correct; only the preview
-    /// during hover doesn't distinguish halves.
+    /// Backed by a custom `DropDelegate` (`FeedListRowDropDelegate`), not the higher-level
+    /// `.dropDestination(for:action:isTargeted:)`, because only `DropDelegate.dropUpdated(info:)`
+    /// exposes a continuously-updated `info.location` while hovering — `isTargeted`'s callback
+    /// carries no location at all — so both the live highlight and the eventual drop resolve the
+    /// same top/bottom half from the same pointer position.
     func feedListDropTarget(
         _ target: FeedListDropTarget,
         hoverKey: FeedListHoverKey,
@@ -151,31 +155,81 @@ private struct FeedListDropTargetModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { rowHeight = $0 }
-            .dropDestination(for: FeedListDragPayload.self) { items, location in
-                guard let payload = items.first else { return false }
-                draggingItem = nil
-                let half: FeedListRowHalf = rowHeight > 0 && location.y >= rowHeight / 2 ? .bottom : .top
-                guard let action = FeedListDragKt.resolveFeedListDropAction(
-                    item: payload.toShared(), target: target, half: half, index: index
-                ) else { return false }
-                applyFeedListDropAction(action, home: home)
-                return true
-            } isTargeted: { targeted in
-                guard targeted, let dragging = draggingItem else {
-                    if hoveredKey == hoverKey {
-                        hoveredKey = nil
-                        activeBoundary = nil
-                        hoveredTagId = nil
-                    }
-                    return
-                }
-                hoveredKey = hoverKey
-                let highlight = FeedListDragKt.resolveFeedListDropHighlight(
-                    item: dragging.toShared(), target: target, half: .top, index: index
-                )
-                activeBoundary = highlight.first
-                hoveredTagId = highlight.second as String?
-            }
+            .onDrop(of: [feedListDragUTType], delegate: FeedListRowDropDelegate(
+                target: target,
+                hoverKey: hoverKey,
+                home: home,
+                index: index,
+                draggingItem: $draggingItem,
+                activeBoundary: $activeBoundary,
+                hoveredTagId: $hoveredTagId,
+                hoveredKey: $hoveredKey,
+                rowHeight: rowHeight
+            ))
+    }
+}
+
+/// Resolves the drop as the drag actually moves over this row/header, not just at release —
+/// `dropUpdated(info:)` is called continuously with `info.location`, which `dropDestination`'s own
+/// `isTargeted` callback never provides. The drop itself is applied from the already-tracked
+/// `draggingItem` (set at drag-start by `feedListDraggable`) rather than decoded from
+/// `info.itemProviders`: every drag this pane accepts originates from this same pane, so there is no
+/// need for `NSItemProvider`'s asynchronous `Transferable` decoding.
+private struct FeedListRowDropDelegate: DropDelegate {
+    let target: FeedListDropTarget
+    let hoverKey: FeedListHoverKey
+    let home: HomeObservable
+    let index: FeedListDropIndex
+    @Binding var draggingItem: FeedListDragPayload?
+    @Binding var activeBoundary: DropBoundary?
+    @Binding var hoveredTagId: String?
+    @Binding var hoveredKey: FeedListHoverKey?
+    let rowHeight: CGFloat
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggingItem != nil && info.hasItemsConforming(to: [feedListDragUTType])
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateHighlight(at: info.location)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard draggingItem != nil else { return DropProposal(operation: .forbidden) }
+        updateHighlight(at: info.location)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        guard hoveredKey == hoverKey else { return }
+        hoveredKey = nil
+        activeBoundary = nil
+        hoveredTagId = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let dragging = draggingItem else { return false }
+        let half = resolvedHalf(for: info.location)
+        draggingItem = nil
+        guard let action = FeedListDragKt.resolveFeedListDropAction(
+            item: dragging.toShared(), target: target, half: half, index: index
+        ) else { return false }
+        applyFeedListDropAction(action, home: home)
+        return true
+    }
+
+    private func resolvedHalf(for location: CGPoint) -> FeedListRowHalf {
+        rowHeight > 0 && location.y >= rowHeight / 2 ? .bottom : .top
+    }
+
+    private func updateHighlight(at location: CGPoint) {
+        guard let dragging = draggingItem else { return }
+        hoveredKey = hoverKey
+        let highlight = FeedListDragKt.resolveFeedListDropHighlight(
+            item: dragging.toShared(), target: target, half: resolvedHalf(for: location), index: index
+        )
+        activeBoundary = highlight.first
+        hoveredTagId = highlight.second as String?
     }
 }
 
