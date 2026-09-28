@@ -9,6 +9,7 @@ struct AddFeedSheet: View {
     @Binding var isPresented: Bool
 
     @State private var addFeed: AddFeedObservable
+    @FocusState private var urlFieldFocused: Bool
 
     init(home: HomeObservable, isPresented: Binding<Bool>) {
         self.home = home
@@ -16,18 +17,42 @@ struct AddFeedSheet: View {
         self._addFeed = State(initialValue: AddFeedObservable(controller: home.makeAddFeedController()))
     }
 
+    private var alreadySubscribed: Bool {
+        AddFeedPreviewResolverKt.addFeedAlreadySubscribed(url: addFeed.state.url, feeds: home.feeds)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(L("home_add_feed"))
                 .font(.headline)
 
+            // The URL field stays editable through preview, matching Compose's own dialog — only
+            // subscribing (not previewing) disables it, unlike the earlier `phase != nil` check.
             TextField(L("home_add_feed_hint"), text: urlBinding)
                 .textFieldStyle(.roundedBorder)
-                .disabled(addFeed.state.phase != nil)
+                .focused($urlFieldFocused)
+                .disabled(addFeed.state.phase == .subscribing)
                 .onSubmit { submit() }
+                .task { urlFieldFocused = true }
+
+            if alreadySubscribed {
+                Text(L("home_already_subscribed"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let phase = addFeed.state.phase {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text(L(phase == .previewing ? "home_add_feed_loading_preview" : "home_add_feed_loading_subscribe"))
+                        .font(.caption)
+                }
+            }
+
+            previewContent
 
             if let error = addFeed.state.error {
-                Text(error.messageText)
+                Text(errorKindMessage(error.errorKind))
                     .font(.caption)
                     .foregroundStyle(.red)
             }
@@ -35,17 +60,7 @@ struct AddFeedSheet: View {
             if let partial = addFeed.state.partialResult {
                 Text(LF("apple_add_feed_partial_result", Int64(partial.first?.intValue ?? 0), Int64(partial.second?.intValue ?? 0)))
                     .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-
-            candidatesList
-
-            if let phase = addFeed.state.phase {
-                HStack(spacing: 6) {
-                    ProgressView()
-                    Text(L(phase == .previewing ? "home_add_feed_loading_preview" : "home_add_feed_loading_subscribe"))
-                        .font(.caption)
-                }
+                    .foregroundStyle(.red)
             }
 
             HStack {
@@ -68,31 +83,75 @@ struct AddFeedSheet: View {
         )
     }
 
+    /// The single-feed preview (title + article count) or the discovered-candidates list —
+    /// matches Compose's own `when (preview)` (`AddFeedDialog.kt`).
     @ViewBuilder
-    private var candidatesList: some View {
-        if let preview = addFeed.state.preview, case let .multiple(multiple) = onEnum(of: preview) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("home_add_feed_links_found"))
-                    .font(.subheadline.bold())
-                Text(L("home_add_feed_select_links"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var previewContent: some View {
+        if let preview = addFeed.state.preview {
+            switch onEnum(of: preview) {
+            case .single(let single):
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(single.title).font(.subheadline.bold())
+                    Text(LF("apple_add_feed_article_count", Int64(single.articleCount)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            case .multiple(let multiple):
+                candidatesList(multiple.candidates)
+            case .failed:
+                EmptyView()
+            }
+        }
+    }
 
-                List(multiple.candidates, id: \.url) { candidate in
-                    Toggle(isOn: candidateBinding(candidate.url)) {
-                        VStack(alignment: .leading) {
-                            Text(candidate.title ?? candidate.url)
-                            Text(candidate.url).font(.caption).foregroundStyle(.secondary)
-                        }
+    private func candidatesList(_ candidates: [DiscoveredFeedLink]) -> some View {
+        let selectedCount = candidates.filter { addFeed.state.selectedCandidates.contains($0.url) }.count
+        let allSelected = !candidates.isEmpty && selectedCount == candidates.count
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(L("home_add_feed_links_found")).font(.subheadline.bold())
+            Text(L("home_add_feed_select_links"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button(L(allSelected ? "home_add_feed_clear_all" : "home_add_feed_select_all")) {
+                    if allSelected {
+                        addFeed.controller.clearCandidates()
+                    } else {
+                        addFeed.controller.selectAllCandidates()
                     }
                 }
-                .frame(minHeight: 120, maxHeight: 240)
+                Spacer()
+                Text(LF("home_add_feed_selected_count", Int64(selectedCount), Int64(candidates.count)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-                HStack {
-                    Button(L("home_add_feed_select_all")) { addFeed.controller.selectAllCandidates() }
-                    Button(L("home_add_feed_clear_all")) { addFeed.controller.clearCandidates() }
+            List(candidates, id: \.url) { candidate in
+                Toggle(isOn: candidateBinding(candidate.url)) {
+                    VStack(alignment: .leading) {
+                        Text(candidate.title ?? candidate.url)
+                        HStack(spacing: 4) {
+                            if let typeLabel = feedTypeLabel(candidate.type) {
+                                Text(typeLabel)
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .frame(minHeight: 120, maxHeight: 240)
+        }
+    }
+
+    private func feedTypeLabel(_ type: DiscoveredFeedType?) -> String? {
+        switch type {
+        case .rss: return L("home_add_feed_type_rss")
+        case .atom: return L("home_add_feed_type_atom")
+        case nil: return nil
+        default: return nil
         }
     }
 
