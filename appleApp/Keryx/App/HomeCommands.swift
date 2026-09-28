@@ -36,8 +36,10 @@ struct HomeCommands: Commands {
                 #if os(macOS)
                 Divider()
                 Button(L("menu_file_import_opml")) { importOpml() }
+                    .keyboardShortcut("i", modifiers: .command)
                     .disabled(!menuState(home).opmlEnabled)
                 Button(L("menu_file_export_opml")) { exportOpml() }
+                    .keyboardShortcut("e", modifiers: .command)
                     .disabled(!menuState(home).opmlEnabled)
                 #endif
             }
@@ -57,6 +59,7 @@ struct HomeCommands: Commands {
                     get: { home.unreadOnly },
                     set: { home.viewModel.setUnreadOnly(value: $0) }
                 ))
+                .keyboardShortcut("u", modifiers: .command)
                 .disabled(!state.unreadOnlyEnabled)
 
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }
@@ -71,16 +74,23 @@ struct HomeCommands: Commands {
             if let home = model.home {
                 let state = menuState(home)
                 Button(L("menu_article_toggle_read")) { home.viewModel.toggleReadSelected() }
+                    .keyboardShortcut("u", modifiers: [.command, .shift])
                     .disabled(!state.articleActionsEnabled)
                 Button(L("menu_article_toggle_star")) { home.viewModel.toggleStarSelected() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(!state.articleActionsEnabled)
                 Button(L("menu_article_open_in_browser")) {
                     if let url = home.selectedArticle?.url { openInBrowser(url) }
                 }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(!state.urlActionsEnabled)
                 Button(L("menu_article_copy_url")) {
-                    if let url = home.selectedArticle?.url { copyToPasteboard(url) }
+                    if let url = home.selectedArticle?.url {
+                        copyToPasteboard(url)
+                        home.pulseCopy()
+                    }
                 }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(!state.urlActionsEnabled)
             }
         }
@@ -89,9 +99,78 @@ struct HomeCommands: Commands {
             if let home = model.home {
                 let state = menuState(home)
                 Button(L("menu_feed_refresh_all")) { home.viewModel.refreshAll() }
+                    .keyboardShortcut("r", modifiers: .command)
                     .disabled(!state.refreshAllEnabled)
                 Button(L("menu_feed_sync_now")) { home.viewModel.sync() }
                     .disabled(!state.syncEnabled)
+                Divider()
+                // The rest all act on the currently selected feed-list item, matching Compose's own
+                // Feed menu (`AppMenuTree.kt:275-324`) exactly: Refresh, Tags ▸, Move to folder ▸, a
+                // separator, the URL/site actions, a separator, Rename, a separator, Unsubscribe —
+                // Rename/Unsubscribe alone use `renameOrDeleteEnabled` (they act on whatever's
+                // selected — feed, folder or tag — not only a feed).
+                Button(L("home_refresh")) {
+                    if let feed = selectedFeed(home) { home.viewModel.refreshFeed(feed: feed) }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!state.feedActionsEnabled)
+
+                Menu(L("home_assign_tags")) {
+                    ForEach(sortedTags(home), id: \.id) { tag in
+                        if let feed = selectedFeed(home) {
+                            Toggle(tag.name, isOn: Binding(
+                                get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
+                                set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
+                            ))
+                        }
+                    }
+                }
+                .disabled(!state.feedActionsEnabled)
+
+                Menu(L("home_move_to_folder")) {
+                    if let feed = selectedFeed(home) {
+                        Toggle(L("home_no_folder"), isOn: Binding(
+                            get: { feed.folder_id == nil },
+                            set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil) }
+                        ))
+                        ForEach(sortedFolders(home), id: \.id) { folder in
+                            Toggle(folder.name, isOn: Binding(
+                                get: { feed.folder_id == folder.id },
+                                set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
+                            ))
+                        }
+                    }
+                }
+                .disabled(!state.feedActionsEnabled)
+
+                Divider()
+                Button(L("home_copy_feed_url")) {
+                    if let feed = selectedFeed(home) {
+                        copyToPasteboard(feed.url)
+                        home.pulseCopy()
+                    }
+                }
+                .disabled(!state.feedActionsEnabled)
+                Button(L("home_copy_site_url")) {
+                    if let site = selectedFeed(home)?.site_url {
+                        copyToPasteboard(site)
+                        home.pulseCopy()
+                    }
+                }
+                .disabled(!state.feedSiteUrlActionsEnabled)
+                Button(L("home_open_site")) {
+                    if let site = selectedFeed(home)?.site_url { openInBrowser(site) }
+                }
+                .disabled(!state.feedSiteUrlActionsEnabled)
+
+                Divider()
+                Button(renameLabel(home)) { performRename(home) }
+                    .keyboardShortcut(.return, modifiers: [])
+                    .disabled(!state.renameOrDeleteEnabled)
+                Divider()
+                Button(deleteLabel(home), role: .destructive) { performDelete(home) }
+                    .keyboardShortcut(.delete, modifiers: [])
+                    .disabled(!state.renameOrDeleteEnabled)
             }
         }
 
@@ -102,14 +181,12 @@ struct HomeCommands: Commands {
     }
 
     /// `sdk.menuState(...)` needs several booleans this app doesn't track anywhere else yet
-    /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`hasRenamableSelection`/`textInputFocused`); this
-    /// resolves them the same way `HomeView`'s own rename/delete keyboard handling does, via
-    /// `resolveFeedListSelectionTarget`, rather than leaving them permanently at their `false`
-    /// defaults (which would incorrectly grey out every feed-specific menu item).
+    /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`hasRenamableSelection`); resolved the same way
+    /// `HomeView`'s own rename/delete keyboard handling does, via `resolveFeedListSelectionTarget`.
+    /// `textInputFocused` reads `HomeObservable`'s own mirror of `HomeView`'s `focusedPane`, so
+    /// this reacts to the search field the same way `HomeShortcutsKt.homeShortcutFor` does.
     private func menuState(_ home: HomeObservable) -> MenuUiState {
-        let target = FeedListModelKt.resolveFeedListSelectionTarget(
-            filter: home.filter, feeds: home.feeds, folders: home.folders, tags: home.tags
-        )
+        let target = selectionTarget(home)
         var hasSelectedFeed = false
         var selectedFeedHasSiteUrl = false
         if let target, case .feed(let f) = onEnum(of: target) {
@@ -126,37 +203,106 @@ struct HomeCommands: Commands {
             )
         }
         return sdk.menuState(
-            onHome: true,
+            onHome: !model.needsSetup,
             hasSelectedArticle: home.selectedArticle != nil,
             selectedArticleHasUrl: ArticleListModelKt.hasUsableUrl(url: home.selectedArticle?.url),
             cloudConnected: home.cloudConnected,
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
             hasSelectedFeed: hasSelectedFeed,
-            textInputFocused: false,
+            textInputFocused: home.textInputFocused,
             hasRenamableSelection: target != nil,
             selectedFeedHasSiteUrl: selectedFeedHasSiteUrl
         )
     }
 
+    private func selectionTarget(_ home: HomeObservable) -> FeedListSelectionTarget? {
+        FeedListModelKt.resolveFeedListSelectionTarget(
+            filter: home.filter, feeds: home.feeds, folders: home.folders, tags: home.tags
+        )
+    }
+
+    /// The feed the Feed menu's selected-feed items (Refresh/Tags/Move to folder/Copy URL/…) act
+    /// on — only when the sidebar's own selection is a feed itself, matching Compose's own
+    /// `selectedFeedForMenu()` (`HomeScreen.kt`).
+    private func selectedFeed(_ home: HomeObservable) -> Feeds? {
+        guard case .feed(let filter) = onEnum(of: home.filter) else { return nil }
+        return home.feeds.first { $0.id == filter.feedId }
+    }
+
+    private func sortedFolders(_ home: HomeObservable) -> [Folders] {
+        home.folders.sorted { $0.sort_order < $1.sort_order }
+    }
+
+    private func sortedTags(_ home: HomeObservable) -> [Tags] {
+        home.tags.sorted { $0.sort_order < $1.sort_order }
+    }
+
+    /// Rename/delete wording follows the selected item's type — a `nil` target falls back to the
+    /// feed wording, matching Compose's own `renameLabel`/`deleteLabel` (`AppMenuBar.kt:161-169`);
+    /// the items are disabled in that case, so the text is never acted on.
+    private func renameLabel(_ home: HomeObservable) -> String {
+        guard let target = selectionTarget(home) else { return L("home_rename_feed") }
+        switch onEnum(of: target) {
+        case .folder: return L("home_menu_rename_folder")
+        case .tag: return L("home_menu_rename_tag")
+        case .feed: return L("home_rename_feed")
+        }
+    }
+
+    private func deleteLabel(_ home: HomeObservable) -> String {
+        guard let target = selectionTarget(home) else { return L("home_unsubscribe_menu") }
+        switch onEnum(of: target) {
+        case .folder: return L("home_menu_delete_folder")
+        case .tag: return L("home_menu_delete_tag")
+        case .feed: return L("home_unsubscribe_menu")
+        }
+    }
+
+    private func performRename(_ home: HomeObservable) {
+        guard let target = selectionTarget(home) else { return }
+        switch onEnum(of: target) {
+        case .feed(let f): model.sidebarDialogs.renamingFeed = f.feed
+        case .folder(let f): model.sidebarDialogs.renamingFolder = f.folder
+        case .tag(let t): model.sidebarDialogs.renamingTag = t.tag
+        }
+    }
+
+    private func performDelete(_ home: HomeObservable) {
+        guard let target = selectionTarget(home) else { return }
+        switch onEnum(of: target) {
+        case .feed(let f): model.sidebarDialogs.unsubscribingFeed = f.feed
+        case .folder(let f): model.sidebarDialogs.deletingFolder = f.folder
+        case .tag(let t): model.sidebarDialogs.deletingTag = t.tag
+        }
+    }
+
     #if os(macOS)
+    /// Shares `AppModel.opmlTransfer`'s busy-guard and result state with the Data settings tab
+    /// (`DataSettingsTab.swift`), so triggering this from the menu can't race a run already started
+    /// from there, matching Compose's own `SettingsViewModel` routing both entry points through one
+    /// state (`AppMenuBar.kt`).
     private func importOpml() {
-        guard let sdk = model.sdk else { return }
+        guard let opmlTransfer = model.opmlTransfer, !opmlTransfer.isBusy else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml, .xml]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let xml = try? String(contentsOf: url, encoding: .utf8) else { return }
-        Task { _ = try? await sdk.opml.importOpml(xml: xml) }
+        opmlTransfer.importOpml(from: url)
     }
 
     private func exportOpml() {
-        guard let sdk = model.sdk else { return }
+        guard let opmlTransfer = model.opmlTransfer, let document = opmlTransfer.exportDocument() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml]
-        panel.nameFieldStringValue = "keryx-feeds.opml"
+        panel.nameFieldStringValue = "keryx.opml"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? sdk.opml.exportOpml().write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try document.text.write(to: url, atomically: true, encoding: .utf8)
+            opmlTransfer.reportExportResult(.success(url))
+        } catch {
+            opmlTransfer.reportExportResult(.failure(error))
+        }
     }
     #endif
 }

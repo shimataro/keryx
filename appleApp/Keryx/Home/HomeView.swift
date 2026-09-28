@@ -28,6 +28,12 @@ struct HomeView: View {
         .onAppear {
             if focusedPane == nil { focusedPane = .articleList }
         }
+        // Mirrors into `HomeObservable` so `HomeCommands.menuState` (a different `View` entirely,
+        // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
+        // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.
+        .onChange(of: focusedPane, initial: true) { _, pane in
+            home.textInputFocused = pane == .search
+        }
     }
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {

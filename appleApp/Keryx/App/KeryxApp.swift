@@ -57,8 +57,12 @@ struct KeryxApp: App {
         // has no equivalent scene type. Reaching Settings on iOS is deferred to whenever iOS's own
         // UI gets built out; for now this scene simply doesn't exist there.
         Settings {
-            if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync {
-                SettingsView(sdk: sdk, preferences: preferences, cloudSync: cloudSync, oauthCoordinator: model.oauthCoordinator)
+            if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync,
+               let opmlTransfer = model.opmlTransfer {
+                SettingsView(
+                    sdk: sdk, preferences: preferences, cloudSync: cloudSync,
+                    oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer
+                )
             }
         }
 

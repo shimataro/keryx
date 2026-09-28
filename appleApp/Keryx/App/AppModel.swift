@@ -15,6 +15,7 @@ final class AppModel {
     private(set) var home: HomeObservable?
     private(set) var preferences: PreferencesObservable?
     private(set) var cloudSync: CloudSyncObservable?
+    private(set) var opmlTransfer: OpmlTransferObservable?
     private(set) var notifications: NotificationCenterObservable?
     private(set) var startupError: (any Error)?
     /// Whether the first-launch Setup screen should show instead of Home — read once at startup;
@@ -42,6 +43,7 @@ final class AppModel {
             )
             self.preferences = PreferencesObservable(controller: sdk.preferences)
             self.cloudSync = CloudSyncObservable(controller: sdk.cloudSyncController)
+            self.opmlTransfer = OpmlTransferObservable(opml: sdk.opml)
             self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
             OsNotificationPoster.requestAuthorization()

@@ -54,6 +54,7 @@ final class HomeObservable {
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
     private(set) var cloudConnected: Bool = false
+    private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
     /// Bumped by every URL-copy action (the reader's own button, and eventually the menu bar's/
     /// keyboard's Copy URL command — see `HomeCommands.swift`) so any UI observing it can flash a
@@ -61,6 +62,14 @@ final class HomeObservable {
     /// `HomeViewModel` `StateFlow` — this is UI-only feedback state, kept here alongside it for the
     /// same reason `HomeScreen.kt`'s own `copyPulse` lives in the Compose screen, not the ViewModel.
     private(set) var copyPulse: Int = 0
+
+    /// Whether a text field (the sidebar's search field, currently) holds keyboard focus — plain UI
+    /// state written by `HomeView`'s own `focusedPane` tracking, not a `HomeViewModel` `StateFlow`.
+    /// Read by `HomeCommands.menuState` so the Feed/Article menu's bare-key accelerators (Return/
+    /// Delete) and its `feedActionsEnabled`-gated items agree with `HomeShortcutsKt.homeShortcutFor`'s
+    /// own `textInputFocused` guard, matching Compose's `MenuController.textInputFocused`
+    /// (`HomeScreen.kt`).
+    var textInputFocused = false
 
     init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
@@ -110,10 +119,11 @@ final class HomeObservable {
         async let t27: () = observeSelectedFeedFaviconUrl()
         async let t28: () = observeArticleContents()
         async let t29: () = observeCloudConnected()
+        async let t30: () = observeActivity()
         _ = await (
             t1, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
-            t21, t22, t23, t24, t25, t26, t27, t28, t29
+            t21, t22, t23, t24, t25, t26, t27, t28, t29, t30
         )
     }
 
@@ -231,5 +241,9 @@ final class HomeObservable {
 
     private func observeCloudConnected() async {
         for await v in viewModel.cloudConnected { cloudConnected = v.boolValue }
+    }
+
+    private func observeActivity() async {
+        for await v in viewModel.activity { activity = v }
     }
 }

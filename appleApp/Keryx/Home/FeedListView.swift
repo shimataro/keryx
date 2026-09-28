@@ -146,6 +146,39 @@ struct FeedListView: View {
                 Image(systemName: "plus")
             }
         }
+        // Mirrors Compose's own `FeedListToolbarRow` (`FeedListPane.kt:883-943`): Refresh All is
+        // always present, Sync only while a cloud provider is connected, and both disable while
+        // either operation (or the refresh-then-sync cycle covering the gap between them) is
+        // already in flight — `activity.refreshIndicatorShown`/`.syncing` pick which one's own
+        // spinner shows, never both for the same phase.
+        ToolbarItem {
+            Button {
+                home.viewModel.refreshAll()
+            } label: {
+                if home.activity.refreshIndicatorShown {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .disabled(!home.activity.idle)
+            .help(L(home.activity.refreshIndicatorShown ? "home_refreshing" : "home_refresh"))
+        }
+        if home.cloudConnected {
+            ToolbarItem {
+                Button {
+                    home.viewModel.sync()
+                } label: {
+                    if home.activity.syncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "icloud")
+                    }
+                }
+                .disabled(!home.activity.idle)
+                .help(L(home.activity.syncing ? "home_syncing" : "home_sync"))
+            }
+        }
     }
 
     private var searchQueryBinding: Binding<String> {

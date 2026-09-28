@@ -9,6 +9,7 @@ struct SettingsView: View {
     let preferences: PreferencesObservable
     let cloudSync: CloudSyncObservable
     let oauthCoordinator: OAuthSessionCoordinator
+    let opmlTransfer: OpmlTransferObservable
 
     var body: some View {
         TabView {
@@ -21,7 +22,7 @@ struct SettingsView: View {
             CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync)
                 .tabItem { Text(L("settings_cloud_sync")) }
 
-            DataSettingsTab(preferences: preferences, opml: sdk.opml)
+            DataSettingsTab(preferences: preferences, opmlTransfer: opmlTransfer)
                 .tabItem { Text(L("settings_tab_data")) }
         }
         .frame(minWidth: 520, minHeight: 420)
