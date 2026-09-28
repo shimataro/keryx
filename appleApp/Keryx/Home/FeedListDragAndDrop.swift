@@ -58,16 +58,6 @@ extension View {
     }
 }
 
-/// Swift-native mirror of which row/header is currently the drop target, used only for `@State`
-/// identity (which row's highlight to clear on `isTargeted(false)`) — see `feedListDropTarget`'s
-/// own KDoc for why this can't just compare the bridged `FeedListDropTarget` directly.
-enum FeedListHoverKey: Equatable {
-    case folder(String)
-    case noFolder
-    case feed(String)
-    case tag(String)
-}
-
 /// Applies a resolved [FeedListDropAction] through the matching `HomeViewModel` call.
 @MainActor
 func applyFeedListDropAction(_ action: FeedListDropAction, home: HomeObservable) {
@@ -82,10 +72,10 @@ func applyFeedListDropAction(_ action: FeedListDropAction, home: HomeObservable)
 }
 
 extension View {
-    /// Makes this row/header both a drag source (when `dragItem` is non-nil) and a drop target
-    /// (`target`), sharing the pane-wide `activeBoundary`/`hoveredTagId`/`hoveredKey` state so every
-    /// row's own highlight and the floating insertion line agree on one boundary at a time — mirrors
-    /// Compose's own `activeBoundaryState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`).
+    /// Makes this row/header a drop target (`target`), sharing the pane-wide
+    /// `activeBoundary`/`dropOnKey`/`hoveredKey` state so every row's own highlight and the
+    /// insertion line agree on one target at a time — mirrors Compose's own
+    /// `activeBoundaryState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`).
     /// Backed by a custom `DropDelegate` (`FeedListRowDropDelegate`), not the higher-level
     /// `.dropDestination(for:action:isTargeted:)`, because only `DropDelegate.dropUpdated(info:)`
     /// exposes a continuously-updated `info.location` while hovering — `isTargeted`'s callback
@@ -98,7 +88,7 @@ extension View {
         index: FeedListDropIndex,
         draggingItem: Binding<FeedListDragPayload?>,
         activeBoundary: Binding<DropBoundary?>,
-        hoveredTagId: Binding<String?>,
+        dropOnKey: Binding<FeedListHoverKey?>,
         hoveredKey: Binding<FeedListHoverKey?>,
     ) -> some View {
         modifier(FeedListDropTargetModifier(
@@ -108,7 +98,7 @@ extension View {
             index: index,
             draggingItem: draggingItem,
             activeBoundary: activeBoundary,
-            hoveredTagId: hoveredTagId,
+            dropOnKey: dropOnKey,
             hoveredKey: hoveredKey
         ))
     }
@@ -118,13 +108,38 @@ extension View {
     /// this pane's only "drag started" signal — every `feedListDropTarget` on the pane reads
     /// `draggingItem` to validate and highlight, so it must be set before the first hover, not
     /// whenever `.draggable`'s payload autoclosure happens to be evaluated.
-    func feedListDraggable(_ item: FeedListDragPayload, draggingItem: Binding<FeedListDragPayload?>) -> some View {
+    ///
+    /// The drag image is just the item's icon and name (`FeedListDragPreview`), as a Finder
+    /// sidebar drag shows, rather than a snapshot of the whole row with its selection tint.
+    func feedListDraggable(
+        _ item: FeedListDragPayload,
+        draggingItem: Binding<FeedListDragPayload?>,
+        @ViewBuilder icon: () -> some View,
+        title: String
+    ) -> some View {
         onDrag {
             draggingItem.wrappedValue = item
             let provider = NSItemProvider()
             provider.register(item)
             return provider
+        } preview: {
+            FeedListDragPreview(icon: icon(), title: title)
         }
+    }
+}
+
+/// The drag image for a feed-list drag: icon plus name, no row chrome.
+private struct FeedListDragPreview<Icon: View>: View {
+    let icon: Icon
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            icon.frame(width: 18, height: 18)
+            Text(title).lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
     }
 }
 
@@ -139,7 +154,7 @@ struct ConditionalFeedListDropTarget: ViewModifier {
     let index: FeedListDropIndex
     @Binding var draggingItem: FeedListDragPayload?
     @Binding var activeBoundary: DropBoundary?
-    @Binding var hoveredTagId: String?
+    @Binding var dropOnKey: FeedListHoverKey?
     @Binding var hoveredKey: FeedListHoverKey?
 
     func body(content: Content) -> some View {
@@ -151,7 +166,7 @@ struct ConditionalFeedListDropTarget: ViewModifier {
                 index: index,
                 draggingItem: $draggingItem,
                 activeBoundary: $activeBoundary,
-                hoveredTagId: $hoveredTagId,
+                dropOnKey: $dropOnKey,
                 hoveredKey: $hoveredKey
             )
         } else {
@@ -167,7 +182,7 @@ private struct FeedListDropTargetModifier: ViewModifier {
     let index: FeedListDropIndex
     @Binding var draggingItem: FeedListDragPayload?
     @Binding var activeBoundary: DropBoundary?
-    @Binding var hoveredTagId: String?
+    @Binding var dropOnKey: FeedListHoverKey?
     @Binding var hoveredKey: FeedListHoverKey?
 
     @State private var rowHeight: CGFloat = 0
@@ -182,7 +197,7 @@ private struct FeedListDropTargetModifier: ViewModifier {
                 index: index,
                 draggingItem: $draggingItem,
                 activeBoundary: $activeBoundary,
-                hoveredTagId: $hoveredTagId,
+                dropOnKey: $dropOnKey,
                 hoveredKey: $hoveredKey,
                 rowHeight: rowHeight
             ))
@@ -202,7 +217,7 @@ private struct FeedListRowDropDelegate: DropDelegate {
     let index: FeedListDropIndex
     @Binding var draggingItem: FeedListDragPayload?
     @Binding var activeBoundary: DropBoundary?
-    @Binding var hoveredTagId: String?
+    @Binding var dropOnKey: FeedListHoverKey?
     @Binding var hoveredKey: FeedListHoverKey?
     let rowHeight: CGFloat
 
@@ -211,26 +226,26 @@ private struct FeedListRowDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        updateHighlight(at: info.location)
+        _ = updateHighlight(at: info.location)
     }
 
+    /// `.forbidden` wherever the shared rules resolve no action, so the cursor carries no move
+    /// badge and a release there slides the item back to where it came from.
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard draggingItem != nil else { return DropProposal(operation: .forbidden) }
-        updateHighlight(at: info.location)
-        return DropProposal(operation: .move)
+        let feedback = updateHighlight(at: info.location)
+        return DropProposal(operation: feedback == .invalid ? .forbidden : .move)
     }
 
     func dropExited(info: DropInfo) {
         guard hoveredKey == hoverKey else { return }
-        hoveredKey = nil
-        activeBoundary = nil
-        hoveredTagId = nil
+        clearHover()
     }
 
     func performDrop(info: DropInfo) -> Bool {
         guard let dragging = draggingItem else { return false }
-        let half = resolvedHalf(for: info.location)
+        let half = feedListRowHalf(locationY: info.location.y, rowHeight: rowHeight)
         draggingItem = nil
+        clearHover()
         guard let action = FeedListDragKt.resolveFeedListDropAction(
             item: dragging.toShared(), target: target, half: half, index: index
         ) else { return false }
@@ -238,29 +253,58 @@ private struct FeedListRowDropDelegate: DropDelegate {
         return true
     }
 
-    private func resolvedHalf(for location: CGPoint) -> FeedListRowHalf {
-        rowHeight > 0 && location.y >= rowHeight / 2 ? .bottom : .top
+    private func clearHover() {
+        hoveredKey = nil
+        activeBoundary = nil
+        dropOnKey = nil
     }
 
-    private func updateHighlight(at location: CGPoint) {
-        guard let dragging = draggingItem else { return }
+    private func updateHighlight(at location: CGPoint) -> FeedListDropFeedback {
+        guard let dragging = draggingItem else { return .invalid }
         hoveredKey = hoverKey
         let highlight = FeedListDragKt.resolveFeedListDropHighlight(
-            item: dragging.toShared(), target: target, half: resolvedHalf(for: location), index: index
+            item: dragging.toShared(),
+            target: target,
+            half: feedListRowHalf(locationY: location.y, rowHeight: rowHeight),
+            index: index
         )
-        activeBoundary = highlight.first
-        hoveredTagId = highlight.second as String?
+        let feedback = feedListDropFeedback(
+            isFeedDrag: dragging.kind == .feed,
+            hoverKey: hoverKey,
+            boundary: highlight.first,
+            attachTagId: highlight.second as String?
+        )
+        activeBoundary = feedback == .insertion ? highlight.first : nil
+        dropOnKey = feedback == .dropOn ? hoverKey : nil
+        return feedback
     }
 }
 
-/// A thin insertion-line indicator — see `feedListDropTarget`'s own KDoc for why this is
-/// deliberately simpler than Compose's paired/indented markers (`InsertionMarker` in
-/// `FeedListDragAndDrop.kt`): the drag-and-drop batch keeps visuals minimal, leaving exact styling
-/// to the later UI-review pass.
+/// Leading inset of every sidebar row's content inside its selection capsule.
+let feedListRowContentInset: CGFloat = 4
+
+/// Extra leading indent of a feed row nested under a folder/tag header — the expand chevron's
+/// width plus the header `HStack`'s default spacing, so a nested feed's icon lines up with its
+/// header's name, as a source-list outline nests children.
+let feedListNestedRowIndent: CGFloat = 20
+
+/// The insertion indicator `NSOutlineView` draws between rows: an accent-colored line starting
+/// from a small hollow circle, indented to the level the item would land at (a nested feed, or a
+/// top-level folder) — the same distinction as Compose's `InsertionMarker.indented`.
 struct FeedListInsertionLine: View {
+    let boundary: DropBoundary
+
     var body: some View {
-        Rectangle()
-            .fill(Color.accentColor)
-            .frame(height: 2)
+        HStack(spacing: 0) {
+            Circle()
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .frame(width: 7, height: 7)
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(height: 2)
+        }
+        .padding(.leading, feedListRowContentInset + (isNestedDropBoundary(boundary) ? feedListNestedRowIndent : 0))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
