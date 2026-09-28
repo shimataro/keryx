@@ -151,12 +151,25 @@ struct FeedListView: View {
         home.folders.sorted { $0.sort_order < $1.sort_order }
     }
 
+    private var sortedFeeds: [Feeds] {
+        home.feeds.sorted { $0.sort_order < $1.sort_order }
+    }
+
+    /// Reuses the shared `groupFeedsByFolder` (`FeedListModel.kt`) rather than filtering by
+    /// `folder_id` locally, so a feed whose `folder_id` points at a folder that no longer exists
+    /// (deleted on another device, not yet synced here) defensively falls into the unassigned
+    /// group here too, matching Compose's own `groupFeedsByFolder` fallback.
+    private var groupedFeeds: [(folder: Folders?, feeds: [Feeds])] {
+        FeedListModelKt.groupFeedsByFolder(feeds: sortedFeeds, folders: sortedFolders)
+            .map { (folder: $0.first, feeds: $0.second as? [Feeds] ?? []) }
+    }
+
     private var unassignedFeeds: [Feeds] {
-        home.feeds.filter { $0.folder_id == nil }.sorted { $0.sort_order < $1.sort_order }
+        groupedFeeds.first { $0.folder == nil }?.feeds ?? []
     }
 
     private func feedsIn(folder: Folders) -> [Feeds] {
-        home.feeds.filter { $0.folder_id == folder.id }.sorted { $0.sort_order < $1.sort_order }
+        groupedFeeds.first { $0.folder?.id == folder.id }?.feeds ?? []
     }
 
     @ViewBuilder
@@ -180,8 +193,11 @@ struct FeedListView: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button(L("home_menu_rename_folder")) { dialogs.renamingFolder = folder }
-                Button(L("home_menu_delete_folder"), role: .destructive) { dialogs.deletingFolder = folder }
+                // Opening the menu selects the row first, matching Compose's own
+                // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`).
+                let _ = selectForContextMenu(instance)
+                Button(L("home_edit_folder_menu")) { dialogs.renamingFolder = folder }
+                Button(L("home_delete_folder_menu"), role: .destructive) { dialogs.deletingFolder = folder }
             }
             .draggable(folder.id)
             .dropDestination(for: String.self) { items, _ in
@@ -210,9 +226,7 @@ struct FeedListView: View {
     }
 
     private func feeds(taggedWith tag: Tags) -> [Feeds] {
-        home.feeds
-            .filter { home.feedTagMap[$0.id]?.contains(tag.id) ?? false }
-            .sorted { $0.sort_order < $1.sort_order }
+        FeedListModelKt.feedsForTag(feeds: sortedFeeds, feedTagMap: home.feedTagMap, tagId: tag.id)
     }
 
     @ViewBuilder
@@ -220,34 +234,16 @@ struct FeedListView: View {
         let isExpanded = home.expandedTagIds.contains(tag.id)
         let instance = FeedListRowSelectionTag(tagId: tag.id)
         Section {
-            Button {
-                focusedPane.wrappedValue = .feedList
-                home.viewModel.selectFilter(filter: instance.filter, instance: instance)
-            } label: {
-                HStack {
-                    Circle()
-                        .fill(colorFromHex(tag.color ?? "#808080"))
-                        .frame(width: 10, height: 10)
-                    Text(tag.name)
-                    Spacer()
-                    unreadBadge(home.unreadByTag[tag.id] ?? 0)
-                    expandChevron(expanded: isExpanded) {
-                        home.viewModel.toggleTagExpanded(tagId: tag.id)
-                    }
-                }
-                .selectableRowLabel(selectionBackground(for: instance))
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                Button(L("home_menu_rename_tag")) { dialogs.renamingTag = tag }
-                Button(L("home_menu_delete_tag"), role: .destructive) { dialogs.deletingTag = tag }
-            }
-            .dropDestination(for: String.self) { items, _ in
-                guard let feedId = items.first, home.feeds.contains(where: { $0.id == feedId }) else { return false }
-                home.viewModel.setFeedTag(feedId: feedId, tagId: tag.id, attached: true)
-                return true
-            }
-            .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+            TagHeaderRow(
+                home: home,
+                dialogs: dialogs,
+                tag: tag,
+                instance: instance,
+                isExpanded: isExpanded,
+                focusedPane: focusedPane,
+                appearedRowKeys: $appearedRowKeys,
+                selectionBackground: selectionBackground(for:)
+            )
 
             if isExpanded {
                 ForEach(feeds(taggedWith: tag), id: \.id) { feed in
@@ -262,7 +258,7 @@ struct FeedListView: View {
     @ViewBuilder
     private func feedRow(_ feed: Feeds, instance: FeedListRowSelection) -> some View {
         row(
-            title: feed.custom_title ?? feed.title,
+            title: feed.displayTitle(),
             faviconUrl: feed.favicon_url,
             unreadCount: home.unreadByFeed[feed.id] ?? 0,
             isErroring: feed.error_count > 0 || feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE,
@@ -277,18 +273,43 @@ struct FeedListView: View {
             return true
         }
         .contextMenu {
-            Button(L("home_rename_feed")) { dialogs.renamingFeed = feed }
+            // Opening the menu selects the row first, matching Compose's own
+            // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`).
+            let _ = selectForContextMenu(instance)
+            // Order matches `FeedListDragAndDrop.kt:553-593` exactly: Refresh, Move to Folder ▸,
+            // Assign tags ▸, a separator, the URL/site actions, a separator, Rename, a separator,
+            // Unsubscribe.
             Button(L("home_refresh")) { home.viewModel.refreshFeed(feed: feed) }
+            Menu(L("home_move_to_folder")) {
+                Toggle(L("home_no_folder"), isOn: Binding(
+                    get: { feed.folder_id == nil },
+                    set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: nil, targetFeedId: nil) }
+                ))
+                ForEach(sortedFolders, id: \.id) { folder in
+                    Toggle(folder.name, isOn: Binding(
+                        get: { feed.folder_id == folder.id },
+                        set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
+                    ))
+                }
+                Button(L("home_new_folder")) { dialogs.creatingFolderForFeed = feed }
+            }
             Menu(L("home_assign_tags")) {
                 ForEach(sortedTags, id: \.id) { tag in
-                    let attached = home.feedTagMap[feed.id]?.contains(tag.id) ?? false
-                    Button {
-                        home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: !attached)
-                    } label: {
-                        Label(tag.name, systemImage: attached ? "checkmark" : "")
-                    }
+                    Toggle(tag.name, isOn: Binding(
+                        get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
+                        set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
+                    ))
                 }
+                Button(L("home_new_tag")) { dialogs.creatingTagForFeed = feed }
             }
+            Divider()
+            Button(L("home_copy_feed_url")) { copyToPasteboard(feed.url) }
+            Button(L("home_copy_site_url")) { if let site = feed.site_url { copyToPasteboard(site) } }
+                .disabled(!ArticleListModelKt.hasUsableUrl(url: feed.site_url))
+            Button(L("home_open_site")) { if let site = feed.site_url { openInBrowser(site) } }
+                .disabled(!ArticleListModelKt.hasUsableUrl(url: feed.site_url))
+            Divider()
+            Button(L("home_rename_feed")) { dialogs.renamingFeed = feed }
             Divider()
             Button(L("home_unsubscribe_menu"), role: .destructive) { dialogs.unsubscribingFeed = feed }
         }
@@ -318,9 +339,18 @@ struct FeedListView: View {
                 Text(title).lineLimit(1)
                 Spacer()
                 if isErroring {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .help(L(isGone ? "home_feed_gone" : "home_feed_error"))
+                    // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
+                    // Compose's own `FeedErrorIndicator` (`FeedListDragAndDrop.kt:655-676`) — an
+                    // ordinary fetch error gets no tooltip, only the accessibility label below.
+                    Group {
+                        if isGone {
+                            Image(systemName: "exclamationmark.triangle.fill").help(L("home_feed_gone"))
+                        } else {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                        }
+                    }
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel(L(isGone ? "home_feed_gone" : "home_feed_error"))
                 }
                 unreadBadge(unreadCount)
             }
@@ -329,6 +359,14 @@ struct FeedListView: View {
         }
         .buttonStyle(.plain)
         .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+    }
+
+    /// Selects `instance` if it isn't already the primary selection — called when a row's context
+    /// menu opens, matching Compose's own `onOpen = { if (!selected) onClick() }`
+    /// (`FeedListDragAndDrop.kt`).
+    private func selectForContextMenu(_ instance: FeedListRowSelection) {
+        guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
+        home.viewModel.selectFilter(filter: instance.filter, instance: instance)
     }
 
     /// Mirrors the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s `toneFor`): the instance
@@ -345,27 +383,29 @@ struct FeedListView: View {
         return .clear
     }
 
-    /// A folder/tag header's expand/collapse control — a button of its own so that clicking the
-    /// rest of the header selects it instead, as in the Compose app.
-    private func expandChevron(expanded: Bool, toggle: @escaping () -> Void) -> some View {
-        Button(action: toggle) {
-            Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                .foregroundStyle(.secondary)
-                .font(.caption)
-                .frame(width: 12)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(L(expanded ? "home_collapse" : "home_expand"))
-    }
+}
 
-    @ViewBuilder
-    private func unreadBadge(_ count: Int64) -> some View {
-        if count > 0 {
-            Text("\(count)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
+/// A folder/tag header's expand/collapse control — a button of its own so that clicking the rest
+/// of the header selects it instead, as in the Compose app. A free function (not a `FeedListView`
+/// method) so `TagHeaderRow`, a separate `View`, can share it.
+private func expandChevron(expanded: Bool, toggle: @escaping () -> Void) -> some View {
+    Button(action: toggle) {
+        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+            .foregroundStyle(.secondary)
+            .font(.caption)
+            .frame(width: 12)
+            .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(L(expanded ? "home_collapse" : "home_expand"))
+}
+
+@ViewBuilder
+private func unreadBadge(_ count: Int64) -> some View {
+    if count > 0 {
+        Text("\(count)")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
     }
 }
 
@@ -423,6 +463,95 @@ struct FaviconView: View {
     }
 }
 
+/// A tag section's own header row — a distinct `View` (rather than a `FeedListView` method, like
+/// the folder header) so its color popover has somewhere stable to hold `@State`.
+private struct TagHeaderRow: View {
+    let home: HomeObservable
+    let dialogs: SidebarDialogState
+    let tag: Tags
+    let instance: FeedListRowSelection
+    let isExpanded: Bool
+    var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    @Binding var appearedRowKeys: Set<String>
+    let selectionBackground: (FeedListRowSelection) -> Color
+
+    @State private var showingColorPicker = false
+
+    var body: some View {
+        Button {
+            focusedPane.wrappedValue = .feedList
+            home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+        } label: {
+            HStack {
+                colorDot
+                Text(tag.name)
+                Spacer()
+                unreadBadge(home.unreadByTag[tag.id] ?? 0)
+                expandChevron(expanded: isExpanded) {
+                    home.viewModel.toggleTagExpanded(tagId: tag.id)
+                }
+            }
+            .selectableRowLabel(selectionBackground(instance))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            // Opening the menu selects the row first, matching Compose's own
+            // `onOpen = { if (!selected) onClick() }` (`FeedListPane.kt`).
+            let _ = selectForContextMenu()
+            Button(L("home_edit_tag_menu")) { dialogs.renamingTag = tag }
+            Button(L("home_change_tag_color_menu")) { showingColorPicker = true }
+            Button(L("home_delete_tag_menu"), role: .destructive) { dialogs.deletingTag = tag }
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let feedId = items.first, home.feeds.contains(where: { $0.id == feedId }) else { return false }
+            home.viewModel.setFeedTag(feedId: feedId, tagId: tag.id, attached: true)
+            return true
+        }
+        .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+    }
+
+    /// The color dot doubles as its own click target — tapping it opens the color popover directly,
+    /// matching Compose's own dot (`FeedListPane.kt`'s `clickable(onClickLabel = colorLabel)`),
+    /// without also triggering the surrounding row `Button`'s select action.
+    private var colorDot: some View {
+        Circle()
+            .fill(colorFromHex(tag.color))
+            .frame(width: 10, height: 10)
+            .contentShape(Circle())
+            .onTapGesture { showingColorPicker = true }
+            .popover(isPresented: $showingColorPicker) {
+                colorPickerContent
+            }
+            .accessibilityLabel(L("home_tag_color"))
+    }
+
+    private var colorPickerContent: some View {
+        HStack(spacing: 8) {
+            colorSwatch(nil)
+            ForEach(TagColorsKt.TAG_COLOR_PALETTE, id: \.self) { hex in colorSwatch(hex) }
+        }
+        .padding(12)
+    }
+
+    /// Applies immediately on tap — there is nothing to confirm, matching Compose's own
+    /// `TagColorPickerPopup` (`TagColorPicker.kt`).
+    private func colorSwatch(_ hex: String?) -> some View {
+        Circle()
+            .fill(colorFromHex(hex))
+            .frame(width: 20, height: 20)
+            .overlay(Circle().strokeBorder(Color.primary, lineWidth: tag.color == hex ? 2 : 0))
+            .onTapGesture {
+                home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
+                showingColorPicker = false
+            }
+    }
+
+    private func selectForContextMenu() {
+        guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
+        home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+    }
+}
+
 /// The three sidebar `ViewModifier`s below exist only to keep `FeedListView.body`'s own modifier
 /// chain short — chaining all of M3's sheets/alerts directly onto `body` made a single expression
 /// too complex for the type checker ("unable to type-check this expression in reasonable time").
@@ -451,11 +580,44 @@ private struct SidebarCreateSheets: ViewModifier {
                     titleKey: "home_add_tag",
                     placeholderKey: "home_new_tag_hint",
                     duplicateMessageKey: "home_tag_name_duplicate",
-                    initialColor: tagColorPalette[0],
+                    // No color by default, matching Compose's own add-tag dialog
+                    // (`FeedListDialogs.kt`'s `var color by remember { mutableStateOf<String?>(null) }`).
                     showColorPicker: true,
                     isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: nil) },
                     onConfirm: { name, color in _ = home.viewModel.createTag(name: name, color: color) },
                     isPresented: $dialogs.isAddingTag
+                )
+            }
+            // A feed row's "Move to Folder ▸ New folder…" / "Assign tags ▸ New tag…" — mirrors
+            // Compose's own `creatingFolderForFeedId`/`creatingTagForFeedId` (`FeedListDialogs.kt`):
+            // the created folder/tag is applied to that feed on confirm.
+            .sheet(item: $dialogs.creatingFolderForFeed) { feed in
+                NamePromptSheet(
+                    titleKey: "home_new_folder",
+                    placeholderKey: "home_new_folder_hint",
+                    duplicateMessageKey: "home_folder_name_duplicate",
+                    isDuplicate: { NameValidationKt.isDuplicateFolderName(name: $0, folders: home.folders, excludeId: nil) },
+                    onConfirm: { name, _ in
+                        if let id = home.viewModel.createFolder(name: name) {
+                            home.viewModel.moveFeed(feedId: feed.id, folderId: id, targetFeedId: nil)
+                        }
+                    },
+                    isPresented: Binding(get: { dialogs.creatingFolderForFeed != nil }, set: { if !$0 { dialogs.creatingFolderForFeed = nil } })
+                )
+            }
+            .sheet(item: $dialogs.creatingTagForFeed) { feed in
+                NamePromptSheet(
+                    titleKey: "home_new_tag",
+                    placeholderKey: "home_new_tag_hint",
+                    duplicateMessageKey: "home_tag_name_duplicate",
+                    showColorPicker: true,
+                    isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: nil) },
+                    onConfirm: { name, color in
+                        if let id = home.viewModel.createTag(name: name, color: color) {
+                            home.viewModel.setFeedTag(feedId: feed.id, tagId: id, attached: true)
+                        }
+                    },
+                    isPresented: Binding(get: { dialogs.creatingTagForFeed != nil }, set: { if !$0 { dialogs.creatingTagForFeed = nil } })
                 )
             }
     }
@@ -469,7 +631,7 @@ private struct SidebarRenameSheets: ViewModifier {
         content
             .sheet(item: $dialogs.renamingFolder) { folder in
                 NamePromptSheet(
-                    titleKey: "home_menu_rename_folder",
+                    titleKey: "home_edit_folder_menu",
                     placeholderKey: "home_new_folder_hint",
                     duplicateMessageKey: "home_folder_name_duplicate",
                     initialName: folder.name,
@@ -480,11 +642,15 @@ private struct SidebarRenameSheets: ViewModifier {
             }
             .sheet(item: $dialogs.renamingTag) { tag in
                 NamePromptSheet(
-                    titleKey: "home_menu_rename_tag",
+                    titleKey: "home_edit_tag_menu",
                     placeholderKey: "home_new_tag_hint",
                     duplicateMessageKey: "home_tag_name_duplicate",
                     initialName: tag.name,
-                    initialColor: tag.color ?? tagColorPalette[0],
+                    // Keeps the tag's existing color (nil included) unless the user actually picks
+                    // one — Compose's own rename never changes `tag.color` on its own
+                    // (`FeedListPane.kt`'s `onEdit`), so pre-selecting a default here would apply a
+                    // color the user never touched.
+                    initialColor: tag.color,
                     showColorPicker: true,
                     isDuplicate: { NameValidationKt.isDuplicateTagName(name: $0, tags: home.tags, excludeId: tag.id) },
                     onConfirm: { name, color in home.viewModel.updateTag(id: tag.id, name: name, color: color) },
@@ -495,11 +661,38 @@ private struct SidebarRenameSheets: ViewModifier {
                 NamePromptSheet(
                     titleKey: "home_rename_feed",
                     placeholderKey: "apple_rename_feed_hint",
-                    initialName: feed.custom_title ?? feed.title,
+                    // The placeholder shown once the field is cleared is the feed's own parsed
+                    // title — what confirming a blank name reverts `custom_title` to (below) —
+                    // matching Compose's own inline-rename placeholder (`FeedListDragAndDrop.kt`).
+                    placeholderText: feed.title,
+                    initialName: feed.displayTitle(),
+                    // A blank name is allowed here (unlike a folder/tag): it clears `custom_title`
+                    // back to the feed's own fetched title (`FeedRepository.renameFeed`'s
+                    // `takeIf { isNotBlank }`, which already treats "" the same as nil).
+                    allowBlank: true,
                     isDuplicate: { _ in false },
                     onConfirm: { name, _ in home.viewModel.renameFeed(id: feed.id, title: name) },
                     isPresented: Binding(get: { dialogs.renamingFeed != nil }, set: { if !$0 { dialogs.renamingFeed = nil } })
                 )
+            }
+            // Closes a rename sheet if its target is deleted mid-edit (e.g. a sync merge removes
+            // the folder/tag/feed while the sheet is open) — otherwise confirming would write to a
+            // row that no longer exists. Mirrors Compose's own auto-cancel when the row stops being
+            // rendered (`FeedListPane.kt:400-412`).
+            .onChange(of: home.folders) { _, folders in
+                if let id = dialogs.renamingFolder?.id, !folders.contains(where: { $0.id == id }) {
+                    dialogs.renamingFolder = nil
+                }
+            }
+            .onChange(of: home.tags) { _, tags in
+                if let id = dialogs.renamingTag?.id, !tags.contains(where: { $0.id == id }) {
+                    dialogs.renamingTag = nil
+                }
+            }
+            .onChange(of: home.feeds) { _, feeds in
+                if let id = dialogs.renamingFeed?.id, !feeds.contains(where: { $0.id == id }) {
+                    dialogs.renamingFeed = nil
+                }
             }
     }
 }

@@ -29,24 +29,10 @@ import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_tag_color
+import works.merc.keryx.app.presentation.home.TAG_COLOR_NONE_HEX
+import works.merc.keryx.app.presentation.home.TAG_COLOR_PALETTE
 import works.merc.keryx.app.ui.common.KeryxAnchoredPanel
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
-
-/**
- * Selectable tag colors. Chosen to stay clear of the app's Teal-based theme palette
- * (`Teal`/`TealLight` in `ui/theme/KeryxTheme.kt`) so a tag dot never reads as "the same color as
- * a selected row".
- */
-private val TagColorPalette: List<String> = listOf(
-    "#E53935", // red
-    "#FB8C00", // orange
-    "#FDD835", // amber
-    "#43A047", // green
-    "#1E88E5", // blue
-    "#5E35B1", // indigo
-    "#8E24AA", // purple
-    "#D81B60", // pink
-)
 
 /**
  * Displays selectable swatches for choosing a tag color, including an option to remove the color.
@@ -70,8 +56,8 @@ internal fun TagColorPicker(selected: String?, onSelect: (String?) -> Unit) {
             .horizontalScroll(rememberScrollState())
             .semantics { contentDescription = rowDescription },
     ) {
-        ColorSwatch(color = Color(0xFF9E9E9E), hex = null, isSelected = selected == null, onClick = { onSelect(null) })
-        TagColorPalette.forEach { hex ->
+        ColorSwatch(color = colorFromHex(TAG_COLOR_NONE_HEX), hex = null, isSelected = selected == null, onClick = { onSelect(null) })
+        TAG_COLOR_PALETTE.forEach { hex ->
             Spacer(Modifier.width(8.dp))
             ColorSwatch(color = colorFromHex(hex), hex = hex, isSelected = selected == hex, onClick = { onSelect(hex) })
         }
@@ -159,7 +145,7 @@ private fun ColorSwatch(color: Color, hex: String?, isSelected: Boolean, onClick
  * @return The parsed color, or gray when the value is null or invalid.
  */
 internal fun colorFromHex(hex: String?): Color {
-    if (hex == null) return Color(0xFF9E9E9E)
+    if (hex == null) return colorFromHex(TAG_COLOR_NONE_HEX)
     val clean = hex.removePrefix("#")
     return runCatching {
         val v = clean.toLong(16)

@@ -1,20 +1,23 @@
+import KeryxShared
 import SwiftUI
 
-/// Fixed color palette for a tag's swatch — Compose's own tag-color picker isn't ported yet
-/// (see M3's known gaps); this is a reasonable, small fixed set rather than a full color wheel.
-let tagColorPalette: [String] = [
-    "#F44336", "#E91E63", "#9C27B0", "#3F51B5",
-    "#2196F3", "#009688", "#4CAF50", "#FF9800",
-]
-
-/// A reusable name-entry sheet for creating/renaming a folder or tag, with live duplicate-name
-/// validation (`NameValidation.kt`'s `isDuplicateFolderName`/`isDuplicateTagName`) and, for a tag,
-/// a color swatch picker. One shared component rather than separate folder/tag/rename dialogs,
-/// since the shape (name + optional color + duplicate check + confirm/cancel) is identical.
+/// A reusable name-entry sheet for creating/renaming a folder, tag, or feed, with live
+/// duplicate-name validation (`NameValidation.kt`'s `isDuplicateFolderName`/`isDuplicateTagName`)
+/// and, for a tag, a color swatch picker. One shared component rather than separate folder/tag/
+/// rename dialogs, since the shape (name + optional color + duplicate check + confirm/cancel) is
+/// identical.
 struct NamePromptSheet: View {
     let titleKey: String
     let placeholderKey: String
+    /// Overrides the localized `placeholderKey` with literal text — used only by the feed-rename
+    /// sheet, whose placeholder is the feed's own parsed title (what a cleared name reverts to),
+    /// not a fixed hint string.
+    let placeholderText: String?
     let duplicateMessageKey: String
+    /// Whether an empty name can be confirmed — only a feed rename allows this, to clear its
+    /// `custom_title` back to the feed's own fetched title (`FeedRepository.renameFeed`'s
+    /// `takeIf { isNotBlank }`); a folder or tag always needs a name.
+    let allowBlank: Bool
     let showColorPicker: Bool
     let isDuplicate: (String) -> Bool
     let onConfirm: (String, String?) -> Void
@@ -26,9 +29,11 @@ struct NamePromptSheet: View {
     init(
         titleKey: String,
         placeholderKey: String,
+        placeholderText: String? = nil,
         duplicateMessageKey: String = "",
         initialName: String = "",
         initialColor: String? = nil,
+        allowBlank: Bool = false,
         showColorPicker: Bool = false,
         isDuplicate: @escaping (String) -> Bool,
         onConfirm: @escaping (String, String?) -> Void,
@@ -36,7 +41,9 @@ struct NamePromptSheet: View {
     ) {
         self.titleKey = titleKey
         self.placeholderKey = placeholderKey
+        self.placeholderText = placeholderText
         self.duplicateMessageKey = duplicateMessageKey
+        self.allowBlank = allowBlank
         self.showColorPicker = showColorPicker
         self.isDuplicate = isDuplicate
         self.onConfirm = onConfirm
@@ -47,12 +54,13 @@ struct NamePromptSheet: View {
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var duplicate: Bool { !trimmedName.isEmpty && isDuplicate(trimmedName) }
+    private var canConfirm: Bool { (allowBlank || !trimmedName.isEmpty) && !duplicate }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L(titleKey)).font(.headline)
 
-            TextField(L(placeholderKey), text: $name)
+            TextField(placeholderText ?? L(placeholderKey), text: $name)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(confirm)
 
@@ -64,38 +72,48 @@ struct NamePromptSheet: View {
 
             if showColorPicker {
                 HStack(spacing: 8) {
-                    ForEach(tagColorPalette, id: \.self) { hex in
-                        Circle()
-                            .fill(colorFromHex(hex))
-                            .frame(width: 20, height: 20)
-                            .overlay(
-                                Circle().strokeBorder(Color.primary, lineWidth: color == hex ? 2 : 0)
-                            )
-                            .onTapGesture { color = hex }
-                    }
+                    swatch(nil)
+                    ForEach(TagColorsKt.TAG_COLOR_PALETTE, id: \.self) { hex in swatch(hex) }
                 }
             }
 
             HStack {
                 Spacer()
                 Button(L("common_cancel"), role: .cancel) { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
                 Button(L("common_ok"), action: confirm)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(trimmedName.isEmpty || duplicate)
+                    .disabled(!canConfirm)
             }
         }
         .padding()
         .frame(minWidth: 320)
     }
 
+    /// A single swatch — `hex == nil` is the "no color" option, matching Compose's own
+    /// `TagColorPicker` (`TagColorPicker.kt`), which always offers it alongside `TagColorsKt.TAG_COLOR_PALETTE`.
+    private func swatch(_ hex: String?) -> some View {
+        Circle()
+            .fill(colorFromHex(hex))
+            .frame(width: 20, height: 20)
+            .overlay(
+                Circle().strokeBorder(Color.primary, lineWidth: color == hex ? 2 : 0)
+            )
+            .onTapGesture { color = hex }
+    }
+
     private func confirm() {
-        guard !trimmedName.isEmpty, !duplicate else { return }
+        guard canConfirm else { return }
         onConfirm(trimmedName, color)
         isPresented = false
     }
 }
 
-func colorFromHex(_ hex: String) -> Color {
+/// Parses a hex color string (optionally `#`-prefixed), or `nil` for the shared
+/// `TagColorsKt.TAG_COLOR_NONE_HEX` fallback gray — mirrors Compose's own `colorFromHex` (`TagColorPicker.kt`)
+/// so an unset tag color renders identically on both platforms.
+func colorFromHex(_ hex: String?) -> Color {
+    guard let hex else { return colorFromHex(TagColorsKt.TAG_COLOR_NONE_HEX) }
     var value: UInt64 = 0
     Scanner(string: hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))).scanHexInt64(&value)
     let r = Double((value & 0xFF0000) >> 16) / 255

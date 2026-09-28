@@ -17,4 +17,11 @@ final class SidebarDialogState {
     var deletingFolder: Folders?
     var deletingTag: Tags?
     var unsubscribingFeed: Feeds?
+    /// The feed a feed-row's "Move to Folder ▸ New folder…" menu item was chosen for — the created
+    /// folder is assigned to this feed on confirm (`FeedListDialogs.kt`'s own
+    /// `creatingFolderForFeedId`).
+    var creatingFolderForFeed: Feeds?
+    /// The feed a feed-row's "Assign tags ▸ New tag…" menu item was chosen for — the created tag is
+    /// attached to this feed on confirm (`FeedListDialogs.kt`'s own `creatingTagForFeedId`).
+    var creatingTagForFeed: Feeds?
 }
