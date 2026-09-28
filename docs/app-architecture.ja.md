@@ -1243,24 +1243,30 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   `EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64`）。リポジトリの他の部分と同じ Apple Silicon 専用の
   方針に合わせている。
 
-### サイドバーのドラッグ＆ドロップ（macOS）
+### サイドバー（macOS）
 
-フィード一覧のドラッグ＆ドロップは、Compose と同じ共有ルール
+サイドバーは標準のソースリストである。`.sidebar` スタイルの `List(selection:)` を使い、フォルダーとタグは
+`DisclosureGroup`、行は未読数を `.badge` で出す `Label` にしている。そのため、行の高さ、フォント、アイコンサイズ
+（システムの「サイドバーのアイコンサイズ」設定）、選択の形、開閉三角、インデントは、メモアプリや Finder と同じく
+すべて `NSOutlineView` が描く（`Home/FeedListView.swift`）。標準の選択は、行のキーを介して共有の選択に接続する
+（`feedListRowSelection(forKey:in:)`）。←/→ はペイン移動のまま保つため（`external-spec.md` §9）、アウトライン
+標準の開閉より先に横取りしている。
+
+ドラッグ＆ドロップは、Compose と同じ共有ルール
 （`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
 UI ごとに異なるのはフィードバックだけで、macOS では `NSOutlineView`/Finder のソースリストの慣習に従う
 （`Home/FeedListDropPresentation.swift`）。
 
-- **ドラッグ可能な行を `Button` にしてはならない。** macOS の `Button` はマウスダウンからマウスアップまで
-  マウスを追跡してドラッグジェスチャーを奪うため、`Button` で包んだ行からはドラッグが始まらない。サイドバーの行は
-  代わりにタップジェスチャーで選択する（`Home/FeedListView.swift` の `selectsOnClick`）。タップはポインターが
-  動いた時点で失敗し、VoiceOver 向けのボタントレイトも保つ。
-- **ドラッグは `.draggable` ではなく `.onDrag` で開始する。** すべてのドロップ先はドラッグ中の項目を基に検証し、
-  ドラッグ開始時に必ず実行されることが保証されているのは `onDrag` のクロージャだけである。ペイロードは専用の
-  エクスポート型（`works.merc.keryx.app.feedlistitem`、`project.yml` の `UTExportedTypeDeclarations` で宣言）を
-  使うため、他アプリからのテキストのドラッグが並べ替えと誤認されることはない。
-- フィードバック：行間にはインデント付きの挿入線、フィードを落とすフォルダー・「フォルダーなし」・タグの見出しには
-  アクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムのスプリングロード設定に
-  従うスプリングロードフォルダー。
+- **ドラッグは `List` 自身の行ドラッグ用フックである `.itemProvider` で開始する。** クリックとドラッグの判定は、
+  行全体で `List` が行う。SwiftUI のジェスチャー方式のドラッグ元は、これらの行では使えない。`.onDrag`/`.draggable`
+  は行の内容が描かれている部分でマウスダウンを取るため、アイコンや名前をクリックしても選択されない。`Button` の行は
+  ドラッグそのものを奪う。
+- プロバイダーのクロージャはドラッグ開始時に実行され、すべてのドロップ先はそのドラッグ中の項目を基に検証する。
+  ペイロードは専用のエクスポート型（`works.merc.keryx.app.feedlistitem`、`project.yml` の
+  `UTExportedTypeDeclarations` で宣言）を使うため、他アプリからのテキストのドラッグが並べ替えと誤認されることはない。
+- フィードバック：行間には挿入線（インデントはアウトライン自身が付ける）、フィードを落とすフォルダー・「フォルダーなし」・
+  タグの行にはアクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムの
+  スプリングロード設定に従うスプリングロードフォルダー。
 
 ### `KeryxSdk`：Swift からの入口
 

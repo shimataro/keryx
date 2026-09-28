@@ -1246,25 +1246,32 @@ no separate iOS target to keep in sync.
 - iOS Simulator only ships an arm64 slice (`EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64` in
   `project.yml`), matching the rest of the repo's Apple-Silicon-only convention.
 
-### Sidebar drag and drop (macOS)
+### Sidebar (macOS)
 
-The feed list's drag and drop applies the same shared rules as Compose
+The sidebar is a native source list — `List(selection:)` in `.sidebar` style, with folders and tags
+as `DisclosureGroup`s and rows as `Label`s with `.badge` unread counts — so row height, font, icon
+size (the system's sidebar icon size setting), selection shape, disclosure triangles and
+indentation all come from `NSOutlineView`, as in Notes and Finder (`Home/FeedListView.swift`). The
+native selection is bridged to the shared one by row key (`feedListRowSelection(forKey:in:)`), and
+←/→ are taken before the outline's own expand/collapse so they keep moving between panes
+(`external-spec.md` §9).
+
+Drag and drop applies the same shared rules as Compose
 (`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
 only the feedback is per UI, and on macOS it follows the source-list conventions of
 `NSOutlineView`/Finder (`Home/FeedListDropPresentation.swift`).
 
-- **A draggable row must not be a `Button`.** On macOS a `Button` tracks the mouse from mouse-down
-  to mouse-up and swallows the drag gesture, so a row wrapped in one never starts a drag. Sidebar
-  rows select with a tap gesture instead (`selectsOnClick` in `Home/FeedListView.swift`), which
-  fails as soon as the pointer moves and keeps the button trait for VoiceOver.
-- **The drag starts through `.onDrag`, not `.draggable`.** Every drop target validates against the
-  in-progress item, and only `onDrag`'s closure is guaranteed to run when the drag begins. The
-  payload uses its own exported type (`works.merc.keryx.app.feedlistitem`, declared under
-  `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is never taken
-  for a reorder.
-- Feedback: an indented insertion line between rows, an accent highlight on a folder, "No folder"
-  or tag header a feed is dropped onto, `.forbidden` wherever the shared rules resolve no action,
-  and spring-loaded folders that follow the system's spring-loading setting.
+- **A drag starts through `.itemProvider`, the `List`'s own row-drag hook.** The list then tells a
+  click from a drag anywhere in the row. SwiftUI's gesture-based sources do not work in these rows:
+  `.onDrag`/`.draggable` take the mouse-down wherever the row's content is drawn, so clicking an
+  icon or title never selects, and a `Button` row swallows the drag altogether.
+- The provider closure runs when the drag begins; every drop target validates against that
+  in-progress item. The payload uses its own exported type (`works.merc.keryx.app.feedlistitem`,
+  declared under `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is
+  never taken for a reorder.
+- Feedback: an insertion line between rows (indented by the outline itself), an accent highlight on
+  a folder, "No folder" or tag row a feed is dropped onto, `.forbidden` wherever the shared rules
+  resolve no action, and spring-loaded folders that follow the system's spring-loading setting.
 
 ### `KeryxSdk`: the Swift entry point
 
