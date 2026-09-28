@@ -178,7 +178,3 @@ private struct FeedListDropOnDelegate: DropDelegate {
         return feedback
     }
 }
-
-/// How far a row's background (`feedListRowBackground`) reaches past the row's content, so the
-/// drop highlight lines up with where the native sidebar selection is drawn.
-let feedListRowHighlightOutset = CGSize(width: 6, height: 3)

@@ -349,7 +349,7 @@ struct FeedListView: View {
         } label: {
             Label(folder.name, systemImage: "folder")
                 .lineLimit(1)
-                .feedListRowBackground(echoBackground(for: instance), dropHighlight: dropOnKey == .folder(folder.id))
+                .sidebarRowHighlight(dropOnKey == .folder(folder.id) ? .drop : highlight(for: instance))
                 .badge(Int(home.unreadByFolder[folder.id] ?? 0))
                 .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
                 .contextMenu {
@@ -410,7 +410,7 @@ struct FeedListView: View {
                 tag: tag,
                 instance: instance,
                 appearedRowKeys: $appearedRowKeys,
-                echoBackground: echoBackground(for:),
+                highlight: highlight(for:),
                 dropIndex: dropIndex,
                 draggingItem: $draggingItem,
                 dropOnKey: $dropOnKey,
@@ -517,7 +517,7 @@ struct FeedListView: View {
                     .frame(width: 16, height: 16)
             }
         }
-        .feedListRowBackground(echoBackground(for: instance))
+        .sidebarRowHighlight(highlight(for: instance))
         .badge(Int(unreadCount))
         .tag(feedListRowSelectionKey(instance))
         .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
@@ -531,35 +531,18 @@ struct FeedListView: View {
         home.viewModel.selectFilter(filter: instance.filter, instance: instance)
     }
 
-    /// The faint SECONDARY tone of the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s
-    /// `toneFor`): every *other* rendered copy of the selected filter — a feed shown under both its
-    /// folder group and an expanded tag — gets a faint echo. The selected row itself is the native
-    /// list selection, which already dims while the sidebar lacks focus, as Compose's PRIMARY tone
-    /// does.
-    private func echoBackground(for instance: FeedListRowSelection) -> Color {
+    /// `.echo` — the faint SECONDARY tone of the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s
+    /// `toneFor`) — for every *other* rendered copy of the selected filter: a feed shown under both
+    /// its folder group and an expanded tag. The selected row itself is the native list selection,
+    /// which already dims while the sidebar lacks focus, as Compose's PRIMARY tone does.
+    private func highlight(for instance: FeedListRowSelection) -> SidebarRowHighlight {
         guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance),
-              articleFiltersEqual(instance.filter, home.filter) else { return .clear }
-        return Color.accentColor.opacity(0.10)
+              articleFiltersEqual(instance.filter, home.filter) else { return .none }
+        return .echo
     }
 }
 
 private extension View {
-    /// A row's background: the macOS source-list drop highlight (an accent fill with white
-    /// content, as a Finder or Notes sidebar item shows under a drag) while a dragged feed would be
-    /// dropped onto it, otherwise `echo` (see `FeedListView.echoBackground`). `.listRowBackground`
-    /// does not reliably paint through `.sidebar`-style rows, so this lives on the row's content,
-    /// widened to where the native selection is drawn.
-    func feedListRowBackground(_ echo: Color, dropHighlight: Bool = false) -> some View {
-        foregroundStyle(dropHighlight ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(dropHighlight ? Color.accentColor : echo)
-                    .padding(.horizontal, -feedListRowHighlightOutset.width)
-                    .padding(.vertical, -feedListRowHighlightOutset.height)
-            }
-    }
-
     /// The drop highlight alone, for the "No folder" section header — a header has no selection
     /// shape to match, so the highlight hugs its title.
     func feedListDropHighlight(_ isOn: Bool) -> some View {
@@ -622,7 +605,7 @@ private struct TagRowLabel: View {
     let tag: Tags
     let instance: FeedListRowSelection
     @Binding var appearedRowKeys: Set<String>
-    let echoBackground: (FeedListRowSelection) -> Color
+    let highlight: (FeedListRowSelection) -> SidebarRowHighlight
     let dropIndex: FeedListDropIndex
     @Binding var draggingItem: FeedListDragPayload?
     @Binding var dropOnKey: FeedListHoverKey?
@@ -638,7 +621,7 @@ private struct TagRowLabel: View {
         }
         // Highlights while a feed hovers for attachment — matches Compose's own
         // `dropTargetBackground` (`FeedListPane.kt`'s tag row).
-        .feedListRowBackground(echoBackground(instance), dropHighlight: dropOnKey == .tag(tag.id))
+        .sidebarRowHighlight(dropOnKey == .tag(tag.id) ? .drop : highlight(instance))
         .badge(Int(home.unreadByTag[tag.id] ?? 0))
         .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu() }
         .contextMenu {
