@@ -17,15 +17,52 @@ struct FeedListView: View {
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
     var body: some View {
-        listContent
-            .listStyle(.sidebar)
-            .searchable(text: searchQueryBinding, placement: .sidebar, prompt: Text(L("home_search_placeholder")))
-            .focused(focusedPane, equals: .feedList)
-            .navigationTitle(L("app_name"))
-            .toolbar { toolbarContent }
-            .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
-            .modifier(SidebarRenameSheets(home: home, dialogs: dialogs))
-            .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
+        VStack(spacing: 0) {
+            searchField
+            Divider()
+            listContent
+                .listStyle(.sidebar)
+                .focused(focusedPane, equals: .feedList)
+        }
+        .navigationTitle(L("app_name"))
+        .toolbar { toolbarContent }
+        .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
+        .modifier(SidebarRenameSheets(home: home, dialogs: dialogs))
+        .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
+        // The 3-pane desktop/macOS layout keeps this field permanently visible (mirrors Compose's
+        // own `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
+        // there is no narrower layout here to ever hide it again), so this only needs setting once.
+        .task { home.viewModel.setSearchBarVisible(visible: true) }
+        .onChange(of: home.pendingSearchFocus) { _, pending in
+            guard pending else { return }
+            focusedPane.wrappedValue = .search
+            home.viewModel.consumeSearchFocusRequest()
+        }
+    }
+
+    /// A plain `TextField` rather than `.searchable`: the system search field cannot report its own
+    /// focus state before macOS 15 (`.searchFocused(_:)`), which this custom field needs both to
+    /// answer `HomeShortcutsKt.homeShortcutFor`'s `textInputFocused` and to let ↓/↑ hand off into
+    /// the article results (`HomeView.moveArticleSelectionFromSearchField`) — see `HomeScreen.kt`'s
+    /// own `focusSearch`/`moveArticleSelectionFromSearchField`.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(L("home_search_placeholder"), text: searchQueryBinding)
+                .textFieldStyle(.plain)
+                .focused(focusedPane, equals: .search)
+            if !home.searchQuery.isEmpty {
+                Button {
+                    home.viewModel.setSearchQuery(query: "")
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(L("home_search_clear"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -65,12 +102,11 @@ struct FeedListView: View {
     }
 
     private var searchQueryBinding: Binding<String> {
+        // `setSearchBarVisible` is set once in `body`'s own `.task` (the 3-pane layout keeps this
+        // field permanently visible), not on every keystroke here.
         Binding(
             get: { home.searchQuery },
-            set: { newValue in
-                home.viewModel.setSearchQuery(query: newValue)
-                home.viewModel.setSearchBarVisible(visible: true)
-            }
+            set: { home.viewModel.setSearchQuery(query: $0) }
         )
     }
 

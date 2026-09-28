@@ -34,11 +34,10 @@ struct HomeView: View {
         guard let shortcut = HomeShortcutsKt.homeShortcutFor(
             key: key,
             modifiers: modifiers,
-            // `.searchFocused(_:)` needs macOS 15 (this project targets 14+), so there is no way to
-            // observe the system search field's own focus state here yet — every key press is
-            // treated as if no text field were focused. Revisit once the custom search field batch
-            // replaces `.searchable` with a `TextField`/`@FocusState` pair that can report this.
-            textInputFocused: false,
+            // The sidebar's search field is a plain `TextField` reporting its focus through this
+            // same `focusedPane`, not `.searchable` (which cannot report its focus before macOS
+            // 15) — see `FeedListView.searchField`.
+            textInputFocused: focusedPane == .search,
             // Ctrl+Shift+R belongs to the Feed menu's "Refresh selected feed" item on desktop
             // Compose (`AppMenuTree.kt`), not the sidebar-refresh key touch-only platforms bind it
             // to — see `HomeCommands.swift`'s `refreshSelectedFeed`.
@@ -60,12 +59,17 @@ struct HomeView: View {
             // "Article Reader (native WebView)" in app-architecture.md) — never change the
             // selection out from under it.
             case .reader: return .ignored
+            // Descends into the results list rather than moving the sidebar's own selection, even
+            // though the field visually sits in the sidebar — matches Compose's own
+            // `moveArticleSelectionFromSearchField` (`HomeScreen.kt`).
+            case .search: moveArticleSelectionFromSearchField(by: -1)
             default: home.viewModel.selectPrevious()
             }
         case .down:
             switch focusedPane {
             case .feedList: moveFeedListSelection(by: 1)
             case .reader: return .ignored
+            case .search: moveArticleSelectionFromSearchField(by: 1)
             default: home.viewModel.selectNext()
             }
         case .nextArticle:
@@ -105,6 +109,15 @@ struct HomeView: View {
             home.viewModel.pullToRefresh()
         }
         return .handled
+    }
+
+    /// Moves the article selection from the search field (↓/↑ reach here even while it holds
+    /// focus — see `HomeShortcutsKt.homeShortcutFor`'s own `textInputFocused` branch) and hands
+    /// keyboard focus to the article list, so the results can keep being browsed with J/K
+    /// afterwards. Mirrors Compose's own `moveArticleSelectionFromSearchField` (`HomeScreen.kt`).
+    private func moveArticleSelectionFromSearchField(by delta: Int) {
+        focusedPane = .articleList
+        if delta < 0 { home.viewModel.selectPrevious() } else { home.viewModel.selectNext() }
     }
 
     /// Moves the sidebar's own selection by `delta` positions in `buildOrderedFeedListRows`'

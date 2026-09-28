@@ -107,38 +107,76 @@ struct ArticleListView: View {
                 L("home_no_feeds"),
                 systemImage: "tray"
             )
-        } else if home.searchActive && home.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).count < Int(ConstantsKt.SEARCH_MIN_TERM_LENGTH) {
-            ContentUnavailableView(
-                L("home_search_too_short"),
-                systemImage: "magnifyingglass"
-            )
-        } else if home.searchActive && !home.searching && home.searchResults.isEmpty {
-            ContentUnavailableView(
-                L("home_search_no_results"),
-                systemImage: "magnifyingglass"
-            )
+        } else if home.searchActive {
+            searchContent
         } else if displayedRows.isEmpty {
             ContentUnavailableView(
                 L("home_no_articles"),
                 systemImage: "doc.text"
             )
         } else {
-            List(displayedRows, id: \.id) { article in
-                row(article)
-                    .onAppear {
-                        appearedIds.insert(article.id)
-                        reportVisible()
-                    }
-                    .onDisappear {
-                        appearedIds.remove(article.id)
-                        reportVisible()
-                    }
-            }
-            .listStyle(.plain)
+            articleList
         }
     }
 
+    /// Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`: a query with no
+    /// 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split `FtsSearch` makes)
+    /// is "too short"; an in-flight search with nothing yet shows nothing at all, rather than
+    /// flashing "no results" between keystrokes; only a *settled* empty result set is "no results".
+    @ViewBuilder
+    private var searchContent: some View {
+        if SearchQueryKt.searchTerms(raw: home.searchQuery).isEmpty {
+            ContentUnavailableView(
+                L("home_search_too_short"),
+                systemImage: "magnifyingglass"
+            )
+        } else if home.searching && home.searchResults.isEmpty {
+            Color.clear
+        } else if home.searchResults.isEmpty {
+            noSearchResultsView
+        } else {
+            articleList
+        }
+    }
+
+    /// A secondary line pointing at "All Feeds" only when the search is actually narrowed to
+    /// something less than that — switching to All wouldn't change anything otherwise. Mirrors
+    /// Compose's own `NoSearchResultsHint` (`ArticleListPane.kt`).
+    private var noSearchResultsView: some View {
+        VStack(spacing: 4) {
+            Text(L("home_search_no_results")).font(.caption).foregroundStyle(.secondary)
+            if !isAllFeedsFilter {
+                Text(L("home_search_try_all_feeds")).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var isAllFeedsFilter: Bool {
+        if case .all = onEnum(of: home.filter) { return true }
+        return false
+    }
+
+    private var articleList: some View {
+        List(displayedRows, id: \.id) { article in
+            row(article)
+                .onAppear {
+                    appearedIds.insert(article.id)
+                    reportVisible()
+                }
+                .onDisappear {
+                    appearedIds.remove(article.id)
+                    reportVisible()
+                }
+        }
+        .listStyle(.plain)
+    }
+
+    /// Suppressed during search: the visible rows are search results, not the underlying filter's
+    /// own list, and reporting them as "seen" would corrupt `newArticleCount`'s bookkeeping once
+    /// the search closes (`ArticleListPane.kt`'s own guard).
     private func reportVisible() {
+        guard !home.searchActive else { return }
         let ordered = displayedRows.filter { appearedIds.contains($0.id) }.map(\.id)
         home.viewModel.markArticlesSeen(ids: ordered)
     }
@@ -155,7 +193,7 @@ struct ArticleListView: View {
                 FaviconView(url: feedFor(article)?.favicon_url, letter: article.title.first)
                     .frame(width: 20, height: 20)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(titleMarks[article.id].map(highlighted) ?? AttributedString(article.title))
+                    Text(titleAttributedString(article))
                         .font(article.is_read == 1 ? .body : .body.bold())
                         .lineLimit(2)
                     HStack(spacing: 6) {
@@ -201,6 +239,15 @@ struct ArticleListView: View {
 
     private func feedFor(_ article: ArticleListRow) -> Feeds? {
         home.feeds.first { $0.id == article.feed_id }
+    }
+
+    /// Falls back to the plain title when a search-marked title is blank — matches Compose's own
+    /// `markedToAnnotatedString(it.ifBlank { article.title })` (`ArticleListPane.kt`).
+    private func titleAttributedString(_ article: ArticleListRow) -> AttributedString {
+        if let marked = titleMarks[article.id], !marked.isEmpty {
+            return highlighted(marked)
+        }
+        return AttributedString(article.title)
     }
 
     private func highlighted(_ marked: String) -> AttributedString {
