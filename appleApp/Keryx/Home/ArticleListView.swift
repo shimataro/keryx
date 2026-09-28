@@ -125,7 +125,7 @@ struct ArticleListView: View {
             }
             .help(L("home_mark_all_read"))
 
-            NotificationBell(home: home, notifications: notifications)
+            NotificationBell(home: home, notifications: notifications, focusedPane: focusedPane)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)

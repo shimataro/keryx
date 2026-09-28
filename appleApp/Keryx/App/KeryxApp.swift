@@ -77,10 +77,11 @@ struct KeryxApp: App {
         // UI gets built out; for now this scene simply doesn't exist there.
         Settings {
             if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync,
-               let opmlTransfer = model.opmlTransfer {
+               let opmlTransfer = model.opmlTransfer, let notifications = model.notifications {
                 SettingsView(
                     sdk: sdk, preferences: preferences, cloudSync: cloudSync,
-                    oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer
+                    oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer,
+                    notifications: notifications
                 )
             }
         }

@@ -369,6 +369,9 @@
          assume a single argument drives the plural category). Formatted via String(format:). -->
     <string name="apple_add_feed_partial_result">%1$d succeeded, %2$d failed</string>
     <string name="apple_add_feed_article_count">%1$d articles</string>
+    <string name="apple_time_minutes_ago">%1$d minutes ago</string>
+    <string name="apple_time_hours_ago">%1$d hours ago</string>
+    <string name="apple_time_days_ago">%1$d days ago</string>
     <string name="apple_new_articles_pill">%1$d new articles</string>
     <string name="apple_rename_feed_hint">Enter feed title</string>
     <string name="apple_loading">Loading…</string>
