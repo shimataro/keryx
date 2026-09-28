@@ -254,12 +254,12 @@ struct ArticleListView: View {
             .background(home.selectedArticle?.id == article.id ? Color.accentColor.opacity(0.15) : Color.clear)
         }
         .buttonStyle(.plain)
+        .selectsOnContextMenu(id: article.id) { selectForContextMenu(article) }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
-            // (`ArticleRowComponents.kt`) — a `let` inside a `@ViewBuilder` menu-content closure
-            // runs as a plain side effect, not a view, and this closure is rebuilt each time the
-            // menu is requested.
-            let _ = selectForContextMenu(article)
+            // (`ArticleRowComponents.kt`) — the actual selection runs on a right-click/Control-
+            // click via `.selectsOnContextMenu` above, not as a side effect of this builder (see
+            // `ContextMenuSelectionTracker`'s own doc for why).
             Button(L(article.is_starred == 1 ? "article_unstar" : "article_star")) {
                 home.viewModel.toggleStar(article: article)
             }

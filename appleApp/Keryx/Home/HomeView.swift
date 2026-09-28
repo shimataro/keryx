@@ -14,6 +14,9 @@ struct HomeView: View {
     @FocusState private var focusedPane: HomeFocusedPane?
     @State private var feedListWidthSaveTask: Task<Void, Never>?
     @State private var articleListWidthSaveTask: Task<Void, Never>?
+    #if os(macOS)
+    @State private var contextMenuSelectionTracker = ContextMenuSelectionTracker()
+    #endif
 
     var body: some View {
         NavigationSplitView {
@@ -43,11 +46,22 @@ struct HomeView: View {
         .task {
             await home.startObserving()
         }
+        #if os(macOS)
+        .environment(\.contextMenuSelectionTracker, contextMenuSelectionTracker)
+        #endif
         .onAppear {
             if focusedPane == nil {
                 focusedPane = HomeView.focusedPane(fromRaw: preferences.localSettings?.lastFocusedPane)
             }
+            #if os(macOS)
+            contextMenuSelectionTracker.startMonitoring()
+            #endif
         }
+        #if os(macOS)
+        .onDisappear {
+            contextMenuSelectionTracker.stopMonitoring()
+        }
+        #endif
         // Mirrors into `HomeObservable` so `HomeCommands.menuState` (a different `View` entirely,
         // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
         // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.

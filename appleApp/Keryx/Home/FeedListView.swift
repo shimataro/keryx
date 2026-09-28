@@ -287,10 +287,13 @@ struct FeedListView: View {
                 .selectableRowLabel(selectionBackground(for: instance))
             }
             .buttonStyle(.plain)
+            .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
             .contextMenu {
                 // Opening the menu selects the row first, matching Compose's own
-                // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`).
-                let _ = selectForContextMenu(instance)
+                // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
+                // selection runs on a right-click/Control-click via `.selectsOnContextMenu` above,
+                // not as a side effect of this builder (see `ContextMenuSelectionTracker`'s own doc
+                // for why).
                 Button(L("home_edit_folder_menu")) { dialogs.renamingFolder = folder }
                 Button(L("home_delete_folder_menu"), role: .destructive) { dialogs.deletingFolder = folder }
             }
@@ -415,10 +418,12 @@ struct FeedListView: View {
             hoveredTagId: $hoveredTagId,
             hoveredKey: $hoveredKey
         ))
+        .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
-            // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`).
-            let _ = selectForContextMenu(instance)
+            // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
+            // selection runs on a right-click/Control-click via `.selectsOnContextMenu` above, not
+            // as a side effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
             // Order matches `FeedListDragAndDrop.kt:553-593` exactly: Refresh, Move to Folder ▸,
             // Assign tags ▸, a separator, the URL/site actions, a separator, Rename, a separator,
             // Unsubscribe.
@@ -645,10 +650,12 @@ private struct TagHeaderRow: View {
             .background(hoveredTagId == tag.id ? Color.accentColor.opacity(0.15) : Color.clear)
         }
         .buttonStyle(.plain)
+        .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu() }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
-            // `onOpen = { if (!selected) onClick() }` (`FeedListPane.kt`).
-            let _ = selectForContextMenu()
+            // `onOpen = { if (!selected) onClick() }` (`FeedListPane.kt`) — the actual selection
+            // runs on a right-click/Control-click via `.selectsOnContextMenu` above, not as a side
+            // effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
             Button(L("home_edit_tag_menu")) { dialogs.renamingTag = tag }
             Button(L("home_change_tag_color_menu")) { showingColorPicker = true }
             Button(L("home_delete_tag_menu"), role: .destructive) { dialogs.deletingTag = tag }
