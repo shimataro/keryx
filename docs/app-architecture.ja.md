@@ -1243,6 +1243,25 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   `EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64`）。リポジトリの他の部分と同じ Apple Silicon 専用の
   方針に合わせている。
 
+### サイドバーのドラッグ＆ドロップ（macOS）
+
+フィード一覧のドラッグ＆ドロップは、Compose と同じ共有ルール
+（`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
+UI ごとに異なるのはフィードバックだけで、macOS では `NSOutlineView`/Finder のソースリストの慣習に従う
+（`Home/FeedListDropPresentation.swift`）。
+
+- **ドラッグ可能な行を `Button` にしてはならない。** macOS の `Button` はマウスダウンからマウスアップまで
+  マウスを追跡してドラッグジェスチャーを奪うため、`Button` で包んだ行からはドラッグが始まらない。サイドバーの行は
+  代わりにタップジェスチャーで選択する（`Home/FeedListView.swift` の `selectsOnClick`）。タップはポインターが
+  動いた時点で失敗し、VoiceOver 向けのボタントレイトも保つ。
+- **ドラッグは `.draggable` ではなく `.onDrag` で開始する。** すべてのドロップ先はドラッグ中の項目を基に検証し、
+  ドラッグ開始時に必ず実行されることが保証されているのは `onDrag` のクロージャだけである。ペイロードは専用の
+  エクスポート型（`works.merc.keryx.app.feedlistitem`、`project.yml` の `UTExportedTypeDeclarations` で宣言）を
+  使うため、他アプリからのテキストのドラッグが並べ替えと誤認されることはない。
+- フィードバック：行間にはインデント付きの挿入線、フィードを落とすフォルダー・「フォルダーなし」・タグの見出しには
+  アクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムのスプリングロード設定に
+  従うスプリングロードフォルダー。
+
 ### `KeryxSdk`：Swift からの入口
 
 `sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：

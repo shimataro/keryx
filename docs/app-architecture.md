@@ -1246,6 +1246,26 @@ no separate iOS target to keep in sync.
 - iOS Simulator only ships an arm64 slice (`EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64` in
   `project.yml`), matching the rest of the repo's Apple-Silicon-only convention.
 
+### Sidebar drag and drop (macOS)
+
+The feed list's drag and drop applies the same shared rules as Compose
+(`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
+only the feedback is per UI, and on macOS it follows the source-list conventions of
+`NSOutlineView`/Finder (`Home/FeedListDropPresentation.swift`).
+
+- **A draggable row must not be a `Button`.** On macOS a `Button` tracks the mouse from mouse-down
+  to mouse-up and swallows the drag gesture, so a row wrapped in one never starts a drag. Sidebar
+  rows select with a tap gesture instead (`selectsOnClick` in `Home/FeedListView.swift`), which
+  fails as soon as the pointer moves and keeps the button trait for VoiceOver.
+- **The drag starts through `.onDrag`, not `.draggable`.** Every drop target validates against the
+  in-progress item, and only `onDrag`'s closure is guaranteed to run when the drag begins. The
+  payload uses its own exported type (`works.merc.keryx.app.feedlistitem`, declared under
+  `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is never taken
+  for a reorder.
+- Feedback: an indented insertion line between rows, an accent highlight on a folder, "No folder"
+  or tag header a feed is dropped onto, `.forbidden` wherever the shared rules resolve no action,
+  and spring-loaded folders that follow the system's spring-loading setting.
+
 ### `KeryxSdk`: the Swift entry point
 
 `sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
