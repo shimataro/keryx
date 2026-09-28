@@ -12,6 +12,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     GENERATE_INFOPLIST_FILE: YES
     # Apple Silicon only, matching :shared's own Apple targets (macosArm64/iosArm64/
     # iosSimulatorArm64 — see docs/app-architecture.md's "Apple targets in :shared"): the
