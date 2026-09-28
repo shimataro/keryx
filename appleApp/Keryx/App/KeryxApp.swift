@@ -1,3 +1,4 @@
+import KeryxShared
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -69,6 +70,14 @@ struct KeryxApp: App {
             }
             #endif
         }
+        #if os(macOS)
+        // Matches the desktop app's first-launch window (`WINDOW_DEFAULT_WIDTH` x `WINDOW_DEFAULT_HEIGHT`)
+        // so the three panes get room at their ideal widths instead of the content-fitted minimum.
+        .defaultSize(
+            width: CGFloat(ConstantsKt.WINDOW_DEFAULT_WIDTH),
+            height: CGFloat(ConstantsKt.WINDOW_DEFAULT_HEIGHT)
+        )
+        #endif
         .commands { HomeCommands(model: model) }
 
         #if os(macOS)
