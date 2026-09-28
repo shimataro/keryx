@@ -53,3 +53,12 @@ func feedListRowSelectionKey(_ instance: FeedListRowSelection) -> String {
     case .feedInTag(let f): return "feed-in-tag:\(f.tagId):\(f.feedId)"
     }
 }
+
+/// The row in `rows` whose `feedListRowSelectionKey` is `key`, or `nil` if none is — how the
+/// sidebar's native `List(selection:)`, which only knows row tags, maps a clicked or arrowed-to
+/// row back to the `FeedListRowSelection` to select. `rows` is the sidebar's visible row order
+/// (`FeedListModelKt.buildOrderedFeedListRows`), which is also the only set of rows the native
+/// selection can land on.
+func feedListRowSelection(forKey key: String, in rows: [FeedListRowSelection]) -> FeedListRowSelection? {
+    rows.first { feedListRowSelectionKey($0) == key }
+}

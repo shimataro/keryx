@@ -103,43 +103,26 @@ extension View {
         ))
     }
 
-    /// Marks this row/header as draggable, carrying `item`. Uses `.onDrag` rather than
-    /// `.draggable`: `onDrag`'s closure is documented to run exactly when a drag begins, which is
-    /// this pane's only "drag started" signal — every `feedListDropTarget` on the pane reads
-    /// `draggingItem` to validate and highlight, so it must be set before the first hover, not
-    /// whenever `.draggable`'s payload autoclosure happens to be evaluated.
+    /// Marks this sidebar row as draggable, carrying `item`, through `.itemProvider` — the
+    /// `List`'s own row-drag hook, so the source list (`NSTableView`) itself decides what a click
+    /// and what a drag is, anywhere in the row, exactly as Notes and Finder do. The drag image is
+    /// the list's own row image.
     ///
-    /// The drag image is just the item's icon and name (`FeedListDragPreview`), as a Finder
-    /// sidebar drag shows, rather than a snapshot of the whole row with its selection tint.
-    func feedListDraggable(
-        _ item: FeedListDragPayload,
-        draggingItem: Binding<FeedListDragPayload?>,
-        @ViewBuilder icon: () -> some View,
-        title: String
-    ) -> some View {
-        onDrag {
+    /// Neither SwiftUI gesture-based drag source works here: `.onDrag`/`.draggable` take the
+    /// mouse-down wherever the row's content is actually drawn (icon and title), so a click there
+    /// never reaches the list's selection while a click on the row's empty space does; and a
+    /// `Button` row swallows the drag altogether.
+    ///
+    /// The provider closure runs when the drag begins, which is this pane's only "drag started"
+    /// signal — every `feedListDropTarget` reads `draggingItem` to validate and highlight, so it
+    /// must be set before the first hover.
+    func feedListDraggable(_ item: FeedListDragPayload, draggingItem: Binding<FeedListDragPayload?>) -> some View {
+        itemProvider {
             draggingItem.wrappedValue = item
             let provider = NSItemProvider()
             provider.register(item)
             return provider
-        } preview: {
-            FeedListDragPreview(icon: icon(), title: title)
         }
-    }
-}
-
-/// The drag image for a feed-list drag: icon plus name, no row chrome.
-private struct FeedListDragPreview<Icon: View>: View {
-    let icon: Icon
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            icon.frame(width: 18, height: 18)
-            Text(title).lineLimit(1)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
     }
 }
 
@@ -280,20 +263,15 @@ private struct FeedListRowDropDelegate: DropDelegate {
     }
 }
 
-/// Leading inset of every sidebar row's content inside its selection capsule.
-let feedListRowContentInset: CGFloat = 4
-
-/// Extra leading indent of a feed row nested under a folder/tag header — the expand chevron's
-/// width plus the header `HStack`'s default spacing, so a nested feed's icon lines up with its
-/// header's name, as a source-list outline nests children.
-let feedListNestedRowIndent: CGFloat = 20
+/// How far a row's background (`feedListRowBackground`) reaches past the row's content, so the
+/// drop highlight lines up with where the native sidebar selection is drawn.
+let feedListRowHighlightOutset = CGSize(width: 6, height: 3)
 
 /// The insertion indicator `NSOutlineView` draws between rows: an accent-colored line starting
-/// from a small hollow circle, indented to the level the item would land at (a nested feed, or a
-/// top-level folder) — the same distinction as Compose's `InsertionMarker.indented`.
+/// from a small hollow circle. It is drawn on the row the item would land beside, from that row's
+/// content edge, so the native outline's own indentation puts it at the right level — a nested
+/// feed, or a top-level folder.
 struct FeedListInsertionLine: View {
-    let boundary: DropBoundary
-
     var body: some View {
         HStack(spacing: 0) {
             Circle()
@@ -303,7 +281,6 @@ struct FeedListInsertionLine: View {
                 .fill(Color.accentColor)
                 .frame(height: 2)
         }
-        .padding(.leading, feedListRowContentInset + (isNestedDropBoundary(boundary) ? feedListNestedRowIndent : 0))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

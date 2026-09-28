@@ -121,4 +121,37 @@ struct FeedListSelectionEqualityTests {
     func differentCaseDropBoundaryIsNotEqual() {
         #expect(!dropBoundariesEqual(DropBoundaryBeforeFeed(feedId: "f1"), DropBoundaryBeforeFolder(folderId: "f1")))
     }
+
+    // MARK: - feedListRowSelection(forKey:in:)
+
+    private let orderedRows: [FeedListRowSelection] = [
+        FeedListRowSelectionAll(),
+        FeedListRowSelectionStarred(),
+        FeedListRowSelectionFolder(folderId: "d1"),
+        FeedListRowSelectionFeedInFolderGroup(feedId: "f1"),
+        FeedListRowSelectionTag(tagId: "t1"),
+        FeedListRowSelectionFeedInTag(feedId: "f1", tagId: "t1"),
+    ]
+
+    @Test
+    func everyRowIsFoundByItsOwnKey() {
+        for row in orderedRows {
+            let found = feedListRowSelection(forKey: feedListRowSelectionKey(row), in: orderedRows)
+            #expect(found.map { feedListRowSelectionsEqual($0, row) } == true)
+        }
+    }
+
+    @Test
+    func sameFeedUnderFolderAndTagResolvesToTheRightCopy() {
+        let inTag = feedListRowSelection(forKey: "feed-in-tag:t1:f1", in: orderedRows)
+        #expect(inTag.map { feedListRowSelectionsEqual($0, FeedListRowSelectionFeedInTag(feedId: "f1", tagId: "t1")) } == true)
+        let inFolder = feedListRowSelection(forKey: "feed-in-folder:f1", in: orderedRows)
+        #expect(inFolder.map { feedListRowSelectionsEqual($0, FeedListRowSelectionFeedInFolderGroup(feedId: "f1")) } == true)
+    }
+
+    @Test
+    func unknownKeyIsNil() {
+        #expect(feedListRowSelection(forKey: "folder:missing", in: orderedRows) == nil)
+        #expect(feedListRowSelection(forKey: "all", in: []) == nil)
+    }
 }

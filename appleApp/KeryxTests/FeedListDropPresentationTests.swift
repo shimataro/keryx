@@ -54,17 +54,6 @@ struct FeedListDropPresentationTests {
         #expect(feedListRowHalf(locationY: 15, rowHeight: 0) == .top)
     }
 
-    // MARK: - isNestedDropBoundary
-
-    @Test
-    func feedBoundariesAreNestedAndFolderBoundariesAreNot() {
-        #expect(isNestedDropBoundary(DropBoundaryBeforeFeed(feedId: "f1")))
-        #expect(isNestedDropBoundary(DropBoundaryAppendFeeds(folderId: "d1")))
-        #expect(isNestedDropBoundary(DropBoundaryAppendFeeds(folderId: nil)))
-        #expect(!isNestedDropBoundary(DropBoundaryBeforeFolder(folderId: "d1")))
-        #expect(!isNestedDropBoundary(DropBoundaryAppendFolders.shared))
-    }
-
     // MARK: - springLoadingDelay
 
     @Test

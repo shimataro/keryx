@@ -54,15 +54,6 @@ func feedListRowHalf(locationY: CGFloat, rowHeight: CGFloat) -> FeedListRowHalf 
     rowHeight > 0 && locationY >= rowHeight / 2 ? .bottom : .top
 }
 
-/// Whether an insertion line at `boundary` sits at the nested (feed) level rather than the
-/// top (folder) level — mirrors Compose's own `InsertionMarker.indented`.
-func isNestedDropBoundary(_ boundary: DropBoundary) -> Bool {
-    switch onEnum(of: boundary) {
-    case .beforeFeed, .appendFeeds: return true
-    case .beforeFolder, .appendFolders: return false
-    }
-}
-
 /// The system's spring-loading preference (System Settings > Accessibility > Pointer Control),
 /// read from the global defaults domain: `nil` when spring-loading is turned off, otherwise the
 /// configured hover delay before a collapsed folder opens mid-drag. Neither key is written until
