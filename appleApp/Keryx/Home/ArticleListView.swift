@@ -148,6 +148,7 @@ struct ArticleListView: View {
     @ViewBuilder
     private func row(_ article: ArticleListRow) -> some View {
         Button {
+            focusedPane.wrappedValue = .articleList
             home.viewModel.selectArticle(article: article)
         } label: {
             HStack(alignment: .top, spacing: 8) {

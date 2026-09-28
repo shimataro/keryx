@@ -114,6 +114,7 @@ struct FeedListView: View {
         let instance = FeedListRowSelectionFolder(folderId: folder.id)
         Section {
             Button {
+                focusedPane.wrappedValue = .feedList
                 home.viewModel.selectFilter(filter: instance.filter, instance: instance)
             } label: {
                 HStack {
@@ -168,6 +169,7 @@ struct FeedListView: View {
         let instance = FeedListRowSelectionTag(tagId: tag.id)
         Section {
             Button {
+                focusedPane.wrappedValue = .feedList
                 home.viewModel.selectFilter(filter: instance.filter, instance: instance)
             } label: {
                 HStack {
@@ -250,6 +252,7 @@ struct FeedListView: View {
         instance: FeedListRowSelection,
     ) -> some View {
         Button {
+            focusedPane.wrappedValue = .feedList
             home.viewModel.selectFilter(filter: instance.filter, instance: instance)
         } label: {
             HStack {

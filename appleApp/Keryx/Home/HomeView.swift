@@ -36,43 +36,71 @@ struct HomeView: View {
             modifiers: modifiers,
             // `.searchFocused(_:)` needs macOS 15 (this project targets 14+), so there is no way to
             // observe the system search field's own focus state here yet — every key press is
-            // treated as if no text field were focused. Revisit once the deployment target moves to
-            // 15, or a custom (non-`.searchable`) search field replaces the system one.
+            // treated as if no text field were focused. Revisit once the custom search field batch
+            // replaces `.searchable` with a `TextField`/`@FocusState` pair that can report this.
             textInputFocused: false,
-            refreshListAvailable: true,
+            // Ctrl+Shift+R belongs to the Feed menu's "Refresh selected feed" item on desktop
+            // Compose (`AppMenuTree.kt`), not the sidebar-refresh key touch-only platforms bind it
+            // to — see `HomeCommands.swift`'s `refreshSelectedFeed`.
+            refreshListAvailable: false,
             isMacOs: true
         ) else { return .ignored }
 
         switch shortcut {
         case .escape:
-            if home.searchBarVisible {
-                home.viewModel.setSearchBarVisible(visible: false)
-            }
+            // Reserved for cancelling an in-progress drag, matching Compose's own `onEscape`
+            // (`HomeScreen.kt`) — see the drag-and-drop batch. Does not hide search results: a
+            // hidden bar with the query still in the field would show stale results reappearing on
+            // the next keystroke.
+            break
         case .up:
-            if focusedPane == .feedList {
-                moveFeedListSelection(by: -1)
-            } else {
-                home.viewModel.selectPrevious()
+            switch focusedPane {
+            case .feedList: moveFeedListSelection(by: -1)
+            // The native WebView reader handles its own scrolling once it holds real focus (see
+            // "Article Reader (native WebView)" in app-architecture.md) — never change the
+            // selection out from under it.
+            case .reader: return .ignored
+            default: home.viewModel.selectPrevious()
             }
         case .down:
-            if focusedPane == .feedList {
-                moveFeedListSelection(by: 1)
-            } else {
-                home.viewModel.selectNext()
+            switch focusedPane {
+            case .feedList: moveFeedListSelection(by: 1)
+            case .reader: return .ignored
+            default: home.viewModel.selectNext()
             }
         case .nextArticle:
             home.viewModel.selectNext()
         case .previousArticle:
             home.viewModel.selectPrevious()
-        case .left, .right, .pageUp, .pageDown, .home, .end:
-            break
+        case .left:
+            switch focusedPane {
+            case .articleList: focusedPane = .feedList
+            case .reader: focusedPane = .articleList
+            default: return .ignored
+            }
+        case .right:
+            switch focusedPane {
+            case .feedList:
+                if home.selectedArticle == nil, let first = home.viewModel.currentArticles().first {
+                    home.viewModel.selectArticle(article: first)
+                }
+                focusedPane = .articleList
+            case .articleList:
+                focusedPane = .reader
+            default:
+                return .ignored
+            }
+        case .pageUp, .pageDown, .home, .end:
+            // Compose only routes these to its own Compose-drawn fallback reader (Linux arm64 with
+            // no native web view). The Apple app always has a native WebView, which scrolls itself.
+            return .ignored
         case .search:
             home.viewModel.setSearchBarVisible(visible: true)
             home.viewModel.requestSearchFocus()
         case .renameFeedListItem:
-            requestRename()
+            if focusedPane == .feedList { requestRename() }
         case .deleteFeedListItem:
-            requestDelete()
+            if focusedPane == .feedList { requestDelete() }
         case .refreshList:
             home.viewModel.pullToRefresh()
         }
