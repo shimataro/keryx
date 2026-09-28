@@ -175,10 +175,7 @@ struct HomeView: View {
         case .right:
             switch focusedPane {
             case .feedList:
-                if home.selectedArticle == nil, let first = home.viewModel.currentArticles().first {
-                    home.viewModel.selectArticle(article: first)
-                }
-                focusedPane = .articleList
+                moveFocusFromFeedListToArticleList(home: home, focusedPane: $focusedPane)
             case .articleList:
                 focusedPane = .reader
             default:

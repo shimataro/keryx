@@ -1,3 +1,4 @@
+import KeryxShared
 import SwiftUI
 
 /// Which pane currently owns keyboard focus, for `@FocusState` in `HomeView` — mirrors the desktop
@@ -26,4 +27,16 @@ extension FocusedValues {
         get { self[HomeFocusedPaneKey.self] }
         set { self[HomeFocusedPaneKey.self] = newValue }
     }
+}
+
+/// Moves keyboard focus from the sidebar into the article list, selecting the first article when
+/// none is selected yet so the list isn't entered with nothing to act on — the sidebar's → key.
+/// Shared by `HomeView.handleKeyPress` and `FeedListView`'s own key handler, which has to take
+/// → before the sidebar outline's own expand/collapse does.
+@MainActor
+func moveFocusFromFeedListToArticleList(home: HomeObservable, focusedPane: FocusState<HomeFocusedPane?>.Binding) {
+    if home.selectedArticle == nil, let first = home.viewModel.currentArticles().first {
+        home.viewModel.selectArticle(article: first)
+    }
+    focusedPane.wrappedValue = .articleList
 }
