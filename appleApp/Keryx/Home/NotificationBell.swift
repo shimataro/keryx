@@ -37,6 +37,8 @@ struct NotificationBell: View {
             }
         }
         .buttonStyle(.borderless)
+        .accessibilityLabel(L("home_notifications"))
+        .accessibilityValue(unreadCount > 0 ? "\(unreadCount)" : "")
         .task { await notifications.startObserving() }
         .popover(isPresented: $isShowingPopover) {
             popoverContent

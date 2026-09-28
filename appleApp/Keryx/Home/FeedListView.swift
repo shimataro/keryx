@@ -163,6 +163,9 @@ struct FeedListView: View {
             }
             .disabled(!home.activity.idle)
             .help(L(home.activity.refreshIndicatorShown ? "home_refreshing" : "home_refresh"))
+            // Kept the same regardless of the spinner replacing the icon label, so VoiceOver
+            // always announces what the button does rather than the SF Symbol's own default name.
+            .accessibilityLabel(L("home_refresh"))
         }
         if home.cloudConnected {
             ToolbarItem {
@@ -177,6 +180,7 @@ struct FeedListView: View {
                 }
                 .disabled(!home.activity.idle)
                 .help(L(home.activity.syncing ? "home_syncing" : "home_sync"))
+                .accessibilityLabel(L("home_sync"))
             }
         }
     }
@@ -285,6 +289,7 @@ struct FeedListView: View {
                 .selectableRowLabel(selectionBackground(for: instance))
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(feedListRowSelectionsEqual(instance, home.selectedRowInstance) ? .isSelected : [])
             .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
             .contextMenu {
                 // Opening the menu selects the row first, matching Compose's own
@@ -507,6 +512,7 @@ struct FeedListView: View {
             .selectableRowLabel(selectionBackground(for: instance))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(feedListRowSelectionsEqual(instance, home.selectedRowInstance) ? .isSelected : [])
         .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
     }
 
@@ -651,6 +657,7 @@ private struct TagHeaderRow: View {
             .background(hoveredTagId == tag.id ? Color.accentColor.opacity(0.15) : Color.clear)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(feedListRowSelectionsEqual(instance, home.selectedRowInstance) ? .isSelected : [])
         .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu() }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
