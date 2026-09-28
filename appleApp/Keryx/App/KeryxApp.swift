@@ -48,7 +48,7 @@ struct KeryxApp: App {
                 model.importOpenedOpml(url: url)
                 #if os(macOS)
                 NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first { $0.title != L("menu_help_about") }?.makeKeyAndOrderFront(nil)
+                NSApp.windows.first { !$0.isAboutWindow }?.makeKeyAndOrderFront(nil)
                 #endif
             }
             // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About

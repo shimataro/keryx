@@ -3,6 +3,14 @@ import AppKit
 import KeryxShared
 import UserNotifications
 
+extension NSWindow {
+    /// The About window (`KeryxApp`'s `Window(L("menu_help_about"), id: "about")`) is matched by
+    /// title, not `id`, since AppKit's own `NSWindow` carries no SwiftUI scene identifier — every
+    /// place that needs "every window except About" (tray toggle, main-window tracking) shares this
+    /// one check instead of repeating the title comparison.
+    var isAboutWindow: Bool { title == L("menu_help_about") }
+}
+
 /// Keeps the app running (hidden in the menu bar) after the last window closes, instead of
 /// quitting — see `external-spec.md` §7's "task tray residence (close minimizes to tray)". Also
 /// owns the tray's own `NSStatusItem` (a plain `MenuBarExtra` can't tell a left click from a right
@@ -40,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
             guard let self, let window = note.object as? NSWindow, self.mainWindow == nil,
-                  window.title != L("menu_help_about") else { return }
+                  !window.isAboutWindow else { return }
             self.mainWindow = window
             window.delegate = self
         }
@@ -146,12 +154,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     }
 
     private var mainWindowVisible: Bool {
-        (mainWindow?.isVisible ?? false) || NSApp.windows.contains { $0.isVisible && $0.title != L("menu_help_about") }
+        (mainWindow?.isVisible ?? false) || NSApp.windows.contains { $0.isVisible && !$0.isAboutWindow }
     }
 
     @objc private func toggleMainWindow() {
         if mainWindowVisible {
-            for window in NSApp.windows where window.title != L("menu_help_about") { window.orderOut(nil) }
+            for window in NSApp.windows where !window.isAboutWindow { window.orderOut(nil) }
             NSApp.setActivationPolicy(.accessory)
         } else {
             NSApp.setActivationPolicy(.regular)
