@@ -20,6 +20,11 @@ struct FeedListView: View {
     /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
     @State private var appearedRowKeys: Set<String> = []
 
+    /// Whether the Folders / Tags section headers are expanded. Native-only view state (Compose has
+    /// no equivalent), kept apart from the per-folder / per-tag disclosure state in `home`.
+    @AppStorage("sidebar.foldersExpanded") private var foldersExpanded = true
+    @AppStorage("sidebar.tagsExpanded") private var tagsExpanded = true
+
     // Drag-and-drop state: the item being dragged, and which row a dragged feed is over for the
     // drop-onto highlight and spring-loading — mirrors Compose's own
     // `draggedFeedIdState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`). Insertion
@@ -97,7 +102,9 @@ struct FeedListView: View {
     /// height, font, icon size (System Settings > Appearance > Sidebar icon size), selection shape,
     /// disclosure triangles and indentation all come from the system rather than being drawn here.
     /// Sections mirror Compose's own grouping: All/Starred, the folders, the always-present
-    /// "No folder" group, then the tags.
+    /// "No folder" group, then the tags. Groups are told apart the way Finder and Mail do it — by
+    /// their section headers (the Folders and Tags ones collapse), not by divider lines — and the
+    /// spacing between them is left to the system.
     @ViewBuilder
     private var listContent: some View {
         List(selection: selectionKeyBinding) {
@@ -106,7 +113,7 @@ struct FeedListView: View {
                 starredRow
             }
             if !sortedFolders.isEmpty {
-                Section(L("home_folders")) {
+                Section(L("home_folders"), isExpanded: $foldersExpanded) {
                     ForEach(sortedFolders, id: \.id) { folder in
                         folderGroup(folder)
                     }
@@ -130,7 +137,7 @@ struct FeedListView: View {
                 noFolderHeader
             }
             if !sortedTags.isEmpty {
-                Section(L("home_tags")) {
+                Section(L("home_tags"), isExpanded: $tagsExpanded) {
                     ForEach(sortedTags, id: \.id) { tag in
                         tagGroup(tag)
                     }

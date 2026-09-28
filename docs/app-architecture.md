@@ -1256,6 +1256,11 @@ native selection is bridged to the shared one by row key (`feedListRowSelection(
 ←/→ are taken before the outline's own expand/collapse so they keep moving between panes
 (`external-spec.md` §9).
 
+Groups are told apart the way Finder and Mail do it: by section headers, not divider lines as in
+Compose. The Folders and Tags headers collapse (the state is native-only view state, stored in
+`@AppStorage`), and the spacing between sections is left to the system's source-list defaults
+rather than overridden with fixed values.
+
 Drag and drop applies the same shared rules as Compose
 (`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
 only the feedback is per UI, and on macOS it follows the source-list conventions of

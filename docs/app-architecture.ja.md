@@ -1252,6 +1252,10 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
 （`feedListRowSelection(forKey:in:)`）。←/→ はペイン移動のまま保つため（`external-spec.md` §9）、アウトライン
 標準の開閉より先に横取りしている。
 
+グループの区別は、Compose のような区切り線ではなく、Finder やメールと同じくセクションヘッダーで行う。
+フォルダーとタグのヘッダーは開閉でき（状態は Apple 版だけの表示状態で、`@AppStorage` に保存する）、
+セクション間の余白は固定値で上書きせず、システムのソースリスト既定に任せる。
+
 ドラッグ＆ドロップは、Compose と同じ共有ルール
 （`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
 UI ごとに異なるのはフィードバックだけで、macOS では `NSOutlineView`/Finder のソースリストの慣習に従う
