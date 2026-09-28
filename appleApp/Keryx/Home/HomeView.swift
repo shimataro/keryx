@@ -26,8 +26,8 @@ struct HomeView: View {
                     ideal: CGFloat(preferences.localSettings.feedListPaneWidth),
                     max: CGFloat(ConstantsKt.FEED_LIST_PANE_MAX_WIDTH)
                 )
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
-                    debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(width)) }
+                .onSizeChanged { size in
+                    debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(size.width)) }
                 }
         } content: {
             ArticleListView(home: home, notifications: notifications, dialogs: sidebarDialogs, focusedPane: $focusedPane)
@@ -36,8 +36,8 @@ struct HomeView: View {
                     ideal: CGFloat(preferences.localSettings.articleListPaneWidth),
                     max: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MAX_WIDTH)
                 )
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
-                    debounceSave(&articleListWidthSaveTask) { preferences.controller.setArticleListPaneWidth(width: Double(width)) }
+                .onSizeChanged { size in
+                    debounceSave(&articleListWidthSaveTask) { preferences.controller.setArticleListPaneWidth(width: Double(size.width)) }
                 }
         } detail: {
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane)

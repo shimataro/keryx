@@ -33,6 +33,31 @@ struct FeedListDragPayload: Codable, Transferable {
 /// `FeedListRowDropDelegate.validateDrop` rather than mistaken for a feed-list reorder.
 let feedListDragUTType = UTType(exportedAs: "works.merc.keryx.app.feedlistitem")
 
+// MARK: - macOS 14-compatible geometry observation
+
+/// Replaces `.onGeometryChange` (macOS 15+) with a `PreferenceKey`-based equivalent
+/// compatible with macOS 14.0 / iOS 17.0.
+/// TODO: Replace with `.onGeometryChange` when deployment target is raised to macOS 15+.
+private struct SizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
+extension View {
+    /// Observes the view's size using GeometryReader + PreferenceKey.
+    func onSizeChanged(perform: @escaping (CGSize) -> Void) -> some View {
+        background(
+            GeometryReader { geometry in
+                Color.clear
+                    .preference(key: SizePreferenceKey.self, value: geometry.size)
+            }
+        )
+        .onPreferenceChange(SizePreferenceKey.self, perform: perform)
+    }
+}
+
 /// Swift-native mirror of which row/header is currently the drop target, used only for `@State`
 /// identity (which row's highlight to clear on `isTargeted(false)`) — see `feedListDropTarget`'s
 /// own KDoc for why this can't just compare the bridged `FeedListDropTarget` directly.
@@ -154,7 +179,7 @@ private struct FeedListDropTargetModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { rowHeight = $0 }
+            .onSizeChanged { rowHeight = $0.height }
             .onDrop(of: [feedListDragUTType], delegate: FeedListRowDropDelegate(
                 target: target,
                 hoverKey: hoverKey,
