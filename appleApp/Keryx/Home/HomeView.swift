@@ -132,11 +132,14 @@ struct HomeView: View {
 
         switch shortcut {
         case .escape:
-            // Reserved for cancelling an in-progress drag, matching Compose's own `onEscape`
-            // (`HomeScreen.kt`) — see the drag-and-drop batch. Does not hide search results: a
-            // hidden bar with the query still in the field would show stale results reappearing on
-            // the next keystroke.
-            break
+            // Cancelling an in-progress drag (matching Compose's own `onEscape`, `HomeScreen.kt`)
+            // isn't wired up here — that state (`draggingItem`/`activeBoundary`) lives in
+            // `FeedListView`, not `HomeView` — so this never actually does anything yet. Reporting
+            // `.ignored` (rather than `.handled` for a key that does nothing) lets the key still
+            // reach macOS's own responder chain, e.g. to exit full screen. Does not hide search
+            // results either way: a hidden bar with the query still in the field would show stale
+            // results reappearing on the next keystroke.
+            return .ignored
         case .up:
             switch focusedPane {
             case .feedList: moveFeedListSelection(by: -1)
@@ -187,9 +190,11 @@ struct HomeView: View {
             home.viewModel.setSearchBarVisible(visible: true)
             home.viewModel.requestSearchFocus()
         case .renameFeedListItem:
-            if focusedPane == .feedList { requestRename() }
+            guard focusedPane == .feedList else { return .ignored }
+            requestRename()
         case .deleteFeedListItem:
-            if focusedPane == .feedList { requestDelete() }
+            guard focusedPane == .feedList else { return .ignored }
+            requestDelete()
         case .refreshList:
             home.viewModel.pullToRefresh()
         }
