@@ -42,8 +42,6 @@ struct FeedListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchField
-            Divider()
             ScrollViewReader { proxy in
                 listContent
                     .listStyle(.sidebar)
@@ -59,6 +57,12 @@ struct FeedListView: View {
         }
         .navigationTitle(L("app_name"))
         .toolbar { toolbarContent }
+        // The system search field. Its focus is reported into `focusedPane` (for ⌘F, the
+        // `textInputFocused` guard and the ↓/↑ hand-off into the results — see `HomeScreen.kt`'s
+        // own `focusSearch`/`moveArticleSelectionFromSearchField`) only from macOS 15 / iOS 18,
+        // where `.searchFocused(_:equals:)` exists; earlier systems get the field without them.
+        .searchable(text: searchQueryBinding, placement: .sidebar, prompt: L("home_search_placeholder"))
+        .modifier(SearchFocusModifier(focusedPane: focusedPane))
         // Spring-loaded folder: holding a dragged feed over a collapsed folder opens it after a
         // short pause, so its feeds become reachable drop targets mid-drag — matches Compose's own
         // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListDragAndDrop.kt`). The pause and
@@ -87,31 +91,6 @@ struct FeedListView: View {
             focusedPane.wrappedValue = .search
             home.viewModel.consumeSearchFocusRequest()
         }
-    }
-
-    /// A plain `TextField` rather than `.searchable`: the system search field cannot report its own
-    /// focus state before macOS 15 (`.searchFocused(_:)`), which this custom field needs both to
-    /// answer `HomeShortcutsKt.homeShortcutFor`'s `textInputFocused` and to let ↓/↑ hand off into
-    /// the article results (`HomeView.moveArticleSelectionFromSearchField`) — see `HomeScreen.kt`'s
-    /// own `focusSearch`/`moveArticleSelectionFromSearchField`.
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(L("home_search_placeholder"), text: searchQueryBinding)
-                .textFieldStyle(.plain)
-                .focused(focusedPane, equals: .search)
-            if !home.searchQuery.isEmpty {
-                Button {
-                    home.viewModel.setSearchQuery(query: "")
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(L("home_search_clear"))
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
     }
 
     /// A native source list — the same `NSOutlineView` sidebar Notes and Finder use — so row
@@ -869,5 +848,19 @@ private struct SidebarDeleteAlerts: ViewModifier {
 
     private func isPresentedBinding<T>(_ source: Binding<T?>) -> Binding<Bool> {
         Binding(get: { source.wrappedValue != nil }, set: { if !$0 { source.wrappedValue = nil } })
+    }
+}
+
+/// Binds the sidebar's `.searchable` field to `focusedPane`'s `.search` case where the system
+/// supports it (`.searchFocused(_:equals:)` is macOS 15 / iOS 18+); a no-op before that.
+private struct SearchFocusModifier: ViewModifier {
+    var focusedPane: FocusState<HomeFocusedPane?>.Binding
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, iOS 18, *) {
+            content.searchFocused(focusedPane, equals: .search)
+        } else {
+            content
+        }
     }
 }

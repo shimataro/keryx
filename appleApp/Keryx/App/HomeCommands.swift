@@ -62,12 +62,16 @@ struct HomeCommands: Commands {
         CommandGroup(after: .toolbar) {
             if let home = model.home {
                 let state = menuState(home)
-                Button(L("menu_view_search")) {
-                    home.viewModel.setSearchBarVisible(visible: true)
-                    home.viewModel.requestSearchFocus()
+                // Focusing the system search field needs `.searchFocused(_:equals:)` (macOS 15+),
+                // so before that the item would do nothing and is left out entirely.
+                if #available(macOS 15, *) {
+                    Button(L("menu_view_search")) {
+                        home.viewModel.setSearchBarVisible(visible: true)
+                        home.viewModel.requestSearchFocus()
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(!state.searchEnabled)
                 }
-                .keyboardShortcut("f", modifiers: .command)
-                .disabled(!state.searchEnabled)
 
                 Toggle(L("menu_view_unread_only"), isOn: Binding(
                     get: { home.unreadOnly },

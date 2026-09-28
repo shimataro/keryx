@@ -121,9 +121,9 @@ struct HomeView: View {
         guard let shortcut = HomeShortcutsKt.homeShortcutFor(
             key: key,
             modifiers: modifiers,
-            // The sidebar's search field is a plain `TextField` reporting its focus through this
-            // same `focusedPane`, not `.searchable` (which cannot report its focus before macOS
-            // 15) — see `FeedListView.searchField`.
+            // The sidebar's `.searchable` field reports its focus through this same `focusedPane`
+            // via `.searchFocused` on macOS 15 / iOS 18+; before that its focus cannot be seen, so
+            // this stays false there — see `FeedListView`'s `SearchFocusModifier`.
             textInputFocused: focusedPane == .search,
             // Ctrl+Shift+R belongs to the Feed menu's "Refresh selected feed" item on desktop
             // Compose (`AppMenuTree.kt`), not the sidebar-refresh key touch-only platforms bind it
@@ -186,6 +186,8 @@ struct HomeView: View {
             // no native web view). The Apple app always has a native WebView, which scrolls itself.
             return .ignored
         case .search:
+            // Focusing the system search field needs `.searchFocused` (macOS 15 / iOS 18+).
+            guard #available(macOS 15, iOS 18, *) else { return .ignored }
             home.viewModel.setSearchBarVisible(visible: true)
             home.viewModel.requestSearchFocus()
         case .renameFeedListItem:
