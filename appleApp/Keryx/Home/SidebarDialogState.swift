@@ -24,4 +24,15 @@ final class SidebarDialogState {
     /// The feed a feed-row's "Assign tags ▸ New tag…" menu item was chosen for — the created tag is
     /// attached to this feed on confirm (`FeedListDialogs.kt`'s own `creatingTagForFeedId`).
     var creatingTagForFeed: Feeds?
+
+    /// Whether any of the above sheets/alerts is currently on screen — gates the Feed menu's bare
+    /// Return/Delete accelerators (`HomeCommands.bareKeysActive`) so, say, Backspace inside
+    /// `NamePromptSheet`'s text field edits the field instead of also triggering the sidebar's own
+    /// unsubscribe confirmation underneath it.
+    var isPresenting: Bool {
+        isAddingFeed || isAddingFolder || isAddingTag
+            || renamingFolder != nil || renamingTag != nil || renamingFeed != nil
+            || deletingFolder != nil || deletingTag != nil || unsubscribingFeed != nil
+            || creatingFolderForFeed != nil || creatingTagForFeed != nil
+    }
 }

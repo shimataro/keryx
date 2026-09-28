@@ -8,14 +8,28 @@ import UniformTypeIdentifiers
 /// The application menu bar's dynamic items (File/View/Article/Feed/Help) — see
 /// `presentation/menu/MenuState.kt`'s `computeMenuUiState` for the enabled/checked rules this
 /// mirrors. This app has exactly one window showing Home (Setup takes over before Home ever
-/// appears), so this reads `AppModel`'s state directly rather than through `FocusedValue` — there
-/// is no second window whose state could otherwise disagree with the menu.
+/// appears), so this reads `AppModel`'s state directly rather than through `FocusedValue` — except
+/// for `HomeView`'s own pane focus (`homeFocusedPane`, published via `.focusedSceneValue`), which
+/// this struct has no other way to observe, since it declares no `@FocusState` of its own.
 struct HomeCommands: Commands {
     let model: AppModel
 
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
+    @FocusedValue(\.homeFocusedPane) private var focusedPane: HomeFocusedPane??
+
+    /// Return/Delete (`renameLabel`/`deleteLabel` below) keep their bare, unmodified accelerator —
+    /// matching Compose's own `AppMenuTree.kt` `FeedRename`/`FeedUnsubscribe` (`ctrl = false`), an
+    /// established file-manager rename/delete convention — but only while the sidebar itself holds
+    /// keyboard focus and no sheet/alert is covering it. Without this guard, AppKit resolves a bare
+    /// Return/Delete against the menu before any view's own `.onKeyPress`/text field ever sees it —
+    /// so Backspace inside `NamePromptSheet`'s text field, or Return/Delete while the article list or
+    /// reader holds focus, would trigger the sidebar's rename/delete instead of editing text or doing
+    /// nothing, acting on whatever the sidebar happens to have selected underneath.
+    private var bareKeysActive: Bool {
+        focusedPane.flatMap { $0 } == .feedList && !model.sidebarDialogs.isPresenting
+    }
 
     var body: some Commands {
         #if os(macOS)
@@ -165,11 +179,11 @@ struct HomeCommands: Commands {
 
                 Divider()
                 Button(renameLabel(home)) { performRename(home) }
-                    .keyboardShortcut(.return, modifiers: [])
+                    .keyboardShortcut(bareKeysActive ? KeyboardShortcut(.return, modifiers: []) : nil)
                     .disabled(!state.renameOrDeleteEnabled)
                 Divider()
                 Button(deleteLabel(home), role: .destructive) { performDelete(home) }
-                    .keyboardShortcut(.delete, modifiers: [])
+                    .keyboardShortcut(bareKeysActive ? KeyboardShortcut(.delete, modifiers: []) : nil)
                     .disabled(!state.renameOrDeleteEnabled)
             }
         }

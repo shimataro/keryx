@@ -46,6 +46,7 @@ struct HomeView: View {
         .task {
             await home.startObserving()
         }
+        .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
         .environment(\.contextMenuSelectionTracker, contextMenuSelectionTracker)
         #endif
