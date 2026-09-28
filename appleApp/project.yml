@@ -83,6 +83,11 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - opml
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: works.merc.keryx.app.feedlistitem
+            UTTypeDescription: Keryx Feed List Drag Item
+            UTTypeConformsTo:
+              - public.data
     prebuildScripts:
       - name: Build KeryxShared
         script: "\"$SRCROOT/Scripts/build-shared.sh\"\n"

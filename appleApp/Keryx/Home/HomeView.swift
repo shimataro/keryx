@@ -27,6 +27,7 @@ struct HomeView: View {
                     max: CGFloat(ConstantsKt.FEED_LIST_PANE_MAX_WIDTH)
                 )
                 .onSizeChanged { size in
+                    // TODO: Replace onSizeChanged with .onGeometryChange when deployment target is macOS 15+.
                     debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(size.width)) }
                 }
         } content: {
@@ -37,6 +38,7 @@ struct HomeView: View {
                     max: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MAX_WIDTH)
                 )
                 .onSizeChanged { size in
+                    // TODO: Replace onSizeChanged with .onGeometryChange when deployment target is macOS 15+.
                     debounceSave(&articleListWidthSaveTask) { preferences.controller.setArticleListPaneWidth(width: Double(size.width)) }
                 }
         } detail: {
