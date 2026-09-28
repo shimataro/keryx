@@ -23,7 +23,7 @@ struct HomeView: View {
             FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.FEED_LIST_PANE_MIN_WIDTH),
-                    ideal: CGFloat(preferences.localSettings?.feedListPaneWidth ?? Double(ConstantsKt.FEED_LIST_PANE_WIDTH_DEFAULT)),
+                    ideal: CGFloat(preferences.localSettings.feedListPaneWidth),
                     max: CGFloat(ConstantsKt.FEED_LIST_PANE_MAX_WIDTH)
                 )
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
@@ -33,7 +33,7 @@ struct HomeView: View {
             ArticleListView(home: home, notifications: notifications, dialogs: sidebarDialogs, focusedPane: $focusedPane)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
-                    ideal: CGFloat(preferences.localSettings?.articleListPaneWidth ?? Double(ConstantsKt.ARTICLE_LIST_PANE_WIDTH_DEFAULT)),
+                    ideal: CGFloat(preferences.localSettings.articleListPaneWidth),
                     max: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MAX_WIDTH)
                 )
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
@@ -52,7 +52,7 @@ struct HomeView: View {
         #endif
         .onAppear {
             if focusedPane == nil {
-                focusedPane = HomeView.focusedPane(fromRaw: preferences.localSettings?.lastFocusedPane)
+                focusedPane = HomeView.focusedPane(fromRaw: preferences.localSettings.lastFocusedPane)
             }
             #if os(macOS)
             contextMenuSelectionTracker.startMonitoring()

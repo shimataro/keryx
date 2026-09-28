@@ -8,11 +8,7 @@ struct NotificationsSettingsTab: View {
 
     var body: some View {
         Form {
-            if let settings = preferences.localSettings {
-                Toggle(L("settings_notification_enabled"), isOn: enabledBinding(settings))
-            } else {
-                ProgressView()
-            }
+            Toggle(L("settings_notification_enabled"), isOn: enabledBinding(preferences.localSettings))
         }
         .padding()
     }

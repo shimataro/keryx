@@ -44,7 +44,7 @@ struct ArticleDetailView: View {
     /// `colorScheme` already reflects `KeryxApp`'s own `.preferredColorScheme` override, so this
     /// needs no separate read of `localSettings.themeMode`.
     private var theme: ArticleHtmlTheme {
-        themeFor(colorScheme: colorScheme, fontScale: Float(preferences.localSettings?.fontSizeScale ?? 1.0))
+        themeFor(colorScheme: colorScheme, fontScale: Float(preferences.localSettings.fontSizeScale))
     }
 
     private var documentHtml: String {
