@@ -6,7 +6,7 @@ import UserNotifications
 extension NSWindow {
     /// The About window (`KeryxApp`'s `Window(L("menu_help_about"), id: "about")`) is matched by
     /// title, not `id`, since AppKit's own `NSWindow` carries no SwiftUI scene identifier — every
-    /// place that needs "every window except About" (tray toggle, main-window tracking) shares this
+    /// place that needs "every window except About" (tray toggle, `.onOpenURL`'s reveal) shares this
     /// one check instead of repeating the title comparison.
     var isAboutWindow: Bool { title == L("menu_help_about") }
 }
@@ -39,19 +39,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         ) { [weak self] _ in
             self?.updateActivationPolicySoon()
         }
-        // Claims the main window's own close button the first time it becomes key — `windowShouldClose`
-        // is the one delegate hook that can turn "close" into "hide" *before* AppKit tears the window
-        // (and every SwiftUI view/task it hosts, including HomeView's own observation loops) down;
-        // `willCloseNotification` above fires too late to prevent that. Skips the About/Settings
-        // windows, which should still close normally.
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            guard let self, let window = note.object as? NSWindow, self.mainWindow == nil,
-                  !window.isAboutWindow else { return }
-            self.mainWindow = window
-            window.delegate = self
-        }
+    }
+
+    /// Called by `KeryxApp`'s `MainWindowReader` with the window hosting the main scene. Claims
+    /// its close button — `windowShouldClose` is the one delegate hook that can turn "close" into
+    /// "hide" *before* AppKit tears the window (and every SwiftUI view/task it hosts, including
+    /// HomeView's own observation loops) down; `willCloseNotification` above fires too late to
+    /// prevent that. Registered by reference rather than inferred from key-window changes, so a
+    /// window hidden before it ever became key ("start minimized") is still the one the tray and
+    /// Dock reveal, instead of `showMainWindow` opening a second one.
+    func registerMainWindow(_ window: NSWindow) {
+        guard window !== mainWindow else { return }
+        mainWindow = window
+        window.delegate = self
     }
 
     /// Turning "close" into "hide" for the main window only — About/Settings should still close for
@@ -75,6 +75,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    /// The main window is only ever hidden, never closed (`windowShouldClose` above), so this only
+    /// matters for Settings/About: closing one of those while the main window sits in the tray must
+    /// not quit the app. Stated explicitly rather than relying on SwiftUI's own default, which is
+    /// not guaranteed for an app whose main scene is a single `Window`.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     /// Reopens (or activates) the main window when the Dock icon is clicked while none is visible.

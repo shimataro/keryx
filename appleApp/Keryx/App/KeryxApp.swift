@@ -20,65 +20,27 @@ struct KeryxApp: App {
         let _ = configureAppDelegate()
         #endif
 
-        WindowGroup(id: "main") {
-            Group {
-                if let sdk = model.sdk, let home = model.home, let preferences = model.preferences {
-                    if model.needsSetup {
-                        SetupView(
-                            controller: sdk.setupController,
-                            oauthCoordinator: model.oauthCoordinator,
-                            onDone: { model.completeSetup() }
-                        )
-                    } else if let notifications = model.notifications {
-                        HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, preferences: preferences)
-                            #if os(macOS)
-                            .onChange(of: home.totalUnread, initial: true) { _, count in
-                                updateDockBadge(count)
-                                appDelegate.updateStatusItemAppearance(unreadCount: count)
-                            }
-                            #endif
-                    }
-                } else {
-                    StartupErrorView(error: model.startupError)
-                }
-            }
-            // Handled at this level (not nested inside the Home-only branch above) so a document
-            // opened during Setup — or before `sdk` even finishes starting — isn't silently dropped.
-            .onOpenURL { url in
-                guard url.pathExtension.lowercased() == "opml" else { return }
-                model.importOpenedOpml(url: url)
-                #if os(macOS)
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first { !$0.isAboutWindow }?.makeKeyAndOrderFront(nil)
-                #endif
-            }
-            // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About
-            // scenes read it independently through their own environment inheritance. Started here
-            // (not only inside `SettingsView`'s own `.task`) so it takes effect before Settings is
-            // ever opened. `NSApp.appearance` additionally covers the surfaces `preferredColorScheme`
-            // does not reach: native menus, and any AppKit chrome outside this scene's own view tree.
-            .task { await model.preferences?.startObserving() }
-            .preferredColorScheme(colorScheme(for: model.preferences?.localSettings.themeMode))
-            #if os(macOS)
-            .onChange(of: model.preferences?.localSettings.themeMode, initial: true) { _, mode in
-                applyAppearance(mode)
-            }
-            // Requested at startup (if already on) and the moment it's switched on — never
-            // unconditionally at every launch — matching desktop's own gate (`App.kt:69-72`).
-            .onChange(of: model.preferences?.localSettings.notificationEnabled, initial: true) { _, enabled in
-                if enabled == true { OsNotificationPoster.requestAuthorization() }
-            }
-            #endif
-        }
         #if os(macOS)
+        // A single-instance `Window`, not a `WindowGroup`: `AppDelegate` brings the main window
+        // back through `openWindow(id: "main")` when it has no window to reveal, and on a
+        // `WindowGroup` that always creates *another* window instead of reusing the existing one.
+        Window(L("app_name"), id: "main") {
+            mainContent
+                .background(MainWindowReader { appDelegate.registerMainWindow($0) })
+        }
         // Matches the desktop app's first-launch window (`WINDOW_DEFAULT_WIDTH` x `WINDOW_DEFAULT_HEIGHT`)
         // so the three panes get room at their ideal widths instead of the content-fitted minimum.
         .defaultSize(
             width: CGFloat(ConstantsKt.WINDOW_DEFAULT_WIDTH),
             height: CGFloat(ConstantsKt.WINDOW_DEFAULT_HEIGHT)
         )
-        #endif
         .commands { HomeCommands(model: model) }
+        #else
+        WindowGroup(id: "main") {
+            mainContent
+        }
+        .commands { HomeCommands(model: model) }
+        #endif
 
         #if os(macOS)
         // The `Settings` scene (Cmd+, / the app menu's "Settings…") is a macOS-only concept — iOS
@@ -99,6 +61,57 @@ struct KeryxApp: App {
             AboutView()
         }
         .windowResizability(.contentSize)
+        #endif
+    }
+
+    private var mainContent: some View {
+        Group {
+            if let sdk = model.sdk, let home = model.home, let preferences = model.preferences {
+                if model.needsSetup {
+                    SetupView(
+                        controller: sdk.setupController,
+                        oauthCoordinator: model.oauthCoordinator,
+                        onDone: { model.completeSetup() }
+                    )
+                } else if let notifications = model.notifications {
+                    HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, preferences: preferences)
+                        #if os(macOS)
+                        .onChange(of: home.totalUnread, initial: true) { _, count in
+                            updateDockBadge(count)
+                            appDelegate.updateStatusItemAppearance(unreadCount: count)
+                        }
+                        #endif
+                }
+            } else {
+                StartupErrorView(error: model.startupError)
+            }
+        }
+        // Handled at this level (not nested inside the Home-only branch above) so a document
+        // opened during Setup — or before `sdk` even finishes starting — isn't silently dropped.
+        .onOpenURL { url in
+            guard url.pathExtension.lowercased() == "opml" else { return }
+            model.importOpenedOpml(url: url)
+            #if os(macOS)
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first { !$0.isAboutWindow }?.makeKeyAndOrderFront(nil)
+            #endif
+        }
+        // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About
+        // scenes read it independently through their own environment inheritance. Started here
+        // (not only inside `SettingsView`'s own `.task`) so it takes effect before Settings is
+        // ever opened. `NSApp.appearance` additionally covers the surfaces `preferredColorScheme`
+        // does not reach: native menus, and any AppKit chrome outside this scene's own view tree.
+        .task { await model.preferences?.startObserving() }
+        .preferredColorScheme(colorScheme(for: model.preferences?.localSettings.themeMode))
+        #if os(macOS)
+        .onChange(of: model.preferences?.localSettings.themeMode, initial: true) { _, mode in
+            applyAppearance(mode)
+        }
+        // Requested at startup (if already on) and the moment it's switched on — never
+        // unconditionally at every launch — matching desktop's own gate (`App.kt:69-72`).
+        .onChange(of: model.preferences?.localSettings.notificationEnabled, initial: true) { _, enabled in
+            if enabled == true { OsNotificationPoster.requestAuthorization() }
+        }
         #endif
     }
 
