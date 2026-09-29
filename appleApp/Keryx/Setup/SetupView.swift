@@ -23,40 +23,47 @@ struct SetupView: View {
             Text(L("setup_choose_mode"))
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    setup.controller.chooseLocalOnly { onDone() }
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(L("setup_local_only")).font(.headline)
-                        Text(L("setup_local_desc")).font(.caption).foregroundStyle(.secondary)
+            // Two equal-weight option cards capped at Compose's own `widthIn(max = 420.dp)`
+            // (`SetupScreen.kt`), so the choices stay a centered column however wide the window is.
+            VStack(spacing: 12) {
+                optionCard(title: L("setup_local_only"), desc: L("setup_local_desc")) {
+                    Button {
+                        setup.controller.chooseLocalOnly { onDone() }
+                    } label: {
+                        Text(L("setup_local_action"))
+                            .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
-                .disabled(setup.phase == .connecting)
-            }
 
-            // Hidden entirely (not just emptied) when no provider is configured for this build —
-            // matches Compose's own `SetupScreen.kt:137`. The auto-local-only choice below covers
-            // this same case, so this branch and that `.task` are never both relevant to the user.
-            if !setup.controller.availableCloudTypes.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L("setup_cloud_sync_section_title")).font(.headline)
-                    Text(L("setup_cloud_sync_section_desc")).font(.caption).foregroundStyle(.secondary)
-
-                    ForEach(setup.controller.availableCloudTypes, id: \.self) { type in
-                        Button {
-                            setup.controller.connect(type: type) { onDone() }
-                        } label: {
-                            Text(L(providerKey(type)))
+                // Hidden entirely (not just emptied) when no provider is configured for this build —
+                // matches Compose's own `SetupScreen.kt:137`. The auto-local-only choice below covers
+                // this same case, so this branch and that `.task` are never both relevant to the user.
+                if !setup.controller.availableCloudTypes.isEmpty {
+                    optionCard(title: L("setup_cloud_sync_section_title"), desc: L("setup_cloud_sync_section_desc")) {
+                        ForEach(setup.controller.availableCloudTypes, id: \.self) { type in
+                            Button {
+                                setup.controller.connect(type: type) { onDone() }
+                            } label: {
+                                Label {
+                                    Text(L(providerKey(type)))
+                                } icon: {
+                                    type.brandIcon
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 18, height: 18)
+                                        // Decorative: the button's own text names the provider.
+                                        .accessibilityHidden(true)
+                                }
                                 .frame(maxWidth: .infinity)
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(setup.phase == .connecting)
                     }
                 }
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(setup.phase == .connecting)
+            .frame(maxWidth: 420)
 
             if setup.phase == .connecting {
                 VStack(spacing: 8) {
@@ -92,6 +99,26 @@ struct SetupView: View {
             Button(L("common_cancel"), role: .cancel) {}
         } message: {
             Text(L("setup_abort_connect_confirm_body"))
+        }
+    }
+
+    /// Centered heading + description above full-width actions — the counterpart of Compose's own
+    /// `KeryxRaisedSurface` cards (`SetupScreen.kt`).
+    private func optionCard<Content: View>(
+        title: String,
+        desc: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        GroupBox {
+            VStack(spacing: 4) {
+                Text(title).font(.headline)
+                Text(desc).font(.caption).foregroundStyle(.secondary)
+                VStack(spacing: 8, content: content)
+                    .padding(.top, 8)
+            }
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(12)
         }
     }
 
