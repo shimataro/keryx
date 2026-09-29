@@ -56,6 +56,7 @@ struct KeryxApp: App {
                 )
             }
         }
+        .windowResizability(.contentSize)
 
         Window(L("menu_help_about"), id: "about") {
             AboutView()

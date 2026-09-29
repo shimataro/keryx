@@ -38,7 +38,8 @@ struct SettingsView: View {
         }
         // A `Form` defaults to checkboxes on macOS; the Compose dialog uses switches (`SwitchRow`).
         .toggleStyle(.switch)
-        .frame(minWidth: 520, minHeight: 420)
+        // Width only: the Settings window then takes each tab's own height, resizing as tabs switch.
+        .frame(width: 520)
         .task { await preferences.startObserving() }
         .task { await cloudSync.startObserving() }
         // A bell-row "show settings tab" action (`NotificationBell.swift`) navigates here even
