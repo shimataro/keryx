@@ -23,6 +23,10 @@ final class SettingsNavigation {
 
     var selectedTab = Tab.general
 
+    /// Whether the iOS Settings sheet is shown — iOS has no `Settings` scene, so Settings is a sheet
+    /// over the main window there (`KeryxApp`). Unused on macOS.
+    var isSheetPresented = false
+
     /// Selects the tab a notification asked for. "updates" falls back to Cloud Sync, which shows
     /// the same sync failure that action is raised for (`SchemaVersionException`).
     func show(tabId: String) {
@@ -41,5 +45,13 @@ final class SettingsNavigation {
         default:
             return Tab.general
         }
+    }
+
+    /// The navigation path the iOS Settings sheet opens with: its tab list alone for General,
+    /// otherwise that tab pushed onto it — so a bell-row `ShowSettingsTab` lands directly on the
+    /// requested tab rather than on the list.
+    static func initialPath(_ tab: String, cloudSyncAvailable: Bool) -> [String] {
+        let visible = visibleTab(tab, cloudSyncAvailable: cloudSyncAvailable)
+        return visible == Tab.general ? [] : [visible]
     }
 }

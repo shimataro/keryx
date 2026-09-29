@@ -43,6 +43,7 @@ struct HomeView: View {
             FeedListView(
                 home: home,
                 dialogs: sidebarDialogs,
+                settingsNavigation: settingsNavigation,
                 focusedPane: $focusedPane,
                 sidebarIsTopmost: sidebarIsTopmost,
                 onOpenArticleList: { compactColumn = .content }

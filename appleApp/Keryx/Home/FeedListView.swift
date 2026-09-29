@@ -14,6 +14,9 @@ import UniformTypeIdentifiers
 struct FeedListView: View {
     let home: HomeObservable
     @Bindable var dialogs: SidebarDialogState
+    /// Opens the iOS Settings sheet from the toolbar's gear button (macOS reaches Settings from the
+    /// app menu instead).
+    let settingsNavigation: SettingsNavigation
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
     /// Whether the split view is collapsed with this sidebar as its topmost column — see
     /// `CompactSidebarSelection`. Always false on macOS.
@@ -201,6 +204,17 @@ struct FeedListView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        #if os(iOS)
+        // iOS has no app menu to hold "Settings…", so the sidebar carries it — the same role as
+        // Android's own settings row at the bottom of its feed list (`external-spec.md` §9).
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                settingsNavigation.isSheetPresented = true
+            } label: {
+                Label(L("settings_title"), systemImage: "gearshape")
+            }
+        }
+        #endif
         ToolbarItem {
             Menu {
                 Button(L("menu_file_add_feed")) { dialogs.isAddingFeed = true }

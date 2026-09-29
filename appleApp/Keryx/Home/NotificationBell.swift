@@ -209,6 +209,8 @@ struct NotificationBell: View {
             settingsNavigation.show(tabId: a.tabId)
             #if os(macOS)
             openSettings()
+            #else
+            settingsNavigation.isSheetPresented = true
             #endif
             isShowingPopover = false
         case .showInfoDialog(let a):

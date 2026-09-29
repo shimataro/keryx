@@ -44,8 +44,8 @@ struct KeryxApp: App {
 
         #if os(macOS)
         // The `Settings` scene (Cmd+, / the app menu's "Settings…") is a macOS-only concept — iOS
-        // has no equivalent scene type. Reaching Settings on iOS is deferred to whenever iOS's own
-        // UI gets built out; for now this scene simply doesn't exist there.
+        // has no equivalent scene type, so there Settings is a sheet over the main window instead
+        // (`settingsSheet` in `mainContent`).
         Settings {
             if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync,
                let opmlTransfer = model.opmlTransfer {
@@ -103,6 +103,14 @@ struct KeryxApp: App {
         // does not reach: native menus, and any AppKit chrome outside this scene's own view tree.
         .task { await model.preferences?.startObserving() }
         .preferredColorScheme(colorScheme(for: model.preferences?.themeMode))
+        #if os(iOS)
+        .sheet(isPresented: Binding(
+            get: { model.settingsNavigation.isSheetPresented },
+            set: { model.settingsNavigation.isSheetPresented = $0 }
+        )) {
+            settingsSheet
+        }
+        #endif
         #if os(macOS)
         .onChange(of: model.preferences?.themeMode, initial: true) { _, mode in
             applyAppearance(mode)
@@ -114,6 +122,24 @@ struct KeryxApp: App {
         }
         #endif
     }
+
+    #if os(iOS)
+    /// The iOS counterpart of the macOS `Settings` scene above, presented from the sidebar's gear
+    /// button or a bell row's `ShowSettingsTab` (`SettingsNavigation.isSheetPresented`).
+    @ViewBuilder
+    private var settingsSheet: some View {
+        if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync,
+           let opmlTransfer = model.opmlTransfer {
+            SettingsView(
+                sdk: sdk, preferences: preferences, cloudSync: cloudSync,
+                oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer,
+                settingsNavigation: model.settingsNavigation
+            )
+            // The sheet is presented outside the view tree `.preferredColorScheme` above applies to.
+            .preferredColorScheme(colorScheme(for: preferences.themeMode))
+        }
+    }
+    #endif
 
     #if os(macOS)
     private func configureAppDelegate() {

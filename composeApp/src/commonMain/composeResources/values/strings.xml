@@ -363,4 +363,8 @@
          plural (article count, new-articles count, OPML import result, relative time) reuses the
          matching Compose <plurals> resource directly instead of a fixed-wording key like this one. -->
     <string name="apple_add_feed_partial_result">%1$d 件成功、%2$d 件失敗</string>
+
+    <!-- Apple (SwiftUI) app only — the button that closes the iOS Settings sheet. macOS reaches
+         Settings as a window of its own, and Compose's dialog closes through its own controls. -->
+    <string name="apple_settings_done">完了</string>
 </resources>

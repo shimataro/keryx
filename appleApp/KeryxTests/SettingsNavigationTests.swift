@@ -53,4 +53,37 @@ struct SettingsNavigationTests {
                 == SettingsNavigation.Tab.general
         )
     }
+
+    @Test
+    func startsWithTheSheetDismissed() {
+        #expect(!SettingsNavigation().isSheetPresented)
+    }
+
+    @Test
+    func initialPathIsEmptyForGeneral() {
+        #expect(SettingsNavigation.initialPath(SettingsNavigation.Tab.general, cloudSyncAvailable: true).isEmpty)
+    }
+
+    @Test
+    func initialPathPushesAnyOtherVisibleTab() {
+        for tab in [SettingsNavigation.Tab.notifications, SettingsNavigation.Tab.cloudSync, SettingsNavigation.Tab.data] {
+            #expect(SettingsNavigation.initialPath(tab, cloudSyncAvailable: true) == [tab])
+        }
+    }
+
+    @Test
+    func initialPathIsEmptyForATabThatIsNotShown() {
+        #expect(SettingsNavigation.initialPath(SettingsNavigation.Tab.cloudSync, cloudSyncAvailable: false).isEmpty)
+        #expect(SettingsNavigation.initialPath("nope", cloudSyncAvailable: true).isEmpty)
+    }
+
+    @Test
+    func initialPathForAnUpdatesRequestLandsOnCloudSync() {
+        let navigation = SettingsNavigation()
+        navigation.show(tabId: SettingsNavigation.Tab.updates)
+        #expect(
+            SettingsNavigation.initialPath(navigation.selectedTab, cloudSyncAvailable: true)
+                == [SettingsNavigation.Tab.cloudSync]
+        )
+    }
 }
