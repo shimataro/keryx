@@ -22,15 +22,11 @@ struct ArticleListView: View {
     private var windowIsKey: Bool { true }
     #endif
 
-    @State private var appearedIds: Set<String> = []
+    /// Which rows are on screen, and the pending report of them — see `VisibleRowTracker`.
+    @State private var visibleRows = VisibleRowTracker()
     /// Whether the new-articles pill is actually shown, debounced against `home.newArticleCount`
     /// itself — see `pillShowDelayTask`'s own KDoc for why.
     @State private var pillShown = false
-
-    /// Debounced task for reporting visible article ids. Rapid `onAppear`/`onDisappear` pairs from
-    /// scrolling are coalesced into a single report after a short delay — mirroring Compose's
-    /// `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
-    @State private var visibleReportTask: Task<Void, Never>? = nil
 
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
@@ -68,7 +64,7 @@ struct ArticleListView: View {
                     // Only when the selection actually moved off-screen (keyboard navigation, a
                     // restored selection) — a row already visible (e.g. just clicked) never jumps.
                     .onChange(of: home.selectedArticle?.id) { _, id in
-                        guard let id, !appearedIds.contains(id) else { return }
+                        guard let id, !visibleRows.appearedIds.contains(id) else { return }
                         proxy.scrollTo(id)
                     }
                     .overlay(alignment: home.newestFirst ? .top : .bottom) {
@@ -257,11 +253,11 @@ struct ArticleListView: View {
             .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
             .listRowSeparator(.hidden)
             .onAppear {
-                appearedIds.insert(article.id)
+                visibleRows.appearedIds.insert(article.id)
                 scheduleReportVisible()
             }
             .onDisappear {
-                appearedIds.remove(article.id)
+                visibleRows.appearedIds.remove(article.id)
                 scheduleReportVisible()
             }
         }
@@ -272,8 +268,8 @@ struct ArticleListView: View {
     /// from a single scroll gesture are coalesced into one `markArticlesSeen` call after a short
     /// delay, mirroring Compose's own `distinctUntilChanged` behaviour.
     private func scheduleReportVisible() {
-        visibleReportTask?.cancel()
-        visibleReportTask = Task {
+        visibleRows.reportTask?.cancel()
+        visibleRows.reportTask = Task {
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
             reportVisible()
@@ -285,7 +281,11 @@ struct ArticleListView: View {
     /// the search closes (`ArticleListPane.kt`'s own guard).
     private func reportVisible() {
         guard !home.searchActive else { return }
-        let ordered = displayedRows.filter { appearedIds.contains($0.id) }.map(\.id)
+        let indexById = displayed.indexById
+        let ordered = visibleRows.appearedIds
+            .compactMap { id in indexById[id].map { (index: $0, id: id) } }
+            .sorted { $0.index < $1.index }
+            .map(\.id)
         home.viewModel.markArticlesSeen(ids: ordered)
     }
 
@@ -321,4 +321,15 @@ struct ArticleListView: View {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
         proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
     }
+}
+
+/// The article list's on-screen rows and its pending visible-row report. A plain class held in
+/// `@State` rather than `@State` values of their own: every row scrolling in or out writes to it,
+/// and nothing here is drawn, so those writes must not invalidate the list's body.
+@MainActor
+private final class VisibleRowTracker {
+    var appearedIds: Set<String> = []
+    /// Rapid `onAppear`/`onDisappear` pairs from scrolling are coalesced into a single report after
+    /// a short delay — mirroring Compose's `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
+    var reportTask: Task<Void, Never>?
 }
