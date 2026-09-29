@@ -91,6 +91,25 @@ struct ArticleDetailView: View {
     }
 
     private var feedName: String? { home.selectedFeedName }
+    private var feedFaviconUrl: String? { home.selectedFeedFaviconUrl }
+
+    /// Favicon + feed name as plain text, matching Compose's reader top bar
+    /// (`ArticleDetailPane.kt`'s `titleContent`): a letter avatar when there is no favicon URL.
+    @ViewBuilder
+    private var feedHeader: some View {
+        if let feedName {
+            HStack(spacing: 6) {
+                FaviconView(url: feedFaviconUrl, letter: feedName.first)
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                Text(feedName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
 
     // MARK: - Toolbar
 
@@ -102,13 +121,12 @@ struct ArticleDetailView: View {
 
         // Default placement: `.navigation` items of this column land at the end of the *previous*
         // column's toolbar section instead of at the start of this one.
-        ToolbarItem {
-            if let feedName {
-                Text(feedName)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+        // Plain label, not a control: hide the shared glass capsule macOS 26 groups items into.
+        if #available(macOS 26, iOS 26, *) {
+            ToolbarItem { feedHeader }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem { feedHeader }
         }
 
         if #available(macOS 26, *) {
