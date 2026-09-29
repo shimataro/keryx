@@ -53,7 +53,9 @@ extension FeedListView {
                 }
                 dialogs.colorPickingTagId = nil
             },
-            dismissColorPicker: { dialogs.colorPickingTagId = nil }
+            dismissColorPicker: { dialogs.colorPickingTagId = nil },
+            dropIndex: { dropIndex },
+            applyDrop: { applyFeedListDropAction($0, home: home) }
         )
     }
 

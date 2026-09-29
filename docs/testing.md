@@ -1132,6 +1132,28 @@ device/emulator:
   tooltip. While a reset is running, the spinner is visible against its container and the row's
   height doesn't change. Check in both light and dark themes.
 
+### (iOS) The sidebar
+
+The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));
+its drop mapping is covered by `SidebarDropResolverTests`, but the gestures themselves need a simulator or
+device. On an iPhone and an iPad (both orientations), with folders, unfoldered feeds and a tag:
+
+- Long-press a feed row and drag it onto a collapsed folder's row: the row highlights, the folder opens
+  after about half a second without becoming selected, and releasing moves the feed into it.
+- Drag a feed onto the "フォルダーなし" header: it leaves its folder. Drag it onto a tag row: the tag is
+  attached (expand the tag to see it listed).
+- Drag a feed between rows — within its folder, into another folder, to the end of a folder, below an empty
+  folder, among the unfoldered feeds: a gap opens there and the feed lands in it, with no flicker while the
+  finger rests over the opened gap.
+- Over All/Starred, inside the tags, between the Folders header and the first folder, and just below a
+  collapsed folder, the drag shows it is refused and releasing changes nothing.
+- Drag a folder between folders: they reorder, and the folder is never highlighted as a drop target. A
+  folder that was expanded when lifted is expanded again afterwards.
+- A long press without moving opens the context menu (and selects the row); pressing and moving at once
+  lifts the row instead. The row being renamed cannot be dragged.
+- Tapping still selects (and on iPhone opens the article list); folder, tag and section disclosure states
+  survive a relaunch.
+
 ### In-App Update
 
 Nothing past `canInstallAndroidApkUpdate`/the pure state-machine functions is exercised by an

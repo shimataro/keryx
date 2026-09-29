@@ -1312,6 +1312,32 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
 - UI テストはアクセシビリティ識別子で行を探す。行は `feedListRowSelectionKey`、ヘッダーは `header:<section>`。
   矢印キーは macOS と同じく `HomeView` のキー処理が受け持つ（コレクションビューは `allowsFocus = false`）。
 
+**ドラッグ＆ドロップ**は macOS や Compose と同じ共有ルールを使い、このサイドバーを SwiftUI の `List` にしない
+理由でもある。iOS の `List` 自体が `UICollectionView` で、そのドラッグ＆ドロップのデリゲートは SwiftUI が内部で
+占有している（`CollectionViewListDragAndDropController`）。そのため行の `.onDrop`/`.dropDestination`、`List`
+全体の `.onDrop`、同じリストの別の場所からドラッグした項目への `.onInsert` は一切呼ばれず、動くのは 1 つの
+`ForEach` 内の `.onMove` だけである。さらにドラッグの開始時に*別の*行の `.onDrag` プロバイダーまで呼ばれるので、
+ドラッグ中の項目を副チャネルに記録しても上書きされてしまう。そこでメモアプリと同じく、コレクションビュー自身が
+デリゲートを持つ（`Home/Sidebar/SidebarCollectionViewController+DragDrop.swift`）。対応付けは UIKit に依存しない
+`SidebarDropResolver` が行う（`KeryxTests` でテストしている）。
+
+- **ドラッグ中の行はドラッグ項目の `localObject`** で、`SidebarDragContext` はセッションの `localContext` で
+  受け渡す。セッションはアプリ内に限り、アイテムプロバイダーはデータを持たない。ドラッグするのは持ち上げた行
+  だけで、ヘッダー、すべて／スター付き、タグ、名前変更中の行はドラッグしない。
+- **行の上か、行の間か。** フィードをフォルダーの行（上 1/4 はその上の行間のまま）、「フォルダーなし」の
+  ヘッダー、タグの行に重ねると `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態でアクセント
+  カラーのハイライトを描く。それ以外は行間（`.insertAtDestinationIndexPath`）で、UIKit が隙間を開けて示す。
+  行間の位置は UIKit が移動を数えるのと同じく、ドラッグ中の行（フォルダーならその中のフィードも。持ち上げた
+  フォルダーはアウトラインが畳む）を除いて数える。開いた隙間の上に指があるあいだ、UIKit はドラッグ中の行自身の
+  インデックスパスを返すので、そのときは直前の位置を保つ。ドロップ時のコーディネーターの行き先は本当の隙間で
+  ある。どの位置も `FeedListDropTarget` と上下半分に直して `resolveFeedListDropAction` に通し、`nil` なら
+  `.forbidden`（タグの中、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
+  `applyFeedListDropAction` で適用する。
+- **スプリングロード**は、フィードを閉じたフォルダーに入れる位置に来たときにシステムの `springLoadingDelay()`
+  のタイマーを始め、発火時にもう一度確かめる。UIKit の `isSpringLoaded` は、開いた行を選択してしまうので使わない。
+- **ドラッグ中は状態を反映しない**（UIKit のプレースホルダーと隙間を乱すため）。最新の状態はドラッグの終わりに
+  反映し、UIKit が畳んだままにする持ち上げたフォルダーもそこで開き直す。
+
 ### `KeryxSdk`：Swift からの入口
 
 `sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：

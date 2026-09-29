@@ -31,6 +31,10 @@ struct SidebarCollectionActions {
     var showColorPicker: (_ tagId: String) -> Void
     var pickColor: (_ tagId: String, _ hex: String?) -> Void
     var dismissColorPicker: () -> Void
+    /// The shared lookup tables the drop rules resolve against.
+    var dropIndex: () -> FeedListDropIndex
+    /// Applies a drop the shared rules resolved (`applyFeedListDropAction`).
+    var applyDrop: (FeedListDropAction) -> Void
 }
 
 /// The iOS sidebar: a `UICollectionView` list rather than SwiftUI's `List`, so the sidebar owns its
@@ -67,6 +71,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 
     private weak var colorPicker: UIViewController?
 
+    /// Whether a drag from this list is under way — see `apply(_:force:)`.
+    var dragInProgress = false
+    /// The latest state handed over mid-drag, applied when the drag ends.
+    private(set) var deferredState: SidebarRenderState?
+
     init(actions: SidebarCollectionActions) {
         self.actions = actions
         super.init(nibName: nil, bundle: nil)
@@ -82,6 +91,10 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         // Arrow keys are `HomeView`'s (the same shortcuts as macOS), not UIKit's focus engine.
         collectionView.allowsFocus = false
         collectionView.delegate = self
+        collectionView.dragDelegate = self
+        collectionView.dropDelegate = self
+        // Off by default on iPhone.
+        collectionView.dragInteractionEnabled = true
         view.addSubview(collectionView)
         dataSource = makeDataSource()
         registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (self: Self, _) in
@@ -228,6 +241,13 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// scroll position and the SwiftUI state inside them, e.g. a half-typed name), then the
     /// selection.
     func apply(_ newState: SidebarRenderState, force: Bool = false) {
+        // Mid-drag, UIKit's own placeholder and gap own the layout; the drop's result (and anything
+        // else that changed meanwhile) is applied once the drag ends.
+        if dragInProgress, !force {
+            deferredState = newState
+            return
+        }
+        deferredState = nil
         loadViewIfNeeded()
         let old = state
         guard force || newState != old else { return }
@@ -339,6 +359,13 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private func userToggled(_ item: SidebarItemID, expanded: Bool) {
         pendingExpansion[item] = (expanded, .now)
         actions.setExpanded(item, expanded)
+    }
+
+    /// Opens a collapsed folder mid-drag (spring loading) — shown at once, without waiting for the
+    /// drag to end.
+    func springOpen(_ folderId: String) {
+        userToggled(.folder(folderId), expanded: true)
+        if let latest = deferredState ?? state { apply(latest, force: true) }
     }
 
     // MARK: - Selection

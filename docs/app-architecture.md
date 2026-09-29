@@ -1324,6 +1324,35 @@ view on iOS.
   `header:<section>` for a header. Arrow keys stay with `HomeView`'s own key handling
   (`allowsFocus = false` on the collection view), as on macOS.
 
+**Drag and drop** applies the same shared rules as macOS and Compose, and is why this sidebar is not
+a SwiftUI `List`. On iOS that `List` is itself a `UICollectionView` whose drag and drop delegates
+SwiftUI keeps to itself (`CollectionViewListDragAndDropController`): a row's `.onDrop`/
+`.dropDestination`, an `.onDrop` on the whole `List`, and `.onInsert` for an item dragged from
+elsewhere in the same list are never called — only `.onMove` within one `ForEach` works — and
+starting a drag also calls *other* rows' `.onDrag` providers, so a side channel recording the dragged
+item gets overwritten. As in Notes, the collection view therefore takes the delegates itself
+(`Home/Sidebar/SidebarCollectionViewController+DragDrop.swift`), with the mapping in the UIKit-free
+`SidebarDropResolver` (tested in `KeryxTests`):
+
+- **The dragged row travels as the drag item's `localObject`** and a `SidebarDragContext` as the
+  session's `localContext`; the session is restricted to the app and its item provider carries no data.
+  Only the lifted row is dragged — never a header, All/Starred, a tag, or the row being renamed.
+- **Onto a row or between rows.** A feed over a folder row (below its top quarter, which stays the gap
+  above it), the "No folder" header or a tag row is proposed as `.insertIntoDestinationIndexPath`, and
+  the cell's drop state paints the accent highlight; anywhere else it is a gap
+  (`.insertAtDestinationIndexPath`), which UIKit draws by opening space. A gap's index is counted the way
+  UIKit numbers a move: with the dragged row (and, for a folder, its feeds — the outline collapses a
+  lifted folder) left out. While the finger is over the gap it has already opened, UIKit reports the
+  dragged row's own index path, so the previous position is kept then; at the drop the coordinator's
+  destination is the real gap. Every position becomes a `FeedListDropTarget` and half, goes through
+  `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. inside the tags, above a section's first
+  row for a feed, or just below a collapsed folder — and is applied with `applyFeedListDropAction`.
+- **Spring loading** is a timer of the system's `springLoadingDelay()` started when a feed would drop
+  into a collapsed folder and checked again when it fires, not UIKit's `isSpringLoaded`, which selects
+  the row it springs.
+- **State is not applied mid-drag** (it would disturb UIKit's placeholder and gap); the latest state is
+  applied when the drag ends, which also re-expands a lifted folder that UIKit left collapsed.
+
 ### `KeryxSdk`: the Swift entry point
 
 `sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
