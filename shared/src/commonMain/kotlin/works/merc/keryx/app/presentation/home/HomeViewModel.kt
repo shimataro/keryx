@@ -133,12 +133,14 @@ class HomeViewModel(
     /**
      * Restores the last-selected filter from local settings, falling back to
      * [ArticleFilter.All] if it's missing, undecodable, or points at a feed/tag/folder that
-     * was deleted while the app was closed.
+     * was deleted while the app was closed. The second value says whether the saved filter was
+     * actually reproduced (false for any of those fallbacks).
      */
-    private fun restoreFilter(): ArticleFilter {
-        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All
-        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All
-        return validateFilterTarget(decoded)
+    private fun restoreFilter(): Pair<ArticleFilter, Boolean> {
+        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All to false
+        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All to false
+        val validated = validateFilterTarget(decoded)
+        return validated to (validated == decoded)
     }
 
     /**
@@ -167,7 +169,12 @@ class HomeViewModel(
     // behavior after upgrading.
     private val legacyUnreadFilter = settingsRepository.getLocalSettings().lastFilter == "unread"
 
-    private val _filter = MutableStateFlow<ArticleFilter>(restoreFilter())
+    private val launchFilter = restoreFilter()
+
+    /** Whether the previous session's filter was restored at launch — see [initialHomePane]. */
+    val filterRestoredOnLaunch: Boolean = launchFilter.second
+
+    private val _filter = MutableStateFlow<ArticleFilter>(launchFilter.first)
     val filter: StateFlow<ArticleFilter> = _filter
 
     // Which *rendered row* of the feed list the selection is on — a feed renders once under its
@@ -601,6 +608,16 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
+    /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
+    val articleRestoredOnLaunch: Boolean
+
+    /**
+     * The pane that should hold keyboard focus when the home screen first appears, fixed at
+     * construction from what this launch managed to restore — see [resolveInitialHomePane]. Read by
+     * the Apple app; desktop Compose keeps its own `HomeLayoutViewModel.getInitialFocusedPane`.
+     */
+    val initialHomePane: InitialHomePane
+
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
         // read and clobbering another device's "mark as unread" sync via read_at last-write-wins).
@@ -620,6 +637,12 @@ class HomeViewModel(
             // article instead of jumping back to the top of the list.
             selectionCursorId = restoredArticle.id
         }
+        articleRestoredOnLaunch = restoredArticle != null
+        initialHomePane = resolveInitialHomePane(
+            savedPane = settingsRepository.getLocalSettings().lastFocusedPane,
+            filterRestored = filterRestoredOnLaunch,
+            articleRestored = articleRestoredOnLaunch,
+        )
 
         // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
         // article currently pinned here; revalidate the pins so a deleted one can't stay visible.

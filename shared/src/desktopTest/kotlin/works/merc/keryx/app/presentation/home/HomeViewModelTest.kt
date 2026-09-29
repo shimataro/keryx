@@ -3289,6 +3289,58 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun firstLaunchRestoresNothingAndFocusesTheFeedList() = runTest {
+        val vm = newViewModel()
+
+        assertFalse(vm.filterRestoredOnLaunch)
+        assertFalse(vm.articleRestoredOnLaunch)
+        assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
+    }
+
+    @Test
+    fun restartRestoresTheSavedPaneWhenFilterAndArticleSurvive() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastFilter = "feed:f1", lastArticleId = "a1", lastFocusedPane = "ArticleDetail"))
+
+        val vm = newViewModel()
+
+        assertTrue(vm.filterRestoredOnLaunch)
+        assertTrue(vm.articleRestoredOnLaunch)
+        assertEquals(InitialHomePane.ArticleDetail, vm.initialHomePane)
+    }
+
+    @Test
+    fun restartFocusesTheFeedListWhenTheSavedFeedWasDeleted() = runTest {
+        db.insertFeed("f1", deletedAt = 10L)
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastFilter = "feed:f1", lastFocusedPane = "ArticleList"))
+
+        val vm = newViewModel()
+
+        assertEquals(ArticleFilter.All, vm.filter.value)
+        assertFalse(vm.filterRestoredOnLaunch)
+        assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
+    }
+
+    @Test
+    fun restartKeepsTheFilterButFocusesTheFeedListWhenOnlyTheArticleWasDeleted() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastFilter = "feed:f1", lastArticleId = "a1", lastFocusedPane = "ArticleList"))
+
+        val vm = newViewModel()
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertTrue(vm.filterRestoredOnLaunch)
+        assertFalse(vm.articleRestoredOnLaunch)
+        assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
+    }
+
+    @Test
     fun restartPinsRestoredReadArticleSoItStaysVisibleInUnreadOnlyList() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 1L, publishedAt = 1L, createdAt = 1L)
