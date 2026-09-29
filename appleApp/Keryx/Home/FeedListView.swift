@@ -205,6 +205,10 @@ struct FeedListView: View {
         ToolbarItem {
             Menu {
                 Button(L("menu_file_add_feed")) { dialogs.isAddingFeed = true }
+                    #if os(macOS)
+                    // Displays the ⌘N that `HomeCommands` binds in the File menu; both set the same flag.
+                    .keyboardShortcut("n", modifiers: .command)
+                    #endif
                 Button(L("menu_file_add_folder")) { dialogs.isAddingFolder = true }
                 Button(L("menu_file_add_tag")) { dialogs.isAddingTag = true }
             } label: {
