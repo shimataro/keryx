@@ -35,6 +35,8 @@ final class HomeObservable {
     private(set) var selectedRowInstance: FeedListRowSelection = FeedListRowSelectionAll()
     private(set) var collapsedFolderIds: Set<String> = []
     private(set) var expandedTagIds: Set<String> = []
+    /// The sidebar's structure derived from the fields above — see `SidebarModel`.
+    private(set) var sidebar = SidebarModel.empty
 
     private(set) var searchQuery: String = ""
     private(set) var searchBarVisible: Bool = false
@@ -140,19 +142,29 @@ final class HomeObservable {
             feedsById = Dictionary(uniqueKeysWithValues: v.map { ($0.id, $0) })
             rebuildArticleRows()
             rebuildSearchRows()
+            rebuildSidebar()
         }
     }
 
     private func observeTags() async {
-        for await v in viewModel.tags { tags = v }
+        for await v in viewModel.tags {
+            tags = v
+            rebuildSidebar()
+        }
     }
 
     private func observeFolders() async {
-        for await v in viewModel.folders { folders = v }
+        for await v in viewModel.folders {
+            folders = v
+            rebuildSidebar()
+        }
     }
 
     private func observeFeedTagMap() async {
-        for await v in viewModel.feedTagMap { feedTagMap = v }
+        for await v in viewModel.feedTagMap {
+            feedTagMap = v
+            rebuildSidebar()
+        }
     }
 
     private func observeUnreadByFeed() async {
@@ -184,11 +196,17 @@ final class HomeObservable {
     }
 
     private func observeCollapsedFolderIds() async {
-        for await v in viewModel.collapsedFolderIds { collapsedFolderIds = v }
+        for await v in viewModel.collapsedFolderIds {
+            collapsedFolderIds = v
+            rebuildSidebar()
+        }
     }
 
     private func observeExpandedTagIds() async {
-        for await v in viewModel.expandedTagIds { expandedTagIds = v }
+        for await v in viewModel.expandedTagIds {
+            expandedTagIds = v
+            rebuildSidebar()
+        }
     }
 
     private func observeSearchQuery() async {
@@ -235,6 +253,17 @@ final class HomeObservable {
             articles = v
             rebuildArticleRows()
         }
+    }
+
+    private func rebuildSidebar() {
+        sidebar = SidebarModel(
+            feeds: feeds,
+            folders: folders,
+            tags: tags,
+            feedTagMap: feedTagMap,
+            collapsedFolderIds: collapsedFolderIds,
+            expandedTagIds: expandedTagIds
+        )
     }
 
     private func rebuildArticleRows() {

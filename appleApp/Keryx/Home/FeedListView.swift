@@ -37,13 +37,10 @@ struct FeedListView: View {
 
     private var selectedRowKey: String { feedListRowSelectionKey(home.selectedRowInstance) }
 
-    /// Rebuilt from the current feeds/folders on every change — mirrors Compose's own
-    /// `derivedStateOf { buildFeedListDropIndex(feeds, folders) }` (`FeedListPane.kt`), just without
-    /// the memoization (this pane's row counts are small enough that recomputing on every body
-    /// evaluation costs nothing worth caching for).
-    private var dropIndex: FeedListDropIndex {
-        FeedListDragKt.buildFeedListDropIndex(feeds: sortedFeeds, folders: sortedFolders)
-    }
+    /// The sidebar's structure (sort orders, groupings, drop index, row order), derived once per
+    /// change by `HomeObservable` — see `SidebarModel`.
+    private var sidebar: SidebarModel { home.sidebar }
+    private var dropIndex: FeedListDropIndex { sidebar.dropIndex }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,7 +90,7 @@ struct FeedListView: View {
         // Ends an in-place rename whose row stopped being rendered — deleted, removed by a sync
         // merge, or a tag/folder collapsed over it — otherwise confirming would write to a row that
         // is no longer there. Mirrors Compose's own auto-cancel (`FeedListPane.kt:402-413`).
-        .onChange(of: orderedRows.map(feedListRowSelectionKey)) { _, keys in
+        .onChange(of: sidebar.orderedRowKeys) { _, keys in
             if let key = dialogs.renamingRowKey, !keys.contains(key) {
                 dialogs.renamingRowKey = nil
             }
@@ -188,16 +185,7 @@ struct FeedListView: View {
         performFeedListInsert(into: group, at: offset, draggingItem: $draggingItem, index: dropIndex, home: home)
     }
 
-    private var orderedRows: [FeedListRowSelection] {
-        FeedListModelKt.buildOrderedFeedListRows(
-            tags: home.tags,
-            folders: home.folders,
-            feeds: home.feeds,
-            collapsedFolderIds: home.collapsedFolderIds,
-            expandedTagIds: home.expandedTagIds,
-            feedTagMap: home.feedTagMap
-        )
-    }
+    private var orderedRows: [FeedListRowSelection] { sidebar.orderedRows }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
@@ -318,30 +306,11 @@ struct FeedListView: View {
 
     // MARK: - Folders
 
-    private var sortedFolders: [Folders] {
-        home.folders.sorted { $0.sort_order < $1.sort_order }
-    }
+    private var sortedFolders: [Folders] { sidebar.sortedFolders }
 
-    private var sortedFeeds: [Feeds] {
-        home.feeds.sorted { $0.sort_order < $1.sort_order }
-    }
+    private var unassignedFeeds: [Feeds] { sidebar.unassignedFeeds }
 
-    /// Reuses the shared `groupFeedsByFolder` (`FeedListModel.kt`) rather than filtering by
-    /// `folder_id` locally, so a feed whose `folder_id` points at a folder that no longer exists
-    /// (deleted on another device, not yet synced here) defensively falls into the unassigned
-    /// group here too, matching Compose's own `groupFeedsByFolder` fallback.
-    private var groupedFeeds: [(folder: Folders?, feeds: [Feeds])] {
-        FeedListModelKt.groupFeedsByFolder(feeds: sortedFeeds, folders: sortedFolders)
-            .map { (folder: $0.first, feeds: $0.second as? [Feeds] ?? []) }
-    }
-
-    private var unassignedFeeds: [Feeds] {
-        groupedFeeds.first { $0.folder == nil }?.feeds ?? []
-    }
-
-    private func feedsIn(folder: Folders) -> [Feeds] {
-        groupedFeeds.first { $0.folder?.id == folder.id }?.feeds ?? []
-    }
+    private func feedsIn(folder: Folders) -> [Feeds] { sidebar.feeds(inFolder: folder.id) }
 
     /// The "No folder" section header — not itself a selectable filter (there is no
     /// `ArticleFilter` for "every unfoldered feed"), only a drop target for moving a feed out of
@@ -430,13 +399,9 @@ struct FeedListView: View {
 
     // MARK: - Tags
 
-    private var sortedTags: [Tags] {
-        home.tags.sorted { $0.sort_order < $1.sort_order }
-    }
+    private var sortedTags: [Tags] { sidebar.sortedTags }
 
-    private func feeds(taggedWith tag: Tags) -> [Feeds] {
-        FeedListModelKt.feedsForTag(feeds: sortedFeeds, feedTagMap: home.feedTagMap, tagId: tag.id)
-    }
+    private func feeds(taggedWith tag: Tags) -> [Feeds] { sidebar.feeds(taggedWith: tag.id) }
 
     /// `toggleTagExpanded` flips the state — see `folderExpandedBinding`.
     private func tagExpandedBinding(_ tagId: String) -> Binding<Bool> {

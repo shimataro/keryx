@@ -279,17 +279,9 @@ struct HomeView: View {
     /// Moves the sidebar's own selection by `delta` positions in `buildOrderedFeedListRows`'
     /// visual order (`FeedListModel.kt`), the same order the sidebar itself renders in.
     private func moveFeedListSelection(by delta: Int) {
-        let orderedRows = FeedListModelKt.buildOrderedFeedListRows(
-            tags: home.tags,
-            folders: home.folders,
-            feeds: home.feeds,
-            collapsedFolderIds: home.collapsedFolderIds,
-            expandedTagIds: home.expandedTagIds,
-            feedTagMap: home.feedTagMap
-        )
         guard let next = FeedListModelKt.nextFeedListRow(
             current: home.selectedRowInstance,
-            orderedRows: orderedRows,
+            orderedRows: home.sidebar.orderedRows,
             delta: Int32(delta)
         ) else { return }
         home.viewModel.selectFilter(filter: next.filter, instance: next)
