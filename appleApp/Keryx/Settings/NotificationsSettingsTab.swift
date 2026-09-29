@@ -10,7 +10,7 @@ struct NotificationsSettingsTab: View {
         Form {
             Toggle(L("settings_notification_enabled"), isOn: enabledBinding(preferences.localSettings))
         }
-        .padding()
+        .settingsFormPadding()
     }
 
     private func enabledBinding(_ settings: LocalSettings) -> Binding<Bool> {

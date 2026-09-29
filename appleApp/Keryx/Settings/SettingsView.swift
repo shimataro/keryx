@@ -111,3 +111,16 @@ struct SettingsView: View {
     }
     #endif
 }
+
+extension View {
+    /// The inset a settings tab's `Form` gets inside the macOS Settings window. None on iOS: its
+    /// grouped `Form` already insets its own sections, and padding it again squeezed every row.
+    @ViewBuilder
+    func settingsFormPadding() -> some View {
+        #if os(macOS)
+        padding()
+        #else
+        self
+        #endif
+    }
+}

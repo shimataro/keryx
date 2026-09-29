@@ -28,6 +28,21 @@ struct CloudSyncSettingsTab: View {
 
     var body: some View {
         Form {
+            #if os(iOS)
+            // The grouped form's own sections, not a `GroupBox` inside one: that nested a second
+            // inset box in the section and squeezed the rows.
+            Section {
+                ForEach(cloudSync.availableCloudTypes, id: \.self) { type in
+                    row(for: type)
+                }
+            } footer: {
+                Text(L("settings_cloud_sync_hint"))
+            }
+
+            Section {
+                syncNowButton
+            }
+            #else
             GroupBox {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(cloudSync.availableCloudTypes.enumerated()), id: \.element) { index, type in
@@ -43,8 +58,9 @@ struct CloudSyncSettingsTab: View {
                 .foregroundStyle(.secondary)
 
             syncNowButton
+            #endif
         }
-        .padding()
+        .settingsFormPadding()
         .alert(
             confirmDisconnect.map { LF("settings_cloud_disconnect_confirm_title", $0.brandLabel) } ?? "",
             isPresented: Binding(get: { confirmDisconnect != nil }, set: { if !$0 { confirmDisconnect = nil } })
@@ -99,11 +115,11 @@ struct CloudSyncSettingsTab: View {
     /// the same split as Compose's own `CloudProviderRow`.
     private func row(for type: CloudStorageType) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+            HStack(spacing: CloudSyncRowMetrics.iconSpacing) {
                 type.brandIcon
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 20, height: 20)
+                    .frame(width: CloudSyncRowMetrics.iconSize, height: CloudSyncRowMetrics.iconSize)
                     // Decorative: the name beside it is what VoiceOver reads.
                     .accessibilityHidden(true)
                 Text(type.brandLabel)
@@ -115,7 +131,32 @@ struct CloudSyncSettingsTab: View {
             statusLine(for: type)
             errorLine(for: type)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, CloudSyncRowMetrics.verticalPadding)
+    }
+
+    /// One provider action. On iOS an icon-only button — the same as Android's own touch-primary
+    /// `ProviderActionButton` (`CloudSyncTab.kt`) — with the label kept for VoiceOver, a 44pt hit
+    /// area, and the borderless style a form row needs so a tap on the row does not fire every
+    /// button in it. macOS keeps a labelled push button, as Compose does with a mouse.
+    private func actionButton(
+        _ title: String,
+        systemImage: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        #if os(iOS)
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .tint(destructive ? .red : nil)
+        #else
+        Button(title, action: action)
+        #endif
     }
 
     @ViewBuilder
@@ -126,20 +167,26 @@ struct CloudSyncSettingsTab: View {
             // `CloudProviderRow`'s own KDoc (`CloudSyncTab.kt`).
             let recoveryEnabled = idleEnabled && !cloudSync.resetting
             let disconnectEnabled = leaveEnabled && !cloudSync.resetting
-            HStack(spacing: 8) {
+            HStack(spacing: CloudSyncRowMetrics.actionSpacing) {
                 if cloudSync.lastSyncAuthFailed {
-                    Button(L("settings_cloud_reconnect")) { cloudSync.controller.reconnect() }
-                        .disabled(!recoveryEnabled)
+                    actionButton(L("settings_cloud_reconnect"), systemImage: "arrow.clockwise") {
+                        cloudSync.controller.reconnect()
+                    }
+                    .disabled(!recoveryEnabled)
                 } else {
-                    Button(L("settings_cloud_reset")) { confirmReset = true }
-                        .disabled(!recoveryEnabled)
+                    actionButton(L("settings_cloud_reset"), systemImage: "trash", destructive: true) {
+                        confirmReset = true
+                    }
+                    .disabled(!recoveryEnabled)
                 }
-                Button(L(disconnectKey(type))) { confirmDisconnect = type }
-                    .disabled(!disconnectEnabled)
+                actionButton(L(disconnectKey(type)), systemImage: "rectangle.portrait.and.arrow.right") {
+                    confirmDisconnect = type
+                }
+                .disabled(!disconnectEnabled)
             }
         } else if cloudSync.connectingType == type && cloudSync.canCancelConnect {
             // Still waiting on the OAuth browser redirect — offer an explicit abort.
-            Button(L("common_abort")) { confirmAbort = type }
+            actionButton(L("common_abort"), systemImage: "xmark.circle") { confirmAbort = type }
         } else {
             // Idle, or past the cancellable window (finishing up: saving tokens/settings/syncing) —
             // the connect/switch button itself shows a spinner rather than swapping to a separate
@@ -151,13 +198,33 @@ struct CloudSyncSettingsTab: View {
                     cloudSync.controller.connect(type: type)
                 }
             } label: {
+                #if os(iOS)
+                // Icon-only, like `actionButton`; the spinner takes the icon's place.
+                Label {
+                    Text(L(connectKey(type)))
+                } icon: {
+                    if cloudSync.connectingType == type {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "link")
+                    }
+                }
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                #else
                 HStack(spacing: 6) {
                     if cloudSync.connectingType == type {
                         ProgressView().controlSize(.small)
                     }
                     Text(L(connectKey(type)))
                 }
+                #endif
             }
+            #if os(iOS)
+            .buttonStyle(.borderless)
+            #endif
             .disabled(!idleEnabled || cloudSync.resetting)
         }
     }
@@ -248,4 +315,20 @@ struct CloudSyncSettingsTab: View {
         default: return ""
         }
     }
+}
+
+/// A provider row's spacing: roomier on iOS, where each row is a touch target in a grouped form
+/// (Android's own `CloudProviderRow` has the same breathing room), than in the macOS `GroupBox`.
+private enum CloudSyncRowMetrics {
+    #if os(iOS)
+    static let iconSize: CGFloat = 28
+    static let iconSpacing: CGFloat = 12
+    static let actionSpacing: CGFloat = 4
+    static let verticalPadding: CGFloat = 8
+    #else
+    static let iconSize: CGFloat = 20
+    static let iconSpacing: CGFloat = 8
+    static let actionSpacing: CGFloat = 8
+    static let verticalPadding: CGFloat = 6
+    #endif
 }

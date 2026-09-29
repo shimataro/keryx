@@ -27,6 +27,33 @@ struct DataSettingsTab: View {
             }
             .pickerStyle(.menu)
 
+            #if os(iOS)
+            // One row per action, as iOS Settings lays out its own actions: two buttons side by side
+            // in a single row wrapped their titles at a phone width.
+            Section(L("settings_data_management")) {
+                Button {
+                    isImporting = true
+                } label: {
+                    Label(L("settings_import_opml"), systemImage: "square.and.arrow.down")
+                }
+                .disabled(opmlTransfer.isBusy)
+                Button {
+                    exportDocument = opmlTransfer.exportDocument()
+                    isExporting = true
+                } label: {
+                    Label(L("settings_export_opml"), systemImage: "square.and.arrow.up")
+                }
+                .disabled(opmlTransfer.isBusy)
+                if opmlTransfer.isBusy {
+                    ProgressView()
+                }
+                if let statusMessage = opmlTransfer.statusMessage {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(opmlTransfer.statusIsError ? .red : .secondary)
+                }
+            }
+            #else
             // A labeled row rather than a `Section`, so its label sits in the same right-aligned label
             // column as the pickers above instead of heading the buttons.
             LabeledContent(L("settings_data_management")) {
@@ -52,8 +79,9 @@ struct DataSettingsTab: View {
                     }
                 }
             }
+            #endif
         }
-        .padding()
+        .settingsFormPadding()
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,

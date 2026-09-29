@@ -31,9 +31,13 @@ struct GeneralSettingsTab: View {
             }
             .pickerStyle(.menu)
 
+            // Only macOS has a menu bar status item to start hidden into (`AppDelegate`); an iOS
+            // app cannot launch hidden at all — the same gate as Compose's own `hasSystemTray`.
+            #if os(macOS)
             Toggle(L("settings_start_minimized"), isOn: startMinimizedBinding(settings))
+            #endif
         }
-        .padding()
+        .settingsFormPadding()
     }
 
     private func themeBinding(_ settings: LocalSettings) -> Binding<String> {
