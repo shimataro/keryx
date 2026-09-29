@@ -223,32 +223,40 @@ struct FeedListView: View {
             Button {
                 home.viewModel.refreshAll()
             } label: {
-                if home.activity.refreshIndicatorShown {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.clockwise")
+                // A `Label` rather than a bare icon so the toolbar's overflow menu (shown when the
+                // sidebar is collapsed) gets a title; the toolbar itself still renders icon-only.
+                // The title stays fixed while the spinner replaces the icon, so VoiceOver always
+                // announces what the button does.
+                Label {
+                    Text(L("home_refresh"))
+                } icon: {
+                    if home.activity.refreshIndicatorShown {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
                 }
             }
             .disabled(!home.activity.idle)
             .help(L(home.activity.refreshIndicatorShown ? "home_refreshing" : "home_refresh"))
-            // Kept the same regardless of the spinner replacing the icon label, so VoiceOver
-            // always announces what the button does rather than the SF Symbol's own default name.
-            .accessibilityLabel(L("home_refresh"))
         }
         if home.cloudConnected {
             ToolbarItem {
                 Button {
                     home.viewModel.sync()
                 } label: {
-                    if home.activity.syncing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "icloud")
+                    Label {
+                        Text(L("home_sync"))
+                    } icon: {
+                        if home.activity.syncing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "icloud")
+                        }
                     }
                 }
                 .disabled(!home.activity.idle)
                 .help(L(home.activity.syncing ? "home_syncing" : "home_sync"))
-                .accessibilityLabel(L("home_sync"))
             }
         }
     }
