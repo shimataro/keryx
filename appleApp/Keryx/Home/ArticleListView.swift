@@ -136,11 +136,20 @@ struct ArticleListView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             HStack(spacing: 4) {
-                Toggle(L("home_unread_only"), isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { home.unreadOnly },
                     set: { home.viewModel.setUnreadOnly(value: $0) }
-                ))
+                )) {
+                    Label(
+                        L("home_unread_only"),
+                        systemImage: home.unreadOnly
+                            ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle"
+                    )
+                    .labelStyle(.iconOnly)
+                }
                 .toggleStyle(.button)
+                .help(L("home_unread_only"))
 
                 Button {
                     home.viewModel.hideRead()
