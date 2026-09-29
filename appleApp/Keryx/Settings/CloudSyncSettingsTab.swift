@@ -46,7 +46,7 @@ struct CloudSyncSettingsTab: View {
         }
         .padding()
         .alert(
-            confirmDisconnect.map { LF("settings_cloud_disconnect_confirm_title", brandLabel($0)) } ?? "",
+            confirmDisconnect.map { LF("settings_cloud_disconnect_confirm_title", $0.brandLabel) } ?? "",
             isPresented: Binding(get: { confirmDisconnect != nil }, set: { if !$0 { confirmDisconnect = nil } })
         ) {
             if let type = confirmDisconnect {
@@ -66,7 +66,7 @@ struct CloudSyncSettingsTab: View {
             Text(L("settings_cloud_reset_confirm_body"))
         }
         .alert(
-            confirmAbort.map { LF("settings_cloud_abort_connect_confirm_title", brandLabel($0)) } ?? "",
+            confirmAbort.map { LF("settings_cloud_abort_connect_confirm_title", $0.brandLabel) } ?? "",
             isPresented: Binding(get: { confirmAbort != nil }, set: { if !$0 { confirmAbort = nil } })
         ) {
             Button(L("common_abort"), role: .destructive) {
@@ -78,7 +78,7 @@ struct CloudSyncSettingsTab: View {
             Text(L("settings_cloud_abort_connect_confirm_body"))
         }
         .alert(
-            confirmSwitch.map { LF("settings_cloud_switch_confirm_title", brandLabel($0)) } ?? "",
+            confirmSwitch.map { LF("settings_cloud_switch_confirm_title", $0.brandLabel) } ?? "",
             isPresented: Binding(get: { confirmSwitch != nil }, set: { if !$0 { confirmSwitch = nil } })
         ) {
             Button(L("settings_cloud_switch_confirm_action")) {
@@ -90,7 +90,7 @@ struct CloudSyncSettingsTab: View {
             // title above already names the target. Matches Compose's own body, which reads
             // `connectedType` live rather than the tapped row's own type
             // (`CloudSyncTab.kt`'s `confirmingSwitchTo` dialog).
-            Text(cloudSync.connectedType.map { LF("settings_cloud_switch_confirm_body", brandLabel($0)) } ?? "")
+            Text(cloudSync.connectedType.map { LF("settings_cloud_switch_confirm_body", $0.brandLabel) } ?? "")
         }
     }
 
@@ -100,13 +100,13 @@ struct CloudSyncSettingsTab: View {
     private func row(for type: CloudStorageType) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                brandIcon(type)
+                type.brandIcon
                     .resizable()
                     .scaledToFit()
                     .frame(width: 20, height: 20)
                     // Decorative: the name beside it is what VoiceOver reads.
                     .accessibilityHidden(true)
-                Text(brandLabel(type))
+                Text(type.brandLabel)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
@@ -228,28 +228,6 @@ struct CloudSyncSettingsTab: View {
         case .preparing: return L("settings_cloud_phase_preparing")
         case .uploading: return L("settings_cloud_phase_uploading")
         case .archiving: return L("settings_cloud_phase_archiving")
-        }
-    }
-
-    /// The provider's brand name — deliberately not localized, matching Compose's own
-    /// `brandLabel()` (`CloudSyncTab.kt`), since a company name isn't translated.
-    private func brandLabel(_ type: CloudStorageType) -> String {
-        switch type {
-        case .dropbox: return "Dropbox"
-        case .googleDrive: return "Google Drive"
-        case .onedrive: return "OneDrive"
-        default: return ""
-        }
-    }
-
-    /// Asset-catalog SVGs: Dropbox/Google Drive hand-converted from Compose's own VectorDrawables,
-    /// OneDrive the official SVG behind Compose's `onedrive.png` (see each SVG's header comment).
-    private func brandIcon(_ type: CloudStorageType) -> Image {
-        switch type {
-        case .dropbox: return Image("dropbox")
-        case .googleDrive: return Image("google_drive")
-        case .onedrive: return Image("onedrive")
-        default: return Image(systemName: "cloud")
         }
     }
 
