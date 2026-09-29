@@ -121,7 +121,7 @@ struct KeryxApp: App {
     }
 
     private func updateDockBadge(_ count: Int64) {
-        NSApp.dockTile.badgeLabel = count <= 0 ? nil : (count > 99 ? "99+" : "\(count)")
+        NSApp.dockTile.badgeLabel = dockBadgeLabel(unreadCount: count)
     }
 
     /// Mirrors `resolveDarkTheme`'s `"light"`/`"dark"`/else (follow system) rule (`KeryxTheme.kt`),
