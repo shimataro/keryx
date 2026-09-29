@@ -311,6 +311,9 @@ struct ArticleListView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 10)
+            // A plain-style button only hit-tests what it draws; without this the Spacer and the
+            // padding are dead zones.
+            .contentShape(Rectangle())
             .background {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 6)
