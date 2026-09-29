@@ -43,7 +43,10 @@ final class OAuthSessionCoordinator: NSObject, @unchecked Sendable {
     @MainActor
     private func presentSession(url: String, callbackScheme: String) {
         guard let authURL = URL(string: url) else { return }
-        let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: callbackScheme) { [weak self] callbackURL, _ in
+        // `@Sendable` keeps this closure from inheriting `presentSession`'s `@MainActor` isolation:
+        // AuthenticationServices invokes it on an arbitrary (XPC reply) queue, where Swift 6's runtime
+        // isolation check on a main-actor closure would trap before the hop below is ever reached.
+        let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: callbackScheme) { @Sendable [weak self] callbackURL, _ in
             Task { @MainActor in
                 self?.activeSession = nil
                 if let callbackURL {
