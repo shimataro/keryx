@@ -15,6 +15,7 @@ struct NamePromptSheet: View {
 
     @State private var name = ""
     @State private var color: String?
+    @FocusState private var nameFieldFocused: Bool
 
     init(
         titleKey: String,
@@ -39,25 +40,42 @@ struct NamePromptSheet: View {
     private var canConfirm: Bool { !trimmedName.isEmpty && !duplicate }
 
     var body: some View {
+        #if os(iOS)
+        // iOS's own form sheet: the title and Cancel / OK in the navigation bar, the fields in a
+        // grouped form — as Reminders' "New List" does.
+        NavigationStack {
+            Form {
+                Section {
+                    nameField
+                    if duplicate { duplicateMessage }
+                }
+                if showColorPicker {
+                    Section { colorPicker }
+                }
+            }
+            .navigationTitle(L(titleKey))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L("common_cancel"), role: .cancel) { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("common_ok"), action: confirm).disabled(!canConfirm)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .task { nameFieldFocused = true }
+        #else
         VStack(alignment: .leading, spacing: 12) {
             Text(L(titleKey)).font(.headline)
 
-            TextField(L(placeholderKey), text: $name)
+            nameField
                 .textFieldStyle(.roundedBorder)
-                .onSubmit(confirm)
 
-            if duplicate {
-                Text(L(duplicateMessageKey))
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            if duplicate { duplicateMessage }
 
-            if showColorPicker {
-                HStack(spacing: 8) {
-                    swatch(nil)
-                    ForEach(TagColorsKt.TAG_COLOR_PALETTE, id: \.self) { hex in swatch(hex) }
-                }
-            }
+            if showColorPicker { colorPicker }
 
             HStack {
                 Spacer()
@@ -70,6 +88,26 @@ struct NamePromptSheet: View {
         }
         .padding()
         .frame(minWidth: 320)
+        #endif
+    }
+
+    private var nameField: some View {
+        TextField(L(placeholderKey), text: $name)
+            .focused($nameFieldFocused)
+            .onSubmit(confirm)
+    }
+
+    private var duplicateMessage: some View {
+        Text(L(duplicateMessageKey))
+            .font(.caption)
+            .foregroundStyle(.red)
+    }
+
+    private var colorPicker: some View {
+        HStack(spacing: 8) {
+            swatch(nil)
+            ForEach(TagColorsKt.TAG_COLOR_PALETTE, id: \.self) { hex in swatch(hex) }
+        }
     }
 
     /// A single swatch — `hex == nil` is the "no color" option, matching Compose's own

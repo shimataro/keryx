@@ -22,58 +22,129 @@ struct AddFeedSheet: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        // iOS's own form sheet: the title and Cancel / confirm in the navigation bar, the fields in
+        // a grouped form — the same shape as `NamePromptSheet`'s.
+        NavigationStack {
+            Form {
+                Section {
+                    urlField
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    statusContent
+                }
+                if let candidates = discoveredCandidates {
+                    candidatesSection(candidates)
+                } else if hasSinglePreview {
+                    Section { previewContent }
+                }
+                if hasMessages {
+                    Section { messagesContent }
+                }
+            }
+            .navigationTitle(L("home_add_feed"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L("common_cancel"), role: .cancel) { isPresented = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    confirmButton
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .task { await addFeed.startObserving() }
+        #else
         VStack(alignment: .leading, spacing: 16) {
             Text(L("home_add_feed"))
                 .font(.headline)
 
-            // The URL field stays editable through preview, matching Compose's own dialog — only
-            // subscribing (not previewing) disables it, unlike the earlier `phase != nil` check.
-            TextField(L("home_add_feed_hint"), text: urlBinding)
+            urlField
                 .textFieldStyle(.roundedBorder)
-                .focused($urlFieldFocused)
-                .disabled(addFeed.state.phase == .subscribing)
-                .onSubmit { submit() }
-                .task { urlFieldFocused = true }
 
-            if alreadySubscribed {
-                Text(L("home_already_subscribed"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let phase = addFeed.state.phase {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text(L(phase == .previewing ? "home_add_feed_loading_preview" : "home_add_feed_loading_subscribe"))
-                        .font(.caption)
-                }
-            }
+            statusContent
 
             previewContent
 
-            if let error = addFeed.state.error {
-                Text(errorKindMessage(error.errorKind))
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            if let partial = addFeed.state.partialResult {
-                Text(LF("apple_add_feed_partial_result", Int64(partial.first?.intValue ?? 0), Int64(partial.second?.intValue ?? 0)))
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            messagesContent
 
             HStack {
                 Spacer()
                 Button(L("common_cancel"), role: .cancel) { isPresented = false }
-                Button(L(addFeed.state.hasResult ? "home_add_feed_subscribe" : "home_add_feed_confirm")) { submit() }
+                confirmButton
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!addFeed.state.confirmEnabled)
             }
         }
         .padding()
         .frame(minWidth: 420)
         .task { await addFeed.startObserving() }
+        #endif
+    }
+
+    // The URL field stays editable through preview, matching Compose's own dialog — only
+    // subscribing (not previewing) disables it, unlike the earlier `phase != nil` check.
+    private var urlField: some View {
+        TextField(L("home_add_feed_hint"), text: urlBinding)
+            .focused($urlFieldFocused)
+            .disabled(addFeed.state.phase == .subscribing)
+            .onSubmit { submit() }
+            .task { urlFieldFocused = true }
+    }
+
+    private var confirmButton: some View {
+        Button(L(addFeed.state.hasResult ? "home_add_feed_subscribe" : "home_add_feed_confirm")) { submit() }
+            .disabled(!addFeed.state.confirmEnabled)
+    }
+
+    /// The "already subscribed" hint and the in-flight preview/subscribe progress.
+    @ViewBuilder
+    private var statusContent: some View {
+        if alreadySubscribed {
+            Text(L("home_already_subscribed"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        if let phase = addFeed.state.phase {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(L(phase == .previewing ? "home_add_feed_loading_preview" : "home_add_feed_loading_subscribe"))
+                    .font(.caption)
+            }
+        }
+    }
+
+    /// The error and partial-subscribe result lines.
+    @ViewBuilder
+    private var messagesContent: some View {
+        if let error = addFeed.state.error {
+            Text(errorKindMessage(error.errorKind))
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+
+        if let partial = addFeed.state.partialResult {
+            Text(LF("apple_add_feed_partial_result", Int64(partial.first?.intValue ?? 0), Int64(partial.second?.intValue ?? 0)))
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var hasMessages: Bool {
+        addFeed.state.error != nil || addFeed.state.partialResult != nil
+    }
+
+    private var hasSinglePreview: Bool {
+        guard let preview = addFeed.state.preview else { return false }
+        if case .single = onEnum(of: preview) { return true }
+        return false
+    }
+
+    private var discoveredCandidates: [DiscoveredFeedLink]? {
+        guard let preview = addFeed.state.preview, case .multiple(let multiple) = onEnum(of: preview) else { return nil }
+        return multiple.candidates
     }
 
     private var urlBinding: Binding<String> {
@@ -105,6 +176,32 @@ struct AddFeedSheet: View {
     }
 
     private func candidatesList(_ candidates: [DiscoveredFeedLink]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            candidatesHeader(candidates)
+
+            List(candidates, id: \.url) { candidate in
+                candidateToggle(candidate)
+            }
+            .frame(minHeight: 120, maxHeight: 240)
+        }
+    }
+
+    #if os(iOS)
+    /// The candidates as rows of the sheet's own form — a `List` nested inside a `Form` would
+    /// scroll on its own, inside the form's scrolling.
+    private func candidatesSection(_ candidates: [DiscoveredFeedLink]) -> some View {
+        Section {
+            ForEach(candidates, id: \.url) { candidate in
+                candidateToggle(candidate)
+            }
+        } header: {
+            candidatesHeader(candidates)
+                .textCase(nil)
+        }
+    }
+    #endif
+
+    private func candidatesHeader(_ candidates: [DiscoveredFeedLink]) -> some View {
         let selectedCount = candidates.filter { addFeed.state.selectedCandidates.contains($0.url) }.count
         let allSelected = !candidates.isEmpty && selectedCount == candidates.count
 
@@ -127,22 +224,21 @@ struct AddFeedSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
 
-            List(candidates, id: \.url) { candidate in
-                Toggle(isOn: candidateBinding(candidate.url)) {
-                    VStack(alignment: .leading) {
-                        Text(candidate.title ?? candidate.url)
-                        HStack(spacing: 4) {
-                            if let typeLabel = feedTypeLabel(candidate.type) {
-                                Text(typeLabel)
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+    private func candidateToggle(_ candidate: DiscoveredFeedLink) -> some View {
+        Toggle(isOn: candidateBinding(candidate.url)) {
+            VStack(alignment: .leading) {
+                Text(candidate.title ?? candidate.url)
+                HStack(spacing: 4) {
+                    if let typeLabel = feedTypeLabel(candidate.type) {
+                        Text(typeLabel)
                     }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .frame(minHeight: 120, maxHeight: 240)
         }
     }
 
