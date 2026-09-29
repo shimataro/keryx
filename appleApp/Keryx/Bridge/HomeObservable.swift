@@ -72,6 +72,10 @@ final class HomeObservable {
     private(set) var selectedFeedName: String?
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
+    /// The rows the iOS reader's swipe pager pages through (`HomeViewModel.pagerArticles`) — the
+    /// search results while a search is active, so a swipe steps exactly as J/K does. Observed on
+    /// iOS only: that flow runs only while collected, and macOS has no pager to collect it for.
+    private(set) var pagerArticles: [ArticleListRow] = []
     private(set) var cloudConnected: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
@@ -152,6 +156,10 @@ final class HomeObservable {
         async let t28: () = observeArticleContents()
         async let t29: () = observeCloudConnected()
         async let t30: () = observeActivity()
+        #if os(iOS)
+        async let t31: () = observePagerArticles()
+        _ = await t31
+        #endif
         _ = await (
             t1, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
@@ -358,6 +366,12 @@ final class HomeObservable {
     private func observeArticleContents() async {
         for await v in viewModel.articleContents { articleContents = v }
     }
+
+    #if os(iOS)
+    private func observePagerArticles() async {
+        for await v in viewModel.pagerArticles { pagerArticles = v }
+    }
+    #endif
 
     private func observeCloudConnected() async {
         for await v in viewModel.cloudConnected { cloudConnected = v.boolValue }
