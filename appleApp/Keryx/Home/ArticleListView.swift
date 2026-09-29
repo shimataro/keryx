@@ -228,7 +228,10 @@ struct ArticleListView: View {
     private var articleList: some View {
         List(displayedRows, id: \.id) { article in
             row(article)
-                .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                // No horizontal inset of our own: the macOS List already pads each row's content by
+                // 8pt on either side, which alone matches Compose's `listRowHorizontalMargin()`
+                // (8dp). Adding 8 here on top of it doubled the card's gap from the pane edge.
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                 .listRowSeparator(.hidden)
                 .onAppear {
                     appearedIds.insert(article.id)
