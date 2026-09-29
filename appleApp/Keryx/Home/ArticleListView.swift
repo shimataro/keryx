@@ -16,7 +16,13 @@ struct ArticleListView: View {
 
     /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
     /// source list's selection), on top of the article list holding the pane focus.
+    #if os(macOS)
     @Environment(\.controlActiveState) private var controlActiveState
+    private var windowIsKey: Bool { controlActiveState == .key }
+    #else
+    /// iOS has no key-window distinction for this, so the pane focus alone decides.
+    private var windowIsKey: Bool { true }
+    #endif
 
     @State private var appearedIds: Set<String> = []
     /// Whether the new-articles pill is actually shown, debounced against `home.newArticleCount`
@@ -32,6 +38,15 @@ struct ArticleListView: View {
     @State private var cachedTitleMarks: [String: String] = [:]
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
+
+    #if os(macOS)
+    private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
+    private static let dimmedSelectionFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    #else
+    // UIKit has no content-selection colors; these are the closest system equivalents.
+    private static let strongSelectionFill = Color.accentColor
+    private static let dimmedSelectionFill = Color(uiColor: .systemGray4)
+    #endif
 
     private var displayedRows: [ArticleListRow] { cachedDisplayedRows }
     private var titleMarks: [String: String] { cachedTitleMarks }
@@ -139,7 +154,7 @@ struct ArticleListView: View {
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer (macOS 26)
         // is what pushes the trailing cluster to the column's right edge.
-        if #available(macOS 26, *) {
+        if #available(macOS 26, iOS 26, *) {
             ToolbarSpacer(.flexible)
         }
 
@@ -287,7 +302,7 @@ struct ArticleListView: View {
             home.viewModel.selectArticle(article: article)
         } label: {
             let isSelected = home.selectedArticle?.id == article.id
-            let paneFocused = focusedPane.wrappedValue == .articleList && controlActiveState == .key
+            let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
             // Same treatment as Compose's `onPrimary`: on the strong (focused) selection fill the
             // text turns light; on the dimmed (unfocused) one it keeps its ordinary colors.
             let onStrongSelection = isSelected && paneFocused
@@ -334,9 +349,7 @@ struct ArticleListView: View {
             .background {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(paneFocused
-                            ? Color(nsColor: .selectedContentBackgroundColor)
-                            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+                        .fill(paneFocused ? Self.strongSelectionFill : Self.dimmedSelectionFill)
                 }
             }
         }

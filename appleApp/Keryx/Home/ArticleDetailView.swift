@@ -129,7 +129,7 @@ struct ArticleDetailView: View {
             ToolbarItem { feedHeader }
         }
 
-        if #available(macOS 26, *) {
+        if #available(macOS 26, iOS 26, *) {
             ToolbarSpacer(.flexible)
         }
 
