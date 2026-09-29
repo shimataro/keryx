@@ -33,6 +33,8 @@ struct HomeCommands: Commands {
     }
 
     var body: some Commands {
+        // Computed once per evaluation and shared by every menu below.
+        let state = model.home.map(menuState)
         #if os(macOS)
         CommandGroup(replacing: .appInfo) {
             Button(L("menu_help_about")) { openWindow(id: "about") }
@@ -40,29 +42,28 @@ struct HomeCommands: Commands {
         #endif
 
         CommandGroup(replacing: .newItem) {
-            if let home = model.home {
+            if let home = model.home, let state {
                 Button(L("menu_file_add_feed")) { model.sidebarDialogs.isAddingFeed = true }
                     .keyboardShortcut("n", modifiers: .command)
-                    .disabled(!menuState(home).addItemsEnabled)
+                    .disabled(!state.addItemsEnabled)
                 Button(L("menu_file_add_folder")) { model.sidebarDialogs.isAddingFolder = true }
-                    .disabled(!menuState(home).addItemsEnabled)
+                    .disabled(!state.addItemsEnabled)
                 Button(L("menu_file_add_tag")) { model.sidebarDialogs.isAddingTag = true }
-                    .disabled(!menuState(home).addItemsEnabled)
+                    .disabled(!state.addItemsEnabled)
                 #if os(macOS)
                 Divider()
                 Button(L("menu_file_import_opml")) { importOpml() }
                     .keyboardShortcut("i", modifiers: .command)
-                    .disabled(!menuState(home).opmlEnabled)
+                    .disabled(!state.opmlEnabled)
                 Button(L("menu_file_export_opml")) { exportOpml() }
                     .keyboardShortcut("e", modifiers: .command)
-                    .disabled(!menuState(home).opmlEnabled)
+                    .disabled(!state.opmlEnabled)
                 #endif
             }
         }
 
         CommandGroup(after: .toolbar) {
-            if let home = model.home {
-                let state = menuState(home)
+            if let home = model.home, let state {
                 // Focusing the system search field needs `.searchFocused(_:equals:)` (macOS 15+),
                 // so before that the item would do nothing and is left out entirely.
                 if #available(macOS 15, *) {
@@ -90,8 +91,7 @@ struct HomeCommands: Commands {
         }
 
         CommandMenu(L("menu_article")) {
-            if let home = model.home {
-                let state = menuState(home)
+            if let home = model.home, let state {
                 Button(L("menu_article_toggle_read")) { home.viewModel.toggleReadSelected() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                     .disabled(!state.articleActionsEnabled)
@@ -115,8 +115,7 @@ struct HomeCommands: Commands {
         }
 
         CommandMenu(L("menu_feed")) {
-            if let home = model.home {
-                let state = menuState(home)
+            if let home = model.home, let state {
                 Button(L("menu_feed_refresh_all")) { home.viewModel.refreshAll() }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(!state.refreshAllEnabled)
@@ -201,7 +200,10 @@ struct HomeCommands: Commands {
 
     /// `sdk.menuState(...)` needs several booleans this app doesn't track anywhere else yet
     /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`hasRenamableSelection`); resolved the same way
-    /// `HomeView`'s own rename/delete keyboard handling does, via `resolveFeedListSelectionTarget`.
+    /// `HomeView`'s own rename/delete keyboard handling does, via `resolveFeedListSelectionTarget`
+    /// (kept by `HomeObservable.feedListSelectionTarget`). Everything read here is a narrow value
+    /// `HomeObservable` only reassigns when it changes, so an article selection alone does not
+    /// rebuild the menu bar.
     /// `textInputFocused` reads `HomeObservable`'s own mirror of `HomeView`'s `focusedPane`, so
     /// this reacts to the search field the same way `HomeShortcutsKt.homeShortcutFor` does.
     private func menuState(_ home: HomeObservable) -> MenuUiState {
@@ -223,8 +225,8 @@ struct HomeCommands: Commands {
         }
         return sdk.menuState(
             onHome: !model.needsSetup,
-            hasSelectedArticle: home.selectedArticle != nil,
-            selectedArticleHasUrl: ArticleListModelKt.hasUsableUrl(url: home.selectedArticle?.url),
+            hasSelectedArticle: home.hasSelectedArticle,
+            selectedArticleHasUrl: home.selectedArticleHasUsableUrl,
             cloudConnected: home.cloudConnected,
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
@@ -236,25 +238,23 @@ struct HomeCommands: Commands {
     }
 
     private func selectionTarget(_ home: HomeObservable) -> FeedListSelectionTarget? {
-        FeedListModelKt.resolveFeedListSelectionTarget(
-            filter: home.filter, feeds: home.feeds, folders: home.folders, tags: home.tags
-        )
+        home.feedListSelectionTarget
     }
 
     /// The feed the Feed menu's selected-feed items (Refresh/Tags/Move to folder/Copy URL/…) act
     /// on — only when the sidebar's own selection is a feed itself, matching Compose's own
     /// `selectedFeedForMenu()` (`HomeScreen.kt`).
     private func selectedFeed(_ home: HomeObservable) -> Feeds? {
-        guard case .feed(let filter) = onEnum(of: home.filter) else { return nil }
-        return home.feeds.first { $0.id == filter.feedId }
+        guard let target = selectionTarget(home), case .feed(let f) = onEnum(of: target) else { return nil }
+        return f.feed
     }
 
     private func sortedFolders(_ home: HomeObservable) -> [Folders] {
-        home.folders.sorted { $0.sort_order < $1.sort_order }
+        home.sidebar.sortedFolders
     }
 
     private func sortedTags(_ home: HomeObservable) -> [Tags] {
-        home.tags.sorted { $0.sort_order < $1.sort_order }
+        home.sidebar.sortedTags
     }
 
     /// Rename/delete wording follows the selected item's type — a `nil` target falls back to the

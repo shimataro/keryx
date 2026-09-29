@@ -1,3 +1,4 @@
+import Foundation
 import KeryxShared
 import Observation
 
@@ -58,6 +59,13 @@ final class HomeObservable {
     private(set) var newArticleCount: Int = 0
 
     private(set) var selectedArticle: Articles?
+    // Narrow facts about the selection for the menu bar (`HomeCommands`), assigned only when they
+    // change: reading `selectedArticle` / `filter` / `feeds` there directly made every article
+    // selection and every feed refresh rebuild the whole menu bar.
+    private(set) var hasSelectedArticle = false
+    private(set) var selectedArticleHasUsableUrl = false
+    /// The sidebar item the selected filter resolves to (`resolveFeedListSelectionTarget`).
+    private(set) var feedListSelectionTarget: FeedListSelectionTarget?
     private(set) var selectedFeedName: String?
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
@@ -143,6 +151,7 @@ final class HomeObservable {
             rebuildArticleRows()
             rebuildSearchRows()
             rebuildSidebar()
+            updateFeedListSelectionTarget()
         }
     }
 
@@ -150,6 +159,7 @@ final class HomeObservable {
         for await v in viewModel.tags {
             tags = v
             rebuildSidebar()
+            updateFeedListSelectionTarget()
         }
     }
 
@@ -157,6 +167,7 @@ final class HomeObservable {
         for await v in viewModel.folders {
             folders = v
             rebuildSidebar()
+            updateFeedListSelectionTarget()
         }
     }
 
@@ -188,7 +199,10 @@ final class HomeObservable {
     }
 
     private func observeFilter() async {
-        for await v in viewModel.filter { filter = v }
+        for await v in viewModel.filter {
+            filter = v
+            updateFeedListSelectionTarget()
+        }
     }
 
     private func observeSelectedRowInstance() async {
@@ -255,6 +269,16 @@ final class HomeObservable {
         }
     }
 
+    private func updateFeedListSelectionTarget() {
+        let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: feeds, folders: folders, tags: tags)
+        let unchanged = switch (feedListSelectionTarget, target) {
+        case (nil, nil): true
+        case let (old?, new?): (old as? NSObject)?.isEqual(new) ?? false
+        default: false
+        }
+        if !unchanged { feedListSelectionTarget = target }
+    }
+
     private func rebuildSidebar() {
         sidebar = SidebarModel(
             feeds: feeds,
@@ -296,7 +320,13 @@ final class HomeObservable {
     }
 
     private func observeSelectedArticle() async {
-        for await v in viewModel.selectedArticle { selectedArticle = v }
+        for await v in viewModel.selectedArticle {
+            selectedArticle = v
+            let has = v != nil
+            if hasSelectedArticle != has { hasSelectedArticle = has }
+            let usable = ArticleListModelKt.hasUsableUrl(url: v?.url)
+            if selectedArticleHasUsableUrl != usable { selectedArticleHasUsableUrl = usable }
+        }
     }
 
     private func observeSelectedFeedName() async {
