@@ -102,14 +102,14 @@ struct KeryxApp: App {
         // ever opened. `NSApp.appearance` additionally covers the surfaces `preferredColorScheme`
         // does not reach: native menus, and any AppKit chrome outside this scene's own view tree.
         .task { await model.preferences?.startObserving() }
-        .preferredColorScheme(colorScheme(for: model.preferences?.localSettings.themeMode))
+        .preferredColorScheme(colorScheme(for: model.preferences?.themeMode))
         #if os(macOS)
-        .onChange(of: model.preferences?.localSettings.themeMode, initial: true) { _, mode in
+        .onChange(of: model.preferences?.themeMode, initial: true) { _, mode in
             applyAppearance(mode)
         }
         // Requested at startup (if already on) and the moment it's switched on — never
         // unconditionally at every launch — matching desktop's own gate (`App.kt:69-72`).
-        .onChange(of: model.preferences?.localSettings.notificationEnabled, initial: true) { _, enabled in
+        .onChange(of: model.preferences?.notificationEnabled, initial: true) { _, enabled in
             if enabled == true { OsNotificationPoster.requestAuthorization() }
         }
         #endif

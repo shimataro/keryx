@@ -63,7 +63,7 @@ struct ArticleDetailView: View {
         ReaderDocumentKey(
             article: home.selectedArticle.map(ObjectIdentifier.init),
             colorScheme: colorScheme,
-            fontSizeScale: preferences.localSettings.fontSizeScale
+            fontSizeScale: preferences.fontSizeScale
         )
     }
 
@@ -83,7 +83,7 @@ struct ArticleDetailView: View {
     }
 
     private func readerDocumentInputs() -> ReaderDocumentInputs {
-        let theme = themeColors(colorScheme: colorScheme, fontScale: Float(preferences.localSettings.fontSizeScale))
+        let theme = themeColors(colorScheme: colorScheme, fontScale: Float(preferences.fontSizeScale))
         // Hidden under the native empty state, but still swapped for a blank themed document so the
         // previous article's embedded media stops playing.
         guard let article = home.selectedArticle else {

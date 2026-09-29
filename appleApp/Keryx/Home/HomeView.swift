@@ -25,7 +25,7 @@ struct HomeView: View {
             FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.FEED_LIST_PANE_MIN_WIDTH),
-                    ideal: CGFloat(preferences.localSettings.feedListPaneWidth),
+                    ideal: CGFloat(preferences.feedListPaneWidth),
                     max: CGFloat(ConstantsKt.FEED_LIST_PANE_MAX_WIDTH)
                 )
                 .onSizeChanged { size in
@@ -36,7 +36,7 @@ struct HomeView: View {
             ArticleListView(home: home, notifications: notifications, settingsNavigation: settingsNavigation, dialogs: sidebarDialogs, focusedPane: $focusedPane)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
-                    ideal: CGFloat(preferences.localSettings.articleListPaneWidth),
+                    ideal: CGFloat(preferences.articleListPaneWidth),
                     max: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MAX_WIDTH)
                 )
                 .onSizeChanged { size in
