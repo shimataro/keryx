@@ -66,15 +66,20 @@ extension View {
         ))
     }
 
-    /// Marks this sidebar row as draggable, carrying `item`, through `.itemProvider` — the
-    /// `List`'s own row-drag hook, so the source list (`NSTableView`) itself decides what a click
-    /// and what a drag is, anywhere in the row, exactly as Notes and Finder do. The drag image is
-    /// the list's own row image.
+    /// Marks this sidebar row as draggable, carrying `item`.
     ///
-    /// Neither SwiftUI gesture-based drag source works here: `.onDrag`/`.draggable` take the
-    /// mouse-down wherever the row's content is actually drawn (icon and title), so a click there
-    /// never reaches the list's selection while a click on the row's empty space does; and a
-    /// `Button` row swallows the drag altogether.
+    /// On macOS this goes through `.itemProvider` — the `List`'s own row-drag hook, so the source
+    /// list (`NSTableView`) itself decides what a click and what a drag is, anywhere in the row,
+    /// exactly as Notes and Finder do. The drag image is the list's own row image. Neither SwiftUI
+    /// gesture-based drag source works there: `.onDrag`/`.draggable` take the mouse-down wherever
+    /// the row's content is actually drawn (icon and title), so a click there never reaches the
+    /// list's selection while a click on the row's empty space does; and a `Button` row swallows the
+    /// drag altogether.
+    ///
+    /// On iOS `.itemProvider` alone never lifts a row, so the drag starts through `.onDrag`
+    /// instead. A touch drag begins with a long press, so the tap that selects a row (and, collapsed,
+    /// opens its article list) is never taken for one; the long press shows the row's context menu,
+    /// and moving the finger from there turns it into the drag, as elsewhere on iOS.
     ///
     /// The provider closure runs when the drag begins, which is this pane's only "drag started"
     /// signal — every drop target reads `draggingItem` to validate and act, so it must be set
@@ -83,27 +88,42 @@ extension View {
     ///
     /// `enabled` is off while the row's name is being edited in place, so a press-and-sweep to select
     /// text isn't taken as a row drag (Compose's `feedListReorderDrag(enabled = inlineEdit == null)`).
-    /// Disabling passes `nil` to `.itemProvider` rather than branching around it, so the row keeps
-    /// its view identity when an edit starts or ends instead of being rebuilt underneath the editor.
+    /// Disabling never branches around the modifier, so the row keeps its view identity when an edit
+    /// starts or ends instead of being rebuilt underneath the editor: macOS passes `nil` to
+    /// `.itemProvider`, and iOS hands out a provider with nothing registered, which ends the drag
+    /// before it lifts.
     func feedListDraggable(
         _ item: FeedListDragPayload,
         draggingItem: Binding<FeedListDragPayload?>,
         enabled: Bool = true
     ) -> some View {
-        itemProvider(enabled ? {
-            draggingItem.wrappedValue = item
-            let provider = NSItemProvider()
-            let data = try? JSONEncoder().encode(item)
-            provider.registerDataRepresentation(
-                forTypeIdentifier: item.contentType.identifier,
-                visibility: .ownProcess
-            ) { completion in
-                completion(data, nil)
-                return nil
-            }
-            return provider
-        } : nil)
+        #if os(macOS)
+        itemProvider(enabled ? { makeFeedListItemProvider(item, draggingItem: draggingItem) } : nil)
+        #else
+        onDrag {
+            enabled ? makeFeedListItemProvider(item, draggingItem: draggingItem) : NSItemProvider()
+        }
+        #endif
     }
+}
+
+/// Starts a drag of `item`: records it as the in-progress item and returns its provider, carrying
+/// the payload under its kind's own type, visible to this process only.
+private func makeFeedListItemProvider(
+    _ item: FeedListDragPayload,
+    draggingItem: Binding<FeedListDragPayload?>
+) -> NSItemProvider {
+    draggingItem.wrappedValue = item
+    let provider = NSItemProvider()
+    let data = try? JSONEncoder().encode(item)
+    provider.registerDataRepresentation(
+        forTypeIdentifier: item.contentType.identifier,
+        visibility: .ownProcess
+    ) { completion in
+        completion(data, nil)
+        return nil
+    }
+    return provider
 }
 
 /// Applies a drop *between* rows, from `.onInsert`: `offset` is where in `group` the outline put
