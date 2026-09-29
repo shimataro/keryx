@@ -687,6 +687,14 @@ Windows の通知領域・Linux の AWT フォールバック・ウィンドウ�
 `design/icons/make_desktop_icons.sh` で共有アートワークから生成する
 （生成済みファイルはコミットしておくのが望ましい）。
 
+SwiftUI アプリ自身のアイコン（macOS・iOS 共通）は PNG セットではなく Icon Composer 形式の
+`appleApp/Keryx/Resources/AppIcon.icon`。ティールのグラデーション背景と、2 レイヤー（`pole.svg`・`waves.svg`）の
+グリフで構成し、Liquid Glass・ダーク・ティントの各バリエーションと OS 26 未満向けの平面フォールバックは Xcode が
+生成する（ビルドには Xcode 26 以降が必要）。レイヤーの SVG は `design/icons/svg/app_icon_apple_{pole,waves}.svg`
+のコピーで、デスクトップ版のグリフをキャンバスの約 55% に拡大したもの。波は線（stroke）ではなく塗りの輪郭として
+描いている（線の弧だとアイコンのレンダラーが余計な継ぎ目を描くため）。編集は Xcode 同梱の Icon Composer で行い、
+2 つの SVG コピーを一致させておくこと。
+
 アプリのストア/メニューカテゴリーは `nativeDistributions` 内でプラットフォームごとに設定している。
 macOS は `appCategory = "public.app-category.news"`（`LSApplicationCategoryType`）を使う
 （Apple の App Store 分類には単純な「インターネット」に相当する項目が無いため）。Linux は

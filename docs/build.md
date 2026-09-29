@@ -684,6 +684,14 @@ notification area, the Linux AWT fallback and the window's own title-bar icon. T
 uses `tray_icon.png`, referenced in place by `appleApp/project.yml` and drawn as a template image. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
+The SwiftUI app's own icon (macOS and iOS alike) is the Icon Composer file
+`appleApp/Keryx/Resources/AppIcon.icon` rather than a PNG set: a teal gradient fill plus the glyph as two
+layers (`pole.svg`, `waves.svg`), from which Xcode renders Liquid Glass, dark and tinted variants and the
+flattened fallbacks for pre-26 OS versions (building it needs Xcode 26 or later). The layer SVGs are copies of
+`design/icons/svg/app_icon_apple_{pole,waves}.svg` — the desktop glyph scaled to ~55% of the canvas, with the
+waves drawn as filled outlines rather than strokes, since the icon renderer draws a stray seam through a stroked
+arc. Edit it in Icon Composer (bundled with Xcode) and keep the two SVG copies in sync.
+
 The app's store/menu category is set per platform in `nativeDistributions`: macOS uses
 `appCategory = "public.app-category.news"` (`LSApplicationCategoryType`) since Apple's App Store
 taxonomy has no plain "Internet" category; Linux uses `menuGroup = "Network;News;Feed;"`, written
