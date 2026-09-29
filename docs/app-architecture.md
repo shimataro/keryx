@@ -1269,10 +1269,7 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
 - **A drag starts through `.itemProvider`, the `List`'s own row-drag hook.** The list then tells a
   click from a drag anywhere in the row. SwiftUI's gesture-based sources do not work in these rows:
   `.onDrag`/`.draggable` take the mouse-down wherever the row's content is drawn, so clicking an
-  icon or title never selects, and a `Button` row swallows the drag altogether. That is macOS; on
-  iOS `.itemProvider` alone never lifts a row, so the drag starts through `.onDrag` instead. A
-  touch drag begins with a long press, so the tap that selects a row is never taken for one — the
-  long press shows the row's context menu, and moving the finger from there becomes the drag.
+  icon or title never selects, and a `Button` row swallows the drag altogether.
 - The provider closure runs when the drag begins; every drop target validates against that
   in-progress item. The payload uses its own exported type (`works.merc.keryx.app.feedlistitem`,
   declared under `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is
