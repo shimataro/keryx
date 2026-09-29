@@ -333,9 +333,11 @@ jobs:
       # Xcode checks that it exists while planning the build, before the target's prebuild script
       # (Scripts/build-shared.sh) gets to assemble it, so on a fresh checkout it must already be
       # there — and before `xcodegen generate`, which otherwise generates the project without the
-      # framework reference. The prebuild's own Gradle run is then up-to-date.
+      # framework reference. The String Catalog project.yml lists as a source is generated here
+      # too, since `xcodegen generate` refuses a missing source path outright. The prebuild's own
+      # Gradle run is then up-to-date.
       - name: Verify Apple framework
-        run: ./gradlew :shared:assembleKeryxSharedReleaseXCFramework --no-configuration-cache
+        run: ./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog --no-configuration-cache
 
       # Builds the appleApp/ SwiftUI project (XcodeGen-generated from project.yml; the
       # .xcodeproj itself is never committed — see .gitignore) for macOS and iOS Simulator, and

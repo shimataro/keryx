@@ -267,7 +267,9 @@ xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
 実行するので、普通にビルドするだけで最新の Kotlin ソースが反映される——別途手動の手順は要らない。
 XCFramework の Debug 版は配線しておらず、どの構成でビルドしても Release 版をリンクする。
 ただしクリーンチェックアウトでは、Xcode がビルド計画の段階（prebuild スクリプトの実行前）で Release 版
-XCFramework の存在を確認するため、先に `./gradlew :shared:assembleKeryxSharedReleaseXCFramework` を
+XCFramework の存在を確認し、また `xcodegen generate` はソースとして列挙された String Catalog が
+存在しないと実行を拒否するため、先に
+`./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog` を
 一度実行しておく必要がある（CI も同様）。
 `dependencies:`（フレームワークリンク）を `FRAMEWORK_SEARCH_PATHS` や Kotlin/Native の
 `embedAndSignAppleFrameworkForXcode` の代わりに使う理由、`KeryxTests` が単体で完結する
