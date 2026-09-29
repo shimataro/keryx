@@ -27,25 +27,29 @@ struct DataSettingsTab: View {
             }
             .pickerStyle(.menu)
 
-            Section(L("settings_data_management")) {
-                HStack {
-                    Button(L("settings_import_opml")) {
-                        isImporting = true
+            // A labeled row rather than a `Section`, so its label sits in the same right-aligned label
+            // column as the pickers above instead of heading the buttons.
+            LabeledContent(L("settings_data_management")) {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Button(L("settings_import_opml")) {
+                            isImporting = true
+                        }
+                        .disabled(opmlTransfer.isBusy)
+                        Button(L("settings_export_opml")) {
+                            exportDocument = opmlTransfer.exportDocument()
+                            isExporting = true
+                        }
+                        .disabled(opmlTransfer.isBusy)
+                        if opmlTransfer.isBusy {
+                            ProgressView().controlSize(.small)
+                        }
                     }
-                    .disabled(opmlTransfer.isBusy)
-                    Button(L("settings_export_opml")) {
-                        exportDocument = opmlTransfer.exportDocument()
-                        isExporting = true
+                    if let statusMessage = opmlTransfer.statusMessage {
+                        Text(statusMessage)
+                            .font(.caption)
+                            .foregroundStyle(opmlTransfer.statusIsError ? .red : .secondary)
                     }
-                    .disabled(opmlTransfer.isBusy)
-                    if opmlTransfer.isBusy {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-                if let statusMessage = opmlTransfer.statusMessage {
-                    Text(statusMessage)
-                        .font(.caption)
-                        .foregroundStyle(opmlTransfer.statusIsError ? .red : .secondary)
                 }
             }
         }
