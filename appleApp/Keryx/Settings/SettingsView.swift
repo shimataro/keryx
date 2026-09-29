@@ -10,31 +10,37 @@ struct SettingsView: View {
     let cloudSync: CloudSyncObservable
     let oauthCoordinator: OAuthSessionCoordinator
     let opmlTransfer: OpmlTransferObservable
-    let notifications: NotificationCenterObservable
-
-    @State private var selectedTab = "general"
+    let settingsNavigation: SettingsNavigation
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: Binding(
+            get: {
+                SettingsNavigation.visibleTab(
+                    settingsNavigation.selectedTab,
+                    cloudSyncAvailable: !cloudSync.availableCloudTypes.isEmpty
+                )
+            },
+            set: { settingsNavigation.selectedTab = $0 }
+        )) {
             GeneralSettingsTab(preferences: preferences)
                 .tabItem { Label(L("settings_tab_general"), systemImage: "gearshape") }
-                .tag("general")
+                .tag(SettingsNavigation.Tab.general)
 
             NotificationsSettingsTab(preferences: preferences)
                 .tabItem { Label(L("settings_tab_notifications"), systemImage: "bell") }
-                .tag("notifications")
+                .tag(SettingsNavigation.Tab.notifications)
 
             // Only shown when at least one cloud provider is actually configured in this build —
             // matches Compose's own `SettingsDialog.kt`, which never adds this tab otherwise.
             if !cloudSync.availableCloudTypes.isEmpty {
                 CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync)
                     .tabItem { Label(L("settings_cloud_sync"), systemImage: "cloud") }
-                    .tag("cloud_sync")
+                    .tag(SettingsNavigation.Tab.cloudSync)
             }
 
             DataSettingsTab(preferences: preferences, opmlTransfer: opmlTransfer)
                 .tabItem { Label(L("settings_tab_data"), systemImage: "externaldrive") }
-                .tag("data")
+                .tag(SettingsNavigation.Tab.data)
         }
         // A `Form` defaults to checkboxes on macOS; the Compose dialog uses switches (`SwitchRow`).
         .toggleStyle(.switch)
@@ -42,15 +48,5 @@ struct SettingsView: View {
         .frame(width: 520)
         .task { await preferences.startObserving() }
         .task { await cloudSync.startObserving() }
-        // A bell-row "show settings tab" action (`NotificationBell.swift`) navigates here even
-        // while Settings is already open, on whichever tab id its own row named — matches Compose's
-        // own re-navigating `tabRequestToken` (`SettingsDialog.kt`). "updates" has no tab in this
-        // app (no in-app updater; see `docs/app-architecture.md`'s "Apple targets in `:shared`"), so
-        // it falls back to "cloud_sync", which shows the same sync failure that action is raised
-        // for (`SchemaVersionException`).
-        .onChange(of: notifications.settingsTabRequest) { _, request in
-            guard let request else { return }
-            selectedTab = request.tabId == "updates" ? "cloud_sync" : request.tabId
-        }
     }
 }

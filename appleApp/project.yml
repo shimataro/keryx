@@ -118,6 +118,7 @@ targets:
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/FeedListDropPresentation.swift
       - path: Keryx/Home/SidebarDialogState.swift
+      - path: Keryx/Settings/SettingsNavigation.swift
       - path: Keryx/Bridge/OpmlTransferObservable.swift
       - path: Keryx/Platform/Localized.swift
       - path: Keryx/Platform/DockBadge.swift

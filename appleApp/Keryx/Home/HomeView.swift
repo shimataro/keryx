@@ -9,6 +9,7 @@ struct HomeView: View {
     let home: HomeObservable
     let sidebarDialogs: SidebarDialogState
     let notifications: NotificationCenterObservable
+    let settingsNavigation: SettingsNavigation
     let preferences: PreferencesObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
@@ -32,7 +33,7 @@ struct HomeView: View {
                     debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(size.width)) }
                 }
         } content: {
-            ArticleListView(home: home, notifications: notifications, dialogs: sidebarDialogs, focusedPane: $focusedPane)
+            ArticleListView(home: home, notifications: notifications, settingsNavigation: settingsNavigation, dialogs: sidebarDialogs, focusedPane: $focusedPane)
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
                     ideal: CGFloat(preferences.localSettings.articleListPaneWidth),

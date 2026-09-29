@@ -28,6 +28,8 @@ final class AppModel {
     /// app-level `Commands`/keyboard handling can trigger the same dialogs.
     let sidebarDialogs = SidebarDialogState()
     let oauthCoordinator = OAuthSessionCoordinator()
+    /// The Settings window's selected tab — see `SettingsNavigation`'s own doc for why it lives here.
+    let settingsNavigation = SettingsNavigation()
 
     init() {
         do {

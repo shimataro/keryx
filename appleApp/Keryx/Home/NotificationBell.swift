@@ -8,6 +8,7 @@ import SwiftUI
 struct NotificationBell: View {
     let home: HomeObservable
     let notifications: NotificationCenterObservable
+    let settingsNavigation: SettingsNavigation
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
     #if os(macOS)
@@ -200,7 +201,8 @@ struct NotificationBell: View {
             focusedPane.wrappedValue = .articleList
             isShowingPopover = false
         case .showSettingsTab(let a):
-            notifications.requestSettingsTab(a.tabId)
+            // Selected before opening, so a Settings window that isn't open yet still opens on it.
+            settingsNavigation.show(tabId: a.tabId)
             #if os(macOS)
             openSettings()
             #endif

@@ -48,11 +48,11 @@ struct KeryxApp: App {
         // UI gets built out; for now this scene simply doesn't exist there.
         Settings {
             if let sdk = model.sdk, let preferences = model.preferences, let cloudSync = model.cloudSync,
-               let opmlTransfer = model.opmlTransfer, let notifications = model.notifications {
+               let opmlTransfer = model.opmlTransfer {
                 SettingsView(
                     sdk: sdk, preferences: preferences, cloudSync: cloudSync,
                     oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer,
-                    notifications: notifications
+                    settingsNavigation: model.settingsNavigation
                 )
             }
         }
@@ -75,7 +75,7 @@ struct KeryxApp: App {
                         onDone: { model.completeSetup() }
                     )
                 } else if let notifications = model.notifications {
-                    HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, preferences: preferences)
+                    HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, settingsNavigation: model.settingsNavigation, preferences: preferences)
                         #if os(macOS)
                         .onChange(of: home.totalUnread, initial: true) { _, count in
                             updateDockBadge(count)

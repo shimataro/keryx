@@ -11,6 +11,7 @@ private let markEnd: Character = "\u{0003}"
 struct ArticleListView: View {
     let home: HomeObservable
     let notifications: NotificationCenterObservable
+    let settingsNavigation: SettingsNavigation
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
@@ -159,7 +160,7 @@ struct ArticleListView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
-            NotificationBell(home: home, notifications: notifications, focusedPane: focusedPane)
+            NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
 
             Button {
                 home.viewModel.toggleSort()
