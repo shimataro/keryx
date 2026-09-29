@@ -14,6 +14,10 @@ struct ArticleListView: View {
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
 
+    /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
+    /// source list's selection), on top of the article list holding the pane focus.
+    @Environment(\.controlActiveState) private var controlActiveState
+
     @State private var appearedIds: Set<String> = []
     /// Whether the new-articles pill is actually shown, debounced against `home.newArticleCount`
     /// itself — see `pillShowDelayTask`'s own KDoc for why.
@@ -210,6 +214,8 @@ struct ArticleListView: View {
     private var articleList: some View {
         List(displayedRows, id: \.id) { article in
             row(article)
+                .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                .listRowSeparator(.hidden)
                 .onAppear {
                     appearedIds.insert(article.id)
                     scheduleReportVisible()
@@ -263,11 +269,16 @@ struct ArticleListView: View {
             focusedPane.wrappedValue = .articleList
             home.viewModel.selectArticle(article: article)
         } label: {
+            let isSelected = home.selectedArticle?.id == article.id
+            let paneFocused = focusedPane.wrappedValue == .articleList && controlActiveState == .key
+            // Same treatment as Compose's `onPrimary`: on the strong (focused) selection fill the
+            // text turns light; on the dimmed (unfocused) one it keeps its ordinary colors.
+            let onStrongSelection = isSelected && paneFocused
             HStack(alignment: .center, spacing: 0) {
                 // Fixed slot, always reserved, so the title never shifts when the dot or star appears.
                 ZStack {
                     if article.is_read == 0 {
-                        Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                        Circle().fill(onStrongSelection ? Color.white : Color.accentColor).frame(width: 8, height: 8)
                     }
                     if article.is_starred == 1 {
                         Image(systemName: "star.fill")
@@ -278,13 +289,13 @@ struct ArticleListView: View {
                 }
                 .frame(width: 14)
                 FaviconView(url: home.feedsById[article.feed_id]?.favicon_url, letter: article.title.first, blankWithoutUrl: true)
-                    .frame(width: 20, height: 20)
+                    .frame(width: 32, height: 32)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .padding(.leading, 6)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(article.title.isEmpty ? AttributedString(L("article_no_title")) : titleAttributedString(article))
                         .font(article.is_read == 1 ? .body : .body.bold())
-                        .foregroundStyle(article.is_read == 1 ? .secondary : .primary)
+                        .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white) : AnyShapeStyle(article.is_read == 1 ? HierarchicalShapeStyle.secondary : HierarchicalShapeStyle.primary))
                         .lineLimit(2, reservesSpace: true)
                     HStack(spacing: 6) {
                         if let feedTitle = home.feedsById[article.feed_id]?.keryxDisplayTitle() {
@@ -294,12 +305,20 @@ struct ArticleListView: View {
                         Text(FormattingKt.formatTimestamp(epochMillis: article.published_at)).lineLimit(1)
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white.opacity(0.8)) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
                 }
                 .padding(.leading, 10)
             }
-            .padding(.vertical, 4)
-            .background(home.selectedArticle?.id == article.id ? Color.accentColor.opacity(0.15) : Color.clear)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(paneFocused
+                            ? Color(nsColor: .selectedContentBackgroundColor)
+                            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+                }
+            }
         }
         .buttonStyle(.plain)
         .selectsOnContextMenu(id: article.id) { selectForContextMenu(article) }
