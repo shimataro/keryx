@@ -269,7 +269,9 @@ xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
 `:shared:assembleKeryxSharedReleaseXCFramework` and `:composeApp:generateStringCatalog`
 automatically before each Xcode/`xcodebuild` build, so a plain build picks up the current Kotlin
 source without a separate manual step — there is no Debug variant of the XCFramework wired in;
-every configuration links Release. See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
+every configuration links Release. On a clean checkout, though, Xcode checks that the release
+XCFramework exists while planning the build — before the prebuild script has run — so run
+`./gradlew :shared:assembleKeryxSharedReleaseXCFramework` once first (CI does the same). See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
 Xcode project" for why the dependency is wired through `dependencies:` (framework linking) rather
 than `FRAMEWORK_SEARCH_PATHS` or Kotlin/Native's `embedAndSignAppleFrameworkForXcode`, and why
 `KeryxTests` is a standalone (non-hosted) test bundle.

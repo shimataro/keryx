@@ -105,6 +105,12 @@ jobs:
         shell: bash
         run: |
           brew install xcodegen
+          # Xcode checks that the release XCFramework exists while planning the build, before the
+          # target's prebuild script (Scripts/build-shared.sh) gets to assemble it, so on a fresh
+          # checkout it must already be there — and before `xcodegen generate`, which otherwise
+          # generates the project without the framework reference. The prebuild's own Gradle run
+          # is then up-to-date.
+          ./gradlew :shared:assembleKeryxSharedReleaseXCFramework --no-configuration-cache
           cd appleApp
           xcodegen generate
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
