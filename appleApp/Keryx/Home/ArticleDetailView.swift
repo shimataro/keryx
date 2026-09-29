@@ -100,10 +100,10 @@ struct ArticleDetailView: View {
         if let feedName {
             HStack(spacing: 6) {
                 FaviconView(url: feedFaviconUrl, letter: feedName.first)
-                    .frame(width: 16, height: 16)
+                    .frame(width: 18, height: 18)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 Text(feedName)
-                    .font(.subheadline)
+                    .font(.title3)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
