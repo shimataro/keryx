@@ -115,19 +115,22 @@ struct ArticleDetailView: View {
 
     /// Favicon + feed name as plain text, matching Compose's reader top bar
     /// (`ArticleDetailPane.kt`'s `titleContent`): a letter avatar when there is no favicon URL.
+    /// A `Label` so the toolbar's overflow menu (at a narrow width) shows the feed name, not just the
+    /// favicon; `.titleAndIcon` keeps both visible in the toolbar itself.
     @ViewBuilder
     private var feedHeader: some View {
         if let feedName {
-            HStack(spacing: 6) {
-                FaviconView(url: feedFaviconUrl, letter: feedName.first)
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            Label {
                 Text(feedName)
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            } icon: {
+                FaviconView(url: feedFaviconUrl, letter: feedName.first)
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
             }
-            .accessibilityElement(children: .combine)
+            .labelStyle(.titleAndIcon)
         }
     }
 
