@@ -100,6 +100,18 @@ final class HomeObservable {
         copyPulse += 1
     }
 
+    /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including
+    /// the sync that follows it, or a refresh/sync already in flight — has finished, so a
+    /// `.refreshable` indicator stays up exactly as long as Compose's own `pullRefreshing` does
+    /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`.
+    func pullToRefresh() async {
+        let filter = filter as AnyObject
+        viewModel.pullToRefresh()
+        for await pending in viewModel.pullRefreshingFilters {
+            if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+        }
+    }
+
     /// Starts every field's observation loop concurrently. Call once from a `.task` on the view
     /// that owns this object; the task's cancellation (the view disappearing) cancels every loop
     /// below with it, since each `async let` is a structured child task of this function.

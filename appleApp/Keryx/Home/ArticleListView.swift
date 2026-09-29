@@ -187,13 +187,28 @@ struct ArticleListView: View {
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
-            ContentUnavailableView(
-                L("home_no_articles"),
-                systemImage: "doc.text"
-            )
+            noArticlesView
         } else {
             articleList
+                .modifier(PullToRefreshModifier(home: home))
         }
+    }
+
+    /// Scrollable on iOS so an empty list can still be pulled to refresh (`external-spec.md` §9:
+    /// "The gesture works on an empty list too", e.g. unread-only with nothing unread).
+    @ViewBuilder
+    private var noArticlesView: some View {
+        let emptyState = ContentUnavailableView(L("home_no_articles"), systemImage: "doc.text")
+        #if os(iOS)
+        GeometryReader { geometry in
+            ScrollView {
+                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
+            }
+            .modifier(PullToRefreshModifier(home: home))
+        }
+        #else
+        emptyState
+        #endif
     }
 
     /// Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`: a query with no
@@ -324,6 +339,25 @@ struct ArticleListView: View {
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
         proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
+    }
+}
+
+/// Pull-to-refresh on iOS (`external-spec.md` §9), scoped to the current selection's feeds and held
+/// up until the refresh and its sync finish — see `HomeObservable.pullToRefresh`. macOS has no pull
+/// gesture, as Compose's desktop list has none.
+private struct PullToRefreshModifier: ViewModifier {
+    let home: HomeObservable
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if PullToRefreshAvailability.isAvailable(searchActive: home.searchActive, hasFeeds: !home.feeds.isEmpty) {
+            content.refreshable { await home.pullToRefresh() }
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 
