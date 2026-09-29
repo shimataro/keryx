@@ -122,6 +122,7 @@ targets:
       - path: Keryx/Bridge/OpmlTransferObservable.swift
       - path: Keryx/Platform/Localized.swift
       - path: Keryx/Platform/DockBadge.swift
+      - path: Keryx/Bridge/ArticleRowModel.swift
     # KeryxShared statically linked (same as the Keryx target's own dependency) so
     # FeedListSelectionEqualityTests can build real Kotlin sealed-type values directly, rather than
     # faking their shape — the xcframework is already built by the time this runs, since the `Keryx`

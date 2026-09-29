@@ -48,6 +48,11 @@ final class HomeObservable {
     private(set) var canHideRead: Bool = false
 
     private(set) var articles: [ArticleListRow] = []
+    /// `articles` / `searchResults` resolved into display rows — see `ArticleRowModel`. Rebuilt
+    /// once per emission of either (or of `feeds`, whose titles and favicons the rows show), never
+    /// per body evaluation.
+    private(set) var articleRows = ArticleRowList.empty
+    private(set) var searchRows = ArticleRowList.empty
     private(set) var newArticleCount: Int = 0
 
     private(set) var selectedArticle: Articles?
@@ -133,6 +138,8 @@ final class HomeObservable {
         for await v in viewModel.feeds {
             feeds = v
             feedsById = Dictionary(uniqueKeysWithValues: v.map { ($0.id, $0) })
+            rebuildArticleRows()
+            rebuildSearchRows()
         }
     }
 
@@ -201,7 +208,10 @@ final class HomeObservable {
     }
 
     private func observeSearchResults() async {
-        for await v in viewModel.searchResults { searchResults = v }
+        for await v in viewModel.searchResults {
+            searchResults = v
+            rebuildSearchRows()
+        }
     }
 
     private func observePendingSearchFocus() async {
@@ -221,7 +231,35 @@ final class HomeObservable {
     }
 
     private func observeArticles() async {
-        for await v in viewModel.articles { articles = v }
+        for await v in viewModel.articles {
+            articles = v
+            rebuildArticleRows()
+        }
+    }
+
+    private func rebuildArticleRows() {
+        let feedRows = feedRowInfo()
+        let zone = Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault()
+        articleRows = ArticleRowList(rows: articles.map { row in
+            let feed = feedRows[row.feed_id]
+            return ArticleRowModel(row: row, markedTitle: nil, feedTitle: feed?.title, faviconUrl: feed?.faviconUrl, zone: zone)
+        })
+    }
+
+    private func rebuildSearchRows() {
+        let feedRows = feedRowInfo()
+        let zone = Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault()
+        searchRows = ArticleRowList(rows: searchResults.map { result in
+            let row = result.article
+            let feed = feedRows[row.feed_id]
+            return ArticleRowModel(row: row, markedTitle: result.titleMarked, feedTitle: feed?.title, faviconUrl: feed?.faviconUrl, zone: zone)
+        })
+    }
+
+    /// Each feed's display title and favicon URL, read across the bridge once per rebuild rather
+    /// than once per row.
+    private func feedRowInfo() -> [String: (title: String, faviconUrl: String?)] {
+        feedsById.mapValues { ($0.displayTitle(), $0.favicon_url) }
     }
 
     private func observeNewArticleCount() async {
