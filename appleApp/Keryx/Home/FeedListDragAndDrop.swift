@@ -83,21 +83,14 @@ extension View {
     ///
     /// `enabled` is off while the row's name is being edited in place, so a press-and-sweep to select
     /// text isn't taken as a row drag (Compose's `feedListReorderDrag(enabled = inlineEdit == null)`).
-    @ViewBuilder
+    /// Disabling passes `nil` to `.itemProvider` rather than branching around it, so the row keeps
+    /// its view identity when an edit starts or ends instead of being rebuilt underneath the editor.
     func feedListDraggable(
         _ item: FeedListDragPayload,
         draggingItem: Binding<FeedListDragPayload?>,
         enabled: Bool = true
     ) -> some View {
-        if enabled {
-            feedListDraggableProvider(item, draggingItem: draggingItem)
-        } else {
-            self
-        }
-    }
-
-    private func feedListDraggableProvider(_ item: FeedListDragPayload, draggingItem: Binding<FeedListDragPayload?>) -> some View {
-        itemProvider {
+        itemProvider(enabled ? {
             draggingItem.wrappedValue = item
             let provider = NSItemProvider()
             let data = try? JSONEncoder().encode(item)
@@ -109,7 +102,7 @@ extension View {
                 return nil
             }
             return provider
-        }
+        } : nil)
     }
 }
 

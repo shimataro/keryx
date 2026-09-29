@@ -68,8 +68,11 @@ struct HomeView: View {
         // Mirrors into `HomeObservable` so `HomeCommands.menuState` (a different `View` entirely,
         // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
         // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.
-        .onChange(of: focusedPane, initial: true) { _, pane in
-            home.textInputFocused = pane == .search || pane == .rowNameEditor
+        .onChange(of: focusedPane, initial: true) { _, _ in
+            home.textInputFocused = textInputFocused
+        }
+        .onChange(of: sidebarDialogs.isEditingInline) { _, _ in
+            home.textInputFocused = textInputFocused
         }
         // Restored on next launch by the `.onAppear` above — matches Compose's own
         // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
@@ -116,6 +119,13 @@ struct HomeView: View {
         }
     }
 
+    /// Whether a text input holds keyboard focus: the search field, or a row's in-place name editor
+    /// (`isEditingInline` — on macOS that editor's focus is not visible through `focusedPane`, see
+    /// `RenameTextField`).
+    private var textInputFocused: Bool {
+        focusedPane == .search || focusedPane == .rowNameEditor || sidebarDialogs.isEditingInline
+    }
+
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
         guard let (key, modifiers) = mapKey(press) else { return .ignored }
         guard let shortcut = HomeShortcutsKt.homeShortcutFor(
@@ -124,7 +134,7 @@ struct HomeView: View {
             // The sidebar's `.searchable` field reports its focus through this same `focusedPane`
             // via `.searchFocused` on macOS 15 / iOS 18+; before that its focus cannot be seen, so
             // this stays false there — see `FeedListView`'s `SearchFocusModifier`.
-            textInputFocused: focusedPane == .search || focusedPane == .rowNameEditor,
+            textInputFocused: textInputFocused,
             // Ctrl+Shift+R belongs to the Feed menu's "Refresh selected feed" item on desktop
             // Compose (`AppMenuTree.kt`), not the sidebar-refresh key touch-only platforms bind it
             // to — see `HomeCommands.swift`'s `refreshSelectedFeed`.

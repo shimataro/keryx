@@ -28,7 +28,8 @@ struct HomeCommands: Commands {
     /// reader holds focus, would trigger the sidebar's rename/delete instead of editing text or doing
     /// nothing, acting on whatever the sidebar happens to have selected underneath.
     private var bareKeysActive: Bool {
-        focusedPane.flatMap { $0 } == .feedList && !model.sidebarDialogs.isPresenting
+        focusedPane.flatMap { $0 } == .feedList
+            && !model.sidebarDialogs.isPresenting && !model.sidebarDialogs.isEditingInline
     }
 
     var body: some Commands {

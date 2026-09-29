@@ -45,4 +45,18 @@ struct SidebarDialogStateTests {
         state.startRename(FeedListRowSelectionFolder(folderId: "d1"))
         #expect(!state.isPresenting)
     }
+
+    /// `isEditingInline` is what stands the Feed menu's bare Return/Delete down while the editor is
+    /// open (`HomeCommands.bareKeysActive`), so it must follow the edit exactly.
+    @Test
+    func isEditingInlineFollowsTheEdit() {
+        let state = SidebarDialogState()
+        #expect(!state.isEditingInline)
+        state.startRename(FeedListRowSelectionStarred())
+        #expect(!state.isEditingInline)
+        state.startRename(FeedListRowSelectionFeedInTag(feedId: "f1", tagId: "t1"))
+        #expect(state.isEditingInline)
+        state.renamingRowKey = nil
+        #expect(!state.isEditingInline)
+    }
 }

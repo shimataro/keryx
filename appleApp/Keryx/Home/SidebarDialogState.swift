@@ -14,9 +14,8 @@ final class SidebarDialogState {
     /// The `feedListRowSelectionKey` of the one row whose name is being edited in place — a key
     /// rather than a folder/tag/feed, since the same feed can be rendered under its folder and under
     /// an expanded tag and only the row that was asked for turns into an editor (Compose's own
-    /// `InlineEditTarget.Feed(feedId, tagId)`). Not a sheet, so `isPresenting` ignores it: an open
-    /// editor holds real focus (`HomeFocusedPane.rowNameEditor`), which is what stands the bare
-    /// Return/Delete accelerators down.
+    /// `InlineEditTarget.Feed(feedId, tagId)`). Not a sheet, so `isPresenting` ignores it; it is
+    /// `isEditingInline` that stands the bare Return/Delete accelerators down.
     var renamingRowKey: String?
     var deletingFolder: Folders?
     var deletingTag: Tags?
@@ -37,6 +36,12 @@ final class SidebarDialogState {
         case .folder, .tag, .feedInFolderGroup, .feedInTag: renamingRowKey = feedListRowSelectionKey(instance)
         }
     }
+
+    /// Whether a row's name is being edited in place — the field holds keyboard focus, so bare
+    /// Return/Delete must reach it instead of the Feed menu's rename/delete. Tracked here rather than
+    /// read off `focusedPane`: on macOS the editor is an AppKit field that takes focus itself, and the
+    /// sidebar's `.feedList` binding may keep reading `.feedList` while it is typed in.
+    var isEditingInline: Bool { renamingRowKey != nil }
 
     /// Whether any of the above sheets/alerts is currently on screen — gates the Feed menu's bare
     /// Return/Delete accelerators (`HomeCommands.bareKeysActive`) so, say, Backspace inside
