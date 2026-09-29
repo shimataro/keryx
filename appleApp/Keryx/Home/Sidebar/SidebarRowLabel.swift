@@ -14,6 +14,8 @@ struct SidebarRowLabel<IconPopover: View>: View {
     /// (`FeedListPane.kt`'s `clickable(onClickLabel = colorLabel)`), without also changing the list
     /// selection. `nil` leaves the dot inert.
     var onIconTap: (() -> Void)?
+    /// The color of a `.symbol` icon — `nil` leaves it to the enclosing list's own styling.
+    var symbolTint: Color?
     /// A popover anchored on the icon (the tag color picker), when the row presents one itself.
     var iconPopoverPresented: Binding<Bool>?
     @ViewBuilder var iconPopover: () -> IconPopover
@@ -51,7 +53,11 @@ struct SidebarRowLabel<IconPopover: View>: View {
     private var iconView: some View {
         switch icon {
         case .symbol(let name):
-            Image(systemName: name)
+            if let symbolTint {
+                Image(systemName: name).foregroundStyle(symbolTint)
+            } else {
+                Image(systemName: name)
+            }
         case .favicon(let url):
             FaviconView(url: url, letter: title.first)
                 .frame(width: 16, height: 16)
@@ -80,11 +86,12 @@ extension SidebarRowLabel where IconPopover == EmptyView {
         isErroring: Bool = false,
         isGone: Bool = false,
         editor: InlineRenameField? = nil,
-        onIconTap: (() -> Void)? = nil
+        onIconTap: (() -> Void)? = nil,
+        symbolTint: Color? = nil
     ) {
         self.init(
             title: title, icon: icon, isErroring: isErroring, isGone: isGone, editor: editor,
-            onIconTap: onIconTap, iconPopoverPresented: nil, iconPopover: { EmptyView() }
+            onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
         )
     }
 }

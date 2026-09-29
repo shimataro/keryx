@@ -40,6 +40,7 @@ func applyFeedListDropAction(_ action: FeedListDropAction, home: HomeObservable)
     }
 }
 
+#if os(macOS)
 extension View {
     /// Makes this folder row, tag row or "No folder" header a target a dragged feed is dropped
     /// *onto* (moved into that folder or the unfoldered group, or tagged), sharing the pane-wide
@@ -187,3 +188,4 @@ private struct FeedListDropOnDelegate: DropDelegate {
         return feedback
     }
 }
+#endif

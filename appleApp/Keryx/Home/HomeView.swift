@@ -141,7 +141,7 @@ struct HomeView: View {
         case .feedList: return "FeedList"
         case .articleList: return "ArticleList"
         case .reader: return "ArticleDetail"
-        case .search, .rowNameEditor, nil: return nil
+        case .search, nil: return nil
         }
     }
 
@@ -206,7 +206,7 @@ struct HomeView: View {
     /// (`isEditingInline` — on macOS that editor's focus is not visible through `focusedPane`, see
     /// `RenameTextField`).
     private var textInputFocused: Bool {
-        focusedPane == .search || focusedPane == .rowNameEditor || sidebarDialogs.isEditingInline
+        focusedPane == .search || sidebarDialogs.isEditingInline
     }
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
@@ -236,16 +236,16 @@ struct HomeView: View {
             // results reappearing on the next keystroke.
             return .ignored
         case .up:
+            // A row's name editor is a single-line field: ↑/↓ have no use there, and must not move
+            // the selection out from under it (`homeShortcutFor` still reports them while a text
+            // input is focused, for the search field's hand-off below).
+            if sidebarDialogs.isEditingInline { return .ignored }
             switch focusedPane {
             case .feedList: moveFeedListSelection(by: -1)
             // The native WebView reader handles its own scrolling once it holds real focus (see
             // "Article Reader (native WebView)" in app-architecture.md) — never change the
             // selection out from under it.
             case .reader: return .ignored
-            // The row name editor is a single-line field: ↑/↓ have no use there, and must not move
-            // the article selection out from under it (`homeShortcutFor` still reports them while a
-            // text input is focused, for the search field's hand-off just below).
-            case .rowNameEditor: return .ignored
             // Descends into the results list rather than moving the sidebar's own selection, even
             // though the field visually sits in the sidebar — matches Compose's own
             // `moveArticleSelectionFromSearchField` (`HomeScreen.kt`).
@@ -253,9 +253,10 @@ struct HomeView: View {
             default: home.viewModel.selectPrevious()
             }
         case .down:
+            if sidebarDialogs.isEditingInline { return .ignored }
             switch focusedPane {
             case .feedList: moveFeedListSelection(by: 1)
-            case .reader, .rowNameEditor: return .ignored
+            case .reader: return .ignored
             case .search: moveArticleSelectionFromSearchField(by: 1)
             default: home.viewModel.selectNext()
             }

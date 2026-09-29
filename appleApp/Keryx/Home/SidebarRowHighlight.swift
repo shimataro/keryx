@@ -18,37 +18,21 @@ enum SidebarRowHighlight: Equatable {
     static let echoAlpha = 0.15
 }
 
+#if os(macOS)
 extension View {
-    /// Paints `highlight` behind a sidebar row. On macOS it is drawn by the row's own
-    /// `NSTableRowView` (see `SidebarRowHighlightAnchorView`), so it has exactly the native
-    /// selection's shape — full row width including the unread badge, the system's insets and corner
-    /// radius, and the row height the Sidebar icon size setting picks — which a background on the
-    /// row's content could never match.
+    /// Paints `highlight` behind a sidebar row. It is drawn by the row's own `NSTableRowView` (see
+    /// `SidebarRowHighlightAnchorView`), so it has exactly the native selection's shape — full row
+    /// width including the unread badge, the system's insets and corner radius, and the row height
+    /// the Sidebar icon size setting picks — which a background on the row's content could never
+    /// match. (The iOS sidebar paints it in its cells' background configuration instead.)
     func sidebarRowHighlight(_ highlight: SidebarRowHighlight) -> some View {
         foregroundStyle(highlight == .drop ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
             // Keeps the row's content (and so its drop target) spanning the row's width.
             .frame(maxWidth: .infinity, alignment: .leading)
-            #if os(macOS)
             .background(SidebarRowHighlightAnchor(highlight: highlight))
-            #else
-            .listRowBackground(highlight.listRowColor)
-            #endif
     }
 }
 
-#if !os(macOS)
-private extension SidebarRowHighlight {
-    var listRowColor: Color? {
-        switch self {
-        case .none: nil
-        case .echo: Color.accentColor.opacity(Self.echoAlpha)
-        case .drop: Color.accentColor
-        }
-    }
-}
-#endif
-
-#if os(macOS)
 /// A zero-size view in the row's content whose only job is to find the enclosing `NSTableRowView`
 /// and drive the highlight view inserted into it.
 private struct SidebarRowHighlightAnchor: NSViewRepresentable {

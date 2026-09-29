@@ -1248,7 +1248,7 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
 サイドバーは標準のソースリストである。`.sidebar` スタイルの `List(selection:)` を使い、フォルダーとタグは
 `DisclosureGroup`、行は未読数を `.badge` で出す `Label` にしている。そのため、行の高さ、フォント、アイコンサイズ
 （システムの「サイドバーのアイコンサイズ」設定）、選択の形、開閉三角、インデントは、メモアプリや Finder と同じく
-すべて `NSOutlineView` が描く（`Home/FeedListView.swift`）。標準の選択は、行のキーを介して共有の選択に接続する
+すべて `NSOutlineView` が描く（`Home/FeedListView+SourceList.swift`）。標準の選択は、行のキーを介して共有の選択に接続する
 （`feedListRowSelection(forKey:in:)`）。←/→ はペイン移動のまま保つため（`external-spec.md` §9）、アウトライン
 標準の開閉より先に横取りしている。
 
@@ -1271,6 +1271,46 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
 - フィードバック：行間には挿入線（インデントはアウトライン自身が付ける）、フィードを落とすフォルダー・「フォルダーなし」・
   タグの行にはアクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムの
   スプリングロード設定に従うスプリングロードフォルダー。
+
+### サイドバー（iOS）
+
+iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectionView` のリストで描く
+（`Home/Sidebar/SidebarCollectionView.swift`、`UIViewControllerRepresentable` で包む）。サイドバー自身が
+コレクションビューのデリゲートを持つためで、理由はドラッグ＆ドロップにある（後述）。`FeedListView` は両プラット
+フォーム共通の外枠（ツールバー、`.searchable` の検索欄、シート、アラート、名前変更の自動キャンセル）を持ったまま、
+行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。
+
+- **データの流れ。** `FeedListView.body` が `SidebarRenderState` を作る。中身は `SidebarOutline`（セクションごとの
+  木構造と展開状態）、各行の `SidebarRowContent`（タイトル、アイコン、未読数、エラー状態、エコーのハイライト、名前
+  変更中か）、表示する選択、名前変更中・色選択中のキーで、どれも `Home/Sidebar/` にある UIKit に依存しない
+  モデルから作り、`KeryxTests` でテストしている。コントローラーはこれを 3 段で反映する。構造が違うセクションの
+  スナップショットだけを適用し、次に内容が変わった行だけをその場で再構成し（スクロール位置や、入力途中の名前など
+  セル内の SwiftUI の状態が残る）、最後に選択を合わせる。アイテムは文字列だけで作る `SidebarItemID` で、
+  diffable data source が求める `Sendable` を満たす。
+- **セクションとヘッダー。** グループは macOS と同じで、すべて／スター付き（ヘッダーなし）、フォルダー、常にある
+  「フォルダーなし」、タグ。ヘッダーは補助ビューではなくセクションの*先頭のアイテム*にする
+  （`headerMode = .firstItemInSection`）。ドロップ先にできるのはアイテムだけだからである。フォルダーとタグの
+  ヘッダーはヘッダー型のアウトライン開閉で畳め、macOS と同じ `@AppStorage` のフラグを使う。フォルダーとタグの行は
+  セル型の開閉なので、行をタップすると選択になり、シェブロンだけが開閉する。開閉は
+  `toggleFolderCollapsed`/`toggleTagExpanded` に渡し、ビューモデルが新しい状態を出すまでは要求した状態を
+  覚えておく。その間に別の更新が来ても行が畳み戻らないようにするためである。
+- **行。** 各行は `UICollectionViewListCell` で、共通の `SidebarRowLabel` を `UIHostingConfiguration` で載せる。
+  未読数は `UICellAccessory.label`。幅が compact のときは inset grouped、regular のときはサイドバーの見た目に
+  なる。背景の設定で、標準の選択、選択中のフィルターの別のコピーに付けるエコー（`SidebarRowHighlight.echoAlpha`）、
+  ドラッグ中のドロップ先を描き、載せた内容はその状態でシステムのセルが使う文字色に合わせる。タップは `List` の
+  ときと同じ `CompactSidebarSelection` のルールで処理する。
+- **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
+  （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
+  同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。行の選択は、
+  UIKit が最初にメニューを求めたときではなく、実際にメニューが出るとき（`willDisplayContextMenu`）に行う。
+  ドラッグに変わる長押しでもメニューは求められるからである。
+- **インラインの名前変更**は同じ `InlineRenameField` を使い、iOS では自前の `@FocusState` でフォーカスを管理する。
+  セルは別のホスティングツリーで、`HomeView` の `focusedPane` が届かないためである。別の行をタップすると先に編集を
+  終えて確定する。名前変更中の行は選択もドラッグもできない。
+- **タグの色の選択**は `TagColorPicker` を UIKit のポップオーバーに載せ、コントローラーがタグのセルから表示する。
+  表示は `SidebarDialogState.colorPickingTagId` で決まる（色の丸とメニューの「色を変更」がこれを設定する）。
+- UI テストはアクセシビリティ識別子で行を探す。行は `feedListRowSelectionKey`、ヘッダーは `header:<section>`。
+  矢印キーは macOS と同じく `HomeView` のキー処理が受け持つ（コレクションビューは `allowsFocus = false`）。
 
 ### `KeryxSdk`：Swift からの入口
 

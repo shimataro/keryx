@@ -23,24 +23,26 @@ struct FeedListView: View {
     /// Pushes the article list when the split view is collapsed (iPhone); a no-op otherwise.
     let onOpenArticleList: () -> Void
 
-    /// Rows currently on screen, keyed by `feedListRowSelectionKey` — read by the scroll-to-
-    /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
-    @State var appearedRowKeys: Set<String> = []
-
     /// Whether the Folders / Tags section headers are expanded. Native-only view state (Compose has
     /// no equivalent), kept apart from the per-folder / per-tag disclosure state in `home`.
     @AppStorage("sidebar.foldersExpanded") var foldersExpanded = true
     @AppStorage("sidebar.tagsExpanded") var tagsExpanded = true
+
+    #if os(macOS)
+    /// Rows currently on screen, keyed by `feedListRowSelectionKey` — read by the scroll-to-
+    /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
+    @State var appearedRowKeys: Set<String> = []
 
     // Drag-and-drop state: the item being dragged, and which row a dragged feed is over for the
     // drop-onto highlight and spring-loading — mirrors Compose's own
     // `draggedFeedIdState`/`hoveredAttachTagIdState` (`FeedListDragController.kt`). Insertion
     // between rows is the outline's own `.onInsert`, which draws the insertion line itself. See
     // `FeedListDragAndDrop.swift` for the drop wiring and `FeedListDropPresentation.swift` for the
-    // rules behind it.
+    // rules behind it. The iOS sidebar keeps its drag state in its collection view instead.
     @State var draggingItem: FeedListDragPayload?
     @State var dropOnKey: FeedListHoverKey?
     @State var hoveredKey: FeedListHoverKey?
+    #endif
 
     var selectedRowKey: String { feedListRowSelectionKey(home.selectedRowInstance) }
 
@@ -50,26 +52,7 @@ struct FeedListView: View {
     var dropIndex: FeedListDropIndex { sidebar.dropIndex }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                listContent
-                    .listStyle(.sidebar)
-                    .focused(focusedPane, equals: .feedList)
-                    // Only when the selection actually moved off-screen (arrow-key navigation, a
-                    // restored selection) — mirrors the article list's own scroll-to-selection
-                    // effect (`ArticleListView.body`) and Compose's `FeedListPane.kt:370-373`.
-                    .onChange(of: selectedRowKey, initial: false) { _, key in
-                        guard !appearedRowKeys.contains(key) else { return }
-                        proxy.scrollTo(key)
-                    }
-                    // Starting an in-place rename scrolls its row into view, like Compose's
-                    // `LaunchedEffect(inlineEdit)` (`FeedListPane.kt`).
-                    .onChange(of: dialogs.renamingRowKey) { _, key in
-                        guard let key, !appearedRowKeys.contains(key) else { return }
-                        proxy.scrollTo(key)
-                    }
-            }
-        }
+        rows
         .toolbar { toolbarContent }
         // The system search field. Its focus is reported into `focusedPane` (for ⌘F, the
         // `textInputFocused` guard and the ↓/↑ hand-off into the results — see `HomeScreen.kt`'s
@@ -77,6 +60,7 @@ struct FeedListView: View {
         // where `.searchFocused(_:equals:)` exists; earlier systems get the field without them.
         .searchable(text: searchQueryBinding, placement: .sidebar, prompt: L("home_search_placeholder"))
         .modifier(SearchFocusModifier(focusedPane: focusedPane))
+        #if os(macOS)
         // Spring-loaded folder: holding a dragged feed over a collapsed folder opens it after a
         // short pause, so its feeds become reachable drop targets mid-drag — matches Compose's own
         // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListDragAndDrop.kt`). The pause and
@@ -93,6 +77,7 @@ struct FeedListView: View {
                 withAnimation { home.viewModel.toggleFolderCollapsed(folderId: folderId) }
             }
         }
+        #endif
         .modifier(SidebarCreateSheets(home: home, dialogs: dialogs))
         // Ends an in-place rename whose row stopped being rendered — deleted, removed by a sync
         // merge, or a tag/folder collapsed over it — otherwise confirming would write to a row that
@@ -112,6 +97,39 @@ struct FeedListView: View {
             focusedPane.wrappedValue = .search
             home.viewModel.consumeSearchFocusRequest()
         }
+    }
+
+    /// The rows themselves: the native source list on macOS (`FeedListView+SourceList.swift`), a
+    /// UIKit collection view on iOS (`SidebarCollectionView`) — see "Sidebar" in
+    /// `docs/app-architecture.md` for why the two differ.
+    @ViewBuilder
+    private var rows: some View {
+        #if os(macOS)
+        ScrollViewReader { proxy in
+            listContent
+                .listStyle(.sidebar)
+                .focused(focusedPane, equals: .feedList)
+                // Only when the selection actually moved off-screen (arrow-key navigation, a
+                // restored selection) — mirrors the article list's own scroll-to-selection
+                // effect (`ArticleListView.body`) and Compose's `FeedListPane.kt:370-373`.
+                .onChange(of: selectedRowKey, initial: false) { _, key in
+                    guard !appearedRowKeys.contains(key) else { return }
+                    proxy.scrollTo(key)
+                }
+                // Starting an in-place rename scrolls its row into view, like Compose's
+                // `LaunchedEffect(inlineEdit)` (`FeedListPane.kt`).
+                .onChange(of: dialogs.renamingRowKey) { _, key in
+                    guard let key, !appearedRowKeys.contains(key) else { return }
+                    proxy.scrollTo(key)
+                }
+        }
+        #else
+        SidebarCollectionView(state: collectionState, actions: collectionActions)
+            .ignoresSafeArea()
+            .focusable()
+            .focusEffectDisabled()
+            .focused(focusedPane, equals: .feedList)
+        #endif
     }
 
     var orderedRows: [FeedListRowSelection] { sidebar.orderedRows }

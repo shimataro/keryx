@@ -11,9 +11,9 @@ import SwiftUI
 ///   cannot be committed unless `allowBlank`; `blockingError` (a duplicate name) paints the frame red.
 ///
 /// While it is open, `SidebarDialogState.isEditingInline` is what makes the window's bare-key
-/// shortcuts and the Feed menu's Return/Delete accelerators stand aside. On iOS it also reports its
-/// focus as `HomeFocusedPane.rowNameEditor`; on macOS the input is an AppKit field that takes focus
-/// itself (see `RenameTextField` for why), so `focusedPane` never reads `.rowNameEditor` there.
+/// shortcuts and the Feed menu's Return/Delete accelerators stand aside. Neither platform reports the
+/// field through `focusedPane`: on macOS the input is an AppKit field that takes focus itself (see
+/// `RenameTextField` for why), and on iOS it sits in a collection-view cell's own hosting tree.
 struct InlineRenameField: View {
     let initialName: String
     /// Shown while the field is empty — the title a blanked feed name falls back to.
@@ -32,6 +32,11 @@ struct InlineRenameField: View {
     @State private var finished = false
     #if os(macOS)
     @State private var fieldHandle = RenameTextFieldHandle()
+    #else
+    /// The field's own focus. The iOS sidebar hosts each row in a collection-view cell — a hosting
+    /// tree of its own, which `HomeView`'s `focusedPane` cannot reach — so the editor tracks its
+    /// focus itself there.
+    @FocusState private var fieldFocused: Bool
     #endif
 
     init(
@@ -84,7 +89,7 @@ struct InlineRenameField: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .lineLimit(1)
-                .focused(focusedPane, equals: .rowNameEditor)
+                .focused($fieldFocused)
                 .onSubmit { finish(commit: true, restoreFocus: true) }
                 .onKeyPress(.escape) {
                     finish(commit: false, restoreFocus: true)
@@ -127,14 +132,15 @@ struct InlineRenameField: View {
         .onChange(of: focusedPane.wrappedValue) { _, pane in
             switch pane {
             case .articleList, .reader, .search: finish(commit: true, restoreFocus: false)
-            case .feedList, .rowNameEditor, nil: break
+            case .feedList, nil: break
             }
         }
         #else
-        .task { focusedPane.wrappedValue = .rowNameEditor }
-        // Focus moving anywhere else (another row clicked, another pane) ends the edit.
-        .onChange(of: focusedPane.wrappedValue) { _, pane in
-            if pane != .rowNameEditor { finish(commit: true, restoreFocus: false) }
+        .task { fieldFocused = true }
+        // Focus moving anywhere else (another row tapped — the sidebar ends editing first — or
+        // another pane) ends the edit.
+        .onChange(of: fieldFocused) { _, focused in
+            if !focused { finish(commit: true, restoreFocus: false) }
         }
         #endif
     }

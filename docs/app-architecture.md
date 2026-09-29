@@ -1251,7 +1251,7 @@ no separate iOS target to keep in sync.
 The sidebar is a native source list — `List(selection:)` in `.sidebar` style, with folders and tags
 as `DisclosureGroup`s and rows as `Label`s with `.badge` unread counts — so row height, font, icon
 size (the system's sidebar icon size setting), selection shape, disclosure triangles and
-indentation all come from `NSOutlineView`, as in Notes and Finder (`Home/FeedListView.swift`). The
+indentation all come from `NSOutlineView`, as in Notes and Finder (`Home/FeedListView+SourceList.swift`). The
 native selection is bridged to the shared one by row key (`feedListRowSelection(forKey:in:)`), and
 ←/→ are taken before the outline's own expand/collapse so they keep moving between panes
 (`external-spec.md` §9).
@@ -1277,6 +1277,52 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
 - Feedback: an insertion line between rows (indented by the outline itself), an accent highlight on
   a folder, "No folder" or tag row a feed is dropped onto, `.forbidden` wherever the shared rules
   resolve no action, and spring-loaded folders that follow the system's spring-loading setting.
+
+### Sidebar (iOS)
+
+The iOS sidebar is a UIKit `UICollectionView` list rather than SwiftUI's `List`
+(`Home/Sidebar/SidebarCollectionView.swift`, wrapped in a `UIViewControllerRepresentable`), so that the
+sidebar owns the collection view's delegates — the reason is drag and drop, see below.
+`FeedListView` keeps the frame both platforms share (toolbar, `.searchable` field, sheets, alerts,
+the rename auto-cancel) and only swaps the rows: the source list under `#if os(macOS)`, the collection
+view on iOS.
+
+- **Data flow.** `FeedListView.body` builds a `SidebarRenderState` — the `SidebarOutline` (each
+  section's tree and which items are expanded), every row's `SidebarRowContent` (title, icon, unread
+  count, error state, echo highlight, whether it is being renamed), the displayed selection and the
+  rename/color-picker keys — from UIKit-free models under `Home/Sidebar/` that `KeryxTests` covers. The
+  controller applies it in three steps: only the section snapshots whose structure differs, then
+  reconfiguring only the rows whose content changed (in place, so scroll position and the SwiftUI
+  state inside a cell, like a half-typed name, survive), then the selection. Items are
+  `SidebarItemID`s built from strings alone, so they are `Sendable` for the diffable data source.
+- **Sections and headers.** The same groups as macOS: All/Starred (no header), Folders, the
+  always-present "No folder", Tags. The headers are the *first item* of their section
+  (`headerMode = .firstItemInSection`), not supplementary views, because only an item can be a drop
+  destination; the Folders and Tags headers collapse with a header-style outline disclosure and keep
+  the same `@AppStorage` flags as macOS. Folder and tag rows carry a cell-style disclosure, so tapping
+  the row selects it and only the chevron expands or collapses it; the toggles feed
+  `toggleFolderCollapsed`/`toggleTagExpanded`, with the requested state held until the view model
+  publishes it so an unrelated update in between cannot fold the row back.
+- **Rows.** Each row is a `UICollectionViewListCell` hosting the shared `SidebarRowLabel` through
+  `UIHostingConfiguration`; the unread count is a `UICellAccessory.label`. The list is inset grouped at
+  a compact width and sidebar-styled at a regular one. The background configuration paints the native
+  selection, the echo of the selected filter's other copies (`SidebarRowHighlight.echoAlpha`) and, while
+  dragging, the drop target; the hosted content takes the text color a system cell would use in that
+  state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did.
+- **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
+  (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
+  macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
+  drag. The row is selected when the menu actually appears (`willDisplayContextMenu`), not when UIKit
+  first asks for it, since a long press that turns into a drag asks too.
+- **In-place rename** uses the same `InlineRenameField`, which on iOS tracks its own `@FocusState`: the
+  cell is a separate hosting tree that `HomeView`'s `focusedPane` cannot reach. Tapping another row ends
+  editing first, which commits the edit; the renaming row can be neither selected nor dragged.
+- **The tag color picker** is `TagColorPicker` in a UIKit popover presented by the controller from the
+  tag's cell, driven by `SidebarDialogState.colorPickingTagId` (the dot and the "Change color" menu item
+  both set it).
+- UI tests find rows by accessibility identifier: the row's `feedListRowSelectionKey`, or
+  `header:<section>` for a header. Arrow keys stay with `HomeView`'s own key handling
+  (`allowsFocus = false` on the collection view), as on macOS.
 
 ### `KeryxSdk`: the Swift entry point
 

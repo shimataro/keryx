@@ -2,8 +2,10 @@ import KeryxShared
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The sidebar's rows as a SwiftUI `List` — the source list itself, apart from `FeedListView`'s
-/// own frame (toolbar, search field, sheets and alerts).
+#if os(macOS)
+/// The macOS sidebar's rows as a SwiftUI `List` — the source list itself, apart from
+/// `FeedListView`'s own frame (toolbar, search field, sheets and alerts). iOS draws its rows with a
+/// collection view instead (`SidebarCollectionView`).
 extension FeedListView {
     /// A native source list — the same `NSOutlineView` sidebar Notes and Finder use — so row
     /// height, font, icon size (System Settings > Appearance > Sidebar icon size), selection shape,
@@ -407,3 +409,4 @@ private struct TagRowLabel: View {
         home.viewModel.selectFilter(filter: instance.filter, instance: instance)
     }
 }
+#endif
