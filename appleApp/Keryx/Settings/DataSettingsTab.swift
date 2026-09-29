@@ -18,14 +18,14 @@ struct DataSettingsTab: View {
                 Text(L("settings_days90")).tag(Optional(90))
                 Text(L("settings_unlimited")).tag(Optional<Int>.none)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             Picker(L("settings_read_timeout"), selection: readTimeoutBinding) {
                 Text(L("settings_seconds10")).tag(Int32(10))
                 Text(L("settings_seconds30")).tag(Int32(30))
                 Text(L("settings_seconds60")).tag(Int32(60))
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             Section(L("settings_data_management")) {
                 HStack {

@@ -20,7 +20,7 @@ struct GeneralSettingsTab: View {
                 Text(L("settings_font_large")).tag(1.2)
                 Text(L("settings_font_xlarge")).tag(1.4)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             Picker(L("settings_refresh_interval"), selection: refreshIntervalBinding(settings)) {
                 Text(L("settings_refresh_min15")).tag(Int32(15))
@@ -29,7 +29,7 @@ struct GeneralSettingsTab: View {
                 Text(L("settings_refresh_hour3")).tag(Int32(180))
                 Text(L("settings_refresh_manual")).tag(Int32(0))
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             Toggle(L("settings_start_minimized"), isOn: startMinimizedBinding(settings))
         }
