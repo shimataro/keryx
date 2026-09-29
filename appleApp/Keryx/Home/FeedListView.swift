@@ -275,9 +275,7 @@ struct FeedListView: View {
     /// its folder group and an expanded tag. The selected row itself is the native list selection,
     /// which already dims while the sidebar lacks focus, as Compose's PRIMARY tone does.
     func highlight(for instance: FeedListRowSelection) -> SidebarRowHighlight {
-        guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance),
-              articleFiltersEqual(instance.filter, home.filter) else { return .none }
-        return .echo
+        SidebarRowContent.highlight(for: instance, selectedRow: home.selectedRowInstance, filter: home.filter)
     }
 }
 

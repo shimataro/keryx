@@ -1,15 +1,5 @@
 import SwiftUI
 
-/// What a sidebar row shows in its icon slot.
-enum SidebarRowIcon: Equatable {
-    /// All / Starred / a folder.
-    case symbol(String)
-    /// A feed: its favicon, or a letter avatar while loading or without one.
-    case favicon(url: String?)
-    /// A tag: its color dot.
-    case tagColor(hex: String?)
-}
-
 /// A sidebar row's content — its title (or in-place name editor), the error indicator and the icon —
 /// without the list-specific decoration around it (selection/drop highlight, unread badge, context
 /// menu, drag and drop), which each sidebar implementation adds itself.
