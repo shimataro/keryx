@@ -15,6 +15,11 @@ struct FeedListView: View {
     let home: HomeObservable
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    /// Whether the split view is collapsed with this sidebar as its topmost column — see
+    /// `CompactSidebarSelection`. Always false on macOS.
+    let sidebarIsTopmost: Bool
+    /// Pushes the article list when the split view is collapsed (iPhone); a no-op otherwise.
+    let onOpenArticleList: () -> Void
 
     /// Rows currently on screen, keyed by `feedListRowSelectionKey` — read by the scroll-to-
     /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
@@ -165,15 +170,22 @@ struct FeedListView: View {
 
     /// Bridges the native `List` selection (row tags) to the shared selection. A `nil` (clicking
     /// empty space, Command-clicking the selected row) or unknown key is ignored, so the sidebar
-    /// always keeps a selection, as Compose's does.
+    /// always keeps a selection, as Compose's does. Collapsed (iPhone), a tap also opens the article
+    /// list — re-tapping the current row included — see `CompactSidebarSelection`.
     private var selectionKeyBinding: Binding<String?> {
         Binding(
-            get: { selectedRowKey },
+            get: {
+                CompactSidebarSelection.displayedKey(selectedKey: selectedRowKey, sidebarIsTopmost: sidebarIsTopmost)
+            },
             set: { key in
-                guard let key, key != selectedRowKey,
+                guard let key,
                       let instance = feedListRowSelection(forKey: key, in: orderedRows) else { return }
-                focusedPane.wrappedValue = .feedList
-                home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+                let tap = CompactSidebarSelection.tap(key: key, selectedKey: selectedRowKey)
+                if tap.changesFilter {
+                    focusedPane.wrappedValue = .feedList
+                    home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+                }
+                if tap.navigates { onOpenArticleList() }
             }
         )
     }

@@ -11,6 +11,9 @@ struct ArticleListView: View {
     let settingsNavigation: SettingsNavigation
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    /// Pushes the reader when the split view is collapsed (iPhone); a no-op otherwise. A row is a
+    /// plain button rather than a `List` selection, so nothing navigates to the reader by itself.
+    let onOpenArticle: () -> Void
 
     /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
     /// source list's selection), on top of the article list holding the pane focus.
@@ -243,6 +246,7 @@ struct ArticleListView: View {
                 onSelect: {
                     focusedPane.wrappedValue = .articleList
                     home.viewModel.selectArticle(article: article.row)
+                    onOpenArticle()
                 },
                 onContextMenuSelect: { selectForContextMenu(article.row) }
             )

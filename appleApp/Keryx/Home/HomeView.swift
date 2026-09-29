@@ -4,7 +4,8 @@ import SwiftUI
 /// The 3-pane Home screen: sidebar (`FeedListView`) / article list (`ArticleListView`) / reader
 /// (`ArticleDetailView`). Desktop/macOS is unconditionally the 3-pane steady state (`external-spec.md`
 /// §9), so — unlike the Compose app, which also serves narrower Android widths — this container has
-/// no narrower-layout branch to reproduce.
+/// no narrower-layout branch of its own. On an iPhone the split view collapses into the system's own
+/// stack (sidebar → article list → reader), navigated through `compactColumn`.
 struct HomeView: View {
     let home: HomeObservable
     let sidebarDialogs: SidebarDialogState
@@ -16,13 +17,36 @@ struct HomeView: View {
     @State private var feedListWidthSaveTask: Task<Void, Never>?
     @State private var articleListWidthSaveTask: Task<Void, Never>?
     @State private var initialFocusApplied = false
+    /// The column shown while the split view is collapsed into a single stack (iPhone, compact
+    /// width). Driven explicitly rather than left to the sidebar `List`'s own selection: an article
+    /// row is a plain button, which never navigates by itself, and re-tapping the current sidebar row
+    /// is no selection change at all. The system writes it back on a back button / edge swipe.
+    @State private var compactColumn: NavigationSplitViewColumn = .sidebar
     #if os(macOS)
     @State private var contextMenuSelectionTracker = ContextMenuSelectionTracker()
+    #else
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
+    /// Whether the collapsed stack is showing the sidebar itself — never on macOS or at a regular
+    /// width, where every column is on screen together.
+    private var sidebarIsTopmost: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .compact && compactColumn == .sidebar
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
-        NavigationSplitView {
-            FeedListView(home: home, dialogs: sidebarDialogs, focusedPane: $focusedPane)
+        NavigationSplitView(preferredCompactColumn: $compactColumn) {
+            FeedListView(
+                home: home,
+                dialogs: sidebarDialogs,
+                focusedPane: $focusedPane,
+                sidebarIsTopmost: sidebarIsTopmost,
+                onOpenArticleList: { compactColumn = .content }
+            )
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.FEED_LIST_PANE_MIN_WIDTH),
                     ideal: CGFloat(preferences.feedListPaneWidth),
@@ -33,7 +57,14 @@ struct HomeView: View {
                     debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(size.width)) }
                 }
         } content: {
-            ArticleListView(home: home, notifications: notifications, settingsNavigation: settingsNavigation, dialogs: sidebarDialogs, focusedPane: $focusedPane)
+            ArticleListView(
+                home: home,
+                notifications: notifications,
+                settingsNavigation: settingsNavigation,
+                dialogs: sidebarDialogs,
+                focusedPane: $focusedPane,
+                onOpenArticle: { compactColumn = .detail }
+            )
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
                     ideal: CGFloat(preferences.articleListPaneWidth),
