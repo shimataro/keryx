@@ -36,6 +36,8 @@ struct SettingsView: View {
                 .tabItem { Label(L("settings_tab_data"), systemImage: "externaldrive") }
                 .tag("data")
         }
+        // A `Form` defaults to checkboxes on macOS; the Compose dialog uses switches (`SwitchRow`).
+        .toggleStyle(.switch)
         .frame(minWidth: 520, minHeight: 420)
         .task { await preferences.startObserving() }
         .task { await cloudSync.startObserving() }
