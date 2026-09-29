@@ -636,7 +636,8 @@ private extension View {
 
 /// Favicon with a letter-avatar fallback while loading or on failure — the SwiftUI equivalent of
 /// the Compose app's Coil3 `AsyncImage` usage (`external-spec.md`'s "Both the feed list and article
-/// list display favicons").
+/// list display favicons"). Decoded images are shared through `FaviconCache`, so a row scrolled back
+/// into view shows its favicon at once instead of reloading it.
 struct FaviconView: View {
     let url: String?
     let letter: Character?
@@ -644,21 +645,33 @@ struct FaviconView: View {
     /// feed list keeps the letter avatar).
     var blankWithoutUrl = false
 
+    /// The image this view loaded, tagged with the URL it was loaded for so a reused view never
+    /// shows the previous URL's image.
+    @State private var loaded: (url: String, image: PlatformImage)?
+
     var body: some View {
         if let url, let parsed = URL(string: url) {
-            AsyncImage(url: parsed) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFit()
-                default:
+            Group {
+                if let image = currentImage(for: url) {
+                    Image(platformImage: image).resizable().scaledToFit()
+                } else {
                     fallback
                 }
+            }
+            .task(id: url) {
+                guard currentImage(for: url) == nil, let image = await FaviconCache.shared.image(for: parsed) else { return }
+                loaded = (url, image)
             }
         } else if blankWithoutUrl {
             Color.clear
         } else {
             fallback
         }
+    }
+
+    private func currentImage(for url: String) -> PlatformImage? {
+        if let loaded, loaded.url == url { return loaded.image }
+        return FaviconCache.shared.cachedImage(for: url)
     }
 
     private var fallback: some View {
