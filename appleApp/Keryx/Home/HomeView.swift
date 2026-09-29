@@ -14,6 +14,7 @@ struct HomeView: View {
     @FocusState private var focusedPane: HomeFocusedPane?
     @State private var feedListWidthSaveTask: Task<Void, Never>?
     @State private var articleListWidthSaveTask: Task<Void, Never>?
+    @State private var initialFocusApplied = false
     #if os(macOS)
     @State private var contextMenuSelectionTracker = ContextMenuSelectionTracker()
     #endif
@@ -49,18 +50,18 @@ struct HomeView: View {
         .task {
             await home.startObserving()
         }
+        .task {
+            await applyInitialFocus()
+        }
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
         .environment(\.contextMenuSelectionTracker, contextMenuSelectionTracker)
         #endif
+        #if os(macOS)
         .onAppear {
-            if focusedPane == nil {
-                focusedPane = HomeView.focusedPane(fromRaw: preferences.localSettings.lastFocusedPane)
-            }
-            #if os(macOS)
             contextMenuSelectionTracker.startMonitoring()
-            #endif
         }
+        #endif
         #if os(macOS)
         .onDisappear {
             contextMenuSelectionTracker.stopMonitoring()
@@ -75,7 +76,7 @@ struct HomeView: View {
         .onChange(of: sidebarDialogs.isEditingInline) { _, _ in
             home.textInputFocused = textInputFocused
         }
-        // Restored on next launch by the `.onAppear` above — matches Compose's own
+        // Restored on next launch by `applyInitialFocus` — matches Compose's own
         // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
         // `HomePane` counterpart (the field lives in the sidebar, not a pane of its own here), so it
         // is never persisted — the previously saved real pane is simply left in place instead.
@@ -111,12 +112,60 @@ struct HomeView: View {
         }
     }
 
-    private static func focusedPane(fromRaw raw: String?) -> HomeFocusedPane {
-        switch raw {
-        case "FeedList": return .feedList
-        case "ArticleList": return .articleList
-        case "ArticleDetail": return .reader
-        default: return .articleList
+    private static func focusedPane(for pane: InitialHomePane) -> HomeFocusedPane {
+        switch pane {
+        case .feedList: return .feedList
+        case .articleList: return .articleList
+        case .articleDetail: return .reader
+        }
+    }
+
+    /// How long the article list / reader may take to show the restored article before the initial
+    /// focus gives up on it and lands on the feed list instead.
+    private static let initialFocusTimeout: Duration = .seconds(2)
+
+    /// Gives the pane `HomeViewModel.initialHomePane` picked keyboard focus once it can actually take
+    /// it. Assigning `focusedPane` while the target is not yet focusable — the article list still
+    /// showing its empty state because `startObserving()` has not delivered the first real rows — is
+    /// silently dropped by SwiftUI, which is what left launch with no pane focused at all.
+    private func applyInitialFocus() async {
+        guard !initialFocusApplied else { return }
+        initialFocusApplied = true
+        var target = HomeView.focusedPane(for: home.viewModel.initialHomePane)
+        // The DB's own answer, since `home.feeds` starts empty before its first real emission.
+        let expectsFeeds = (try? await home.viewModel.hasAnyFeed())?.boolValue
+        let deadline = ContinuousClock.now + HomeView.initialFocusTimeout
+        while !initialFocusReady(target, expectsFeeds: expectsFeeds) {
+            if ContinuousClock.now >= deadline {
+                // The feed list always has a selected row to focus; the restored article never showed up.
+                if target == .feedList { break }
+                target = .feedList
+                continue
+            }
+            try? await Task.sleep(for: .milliseconds(16))
+            if Task.isCancelled { return }
+        }
+        // The target's view may only be laid out on the next pass, so re-assign until it sticks. A
+        // pane that still refuses it (the reader's WebView is an AppKit view, whose focus SwiftUI does
+        // not always track — see `RenameTextField`) falls back towards the feed list, so launch never
+        // ends with no pane focused.
+        let fallbacks: [HomeFocusedPane] = [.reader, .articleList, .feedList]
+        for candidate in fallbacks.drop(while: { $0 != target }) {
+            for _ in 0..<3 {
+                focusedPane = candidate
+                await Task.yield()
+                if focusedPane == candidate { return }
+            }
+        }
+    }
+
+    private func initialFocusReady(_ target: HomeFocusedPane, expectsFeeds: Bool?) -> Bool {
+        switch target {
+        case .articleList, .reader:
+            guard let id = home.selectedArticle?.id else { return false }
+            return home.articles.contains { $0.id == id }
+        default:
+            return expectsFeeds == false || !home.feeds.isEmpty
         }
     }
 

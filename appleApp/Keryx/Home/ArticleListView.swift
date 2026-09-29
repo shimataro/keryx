@@ -30,6 +30,8 @@ struct ArticleListView: View {
 
     @State private var cachedDisplayedRows: [ArticleListRow] = []
     @State private var cachedTitleMarks: [String: String] = [:]
+    /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
+    @State private var didShowFirstRows = false
 
     private var displayedRows: [ArticleListRow] { cachedDisplayedRows }
     private var titleMarks: [String: String] { cachedTitleMarks }
@@ -73,7 +75,19 @@ struct ArticleListView: View {
                     .task(id: home.newArticleCount) {
                         await updatePillShown()
                     }
-                    .onChange(of: home.articles) { _, _ in recacheDisplayedRows() }
+                    .onChange(of: home.articles) { _, _ in
+                        recacheDisplayedRows()
+                        // The article restored from the previous session is already selected before
+                        // any row exists, so the selection-change scroll above never sees it; bring it
+                        // into view once, when the first rows land (after they are laid out).
+                        guard !didShowFirstRows, !displayedRows.isEmpty else { return }
+                        didShowFirstRows = true
+                        guard let id = home.selectedArticle?.id else { return }
+                        Task {
+                            await Task.yield()
+                            proxy.scrollTo(id)
+                        }
+                    }
                     .onChange(of: home.searchResults) { _, _ in recacheDisplayedRows() }
                     .onChange(of: home.searchActive) { _, _ in recacheDisplayedRows() }
             }

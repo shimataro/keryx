@@ -9,3 +9,4 @@ import KeryxShared
 extension AddFeedController: @unchecked Sendable {}
 extension OpmlTransfer: @unchecked Sendable {}
 extension KeryxSdk: @unchecked Sendable {}
+extension HomeViewModel: @unchecked Sendable {}
