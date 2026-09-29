@@ -14,21 +14,32 @@ struct AboutView: View {
             Text(LF("settings_version", appVersion))
                 .foregroundStyle(.secondary)
 
-            // Order and grouping matches Compose's own AboutDialog.kt: support links (website,
-            // project page, contact) first, then the legal documents (terms, privacy, licenses).
-            VStack(spacing: 4) {
-                Link(L("settings_website"), destination: URL(string: L("website_url"))!)
-                Link(L("settings_project_page"), destination: URL(string: projectUrl)!)
-                Link(L("settings_contact"), destination: URL(string: "mailto:\(L("contact_email"))")!)
+            // Order, grouping and spacing match Compose's own AboutDialog.kt: a divider before each
+            // group — support links (website, project page, contact) first, then the legal
+            // documents (terms, privacy, licenses) — with each link's destination as its tooltip.
+            // The first divider takes only bottom padding: this stack's own spacing is its top.
+            Divider().padding(.bottom, 12)
+            VStack(spacing: 12) {
+                link(L("settings_website"), url: L("website_url"))
+                link(L("settings_project_page"), url: projectUrl)
+                link(L("settings_contact"), url: "mailto:\(L("contact_email"))", tooltip: L("contact_email"))
             }
-            VStack(spacing: 4) {
-                Link(L("settings_terms"), destination: URL(string: L("terms_url"))!)
-                Link(L("settings_privacy_policy"), destination: URL(string: L("privacy_policy_url"))!)
-                Link(L("settings_licenses"), destination: URL(string: licensesUrl)!)
+            Divider().padding(.vertical, 12)
+            VStack(spacing: 12) {
+                link(L("settings_terms"), url: L("terms_url"))
+                link(L("settings_privacy_policy"), url: L("privacy_policy_url"))
+                link(L("settings_licenses"), url: licensesUrl)
             }
         }
         .padding(32)
         .frame(width: 360)
+    }
+
+    /// A link row whose hover tooltip shows `tooltip` — its destination unless given (the contact
+    /// row shows the bare address, not the `mailto:` URL, like Compose's `EmailLinkRow`).
+    private func link(_ label: String, url: String, tooltip: String? = nil) -> some View {
+        Link(label, destination: URL(string: url)!)
+            .help(tooltip ?? url)
     }
 
     private var appVersion: String {
