@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Converted by hand from composeApp/src/commonMain/composeResources/drawable/google_drive.xml
+     (Android VectorDrawable, which Xcode can't read). Re-convert if that file changes.
+     The VectorDrawable group applies its scale before its translate, hence the transform order. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="87" height="81" viewBox="0 0 800 741.3696">
+  <defs>
+    <clipPath id="clip">
+      <path d="M63.09,37 C77.716,11.667 114.283,11.666 128.909,37 L173.942,115 C188.568,140.334 170.285,172.001 141.032,172.001 H50.967 C21.714,172.001 3.431,140.334 18.057,115 Z"/>
+    </clipPath>
+    <linearGradient id="yellow" gradientUnits="userSpaceOnUse" x1="193.6" y1="165.6" x2="103.09" y2="111.21">
+      <stop offset="0.09" stop-color="#FFE921"/>
+      <stop offset="1" stop-color="#FEC700"/>
+    </linearGradient>
+    <linearGradient id="blue" gradientUnits="userSpaceOnUse" x1="114.4" y1="181.61" x2="15.53" y2="121.8">
+      <stop offset="0.15" stop-color="#A9A8FF"/>
+      <stop offset="0.33" stop-color="#6D97FF"/>
+      <stop offset="0.48" stop-color="#3186FF"/>
+    </linearGradient>
+    <linearGradient id="green" gradientUnits="userSpaceOnUse" x1="128.88" y1="37.88" x2="28.7" y2="84.64">
+      <stop offset="0.55" stop-color="#0EBC5F"/>
+      <stop offset="0.85" stop-color="#78C9FF"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-62.146701,-86.652356) scale(4.8140532)">
+    <g clip-path="url(#clip)">
+      <path fill="url(#yellow)" d="M206.905,172.02 L115.017,172.02 L96.002,139.086 L141.946,59.508 Z"/>
+      <path fill="url(#blue)" d="M-14.919,172.006 L50.04,59.494 L50.04,59.496 L31.032,92.422 L69.052,92.422 L115,172.004 L-14.918,172.005 Z"/>
+      <path fill="url(#green)" d="M96.007,-20.085 L141.954,59.5 L122.943,92.428 L31.048,92.428 Z"/>
+    </g>
+  </g>
+</svg>

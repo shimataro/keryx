@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Cloud sync tab: provider connect/disconnect/switch, with the four confirmation dialogs, and a
 /// standing "Sync Now" button — mirrors Compose's own `CloudSyncTabContent`/`CloudProviderRow`
-/// (`CloudSyncTab.kt`).
+/// (`CloudSyncTab.kt`). The providers share one `GroupBox`, the counterpart of Compose's own
+/// `SettingsCard` around its provider rows.
 struct CloudSyncSettingsTab: View {
     let oauthCoordinator: OAuthSessionCoordinator
     let cloudSync: CloudSyncObservable
@@ -27,8 +28,13 @@ struct CloudSyncSettingsTab: View {
 
     var body: some View {
         Form {
-            ForEach(cloudSync.availableCloudTypes, id: \.self) { type in
-                row(for: type)
+            GroupBox {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(cloudSync.availableCloudTypes.enumerated()), id: \.element) { index, type in
+                        if index > 0 { Divider() }
+                        row(for: type)
+                    }
+                }
             }
 
             // Explains the rows above, so it sits right under them in the control column.
@@ -88,16 +94,28 @@ struct CloudSyncSettingsTab: View {
         }
     }
 
-    /// The provider name goes in the form's label column, like every other settings row, with its
-    /// actions, status and error stacked in the control column.
+    /// Brand icon and name leading, actions trailing, with the status and error lines stacked
+    /// beneath. The name truncates to one line so the buttons always keep their intrinsic width —
+    /// the same split as Compose's own `CloudProviderRow`.
     private func row(for type: CloudStorageType) -> some View {
-        LabeledContent(brandLabel(type)) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                brandIcon(type)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+                    // Decorative: the name beside it is what VoiceOver reads.
+                    .accessibilityHidden(true)
+                Text(brandLabel(type))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
                 actionButtons(for: type)
-                statusLine(for: type)
-                errorLine(for: type)
             }
+            statusLine(for: type)
+            errorLine(for: type)
         }
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -221,6 +239,17 @@ struct CloudSyncSettingsTab: View {
         case .googleDrive: return "Google Drive"
         case .onedrive: return "OneDrive"
         default: return ""
+        }
+    }
+
+    /// Asset-catalog SVGs: Dropbox/Google Drive hand-converted from Compose's own VectorDrawables,
+    /// OneDrive the official SVG behind Compose's `onedrive.png` (see each SVG's header comment).
+    private func brandIcon(_ type: CloudStorageType) -> Image {
+        switch type {
+        case .dropbox: return Image("dropbox")
+        case .googleDrive: return Image("google_drive")
+        case .onedrive: return Image("onedrive")
+        default: return Image(systemName: "cloud")
         }
     }
 
