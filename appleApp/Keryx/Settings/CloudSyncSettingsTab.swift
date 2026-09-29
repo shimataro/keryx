@@ -27,13 +27,14 @@ struct CloudSyncSettingsTab: View {
 
     var body: some View {
         Form {
-            Text(L("settings_cloud_sync_hint"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             ForEach(cloudSync.availableCloudTypes, id: \.self) { type in
                 row(for: type)
             }
+
+            // Explains the rows above, so it sits right under them in the control column.
+            Text(L("settings_cloud_sync_hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             syncNowButton
         }
@@ -87,18 +88,16 @@ struct CloudSyncSettingsTab: View {
         }
     }
 
-    @ViewBuilder
+    /// The provider name goes in the form's label column, like every other settings row, with its
+    /// actions, status and error stacked in the control column.
     private func row(for type: CloudStorageType) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(brandLabel(type)).font(.headline)
-                Spacer()
+        LabeledContent(brandLabel(type)) {
+            VStack(alignment: .leading, spacing: 4) {
                 actionButtons(for: type)
+                statusLine(for: type)
+                errorLine(for: type)
             }
-            statusLine(for: type)
-            errorLine(for: type)
         }
-        .padding(.vertical, 6)
     }
 
     @ViewBuilder
