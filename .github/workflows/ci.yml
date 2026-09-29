@@ -202,7 +202,7 @@ jobs:
   # `ditto` ones, only run on macOS) and its packaging. Android is not rebuilt here — the `build`
   # job already covers it on Linux, and nothing about it differs by host OS.
   build-macos-desktop:
-    name: Build & Test (macos-latest desktop)
+    name: Build & Test (macos-latest compose)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -298,7 +298,7 @@ jobs:
   # debug frameworks too would add ~5 min without verifying anything the release link and the
   # test-binary links don't already.
   build-apple:
-    name: Build & Test (macos-latest apple)
+    name: Build & Test (macos-latest)
     runs-on: macos-latest
     timeout-minutes: 30
     # Job-level so every Gradle invocation here — including the one Scripts/build-shared.sh makes
