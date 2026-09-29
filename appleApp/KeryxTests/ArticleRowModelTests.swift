@@ -75,4 +75,70 @@ struct ArticleRowModelTests {
         #expect(model(row()) == model(row()))
         #expect(model(row(isRead: 0)) != model(row(isRead: 1)))
     }
+
+    // MARK: - ArticleRowList.build
+
+    private func build(
+        _ rows: [ArticleListRow],
+        feedTitle: String = "Feed",
+        reusing previous: ArticleRowList = .empty,
+        zoneId: String = "UTC"
+    ) -> ArticleRowList {
+        ArticleRowList.build(
+            rows.map { (row: $0, markedTitle: nil) },
+            feedInfo: ["f1": FeedRowInfo(title: feedTitle, faviconUrl: nil)],
+            reusing: previous,
+            zoneId: zoneId,
+            makeZone: { utc }
+        )
+    }
+
+    @Test
+    func unchangedRowIsReused() {
+        let first = build([row()])
+        let second = build([row()], reusing: first)
+        // An equal but distinct Kotlin row: reuse keeps the previous model, and with it its row.
+        #expect(second.rows[0].row === first.rows[0].row)
+        #expect(second.indexById == ["a1": 0])
+    }
+
+    @Test
+    func changedRowIsRebuilt() {
+        let first = build([row(isRead: 0)])
+        let fresh = row(isRead: 1)
+        let second = build([fresh], reusing: first)
+        #expect(second.rows[0].row === fresh)
+        #expect(second.rows[0].isRead)
+    }
+
+    @Test
+    func changedFeedTitleRebuildsTheRow() {
+        let first = build([row()], feedTitle: "Old")
+        let fresh = row()
+        let second = build([fresh], feedTitle: "New", reusing: first)
+        #expect(second.rows[0].row === fresh)
+        #expect(second.rows[0].feedTitle == "New")
+    }
+
+    @Test
+    func zoneChangeRebuildsEveryRow() {
+        let first = build([row()], zoneId: "UTC")
+        let fresh = row()
+        let second = build([fresh], reusing: first, zoneId: "Asia/Tokyo")
+        #expect(second.rows[0].row === fresh)
+    }
+
+    @Test
+    func zoneIsResolvedOnlyWhenARowIsBuilt() {
+        let first = build([row()])
+        var resolved = 0
+        _ = ArticleRowList.build(
+            [(row: row(), markedTitle: nil)],
+            feedInfo: ["f1": FeedRowInfo(title: "Feed", faviconUrl: nil)],
+            reusing: first,
+            zoneId: "UTC",
+            makeZone: { resolved += 1; return utc }
+        )
+        #expect(resolved == 0)
+    }
 }
