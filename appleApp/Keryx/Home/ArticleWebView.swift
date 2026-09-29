@@ -22,7 +22,8 @@ struct ArticleWebView {
         coordinator.outboundLinks = outboundLinks
         // SwiftUI calls update on every re-evaluation; reloading an unchanged document would reset
         // the scroll position.
-        guard html != coordinator.loadedHtml else { return }
+        // An empty document is `ReaderDocument.empty`, held only until the first real one is built.
+        guard !html.isEmpty, html != coordinator.loadedHtml else { return }
         coordinator.loadedHtml = html
         webView.loadHTMLString(html, baseURL: ArticleNavigationPolicy.documentBaseURL)
     }

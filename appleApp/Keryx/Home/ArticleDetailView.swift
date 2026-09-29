@@ -22,11 +22,18 @@ struct ArticleDetailView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var copyConfirmed = false
+    /// The reader's current document and its outbound-link set, built by `rebuildDocument()` off the
+    /// main thread. Held here rather than recomputed in `body`: building it means wrapping the whole
+    /// article body and parsing it with ksoup, far too heavy to repeat on every body evaluation — and
+    /// a single selection re-evaluates `body` several times (`selectedFeedName`/`selectedFeedFaviconUrl`
+    /// arrive as flows of their own). Mirrors Compose's own `remember`/`LaunchedEffect` memoization
+    /// (`ArticleDetailPane.kt`).
+    @State private var document = ReaderDocument.empty
 
     var body: some View {
         let hasArticle = home.selectedArticle != nil
         ZStack {
-            ArticleWebView(html: documentHtml, outboundLinks: outboundLinks)
+            ArticleWebView(html: document.html, outboundLinks: document.outboundLinks)
                 .allowsHitTesting(hasArticle)
                 .accessibilityHidden(!hasArticle)
             if !hasArticle {
@@ -44,63 +51,63 @@ struct ArticleDetailView: View {
                 copyConfirmed = false
             }
         }
+        .task(id: documentKey) {
+            await rebuildDocument()
+        }
+    }
+
+    /// What the document depends on. The article is keyed by instance identity rather than by
+    /// content: a new `Articles` instance only arrives when `HomeViewModel` actually publishes one,
+    /// and an unchanged rebuilt document never reloads the WebView (see `ArticleWebView.configure`).
+    private var documentKey: ReaderDocumentKey {
+        ReaderDocumentKey(
+            article: home.selectedArticle.map(ObjectIdentifier.init),
+            colorScheme: colorScheme,
+            fontSizeScale: preferences.localSettings.fontSizeScale
+        )
     }
 
     /// Rendered straight from the already-loaded `selectedArticle`, matching Compose's own
     /// 3-pane (non-pager) reader (`ArticleDetailPane.kt`'s `singleReaderDocument`) — there is no
     /// separate content cache or loading state to keep in sync here, since `Articles` (the
     /// `StateFlow` this comes from) already carries the full body.
-    private var readerRow: ArticleReaderRow? { home.selectedArticle?.toReaderRow() }
-
-    /// Rebuilt whenever the in-app theme or font-size setting changes, following the app's own
-    /// light/dark setting rather than the OS's raw appearance — see `PreferencesObservable`.
-    /// `colorScheme` already reflects `KeryxApp`'s own `.preferredColorScheme` override, so this
-    /// needs no separate read of `localSettings.themeMode`.
-    private var theme: ArticleHtmlTheme {
-        themeFor(colorScheme: colorScheme, fontScale: Float(preferences.localSettings.fontSizeScale))
+    ///
+    /// The inputs are flattened to plain values here, on the main actor, and the document itself is
+    /// built by `ReaderDocument.build` off it. Until that finishes the previous document stays on
+    /// screen; a rebuild superseded by a newer key is cancelled by `.task(id:)` and discarded.
+    private func rebuildDocument() async {
+        let inputs = readerDocumentInputs()
+        let built = await ReaderDocument.build(inputs)
+        guard !Task.isCancelled else { return }
+        document = built
     }
 
-    private var documentHtml: String {
+    private func readerDocumentInputs() -> ReaderDocumentInputs {
+        let theme = themeColors(colorScheme: colorScheme, fontScale: Float(preferences.localSettings.fontSizeScale))
         // Hidden under the native empty state, but still swapped for a blank themed document so the
         // previous article's embedded media stops playing.
-        guard let article = home.selectedArticle, let row = readerRow else {
-            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: "")
+        guard let article = home.selectedArticle else {
+            return ReaderDocumentInputs(theme: theme, content: .placeholder)
         }
+        let row = article.toReaderRow()
         let title = row.title.isEmpty ? L("article_no_title") : row.title
         let meta = FormattingKt.articleMetaText(author: row.author, publishedAt: row.published_at)
-        let openInBrowserTooltip = L("article_open_in_browser")
-        if let body = row.readerBody(), !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return ArticleWebViewHtmlKt.wrapArticleHtml(
-                theme: theme,
-                title: title,
-                meta: meta,
-                body: body,
-                baseUrl: article.url,
-                titleUrl: article.url,
-                titleTooltip: openInBrowserTooltip
-            )
-        }
-        return ArticleWebViewHtmlKt.articleNoContentHtml(
-            theme: theme,
+        let header = ReaderDocumentInputs.Header(
             title: title,
             meta: meta,
-            message: L("article_no_content"),
-            titleUrl: article.url,
-            titleTooltip: openInBrowserTooltip
+            url: article.url,
+            // Only an http(s) article URL counts as an outbound link — matches Compose's own
+            // `hasUsableUrl`-gated set (`ArticleDetailPane.kt`); a `keryx://`-scheme or empty URL
+            // must not be added, since WebKit would then treat a click that happens to normalize
+            // to the same string as "open externally" instead of loading it in the reader.
+            urlIsOutbound: ArticleListModelKt.isHttpOrHttpsUrl(url: article.url),
+            openInBrowserTooltip: L("article_open_in_browser")
         )
-    }
-
-    /// Only an http(s) article URL counts as an outbound link — matches Compose's own
-    /// `hasUsableUrl`-gated set (`ArticleDetailPane.kt:754-757`); a `keryx://`-scheme or empty URL
-    /// must not be added, since WebKit would then treat a click that happens to normalize to the
-    /// same string as "open externally" instead of loading it in the reader.
-    private var outboundLinks: Set<String> {
-        guard let article = home.selectedArticle, let body = readerRow?.readerBody() else { return [] }
-        var links = ArticleWebViewHtmlKt.extractLinks(html: body, baseUri: article.url)
-        if ArticleListModelKt.isHttpOrHttpsUrl(url: article.url) {
-            links.insert(article.url)
+        let body = row.readerBody()
+        if let body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ReaderDocumentInputs(theme: theme, content: .article(header, body: body))
         }
-        return links
+        return ReaderDocumentInputs(theme: theme, content: .noContent(header, message: L("article_no_content"), blankBody: body))
     }
 
     private var feedName: String? { home.selectedFeedName }
@@ -189,11 +196,11 @@ struct ArticleDetailView: View {
     /// follows `colorScheme` (which already reflects the in-app theme override) even for a frame
     /// where the system appearance has not caught up yet.
     #if os(macOS)
-    private func themeFor(colorScheme: ColorScheme, fontScale: Float) -> ArticleHtmlTheme {
+    private func themeColors(colorScheme: ColorScheme, fontScale: Float) -> ReaderThemeColors {
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua) ?? NSAppearance.currentDrawing()
-        var theme: ArticleHtmlTheme?
+        var theme: ReaderThemeColors?
         appearance.performAsCurrentDrawingAppearance {
-            theme = ArticleHtmlTheme(
+            theme = ReaderThemeColors(
                 surface: argb(.windowBackgroundColor),
                 onSurface: argb(.labelColor),
                 linkColor: argb(.linkColor),
@@ -201,7 +208,7 @@ struct ArticleDetailView: View {
                 fontScale: fontScale
             )
         }
-        return theme ?? ArticleHtmlTheme(surface: 0, onSurface: 0, linkColor: 0, mutedColor: 0, fontScale: fontScale)
+        return theme ?? ReaderThemeColors(surface: 0, onSurface: 0, linkColor: 0, mutedColor: 0, fontScale: fontScale)
     }
 
     private func argb(_ color: NSColor) -> Int32 {
@@ -212,10 +219,10 @@ struct ArticleDetailView: View {
         return (Int32(0xFF) << 24) | (r << 16) | (g << 8) | b
     }
     #else
-    private func themeFor(colorScheme: ColorScheme, fontScale: Float) -> ArticleHtmlTheme {
+    private func themeColors(colorScheme: ColorScheme, fontScale: Float) -> ReaderThemeColors {
         let trait = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
         func resolved(_ color: UIColor) -> UIColor { color.resolvedColor(with: trait) }
-        return ArticleHtmlTheme(
+        return ReaderThemeColors(
             surface: argb(resolved(.systemBackground)),
             onSurface: argb(resolved(.label)),
             linkColor: argb(resolved(.link)),
