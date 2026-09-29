@@ -199,7 +199,7 @@ struct FeedListView: View {
                 Button(L("menu_file_add_folder")) { dialogs.isAddingFolder = true }
                 Button(L("menu_file_add_tag")) { dialogs.isAddingTag = true }
             } label: {
-                Image(systemName: "plus")
+                Label(L("home_add"), systemImage: "plus")
             }
         }
         // Mirrors Compose's own `FeedListToolbarRow` (`FeedListPane.kt:883-943`): Refresh All is

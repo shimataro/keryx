@@ -38,6 +38,7 @@
     <string name="setup_auth_failed">認証に失敗しました</string>
 
     <!-- home -->
+    <string name="home_add">追加</string>
     <string name="home_add_feed">フィードを追加</string>
     <string name="home_add_feed_hint">フィード URL を入力</string>
     <string name="home_add_feed_confirm">確認</string>

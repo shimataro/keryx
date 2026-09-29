@@ -153,11 +153,16 @@ struct ArticleDetailView: View {
             ToolbarSpacer(.flexible)
         }
 
+        // `Label`s rather than bare icons so the toolbar's overflow menu (at a narrow width) gets titles;
+        // the toolbar itself still renders them icon-only.
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
                 home.viewModel.toggleStarSelected()
             } label: {
-                Image(systemName: article?.is_starred == 1 ? "star.fill" : "star")
+                Label(
+                    L(article?.is_starred == 1 ? "article_unstar" : "article_star"),
+                    systemImage: article?.is_starred == 1 ? "star.fill" : "star"
+                )
             }
             .disabled(article == nil)
             .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
@@ -165,7 +170,7 @@ struct ArticleDetailView: View {
             Button {
                 home.viewModel.markSelectedUnread()
             } label: {
-                Image(systemName: "envelope.badge")
+                Label(L("article_mark_as_unread"), systemImage: "envelope.badge")
             }
             .disabled(article == nil)
             .help(L("article_mark_as_unread"))
@@ -175,7 +180,7 @@ struct ArticleDetailView: View {
                 copyToPasteboard(article.url)
                 home.pulseCopy()
             } label: {
-                Image(systemName: copyConfirmed ? "checkmark" : "link")
+                Label(L("article_copy_url"), systemImage: copyConfirmed ? "checkmark" : "link")
             }
             .disabled(!hasUsableUrl)
             .help(L("article_copy_url"))
@@ -183,7 +188,7 @@ struct ArticleDetailView: View {
             Button {
                 if let article { openInBrowser(article.url) }
             } label: {
-                Image(systemName: "safari")
+                Label(L("article_open_in_browser"), systemImage: "safari")
             }
             .disabled(!hasUsableUrl)
             .help(L("article_open_in_browser"))

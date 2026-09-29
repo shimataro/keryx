@@ -115,32 +115,31 @@ struct ArticleListView: View {
     // hand-rolled capsule Compose uses as a stand-in (see `ui-guidelines`' "Icon grouping").
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            HStack(spacing: 4) {
-                Toggle(isOn: Binding(
-                    get: { home.unreadOnly },
-                    set: { home.viewModel.setUnreadOnly(value: $0) }
-                )) {
-                    Label(
-                        L("home_unread_only"),
-                        systemImage: home.unreadOnly
-                            ? "line.3.horizontal.decrease.circle.fill"
-                            : "line.3.horizontal.decrease.circle"
-                    )
-                    .labelStyle(.iconOnly)
-                }
-                .toggleStyle(.button)
-                .help(L("home_unread_only"))
-
-                Button {
-                    home.viewModel.hideRead()
-                } label: {
-                    Image(systemName: "eye.slash")
-                }
-                .disabled(!home.canHideRead)
-                .help(L("home_hide_read"))
-                .accessibilityLabel(L("home_hide_read"))
+        // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
+        // the overflow menu it collapses into at a narrow width takes each row's title from it.
+        // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
+        ToolbarItemGroup(placement: .navigation) {
+            Toggle(isOn: Binding(
+                get: { home.unreadOnly },
+                set: { home.viewModel.setUnreadOnly(value: $0) }
+            )) {
+                Label(
+                    L("home_unread_only"),
+                    systemImage: home.unreadOnly
+                        ? "line.3.horizontal.decrease.circle.fill"
+                        : "line.3.horizontal.decrease.circle"
+                )
             }
+            .toggleStyle(.button)
+            .help(L("home_unread_only"))
+
+            Button {
+                home.viewModel.hideRead()
+            } label: {
+                Label(L("home_hide_read"), systemImage: "eye.slash")
+            }
+            .disabled(!home.canHideRead)
+            .help(L("home_hide_read"))
         }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer (macOS 26)
@@ -155,19 +154,20 @@ struct ArticleListView: View {
             Button {
                 home.viewModel.toggleSort()
             } label: {
-                Image(systemName: home.newestFirst ? "arrow.down" : "arrow.up")
+                Label(
+                    L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
+                    systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
+                )
             }
             .disabled(home.searchActive)
             .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
-            .accessibilityLabel(L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"))
 
             Button {
                 home.viewModel.markAllRead()
             } label: {
-                Image(systemName: "checklist.checked")
+                Label(L("home_mark_all_read"), systemImage: "checklist.checked")
             }
             .help(L("home_mark_all_read"))
-            .accessibilityLabel(L("home_mark_all_read"))
         }
     }
 

@@ -25,20 +25,24 @@ struct NotificationBell: View {
         Button {
             isShowingPopover = true
         } label: {
-            Image(systemName: "bell")
-                .overlay(alignment: .topTrailing) {
-                    if unreadCount > 0 {
-                        Text("\(unreadCount)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(2)
-                            .background(Circle().fill(.red))
-                            .offset(x: 6, y: -6)
+            // A `Label` so the toolbar's overflow menu gets a title; the badge stays on the icon.
+            Label {
+                Text(L("home_notifications"))
+            } icon: {
+                Image(systemName: "bell")
+                    .overlay(alignment: .topTrailing) {
+                        if unreadCount > 0 {
+                            Text("\(unreadCount)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(2)
+                                .background(Circle().fill(.red))
+                                .offset(x: 6, y: -6)
+                        }
                     }
-                }
+            }
         }
         .help(L("home_notifications"))
-        .accessibilityLabel(L("home_notifications"))
         .accessibilityValue(unreadCount > 0 ? "\(unreadCount)" : "")
         .task { await notifications.startObserving() }
         .popover(isPresented: $isShowingPopover) {

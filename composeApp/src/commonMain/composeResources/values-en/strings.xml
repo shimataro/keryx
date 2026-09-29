@@ -37,6 +37,7 @@
     <string name="setup_auth_failed">Authentication failed</string>
 
     <!-- home -->
+    <string name="home_add">Add</string>
     <string name="home_add_feed">Add feed</string>
     <string name="home_add_feed_hint">Enter feed URL</string>
     <string name="home_add_feed_confirm">Confirm</string>
