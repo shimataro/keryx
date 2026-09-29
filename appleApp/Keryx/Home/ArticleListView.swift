@@ -45,8 +45,6 @@ struct ArticleListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
-            Divider()
             ScrollViewReader { proxy in
                 content
                     // Resets to the top on every filter switch, whatever the sort order — unlike
@@ -77,6 +75,7 @@ struct ArticleListView: View {
             }
         }
         .focused(focusedPane, equals: .articleList)
+        .toolbar { toolbarContent }
     }
 
     /// The pill's count going from `0` to positive is deliberately not shown immediately — the
@@ -96,22 +95,38 @@ struct ArticleListView: View {
 
     // MARK: - Toolbar
 
-    private var toolbar: some View {
-        HStack(spacing: 12) {
-            Button {
-                home.viewModel.setUnreadOnly(value: !home.unreadOnly)
-            } label: {
-                Image(systemName: home.unreadOnly ? "circle.inset.filled" : "circle")
-            }
-            .help(L("home_unread_only"))
+    // Lives in the window toolbar (the strip above this column), not in the pane: the native
+    // toolbar draws its buttons at the platform's standard size and groups them, replacing the
+    // hand-rolled capsule Compose uses as a stand-in (see `ui-guidelines`' "Icon grouping").
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            HStack(spacing: 4) {
+                Toggle(L("home_unread_only"), isOn: Binding(
+                    get: { home.unreadOnly },
+                    set: { home.viewModel.setUnreadOnly(value: $0) }
+                ))
+                .toggleStyle(.button)
 
-            Button {
-                home.viewModel.hideRead()
-            } label: {
-                Image(systemName: "eye.slash")
+                Button {
+                    home.viewModel.hideRead()
+                } label: {
+                    Image(systemName: "eye.slash")
+                }
+                .disabled(!home.canHideRead)
+                .help(L("home_hide_read"))
+                .accessibilityLabel(L("home_hide_read"))
             }
-            .disabled(!home.canHideRead)
-            .help(L("home_hide_read"))
+        }
+
+        // `.primaryAction` still flows from the column's leading edge; a flexible spacer (macOS 26)
+        // is what pushes the trailing cluster to the column's right edge.
+        if #available(macOS 26, *) {
+            ToolbarSpacer(.flexible)
+        }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            NotificationBell(home: home, notifications: notifications, focusedPane: focusedPane)
 
             Button {
                 home.viewModel.toggleSort()
@@ -120,21 +135,16 @@ struct ArticleListView: View {
             }
             .disabled(home.searchActive)
             .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
-
-            Spacer()
+            .accessibilityLabel(L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"))
 
             Button {
                 home.viewModel.markAllRead()
             } label: {
-                Image(systemName: "checkmark.circle")
+                Image(systemName: "checklist.checked")
             }
             .help(L("home_mark_all_read"))
-
-            NotificationBell(home: home, notifications: notifications, focusedPane: focusedPane)
+            .accessibilityLabel(L("home_mark_all_read"))
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Content / empty states
@@ -253,31 +263,40 @@ struct ArticleListView: View {
             focusedPane.wrappedValue = .articleList
             home.viewModel.selectArticle(article: article)
         } label: {
-            HStack(alignment: .top, spacing: 8) {
-                FaviconView(url: home.feedsById[article.feed_id]?.favicon_url, letter: article.title.first)
+            HStack(alignment: .center, spacing: 0) {
+                // Fixed slot, always reserved, so the title never shifts when the dot or star appears.
+                ZStack {
+                    if article.is_read == 0 {
+                        Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                    }
+                    if article.is_starred == 1 {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.yellow)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
+                }
+                .frame(width: 14)
+                FaviconView(url: home.feedsById[article.feed_id]?.favicon_url, letter: article.title.first, blankWithoutUrl: true)
                     .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .padding(.leading, 6)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(article.title.isEmpty ? AttributedString(L("article_no_title")) : titleAttributedString(article))
                         .font(article.is_read == 1 ? .body : .body.bold())
-                        .lineLimit(2)
+                        .foregroundStyle(article.is_read == 1 ? .secondary : .primary)
+                        .lineLimit(2, reservesSpace: true)
                     HStack(spacing: 6) {
                         if let feedTitle = home.feedsById[article.feed_id]?.keryxDisplayTitle() {
-                            Text(feedTitle)
+                            Text(feedTitle).lineLimit(1)
                         }
-                        Text(formattedDate(article.published_at))
+                        Spacer(minLength: 8)
+                        Text(FormattingKt.formatTimestamp(epochMillis: article.published_at)).lineLimit(1)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
-                Spacer()
-                VStack {
-                    if article.is_starred == 1 {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow)
-                    }
-                    if article.is_read == 0 {
-                        Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                    }
-                }
+                .padding(.leading, 10)
             }
             .padding(.vertical, 4)
             .background(home.selectedArticle?.id == article.id ? Color.accentColor.opacity(0.15) : Color.clear)
@@ -344,12 +363,6 @@ struct ArticleListView: View {
         return result
     }
 
-    private func formattedDate(_ epochMillis: KotlinLong?) -> String {
-        guard let epochMillis else { return "" }
-        let date = Date(timeIntervalSince1970: Double(epochMillis.int64Value) / 1000)
-        return date.formatted(date: .numeric, time: .shortened)
-    }
-
     // MARK: - New articles pill
 
     @ViewBuilder
@@ -358,7 +371,7 @@ struct ArticleListView: View {
             home.viewModel.markAllArticlesSeen()
             scrollToFreshEnd(proxy)
         } label: {
-            Text(LF("home_new_articles", Int64(home.newArticleCount)))
+            Label(LF("home_new_articles", Int64(home.newArticleCount)), systemImage: home.newestFirst ? "arrow.up" : "arrow.down")
                 .font(.callout)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

@@ -45,6 +45,7 @@ struct HomeView: View {
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane)
         }
         .onKeyPress { press in handleKeyPress(press) }
+        .modifier(HiddenSplitViewTitle())
         .task {
             await home.startObserving()
         }
@@ -257,5 +258,22 @@ struct HomeView: View {
         case .folder(let f): sidebarDialogs.deletingFolder = f.folder
         case .tag(let t): sidebarDialogs.deletingTag = t.tag
         }
+    }
+}
+
+/// Compose's window shows no title over the panes; `NavigationSplitView` draws the window's name as
+/// a toolbar item of its own, which `NSWindow.titleVisibility` does not reach. The window itself
+/// keeps its name (`KeryxApp`'s `Window(L("app_name"))`).
+private struct HiddenSplitViewTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        if #available(macOS 15, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content.navigationTitle("")
+        }
+        #else
+        content
+        #endif
     }
 }

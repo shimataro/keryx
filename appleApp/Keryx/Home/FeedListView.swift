@@ -66,7 +66,6 @@ struct FeedListView: View {
                     }
             }
         }
-        .navigationTitle(L("app_name"))
         .toolbar { toolbarContent }
         // The system search field. Its focus is reported into `focusedPane` (for ⌘F, the
         // `textInputFocused` guard and the ↓/↑ hand-off into the results — see `HomeScreen.kt`'s
@@ -633,6 +632,9 @@ private extension View {
 struct FaviconView: View {
     let url: String?
     let letter: Character?
+    /// Leaves the slot empty when there is no favicon URL, as Compose's article row does (the
+    /// feed list keeps the letter avatar).
+    var blankWithoutUrl = false
 
     var body: some View {
         if let url, let parsed = URL(string: url) {
@@ -644,6 +646,8 @@ struct FaviconView: View {
                     fallback
                 }
             }
+        } else if blankWithoutUrl {
+            Color.clear
         } else {
             fallback
         }

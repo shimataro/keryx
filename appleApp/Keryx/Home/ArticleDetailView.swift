@@ -19,11 +19,10 @@ struct ArticleDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
-            Divider()
             ArticleWebView(html: documentHtml, outboundLinks: outboundLinks)
         }
         .focused(focusedPane, equals: .reader)
+        .toolbar { toolbarContent }
         .onChange(of: home.copyPulse) { _, _ in
             copyConfirmed = true
             Task {
@@ -95,20 +94,28 @@ struct ArticleDetailView: View {
 
     // MARK: - Toolbar
 
-    @ViewBuilder
-    private var toolbar: some View {
-        HStack(spacing: 12) {
+    // In the window toolbar (the strip above this column) so each pane gets its own toolbar section.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        let article = home.selectedArticle
+        let hasUsableUrl = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+
+        // Default placement: `.navigation` items of this column land at the end of the *previous*
+        // column's toolbar section instead of at the start of this one.
+        ToolbarItem {
             if let feedName {
                 Text(feedName)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer()
+        }
 
-            let article = home.selectedArticle
-            let hasUsableUrl = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+        if #available(macOS 26, *) {
+            ToolbarSpacer(.flexible)
+        }
 
+        ToolbarItemGroup(placement: .primaryAction) {
             Button {
                 home.viewModel.toggleStarSelected()
             } label: {
@@ -143,9 +150,6 @@ struct ArticleDetailView: View {
             .disabled(!hasUsableUrl)
             .help(L("article_open_in_browser"))
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     /// Resolves the reader's colors under `colorScheme` explicitly — via

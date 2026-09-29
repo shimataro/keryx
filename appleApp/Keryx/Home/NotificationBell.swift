@@ -24,19 +24,19 @@ struct NotificationBell: View {
         Button {
             isShowingPopover = true
         } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "bell")
-                if unreadCount > 0 {
-                    Text("\(unreadCount)")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(2)
-                        .background(Circle().fill(.red))
-                        .offset(x: 6, y: -6)
+            Image(systemName: "bell")
+                .overlay(alignment: .topTrailing) {
+                    if unreadCount > 0 {
+                        Text("\(unreadCount)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(2)
+                            .background(Circle().fill(.red))
+                            .offset(x: 6, y: -6)
+                    }
                 }
-            }
         }
-        .buttonStyle(.borderless)
+        .help(L("home_notifications"))
         .accessibilityLabel(L("home_notifications"))
         .accessibilityValue(unreadCount > 0 ? "\(unreadCount)" : "")
         .task { await notifications.startObserving() }
