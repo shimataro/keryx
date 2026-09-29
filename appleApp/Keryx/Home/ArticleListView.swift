@@ -1,9 +1,6 @@
 import KeryxShared
 import SwiftUI
 
-private let markStart: Character = "\u{0002}"
-private let markEnd: Character = "\u{0003}"
-
 /// The center pane: toolbar (unread-only, hide-read, sort, mark-all-read, the notification bell),
 /// the article rows themselves (search-highlighted when a query is active), the "new articles"
 /// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
@@ -35,22 +32,13 @@ struct ArticleListView: View {
     /// `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
     @State private var visibleReportTask: Task<Void, Never>? = nil
 
-    @State private var cachedDisplayedRows: [ArticleListRow] = []
-    @State private var cachedTitleMarks: [String: String] = [:]
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
 
-    #if os(macOS)
-    private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
-    private static let dimmedSelectionFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    #else
-    // UIKit has no content-selection colors; these are the closest system equivalents.
-    private static let strongSelectionFill = Color.accentColor
-    private static let dimmedSelectionFill = Color(uiColor: .systemGray4)
-    #endif
-
-    private var displayedRows: [ArticleListRow] { cachedDisplayedRows }
-    private var titleMarks: [String: String] { cachedTitleMarks }
+    /// The rows on screen: the search results while a search is active, else the filter's own list.
+    /// Both are resolved once per emission by `HomeObservable` (see `ArticleRowModel`).
+    private var displayed: ArticleRowList { home.searchActive ? home.searchRows : home.articleRows }
+    private var displayedRows: [ArticleRowModel] { displayed.rows }
 
     /// A plain `String` key for `home.filter` (a Kotlin sealed-type protocol value), so
     /// `.onChange(of:)` — which requires a genuinely `Equatable` value type, not a bridged
@@ -91,12 +79,11 @@ struct ArticleListView: View {
                     .task(id: home.newArticleCount) {
                         await updatePillShown()
                     }
-                    .onChange(of: home.articles) { _, _ in
-                        recacheDisplayedRows()
+                    .onChange(of: displayedRows.isEmpty) { _, isEmpty in
                         // The article restored from the previous session is already selected before
                         // any row exists, so the selection-change scroll above never sees it; bring it
                         // into view once, when the first rows land (after they are laid out).
-                        guard !didShowFirstRows, !displayedRows.isEmpty else { return }
+                        guard !didShowFirstRows, !isEmpty else { return }
                         didShowFirstRows = true
                         guard let id = home.selectedArticle?.id else { return }
                         Task {
@@ -104,8 +91,6 @@ struct ArticleListView: View {
                             proxy.scrollTo(id)
                         }
                     }
-                    .onChange(of: home.searchResults) { _, _ in recacheDisplayedRows() }
-                    .onChange(of: home.searchActive) { _, _ in recacheDisplayedRows() }
             }
         }
         .focused(focusedPane, equals: .articleList)
@@ -251,21 +236,34 @@ struct ArticleListView: View {
     }
 
     private var articleList: some View {
-        List(displayedRows, id: \.id) { article in
-            row(article)
-                // No horizontal inset of our own: the macOS List already pads each row's content by
-                // 8pt on either side, which alone matches Compose's `listRowHorizontalMargin()`
-                // (8dp). Adding 8 here on top of it doubled the card's gap from the pane edge.
-                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                .listRowSeparator(.hidden)
-                .onAppear {
-                    appearedIds.insert(article.id)
-                    scheduleReportVisible()
-                }
-                .onDisappear {
-                    appearedIds.remove(article.id)
-                    scheduleReportVisible()
-                }
+        let selectedId = home.selectedArticle?.id
+        let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
+        return List(displayedRows) { article in
+            ArticleRowView(
+                model: article,
+                isSelected: article.id == selectedId,
+                paneFocused: paneFocused,
+                viewModel: home.viewModel,
+                onSelect: {
+                    focusedPane.wrappedValue = .articleList
+                    home.viewModel.selectArticle(article: article.row)
+                },
+                onContextMenuSelect: { selectForContextMenu(article.row) }
+            )
+            .equatable()
+            // No horizontal inset of our own: the macOS List already pads each row's content by
+            // 8pt on either side, which alone matches Compose's `listRowHorizontalMargin()`
+            // (8dp). Adding 8 here on top of it doubled the card's gap from the pane edge.
+            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+            .listRowSeparator(.hidden)
+            .onAppear {
+                appearedIds.insert(article.id)
+                scheduleReportVisible()
+            }
+            .onDisappear {
+                appearedIds.remove(article.id)
+                scheduleReportVisible()
+            }
         }
         .listStyle(.plain)
     }
@@ -291,138 +289,12 @@ struct ArticleListView: View {
         home.viewModel.markArticlesSeen(ids: ordered)
     }
 
-    /// Updates the cached `displayedRows` and `titleMarks` so they are not recomputed on every
-    /// body evaluation. Called by `.onChange` observers on the underlying data sources.
-    private func recacheDisplayedRows() {
-        if home.searchActive {
-            cachedDisplayedRows = home.searchResults.map(\.article)
-            cachedTitleMarks = Dictionary(uniqueKeysWithValues: home.searchResults.map { ($0.article.id, $0.titleMarked) })
-        } else {
-            cachedDisplayedRows = home.articles
-            cachedTitleMarks = [:]
-        }
-    }
-
     // MARK: - Row
-
-    @ViewBuilder
-    private func row(_ article: ArticleListRow) -> some View {
-        Button {
-            focusedPane.wrappedValue = .articleList
-            home.viewModel.selectArticle(article: article)
-        } label: {
-            let isSelected = home.selectedArticle?.id == article.id
-            let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-            // Same treatment as Compose's `onPrimary`: on the strong (focused) selection fill the
-            // text turns light; on the dimmed (unfocused) one it keeps its ordinary colors.
-            let onStrongSelection = isSelected && paneFocused
-            HStack(alignment: .center, spacing: 0) {
-                // Fixed slot, always reserved, so the title never shifts when the dot or star appears.
-                ZStack {
-                    if article.is_read == 0 {
-                        Circle().fill(onStrongSelection ? Color.white : Color.accentColor).frame(width: 8, height: 8)
-                    }
-                    if article.is_starred == 1 {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.yellow)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                    }
-                }
-                .frame(width: 14)
-                FaviconView(url: home.feedsById[article.feed_id]?.favicon_url, letter: article.title.first, blankWithoutUrl: true)
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .padding(.leading, 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(article.title.isEmpty ? AttributedString(L("article_no_title")) : titleAttributedString(article))
-                        .font(article.is_read == 1 ? .body : .body.bold())
-                        .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white) : AnyShapeStyle(article.is_read == 1 ? HierarchicalShapeStyle.secondary : HierarchicalShapeStyle.primary))
-                        .lineLimit(2, reservesSpace: true)
-                    HStack(spacing: 6) {
-                        if let feedTitle = home.feedsById[article.feed_id]?.keryxDisplayTitle() {
-                            Text(feedTitle).lineLimit(1)
-                        }
-                        Spacer(minLength: 8)
-                        Text(FormattingKt.formatTimestamp(epochMillis: article.published_at)).lineLimit(1)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white.opacity(0.8)) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
-                }
-                .padding(.leading, 10)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 10)
-            // A plain-style button only hit-tests what it draws; without this the Spacer and the
-            // padding are dead zones.
-            .contentShape(Rectangle())
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(paneFocused ? Self.strongSelectionFill : Self.dimmedSelectionFill)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .selectsOnContextMenu(id: article.id) { selectForContextMenu(article) }
-        .contextMenu {
-            // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
-            // (`ArticleRowComponents.kt`) — the actual selection runs on a right-click/Control-
-            // click via `.selectsOnContextMenu` above, not as a side effect of this builder (see
-            // `ContextMenuSelectionTracker`'s own doc for why).
-            Button(L(article.is_starred == 1 ? "article_unstar" : "article_star")) {
-                home.viewModel.toggleStar(article: article)
-            }
-            Button(L(article.is_read == 1 ? "article_mark_as_unread" : "article_mark_as_read")) {
-                home.viewModel.toggleRead(article: article)
-            }
-            Button(L("article_copy_url")) {
-                copyToPasteboard(article.url)
-            }
-            .disabled(!ArticleListModelKt.hasUsableUrl(url: article.url))
-            Button(L("article_open_in_browser")) {
-                openInBrowser(article.url)
-            }
-            .disabled(!ArticleListModelKt.hasUsableUrl(url: article.url))
-        }
-    }
 
     private func selectForContextMenu(_ article: ArticleListRow) {
         if home.selectedArticle?.id != article.id {
             home.viewModel.selectArticle(article: article)
         }
-    }
-
-    /// Falls back to the plain title when a search-marked title is blank — matches Compose's own
-    /// `markedToAnnotatedString(it.ifBlank { article.title })` (`ArticleListPane.kt`).
-    private func titleAttributedString(_ article: ArticleListRow) -> AttributedString {
-        if let marked = titleMarks[article.id], !marked.isEmpty {
-            return highlighted(marked)
-        }
-        return AttributedString(article.title)
-    }
-
-    private func highlighted(_ marked: String) -> AttributedString {
-        var result = AttributedString()
-        var remaining = marked[...]
-        var highlighting = false
-        while let markerIndex = remaining.firstIndex(where: { $0 == markStart || $0 == markEnd }) {
-            let plain = remaining[..<markerIndex]
-            if !plain.isEmpty {
-                var piece = AttributedString(String(plain))
-                if highlighting { piece.backgroundColor = .yellow.opacity(0.4) }
-                result += piece
-            }
-            let marker = remaining[markerIndex]
-            highlighting = (marker == markStart)
-            remaining = remaining[remaining.index(after: markerIndex)...]
-        }
-        if !remaining.isEmpty {
-            var piece = AttributedString(String(remaining))
-            if highlighting { piece.backgroundColor = .yellow.opacity(0.4) }
-            result += piece
-        }
-        return result
     }
 
     // MARK: - New articles pill
@@ -448,13 +320,5 @@ struct ArticleListView: View {
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
         proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
-    }
-}
-
-private extension Feeds {
-    /// `custom_title`, falling back to `title` — named to avoid clashing with any bridged Kotlin
-    /// extension of a similar name reaching Swift under a different signature.
-    func keryxDisplayTitle() -> String? {
-        custom_title ?? title
     }
 }
