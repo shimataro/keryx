@@ -676,7 +676,8 @@ upload key registered with Play and an AAB signed any other way is not publishab
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
 black outline) for the macOS menu bar and the Linux SNI panel, `tray_icon.png` (full colour) for the Windows
-notification area, the Linux AWT fallback and the window's own title-bar icon. These are generated from shared artwork via
+notification area, the Linux AWT fallback and the window's own title-bar icon. The SwiftUI app's macOS menu bar also
+uses `tray_icon.png`, referenced in place by `appleApp/project.yml` and drawn as a template image. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
 
 The app's store/menu category is set per platform in `nativeDistributions`: macOS uses

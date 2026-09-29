@@ -218,12 +218,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     /// Called from `KeryxApp`'s own unread-count observation, kept alive for the app's whole
     /// lifetime (not tied to the main window's own SwiftUI content, which this `AppDelegate`
     /// exists independently of) — see `KeryxApp.swift`'s own `.onChange(of: home.totalUnread)`.
+    ///
+    /// The icon is the app glyph as a *template* image (the HIG's rule for menu bar extras), so the
+    /// system tints it for a light/dark menu bar and inverts it while the item is highlighted.
+    /// That is why unread is a cut-out dot in the same colour as the glyph — the shape SF Symbols'
+    /// own `*.badge` variants use — rather than desktop's red dot, which a template can't carry.
     func updateStatusItemAppearance(unreadCount: Int64 = 0) {
-        statusItem?.button?.image = NSImage(
-            systemSymbolName: unreadCount > 0 ? "envelope.badge.fill" : "envelope",
-            accessibilityDescription: nil
-        )
-        statusItem?.button?.toolTip = "\(L("app_name")) (\(unreadCount))"
+        let hasUnread = unreadCount > 0
+        statusItem?.button?.image = hasUnread ? Self.trayImageUnread : Self.trayImage
+        statusItem?.button?.toolTip = hasUnread ? "\(L("app_name")) (\(unreadCount))" : L("app_name")
+    }
+
+    private static let trayImageSize = NSSize(width: 18, height: 18)
+    /// Unread dot diameter relative to the icon (same ratio as desktop's `IconBadge.kt`).
+    private static let unreadDotRatio: CGFloat = 0.3
+    /// Transparent ring cut out of the glyph around the unread dot so the two stay distinct.
+    private static let unreadDotGap: CGFloat = 1.5
+
+    private static let trayImage = makeTrayImage(withUnreadDot: false)
+    private static let trayImageUnread = makeTrayImage(withUnreadDot: true)
+
+    private static func makeTrayImage(withUnreadDot: Bool) -> NSImage? {
+        guard let glyph = Bundle.main.image(forResource: "tray_icon") else {
+            assertionFailure("tray_icon.png is missing from the app bundle (see appleApp/project.yml)")
+            return nil
+        }
+        let image = NSImage(size: trayImageSize, flipped: false) { rect in
+            glyph.draw(in: rect)
+            if withUnreadDot {
+                let dot = rect.height * unreadDotRatio
+                let dotRect = NSRect(x: rect.maxX - dot, y: rect.maxY - dot, width: dot, height: dot)
+                NSGraphicsContext.current?.compositingOperation = .destinationOut
+                NSBezierPath(ovalIn: dotRect.insetBy(dx: -unreadDotGap, dy: -unreadDotGap)).fill()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: dotRect).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
 #endif

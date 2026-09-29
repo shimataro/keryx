@@ -677,7 +677,8 @@ Play に専用のアップロード鍵を登録済みであり、それ以外の
 アプリアイコンは `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`。トレイアイコンは
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png`。`tray_icon_outlined.png`
 （白グリフ + 黒フチ）は macOS のメニューバーと Linux の SNI パネル用、`tray_icon.png`（フルカラー）は
-Windows の通知領域・Linux の AWT フォールバック・ウィンドウ自身のタイトルバーアイコン用。これらは
+Windows の通知領域・Linux の AWT フォールバック・ウィンドウ自身のタイトルバーアイコン用。SwiftUI アプリの macOS メニューバーも
+`tray_icon.png` を使い（`appleApp/project.yml` が元の場所を直接参照）、テンプレート画像として描画する。これらは
 `design/icons/make_desktop_icons.sh` で共有アートワークから生成する
 （生成済みファイルはコミットしておくのが望ましい）。
 

@@ -37,6 +37,11 @@ targets:
       # regenerates it every build) from composeResources/values*/strings.xml — never committed,
       # never hand-edited. See docs/build.md's "String Catalog for the Apple app".
       - path: ../composeApp/build/generated/stringCatalog/Localizable.xcstrings
+      # The tray glyph shared with the Compose desktop build, referenced in place rather than
+      # copied so the two can't drift. Used as a template image (only its alpha matters).
+      - path: ../composeApp/src/commonMain/composeResources/drawable/tray_icon.png
+        buildPhase: resources
+        destinationFilters: [macOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: works.merc.keryx
