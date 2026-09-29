@@ -17,23 +17,23 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             GeneralSettingsTab(preferences: preferences)
-                .tabItem { Text(L("settings_tab_general")) }
+                .tabItem { Label(L("settings_tab_general"), systemImage: "gearshape") }
                 .tag("general")
 
             NotificationsSettingsTab(preferences: preferences)
-                .tabItem { Text(L("settings_tab_notifications")) }
+                .tabItem { Label(L("settings_tab_notifications"), systemImage: "bell") }
                 .tag("notifications")
 
             // Only shown when at least one cloud provider is actually configured in this build —
             // matches Compose's own `SettingsDialog.kt`, which never adds this tab otherwise.
             if !cloudSync.availableCloudTypes.isEmpty {
                 CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync)
-                    .tabItem { Text(L("settings_cloud_sync")) }
+                    .tabItem { Label(L("settings_cloud_sync"), systemImage: "cloud") }
                     .tag("cloud_sync")
             }
 
             DataSettingsTab(preferences: preferences, opmlTransfer: opmlTransfer)
-                .tabItem { Text(L("settings_tab_data")) }
+                .tabItem { Label(L("settings_tab_data"), systemImage: "externaldrive") }
                 .tag("data")
         }
         .frame(minWidth: 520, minHeight: 420)
