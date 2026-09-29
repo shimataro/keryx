@@ -9,6 +9,12 @@ import UIKit
 /// The reader pane — desktop is always the permanent, keyboard-driven 3-pane layout (no swipe
 /// pager; that is a narrow/touch-only affordance, see `external-spec.md` §9), so this view has no
 /// back control and stays mounted across selections, swapping only the WebView's document.
+///
+/// Unlike Compose — whose heavyweight `SwingPanel` WebView repaints the whole window when added or
+/// removed, so it renders even "no article selected" as HTML inside the WebView — the empty state
+/// here is a native `ContentUnavailableView` laid over the WebView. The WebView itself stays
+/// mounted underneath, so selecting an article never recreates it (and never flashes its default
+/// white background before the first paint).
 struct ArticleDetailView: View {
     let home: HomeObservable
     let preferences: PreferencesObservable
@@ -18,8 +24,16 @@ struct ArticleDetailView: View {
     @State private var copyConfirmed = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        let hasArticle = home.selectedArticle != nil
+        ZStack {
             ArticleWebView(html: documentHtml, outboundLinks: outboundLinks)
+                .allowsHitTesting(hasArticle)
+                .accessibilityHidden(!hasArticle)
+            if !hasArticle {
+                ContentUnavailableView(L("home_no_article_selected"), systemImage: "doc.richtext")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
+            }
         }
         .focused(focusedPane, equals: .reader)
         .toolbar { toolbarContent }
@@ -47,11 +61,10 @@ struct ArticleDetailView: View {
     }
 
     private var documentHtml: String {
-        guard let article = home.selectedArticle else {
-            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("home_no_article_selected"))
-        }
-        guard let row = readerRow else {
-            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: L("home_no_article_selected"))
+        // Hidden under the native empty state, but still swapped for a blank themed document so the
+        // previous article's embedded media stops playing.
+        guard let article = home.selectedArticle, let row = readerRow else {
+            return ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: "")
         }
         let title = row.title.isEmpty ? L("article_no_title") : row.title
         let meta = FormattingKt.articleMetaText(author: row.author, publishedAt: row.published_at)
