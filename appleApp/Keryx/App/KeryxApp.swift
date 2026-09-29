@@ -92,8 +92,7 @@ struct KeryxApp: App {
             guard url.pathExtension.lowercased() == "opml" else { return }
             model.importOpenedOpml(url: url)
             #if os(macOS)
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first { !$0.isAboutWindow }?.makeKeyAndOrderFront(nil)
+            appDelegate.revealMainWindow()
             #endif
         }
         // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About

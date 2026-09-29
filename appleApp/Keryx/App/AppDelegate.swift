@@ -6,18 +6,27 @@ import UserNotifications
 extension NSWindow {
     /// The About window (`KeryxApp`'s `Window(L("menu_help_about"), id: "about")`) is matched by
     /// title, not `id`, since AppKit's own `NSWindow` carries no SwiftUI scene identifier — every
-    /// place that needs "every window except About" (tray toggle, `.onOpenURL`'s reveal) shares this
+    /// place that needs "every window except About" (tray toggle and its label) shares this
     /// one check instead of repeating the title comparison.
     var isAboutWindow: Bool { title == L("menu_help_about") }
+
+    /// Whether this is one of the app's own content windows (main, Settings, About) rather than
+    /// AppKit's own chrome. `NSApp.windows` also holds the tray icon's `NSStatusBarWindow` — always
+    /// `isVisible` while the status item exists — plus tooltip panels and menus; counting those as
+    /// "a visible window" kept the Dock icon up and the tray toggle stuck on "hide", and ordering
+    /// the status-bar window out along with the rest broke the next visibility check. None of them
+    /// can become main, so `canBecomeMain` tells them apart.
+    var isAppContentWindow: Bool { canBecomeMain }
 }
 
 /// Keeps the app running (hidden in the menu bar) after the last window closes, instead of
 /// quitting — see `external-spec.md` §7's "task tray residence (close minimizes to tray)". Also
 /// owns the tray's own `NSStatusItem` (a plain `MenuBarExtra` can't tell a left click from a right
 /// one), flushes settings before quitting, applies the "start minimized" setting, shows a
-/// notification banner even while the app is frontmost, and hands every foreground/Dock reopen
-/// through `showMainWindow` (set by `KeryxApp` to `openWindow(id: "main")`, since only a `View`'s
-/// environment carries that action).
+/// notification banner even while the app is frontmost, and hands every tray/Dock/document reopen
+/// through `revealMainWindow` — which falls back to `showMainWindow` (set by `KeryxApp` to
+/// `openWindow(id: "main")`, since only a `View`'s environment carries that action) when no main
+/// window exists yet.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     /// Set by `KeryxApp` once its own properties are ready (before this delegate's own launch
@@ -87,9 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
 
     /// Reopens (or activates) the main window when the Dock icon is clicked while none is visible.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        NSApp.setActivationPolicy(.regular)
-        if !flag {
-            showMainWindowOrReveal()
+        if flag {
+            NSApp.setActivationPolicy(.regular)
+        } else {
+            revealMainWindow()
         }
         return true
     }
@@ -109,16 +119,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         guard model?.sdk?.settingsRepository.getLocalSettings().startMinimized == true else { return }
         NSApp.setActivationPolicy(.accessory)
         DispatchQueue.main.async {
-            for window in NSApp.windows { window.orderOut(nil) }
+            for window in NSApp.windows where window.isAppContentWindow { window.orderOut(nil) }
         }
     }
 
     private func updateActivationPolicySoon() {
         // Deferred a tick: at the moment a window-close notification fires, the closing window is
         // still in `NSApp.windows`, so counting visible windows synchronously here would always
-        // find at least one (the one about to close/hide).
+        // find at least one (the one about to close/hide). Only content windows count — see
+        // `isAppContentWindow` for why the status-bar window must not.
         DispatchQueue.main.async {
-            let hasVisibleWindow = NSApp.windows.contains { $0.isVisible }
+            let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.isAppContentWindow }
             NSApp.setActivationPolicy(hasVisibleWindow ? .regular : .accessory)
         }
     }
@@ -162,17 +173,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     }
 
     private var mainWindowVisible: Bool {
-        (mainWindow?.isVisible ?? false) || NSApp.windows.contains { $0.isVisible && !$0.isAboutWindow }
+        (mainWindow?.isVisible ?? false)
+            || NSApp.windows.contains { $0.isVisible && $0.isAppContentWindow && !$0.isAboutWindow }
     }
 
     @objc private func toggleMainWindow() {
         if mainWindowVisible {
-            for window in NSApp.windows where !window.isAboutWindow { window.orderOut(nil) }
+            for window in NSApp.windows where window.isAppContentWindow && !window.isAboutWindow {
+                window.orderOut(nil)
+            }
             NSApp.setActivationPolicy(.accessory)
         } else {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            showMainWindowOrReveal()
+            revealMainWindow()
+        }
+    }
+
+    /// Brings the main window back to the front from wherever it is (tray-hidden, backgrounded,
+    /// minimized). Promotes to Regular and activates *first*, then shows the window a tick later —
+    /// the same order as desktop's own `activationRequests` handler (`main.kt`): an order-front
+    /// issued in the same tick as the Accessory -> Regular transition can be dropped by the window
+    /// server, leaving the window restored but behind other apps.
+    ///
+    /// Deliberately the forcing `activate(ignoringOtherApps: true)`, not macOS 14's `activate()`:
+    /// the latter is cooperative — it only succeeds if the frontmost app yields activation, which
+    /// nothing does for a tray click, so the window would come back behind the frontmost app. This
+    /// matches desktop's `MacActivationPolicy.setDockIconVisible` (`activateIgnoringOtherApps:`).
+    func revealMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { [weak self] in
+            self?.showMainWindowOrReveal()
         }
     }
 
