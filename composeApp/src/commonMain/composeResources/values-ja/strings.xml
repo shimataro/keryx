@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Default (fallback) locale = Japanese. The system locale selects a matching
-  values-<lang>/ set if present (see values-en/strings.xml for English), otherwise falls
-  back to this file. Every user-facing string lives here or in its values-<lang>/ override.
+  Japanese locale override. Every key in values/strings.xml (the English default/fallback)
+  is translated here in full — see that file's own header comment for the fallback mechanism.
 -->
 <resources>
     <string name="app_name">Keryx</string>
@@ -225,20 +224,20 @@
     <string name="settings_website">ウェブサイト</string>
     <string name="settings_project_page">プロジェクトページ</string>
     <string name="settings_licenses">オープンソースライセンス</string>
-    <!-- Official website URL. Locale-dependent: the default (Japanese) locale points to /ja/;
-         values-en/strings.xml overrides this with the English (/en/) URL. -->
+    <!-- Official website URL. Locale-dependent: the English default points to /en/; this
+         override points to the Japanese (/ja/) page. -->
     <string name="website_url">https://keryx.merc.works/ja/</string>
     <string name="settings_privacy_policy">プライバシーポリシー</string>
-    <!-- Locale-dependent, like website_url above: the default (Japanese) locale points to /ja/privacy;
-         values-en/strings.xml overrides this with the English (/privacy) URL. -->
+    <!-- Locale-dependent, like website_url above: the English default points to /privacy; this
+         override points to the Japanese (/ja/privacy) page. -->
     <string name="privacy_policy_url">https://keryx.merc.works/ja/privacy</string>
     <string name="settings_terms">利用規約</string>
-    <!-- Locale-dependent, like website_url above: the default (Japanese) locale points to /ja/terms;
-         values-en/strings.xml overrides this with the English (/terms) URL. -->
+    <!-- Locale-dependent, like website_url above: the English default points to /terms; this
+         override points to the Japanese (/ja/terms) page. -->
     <string name="terms_url">https://keryx.merc.works/ja/terms</string>
     <string name="settings_contact">お問い合わせ（メール）</string>
-    <!-- Contact email address. Locale-dependent, like website_url above: both locales currently
-         share one address, but values-en/strings.xml can override it with a locale-specific one. -->
+    <!-- Contact email address. Locale-dependent, like website_url above: currently the same address
+         as the English default, kept here so the two locales can diverge later. -->
     <string name="contact_email">keryx@merc.works</string>
     <string name="settings_update_check_interval">アップデート確認間隔</string>
     <string name="settings_update_check_startup_only">起動時のみ</string>
