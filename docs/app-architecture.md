@@ -1352,6 +1352,9 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
   destination is the real gap. Every position becomes a `FeedListDropTarget` and half, goes through
   `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. inside the tags, above a section's first
   row for a feed, or just below a collapsed folder — and is applied with `applyFeedListDropAction`.
+- **Dropping onto a row shrinks the preview into its center** (`UIDragPreviewTarget`) instead of using
+  UIKit's default, a snapshot of the dragged row fitted to the target's bounds, which would lay the dragged
+  feed's name over the target's title for the whole drop animation.
 - **Spring loading** is a timer of the system's `springLoadingDelay()` started when a feed would drop
   into a collapsed folder and checked again when it fires, not UIKit's `isSpringLoaded`, which selects
   the row it springs.

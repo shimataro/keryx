@@ -140,8 +140,17 @@ extension SidebarCollectionViewController: UICollectionViewDragDelegate, UIColle
               let dragItem = coordinator.items.first?.dragItem else { return }
         switch position {
         case .into(let item):
-            if let indexPath = dataSource.indexPath(for: item), let cell = collectionView.cellForItem(at: indexPath) {
-                coordinator.drop(dragItem, intoItemAt: indexPath, rect: cell.bounds)
+            // The default preview is a snapshot of the dragged row that fills the target's bounds, so
+            // for the whole drop animation the dragged feed's name would sit over the target's title.
+            // Shrinking it into the row's center keeps the title readable.
+            if let indexPath = dataSource.indexPath(for: item),
+               let center = collectionView.layoutAttributesForItem(at: indexPath)?.center {
+                let target = UIDragPreviewTarget(
+                    container: collectionView,
+                    center: center,
+                    transform: CGAffineTransform(scaleX: 0.05, y: 0.05)
+                )
+                coordinator.drop(dragItem, to: target)
             }
         case .gap:
             if let destination = coordinator.destinationIndexPath {

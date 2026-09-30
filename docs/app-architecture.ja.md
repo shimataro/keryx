@@ -1338,6 +1338,9 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   ある。どの位置も `FeedListDropTarget` と上下半分に直して `resolveFeedListDropAction` に通し、`nil` なら
   `.forbidden`（タグの中、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
   `applyFeedListDropAction` で適用する。
+- **行の上へのドロップは、プレビューをその行の中央へ縮める**（`UIDragPreviewTarget`）。UIKit の既定は
+  ドラッグ中の行のスナップショットをターゲットの bounds いっぱいに合わせるので、ドロップのアニメーションの間
+  ずっと、ドラッグ中のフィード名がターゲットのタイトルに重なってしまう。
 - **スプリングロード**は、フィードを閉じたフォルダーに入れる位置に来たときにシステムの `springLoadingDelay()`
   のタイマーを始め、発火時にもう一度確かめる。UIKit の `isSpringLoaded` は、開いた行を選択してしまうので使わない。
 - **ドラッグ中は状態を反映しない**（UIKit のプレースホルダーと隙間を乱すため）。最新の状態はドラッグの終わりに
