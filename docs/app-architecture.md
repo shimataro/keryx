@@ -1366,6 +1366,38 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
 - **State is not applied mid-drag** (it would disturb UIKit's placeholder and gap); the latest state is
   applied when the drag ends, which also re-expands a lifted folder that UIKit left collapsed.
 
+### Article list (macOS)
+
+The macOS article list is an `NSTableView` with one fixed row height
+(`Home/ArticleTableView.swift`, an `NSViewRepresentable`), not SwiftUI's `List`; iOS keeps its `List`.
+
+- **Why.** The macOS `List` is itself an `NSTableView`, but with automatic row heights, and applying a
+  change measures every row inserted above the top visible one (`_doAutomaticRowHeightsForInsertedAndVisibleRows`
+  under `_keepTopRowStableAtLeastOnce`) to keep that row in place. Turning "unread only" off with an
+  old unread article on screen, or re-sorting the full list, inserts thousands of rows at once: with
+  11,585 articles and 18 unread, 99.6% of the main thread's samples were in that measuring, the app
+  stopped responding for minutes, and it sometimes crashed on an assertion in UIFoundation's line
+  breaker (`-[_NSLineMetrics widthOfSubstringWithRange:]`). How long it took depended only on how many
+  rows landed above the anchor row — the same toggle with the unread articles near the top of the
+  full list finished in 0.4s.
+- **Fixed height.** Every article row has the same height (the title always reserves two lines, the
+  feed/timestamp line one), so the table measures one sample row once — Japanese text and an emoji
+  in both lines, at the pane's minimum width — and never measures another. Each cell lays its row out
+  at the row's own ideal height (`fixedSize(vertical:)`): proposed the cell's fixed height instead,
+  SwiftUI sets a title that fits in exactly two lines on one.
+- **Updates.** A change to the set or order of rows reloads the table and puts the top visible row
+  back where it was on screen from its index alone (`Home/ArticleTableLayout.swift`, tested in
+  `KeryxTests`), so rows inserted above it land out of view — which the new-articles pill relies on
+  (`freshSideUnseenCount`). A filter switch goes back to the top instead. A change that keeps the
+  rows re-renders only the visible cells whose `ArticleRowView` differs.
+- **Everything else stays SwiftUI's.** Rows are the same hosted `ArticleRowView`s: selection, clicks
+  and context menus are theirs, and neither the table nor a row's hosting view ever becomes the first
+  responder, so pane focus and `HomeView`'s key handling are unchanged. The visible-row report for
+  the new-articles count comes from the clip view's bounds rather than `onAppear`/`onDisappear`. A
+  hosted row does not inherit SwiftUI's environment, so the context-menu tracker is passed in
+  explicitly, and the soft scroll edge effect under the toolbar, which the `List` got for free, is
+  asked for with `scrollEdgeEffectStyle`.
+
 ### Selection display (iOS)
 
 At a compact width (the split view collapsed into one stack), the sidebar's and the article list's
