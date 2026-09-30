@@ -708,7 +708,7 @@ The SwiftUI app's own icon (macOS and iOS alike) is the Icon Composer file
 `appleApp/Keryx/Resources/AppIcon.icon` rather than a PNG set: a teal gradient fill plus the glyph as two
 layers (`pole.svg`, `waves.svg`), from which Xcode renders Liquid Glass, dark and tinted variants and the
 flattened fallbacks for pre-26 OS versions (building it needs Xcode 26 or later). The layer SVGs are copies of
-`design/icons/svg/app_icon_apple_{pole,waves}.svg` — the desktop glyph scaled to ~55% of the canvas, with the
+`design/icons/svg/app_icon_apple_{pole,waves}.svg` — the desktop glyph at the same size (about 65% of the canvas wide), with the
 waves drawn as filled outlines rather than strokes, since the icon renderer draws a stray seam through a stroked
 arc. Edit it in Icon Composer (bundled with Xcode) and keep the two SVG copies in sync.
 
