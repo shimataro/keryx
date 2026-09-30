@@ -201,8 +201,12 @@ struct HomeView: View {
         var target = HomeView.focusedPane(for: home.viewModel.initialHomePane)
         // The DB's own answer, since `home.feeds` starts empty before its first real emission.
         let expectsFeeds = (try? await home.viewModel.hasAnyFeed())?.boolValue
-        let deadline = ContinuousClock.now + HomeView.initialFocusTimeout
+        var deadline = ContinuousClock.now + HomeView.initialFocusTimeout
         while !initialFocusReady(target, expectsFeeds: expectsFeeds) {
+            // Time spent with a sheet up is the user's, not the restored article's: it must not
+            // push the target onto the feed-list fallback.
+            guard let waited = await waitWhileSheetPresented() else { return }
+            deadline += waited
             if ContinuousClock.now >= deadline {
                 // The feed list always has a selected row to focus; the restored article never showed up.
                 if target == .feedList { break }
@@ -219,11 +223,28 @@ struct HomeView: View {
         let fallbacks: [HomeFocusedPane] = [.reader, .articleList, .feedList]
         for candidate in fallbacks.drop(while: { $0 != target }) {
             for _ in 0..<3 {
+                // Checked before every assignment, since a sheet can open across the `yield`.
+                guard await waitWhileSheetPresented() != nil else { return }
                 focusedPane = candidate
                 await Task.yield()
                 if focusedPane == candidate { return }
             }
         }
+    }
+
+    /// Waits for any sidebar sheet/alert (`SidebarDialogState.isPresenting`) to close, returning how
+    /// long that took, or `nil` if the task was cancelled meanwhile. Launch's pane focus must not be
+    /// assigned under a sheet: pressing ⌘N while `applyInitialFocus` is still waiting opens
+    /// `AddFeedSheet`, and a late `focusedPane` assignment then pulls focus out of its URL field for
+    /// a moment before the sheet's window takes it back. Deferring rather than giving up keeps launch
+    /// from ending with no pane focused once the sheet is dismissed.
+    private func waitWhileSheetPresented() async -> Duration? {
+        let start = ContinuousClock.now
+        while sidebarDialogs.isPresenting {
+            try? await Task.sleep(for: .milliseconds(16))
+            if Task.isCancelled { return nil }
+        }
+        return ContinuousClock.now - start
     }
 
     private func initialFocusReady(_ target: HomeFocusedPane, expectsFeeds: Bool?) -> Bool {
