@@ -111,13 +111,41 @@ struct NotificationBell: View {
         // button (`NotificationCenterSheet.kt:205-210,280`).
         if isResetCloudData(notification) {
             resetCloudDataRow(notification)
+        } else if let icon = actionIcon(notification) {
+            actionableRow(notification, trailingIcon: icon)
         } else {
-            Button {
-                handleAction(notification)
-            } label: {
-                rowLabel(notification)
+            // No action: nothing happens on tap, so it is not a `Button` and carries no link styling.
+            HStack(alignment: .top) {
+                rowContent(notification)
+                Spacer()
+                dismissButton(notification)
             }
-            .buttonStyle(.plain)
+        }
+    }
+
+    /// A row that runs its action on tap. The message reads as a link (accent color, underlined
+    /// while hovered, pointing-hand cursor) and a trailing icon hints at where it leads, matching
+    /// Compose's own clickable row (`NotificationCenterSheet.kt`). The dismiss button is a sibling
+    /// of the row `Button`, not nested inside it, so dismissing never also runs the action.
+    private func actionableRow(_ notification: AppNotification, trailingIcon: String) -> some View {
+        HStack(alignment: .top) {
+            HoverReader { isHovering in
+                Button {
+                    handleAction(notification)
+                } label: {
+                    HStack(alignment: .top) {
+                        rowContent(notification, isLink: true, isHovering: isHovering)
+                        Spacer(minLength: 0)
+                        Image(systemName: trailingIcon)
+                            .foregroundStyle(isHovering ? Color.accentColor : Color.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .linkPointer()
+            }
+            dismissButton(notification)
         }
     }
 
@@ -127,9 +155,21 @@ struct NotificationBell: View {
         return false
     }
 
+    /// The trailing icon for a row-tappable action, or `nil` when the row is not tappable (no
+    /// action, or `ResetCloudData`). The icons stay clear of the level icons (`info.circle.fill`).
+    private func actionIcon(_ notification: AppNotification) -> String? {
+        guard let action = notification.action else { return nil }
+        switch onEnum(of: action) {
+        case .openUrl: return "arrow.up.right"
+        case .showFeedDetail, .showSettingsTab: return "chevron.right"
+        case .showInfoDialog: return "doc.text"
+        case .resetCloudData: return nil
+        }
+    }
+
     private func resetCloudDataRow(_ notification: AppNotification) -> some View {
         HStack(alignment: .top) {
-            rowLabel(notification, showDismiss: false)
+            rowContent(notification)
             Spacer()
             Button(L("settings_cloud_reset_confirm_action"), role: .destructive) {
                 confirmReset = notification
@@ -139,28 +179,30 @@ struct NotificationBell: View {
         }
     }
 
-    private func rowLabel(_ notification: AppNotification, showDismiss: Bool = true) -> some View {
+    private func rowContent(_ notification: AppNotification, isLink: Bool = false, isHovering: Bool = false) -> some View {
         HStack(alignment: .top) {
             Image(systemName: levelIcon(notification.level))
                 .foregroundStyle(levelColor(notification.level))
             VStack(alignment: .leading, spacing: 2) {
                 Text(notificationText(notification.text))
                     .multilineTextAlignment(.leading)
+                    .foregroundStyle(isLink ? Color.accentColor : Color.primary)
+                    .underline(isLink && isHovering)
                 Text(relativeTimeText(notification.timestampMillis))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            if showDismiss {
-                Spacer()
-                Button {
-                    notifications.dismiss(id: notification.id)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .help(L("notification_dismiss"))
-            }
         }
+    }
+
+    private func dismissButton(_ notification: AppNotification) -> some View {
+        Button {
+            notifications.dismiss(id: notification.id)
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+        }
+        .buttonStyle(.plain)
+        .help(L("notification_dismiss"))
     }
 
     /// Mirrors Compose's own `formatRelativeTime` (`NotificationCenterSheet.kt`), bucketing through
@@ -219,5 +261,21 @@ struct NotificationBell: View {
         case .resetCloudData:
             confirmReset = notification
         }
+    }
+}
+
+/// Owns a hover flag and hands it to `content`, so a row can restyle itself while hovered without
+/// the whole row being extracted into its own view.
+private struct HoverReader<Content: View>: View {
+    private let content: (Bool) -> Content
+    @State private var isHovering = false
+
+    init(@ViewBuilder content: @escaping (Bool) -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content(isHovering)
+            .onHover { isHovering = $0 }
     }
 }
