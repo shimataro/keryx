@@ -1305,10 +1305,10 @@ view on iOS.
   publishes it so an unrelated update in between cannot fold the row back.
 - **Rows.** Each row is a `UICollectionViewListCell` hosting the shared `SidebarRowLabel` through
   `UIHostingConfiguration`; the unread count is a `UICellAccessory.label`. The list is inset grouped at
-  a compact width and sidebar-styled at a regular one. The background configuration paints the native
-  selection, the echo of the selected filter's other copies (`SidebarRowHighlight.echoAlpha`) and, while
-  dragging, the drop target; the hosted content takes the text color a system cell would use in that
-  state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did; while the
+  a compact width and sidebar-styled at a regular one. The background configuration paints the selection
+  and, while dragging, the drop target in `SelectionColor` with white text and icons, and the echo of
+  the selected filter's other copies (`SidebarRowHighlight.echoAlpha`); otherwise the hosted content
+  takes the text color a system cell would use in that state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did; while the
   collapsed sidebar shows no selection (it is the topmost column on an iPhone), it shows no echo either.
 - **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
   (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
@@ -1340,7 +1340,7 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
   Only the lifted row is dragged — never a header, All/Starred, a tag, or the row being renamed.
 - **Onto a row or between rows.** A feed over a folder row (below its top quarter, which stays the gap
   above it), the "No folder" header or a tag row is proposed as `.insertIntoDestinationIndexPath`, and
-  the cell's drop state paints the accent highlight; anywhere else it is a gap
+  the cell's drop state paints it in `SelectionColor`; anywhere else it is a gap
   (`.insertAtDestinationIndexPath`), which UIKit draws by opening space. A gap's index is counted the way
   UIKit numbers a move: with the dragged row (and, for a folder, its feeds — the outline collapses a
   lifted folder) left out. While the finger is over the gap it has already opened, UIKit reports the
@@ -1362,6 +1362,13 @@ again (`CompactSidebarSelection`, `CompactArticleSelection`); the shared selecti
 is unchanged. Popping the reader back to the article list flashes the row just read in a neutral gray
 that fades out over about 0.35 s — the iOS list idiom, and the role Android's neutral ripple pulse
 plays there.
+
+At a regular width (iPad, a large iPhone in landscape) the selection stays, in both the sidebar and the
+article list, filled with `SelectionColor` under white text. That asset is Keryx's teal — `#00897B` in
+light mode, the same as the Compose app's selection — but `#00796B` in dark mode, darker than
+`AccentColor`'s `#4DB6AC`, on which white text would be unreadable (2.4:1). Unlike macOS it is not
+dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
+touch-first too, does not dim either (`external-spec.md` §9).
 
 ### `KeryxSdk`: the Swift entry point
 

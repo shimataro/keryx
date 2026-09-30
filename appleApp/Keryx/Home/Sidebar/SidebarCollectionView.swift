@@ -157,7 +157,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         cell.configurationUpdateHandler = { cell, cellState in
             var background = UIBackgroundConfiguration.clear()
             if Self.isDropTarget(cellState) {
-                background.backgroundColor = .tintColor
+                background.backgroundColor = Self.selectionColor
                 background.cornerRadius = 8
             }
             cell.backgroundConfiguration = background
@@ -165,19 +165,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     }
 
     private func configureRow(_ cell: UICollectionViewListCell, _ item: SidebarItemID) {
-        let content = state?.contents[item]
-        var accessories: [UICellAccessory] = []
-        if let count = content?.unreadCount {
-            accessories.append(.label(text: String(count), options: .init(isHidden: count == 0)))
-        }
-        switch item {
-        case .folder, .tag:
-            // `.cell`: tapping the row selects it, only the chevron expands/collapses.
-            accessories.append(.outlineDisclosure(options: .init(style: .cell)))
-        default:
-            break
-        }
-        cell.accessories = accessories
         cell.accessibilityIdentifier = Self.accessibilityIdentifier(item)
         cell.configurationUpdateHandler = { [weak self] cell, cellState in
             guard let self, let cell = cell as? UICollectionViewListCell else { return }
@@ -186,24 +173,44 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         cell.setNeedsUpdateConfiguration()
     }
 
-    /// Paints the row for its current state: the native selection, the echo of the selected filter's
-    /// other copies, or the accent fill while a dragged feed would be dropped onto it.
+    /// Keryx's teal for a selection (and a drop target) — darker than `AccentColor` in dark mode, so
+    /// white text on it stays readable.
+    private static let selectionColor = UIColor(named: "SelectionColor") ?? .tintColor
+
+    /// Paints the row for its current state: the selection or a drop target (white on
+    /// `SelectionColor`), the echo of the selected filter's other copies, or neither.
     private func updateRow(_ cell: UICollectionViewListCell, _ item: SidebarItemID, _ cellState: UICellConfigurationState) {
         guard let content = state?.contents[item] else { return }
         let dropTarget = Self.isDropTarget(cellState)
+        let filled = dropTarget || cellState.isSelected
         var background = cell.defaultBackgroundConfiguration().updated(for: cellState)
-        if dropTarget {
-            background.backgroundColor = .tintColor
+        if filled {
+            background.backgroundColor = Self.selectionColor
         } else if content.highlight == .echo, !cellState.isSelected, !cellState.isHighlighted {
             background.backgroundColor = UIColor.tintColor.withAlphaComponent(SidebarRowHighlight.echoAlpha)
         }
         cell.backgroundConfiguration = background
 
-        // The text color a system list cell would use in this state (white on the sidebar's
-        // selection). Icons take it too, as the SwiftUI `List` sidebar drew them, rather than the
-        // accent tint a plain `UIListContentConfiguration` would give them.
+        // White on the teal fill; otherwise the text color a system list cell would use in this
+        // state. Icons take it too, as the SwiftUI `List` sidebar drew them, rather than the accent
+        // tint a plain `UIListContentConfiguration` would give them.
         let system = cell.defaultContentConfiguration().updated(for: cellState)
-        let textColor = dropTarget ? UIColor.white : system.textProperties.resolvedColor()
+        let textColor = filled ? UIColor.white : system.textProperties.resolvedColor()
+
+        var accessories: [UICellAccessory] = [
+            .label(
+                text: String(content.unreadCount),
+                options: .init(isHidden: content.unreadCount == 0, tintColor: filled ? .white : nil)
+            ),
+        ]
+        switch item {
+        case .folder, .tag:
+            // `.cell`: tapping the row selects it, only the chevron expands/collapses.
+            accessories.append(.outlineDisclosure(options: .init(style: .cell, tintColor: filled ? .white : nil)))
+        default:
+            break
+        }
+        cell.accessories = accessories
         let editor = content.isRenaming ? actions.editor(item) : nil
         let onIconTap: (() -> Void)?
         if case .tag(let tagId) = item {

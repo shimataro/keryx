@@ -10,7 +10,8 @@ struct ArticleRowView: View, Equatable {
     let isSelected: Bool
     /// Whether the row shows the brief gray highlight of a collapsed list returned to from the reader.
     let isReturnFlashing: Bool
-    /// Whether the article list holds the pane focus in the key window.
+    /// Whether the article list holds the pane focus in the key window. Only macOS dims the
+    /// selection without it; a touch-first iOS keeps one selection color, as Android does.
     let paneFocused: Bool
     /// Not observed, only called — actions reach `HomeViewModel` directly.
     let viewModel: HomeViewModel
@@ -21,9 +22,9 @@ struct ArticleRowView: View, Equatable {
     private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
     private static let dimmedSelectionFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
     #else
-    // UIKit has no content-selection colors; these are the closest system equivalents.
-    private static let strongSelectionFill = Color.accentColor
-    private static let dimmedSelectionFill = Color(uiColor: .systemGray4)
+    /// UIKit has no content-selection colors, so the selection is Keryx's own teal — darker than
+    /// `AccentColor` in dark mode, so white text on it stays readable.
+    private static let strongSelectionFill = Color("SelectionColor")
     #endif
     /// The neutral gray a UIKit list cell highlights in, for the return flash.
     #if os(iOS)
@@ -45,7 +46,7 @@ struct ArticleRowView: View, Equatable {
         Button(action: onSelect) {
             // Same treatment as Compose's `onPrimary`: on the strong (focused) selection fill the
             // text turns light; on the dimmed (unfocused) one it keeps its ordinary colors.
-            let onStrongSelection = isSelected && paneFocused
+            let onStrongSelection = showsStrongSelection
             HStack(alignment: .center, spacing: 0) {
                 // Fixed slot, always reserved, so the title never shifts when the dot or star appears.
                 ZStack {
@@ -87,9 +88,12 @@ struct ArticleRowView: View, Equatable {
             // padding are dead zones.
             .contentShape(Rectangle())
             .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(paneFocused ? Self.strongSelectionFill : Self.dimmedSelectionFill)
+                if showsStrongSelection {
+                    RoundedRectangle(cornerRadius: 6).fill(Self.strongSelectionFill)
+                } else if isSelected {
+                    #if os(macOS)
+                    RoundedRectangle(cornerRadius: 6).fill(Self.dimmedSelectionFill)
+                    #endif
                 } else if isReturnFlashing {
                     RoundedRectangle(cornerRadius: 6).fill(Self.returnFlashFill)
                 }
@@ -117,6 +121,14 @@ struct ArticleRowView: View, Equatable {
             }
             .disabled(!ArticleListModelKt.hasUsableUrl(url: model.url))
         }
+    }
+
+    private var showsStrongSelection: Bool {
+        #if os(macOS)
+        isSelected && paneFocused
+        #else
+        isSelected
+        #endif
     }
 
     private var titleText: AttributedString {

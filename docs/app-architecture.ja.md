@@ -1296,8 +1296,9 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   覚えておく。その間に別の更新が来ても行が畳み戻らないようにするためである。
 - **行。** 各行は `UICollectionViewListCell` で、共通の `SidebarRowLabel` を `UIHostingConfiguration` で載せる。
   未読数は `UICellAccessory.label`。幅が compact のときは inset grouped、regular のときはサイドバーの見た目に
-  なる。背景の設定で、標準の選択、選択中のフィルターの別のコピーに付けるエコー（`SidebarRowHighlight.echoAlpha`）、
-  ドラッグ中のドロップ先を描き、載せた内容はその状態でシステムのセルが使う文字色に合わせる。タップは `List` の
+  なる。背景の設定で、選択とドラッグ中のドロップ先を `SelectionColor` で塗って文字とアイコンを白にし、選択中の
+  フィルターの別のコピーにはエコー（`SidebarRowHighlight.echoAlpha`）を描く。それ以外では、載せた内容はその状態で
+  システムのセルが使う文字色に合わせる。タップは `List` の
   ときと同じ `CompactSidebarSelection` のルールで処理する。
   畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
@@ -1326,8 +1327,8 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   受け渡す。セッションはアプリ内に限り、アイテムプロバイダーはデータを持たない。ドラッグするのは持ち上げた行
   だけで、ヘッダー、すべて／スター付き、タグ、名前変更中の行はドラッグしない。
 - **行の上か、行の間か。** フィードをフォルダーの行（上 1/4 はその上の行間のまま）、「フォルダーなし」の
-  ヘッダー、タグの行に重ねると `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態でアクセント
-  カラーのハイライトを描く。それ以外は行間（`.insertAtDestinationIndexPath`）で、UIKit が隙間を開けて示す。
+  ヘッダー、タグの行に重ねると `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態で `SelectionColor` の
+  ハイライトを描く。それ以外は行間（`.insertAtDestinationIndexPath`）で、UIKit が隙間を開けて示す。
   行間の位置は UIKit が移動を数えるのと同じく、ドラッグ中の行（フォルダーならその中のフィードも。持ち上げた
   フォルダーはアウトラインが畳む）を除いて数える。開いた隙間の上に指があるあいだ、UIKit はドラッグ中の行自身の
   インデックスパスを返すので、そのときは直前の位置を保つ。ドロップ時のコーディネーターの行き先は本当の隙間で
@@ -1345,6 +1346,12 @@ compact 幅（分割ビューが 1 つのスタックに畳まれた状態）で
 リンクなので、どちらも一番手前の列に戻ったときに選択を画面に残さない（`CompactSidebarSelection`、
 `CompactArticleSelection`）。`HomeViewModel` の共有の選択は変えない。記事詳細から記事一覧に戻ると、読んでいた
 行を中立の灰色で一瞬光らせ、約 0.35 秒で消す。iOS のリストの作法で、Android の中立色のリップルと同じ役割である。
+
+regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと記事一覧のどちらも選択を残し、`SelectionColor` で
+塗って文字を白にする。この色アセットは Keryx のティールで、ライトでは Compose 版の選択と同じ `#00897B`、ダーク
+では `#00796B` にしている。ダークの `AccentColor`（`#4DB6AC`）の上では白文字が読めない（2.4:1）ため、それより
+暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
+同じくタッチ主体の Android も薄くしない（`external-spec.md` §9）。
 
 ### `KeryxSdk`：Swift からの入口
 
