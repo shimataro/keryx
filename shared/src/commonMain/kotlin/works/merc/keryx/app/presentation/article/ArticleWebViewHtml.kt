@@ -208,8 +208,11 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
         </head>
         $bodyTag
     """.trimIndent()
-    return "$shell\n$content\n</body>\n</html>"
+    return "$shell\n$content$HTML_CLOSING"
 }
+
+/** Closes the `<body>` and `<html>` that [articleDocument]'s shell opens, after the raw content. */
+private const val HTML_CLOSING = "\n</body>\n</html>"
 
 /**
  * Escapes plain text for safe inclusion as HTML text content. `&` is replaced first so the
