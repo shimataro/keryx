@@ -364,12 +364,11 @@
     <string name="error_generic">An error occurred</string>
     <string name="error_update">Update failed</string>
 
-    <!-- Apple (SwiftUI) app only — a non-plural counterpart to Compose's own two-argument
-         home_add_feed_partial, which has no direct equivalent in Foundation's String Catalog
-         plural mechanism (its keyed variations assume a single argument drives the plural
-         category). Formatted via LF, same as every other Apple-only string here. A single-argument
-         plural (article count, new-articles count, OPML import result, relative time) reuses the
-         matching Compose <plurals> resource directly instead of a fixed-wording key like this one. -->
+    <!-- Apple (SwiftUI) app only — a fixed-wording, non-plural counterpart to Compose's own
+         two-argument home_add_feed_partial. Formatted via LF, same as every other Apple-only
+         string here. A single-argument plural (article count, new-articles count, OPML import
+         result, relative time) reuses the matching Compose <plurals> resource directly instead
+         of a fixed-wording key like this one. -->
     <string name="apple_add_feed_partial_result">%1$d succeeded, %2$d failed</string>
 
     <!-- Apple (SwiftUI) app only — the button that closes the iOS Settings sheet. macOS reaches

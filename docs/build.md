@@ -245,11 +245,13 @@ Android resource names (`home_all_feeds`, `common_cancel`, …), so `appleApp/Ke
 `String(localized:)` and hand back a plain, already-localized `String` — pass that into whichever
 view initializer takes a bare `String` (`Text(L("home_all_feeds"))`, `.help(L("article_star"))`, an
 `.alert(LF("home_delete_folder_confirm", folder.name), …)` title, etc.), never the `LocalizedStringKey`-taking
-overload, since the key text itself is not meant to be shown. A resource whose Android `<plurals>` form
-takes more than one argument (e.g. "%1$d succeeded, %2$d failed") has no direct Foundation counterpart —
-its `.xcstrings` variation is keyed on a single argument's plural category — so the Apple side adds its
-own plain (non-plural) string instead of trying to reuse the Android plural as-is (see
-`apple_add_feed_partial_result`'s comment in `strings.xml`).
+overload, since the key text itself is not meant to be shown. A `<plurals>` whose forms use more than
+one argument (e.g. "%1$d feed added, %2$d failed") is emitted as a **substitution** rather than plain
+plural variations: a plain variation cannot say which argument picks the plural category, and Xcode
+warns "Use an explicit substitution instead". The first argument drives the category, matching the
+Android convention of passing the counted value first (it is also the `quantity` handed to
+`pluralStringResource`). The Apple app still uses its own fixed-wording, non-plural
+`apple_add_feed_partial_result` for that message (see its comment in `strings.xml`).
 
 ## Building the SwiftUI app (`appleApp/`)
 

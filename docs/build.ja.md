@@ -243,11 +243,13 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 ローカライズ済みの素の `String` を返す——これを `String` を受け取る側の初期化子に渡す
 （`Text(L("home_all_feeds"))`、`.help(L("article_star"))`、`.alert(LF("home_delete_folder_confirm",
 folder.name), …)` のタイトルなど）のであって、`LocalizedStringKey` を受け取る側のオーバーロードには
-渡さない——キーの文字列そのものを表示する意図ではないため。Android の `<plurals>` が引数を2つ以上取る
-場合（例：「%1$d 件成功、%2$d 件失敗」）は Foundation 側に直接対応する仕組みが無い——`.xcstrings` の
-plural variation は単一の引数の複数形カテゴリだけをキーにする——ので、Apple 側はその Android
-plural をそのまま流用しようとせず、代わりに独自のプレーンな（plural ではない）文字列を追加する
-（`strings.xml` の `apple_add_feed_partial_result` 自身のコメント参照）。
+渡さない——キーの文字列そのものを表示する意図ではないため。複数の引数を使う `<plurals>`
+（例：「%1$d feed added, %2$d failed」）は、素の plural バリエーションではなく **substitution** として出力する：
+素のバリエーションではどの引数が複数形カテゴリを決めるのか判別できず、Xcode が
+「Use an explicit substitution instead」と警告するため。カテゴリを決めるのは第 1 引数で、Android の
+「数える値を先頭に渡す」慣例に合わせている（`pluralStringResource` に渡す `quantity` でもある）。
+Apple アプリは、そのメッセージについては引き続き固定文言の plural ではない
+`apple_add_feed_partial_result` を使う（`strings.xml` のそのコメント参照）。
 
 ## SwiftUI アプリ（`appleApp/`）のビルド
 

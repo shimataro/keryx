@@ -243,7 +243,8 @@ kotlin {
 // composeResources/values*/strings.xml keeps one source of truth for both UIs' text (see
 // docs/app-architecture.md's "Apple Native Apps (SwiftUI)"). Japanese is the source/fallback
 // language, as it is here. Android-style positional placeholders become their Apple equivalents
-// (%1$s -> %1$@, %1$d -> %1$lld) and <plurals> become plural variations.
+// (%1$s -> %1$@, %1$d -> %1$lld) and <plurals> become plural variations (or, with several
+// arguments, a substitution — see pluralLocalization).
 abstract class GenerateStringCatalogTask : DefaultTask() {
     @get:InputDirectory
     abstract val resourcesDir: DirectoryProperty
@@ -266,12 +267,12 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
                     "string" -> mapOf("stringUnit" to unit(element.textContent))
                     "plurals" -> {
                         val items = element.getElementsByTagName("item")
-                        val forms = sortedMapOf<String, Any>()
+                        val forms = sortedMapOf<String, String>()
                         for (j in 0 until items.length) {
                             val item = items.item(j) as org.w3c.dom.Element
-                            forms[item.getAttribute("quantity")] = mapOf("stringUnit" to unit(item.textContent))
+                            forms[item.getAttribute("quantity")] = appleValue(item.textContent)
                         }
-                        mapOf("variations" to mapOf("plural" to forms))
+                        pluralLocalization(forms)
                     }
                     else -> continue
                 }
@@ -285,7 +286,42 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
             .writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(catalog)) + "\n")
     }
 
-    private fun unit(raw: String) = mapOf("state" to "translated", "value" to appleValue(raw))
+    private fun unit(raw: String) = translated(appleValue(raw))
+
+    private fun translated(value: String) = mapOf("state" to "translated", "value" to value)
+
+    /**
+     * A single-argument plural becomes plain plural variations. One with several positional
+     * arguments becomes a substitution instead, because Apple cannot infer which argument picks
+     * the plural category and warns ("Use an explicit substitution instead"). The first argument
+     * drives it, matching the Android convention of passing the counted value first (the
+     * `quantity` given to `pluralStringResource` is that same value at every call site).
+     */
+    private fun pluralLocalization(forms: Map<String, String>): Map<String, Any> {
+        val positions = forms.values.flatMap { form -> applePlaceholder.findAll(form).map { it.groupValues[1] } }.toSet()
+        if (positions.size <= 1) {
+            return mapOf("variations" to mapOf("plural" to forms.mapValues { mapOf("stringUnit" to translated(it.value)) }))
+        }
+        val specifier = forms.values.firstNotNullOf { form ->
+            applePlaceholder.findAll(form).firstOrNull { it.groupValues[1] == "1" }?.groupValues?.get(2)
+        }
+        val substitutionForms = forms.mapValues { (_, form) ->
+            mapOf("stringUnit" to translated(form.replace("%1\$$specifier", "%arg")))
+        }
+        return mapOf(
+            "stringUnit" to translated("%#@arg1@"),
+            "substitutions" to mapOf(
+                "arg1" to mapOf(
+                    "argNum" to 1,
+                    "formatSpecifier" to specifier,
+                    "variations" to mapOf("plural" to substitutionForms),
+                ),
+            ),
+        )
+    }
+
+    /** An Apple positional placeholder, as [appleValue] produces: position, then specifier. */
+    private val applePlaceholder = Regex("%(\\d+)\\\$(@|lld)")
 
     /** Android resource escapes resolved, and positional placeholders mapped to Apple's. */
     private fun appleValue(raw: String): String = raw
