@@ -77,8 +77,8 @@ extension FeedListView {
                       let instance = feedListRowSelection(forKey: key, in: orderedRows) else { return }
                 let tap = CompactSidebarSelection.tap(key: key, selectedKey: selectedRowKey)
                 if tap.changesFilter {
+                    home.selectFilter(instance.filter, instance: instance)
                     focusedPane.wrappedValue = .feedList
-                    home.viewModel.selectFilter(filter: instance.filter, instance: instance)
                 }
                 if tap.navigates { onOpenArticleList() }
             }
@@ -321,7 +321,7 @@ extension FeedListView {
     /// (`FeedListDragAndDrop.kt`).
     private func selectForContextMenu(_ instance: FeedListRowSelection) {
         guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
-        home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+        home.selectFilter(instance.filter, instance: instance)
     }
 }
 
@@ -406,7 +406,7 @@ private struct TagRowLabel: View {
 
     private func selectForContextMenu() {
         guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
-        home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+        home.selectFilter(instance.filter, instance: instance)
     }
 }
 #endif

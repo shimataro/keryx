@@ -250,8 +250,8 @@ struct NotificationBell: View {
             // merge could still be catching up) — matches Compose's own unconditional select
             // (`HomeScreen.kt:755-759`), which also focuses the article-list pane so the keyboard
             // immediately lands where the selected feed's articles now show.
-            home.viewModel.selectFilter(
-                filter: ArticleFilterFeed(feedId: a.feedId),
+            home.selectFilter(
+                ArticleFilterFeed(feedId: a.feedId),
                 instance: FeedListRowSelectionFeedInFolderGroup(feedId: a.feedId)
             )
             focusedPane.wrappedValue = .articleList

@@ -100,6 +100,16 @@ final class HomeObservable {
         self.makeAddFeedController = makeAddFeedController
     }
 
+    /// Selects a filter and mirrors the result into the observed state at once. The `for await`
+    /// observers only deliver the new value a MainActor hop later, and a view that re-renders in
+    /// between (a pane-focus change, say) would read the stale selection and flash it back.
+    func selectFilter(_ filter: ArticleFilter, instance: FeedListRowSelection) {
+        viewModel.selectFilter(filter: filter, instance: instance)
+        self.filter = viewModel.filter.value
+        selectedRowInstance = viewModel.selectedRowInstance.value
+        updateFeedListSelectionTarget()
+    }
+
     func pulseCopy() {
         copyPulse += 1
     }

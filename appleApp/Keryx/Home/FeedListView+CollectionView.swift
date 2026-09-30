@@ -44,7 +44,7 @@ extension FeedListView {
             menuWillOpen: { item in
                 guard let instance = item.rowSelection,
                       !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
-                home.viewModel.selectFilter(filter: instance.filter, instance: instance)
+                home.selectFilter(instance.filter, instance: instance)
             },
             editor: renameEditor(for:),
             showColorPicker: { dialogs.colorPickingTagId = $0 },
@@ -66,8 +66,8 @@ extension FeedListView {
         guard let key = item.selectionKey, let instance = item.rowSelection else { return }
         let tap = CompactSidebarSelection.tap(key: key, selectedKey: selectedRowKey)
         if tap.changesFilter {
+            home.selectFilter(instance.filter, instance: instance)
             focusedPane.wrappedValue = .feedList
-            home.viewModel.selectFilter(filter: instance.filter, instance: instance)
         }
         if tap.navigates { onOpenArticleList() }
     }

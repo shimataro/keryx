@@ -351,7 +351,7 @@ struct HomeView: View {
             orderedRows: home.sidebar.orderedRows,
             delta: Int32(delta)
         ) else { return }
-        home.viewModel.selectFilter(filter: next.filter, instance: next)
+        home.selectFilter(next.filter, instance: next)
     }
 
     private func requestRename() {
