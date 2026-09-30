@@ -253,6 +253,10 @@ Android convention of passing the counted value first (it is also the `quantity`
 `pluralStringResource`). The Apple app still uses its own fixed-wording, non-plural
 `apple_add_feed_partial_result` for that message (see its comment in `strings.xml`).
 
+`project.yml` sets `developmentLanguage: ja` to match the catalog's source language: Xcode refuses to
+export localizations when the two differ, and the development language is also the app's fallback
+(`CFBundleDevelopmentRegion`), which must be Japanese like the Compose app's.
+
 Xcode's localization sync would otherwise warn "Skipping extraction of localizable string with
 non-literal key" once per `Text(L("…"))` call, since it cannot tell that these already pass a
 localized `String`. `project.yml` therefore sets `LOCALIZED_STRING_SWIFTUI_SUPPORT = NO` (nothing in the

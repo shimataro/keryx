@@ -251,6 +251,10 @@ folder.name), …)` のタイトルなど）のであって、`LocalizedStringKe
 Apple アプリは、そのメッセージについては引き続き固定文言の plural ではない
 `apple_add_feed_partial_result` を使う（`strings.xml` のそのコメント参照）。
 
+`project.yml` は、カタログのソース言語に合わせて `developmentLanguage: ja` を設定する：両者が食い違うと
+Xcode はローカライゼーションのエクスポートを拒否し、開発言語はアプリのフォールバック
+（`CFBundleDevelopmentRegion`）でもあるため、Compose アプリと同じく日本語でなければならない。
+
 このままだと Xcode のローカライゼーション同期が、`Text(L("…"))` の呼び出しごとに
 「Skipping extraction of localizable string with non-literal key」と警告する——これらがすでにローカライズ済みの
 `String` を渡していることを判別できないため。そこで `project.yml` は `LOCALIZED_STRING_SWIFTUI_SUPPORT = NO` を
