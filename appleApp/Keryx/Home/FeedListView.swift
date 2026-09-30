@@ -166,43 +166,25 @@ struct FeedListView: View {
         // already in flight — `activity.refreshIndicatorShown`/`.syncing` pick which one's own
         // spinner shows, never both for the same phase.
         ToolbarItem {
-            Button {
-                home.viewModel.refreshAll()
-            } label: {
-                // A `Label` rather than a bare icon so the toolbar's overflow menu (shown when the
-                // sidebar is collapsed) gets a title; the toolbar itself still renders icon-only.
-                // The title stays fixed while the spinner replaces the icon, so VoiceOver always
-                // announces what the button does.
-                Label {
-                    Text(L("home_refresh"))
-                } icon: {
-                    if home.activity.refreshIndicatorShown {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
-            .disabled(!home.activity.idle)
-            .help(L(home.activity.refreshIndicatorShown ? "home_refreshing" : "home_refresh"))
+            ToolbarActivityButton(
+                titleKey: "home_refresh",
+                busyTitleKey: "home_refreshing",
+                systemImage: "arrow.clockwise",
+                busy: home.activity.refreshIndicatorShown,
+                enabled: home.activity.idle,
+                action: { home.viewModel.refreshAll() }
+            )
         }
         if home.cloudConnected {
             ToolbarItem {
-                Button {
-                    home.viewModel.sync()
-                } label: {
-                    Label {
-                        Text(L("home_sync"))
-                    } icon: {
-                        if home.activity.syncing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "icloud")
-                        }
-                    }
-                }
-                .disabled(!home.activity.idle)
-                .help(L(home.activity.syncing ? "home_syncing" : "home_sync"))
+                ToolbarActivityButton(
+                    titleKey: "home_sync",
+                    busyTitleKey: "home_syncing",
+                    systemImage: "icloud",
+                    busy: home.activity.syncing,
+                    enabled: home.activity.idle,
+                    action: { home.viewModel.sync() }
+                )
             }
         }
     }
@@ -469,5 +451,52 @@ private struct SearchFocusModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// A sidebar toolbar action (Refresh All / Sync) that shows a spinner while its operation runs.
+///
+/// On macOS the spinner replaces the icon inside the button's `Label`: `NSToolbar` hosts the view
+/// as-is, and the title stays fixed so VoiceOver and the collapsed-sidebar overflow menu still name
+/// the action. iOS's navigation bar cannot render a `ProgressView` as a button's icon — it falls
+/// back to the label's title text — so there the spinner takes the button's place instead, carrying
+/// the in-progress title for VoiceOver. The button is disabled while busy either way, so nothing
+/// tappable is lost.
+private struct ToolbarActivityButton: View {
+    let titleKey: String
+    let busyTitleKey: String
+    let systemImage: String
+    let busy: Bool
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        #if os(iOS)
+        if busy {
+            ProgressView()
+                .accessibilityLabel(L(busyTitleKey))
+        } else {
+            Button(action: action) {
+                Label(L(titleKey), systemImage: systemImage)
+            }
+            .disabled(!enabled)
+        }
+        #else
+        Button(action: action) {
+            // A `Label` rather than a bare icon so the toolbar's overflow menu (shown when the
+            // sidebar is collapsed) gets a title; the toolbar itself still renders icon-only.
+            Label {
+                Text(L(titleKey))
+            } icon: {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                }
+            }
+        }
+        .disabled(!enabled)
+        .help(L(busy ? busyTitleKey : titleKey))
+        #endif
     }
 }
