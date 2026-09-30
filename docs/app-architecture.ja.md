@@ -72,8 +72,8 @@
                   分割された、全ペイン共通のプレーンな M3 見た目のコンポーネント）, menu/（MenuController）
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
-  commonMain/composeResources/  values/strings.xml（日本語、デフォルト/フォールバック）,
-    values-en/strings.xml（英語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
+  commonMain/composeResources/  values/strings.xml（英語、デフォルト/フォールバック）,
+    values-ja/strings.xml（日本語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
     *ベクター*形式——ビットマップ資産（`app_icon.png`、`onedrive.png`、トレイの PNG 群）は対象外）

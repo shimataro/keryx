@@ -219,7 +219,7 @@ appleMain の構成は [app-architecture.ja.md](app-architecture.ja.md) の「Ap
 ## Apple アプリ用の String Catalog
 
 SwiftUI アプリは Xcode の String Catalog でローカライズする。この String Catalog は Compose アプリ自身の
-`composeResources/values/strings.xml`（日本語。ソース言語かつフォールバック）と `values-en/strings.xml` から生成するので、
+`composeResources/values/strings.xml`（英語。ソース言語かつフォールバック）と `values-ja/strings.xml` から生成するので、
 ユーザーに見えるすべての文言について、2 つの UI が単一の情報源を共有する：
 
 ```bash
@@ -251,9 +251,10 @@ folder.name), …)` のタイトルなど）のであって、`LocalizedStringKe
 Apple アプリは、そのメッセージについては引き続き固定文言の plural ではない
 `apple_add_feed_partial_result` を使う（`strings.xml` のそのコメント参照）。
 
-`project.yml` は、カタログのソース言語に合わせて `developmentLanguage: ja` を設定する：両者が食い違うと
+`project.yml` は、カタログのソース言語に合わせて `developmentLanguage: en` を設定する：両者が食い違うと
 Xcode はローカライゼーションのエクスポートを拒否し、開発言語はアプリのフォールバック
-（`CFBundleDevelopmentRegion`）でもあるため、Compose アプリと同じく日本語でなければならない。
+（`CFBundleDevelopmentRegion`）でもあるため、Compose アプリと同じく英語でなければならない
+（日本語のシステムでは日本語、それ以外の言語では英語にフォールバックする）。
 
 このままだと Xcode のローカライゼーション同期が、`Text(L("…"))` の呼び出しごとに
 「Skipping extraction of localizable string with non-literal key」と警告する——これらがすでにローカライズ済みの

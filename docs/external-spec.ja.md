@@ -150,9 +150,10 @@ Google Play 開発者サービスがインストール済みかつ有効かつ�
 
 ## 8. アクセシビリティ・国際化
 
-- UI 文言はすべて Compose Resources（日本語の `values/strings.xml` ——既定かつフォールバック——に加え、
-  同じキー集合の英語 `values-en/strings.xml`）で管理。システムロケールに応じて選択し、いずれの言語にも
-  該当しなければ日本語へフォールバック。
+- UI 文言はすべて Compose Resources（英語の `values/strings.xml` ——既定かつフォールバック——に加え、
+  同じキー集合の日本語 `values-ja/strings.xml`）で管理。システムロケールに応じて選択し、いずれの言語にも
+  該当しなければ英語へフォールバック。SwiftUI アプリも同じ規則に従う（String Catalog はこれらのファイルから
+  生成され、開発言語は英語）。
 - 文字サイズ設定（`LocalDensity` の fontScale に反映）。
 
 ## 9. UI 方針

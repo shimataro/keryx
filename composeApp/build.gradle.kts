@@ -241,7 +241,7 @@ kotlin {
 // --- String Catalog for the Apple app ---
 // The SwiftUI app localizes through an Xcode String Catalog; generating it from the same
 // composeResources/values*/strings.xml keeps one source of truth for both UIs' text (see
-// docs/app-architecture.md's "Apple Native Apps (SwiftUI)"). Japanese is the source/fallback
+// docs/app-architecture.md's "Apple Native Apps (SwiftUI)"). English is the source/fallback
 // language, as it is here. Android-style positional placeholders become their Apple equivalents
 // (%1$s -> %1$@, %1$d -> %1$lld) and <plurals> become plural variations (or, with several
 // arguments, a substitution — see pluralLocalization).
@@ -254,7 +254,7 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        val locales = linkedMapOf("ja" to "values", "en" to "values-en")
+        val locales = linkedMapOf("ja" to "values-ja", "en" to "values")
         val strings = sortedMapOf<String, MutableMap<String, Any>>()
         for ((locale, dir) in locales) {
             val file = resourcesDir.get().asFile.resolve("$dir/strings.xml")
@@ -281,7 +281,7 @@ abstract class GenerateStringCatalogTask : DefaultTask() {
                 (entry["localizations"] as MutableMap<String, Any>)[locale] = localization
             }
         }
-        val catalog = mapOf("sourceLanguage" to "ja", "strings" to strings, "version" to "1.0")
+        val catalog = mapOf("sourceLanguage" to "en", "strings" to strings, "version" to "1.0")
         outputFile.get().asFile.apply { parentFile.mkdirs() }
             .writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(catalog)) + "\n")
     }
@@ -741,10 +741,10 @@ tasks.withType<JavaExec>().configureEach {
 }
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
-    // Now that values-en/strings.xml exists alongside the Japanese default, Compose Resources
-    // resolution genuinely depends on the JVM's locale (previously inert, since only one locale
-    // existed). Several tests assert literal resource text; pin to Japanese so results don't
-    // depend on the host's own locale (e.g. CI runners typically default to English).
+    // Compose Resources resolution depends on the JVM's locale: values/ is English (the default)
+    // and values-ja/ Japanese. Several tests assert literal Japanese resource text; pin to
+    // Japanese so results don't depend on the host's own locale (e.g. CI runners typically
+    // default to English).
     jvmArgs("-Duser.language=ja", "-Duser.country=JP")
 }
 

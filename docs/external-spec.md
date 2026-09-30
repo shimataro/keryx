@@ -143,9 +143,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 ## 8. Accessibility & Internationalization
 
-- All UI strings are managed via Compose Resources (`values/strings.xml` for Japanese — the default and
-  fallback — plus `values-en/strings.xml` for English, same key set). Selected according to system locale,
-  falling back to Japanese if the system locale isn't one of the two.
+- All UI strings are managed via Compose Resources (`values/strings.xml` for English — the default and
+  fallback — plus `values-ja/strings.xml` for Japanese, same key set). Selected according to system locale,
+  falling back to English if the system locale isn't one of the two. The SwiftUI app follows the same rule
+  (its String Catalog is generated from these files and its development language is English).
 - Font size setting (reflected in `LocalDensity` fontScale).
 
 ## 9. UI Direction

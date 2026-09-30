@@ -1,10 +1,11 @@
 name: Keryx
 options:
   createIntermediateGroups: true
-  # Japanese is the String Catalog's source language and the fallback for any locale the app does
-  # not ship (external-spec §8). Xcode requires the project's development language to match the
-  # catalog's sourceLocale, and it becomes CFBundleDevelopmentRegion, i.e. that fallback.
-  developmentLanguage: ja
+  # English is the String Catalog's source language and the fallback for any locale the app does
+  # not ship (external-spec §8): a Japanese system gets Japanese, everything else English. Xcode
+  # requires the project's development language to match the catalog's sourceLocale, and it
+  # becomes CFBundleDevelopmentRegion, i.e. that fallback.
+  developmentLanguage: en
   deploymentTarget:
     macOS: "14.0"
     iOS: "17.0"

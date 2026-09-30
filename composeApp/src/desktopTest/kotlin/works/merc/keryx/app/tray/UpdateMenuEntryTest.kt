@@ -29,7 +29,7 @@ private fun manualOnlyUpdate() =
  *
  * Runs inside a real composition ([runDesktopComposeUiTest]) because the function resolves its
  * labels with `stringResource`; the build pins the test JVM's locale to Japanese (see
- * `composeApp/build.gradle.kts`), so the expected strings below are `values/strings.xml`'s.
+ * `composeApp/build.gradle.kts`), so the expected strings below are `values-ja/strings.xml`'s.
  */
 @OptIn(ExperimentalTestApi::class)
 class UpdateMenuEntryTest {

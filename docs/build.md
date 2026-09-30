@@ -221,8 +221,8 @@ appleMain is structured.
 ## String Catalog for the Apple app
 
 The SwiftUI app localizes through an Xcode String Catalog generated from the Compose app's own
-`composeResources/values/strings.xml` (Japanese, the source/fallback language) and
-`values-en/strings.xml`, so both UIs share one source of truth for every user-facing text:
+`composeResources/values/strings.xml` (English, the source/fallback language) and
+`values-ja/strings.xml`, so both UIs share one source of truth for every user-facing text:
 
 ```bash
 ./gradlew :composeApp:generateStringCatalog
@@ -253,9 +253,10 @@ Android convention of passing the counted value first (it is also the `quantity`
 `pluralStringResource`). The Apple app still uses its own fixed-wording, non-plural
 `apple_add_feed_partial_result` for that message (see its comment in `strings.xml`).
 
-`project.yml` sets `developmentLanguage: ja` to match the catalog's source language: Xcode refuses to
+`project.yml` sets `developmentLanguage: en` to match the catalog's source language: Xcode refuses to
 export localizations when the two differ, and the development language is also the app's fallback
-(`CFBundleDevelopmentRegion`), which must be Japanese like the Compose app's.
+(`CFBundleDevelopmentRegion`), which must be English like the Compose app's — a Japanese system gets
+Japanese, every other language falls back to English.
 
 Xcode's localization sync would otherwise warn "Skipping extraction of localizable string with
 non-literal key" once per `Text(L("…"))` call, since it cannot tell that these already pass a

@@ -78,8 +78,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   feel components shared by every pane), menu/ (MenuController)
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
-  commonMain/composeResources/  values/strings.xml (Japanese, default/fallback), values-en/strings.xml
-    (English, same key set), drawable/ (icons are Android Vector Drawable XML,
+  commonMain/composeResources/  values/strings.xml (English, default/fallback), values-ja/strings.xml
+    (Japanese, same key set), drawable/ (icons are Android Vector Drawable XML,
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
     target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)

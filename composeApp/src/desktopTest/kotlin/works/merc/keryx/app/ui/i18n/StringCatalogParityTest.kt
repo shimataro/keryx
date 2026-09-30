@@ -68,8 +68,8 @@ class StringCatalogParityTest {
     private val placeholder = Regex("""%(\d+)\$""")
 
     @Test
-    fun japaneseIsTheSourceLanguage() {
-        assertEquals("ja", catalog.getValue("sourceLanguage").jsonPrimitive.content)
+    fun englishIsTheSourceLanguage() {
+        assertEquals("en", catalog.getValue("sourceLanguage").jsonPrimitive.content)
     }
 
     @Test
@@ -83,7 +83,7 @@ class StringCatalogParityTest {
      */
     @Test
     fun aMultiArgumentPluralIsASubstitutionNotAPlainVariation() {
-        for ((locale, dir) in listOf("ja" to "values", "en" to "values-en")) {
+        for ((locale, dir) in listOf("ja" to "values-ja", "en" to "values")) {
             for ((key, texts) in resources(dir)) {
                 val localization = localization(key, locale)
                 val multiArgument = texts.flatMap { t -> placeholder.findAll(t).map { it.groupValues[1] } }.toSet().size > 1
@@ -100,7 +100,7 @@ class StringCatalogParityTest {
 
     @Test
     fun everyKeyIsTranslatedInBothLocalesWithTheSamePlaceholders() {
-        for ((locale, dir) in listOf("ja" to "values", "en" to "values-en")) {
+        for ((locale, dir) in listOf("ja" to "values-ja", "en" to "values")) {
             for ((key, texts) in resources(dir)) {
                 val values = catalogValues(key, locale)
                 assertEquals(texts.size, values.size, "$locale/$key: plural forms")
