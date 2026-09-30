@@ -1254,7 +1254,9 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
 
 グループの区別は、Compose のような区切り線ではなく、Finder やメールと同じくセクションヘッダーで行う。
 フォルダーとタグのヘッダーは開閉でき（状態は Apple 版だけの表示状態で、`@AppStorage` に保存する）、
-セクション間の余白は固定値で上書きせず、システムのソースリスト既定に任せる。
+セクション間の余白は固定値で上書きせず、システムのソースリスト既定に任せる。選択中のフィルターの別のコピーに
+付けるエコー（Compose では SECONDARY の薄い塗り）は、塗らずにタイトルを `Color.accentColor` にする（アイコンは
+ソースリストがもともとアクセント色にしている）。選択とドロップ先はシステムの色のままにする。
 
 ドラッグ＆ドロップは、Compose と同じ共有ルール
 （`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
@@ -1296,9 +1298,10 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   覚えておく。その間に別の更新が来ても行が畳み戻らないようにするためである。
 - **行。** 各行は `UICollectionViewListCell` で、共通の `SidebarRowLabel` を `UIHostingConfiguration` で載せる。
   未読数は `UICellAccessory.label`。幅が compact のときは inset grouped、regular のときはサイドバーの見た目に
-  なる。背景の設定で、選択とドラッグ中のドロップ先を `SelectionColor` で塗って文字とアイコンを白にし、選択中の
-  フィルターの別のコピーにはエコー（`SidebarRowHighlight.echoAlpha`）を描く。それ以外では、載せた内容はその状態で
-  システムのセルが使う文字色に合わせる。タップは `List` の
+  なる。背景の設定で、選択とドラッグ中のドロップ先を `SelectionColor` で塗って文字とアイコンを白にする。選択中の
+  フィルターの別のコピーに付けるエコーは塗らず、タイトルとアイコンを `AccentColor` にするだけにする（選択色の
+  薄い塗りは、明るいリストではくすんで見える）。それ以外では、載せた内容はその状態でシステムのセルが使う文字色に
+  合わせる。タップは `List` の
   ときと同じ `CompactSidebarSelection` のルールで処理する。
   畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す

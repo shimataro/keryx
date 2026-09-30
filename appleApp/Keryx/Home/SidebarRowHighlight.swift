@@ -4,18 +4,16 @@ import SwiftUI
 import AppKit
 #endif
 
-/// A sidebar row's highlight other than its own native list selection: the faint echo of the
-/// Compose app's `RowSelectionTone.SECONDARY` (`HomeCommon.kt`) — every *other* rendered copy of the
-/// selected filter, e.g. a feed shown under both its folder group and an expanded tag — or the
-/// accent fill a Finder/Notes sidebar item shows while a dragged item would be dropped onto it.
+/// A sidebar row's highlight other than its own native list selection.
 enum SidebarRowHighlight: Equatable {
     case none
+    /// Every *other* rendered copy of the selected filter, e.g. a feed shown under both its folder
+    /// group and an expanded tag — the role of the Compose app's `RowSelectionTone.SECONDARY`
+    /// (`HomeCommon.kt`). The Apple app shows it as accent-colored text with no fill: a faint fill of
+    /// the selection color reads as a dull smudge on a light sidebar.
     case echo
+    /// The accent fill a Finder/Notes sidebar item shows while a dragged item would be dropped onto it.
     case drop
-
-    /// Mirrors Compose's `SECONDARY_SELECTION_ALPHA` (`HomeCommon.kt`): the same fraction of the
-    /// selection color on every platform, independent of pane focus.
-    static let echoAlpha = 0.15
 }
 
 #if os(macOS)
@@ -26,10 +24,22 @@ extension View {
     /// the Sidebar icon size setting picks — which a background on the row's content could never
     /// match. (The iOS sidebar paints it in its cells' background configuration instead.)
     func sidebarRowHighlight(_ highlight: SidebarRowHighlight) -> some View {
-        foregroundStyle(highlight == .drop ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
+        foregroundStyle(highlight.foreground)
             // Keeps the row's content (and so its drop target) spanning the row's width.
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(SidebarRowHighlightAnchor(highlight: highlight))
+    }
+}
+
+private extension SidebarRowHighlight {
+    /// The title's color. The row's icon is already accent-tinted by the source list, so for the
+    /// echo the title alone tells the copy apart.
+    var foreground: AnyShapeStyle {
+        switch self {
+        case .none: AnyShapeStyle(.primary)
+        case .echo: AnyShapeStyle(Color.accentColor)
+        case .drop: AnyShapeStyle(Color.white)
+        }
     }
 }
 
@@ -136,16 +146,8 @@ private final class SidebarRowHighlightView: NSTableRowView {
 
     func show(_ highlight: SidebarRowHighlight, for anchor: SidebarRowHighlightAnchorView) {
         owner = anchor
-        switch highlight {
-        case .none:
-            isHidden = true
-        case .echo:
-            alphaValue = SidebarRowHighlight.echoAlpha
-            isHidden = false
-        case .drop:
-            alphaValue = 1
-            isHidden = false
-        }
+        // Only a drop target is filled; the echo is the title's color (`sidebarRowHighlight`).
+        isHidden = highlight != .drop
     }
 
     func release(from anchor: SidebarRowHighlightAnchorView) {

@@ -176,9 +176,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// Keryx's teal for a selection (and a drop target) — darker than `AccentColor` in dark mode, so
     /// white text on it stays readable.
     private static let selectionColor = UIColor(named: "SelectionColor") ?? .tintColor
+    private static let accentColor = UIColor(named: "AccentColor") ?? .tintColor
 
     /// Paints the row for its current state: the selection or a drop target (white on
-    /// `SelectionColor`), the echo of the selected filter's other copies, or neither.
+    /// `SelectionColor`), the echo of the selected filter's other copies (accent-colored title and
+    /// icon, no fill — a faint fill reads as a dull smudge), or neither.
     private func updateRow(_ cell: UICollectionViewListCell, _ item: SidebarItemID, _ cellState: UICellConfigurationState) {
         guard let content = state?.contents[item] else { return }
         let dropTarget = Self.isDropTarget(cellState)
@@ -186,16 +188,21 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         var background = cell.defaultBackgroundConfiguration().updated(for: cellState)
         if filled {
             background.backgroundColor = Self.selectionColor
-        } else if content.highlight == .echo, !cellState.isSelected, !cellState.isHighlighted {
-            background.backgroundColor = UIColor.tintColor.withAlphaComponent(SidebarRowHighlight.echoAlpha)
         }
         cell.backgroundConfiguration = background
 
-        // White on the teal fill; otherwise the text color a system list cell would use in this
-        // state. Icons take it too, as the SwiftUI `List` sidebar drew them, rather than the accent
-        // tint a plain `UIListContentConfiguration` would give them.
+        // White on the teal fill, the accent color for an echo; otherwise the text color a system
+        // list cell would use in this state. Icons take it too, as the SwiftUI `List` sidebar drew
+        // them, rather than the accent tint a plain `UIListContentConfiguration` would give them.
         let system = cell.defaultContentConfiguration().updated(for: cellState)
-        let textColor = filled ? UIColor.white : system.textProperties.resolvedColor()
+        let textColor: UIColor
+        if filled {
+            textColor = .white
+        } else if content.highlight == .echo, !cellState.isHighlighted {
+            textColor = Self.accentColor
+        } else {
+            textColor = system.textProperties.resolvedColor()
+        }
 
         var accessories: [UICellAccessory] = [
             .label(

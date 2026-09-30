@@ -102,8 +102,8 @@ struct SidebarRowContent: Equatable, Sendable {
         return contents
     }
 
-    /// `.echo` — the faint SECONDARY tone of the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s
-    /// `toneFor`) — for every *other* rendered copy of the selected filter: a feed shown under both
+    /// `.echo` — the role of the SECONDARY tone of the Compose app's `RowSelectionTone`
+    /// (`FeedListPane.kt`'s `toneFor`) — for every *other* rendered copy of the selected filter: a feed shown under both
     /// its folder group and an expanded tag. The same rule as `FeedListView.highlight(for:)`.
     static func highlight(
         for row: FeedListRowSelection,

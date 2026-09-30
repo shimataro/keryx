@@ -1259,7 +1259,10 @@ native selection is bridged to the shared one by row key (`feedListRowSelection(
 Groups are told apart the way Finder and Mail do it: by section headers, not divider lines as in
 Compose. The Folders and Tags headers collapse (the state is native-only view state, stored in
 `@AppStorage`), and the spacing between sections is left to the system's source-list defaults
-rather than overridden with fixed values.
+rather than overridden with fixed values. The echo of the selected filter's other copies (Compose's
+faint SECONDARY fill) is the title in `Color.accentColor` with no fill — the icons are already
+accent-tinted by the source list — while the selection and a drop target keep the system's own
+colors.
 
 Drag and drop applies the same shared rules as Compose
 (`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
@@ -1306,8 +1309,9 @@ view on iOS.
 - **Rows.** Each row is a `UICollectionViewListCell` hosting the shared `SidebarRowLabel` through
   `UIHostingConfiguration`; the unread count is a `UICellAccessory.label`. The list is inset grouped at
   a compact width and sidebar-styled at a regular one. The background configuration paints the selection
-  and, while dragging, the drop target in `SelectionColor` with white text and icons, and the echo of
-  the selected filter's other copies (`SidebarRowHighlight.echoAlpha`); otherwise the hosted content
+  and, while dragging, the drop target in `SelectionColor` with white text and icons; the echo of the
+  selected filter's other copies is no fill at all, only the title and icon in `AccentColor` (a faint
+  fill of the selection color reads as a dull smudge on a light list); otherwise the hosted content
   takes the text color a system cell would use in that state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did; while the
   collapsed sidebar shows no selection (it is the topmost column on an iPhone), it shows no echo either.
 - **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`

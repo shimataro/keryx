@@ -288,8 +288,8 @@ struct FeedListView: View {
 
     func feeds(taggedWith tag: Tags) -> [Feeds] { sidebar.feeds(taggedWith: tag.id) }
 
-    /// `.echo` — the faint SECONDARY tone of the Compose app's `RowSelectionTone` (`FeedListPane.kt`'s
-    /// `toneFor`) — for every *other* rendered copy of the selected filter: a feed shown under both
+    /// `.echo` — the role of the SECONDARY tone of the Compose app's `RowSelectionTone`
+    /// (`FeedListPane.kt`'s `toneFor`) — for every *other* rendered copy of the selected filter: a feed shown under both
     /// its folder group and an expanded tag. The selected row itself is the native list selection,
     /// which already dims while the sidebar lacks focus, as Compose's PRIMARY tone does.
     func highlight(for instance: FeedListRowSelection) -> SidebarRowHighlight {
