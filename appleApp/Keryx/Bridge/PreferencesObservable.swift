@@ -14,19 +14,22 @@ import Observation
 /// even persisted that placeholder over whatever was actually saved.
 @MainActor
 @Observable
-final class PreferencesObservable {
+final class PreferencesObservable: ObservableAssignment {
     let controller: PreferencesController
 
     private(set) var localSettings: LocalSettings
-    // The fields the always-on-screen views read, mirrored one by one. `localSettings` itself is
-    // replaced on every write — including the `lastArticleId`/`lastFocusedPane` bookkeeping each
-    // article selection and focus change does — so a view reading a field through it would be
-    // invalidated by all of those too. These are only assigned when their own value changes.
+    // The fields views read, mirrored one by one — read these, never a field through
+    // `localSettings`. That is replaced on every write, including the `lastArticleId`/
+    // `lastFocusedPane` bookkeeping each article selection and focus change does, so a view reading
+    // through it would be invalidated by all of those too. These are only assigned when their own
+    // value changes.
     private(set) var themeMode: String
     private(set) var fontSizeScale: Double
     private(set) var feedListPaneWidth: Double
     private(set) var articleListPaneWidth: Double
     private(set) var notificationEnabled: Bool
+    private(set) var refreshIntervalMinutes: Int32
+    private(set) var startMinimized: Bool
     private(set) var readTimeoutSeconds: Int
     private(set) var cacheRetentionDays: Int?
 
@@ -39,10 +42,15 @@ final class PreferencesObservable {
         feedListPaneWidth = settings.feedListPaneWidth
         articleListPaneWidth = settings.articleListPaneWidth
         notificationEnabled = settings.notificationEnabled
+        refreshIntervalMinutes = settings.refreshIntervalMinutes
+        startMinimized = settings.startMinimized
         readTimeoutSeconds = Int(controller.readTimeoutSeconds.value.int32Value)
         cacheRetentionDays = controller.cacheRetentionDays.value.map { Int($0.int32Value) }
     }
 
+    /// Started once, for the app's lifetime, by `AppModel` — not by any view, since the macOS
+    /// Settings window outlives the main window's own view tree (closing that window to the menu bar
+    /// keeps Settings open).
     func startObserving() async {
         async let t1: () = observeLocalSettings()
         async let t2: () = observeReadTimeoutSeconds()
@@ -58,18 +66,16 @@ final class PreferencesObservable {
             assignIfChanged(\.feedListPaneWidth, v.feedListPaneWidth)
             assignIfChanged(\.articleListPaneWidth, v.articleListPaneWidth)
             assignIfChanged(\.notificationEnabled, v.notificationEnabled)
+            assignIfChanged(\.refreshIntervalMinutes, v.refreshIntervalMinutes)
+            assignIfChanged(\.startMinimized, v.startMinimized)
         }
     }
 
-    private func assignIfChanged<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<PreferencesObservable, Value>, _ value: Value) {
-        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
-    }
-
     private func observeReadTimeoutSeconds() async {
-        for await v in controller.readTimeoutSeconds { readTimeoutSeconds = Int(v.int32Value) }
+        for await v in controller.readTimeoutSeconds { assignIfChanged(\.readTimeoutSeconds, Int(v.int32Value)) }
     }
 
     private func observeCacheRetentionDays() async {
-        for await v in controller.cacheRetentionDays { cacheRetentionDays = v.map { Int($0.int32Value) } }
+        for await v in controller.cacheRetentionDays { assignIfChanged(\.cacheRetentionDays, v.map { Int($0.int32Value) }) }
     }
 }

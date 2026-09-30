@@ -98,7 +98,7 @@ struct HomeView: View {
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
             guard old == .detail, new == .content, articleListIsTopmost,
-                  let id = home.selectedArticle?.id else { return }
+                  let id = home.selectedArticleId else { return }
             flashReturnedRow(id)
         }
         .modifier(HiddenSplitViewTitle())
@@ -199,7 +199,7 @@ struct HomeView: View {
         guard !initialFocusApplied else { return }
         initialFocusApplied = true
         var target = HomeView.focusedPane(for: home.viewModel.initialHomePane)
-        // The DB's own answer, since `home.feeds` starts empty before its first real emission.
+        // The DB's own answer, since `home.hasFeeds` starts false before its first real emission.
         let expectsFeeds = (try? await home.viewModel.hasAnyFeed())?.boolValue
         var deadline = ContinuousClock.now + HomeView.initialFocusTimeout
         while !initialFocusReady(target, expectsFeeds: expectsFeeds) {
@@ -250,10 +250,10 @@ struct HomeView: View {
     private func initialFocusReady(_ target: HomeFocusedPane, expectsFeeds: Bool?) -> Bool {
         switch target {
         case .articleList, .reader:
-            guard let id = home.selectedArticle?.id else { return false }
-            return home.articles.contains { $0.id == id }
+            guard let id = home.selectedArticleId else { return false }
+            return home.articleRows.indexById[id] != nil
         default:
-            return expectsFeeds == false || !home.feeds.isEmpty
+            return expectsFeeds == false || home.hasFeeds
         }
     }
 

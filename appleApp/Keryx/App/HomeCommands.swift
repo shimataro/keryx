@@ -128,7 +128,7 @@ struct HomeCommands: Commands {
                 // Rename/Unsubscribe alone use `renameOrDeleteEnabled` (they act on whatever's
                 // selected — feed, folder or tag — not only a feed).
                 Button(L("home_refresh")) {
-                    if let feed = selectedFeed(home) { home.viewModel.refreshFeed(feed: feed) }
+                    if let feed = selectedFeed(home) { home.refreshFeed(feed) }
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(!state.feedActionsEnabled)
@@ -250,11 +250,11 @@ struct HomeCommands: Commands {
     }
 
     private func sortedFolders(_ home: HomeObservable) -> [Folders] {
-        home.sidebar.sortedFolders
+        home.sortedFolders
     }
 
     private func sortedTags(_ home: HomeObservable) -> [Tags] {
-        home.sidebar.sortedTags
+        home.sortedTags
     }
 
     /// Rename/delete wording follows the selected item's type — a `nil` target falls back to the

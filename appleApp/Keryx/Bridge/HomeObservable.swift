@@ -15,13 +15,19 @@ import Observation
 /// needed so far; add a property + loop pair here as more of `HomeViewModel`'s state is read.
 @MainActor
 @Observable
-final class HomeObservable {
+final class HomeObservable: ObservableAssignment {
     let viewModel: HomeViewModel
     /// Builds a fresh `AddFeedController` for one presentation of the add-feed sheet — never
     /// cached, since `KeryxSdk.newAddFeedController()` itself returns a new instance every call.
     let makeAddFeedController: () -> AddFeedController
 
+    /// The latest `feeds` emission, always — the rows action-time lookups (`currentFeed(id:)`)
+    /// resolve through. Views should read `hasFeeds` / `feedsById` / `sidebar` instead, which only
+    /// change with the feed list's structure (`FeedStructureKey`).
     private(set) var feeds: [Feeds] = []
+    private(set) var hasFeeds = false
+    /// Rebuilt only when the feed list's structure changes, so its `Feeds` may lag behind `feeds`
+    /// in the fields `FeedStructureKey` leaves out.
     private(set) var feedsById: [String: Feeds] = [:]
     private(set) var tags: [Tags] = []
     private(set) var folders: [Folders] = []
@@ -36,14 +42,20 @@ final class HomeObservable {
     private(set) var selectedRowInstance: FeedListRowSelection = FeedListRowSelectionAll()
     private(set) var collapsedFolderIds: Set<String> = []
     private(set) var expandedTagIds: Set<String> = []
-    /// The sidebar's structure derived from the fields above — see `SidebarModel`.
+    /// The sidebar's structure derived from the fields above — see `SidebarModel`. Rebuilt at most
+    /// once per MainActor turn however many of its inputs changed in it (`sidebarRebuild`).
     private(set) var sidebar = SidebarModel.empty
+    /// `sidebar.sortedFolders` / `sortedTags`, assigned only when they change, for the menu bar
+    /// (`HomeCommands`): reading them through `sidebar` rebuilt it on every sidebar rebuild.
+    private(set) var sortedFolders: [Folders] = []
+    private(set) var sortedTags: [Tags] = []
 
     private(set) var searchQuery: String = ""
     private(set) var searchBarVisible: Bool = false
     private(set) var searchActive: Bool = false
     private(set) var searching: Bool = false
     private(set) var searchResults: [ArticleSearchResult] = []
+    private(set) var hasSearchResults = false
     private(set) var pendingSearchFocus: Bool = false
 
     private(set) var unreadOnly: Bool = false
@@ -59,13 +71,17 @@ final class HomeObservable {
     /// Each feed's title and favicon as the article rows show them; a `feeds` emission that leaves
     /// this unchanged (a refresh updating etags and error counts) does not touch the rows.
     private var feedRowInfo: [String: FeedRowInfo] = [:]
+    /// Gates the `feeds`-derived rebuilds on the fields views actually read — see `FeedStructureKey`.
+    @ObservationIgnored private var feedStructure = FeedStructureTracker()
+    @ObservationIgnored private var sidebarRebuild: CoalescedAction?
     private(set) var newArticleCount: Int = 0
 
     private(set) var selectedArticle: Articles?
-    // Narrow facts about the selection for the menu bar (`HomeCommands`), assigned only when they
-    // change: reading `selectedArticle` / `filter` / `feeds` there directly made every article
-    // selection and every feed refresh rebuild the whole menu bar.
+    // Narrow facts about the selection for the menu bar (`HomeCommands`) and the article list,
+    // assigned only when they change: reading `selectedArticle` / `filter` / `feeds` there directly
+    // made every article selection, star/read toggle and feed refresh re-evaluate them all.
     private(set) var hasSelectedArticle = false
+    private(set) var selectedArticleId: String?
     private(set) var selectedArticleHasUsableUrl = false
     /// The sidebar item the selected filter resolves to (`resolveFeedListSelectionTarget`).
     private(set) var feedListSelectionTarget: FeedListSelectionTarget?
@@ -98,6 +114,7 @@ final class HomeObservable {
     init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
         self.makeAddFeedController = makeAddFeedController
+        sidebarRebuild = CoalescedAction { [weak self] in self?.rebuildSidebar() }
     }
 
     /// Selects a filter and mirrors the result into the observed state at once. The `for await`
@@ -105,9 +122,21 @@ final class HomeObservable {
     /// between (a pane-focus change, say) would read the stale selection and flash it back.
     func selectFilter(_ filter: ArticleFilter, instance: FeedListRowSelection) {
         viewModel.selectFilter(filter: filter, instance: instance)
-        self.filter = viewModel.filter.value
-        selectedRowInstance = viewModel.selectedRowInstance.value
+        assignFilter(viewModel.filter.value)
+        assignSelectedRowInstance(viewModel.selectedRowInstance.value)
         updateFeedListSelectionTarget()
+    }
+
+    /// The current row for `id`: the `Feeds` the sidebar and `feedsById` hold may carry a stale
+    /// `etag` / `last_modified` (see `FeedStructureKey`), which a refresh sends as its conditional
+    /// request.
+    func currentFeed(id: String) -> Feeds? {
+        feeds.first { $0.id == id }
+    }
+
+    /// Refreshes `feed` from its current row — see `currentFeed(id:)`.
+    func refreshFeed(_ feed: Feeds) {
+        viewModel.refreshFeed(feed: currentFeed(id: feed.id) ?? feed)
     }
 
     func pulseCopy() {
@@ -180,6 +209,10 @@ final class HomeObservable {
     private func observeFeeds() async {
         for await v in viewModel.feeds {
             feeds = v
+            assignIfChanged(\.hasFeeds, !v.isEmpty)
+            // A refresh re-emits `feeds` once per fetched feed, mostly changing only the fields no
+            // view reads; everything below holds the `Feeds` objects and is left alone then.
+            guard feedStructure.accept(v) else { continue }
             feedsById = Dictionary(uniqueKeysWithValues: v.map { ($0.id, $0) })
             let info = feedsById.mapValues { FeedRowInfo(title: $0.displayTitle(), faviconUrl: $0.favicon_url) }
             if info != feedRowInfo {
@@ -187,116 +220,121 @@ final class HomeObservable {
                 rebuildArticleRows()
                 rebuildSearchRows()
             }
-            rebuildSidebar()
-            updateFeedListSelectionTarget()
+            sidebarRebuild?.markDirty()
         }
     }
 
     private func observeTags() async {
         for await v in viewModel.tags {
-            tags = v
-            rebuildSidebar()
-            updateFeedListSelectionTarget()
+            if assignIfChanged(\.tags, v) { sidebarRebuild?.markDirty() }
         }
     }
 
     private func observeFolders() async {
         for await v in viewModel.folders {
-            folders = v
-            rebuildSidebar()
-            updateFeedListSelectionTarget()
+            if assignIfChanged(\.folders, v) { sidebarRebuild?.markDirty() }
         }
     }
 
     private func observeFeedTagMap() async {
         for await v in viewModel.feedTagMap {
-            feedTagMap = v
-            rebuildSidebar()
+            if assignIfChanged(\.feedTagMap, v) { sidebarRebuild?.markDirty() }
         }
     }
 
     private func observeUnreadByFeed() async {
-        for await v in viewModel.unreadByFeed { unreadByFeed = v.mapValues(\.int64Value) }
+        for await v in viewModel.unreadByFeed { assignIfChanged(\.unreadByFeed, v.mapValues(\.int64Value)) }
     }
 
     private func observeUnreadByTag() async {
-        for await v in viewModel.unreadByTag { unreadByTag = v.mapValues(\.int64Value) }
+        for await v in viewModel.unreadByTag { assignIfChanged(\.unreadByTag, v.mapValues(\.int64Value)) }
     }
 
     private func observeUnreadByFolder() async {
-        for await v in viewModel.unreadByFolder { unreadByFolder = v.mapValues(\.int64Value) }
+        for await v in viewModel.unreadByFolder { assignIfChanged(\.unreadByFolder, v.mapValues(\.int64Value)) }
     }
 
     private func observeTotalUnread() async {
-        for await v in viewModel.totalUnread { totalUnread = v.int64Value }
+        for await v in viewModel.totalUnread { assignIfChanged(\.totalUnread, v.int64Value) }
     }
 
     private func observeStarredUnreadCount() async {
-        for await v in viewModel.starredUnreadCount { starredUnreadCount = v.int64Value }
+        for await v in viewModel.starredUnreadCount { assignIfChanged(\.starredUnreadCount, v.int64Value) }
     }
 
     private func observeFilter() async {
         for await v in viewModel.filter {
-            filter = v
-            updateFeedListSelectionTarget()
+            if assignFilter(v) { updateFeedListSelectionTarget() }
         }
     }
 
+    // `assignIfChanged` needs `Equatable`, which a Kotlin sealed type's bridged protocol is not —
+    // see `FeedListSelectionEquality`.
+    @discardableResult
+    private func assignFilter(_ v: ArticleFilter) -> Bool {
+        guard !articleFiltersEqual(filter, v) else { return false }
+        filter = v
+        return true
+    }
+
+    private func assignSelectedRowInstance(_ v: FeedListRowSelection) {
+        if !feedListRowSelectionsEqual(selectedRowInstance, v) { selectedRowInstance = v }
+    }
+
     private func observeSelectedRowInstance() async {
-        for await v in viewModel.selectedRowInstance { selectedRowInstance = v }
+        for await v in viewModel.selectedRowInstance { assignSelectedRowInstance(v) }
     }
 
     private func observeCollapsedFolderIds() async {
         for await v in viewModel.collapsedFolderIds {
-            collapsedFolderIds = v
-            rebuildSidebar()
+            if assignIfChanged(\.collapsedFolderIds, v) { sidebarRebuild?.markDirty() }
         }
     }
 
     private func observeExpandedTagIds() async {
         for await v in viewModel.expandedTagIds {
-            expandedTagIds = v
-            rebuildSidebar()
+            if assignIfChanged(\.expandedTagIds, v) { sidebarRebuild?.markDirty() }
         }
     }
 
     private func observeSearchQuery() async {
-        for await v in viewModel.searchQuery { searchQuery = v }
+        for await v in viewModel.searchQuery { assignIfChanged(\.searchQuery, v) }
     }
 
     private func observeSearchBarVisible() async {
-        for await v in viewModel.searchBarVisible { searchBarVisible = v.boolValue }
+        for await v in viewModel.searchBarVisible { assignIfChanged(\.searchBarVisible, v.boolValue) }
     }
 
     private func observeSearchActive() async {
-        for await v in viewModel.searchActive { searchActive = v.boolValue }
+        for await v in viewModel.searchActive { assignIfChanged(\.searchActive, v.boolValue) }
     }
 
     private func observeSearching() async {
-        for await v in viewModel.searching { searching = v.boolValue }
+        for await v in viewModel.searching { assignIfChanged(\.searching, v.boolValue) }
     }
 
     private func observeSearchResults() async {
         for await v in viewModel.searchResults {
             searchResults = v
+            assignIfChanged(\.hasSearchResults, !v.isEmpty)
             rebuildSearchRows()
         }
     }
 
     private func observePendingSearchFocus() async {
-        for await v in viewModel.pendingSearchFocus { pendingSearchFocus = v.boolValue }
+        for await v in viewModel.pendingSearchFocus { assignIfChanged(\.pendingSearchFocus, v.boolValue) }
     }
 
     private func observeUnreadOnly() async {
-        for await v in viewModel.unreadOnly { unreadOnly = v.boolValue }
+        for await v in viewModel.unreadOnly { assignIfChanged(\.unreadOnly, v.boolValue) }
     }
 
     private func observeNewestFirst() async {
-        for await v in viewModel.newestFirst { newestFirst = v.boolValue }
+        for await v in viewModel.newestFirst { assignIfChanged(\.newestFirst, v.boolValue) }
     }
 
     private func observeCanHideRead() async {
-        for await v in viewModel.canHideRead { canHideRead = v.boolValue }
+        for await v in viewModel.canHideRead { assignIfChanged(\.canHideRead, v.boolValue) }
     }
 
     private func observeArticles() async {
@@ -316,8 +354,9 @@ final class HomeObservable {
         if !unchanged { feedListSelectionTarget = target }
     }
 
+    /// Runs through `sidebarRebuild` only, once per MainActor turn in which any of its inputs changed.
     private func rebuildSidebar() {
-        sidebar = SidebarModel(
+        let model = SidebarModel(
             feeds: feeds,
             folders: folders,
             tags: tags,
@@ -325,6 +364,10 @@ final class HomeObservable {
             collapsedFolderIds: collapsedFolderIds,
             expandedTagIds: expandedTagIds
         )
+        sidebar = model
+        assignIfChanged(\.sortedFolders, model.sortedFolders)
+        assignIfChanged(\.sortedTags, model.sortedTags)
+        updateFeedListSelectionTarget()
     }
 
     private func rebuildArticleRows() {
@@ -352,25 +395,26 @@ final class HomeObservable {
     }
 
     private func observeNewArticleCount() async {
-        for await v in viewModel.newArticleCount { newArticleCount = Int(v.int32Value) }
+        for await v in viewModel.newArticleCount { assignIfChanged(\.newArticleCount, Int(v.int32Value)) }
     }
 
     private func observeSelectedArticle() async {
         for await v in viewModel.selectedArticle {
+            // Always assigned: a star/read toggle emits a new instance of the same article, which
+            // the reader keys its revision on.
             selectedArticle = v
-            let has = v != nil
-            if hasSelectedArticle != has { hasSelectedArticle = has }
-            let usable = ArticleListModelKt.hasUsableUrl(url: v?.url)
-            if selectedArticleHasUsableUrl != usable { selectedArticleHasUsableUrl = usable }
+            assignIfChanged(\.hasSelectedArticle, v != nil)
+            assignIfChanged(\.selectedArticleId, v?.id)
+            assignIfChanged(\.selectedArticleHasUsableUrl, ArticleListModelKt.hasUsableUrl(url: v?.url))
         }
     }
 
     private func observeSelectedFeedName() async {
-        for await v in viewModel.selectedFeedName { selectedFeedName = v }
+        for await v in viewModel.selectedFeedName { assignIfChanged(\.selectedFeedName, v) }
     }
 
     private func observeSelectedFeedFaviconUrl() async {
-        for await v in viewModel.selectedFeedFaviconUrl { selectedFeedFaviconUrl = v }
+        for await v in viewModel.selectedFeedFaviconUrl { assignIfChanged(\.selectedFeedFaviconUrl, v) }
     }
 
     private func observeArticleContents() async {
@@ -384,10 +428,10 @@ final class HomeObservable {
     #endif
 
     private func observeCloudConnected() async {
-        for await v in viewModel.cloudConnected { cloudConnected = v.boolValue }
+        for await v in viewModel.cloudConnected { assignIfChanged(\.cloudConnected, v.boolValue) }
     }
 
     private func observeActivity() async {
-        for await v in viewModel.activity { activity = v }
+        for await v in viewModel.activity { assignIfChanged(\.activity, v) }
     }
 }

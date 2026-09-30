@@ -77,10 +77,10 @@ struct KeryxApp: App {
                 } else if let notifications = model.notifications {
                     HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, settingsNavigation: model.settingsNavigation, preferences: preferences)
                         #if os(macOS)
-                        .onChange(of: home.totalUnread, initial: true) { _, count in
+                        .modifier(UnreadCountObserver(home: home) { count in
                             updateDockBadge(count)
                             appDelegate.updateStatusItemAppearance(unreadCount: count)
-                        }
+                        })
                         #endif
                 }
             } else {
@@ -97,11 +97,11 @@ struct KeryxApp: App {
             #endif
         }
         // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About
-        // scenes read it independently through their own environment inheritance. Started here
-        // (not only inside `SettingsView`'s own `.task`) so it takes effect before Settings is
-        // ever opened. `NSApp.appearance` additionally covers the surfaces `preferredColorScheme`
-        // does not reach: native menus, and any AppKit chrome outside this scene's own view tree.
-        .task { await model.preferences?.startObserving() }
+        // scenes read it independently through their own environment inheritance. The preferences
+        // themselves are observed by `AppModel` for the app's whole lifetime, so this takes effect
+        // before Settings is ever opened. `NSApp.appearance` additionally covers the surfaces
+        // `preferredColorScheme` does not reach: native menus, and any AppKit chrome outside this
+        // scene's own view tree.
         .preferredColorScheme(colorScheme(for: model.preferences?.themeMode))
         #if os(iOS)
         .sheet(isPresented: Binding(
@@ -172,3 +172,17 @@ struct KeryxApp: App {
         }
     }
 }
+
+#if os(macOS)
+/// Reports `home.totalUnread` (the Dock badge and the menu bar status item) from a modifier of its
+/// own, so only this modifier — not `KeryxApp`'s whole main content — depends on the count, which
+/// changes with every article read.
+private struct UnreadCountObserver: ViewModifier {
+    let home: HomeObservable
+    let onChange: (Int64) -> Void
+
+    func body(content: Content) -> some View {
+        content.onChange(of: home.totalUnread, initial: true) { _, count in onChange(count) }
+    }
+}
+#endif

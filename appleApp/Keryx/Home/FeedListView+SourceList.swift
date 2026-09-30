@@ -257,7 +257,7 @@ extension FeedListView {
             // Order matches `FeedListDragAndDrop.kt:553-593` exactly: Refresh, Move to Folder ▸,
             // Assign tags ▸, a separator, the URL/site actions, a separator, Rename, a separator,
             // Unsubscribe.
-            Button(L("home_refresh")) { home.viewModel.refreshFeed(feed: feed) }
+            Button(L("home_refresh")) { home.refreshFeed(feed) }
             Menu(L("home_move_to_folder")) {
                 Toggle(L("home_no_folder"), isOn: Binding(
                     get: { feed.folder_id == nil },

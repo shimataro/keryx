@@ -93,7 +93,7 @@ struct ArticleListView: View {
                     }
                     // Only when the selection actually moved off-screen (keyboard navigation, a
                     // restored selection) — a row already visible (e.g. just clicked) never jumps.
-                    .onChange(of: home.selectedArticle?.id) { _, id in
+                    .onChange(of: home.selectedArticleId) { _, id in
                         guard let id, !visibleRows.appearedIds.contains(id) else { return }
                         proxy.scrollTo(id)
                     }
@@ -103,7 +103,7 @@ struct ArticleListView: View {
                         // into view once, when the first rows land (after they are laid out).
                         guard !didShowFirstRows, !isEmpty else { return }
                         didShowFirstRows = true
-                        guard let id = home.selectedArticle?.id else { return }
+                        guard let id = home.selectedArticleId else { return }
                         Task {
                             await Task.yield()
                             proxy.scrollTo(id)
@@ -213,7 +213,7 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if home.feeds.isEmpty {
+        if !home.hasFeeds {
             ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
@@ -257,9 +257,9 @@ struct ArticleListView: View {
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"
             )
-        } else if home.searching && home.searchResults.isEmpty {
+        } else if home.searching && !home.hasSearchResults {
             Color.clear
-        } else if home.searchResults.isEmpty {
+        } else if !home.hasSearchResults {
             noSearchResultsView
         } else {
             articleList
@@ -286,7 +286,7 @@ struct ArticleListView: View {
 
     /// The selected row as the list draws it — see `CompactArticleSelection`.
     private var displayedSelectedId: String? {
-        CompactArticleSelection.displayedId(selectedId: home.selectedArticle?.id, articleListIsTopmost: articleListIsTopmost)
+        CompactArticleSelection.displayedId(selectedId: home.selectedArticleId, articleListIsTopmost: articleListIsTopmost)
     }
 
     private func rowView(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> ArticleRowView {
@@ -386,7 +386,7 @@ struct ArticleListView: View {
     // MARK: - Row
 
     private func selectForContextMenu(_ article: ArticleListRow) {
-        if home.selectedArticle?.id != article.id {
+        if home.selectedArticleId != article.id {
             home.viewModel.selectArticle(article: article)
         }
     }
@@ -427,7 +427,7 @@ private struct PullToRefreshModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        if PullToRefreshAvailability.isAvailable(searchActive: home.searchActive, hasFeeds: !home.feeds.isEmpty) {
+        if PullToRefreshAvailability.isAvailable(searchActive: home.searchActive, hasFeeds: home.hasFeeds) {
             content.refreshable { await home.pullToRefresh() }
         } else {
             content

@@ -44,7 +44,6 @@ struct SettingsView: View {
         .onAppear {
             path = SettingsNavigation.initialPath(settingsNavigation.selectedTab, cloudSyncAvailable: cloudSyncAvailable)
         }
-        .task { await preferences.startObserving() }
         .task { await cloudSync.startObserving() }
     }
 
@@ -106,7 +105,6 @@ struct SettingsView: View {
         .toggleStyle(.switch)
         // Width only: the Settings window then takes each tab's own height, resizing as tabs switch.
         .frame(width: 520)
-        .task { await preferences.startObserving() }
         .task { await cloudSync.startObserving() }
     }
     #endif

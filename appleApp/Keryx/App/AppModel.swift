@@ -43,14 +43,19 @@ final class AppModel {
                 // Kotlin/Native's ObjC export to rename any Kotlin method literally named `newXxx`.
                 makeAddFeedController: { sdk.doNewAddFeedController() }
             )
-            self.preferences = PreferencesObservable(controller: sdk.preferences)
+            let preferences = PreferencesObservable(controller: sdk.preferences)
+            self.preferences = preferences
+            // The one observation of the preferences, for the app's lifetime: the theme and the
+            // Settings window both need it with or without the main window open (see
+            // `PreferencesObservable.startObserving`).
+            Task { await preferences.startObserving() }
             self.cloudSync = CloudSyncObservable(controller: sdk.cloudSyncController)
             self.opmlTransfer = OpmlTransferObservable(opml: sdk.opml)
             self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
             // Requesting authorization is `KeryxApp`'s job now, gated on `notificationEnabled`
             // (both at startup and whenever the setting is switched on) — see its own
-            // `.onChange(of: model.preferences?.localSettings?.notificationEnabled)`, matching
+            // `.onChange(of: model.preferences?.notificationEnabled)`, matching
             // desktop's own gate (`App.kt:69-72`).
             try sdk.startMaintenance()
             Task {

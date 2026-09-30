@@ -62,7 +62,7 @@ enum SidebarContextMenus {
         let siteAttributes: UIMenuElement.Attributes = ArticleListModelKt.hasUsableUrl(url: feed.site_url) ? [] : .disabled
         return UIMenu(children: [
             UIMenu(options: .displayInline, children: [
-                UIAction(title: L("home_refresh")) { _ in home.viewModel.refreshFeed(feed: feed) },
+                UIAction(title: L("home_refresh")) { _ in home.refreshFeed(feed) },
                 moveToFolder,
                 assignTags,
             ]),
