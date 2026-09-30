@@ -55,6 +55,12 @@ targets:
         # no size/startup gain was measured, so it stays until a run through every screen shows
         # the framework does not depend on it.
         OTHER_LDFLAGS: "-lsqlite3 -ObjC $(inherited)"
+        # Xcode's localization sync scans Swift for strings to extract. With this on it treats every
+        # SwiftUI initializer (`Text(L("home_all_feeds"))`, …) as a localizable string and warns that
+        # its key is not a literal. Here the catalog keys are opaque identifiers and those calls
+        # pass an already-localized String (see Keryx/Platform/Localized.swift), so there is
+        # nothing to extract from the Swift sources.
+        LOCALIZED_STRING_SWIFTUI_SUPPORT: NO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
     dependencies:

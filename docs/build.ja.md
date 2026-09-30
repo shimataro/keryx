@@ -251,6 +251,12 @@ folder.name), …)` のタイトルなど）のであって、`LocalizedStringKe
 Apple アプリは、そのメッセージについては引き続き固定文言の plural ではない
 `apple_add_feed_partial_result` を使う（`strings.xml` のそのコメント参照）。
 
+このままだと Xcode のローカライゼーション同期が、`Text(L("…"))` の呼び出しごとに
+「Skipping extraction of localizable string with non-literal key」と警告する——これらがすでにローカライズ済みの
+`String` を渡していることを判別できないため。そこで `project.yml` は `LOCALIZED_STRING_SWIFTUI_SUPPORT = NO` を
+設定し（Swift ソースから抽出したい文言は無い——カタログは生成される）、`LF` は書式の取得に
+`NSLocalizedString` ではなく `Bundle.localizedString(forKey:)` を使う（同期はこちらも走査対象にするため）。
+
 ## SwiftUI アプリ（`appleApp/`）のビルド
 
 `appleApp/project.yml` が正となる情報源で、`.xcodeproj` は生成物であり、コミットしない

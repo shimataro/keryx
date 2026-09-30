@@ -253,6 +253,12 @@ Android convention of passing the counted value first (it is also the `quantity`
 `pluralStringResource`). The Apple app still uses its own fixed-wording, non-plural
 `apple_add_feed_partial_result` for that message (see its comment in `strings.xml`).
 
+Xcode's localization sync would otherwise warn "Skipping extraction of localizable string with
+non-literal key" once per `Text(L("…"))` call, since it cannot tell that these already pass a
+localized `String`. `project.yml` therefore sets `LOCALIZED_STRING_SWIFTUI_SUPPORT = NO` (nothing in the
+Swift sources is meant to be extracted — the catalog is generated), and `LF` looks the format up
+through `Bundle.localizedString(forKey:)` instead of `NSLocalizedString`, which the sync scans for too.
+
 ## Building the SwiftUI app (`appleApp/`)
 
 `appleApp/project.yml` is the source of truth; the `.xcodeproj` is a generated artifact and is
