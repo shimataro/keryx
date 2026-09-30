@@ -42,6 +42,8 @@ struct ArticleRowView: View, Equatable {
     private static let copyUrlLabel = L("article_copy_url")
     private static let openInBrowserLabel = L("article_open_in_browser")
     private static let noTitleLabel = L("article_no_title")
+    private static let unreadStateLabel = L("article_state_unread")
+    private static let starredStateLabel = L("article_state_starred")
 
     /// The closures are rebuilt by every parent evaluation and never compared: they only forward to
     /// actions keyed by this row's own article, which `model` already covers.
@@ -71,6 +73,8 @@ struct ArticleRowView: View, Equatable {
                     }
                 }
                 .frame(width: 14)
+                // Announced as the row's accessibility value instead (see `stateAccessibilityValue`).
+                .accessibilityHidden(true)
                 FaviconView(url: model.faviconUrl, letter: model.title?.first, blankWithoutUrl: true)
                     .frame(width: 32, height: 32)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -110,6 +114,7 @@ struct ArticleRowView: View, Equatable {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityValue(stateAccessibilityValue)
         .selectsOnContextMenu(id: model.id, perform: onContextMenuSelect)
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
@@ -147,5 +152,15 @@ struct ArticleRowView: View, Equatable {
         guard let title = model.title else { return Text(verbatim: Self.noTitleLabel) }
         if let highlighted = model.highlightedTitle { return Text(highlighted) }
         return Text(verbatim: title)
+    }
+
+    /// What the unread dot and the star show, for VoiceOver: empty for a read, unstarred article.
+    private var stateAccessibilityValue: String {
+        [
+            model.isRead ? nil : Self.unreadStateLabel,
+            model.isStarred ? Self.starredStateLabel : nil,
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
     }
 }

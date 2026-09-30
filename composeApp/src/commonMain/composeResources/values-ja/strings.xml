@@ -133,6 +133,9 @@
     <string name="article_unstar">スターを外す</string>
     <string name="article_no_content">本文がありません</string>
     <string name="article_no_title">タイトルなし</string>
+    <!-- Article states announced by screen readers on an article-list row. -->
+    <string name="article_state_unread">未読</string>
+    <string name="article_state_starred">スター付き</string>
     <string name="article_copy_url">URL をコピー</string>
     <string name="article_url_copied">URL をコピーしました</string>
     <string name="article_prev">前の記事</string>

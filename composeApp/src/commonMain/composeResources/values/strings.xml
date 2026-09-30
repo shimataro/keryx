@@ -138,6 +138,9 @@
     <string name="article_unstar">Unstar</string>
     <string name="article_no_content">No content</string>
     <string name="article_no_title">Untitled</string>
+    <!-- Article states announced by screen readers on an article-list row. -->
+    <string name="article_state_unread">Unread</string>
+    <string name="article_state_starred">Starred</string>
     <string name="article_copy_url">Copy URL</string>
     <string name="article_url_copied">URL copied</string>
     <string name="article_prev">Previous article</string>
