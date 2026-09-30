@@ -147,7 +147,10 @@ struct ArticleTableView: NSViewRepresentable {
 
             let old = rows
             rows = newParent.rows
-            if old.rows.count != rows.rows.count || !old.rows.elementsEqual(rows.rows, by: { $0.id == $1.id }) {
+            // The same generation is the same rows in the same order (`ArticleRowList.generation`),
+            // so only a new one needs its ids compared.
+            if old.generation != rows.generation,
+               old.rows.count != rows.rows.count || !old.rows.elementsEqual(rows.rows, by: { $0.id == $1.id }) {
                 applyStructureChange(from: old)
             } else {
                 refreshVisibleCells()

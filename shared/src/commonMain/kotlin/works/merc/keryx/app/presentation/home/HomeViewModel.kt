@@ -58,6 +58,13 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
 /**
+ * How long the article-change signal must stay quiet before an active search re-runs — short
+ * enough that a read/star toggle's re-searched row still updates promptly, long enough to coalesce
+ * a refresh's per-feed commits.
+ */
+internal const val SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS = 100L
+
+/**
  * Debounced FTS results tagged with the query/filter that produced them (see
  * [HomeViewModel.searching]).
  */
@@ -320,14 +327,25 @@ class HomeViewModel(
                 // unstarred while browsing Starred). Per-field resolution (rather than picking one
                 // map's snapshot outright) covers an article pinned in both at once, e.g. read and
                 // then unstarred while browsing Starred + unread-only.
-                resolvedList = list.map { row ->
-                    row.copy(
-                        is_read = pinnedRead[row.id]?.is_read ?: row.is_read,
-                        is_starred = pinnedUnstarred[row.id]?.is_starred ?: row.is_starred,
-                    )
+                //
+                // Only a pinned row whose resolved fields differ is replaced; every other row keeps
+                // its instance, and once the writes have landed the raw list itself is returned.
+                var resolved: MutableList<ArticleListRow>? = null
+                val presentPinnedIds = HashSet<String>()
+                list.forEachIndexed { index, row ->
+                    val readPin = pinnedRead[row.id]
+                    val unstarPin = pinnedUnstarred[row.id]
+                    if (readPin == null && unstarPin == null) return@forEachIndexed
+                    presentPinnedIds += row.id
+                    val isRead = readPin?.is_read ?: row.is_read
+                    val isStarred = unstarPin?.is_starred ?: row.is_starred
+                    if (isRead != row.is_read || isStarred != row.is_starred) {
+                        val target = resolved ?: list.toMutableList().also { resolved = it }
+                        target[index] = row.copy(is_read = isRead, is_starred = isStarred)
+                    }
                 }
-                val existingIds = list.mapTo(HashSet(list.size)) { it.id }
-                extra = (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in existingIds }.map { id ->
+                resolvedList = resolved ?: list
+                extra = (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in presentPinnedIds }.map { id ->
                     val base = pinnedRead[id] ?: pinnedUnstarred.getValue(id)
                     base.copy(
                         is_read = pinnedRead[id]?.is_read ?: base.is_read,
@@ -465,7 +483,9 @@ class HomeViewModel(
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
             // doesn't auto-notify. search() absorbs the transient articles_fts-dropped case itself.
-            articleChangeSignal,
+            // Debounced: a refresh commits once per fetched feed, and each commit would otherwise
+            // re-run the whole FTS query while a search is showing.
+            articleChangeSignal.debounce(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS),
         ) { q, f, _, _ -> q to f }
             .map { (q, f) ->
                 SearchSnapshot(q, f, if (searchTerms(q).isEmpty()) emptyList() else articleRepository.search(q, f))

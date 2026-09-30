@@ -123,6 +123,22 @@ private fun KeryxDatabase.insertArticle(
     )
 }
 
+/** Counts the FTS `MATCH` queries run through it — one per search that reached the index. */
+private class SearchCountingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    var matchQueries = 0
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        if (sql.contains("articles_fts MATCH")) matchQueries++
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+}
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
 
@@ -198,8 +214,10 @@ class HomeViewModelTest {
         // Passing one also connects the CloudSession (a client ID plus stored tokens), since a
         // refresh-then-sync cycle only syncs while a provider is connected.
         cloudProvider: (() -> works.merc.keryx.app.data.cloud.CloudStorage?)? = null,
+        // What FtsSearch runs its queries through — a test can wrap `driver` to count searches.
+        ftsDriver: SqlDriver = driver,
     ): HomeViewModel {
-        val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
+        val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManagerIndexed(driver), syncScheduler,
@@ -1585,6 +1603,51 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun resolvingAPinReplacesOnlyThePinnedRow() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val before = vm.articles.value
+
+        vm.toggleRead(before.first { it.id == "a1" })
+
+        // The write is still queued, so only a1's field is resolved from its pin; a2 keeps the very
+        // instance the raw query produced.
+        val after = vm.articles.value
+        assertEquals(listOf("a1", "a2"), after.map { it.id })
+        assertEquals(1L, after[0].is_read)
+        assertTrue(after[1] === before[1])
+    }
+
+    @Test
+    fun pinsThatAlreadyMatchTheQueryResultLeaveItsRowsUntouched() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        // The write has landed: a1 is still pinned, but the query result already agrees with it.
+        val settled = vm.articles.value
+        assertEquals(1L, settled[0].is_read)
+
+        // Re-runs the merge over the same query result without touching the pins.
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+        vm.toggleSort()
+        testScheduler.advanceUntilIdle()
+
+        val rerun = vm.articles.value
+        assertEquals(settled.size, rerun.size)
+        settled.indices.forEach { assertTrue(rerun[it] === settled[it]) }
+    }
+
+    @Test
     fun toggleReadUpdatesDbAndRefreshesSelectedStateOnlyWhenSelected() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
@@ -1887,7 +1950,7 @@ class HomeViewModelTest {
         assertTrue(vm.canHideRead.value)
 
         vm.hideRead()
-        testScheduler.advanceUntilIdle()
+        advanceForArticleChangeDebounce()
 
         // a1 (read, unselected) is hidden from the search results; a2 (selected) and a3 (unread) stay.
         assertEquals(setOf("a2", "a3"), vm.searchResults.value.map { it.article.id }.toSet())
@@ -2575,6 +2638,17 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
     }
 
+    /**
+     * Lets an active search re-run after an article write: the change signal is debounced by
+     * [SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS] on the real clock (`dispatcher` is Unconfined), like the
+     * query debounce above.
+     */
+    private fun TestScope.advanceForArticleChangeDebounce() {
+        testScheduler.advanceUntilIdle()
+        Thread.sleep(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS * 3)
+        testScheduler.advanceUntilIdle()
+    }
+
     @Test
     fun searchingIsTrueWhileDebouncedResultsAreStillPendingThenFalse() = runTest {
         db.insertFeed("f1")
@@ -2843,7 +2917,7 @@ class HomeViewModelTest {
         assertEquals(0L, vm.searchResults.value.single().article.is_starred)
 
         vm.toggleStar(db.articlesQueries.getById("a1").executeAsOne().toListRow())
-        testScheduler.advanceUntilIdle()
+        advanceForArticleChangeDebounce()
 
         assertEquals(1L, vm.searchResults.value.single().article.is_starred)
     }
@@ -2865,11 +2939,33 @@ class HomeViewModelTest {
 
         // Star the already-read result: the stale pinned snapshot must not hide the fresh star.
         vm.toggleStar(vm.searchResults.value.single().article)
-        testScheduler.advanceUntilIdle()
+        advanceForArticleChangeDebounce()
 
         val result = vm.searchResults.value.single().article
         assertEquals(1L, result.is_starred)
         assertEquals(1L, result.is_read)
+    }
+
+    @Test
+    fun aBurstOfArticleChangesReRunsAnActiveSearchOnce() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
+        ftsManagerIndexed(driver)
+        val counting = SearchCountingSqlDriver(driver)
+        val vm = newViewModel(ftsDriver = counting)
+        subscribeAll(vm)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+        counting.matchQueries = 0
+
+        // Several commits in quick succession, as a refresh lands one per fetched feed.
+        repeat(5) { i -> db.insertArticle("b$i", "f1", title = "Other $i") }
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, counting.matchQueries)
+
+        advanceForArticleChangeDebounce()
+        assertEquals(1, counting.matchQueries)
     }
 
     @Test

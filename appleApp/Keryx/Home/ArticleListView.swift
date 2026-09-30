@@ -247,12 +247,13 @@ struct ArticleListView: View {
     }
 
     /// Mirrors Compose's own `emptyContent` `when` in `ArticleListPane.kt`: a query with no
-    /// 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split `FtsSearch` makes)
-    /// is "too short"; an in-flight search with nothing yet shows nothing at all, rather than
-    /// flashing "no results" between keystrokes; only a *settled* empty result set is "no results".
+    /// 2+-character word (`searchTerms`, shared with the trigram/`LIKE` split `FtsSearch` makes —
+    /// resolved once per query change as `searchQueryHasTerms`) is "too short"; an in-flight search
+    /// with nothing yet shows nothing at all, rather than flashing "no results" between keystrokes;
+    /// only a *settled* empty result set is "no results".
     @ViewBuilder
     private var searchContent: some View {
-        if SearchQueryKt.searchTerms(raw: home.searchQuery).isEmpty {
+        if !home.searchQueryHasTerms {
             ContentUnavailableView(
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"

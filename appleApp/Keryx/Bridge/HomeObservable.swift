@@ -51,10 +51,16 @@ final class HomeObservable: ObservableAssignment {
     private(set) var sortedTags: [Tags] = []
 
     private(set) var searchQuery: String = ""
+    /// Whether `searchQuery` has a usable term (`searchTerms`), assigned only when that changes —
+    /// the article list reads this rather than `searchQuery`, which changes with every keystroke.
+    private(set) var searchQueryHasTerms = false
     private(set) var searchBarVisible: Bool = false
     private(set) var searchActive: Bool = false
     private(set) var searching: Bool = false
-    private(set) var searchResults: [ArticleSearchResult] = []
+    /// The latest `searchResults` emission, which `searchRows` is built from. Not observed: views
+    /// read `searchRows` / `hasSearchResults`.
+    @ObservationIgnored private var searchResults: [ArticleSearchResult] = []
+    /// Whether `searchRows` has any row — assigned together with it, so the two never disagree.
     private(set) var hasSearchResults = false
     private(set) var pendingSearchFocus: Bool = false
 
@@ -62,12 +68,23 @@ final class HomeObservable: ObservableAssignment {
     private(set) var newestFirst: Bool = true
     private(set) var canHideRead: Bool = false
 
-    private(set) var articles: [ArticleListRow] = []
+    /// The latest `articles` emission, which `articleRows` is built from. Not observed: views read
+    /// `articleRows`.
+    @ObservationIgnored private var articles: [ArticleListRow] = []
     /// `articles` / `searchResults` resolved into display rows — see `ArticleRowModel`. Rebuilt
     /// once per emission of either (or of `feeds`, whose titles and favicons the rows show), never
-    /// per body evaluation.
+    /// per body evaluation, off the main actor (`ArticleRowList.buildInBackground`); assigned only
+    /// when some row actually changed.
     private(set) var articleRows = ArticleRowList.empty
     private(set) var searchRows = ArticleRowList.empty
+    /// The in-flight background build of each list. A newer request cancels the older one, and a
+    /// result is applied only if it is still the latest request's (`rowListGeneration`), so an
+    /// older emission's rows can never land over a newer one's.
+    @ObservationIgnored private var articleRowsBuild: (task: Task<Void, Never>, generation: Int)?
+    @ObservationIgnored private var searchRowsBuild: (task: Task<Void, Never>, generation: Int)?
+    /// The last `ArticleRowList.generation` handed out — shared by both lists, so a table switched
+    /// from one to the other never mistakes them for the same rows.
+    @ObservationIgnored private var rowListGeneration = 0
     /// Each feed's title and favicon as the article rows show them; a `feeds` emission that leaves
     /// this unchanged (a refresh updating etags and error counts) does not touch the rows.
     private var feedRowInfo: [String: FeedRowInfo] = [:]
@@ -92,6 +109,9 @@ final class HomeObservable: ObservableAssignment {
     /// search results while a search is active, so a swipe steps exactly as J/K does. Observed on
     /// iOS only: that flow runs only while collected, and macOS has no pager to collect it for.
     private(set) var pagerArticles: [ArticleListRow] = []
+    /// Each `pagerArticles` row's position, rebuilt with it — for the pager's membership and
+    /// neighbour lookups without a scan (or a round trip through `readerPages`).
+    private(set) var pagerIndexById: [String: Int] = [:]
     private(set) var cloudConnected: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
@@ -298,7 +318,10 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeSearchQuery() async {
-        for await v in viewModel.searchQuery { assignIfChanged(\.searchQuery, v) }
+        for await v in viewModel.searchQuery {
+            guard assignIfChanged(\.searchQuery, v) else { continue }
+            assignIfChanged(\.searchQueryHasTerms, !SearchQueryKt.searchTerms(raw: v).isEmpty)
+        }
     }
 
     private func observeSearchBarVisible() async {
@@ -316,7 +339,6 @@ final class HomeObservable: ObservableAssignment {
     private func observeSearchResults() async {
         for await v in viewModel.searchResults {
             searchResults = v
-            assignIfChanged(\.hasSearchResults, !v.isEmpty)
             rebuildSearchRows()
         }
     }
@@ -371,27 +393,41 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func rebuildArticleRows() {
-        articleRows = ArticleRowList.build(
-            articles.map { (row: $0, markedTitle: nil) },
-            feedInfo: feedRowInfo,
-            reusing: articleRows,
-            zoneId: TimeZone.current.identifier,
-            makeZone: Self.systemZone
-        )
+        articleRowsBuild?.task.cancel()
+        let generation = nextRowListGeneration()
+        let (entries, feedInfo, previous) = (articles, feedRowInfo, articleRows)
+        let zoneId = TimeZone.current.identifier
+        let task = Task { [weak self] in
+            let list = await ArticleRowList.buildInBackground(
+                entries, feedInfo: feedInfo, reusing: previous, zoneId: zoneId, generation: generation
+            )
+            guard let self, !Task.isCancelled, articleRowsBuild?.generation == generation else { return }
+            articleRowsBuild = nil
+            if list.generation != articleRows.generation { articleRows = list }
+        }
+        articleRowsBuild = (task, generation)
     }
 
     private func rebuildSearchRows() {
-        searchRows = ArticleRowList.build(
-            searchResults.map { (row: $0.article, markedTitle: $0.titleMarked) },
-            feedInfo: feedRowInfo,
-            reusing: searchRows,
-            zoneId: TimeZone.current.identifier,
-            makeZone: Self.systemZone
-        )
+        searchRowsBuild?.task.cancel()
+        let generation = nextRowListGeneration()
+        let (entries, feedInfo, previous) = (searchResults, feedRowInfo, searchRows)
+        let zoneId = TimeZone.current.identifier
+        let task = Task { [weak self] in
+            let list = await ArticleRowList.buildInBackground(
+                entries, feedInfo: feedInfo, reusing: previous, zoneId: zoneId, generation: generation
+            )
+            guard let self, !Task.isCancelled, searchRowsBuild?.generation == generation else { return }
+            searchRowsBuild = nil
+            if list.generation != searchRows.generation { searchRows = list }
+            assignIfChanged(\.hasSearchResults, !list.rows.isEmpty)
+        }
+        searchRowsBuild = (task, generation)
     }
 
-    private static func systemZone() -> Kotlinx_datetimeTimeZone {
-        Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault()
+    private func nextRowListGeneration() -> Int {
+        rowListGeneration += 1
+        return rowListGeneration
     }
 
     private func observeNewArticleCount() async {
@@ -423,7 +459,12 @@ final class HomeObservable: ObservableAssignment {
 
     #if os(iOS)
     private func observePagerArticles() async {
-        for await v in viewModel.pagerArticles { pagerArticles = v }
+        for await v in viewModel.pagerArticles {
+            pagerArticles = v
+            var index = [String: Int](minimumCapacity: v.count)
+            for (i, row) in v.enumerated() { index[row.id] = i }
+            pagerIndexById = index
+        }
     }
     #endif
 

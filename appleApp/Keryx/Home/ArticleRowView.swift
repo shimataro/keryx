@@ -33,6 +33,16 @@ struct ArticleRowView: View, Equatable {
     private static let returnFlashFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
     #endif
 
+    // Looked up once rather than on every body evaluation of every row; the app's language cannot
+    // change while it runs.
+    private static let starLabel = L("article_star")
+    private static let unstarLabel = L("article_unstar")
+    private static let markReadLabel = L("article_mark_as_read")
+    private static let markUnreadLabel = L("article_mark_as_unread")
+    private static let copyUrlLabel = L("article_copy_url")
+    private static let openInBrowserLabel = L("article_open_in_browser")
+    private static let noTitleLabel = L("article_no_title")
+
     /// The closures are rebuilt by every parent evaluation and never compared: they only forward to
     /// actions keyed by this row's own article, which `model` already covers.
     nonisolated static func == (lhs: ArticleRowView, rhs: ArticleRowView) -> Bool {
@@ -66,7 +76,7 @@ struct ArticleRowView: View, Equatable {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .padding(.leading, 6)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(titleText)
+                    titleText
                         .font(model.isRead ? .body : .body.bold())
                         .foregroundStyle(onStrongSelection ? AnyShapeStyle(Color.white) : AnyShapeStyle(model.isRead ? HierarchicalShapeStyle.secondary : HierarchicalShapeStyle.primary))
                         .lineLimit(2, reservesSpace: true)
@@ -106,20 +116,20 @@ struct ArticleRowView: View, Equatable {
             // (`ArticleRowComponents.kt`) — the actual selection runs on a right-click/Control-
             // click via `.selectsOnContextMenu` above, not as a side effect of this builder (see
             // `ContextMenuSelectionTracker`'s own doc for why).
-            Button(L(model.isStarred ? "article_unstar" : "article_star")) {
+            Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
                 viewModel.toggleStar(article: model.row)
             }
-            Button(L(model.isRead ? "article_mark_as_unread" : "article_mark_as_read")) {
+            Button(model.isRead ? Self.markUnreadLabel : Self.markReadLabel) {
                 viewModel.toggleRead(article: model.row)
             }
-            Button(L("article_copy_url")) {
+            Button(Self.copyUrlLabel) {
                 copyToPasteboard(model.url)
             }
-            .disabled(!ArticleListModelKt.hasUsableUrl(url: model.url))
-            Button(L("article_open_in_browser")) {
+            .disabled(!model.hasUsableUrl)
+            Button(Self.openInBrowserLabel) {
                 openInBrowser(model.url)
             }
-            .disabled(!ArticleListModelKt.hasUsableUrl(url: model.url))
+            .disabled(!model.hasUsableUrl)
         }
     }
 
@@ -131,8 +141,11 @@ struct ArticleRowView: View, Equatable {
         #endif
     }
 
-    private var titleText: AttributedString {
-        guard let title = model.title else { return AttributedString(L("article_no_title")) }
-        return model.highlightedTitle ?? AttributedString(title)
+    /// Only a search result's highlighted title needs an `AttributedString`; a plain title is set
+    /// verbatim, skipping both the attributed copy and a localization lookup of the title text.
+    private var titleText: Text {
+        guard let title = model.title else { return Text(verbatim: Self.noTitleLabel) }
+        if let highlighted = model.highlightedTitle { return Text(highlighted) }
+        return Text(verbatim: title)
     }
 }
