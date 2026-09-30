@@ -262,6 +262,11 @@ xcodebuild -scheme Keryx -destination 'platform=macOS' test
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
 ```
 
+スキームの Run / Test アクションは Debug 構成を使うため、Swift 側は最適化なし（`-Onone`）でビルドされる。
+性能の計測は Debug ではなく Release ビルド（`xcodebuild -scheme Keryx -configuration Release …`、
+または Xcode の Product > Profile）で行うこと。Kotlin の XCFramework はどの構成でも Release である。
+計測時は実データのディレクトリではなく、環境変数 `KERYX_DATA_DIR` で scratch の DB を指す。
+
 `project.yml` の `prebuildScripts` 項目（`Scripts/build-shared.sh`）が、ビルドのたびに
 `:shared:assembleKeryxSharedReleaseXCFramework` と `:composeApp:generateStringCatalog` を自動的に
 実行するので、普通にビルドするだけで最新の Kotlin ソースが反映される——別途手動の手順は要らない。

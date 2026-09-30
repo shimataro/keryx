@@ -265,6 +265,13 @@ xcodebuild -scheme Keryx -destination 'platform=macOS' test
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
 ```
 
+The scheme's Run and Test actions use the Debug configuration, so the Swift side is built
+unoptimized (`-Onone`). Measure performance with a Release build
+(`xcodebuild -scheme Keryx -configuration Release …`, or Product > Profile in Xcode), never a
+Debug one; the Kotlin XCFramework is Release in every configuration either way. Point a
+measurement run at a scratch database with the `KERYX_DATA_DIR` environment variable rather than
+your real data directory.
+
 `project.yml`'s `prebuildScripts` entry (`Scripts/build-shared.sh`) runs
 `:shared:assembleKeryxSharedReleaseXCFramework` and `:composeApp:generateStringCatalog`
 automatically before each Xcode/`xcodebuild` build, so a plain build picks up the current Kotlin

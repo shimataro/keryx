@@ -50,6 +50,10 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright (c) 2026 Mercury Works"
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.news
         CODE_SIGN_ENTITLEMENTS: Keryx/Keryx.entitlements
+        # -ObjC force-loads every ObjC class/category in the static KeryxShared framework. Dropping
+        # it builds, tests and launches fine, but only an empty-database launch was exercised and
+        # no size/startup gain was measured, so it stays until a run through every screen shows
+        # the framework does not depend on it.
         OTHER_LDFLAGS: "-lsqlite3 -ObjC $(inherited)"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
