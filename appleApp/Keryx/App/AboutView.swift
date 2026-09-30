@@ -40,6 +40,7 @@ struct AboutView: View {
     private func link(_ label: String, url: String, tooltip: String? = nil) -> some View {
         Link(label, destination: URL(string: url)!)
             .help(tooltip ?? url)
+            .linkPointer()
     }
 
     private var appVersion: String {
