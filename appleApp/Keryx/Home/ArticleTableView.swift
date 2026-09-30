@@ -21,8 +21,9 @@ struct ArticleTableScrollRequest: Equatable {
 /// (`ArticleTableLayout`).
 ///
 /// The rows are the same `ArticleRowView`s the iOS `List` shows, hosted one per visible cell.
-/// Selection, clicks and context menus stay the row's own; the table itself never takes the first
-/// responder, so keyboard focus and `HomeView`'s key handling remain SwiftUI's.
+/// Selection, clicks and context menus stay the row's own. The table takes the first responder for
+/// the pane focus, as the `List`'s own table did, but passes every key on, so `HomeView`'s key
+/// handling remains SwiftUI's (`ArticleNSTableView`).
 struct ArticleTableView: NSViewRepresentable {
     let rows: ArticleRowList
     let selectedId: String?
@@ -320,15 +321,25 @@ struct ArticleTableView: NSViewRepresentable {
     }
 }
 
-/// The table itself: never the first responder (keyboard focus stays SwiftUI's), and a click
-/// outside any row — which no hosted row sees — is reported so the pane can still take focus.
+/// The table itself. Like the `NSTableView` inside SwiftUI's own `List`, it is what takes the first
+/// responder when the article list has the pane focus, but it handles no key itself: every key goes
+/// on up the responder chain to the hosting view, whose SwiftUI key handling (`HomeView`'s
+/// `onKeyPress`) runs as for any other pane — the table's own arrow-key selection and type-select
+/// never see them. A click outside any row, which no hosted row sees, is reported so the pane can
+/// still take focus.
 final class ArticleNSTableView: NSTableView {
     var onBackgroundClick: (() -> Void)?
 
-    override var acceptsFirstResponder: Bool { false }
-
     override func mouseDown(with event: NSEvent) {
         onBackgroundClick?()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        nextResponder?.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        nextResponder?.keyUp(with: event)
     }
 }
 
@@ -365,8 +376,8 @@ private final class ArticleCellView: NSTableCellView {
     }
 }
 
-/// A row's hosting view never takes the first responder either: a click on a row must leave the key
-/// events with `HomeView`, which the row's own action then focuses on the article list.
+/// A row's hosting view never takes the first responder: a click on a row must leave the key events
+/// with `HomeView`, which the row's own action then focuses on the article list.
 private final class ArticleRowHostingView: NSHostingView<ArticleCellContent> {
     override var acceptsFirstResponder: Bool { false }
 }

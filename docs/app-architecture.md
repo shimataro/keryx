@@ -1391,8 +1391,12 @@ The macOS article list is an `NSTableView` with one fixed row height
   (`freshSideUnseenCount`). A filter switch goes back to the top instead. A change that keeps the
   rows re-renders only the visible cells whose `ArticleRowView` differs.
 - **Everything else stays SwiftUI's.** Rows are the same hosted `ArticleRowView`s: selection, clicks
-  and context menus are theirs, and neither the table nor a row's hosting view ever becomes the first
-  responder, so pane focus and `HomeView`'s key handling are unchanged. The visible-row report for
+  and context menus are theirs. The table takes the first responder for the pane focus, as the
+  `List`'s own table did, but passes every key on up the responder chain, so `HomeView`'s key
+  handling is unchanged; a row's hosting view never takes it. Unlike a `List`, a representable is not
+  focused through a binding on a container above it, so the pane's `.focused` sits on the
+  representable itself, with `.focusable(interactions: .edit)` — the default follows the system's
+  keyboard-navigation setting, which is off by default, and the pane then took no focus at all. The visible-row report for
   the new-articles count comes from the clip view's bounds rather than `onAppear`/`onDisappear`. A
   hosted row does not inherit SwiftUI's environment, so the context-menu tracker is passed in
   explicitly, and the soft scroll edge effect under the toolbar, which the `List` got for free, is

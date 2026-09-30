@@ -112,7 +112,9 @@ struct ArticleListView: View {
             }
             #endif
         }
+        #if os(iOS)
         .focused(focusedPane, equals: .articleList)
+        #endif
         .toolbar { toolbarContent }
     }
 
@@ -321,10 +323,14 @@ struct ArticleListView: View {
         // the toolbar's height itself.
         .ignoresSafeArea(edges: .top)
         .modifier(SoftTopScrollEdge())
-        // The table never takes the first responder, so the pane is made focusable here instead —
-        // `.focused(focusedPane, equals: .articleList)` in `body` still lands on it.
-        .focusable()
+        // SwiftUI hands a representable's focus to its AppKit views — the table takes the first
+        // responder and passes every key on to `HomeView`'s handler (`ArticleNSTableView`). The
+        // focus binding sits here rather than on the container in `body`, which is only focusable
+        // through a focusable child such as iOS's `List`. `.edit`, because the default (`.activate`)
+        // follows the system's keyboard-navigation setting, off by default.
+        .focusable(interactions: .edit)
         .focusEffectDisabled()
+        .focused(focusedPane, equals: .articleList)
     }
     #else
     private var articleList: some View {
