@@ -20,3 +20,15 @@ enum CompactSidebarSelection {
         (changesFilter: key != selectedKey, navigates: true)
     }
 }
+
+/// How the article list shows its selection while the split view is collapsed (iPhone): as for the
+/// sidebar, a row there is a navigation link into the reader, so once the list is the topmost column
+/// again — the reader popped — it keeps no selection on screen. The shared selection itself (the
+/// article `HomeViewModel` has selected) is untouched; only its display is.
+enum CompactArticleSelection {
+    /// The id of the row to draw as selected: none while the collapsed article list is the topmost
+    /// column, otherwise the selected article's.
+    static func displayedId(selectedId: String?, articleListIsTopmost: Bool) -> String? {
+        articleListIsTopmost ? nil : selectedId
+    }
+}

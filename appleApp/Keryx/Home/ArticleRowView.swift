@@ -8,6 +8,8 @@ import SwiftUI
 struct ArticleRowView: View, Equatable {
     let model: ArticleRowModel
     let isSelected: Bool
+    /// Whether the row shows the brief gray highlight of a collapsed list returned to from the reader.
+    let isReturnFlashing: Bool
     /// Whether the article list holds the pane focus in the key window.
     let paneFocused: Bool
     /// Not observed, only called — actions reach `HomeViewModel` directly.
@@ -23,12 +25,19 @@ struct ArticleRowView: View, Equatable {
     private static let strongSelectionFill = Color.accentColor
     private static let dimmedSelectionFill = Color(uiColor: .systemGray4)
     #endif
+    /// The neutral gray a UIKit list cell highlights in, for the return flash.
+    #if os(iOS)
+    private static let returnFlashFill = Color(uiColor: .systemGray4)
+    #else
+    private static let returnFlashFill = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    #endif
 
     /// The closures are rebuilt by every parent evaluation and never compared: they only forward to
     /// actions keyed by this row's own article, which `model` already covers.
     nonisolated static func == (lhs: ArticleRowView, rhs: ArticleRowView) -> Bool {
         MainActor.assumeIsolated {
-            lhs.model == rhs.model && lhs.isSelected == rhs.isSelected && lhs.paneFocused == rhs.paneFocused
+            lhs.model == rhs.model && lhs.isSelected == rhs.isSelected
+                && lhs.isReturnFlashing == rhs.isReturnFlashing && lhs.paneFocused == rhs.paneFocused
         }
     }
 
@@ -81,6 +90,8 @@ struct ArticleRowView: View, Equatable {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(paneFocused ? Self.strongSelectionFill : Self.dimmedSelectionFill)
+                } else if isReturnFlashing {
+                    RoundedRectangle(cornerRadius: 6).fill(Self.returnFlashFill)
                 }
             }
         }

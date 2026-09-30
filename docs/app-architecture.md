@@ -1354,6 +1354,15 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
 - **State is not applied mid-drag** (it would disturb UIKit's placeholder and gap); the latest state is
   applied when the drag ends, which also re-expands a lifted folder that UIKit left collapsed.
 
+### Selection display (iOS)
+
+At a compact width (the split view collapsed into one stack), the sidebar's and the article list's
+rows are navigation links, so neither list keeps a selection on screen once it is the topmost column
+again (`CompactSidebarSelection`, `CompactArticleSelection`); the shared selection in `HomeViewModel`
+is unchanged. Popping the reader back to the article list flashes the row just read in a neutral gray
+that fades out over about 0.35 s — the iOS list idiom, and the role Android's neutral ripple pulse
+plays there.
+
 ### `KeryxSdk`: the Swift entry point
 
 `sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:

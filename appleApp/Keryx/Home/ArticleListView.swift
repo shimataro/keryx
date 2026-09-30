@@ -11,6 +11,11 @@ struct ArticleListView: View {
     let settingsNavigation: SettingsNavigation
     @Bindable var dialogs: SidebarDialogState
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    /// Whether the split view is collapsed with this list as its topmost column — it then keeps no
+    /// selection on screen (`CompactArticleSelection`). Always false on macOS.
+    let articleListIsTopmost: Bool
+    /// The row flashing gray after the reader was popped back to it — see `HomeView.returnFlashId`.
+    let returnFlashId: String?
     /// Pushes the reader when the split view is collapsed (iPhone); a no-op otherwise. A row is a
     /// plain button rather than a `List` selection, so nothing navigates to the reader by itself.
     let onOpenArticle: () -> Void
@@ -250,12 +255,15 @@ struct ArticleListView: View {
     }
 
     private var articleList: some View {
-        let selectedId = home.selectedArticle?.id
+        let selectedId = CompactArticleSelection.displayedId(
+            selectedId: home.selectedArticle?.id, articleListIsTopmost: articleListIsTopmost
+        )
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
         return List(displayedRows) { article in
             ArticleRowView(
                 model: article,
                 isSelected: article.id == selectedId,
+                isReturnFlashing: article.id == returnFlashId,
                 paneFocused: paneFocused,
                 viewModel: home.viewModel,
                 onSelect: {

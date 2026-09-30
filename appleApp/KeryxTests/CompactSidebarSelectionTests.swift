@@ -28,3 +28,19 @@ struct CompactSidebarSelectionTests {
         #expect(result.navigates)
     }
 }
+
+/// `CompactArticleSelection` drops the collapsed article list's selection from the screen once the
+/// reader is popped, as iOS lists do.
+@Suite
+struct CompactArticleSelectionTests {
+    @Test
+    func displayedIdIsNoneWhileTheArticleListIsTopmost() {
+        #expect(CompactArticleSelection.displayedId(selectedId: "a1", articleListIsTopmost: true) == nil)
+    }
+
+    @Test
+    func displayedIdIsTheSelectionOtherwise() {
+        #expect(CompactArticleSelection.displayedId(selectedId: "a1", articleListIsTopmost: false) == "a1")
+        #expect(CompactArticleSelection.displayedId(selectedId: nil, articleListIsTopmost: false) == nil)
+    }
+}

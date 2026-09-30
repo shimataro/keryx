@@ -1339,6 +1339,13 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
 - **ドラッグ中は状態を反映しない**（UIKit のプレースホルダーと隙間を乱すため）。最新の状態はドラッグの終わりに
   反映し、UIKit が畳んだままにする持ち上げたフォルダーもそこで開き直す。
 
+### 選択の表示（iOS）
+
+compact 幅（分割ビューが 1 つのスタックに畳まれた状態）では、サイドバーと記事一覧の行はナビゲーションの
+リンクなので、どちらも一番手前の列に戻ったときに選択を画面に残さない（`CompactSidebarSelection`、
+`CompactArticleSelection`）。`HomeViewModel` の共有の選択は変えない。記事詳細から記事一覧に戻ると、読んでいた
+行を中立の灰色で一瞬光らせ、約 0.35 秒で消す。iOS のリストの作法で、Android の中立色のリップルと同じ役割である。
+
 ### `KeryxSdk`：Swift からの入口
 
 `sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：

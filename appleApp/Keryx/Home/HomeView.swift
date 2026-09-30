@@ -38,6 +38,21 @@ struct HomeView: View {
         #endif
     }
 
+    /// Whether the collapsed stack is showing the article list itself — see `sidebarIsTopmost`.
+    private var articleListIsTopmost: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .compact && compactColumn == .content
+        #else
+        false
+        #endif
+    }
+
+    /// The article whose row briefly flashes gray after the reader is popped back to the collapsed
+    /// article list — the iOS idiom of a list row fading out its highlight on return, and the role
+    /// Android's own neutral ripple pulse (`ripplePulseFor`) plays there. `nil` otherwise.
+    @State private var returnFlashId: String?
+    private static let returnFlashFadeSeconds = 0.35
+
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $compactColumn) {
             FeedListView(
@@ -64,6 +79,8 @@ struct HomeView: View {
                 settingsNavigation: settingsNavigation,
                 dialogs: sidebarDialogs,
                 focusedPane: $focusedPane,
+                articleListIsTopmost: articleListIsTopmost,
+                returnFlashId: returnFlashId,
                 onOpenArticle: { compactColumn = .detail }
             )
                 .navigationSplitViewColumnWidth(
@@ -79,6 +96,11 @@ struct HomeView: View {
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane)
         }
         .onKeyPress { press in handleKeyPress(press) }
+        .onChange(of: compactColumn) { old, new in
+            guard old == .detail, new == .content, articleListIsTopmost,
+                  let id = home.selectedArticle?.id else { return }
+            flashReturnedRow(id)
+        }
         .modifier(HiddenSplitViewTitle())
         .task {
             await home.startObserving()
@@ -116,6 +138,18 @@ struct HomeView: View {
         .onChange(of: focusedPane) { _, pane in
             if let raw = HomeView.rawValue(for: pane) {
                 preferences.controller.setLastFocusedPane(pane: raw)
+            }
+        }
+    }
+
+    /// Shows `id`'s row in the gray highlight at once, then fades it out.
+    private func flashReturnedRow(_ id: String) {
+        returnFlashId = id
+        Task {
+            // Fully on for a moment, while the pop transition settles, before it starts to fade.
+            try? await Task.sleep(for: .milliseconds(150))
+            withAnimation(.easeOut(duration: HomeView.returnFlashFadeSeconds)) {
+                returnFlashId = nil
             }
         }
     }
