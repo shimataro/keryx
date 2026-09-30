@@ -39,10 +39,14 @@ struct SidebarOutline: Equatable, Sendable {
                 }
                 return nil
             }
-            func flatten(_ node: Node) -> [SidebarItemID] {
-                node.children.flatMap { [$0.id] + flatten($0) }
+            guard let found = find(nodes) else { return [] }
+            var items: [SidebarItemID] = []
+            func visit(_ node: Node) {
+                items.append(node.id)
+                node.children.forEach(visit)
             }
-            return find(nodes).map(flatten) ?? []
+            found.children.forEach(visit)
+            return items
         }
     }
 
@@ -106,11 +110,18 @@ struct SidebarOutline: Equatable, Sendable {
         sections.first { $0.section == section }
     }
 
-    /// Every item in the outline, hidden ones included.
+    /// Every item in the outline, hidden ones included, in depth-first order — one pass over the
+    /// tree, rather than searching it again for every top-level node's descendants.
     var allItems: [SidebarItemID] {
-        sections.flatMap { section in
-            section.nodes.flatMap { [$0.id] + section.descendants(of: $0.id) }
+        var items: [SidebarItemID] = []
+        func visit(_ node: Node) {
+            items.append(node.id)
+            node.children.forEach(visit)
         }
+        for section in sections {
+            section.nodes.forEach(visit)
+        }
+        return items
     }
 
     /// The selectable items on screen, in display order — with both section headers expanded, the

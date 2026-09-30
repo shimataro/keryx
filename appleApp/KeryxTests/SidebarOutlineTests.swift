@@ -76,6 +76,44 @@ struct SidebarOutlineTests {
         #expect(outline.visibleRows.compactMap(\.selectionKey) == model.orderedRowKeys)
     }
 
+    /// The single-pass `allItems` returns what the previous implementation — each top-level node
+    /// followed by its searched-for descendants — did, for every disclosure state.
+    @Test(arguments: [(true, true), (false, true), (true, false), (false, false)])
+    func allItemsMatchesThePerNodeDescendantWalk(foldersExpanded: Bool, tagsExpanded: Bool) {
+        let outline = F.outline(foldersExpanded: foldersExpanded, tagsExpanded: tagsExpanded)
+        #expect(outline.allItems == legacyAllItems(outline))
+        let empty = F.outline(feeds: [], folders: [], tags: [], feedTagMap: [:])
+        #expect(empty.allItems == legacyAllItems(empty))
+    }
+
+    @Test
+    func allItemsIsDepthFirstInDisplayOrder() {
+        #expect(F.outline().allItems == [
+            .all, .starred,
+            .sectionHeader(.folders), .folder("d1"), .feed("a"), .feed("b"), .folder("d2"), .feed("c"),
+            .folder("d3"), .folder("d4"), .feed("e"),
+            .noFolderHeader, .feed("u1"), .feed("u2"),
+            .sectionHeader(.tags), .tag("t1"), .feedInTag(feedId: "a", tagId: "t1"), .tag("t2"),
+        ])
+    }
+
+    /// The previous `allItems`, kept here as the reference the new one is checked against.
+    private func legacyAllItems(_ outline: SidebarOutline) -> [SidebarItemID] {
+        func find(_ nodes: [SidebarOutline.Node], _ item: SidebarItemID) -> SidebarOutline.Node? {
+            for node in nodes {
+                if node.id == item { return node }
+                if let found = find(node.children, item) { return found }
+            }
+            return nil
+        }
+        func flatten(_ node: SidebarOutline.Node) -> [SidebarItemID] {
+            node.children.flatMap { [$0.id] + flatten($0) }
+        }
+        return outline.sections.flatMap { section in
+            section.nodes.flatMap { node in [node.id] + (find(section.nodes, node.id).map(flatten) ?? []) }
+        }
+    }
+
     @Test
     func allItemsIncludesHiddenOnes() {
         let items = F.outline(foldersExpanded: false).allItems

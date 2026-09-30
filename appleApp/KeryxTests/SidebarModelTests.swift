@@ -105,4 +105,49 @@ struct SidebarModelTests {
         #expect(collapsed.orderedRowKeys == expectedCollapsed.map(feedListRowSelectionKey))
         #expect(collapsed.orderedRows.count == collapsed.orderedRowKeys.count)
     }
+
+    // MARK: - Precomputed row data
+
+    @Test
+    func orderedRowsByKeyResolvesEveryVisibleRow() {
+        let m = SidebarFixtures.model()
+        for (key, row) in zip(m.orderedRowKeys, m.orderedRows) {
+            #expect(m.orderedRowsByKey[key].map { feedListRowSelectionsEqual($0, row) } == true)
+        }
+        #expect(m.orderedRowsByKey.count == m.orderedRowKeys.count)
+        // A feed hidden in a collapsed folder is not a row the list can report.
+        #expect(m.orderedRowsByKey["feed-in-folder:e"] == nil)
+    }
+
+    @Test
+    func rowSelectionsCoverEveryRenderedRowWithItsSharedKey() {
+        let m = SidebarFixtures.model()
+        let rowItems = SidebarFixtures.outline().allItems.filter { $0.selectionKey != nil && $0 != .all && $0 != .starred }
+        #expect(Set(m.rowSelections.keys) == Set(rowItems))
+        for (item, selection) in m.rowSelections {
+            #expect(selection.key == item.selectionKey)
+            #expect(selection.key == feedListRowSelectionKey(selection.instance))
+        }
+        // All / Starred are built on demand.
+        #expect(m.rowSelection(.all)?.key == "all")
+        #expect(m.rowSelection(.sectionHeader(.folders)) == nil)
+    }
+
+    @Test
+    func staticContentsCarryTitlesIconsAndErrorState() {
+        let F = SidebarFixtures.self
+        let m = F.model(
+            feeds: [
+                F.feed("a", sortOrder: 1, customTitle: "Mine"),
+                F.feed("b", sortOrder: 2, errorCount: 3),
+                F.feed("c", sortOrder: 3, lastError: ConstantsKt.FEED_ERROR_REASON_GONE),
+            ],
+            tags: [F.tag("t1", sortOrder: 1, color: "#ff0000")]
+        )
+        #expect(m.feedContents["a"] == SidebarRowStaticContent(title: "Mine", icon: .favicon(url: "https://example.com/a.ico")))
+        #expect(m.feedContents["b"].map { $0.isErroring && !$0.isGone } == true)
+        #expect(m.feedContents["c"].map { $0.isErroring && $0.isGone } == true)
+        #expect(m.folderContents["d1"] == SidebarRowStaticContent(title: "name-d1", icon: .symbol("folder")))
+        #expect(m.tagContents["t1"] == SidebarRowStaticContent(title: "name-t1", icon: .tagColor(hex: "#ff0000")))
+    }
 }

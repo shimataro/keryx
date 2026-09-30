@@ -37,7 +37,7 @@ extension FeedListView {
             // unconditionally (`FeedListPane.kt`'s own "No folder" section).
             Section {
                 ForEach(unassignedFeeds, id: \.id) { feed in
-                    feedRow(feed, instance: FeedListRowSelectionFeedInFolderGroup(feedId: feed.id))
+                    feedRow(feed, item: .feed(feed.id))
                 }
                 .onInsert(of: [feedListFeedDragType]) { offset, _ in
                     insert(into: .feeds(folderId: nil, feedIds: unassignedFeeds.map(\.id)), at: offset)
@@ -73,8 +73,7 @@ extension FeedListView {
                 CompactSidebarSelection.displayedKey(selectedKey: selectedRowKey, sidebarIsTopmost: sidebarIsTopmost)
             },
             set: { key in
-                guard let key,
-                      let instance = feedListRowSelection(forKey: key, in: orderedRows) else { return }
+                guard let key, let instance = sidebar.orderedRowsByKey[key] else { return }
                 let tap = CompactSidebarSelection.tap(key: key, selectedKey: selectedRowKey)
                 if tap.changesFilter {
                     home.selectFilter(instance.filter, instance: instance)
@@ -95,21 +94,11 @@ extension FeedListView {
     // MARK: - All / Starred
 
     private var allRow: some View {
-        row(
-            title: L("home_all_feeds"),
-            systemImage: "tray.full",
-            unreadCount: home.totalUnread,
-            instance: FeedListRowSelectionAll(),
-        )
+        row(content: .all, unread: .total, selection: rowSelection(.all, FeedListRowSelectionAll()))
     }
 
     private var starredRow: some View {
-        row(
-            title: L("home_starred"),
-            systemImage: "star",
-            unreadCount: home.starredUnreadCount,
-            instance: FeedListRowSelectionStarred(),
-        )
+        row(content: .starred, unread: .starred, selection: rowSelection(.starred, FeedListRowSelectionStarred()))
     }
 
     // MARK: - Folders
@@ -145,23 +134,25 @@ extension FeedListView {
     }
 
     private func folderGroup(_ folder: Folders) -> some View {
-        let instance = FeedListRowSelectionFolder(folderId: folder.id)
+        let selection = rowSelection(.folder(folder.id), FeedListRowSelectionFolder(folderId: folder.id))
+        let instance = selection.instance
         return DisclosureGroup(isExpanded: folderExpandedBinding(folder.id)) {
             ForEach(feedsIn(folder: folder), id: \.id) { feed in
-                feedRow(feed, instance: FeedListRowSelectionFeedInFolderGroup(feedId: feed.id))
+                feedRow(feed, item: .feed(feed.id))
             }
             .onInsert(of: [feedListFeedDragType]) { offset, _ in
                 insert(into: .feeds(folderId: folder.id, feedIds: feedsIn(folder: folder).map(\.id)), at: offset)
             }
         } label: {
-            SidebarRowLabel(
-                title: folder.name,
-                icon: .symbol("folder"),
+            SidebarSourceListRow(
+                home: home,
+                content: sidebar.folderContents[folder.id] ?? SidebarRowStaticContent(title: folder.name, icon: .symbol("folder")),
+                unread: .folder(folder.id),
+                highlight: dropOnKey == .folder(folder.id) ? .drop : highlight(for: instance),
                 editor: folderRenameEditor(folder)
             )
-                .sidebarRowHighlight(dropOnKey == .folder(folder.id) ? .drop : highlight(for: instance))
-                .badge(Int(home.unreadByFolder[folder.id] ?? 0))
-                .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
+                .equatable()
+                .selectsOnContextMenu(id: selection.key) { selectForContextMenu(instance) }
                 .contextMenu {
                     // Opening the menu selects the row first, matching Compose's own
                     // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
@@ -174,7 +165,7 @@ extension FeedListView {
                 .feedListDraggable(
                     FeedListDragPayload(kind: .folder, id: folder.id),
                     draggingItem: $draggingItem,
-                    enabled: dialogs.renamingRowKey != feedListRowSelectionKey(instance)
+                    enabled: dialogs.renamingRowKey != selection.key
                 )
                 .feedListDropTarget(
                     FeedListDropTargetFolderHeader(folderId: folder.id),
@@ -185,8 +176,8 @@ extension FeedListView {
                     dropOnKey: $dropOnKey,
                     hoveredKey: $hoveredKey
                 )
-                .tag(feedListRowSelectionKey(instance))
-                .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+                .tag(selection.key)
+                .trackAppearance(selection.key, in: $appearedRowKeys)
         }
     }
 
@@ -204,20 +195,21 @@ extension FeedListView {
     }
 
     private func tagGroup(_ tag: Tags) -> some View {
-        let instance = FeedListRowSelectionTag(tagId: tag.id)
+        let selection = rowSelection(.tag(tag.id), FeedListRowSelectionTag(tagId: tag.id))
         return DisclosureGroup(isExpanded: tagExpandedBinding(tag.id)) {
             ForEach(feeds(taggedWith: tag), id: \.id) { feed in
-                feedRow(feed, instance: FeedListRowSelectionFeedInTag(feedId: feed.id, tagId: tag.id))
+                feedRow(feed, item: .feedInTag(feedId: feed.id, tagId: tag.id))
             }
         } label: {
             TagRowLabel(
                 home: home,
                 dialogs: dialogs,
                 tag: tag,
-                instance: instance,
+                content: sidebar.tagContents[tag.id] ?? SidebarRowStaticContent(title: tag.name, icon: .tagColor(hex: tag.color)),
+                selection: selection,
                 editor: tagRenameEditor(tag),
                 appearedRowKeys: $appearedRowKeys,
-                highlight: highlight(for:),
+                highlight: dropOnKey == .tag(tag.id) ? .drop : highlight(for: selection.instance),
                 dropIndex: dropIndex,
                 draggingItem: $draggingItem,
                 dropOnKey: $dropOnKey,
@@ -233,22 +225,24 @@ extension FeedListView {
     /// draggable too, but its tag's `ForEach` takes no insertions — matching Compose's own
     /// `FeedListRowKey.Other` classification for it (`FeedListDragAndDrop.kt`'s own
     /// `parseFeedListRowKey`).
-    private func feedRow(_ feed: Feeds, instance: FeedListRowSelection) -> some View {
-        row(
-            title: feed.displayTitle(),
-            faviconUrl: feed.favicon_url,
-            unreadCount: home.unreadByFeed[feed.id] ?? 0,
-            isErroring: feed.error_count > 0 || feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE,
-            isGone: feed.last_error == ConstantsKt.FEED_ERROR_REASON_GONE,
-            instance: instance,
-            editor: feedRenameEditor(feed, instance: instance),
+    ///
+    /// `item` is `.feed` for a feed in its folder group or among the unfoldered feeds, `.feedInTag`
+    /// for its copy under an expanded tag.
+    private func feedRow(_ feed: Feeds, item: SidebarItemID) -> some View {
+        let selection = rowSelection(item, item.rowSelection ?? FeedListRowSelectionFeedInFolderGroup(feedId: feed.id))
+        let instance = selection.instance
+        return row(
+            content: sidebar.feedContents[feed.id] ?? SidebarRowStaticContent(feed: feed),
+            unread: .feed(feed.id),
+            selection: selection,
+            editor: feedRenameEditor(feed, instance: instance)
         )
         .feedListDraggable(
             FeedListDragPayload(kind: .feed, id: feed.id),
             draggingItem: $draggingItem,
-            enabled: dialogs.renamingRowKey != feedListRowSelectionKey(instance)
+            enabled: dialogs.renamingRowKey != selection.key
         )
-        .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu(instance) }
+        .selectsOnContextMenu(id: selection.key) { selectForContextMenu(instance) }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
             // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
@@ -294,26 +288,27 @@ extension FeedListView {
     }
 
     private func row(
-        title: String,
-        systemImage: String? = nil,
-        faviconUrl: String? = nil,
-        unreadCount: Int64,
-        isErroring: Bool = false,
-        isGone: Bool = false,
-        instance: FeedListRowSelection,
-        editor: InlineRenameField? = nil,
+        content: SidebarRowStaticContent,
+        unread: SidebarUnreadSource,
+        selection: SidebarRowSelection,
+        editor: InlineRenameField? = nil
     ) -> some View {
-        SidebarRowLabel(
-            title: title,
-            icon: systemImage.map(SidebarRowIcon.symbol) ?? .favicon(url: faviconUrl),
-            isErroring: isErroring,
-            isGone: isGone,
+        SidebarSourceListRow(
+            home: home,
+            content: content,
+            unread: unread,
+            highlight: highlight(for: selection.instance),
             editor: editor
         )
-        .sidebarRowHighlight(highlight(for: instance))
-        .badge(Int(unreadCount))
-        .tag(feedListRowSelectionKey(instance))
-        .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+        .equatable()
+        .tag(selection.key)
+        .trackAppearance(selection.key, in: $appearedRowKeys)
+    }
+
+    /// The selection and key of the row `item`, precomputed by `SidebarModel` — or built from
+    /// `instance` for a row it has none for (All / Starred).
+    private func rowSelection(_ item: SidebarItemID, _ instance: @autoclosure () -> FeedListRowSelection) -> SidebarRowSelection {
+        sidebar.rowSelections[item] ?? SidebarRowSelection(instance())
     }
 
     /// Selects `instance` if it isn't already the primary selection — called when a row's context
@@ -353,10 +348,12 @@ private struct TagRowLabel: View {
     let home: HomeObservable
     let dialogs: SidebarDialogState
     let tag: Tags
-    let instance: FeedListRowSelection
+    let content: SidebarRowStaticContent
+    let selection: SidebarRowSelection
     let editor: InlineRenameField?
     @Binding var appearedRowKeys: Set<String>
-    let highlight: (FeedListRowSelection) -> SidebarRowHighlight
+    /// The row's echo or drop highlight, resolved by `FeedListView`.
+    let highlight: SidebarRowHighlight
     let dropIndex: FeedListDropIndex
     @Binding var draggingItem: FeedListDragPayload?
     @Binding var dropOnKey: FeedListHoverKey?
@@ -365,9 +362,13 @@ private struct TagRowLabel: View {
     @State private var showingColorPicker = false
 
     var body: some View {
-        SidebarRowLabel(
-            title: tag.name,
-            icon: .tagColor(hex: tag.color),
+        // The highlight is `.drop` while a feed hovers for attachment — matches Compose's own
+        // `dropTargetBackground` (`FeedListPane.kt`'s tag row).
+        SidebarSourceListRow(
+            home: home,
+            content: content,
+            unread: .tag(tag.id),
+            highlight: highlight,
             editor: editor,
             onIconTap: { showingColorPicker = true },
             iconPopoverPresented: $showingColorPicker
@@ -377,17 +378,14 @@ private struct TagRowLabel: View {
                 showingColorPicker = false
             }
         }
-        // Highlights while a feed hovers for attachment — matches Compose's own
-        // `dropTargetBackground` (`FeedListPane.kt`'s tag row).
-        .sidebarRowHighlight(dropOnKey == .tag(tag.id) ? .drop : highlight(instance))
-        .badge(Int(home.unreadByTag[tag.id] ?? 0))
-        .selectsOnContextMenu(id: feedListRowSelectionKey(instance)) { selectForContextMenu() }
+        .equatable()
+        .selectsOnContextMenu(id: selection.key) { selectForContextMenu() }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
             // `onOpen = { if (!selected) onClick() }` (`FeedListPane.kt`) — the actual selection
             // runs on a right-click/Control-click via `.selectsOnContextMenu` above, not as a side
             // effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
-            Button(L("home_edit_tag_menu")) { dialogs.startRename(instance) }
+            Button(L("home_edit_tag_menu")) { dialogs.startRename(selection.instance) }
             Button(L("home_change_tag_color_menu")) { showingColorPicker = true }
             Button(L("home_delete_tag_menu"), role: .destructive) { dialogs.deletingTag = tag }
         }
@@ -400,11 +398,12 @@ private struct TagRowLabel: View {
             dropOnKey: $dropOnKey,
             hoveredKey: $hoveredKey
         )
-        .tag(feedListRowSelectionKey(instance))
-        .trackAppearance(feedListRowSelectionKey(instance), in: $appearedRowKeys)
+        .tag(selection.key)
+        .trackAppearance(selection.key, in: $appearedRowKeys)
     }
 
     private func selectForContextMenu() {
+        let instance = selection.instance
         guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
         home.selectFilter(instance.filter, instance: instance)
     }

@@ -31,6 +31,9 @@ struct FeedListView: View {
     #if os(macOS)
     /// Rows currently on screen, keyed by `feedListRowSelectionKey` — read by the scroll-to-
     /// selection effect below so an already-visible row (e.g. one just clicked) never jumps.
+    /// Only ever read inside `.onChange` actions, never during `body`, so the insertions and
+    /// removals scrolling makes do not re-evaluate this view (checked against an `NSHostingView`:
+    /// writes to a `@State` that `body` does not read invalidate nothing).
     @State var appearedRowKeys: Set<String> = []
 
     // Drag-and-drop state: the item being dragged, and which row a dragged feed is over for the
@@ -209,7 +212,9 @@ struct FeedListView: View {
         blockingError: @escaping (String) -> String? = { _ in nil },
         commit: @escaping (String) -> Void
     ) -> InlineRenameField? {
-        guard dialogs.renamingRowKey == feedListRowSelectionKey(instance) else { return nil }
+        // Checked for every row on every evaluation, so the common case — nothing being renamed —
+        // skips deriving the row's key.
+        guard let renamingKey = dialogs.renamingRowKey, renamingKey == feedListRowSelectionKey(instance) else { return nil }
         return InlineRenameField(
             initialName: initialName,
             placeholder: placeholder,

@@ -21,6 +21,18 @@ struct SidebarModel {
     /// The rendered rows in visual order (`buildOrderedFeedListRows`), and their selection keys.
     let orderedRows: [FeedListRowSelection]
     let orderedRowKeys: [String]
+    /// `orderedRows` by their keys — how a key the native source list reports resolves back to its
+    /// row without re-deriving every row's key.
+    let orderedRowsByKey: [String: FeedListRowSelection]
+    /// What each feed, folder and tag row shows apart from its unread count and highlight, by id —
+    /// shared by every rendered copy of the same feed (see `SidebarRowStaticContent`).
+    let feedContents: [String: SidebarRowStaticContent]
+    let folderContents: [String: SidebarRowStaticContent]
+    let tagContents: [String: SidebarRowStaticContent]
+    /// Every rendered folder, tag and feed row's selection and key, built here once per structure
+    /// change rather than several times per row on every source-list evaluation — see
+    /// `SidebarRowSelection`. All / Starred and the headers are left out.
+    let rowSelections: [SidebarItemID: SidebarRowSelection]
 
     init(
         feeds: [Feeds],
@@ -62,7 +74,39 @@ struct SidebarModel {
             expandedTagIds: expandedTagIds,
             feedTagMap: feedTagMap
         )
-        orderedRowKeys = orderedRows.map(feedListRowSelectionKey)
+        let keys = orderedRows.map(feedListRowSelectionKey)
+        orderedRowKeys = keys
+        orderedRowsByKey = Dictionary(zip(keys, orderedRows), uniquingKeysWith: { first, _ in first })
+
+        var feedContents: [String: SidebarRowStaticContent] = [:]
+        for feed in sortedFeeds where feedContents[feed.id] == nil {
+            feedContents[feed.id] = SidebarRowStaticContent(feed: feed)
+        }
+        self.feedContents = feedContents
+        folderContents = Dictionary(
+            sortedFolders.map { ($0.id, SidebarRowStaticContent(title: $0.name, icon: .symbol("folder"))) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        tagContents = Dictionary(
+            sortedTags.map { ($0.id, SidebarRowStaticContent(title: $0.name, icon: .tagColor(hex: $0.color))) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var selections: [SidebarItemID: SidebarRowSelection] = [:]
+        func add(_ item: SidebarItemID) {
+            guard selections[item] == nil, let selection = SidebarRowSelection(item) else { return }
+            selections[item] = selection
+        }
+        for folder in sortedFolders {
+            add(.folder(folder.id))
+            byFolder[folder.id]?.forEach { add(.feed($0.id)) }
+        }
+        unassigned.forEach { add(.feed($0.id)) }
+        for tag in sortedTags {
+            add(.tag(tag.id))
+            byTag[tag.id]?.forEach { add(.feedInTag(feedId: $0.id, tagId: tag.id)) }
+        }
+        rowSelections = selections
     }
 
     static var empty: SidebarModel {
@@ -72,4 +116,30 @@ struct SidebarModel {
     func feeds(inFolder folderId: String) -> [Feeds] { feedsByFolderId[folderId] ?? [] }
 
     func feeds(taggedWith tagId: String) -> [Feeds] { feedsByTagId[tagId] ?? [] }
+
+    /// The selection and key of the rendered row `item` — built on the spot for an item this model
+    /// has none for (All / Starred), which only happens for rows whose selection is cheap anyway.
+    func rowSelection(_ item: SidebarItemID) -> SidebarRowSelection? {
+        rowSelections[item] ?? SidebarRowSelection(item)
+    }
+}
+
+/// A rendered sidebar row's shared selection value and its `feedListRowSelectionKey`, built once
+/// per structure change: the source list needs both for every row (its tag, selection highlight,
+/// context menu and drag guard), and building them per row per evaluation meant a Kotlin object and
+/// a sealed-type switch each time.
+struct SidebarRowSelection {
+    let instance: FeedListRowSelection
+    let key: String
+
+    init(_ instance: FeedListRowSelection) {
+        self.instance = instance
+        key = feedListRowSelectionKey(instance)
+    }
+
+    /// `nil` for a header, which is never selected.
+    init?(_ item: SidebarItemID) {
+        guard let instance = item.rowSelection else { return nil }
+        self.init(instance)
+    }
 }
