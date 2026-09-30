@@ -280,6 +280,22 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         }
     }
 
+    /// Shows a drop's result in the list before the shared state carrying it arrives (see
+    /// `SidebarDropPreview`). `state` takes the outline too, so the re-apply when the drag ends does
+    /// not put the old order back; the real state then replaces it, and changes nothing structural
+    /// if the prediction was right.
+    func applyPredictedOutline(_ outline: SidebarOutline) {
+        guard let current = state else { return }
+        state = SidebarRenderState(
+            outline: outline,
+            contents: current.contents,
+            selectedItem: current.selectedItem,
+            renamingKey: current.renamingKey,
+            colorPickingTagId: current.colorPickingTagId
+        )
+        applyStructure(outline, animated: false)
+    }
+
     private func applyStructure(_ outline: SidebarOutline, animated: Bool) {
         let sections = outline.sections.map(\.section)
         if dataSource.snapshot().sectionIdentifiers != sections {

@@ -1358,6 +1358,11 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
 - **Spring loading** is a timer of the system's `springLoadingDelay()` started when a feed would drop
   into a collapsed folder and checked again when it fires, not UIKit's `isSpringLoaded`, which selects
   the row it springs.
+- **The drop's own result is applied inside `performDropWith`**, ahead of the shared state: UIKit expects the
+  data source to show it when that returns, and the view model's state only arrives afterwards, which used to
+  let the dropped row land, its gap close, and the row move in a second animation. `SidebarDropPreview`
+  (UIKit-free, tested in `KeryxTests`) predicts the outline with the repositories' `reorderIds` rules;
+  the state that follows has the same structure, so it changes nothing.
 - **State is not applied mid-drag** (it would disturb UIKit's placeholder and gap); the latest state is
   applied when the drag ends, which also re-expands a lifted folder that UIKit left collapsed.
 

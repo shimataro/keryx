@@ -138,11 +138,17 @@ extension SidebarCollectionViewController: UICollectionViewDragDelegate, UIColle
         guard let position,
               let action = SidebarDropResolver.action(for: position, dragging: context.item, outline: outline, index: actions.dropIndex()),
               let dragItem = coordinator.items.first?.dragItem else { return }
+        // UIKit wants the data source to show the result by the time this returns, so the dropped row
+        // settles where it lands instead of the gap closing and the row moving afterwards.
+        if let predicted = SidebarDropPreview.outline(after: action, in: outline) {
+            applyPredictedOutline(predicted)
+        }
         switch position {
         case .into(let item):
             // The default preview is a snapshot of the dragged row that fills the target's bounds, so
             // for the whole drop animation the dragged feed's name would sit over the target's title.
             // Shrinking it into the row's center keeps the title readable.
+            collectionView.layoutIfNeeded()
             if let indexPath = dataSource.indexPath(for: item),
                let center = collectionView.layoutAttributesForItem(at: indexPath)?.center {
                 let target = UIDragPreviewTarget(
@@ -153,11 +159,22 @@ extension SidebarCollectionViewController: UICollectionViewDragDelegate, UIColle
                 coordinator.drop(dragItem, to: target)
             }
         case .gap:
-            if let destination = coordinator.destinationIndexPath {
+            let moved = dataSource.indexPath(for: droppedItem(action) ?? context.item) ?? coordinator.destinationIndexPath
+            if let destination = moved {
                 coordinator.drop(dragItem, toItemAt: destination)
             }
         }
         actions.applyDrop(action)
+    }
+
+    /// The row a drop's action moves — the feed itself even when the drag started from its copy under
+    /// a tag.
+    private func droppedItem(_ action: FeedListDropAction) -> SidebarItemID? {
+        switch onEnum(of: action) {
+        case .moveFeed(let move): return .feed(move.feedId)
+        case .reorderFolder(let reorder): return .folder(reorder.draggedFolderId)
+        case .attachTag: return nil
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, dropSessionDidExit session: UIDropSession) {

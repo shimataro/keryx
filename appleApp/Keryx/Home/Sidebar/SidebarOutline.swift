@@ -48,6 +48,10 @@ struct SidebarOutline: Equatable, Sendable {
 
     let sections: [Section]
 
+    init(sections: [Section]) {
+        self.sections = sections
+    }
+
     /// - Parameters:
     ///   - foldersExpanded: Whether the Folders section header is expanded (`FeedListView`'s own
     ///     `@AppStorage` flag), as opposed to the per-folder state in `collapsedFolderIds`.
