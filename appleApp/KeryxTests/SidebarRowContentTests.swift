@@ -9,6 +9,7 @@ struct SidebarRowContentTests {
     private func contents(
         feeds: [Feeds] = F.feeds,
         unreadByFeed: [String: Int64] = [:],
+        selectionDisplayed: Bool = true,
         selectedRow: FeedListRowSelection = FeedListRowSelectionAll(),
         filter: ArticleFilter = ArticleFilterAll(),
         renamingRowKey: String? = nil
@@ -21,6 +22,7 @@ struct SidebarRowContentTests {
             unreadByTag: ["t1": 3],
             totalUnread: 10,
             starredUnreadCount: 2,
+            selectionDisplayed: selectionDisplayed,
             selectedRow: selectedRow,
             filter: filter,
             renamingRowKey: renamingRowKey
@@ -74,6 +76,16 @@ struct SidebarRowContentTests {
         #expect(all[.feedInTag(feedId: "a", tagId: "t1")]?.highlight == .echo)
         #expect(all[.feed("b")]?.highlight == SidebarRowHighlight.none)
         #expect(all[.folder("d1")]?.highlight == SidebarRowHighlight.none)
+    }
+
+    @Test
+    func nothingEchoesWhileTheSelectionIsNotDisplayed() {
+        let all = contents(
+            selectionDisplayed: false,
+            selectedRow: FeedListRowSelectionFeedInFolderGroup(feedId: "a"),
+            filter: ArticleFilterFeed(feedId: "a")
+        )
+        #expect(all.values.allSatisfy { $0.highlight == SidebarRowHighlight.none })
     }
 
     @Test

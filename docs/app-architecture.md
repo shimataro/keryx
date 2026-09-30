@@ -1308,7 +1308,8 @@ view on iOS.
   a compact width and sidebar-styled at a regular one. The background configuration paints the native
   selection, the echo of the selected filter's other copies (`SidebarRowHighlight.echoAlpha`) and, while
   dragging, the drop target; the hosted content takes the text color a system cell would use in that
-  state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did.
+  state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did; while the
+  collapsed sidebar shows no selection (it is the topmost column on an iPhone), it shows no echo either.
 - **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
   (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
   macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and

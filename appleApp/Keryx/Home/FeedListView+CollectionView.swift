@@ -25,6 +25,7 @@ extension FeedListView {
                 unreadByTag: home.unreadByTag,
                 totalUnread: home.totalUnread,
                 starredUnreadCount: home.starredUnreadCount,
+                selectionDisplayed: displayedKey != nil,
                 selectedRow: home.selectedRowInstance,
                 filter: home.filter,
                 renamingRowKey: dialogs.renamingRowKey

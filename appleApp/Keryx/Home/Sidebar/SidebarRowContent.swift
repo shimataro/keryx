@@ -29,6 +29,9 @@ struct SidebarRowContent: Equatable, Sendable {
     /// The contents of every item in `outline`, hidden ones included.
     ///
     /// - Parameters:
+    ///   - selectionDisplayed: Whether the list shows the selection at all — not while the collapsed
+    ///     sidebar is the topmost column (`CompactSidebarSelection.displayedKey`). Without a selected
+    ///     row on screen, echoing its other copies would single out a row nobody picked.
     ///   - selectedRow: The shared selection, for the echo highlight.
     ///   - filter: The article list's current filter, for the echo highlight.
     ///   - renamingRowKey: `SidebarDialogState.renamingRowKey`.
@@ -40,6 +43,7 @@ struct SidebarRowContent: Equatable, Sendable {
         unreadByTag: [String: Int64],
         totalUnread: Int64,
         starredUnreadCount: Int64,
+        selectionDisplayed: Bool,
         selectedRow: FeedListRowSelection,
         filter: ArticleFilter,
         renamingRowKey: String?
@@ -56,7 +60,9 @@ struct SidebarRowContent: Equatable, Sendable {
                 unreadCount: unread,
                 isErroring: (feed?.error_count ?? 0) > 0 || isGone,
                 isGone: isGone,
-                highlight: item.rowSelection.map { highlight(for: $0, selectedRow: selectedRow, filter: filter) } ?? .none,
+                highlight: selectionDisplayed
+                    ? item.rowSelection.map { highlight(for: $0, selectedRow: selectedRow, filter: filter) } ?? .none
+                    : .none,
                 isRenaming: renamingRowKey != nil && item.selectionKey == renamingRowKey
             )
         }

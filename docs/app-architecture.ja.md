@@ -1299,6 +1299,7 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   なる。背景の設定で、標準の選択、選択中のフィルターの別のコピーに付けるエコー（`SidebarRowHighlight.echoAlpha`）、
   ドラッグ中のドロップ先を描き、載せた内容はその状態でシステムのセルが使う文字色に合わせる。タップは `List` の
   ときと同じ `CompactSidebarSelection` のルールで処理する。
+  畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
   （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
   同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。行の選択は、
