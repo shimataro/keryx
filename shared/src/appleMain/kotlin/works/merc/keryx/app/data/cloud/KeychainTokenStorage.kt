@@ -56,7 +56,9 @@ import works.merc.keryx.app.core.Log
  * @param useDataProtectionKeychain When true, every query also sets `kSecUseDataProtectionKeychain`
  *   — a store the Compose desktop build's `security`-CLI-based storage cannot reach at all, unlike
  *   plain login-Keychain items which share one flat namespace by service+account alone. The
- *   shipping app always passes true (see `KeryxSdk.start`'s own parameter); it needs the
+ *   shipping app always passes true (see `KeryxSdk.start`'s own parameter) — it must, because the
+ *   Compose build uses the same service and account, so false in a shipping build would share its
+ *   items and let either app's disconnect revoke the other's refresh token. It needs the
  *   `keychain-access-groups` entitlement and a real (not ad-hoc) code signature, so tests and
  *   previews pass false and use the ordinary login Keychain instead — see
  *   "Distribution and coexistence" in `docs/app-architecture.md`.

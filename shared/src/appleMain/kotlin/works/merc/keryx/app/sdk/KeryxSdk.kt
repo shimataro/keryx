@@ -274,7 +274,10 @@ class KeryxSdk private constructor(private val koin: Koin) {
          *   rather than the ordinary login Keychain — see `data/cloud/KeychainTokenStorage.kt`'s own
          *   doc for why. The shipping app passes `true`; it needs the `keychain-access-groups`
          *   entitlement and a real code signature, so this defaults to `false` for tests/previews
-         *   that build with an ad-hoc or no signature at all.
+         *   that build with an ad-hoc or no signature at all. Never leave it `false` in a shipping
+         *   build: the service and account match the Compose desktop build's, so the Data Protection
+         *   Keychain is the only thing keeping the two apps off each other's items (one's
+         *   disconnect would revoke the other's refresh token).
          * @throws works.merc.keryx.app.data.local.DatabaseTooNewException if a newer build migrated
          *   the database.
          */

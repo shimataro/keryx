@@ -487,20 +487,18 @@ opens a browser directly:
 
 **Per-provider separate `TokenStorage` instances** are constructed in DI (`platformModule`) (do not share a single instance across providers; `SecurityCliTokenStorage`/`KeystoreTokenStorage` cache results per instance, so sharing would break). Keychain account name and fallback file name are derived from `CloudStorageType.id` (`"dropbox"`, `"google_drive"`, `"onedrive"`).
 
-- Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`, service `KEYCHAIN_SERVICE` = `works.merc.keryx`).
-- macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead. Its own service is `KEYCHAIN_SERVICE_MACOS` = `works.merc.keryx.compose`
-  (`data/cloud/KeychainCoordinates.kt`), not the shared `KEYCHAIN_SERVICE` above — see the native
-  Apple app bullet below for why. `load()` migrates an existing item from `KEYCHAIN_SERVICE`
-  the first time it doesn't find one under the new name: it copies the item over (verified the same
-  way a fresh `save()` is), then removes the old one only once that copy is confirmed — see
-  `SecurityCliTokenStorage`'s own doc for the exact sequence and its `clear()`'s best-effort cleanup
-  of a leftover legacy item.
+`KEYCHAIN_SERVICE` (`works.merc.keryx`, `data/cloud/KeychainCoordinates.kt`) is shared by every desktop OS.
+
+- Windows/Linux: OS secure storage (java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`).
+- macOS: Delegated to Apple-signed `/usr/bin/security` CLI (`SecurityCliTokenStorage`). java-keyring fails to write to Keychain from a shared JVM, so macOS uses `security` instead. Its items live in the ordinary login Keychain — the native Apple app below uses the same service name, but a different store.
 - Native Apple app (macOS/iOS, `:shared`'s appleMain): `KeychainTokenStorage` writes the Keychain
   directly through the Security framework, service `works.merc.keryx`, same per-provider account for
   every provider — but into the **Data Protection Keychain**
   (`kSecUseDataProtectionKeychain`, gated on the shipping app's `keychain-access-groups`
   entitlement) rather than the ordinary login Keychain `security` reads and writes, so it is a
-  separate store the Compose build cannot reach at all regardless of service name. There is no
+  separate store the Compose build cannot reach at all even though the service and account match.
+  That separation depends entirely on `KeryxSdk.start`'s `useDataProtectionKeychain = true`; its
+  default `false` (for tests) would share the Compose build's login-Keychain items. There is no
   plaintext fallback (a failed write is `NOT_PERSISTED`). No migration from the Compose build's own
   items is attempted — the native app always starts by reconnecting, and synced data comes back
   from the cloud. Google Drive is not offered there until an Apple-type OAuth client (no client

@@ -1134,14 +1134,17 @@ around.
   Compose build owns `keryx://`.
 - **The two apps never write to the same Keychain item.** Sharing one would let either app's
   disconnect (which also revokes the provider's refresh token) silently break the other's sync, and
-  the Compose build predates the SwiftUI app owning this bundle ID at all. The Compose desktop
-  build's own service name is `works.merc.keryx.compose` (`data/cloud/KeychainCoordinates.kt`),
-  migrated from the shared `works.merc.keryx` name it used before this split
-  (`SecurityCliTokenStorage`'s own doc covers the migration). The SwiftUI app keeps
-  `works.merc.keryx` as its service, but stores every item in the **Data Protection Keychain**
+  the Compose build predates the SwiftUI app owning this bundle ID at all. Both use the same
+  service name, `works.merc.keryx` (`KEYCHAIN_SERVICE` in `data/cloud/KeychainCoordinates.kt` on
+  the Compose side), and the same per-provider account — what keeps them apart is the store, not
+  the name: the SwiftUI app stores every item in the **Data Protection Keychain**
   (`kSecUseDataProtectionKeychain`, gated on the `keychain-access-groups` entitlement) rather than
-  the ordinary login Keychain the `security` CLI reads and writes — a separate store the Compose
-  build cannot reach at all, not just a different service name inside the same one. See
+  the ordinary login Keychain the Compose build's `security` CLI reads and writes, a separate store
+  the Compose build cannot reach at all. That separation therefore rests entirely on the SwiftUI app
+  passing `useDataProtectionKeychain = true` to `KeryxSdk.start`: with `false` (the parameter's
+  default, meant for tests) it would land in the login Keychain on exactly the Compose build's
+  items. The Compose build's own service name is deliberately left unchanged, so its existing
+  users' tokens need no migration. See
   "Token Storage" in [sync-architecture.md](sync-architecture.md) and
   `data/cloud/KeychainTokenStorage.kt`'s own doc.
 
@@ -1183,8 +1186,8 @@ sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
 trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
 (3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
 (`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `type.id` — the same
-account every provider uses, since the Data Protection Keychain this app stores in already keeps it
-apart from the Compose build's own service; see "Distribution and coexistence" — readable after
+service and account the Compose build uses, since the Data Protection Keychain this app stores in
+already keeps it apart from the Compose build's login-Keychain items; see "Distribution and coexistence" — readable after
 first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
 ("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
 — gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/

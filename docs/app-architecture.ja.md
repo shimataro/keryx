@@ -1141,13 +1141,15 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   駆動する（下記「`:shared` の Apple ターゲット」参照）。`keryx://` を所有するのは Compose ビルドのみ。
 - **どちらのアプリも、同じ Keychain 項目には書き込まない。** 共有すると、一方のアプリが切断した際
   （プロバイダーのリフレッシュトークンも失効させる）に、もう一方の同期が黙って壊れてしまう。しかも
-  Compose 版は、SwiftUI 版がこの Bundle ID を持つより前から存在している。Compose デスクトップ版自身の
-  サービス名は `works.merc.keryx.compose`（`data/cloud/KeychainCoordinates.kt`）で、この分離より前に
-  使っていた共通の `works.merc.keryx` から移行する（移行の詳細は `SecurityCliTokenStorage` 自身の doc
-  を参照）。SwiftUI 版はサービス名として `works.merc.keryx` を保ち続けるが、`security` CLI が読み書き
-  する通常のログイン Keychain ではなく、**Data Protection Keychain**（`kSecUseDataProtectionKeychain`。
-  `keychain-access-groups` エンタイトルメントが前提）にすべての項目を保存する——同じ入れ物の中で
-  サービス名を分けるだけでなく、Compose 版がまったく到達できない別の入れ物そのものになる。詳細は
+  Compose 版は、SwiftUI 版がこの Bundle ID を持つより前から存在している。両アプリともサービス名は
+  `works.merc.keryx`（Compose 側は `data/cloud/KeychainCoordinates.kt` の `KEYCHAIN_SERVICE`）、
+  アカウントもプロバイダーごとに同じで、両者を分けているのは名前ではなく入れ物である：SwiftUI 版は
+  Compose 版の `security` CLI が読み書きする通常のログイン Keychain ではなく、**Data Protection Keychain**
+  （`kSecUseDataProtectionKeychain`。`keychain-access-groups` エンタイトルメントが前提）にすべての項目を
+  保存し、これは Compose 版がまったく到達できない別の入れ物になる。したがってこの分離は、SwiftUI 版が
+  `KeryxSdk.start` に `useDataProtectionKeychain = true` を渡すことだけに依存している——テスト向けの
+  既定値 `false` のままだと、ログイン Keychain 上の Compose 版の項目そのものに書き込んでしまう。
+  Compose 版のサービス名は意図的に変えておらず、既存ユーザーのトークンに移行は不要。詳細は
   sync-architecture.ja.md の「トークン保存先」と `data/cloud/KeychainTokenStorage.kt` 自身の doc を
   参照。
 
@@ -1180,8 +1182,8 @@ Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そして
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
 確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
-`type.id`——保存先が Data Protection Keychain である時点で Compose 版自身のサービスとはすでに分かれて
-いるので、どのプロバイダーも同じアカウント名でよい。「配布と共存」参照——、初回ロック解除後に読み取り
+`type.id`——Compose 版と同じサービス・アカウントだが、保存先が Data Protection Keychain である時点で
+Compose 版のログイン Keychain 上の項目とはすでに分かれている。「配布と共存」参照——、初回ロック解除後に読み取り
 可能。平文へのフォールバックはない）。Google Drive は、
 `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
 設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の

@@ -11,8 +11,6 @@ import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.FileTokenStorage
 import works.merc.keryx.app.data.cloud.GoogleDriveAuthManager
 import works.merc.keryx.app.data.cloud.GoogleDriveStorage
-import works.merc.keryx.app.data.cloud.KEYCHAIN_SERVICE
-import works.merc.keryx.app.data.cloud.KEYCHAIN_SERVICE_MACOS
 import works.merc.keryx.app.data.cloud.KeyringTokenStorage
 import works.merc.keryx.app.data.cloud.LibSecretTokenStorage
 import works.merc.keryx.app.data.cloud.SecurityCliTokenStorage
@@ -34,10 +32,7 @@ import works.merc.keryx.app.resources.oauth_loopback_success
  * Dropbox's values (`dropbox`) match the pre-multi-provider hardcoded ones, so no
  * migration is needed for existing users' stored tokens. macOS Keychain writes
  * fail from the shared JVM via java-keyring, so delegate to the Apple-signed
- * `security` CLI there — passing [KEYCHAIN_SERVICE_MACOS] as its own service, with
- * [KEYCHAIN_SERVICE] as the legacy one to migrate an existing item away from (see
- * [KEYCHAIN_SERVICE_MACOS]'s own doc for why: the SwiftUI app now owns the shared
- * name). Windows/Linux normally keep the java-keyring backend, but
+ * `security` CLI there; Windows/Linux normally keep the java-keyring backend, but
  * inside the snap [LibSecretTokenStorage] is used instead — `password-manager-service`
  * is not auto-connected by snapd policy (and Snapcraft reviewers decline that
  * request for this interface on principle, see `docs/build.md`), so java-keyring's
@@ -62,14 +57,7 @@ import works.merc.keryx.app.resources.oauth_loopback_success
 internal fun providerTokenStorage(type: CloudStorageType, macOs: Boolean, snap: Boolean): TokenStorage {
     val fallback = FileTokenStorage(fileName = ".${type.id}_tokens.json")
     return when {
-        // service/legacyService: see KEYCHAIN_SERVICE_MACOS's own doc for why this build's macOS
-        // Keychain items moved to their own service name, migrated from the old shared one.
-        macOs -> SecurityCliTokenStorage(
-            fallback = fallback,
-            account = type.id,
-            service = KEYCHAIN_SERVICE_MACOS,
-            legacyService = KEYCHAIN_SERVICE,
-        )
+        macOs -> SecurityCliTokenStorage(fallback = fallback, account = type.id)
         snap -> LibSecretTokenStorage(fallback = fallback, account = type.id)
         else -> KeyringTokenStorage(fallback = fallback, account = type.id)
     }
