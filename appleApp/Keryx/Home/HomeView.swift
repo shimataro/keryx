@@ -108,6 +108,11 @@ struct HomeView: View {
         .task {
             await applyInitialFocus()
         }
+        #if os(iOS)
+        // Mounted on every layout (the detail column is not, at a compact width until an article is
+        // opened), so WebKit can start while the app is idle rather than on the first article.
+        .task { await ReaderWebViewWarmUp.scheduleOnce() }
+        #endif
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
         .environment(\.contextMenuSelectionTracker, contextMenuSelectionTracker)

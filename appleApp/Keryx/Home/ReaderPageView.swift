@@ -6,11 +6,12 @@ import AppKit
 import UIKit
 #endif
 
-/// One reader page: an `ArticleWebView` showing `row`, or a blank themed document while `row` is
-/// `nil` (nothing selected, or a pager page whose body is still loading). Used once by the macOS
-/// reader and once per page by the iOS swipe pager (`ArticlePagerView`).
+/// One reader page: an `ArticleWebView` showing `row`, or — while `row` is `nil` — a blank themed
+/// document on macOS (nothing selected) and just the reader's background on iOS (a pager page whose
+/// body is still loading). Used once by the macOS reader and once per page by the iOS swipe pager
+/// (`ArticlePagerView`).
 struct ReaderPageView: View {
-    /// The article to render, or `nil` for the blank document.
+    /// The article to render, or `nil` for the blank state.
     let row: ArticleReaderRow?
     /// Identifies the instance `row` came from, so the document is rebuilt only when a new one is
     /// actually published — see `rebuildDocument()`.
@@ -26,8 +27,16 @@ struct ReaderPageView: View {
     /// (`ArticleDetailPane.kt`).
     @State private var document = ReaderDocument.empty
 
+    /// How long a rebuild waits for its key to settle before starting, so stepping quickly through
+    /// articles (J/K held down, rapid clicks) builds only the article it stops on.
+    private static let rebuildDebounce: Duration = .milliseconds(75)
+
     var body: some View {
         ArticleWebView(html: document.html, outboundLinks: document.outboundLinks)
+            #if os(iOS)
+            // Shows through the WebView until its first document paints (see `ArticleWebView`).
+            .background(.background)
+            #endif
             .task(id: documentKey) {
                 await rebuildDocument()
             }
@@ -47,17 +56,35 @@ struct ReaderPageView: View {
     /// The inputs are flattened to plain values here, on the main actor, and the document itself is
     /// built by `ReaderDocument.build` off it. Until that finishes the previous document stays on
     /// screen; a rebuild superseded by a newer key is cancelled by `.task(id:)` and discarded.
+    ///
+    /// The document is shown as soon as its HTML is ready; its outbound links are extracted
+    /// afterwards (unless the previous document already had the same body's), with `ArticleWebView`
+    /// holding any click made in between.
     private func rebuildDocument() async {
+        #if os(iOS)
+        // A pager page whose body is still loading shows only the reader's background rather than
+        // loading a blank document first: the WebView then loads once, when the body arrives. (Each
+        // iOS page is one article, so there is never a previous article's media to stop.)
+        if row == nil { return }
+        #endif
+        // The first document a page shows is built at once; only replacing one waits to settle.
+        if !document.html.isEmpty {
+            do { try await Task.sleep(for: Self.rebuildDebounce) } catch { return }
+        }
         let inputs = readerDocumentInputs()
-        let built = await ReaderDocument.build(inputs)
+        let built = await ReaderDocument.build(inputs, reusingLinksOf: document)
         guard !Task.isCancelled else { return }
         document = built
+        guard built.outboundLinks == nil, let source = built.linkSource else { return }
+        let links = await ReaderDocument.extractOutboundLinks(source)
+        guard !Task.isCancelled else { return }
+        document = built.withOutboundLinks(links)
     }
 
     private func readerDocumentInputs() -> ReaderDocumentInputs {
         let theme = themeColors(colorScheme: colorScheme, fontScale: Float(preferences.fontSizeScale))
         // A blank themed document rather than none, so a previous article's embedded media stops
-        // playing and a still-loading pager page shows the reader's own background.
+        // playing.
         guard let row else {
             return ReaderDocumentInputs(theme: theme, content: .placeholder)
         }
@@ -74,11 +101,10 @@ struct ReaderPageView: View {
             urlIsOutbound: ArticleListModelKt.isHttpOrHttpsUrl(url: row.url),
             openInBrowserTooltip: L("article_open_in_browser")
         )
-        let body = row.readerBody()
-        if let body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return ReaderDocumentInputs(theme: theme, content: .article(header, body: body))
-        }
-        return ReaderDocumentInputs(theme: theme, content: .noContent(header, message: L("article_no_content"), blankBody: body))
+        return ReaderDocumentInputs(
+            theme: theme,
+            content: .article(header, row: row, noContentMessage: L("article_no_content"))
+        )
     }
 
     /// Resolves the reader's colors under `colorScheme` explicitly — via

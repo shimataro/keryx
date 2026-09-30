@@ -149,7 +149,11 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
     //    known-issues.md. The limit to chrome is itself deliberate: the content-facing rules (a,
     //    img/video/iframe, table, td/th) stay plain defaults that a feed author's own style
     //    attribute is meant to be able to override, exactly as it can today.
-    return """
+    //
+    // trimIndent() is applied to the template alone and [content] is appended afterwards: run over
+    // the interpolated whole, it would also strip a body whose every line happens to be indented at
+    // least as deeply as the template, changing whitespace that is content inside a <pre>.
+    val shell = """
         <!doctype html>
         <html>
         <head>
@@ -203,10 +207,8 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
         </style>
         </head>
         $bodyTag
-        $content
-        </body>
-        </html>
     """.trimIndent()
+    return "$shell\n$content\n</body>\n</html>"
 }
 
 /**

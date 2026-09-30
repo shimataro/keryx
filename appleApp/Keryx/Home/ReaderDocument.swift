@@ -12,7 +12,9 @@ struct ReaderThemeColors: Sendable {
     let fontScale: Float
 }
 
-/// Everything `ReaderDocument.build` needs, already localized and flattened to Swift values.
+/// Everything `ReaderDocument.build` needs, already localized and flattened to Swift values — except
+/// the article row itself, whose body is picked and bridged to Swift inside `build`, off the main
+/// actor (a whole article body is the one large string here).
 struct ReaderDocumentInputs: Sendable {
     struct Header: Sendable {
         let title: String
@@ -26,15 +28,19 @@ struct ReaderDocumentInputs: Sendable {
     enum Content: Sendable {
         /// No article selected.
         case placeholder
-        case article(Header, body: String)
-        /// The feed supplied neither `content` nor `summary` (or only whitespace — then carried as
-        /// `blankBody`, whose links still count, as they always have).
-        case noContent(Header, message: String, blankBody: String?)
+        /// An article; `build` renders `noContentMessage` in place of the body when the feed
+        /// supplied neither `content` nor `summary` (or only whitespace — whose links still count,
+        /// as they always have).
+        case article(Header, row: ArticleReaderRow, noContentMessage: String)
     }
 
     let theme: ReaderThemeColors
     let content: Content
 }
+
+/// `ArticleReaderRow` is an immutable Kotlin data class (every property a `val` of an immutable
+/// type), so handing one to `ReaderDocument.build` off the main actor cannot race.
+extension ArticleReaderRow: @retroactive @unchecked Sendable {}
 
 /// What `ArticleDetailView.rebuildDocument` keys its rebuild on.
 struct ReaderDocumentKey: Hashable {
@@ -43,19 +49,41 @@ struct ReaderDocumentKey: Hashable {
     let fontSizeScale: Double
 }
 
+/// What a document's outbound-link set is extracted from: the article body, resolved against the
+/// article's own URL, plus that URL itself when it counts as an outbound link.
+struct ReaderLinkSource: Sendable, Equatable {
+    let body: String
+    let baseUri: String
+    let includesBaseUri: Bool
+}
+
 /// A reader document ready to load, plus the links in it that count as genuine outbound clicks.
+///
+/// Built in two steps so the document reaches the WebView without waiting for its body to be parsed
+/// for links: `build` renders the HTML (leaving `outboundLinks` `nil` when a body still needs
+/// parsing), and `extractOutboundLinks` supplies the set afterwards. `ArticleWebView` holds any
+/// navigation made in between — see `ReaderNavigationGate`.
 struct ReaderDocument: Sendable {
     let html: String
-    let outboundLinks: Set<String>
+    /// `nil` until `extractOutboundLinks` has run over `linkSource`.
+    let outboundLinks: Set<String>?
+    /// What `outboundLinks` is extracted from; `nil` for a document with no body to parse.
+    let linkSource: ReaderLinkSource?
 
     /// Held only until the first build lands (a few milliseconds after the reader appears);
     /// `ArticleWebView` loads nothing for it.
-    static let empty = ReaderDocument(html: "", outboundLinks: [])
+    static let empty = ReaderDocument(html: "", outboundLinks: [], linkSource: nil)
 
-    /// Builds the document off the main actor: wrapping a whole article body and parsing it with
-    /// ksoup for its links is the expensive part of switching articles.
+    /// This document with its link set filled in.
+    func withOutboundLinks(_ links: Set<String>) -> ReaderDocument {
+        ReaderDocument(html: html, outboundLinks: links, linkSource: linkSource)
+    }
+
+    /// Renders the document off the main actor — wrapping a whole article body is expensive — but
+    /// leaves the body's links unparsed unless `previous` already parsed the very same body: a star
+    /// or read toggle publishes a new instance of the same article, which must not re-run ksoup.
     @concurrent
-    static func build(_ inputs: ReaderDocumentInputs) async -> ReaderDocument {
+    static func build(_ inputs: ReaderDocumentInputs, reusingLinksOf previous: ReaderDocument) async -> ReaderDocument {
         let colors = inputs.theme
         let theme = ArticleHtmlTheme(
             surface: colors.surface,
@@ -68,35 +96,50 @@ struct ReaderDocument: Sendable {
         case .placeholder:
             return ReaderDocument(
                 html: ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: ""),
-                outboundLinks: []
+                outboundLinks: [],
+                linkSource: nil
             )
-        case let .article(header, body):
-            let html = ArticleWebViewHtmlKt.wrapArticleHtml(
-                theme: theme,
-                title: header.title,
-                meta: header.meta,
-                body: body,
-                baseUrl: header.url,
-                titleUrl: header.url,
-                titleTooltip: header.openInBrowserTooltip
-            )
-            return ReaderDocument(html: html, outboundLinks: outboundLinks(body: body, header: header))
-        case let .noContent(header, message, blankBody):
+        case let .article(header, row, noContentMessage):
+            let body = row.readerBody()
+            if let body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let html = ArticleWebViewHtmlKt.wrapArticleHtml(
+                    theme: theme,
+                    title: header.title,
+                    meta: header.meta,
+                    body: body,
+                    baseUrl: header.url,
+                    titleUrl: header.url,
+                    titleTooltip: header.openInBrowserTooltip
+                )
+                let source = ReaderLinkSource(body: body, baseUri: header.url, includesBaseUri: header.urlIsOutbound)
+                let reused = previous.linkSource == source ? previous.outboundLinks : nil
+                return ReaderDocument(html: html, outboundLinks: reused, linkSource: source)
+            }
             let html = ArticleWebViewHtmlKt.articleNoContentHtml(
                 theme: theme,
                 title: header.title,
                 meta: header.meta,
-                message: message,
+                message: noContentMessage,
                 titleUrl: header.url,
                 titleTooltip: header.openInBrowserTooltip
             )
-            return ReaderDocument(html: html, outboundLinks: blankBody.map { outboundLinks(body: $0, header: header) } ?? [])
+            // A blank body has nothing worth deferring: parsing whitespace is instant.
+            let links = body.map {
+                outboundLinks(ReaderLinkSource(body: $0, baseUri: header.url, includesBaseUri: header.urlIsOutbound))
+            } ?? []
+            return ReaderDocument(html: html, outboundLinks: links, linkSource: nil)
         }
     }
 
-    private static func outboundLinks(body: String, header: ReaderDocumentInputs.Header) -> Set<String> {
-        var links = ArticleWebViewHtmlKt.extractLinks(html: body, baseUri: header.url)
-        if header.urlIsOutbound { links.insert(header.url) }
+    /// Parses `source`'s body with ksoup for its links, off the main actor.
+    @concurrent
+    static func extractOutboundLinks(_ source: ReaderLinkSource) async -> Set<String> {
+        outboundLinks(source)
+    }
+
+    private static func outboundLinks(_ source: ReaderLinkSource) -> Set<String> {
+        var links = ArticleWebViewHtmlKt.extractLinks(html: source.body, baseUri: source.baseUri)
+        if source.includesBaseUri { links.insert(source.baseUri) }
         return links
     }
 }

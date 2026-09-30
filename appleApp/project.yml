@@ -115,6 +115,7 @@ targets:
     sources:
       - path: KeryxTests
       - path: Keryx/Home/ArticleNavigationPolicy.swift
+      - path: Keryx/Home/ReaderNavigationGate.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/CompactSidebarSelection.swift
       - path: Keryx/Home/PullToRefreshAvailability.swift
