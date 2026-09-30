@@ -80,28 +80,38 @@ struct NotificationBell: View {
 
     @ViewBuilder
     private var popoverContent: some View {
+        let isEmpty = notifications.items.isEmpty
         VStack(alignment: .leading, spacing: 0) {
+            // Icon-only, like Compose's own clear-all button; disabled (not hidden) when empty so the
+            // header doesn't change shape as notifications come and go.
             HStack {
-                Text(L("notification_detail_title")).font(.headline)
                 Spacer()
-                if !notifications.items.isEmpty {
-                    Button(L("notification_dismiss_all")) { notifications.dismissAll() }
-                        .font(.caption)
+                Button {
+                    notifications.dismissAll()
+                } label: {
+                    Image(systemName: "trash")
                 }
+                .buttonStyle(.plain)
+                .disabled(isEmpty)
+                .help(L("notification_dismiss_all"))
+                .accessibilityLabel(L("notification_dismiss_all"))
             }
-            .padding()
+            .padding([.horizontal, .top])
+            .padding(.bottom, 8)
 
-            if notifications.items.isEmpty {
+            if isEmpty {
                 Text(L("notification_empty"))
                     .foregroundStyle(.secondary)
-                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
             } else {
                 List(notifications.items, id: \.id) { notification in
                     row(notification)
                 }
             }
         }
-        .frame(minWidth: 320, minHeight: 200)
+        .frame(minWidth: 320, minHeight: isEmpty ? nil : 200)
+        .accessibilityLabel(L("home_notifications"))
     }
 
     @ViewBuilder
