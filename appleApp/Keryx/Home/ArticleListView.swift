@@ -30,14 +30,23 @@ struct ArticleListView: View {
     private var windowIsKey: Bool { true }
     #endif
 
-    /// Which rows are on screen, and the pending report of them — see `VisibleRowTracker`.
-    @State private var visibleRows = VisibleRowTracker()
     /// Whether the new-articles pill is actually shown, debounced against `home.newArticleCount`
     /// itself — see `pillShowDelayTask`'s own KDoc for why.
     @State private var pillShown = false
 
+    #if os(macOS)
+    /// Handed to every hosted row explicitly — see `ArticleTableView.contextMenuSelectionTracker`.
+    @Environment(\.contextMenuSelectionTracker) private var contextMenuSelectionTracker
+    /// Bumped on every filter switch — see `ArticleTableView.resetGeneration`.
+    @State private var tableResetGeneration = 0
+    /// The new-articles pill's pending jump — see `ArticleTableScrollRequest`.
+    @State private var tableScrollRequest = ArticleTableScrollRequest()
+    #else
+    /// Which rows are on screen, and the pending report of them — see `VisibleRowTracker`.
+    @State private var visibleRows = VisibleRowTracker()
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
+    #endif
 
     /// The rows on screen: the search results while a search is active, else the filter's own list.
     /// Both are resolved once per emission by `HomeObservable` (see `ArticleRowModel`).
@@ -59,8 +68,21 @@ struct ArticleListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            #if os(macOS)
+            // `ArticleTableView` does its own scrolling: back to the top on a filter switch, to an
+            // off-screen selection, and to the fresh end for the pill.
+            withNewArticlesPill(content) {
+                tableScrollRequest = ArticleTableScrollRequest(
+                    generation: tableScrollRequest.generation + 1,
+                    newestFirst: home.newestFirst
+                )
+            }
+            .onChange(of: filterKey, initial: false) { _, _ in
+                tableResetGeneration += 1
+            }
+            #else
             ScrollViewReader { proxy in
-                content
+                withNewArticlesPill(content) { scrollToFreshEnd(proxy) }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
                     // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
                     // vs. `NewArticlesPill`'s own "fresh end"). `initial: false` keeps the first
@@ -75,14 +97,6 @@ struct ArticleListView: View {
                         guard let id, !visibleRows.appearedIds.contains(id) else { return }
                         proxy.scrollTo(id)
                     }
-                    .overlay(alignment: home.newestFirst ? .top : .bottom) {
-                        if pillShown {
-                            newArticlesPill(proxy: proxy)
-                        }
-                    }
-                    .task(id: home.newArticleCount) {
-                        await updatePillShown()
-                    }
                     .onChange(of: displayedRows.isEmpty) { _, isEmpty in
                         // The article restored from the previous session is already selected before
                         // any row exists, so the selection-change scroll above never sees it; bring it
@@ -96,9 +110,23 @@ struct ArticleListView: View {
                         }
                     }
             }
+            #endif
         }
         .focused(focusedPane, equals: .articleList)
         .toolbar { toolbarContent }
+    }
+
+    /// Overlays the new-articles pill on `list`; tapping it clears the count and runs `jump`.
+    private func withNewArticlesPill(_ list: some View, jump: @escaping () -> Void) -> some View {
+        list
+            .overlay(alignment: home.newestFirst ? .top : .bottom) {
+                if pillShown {
+                    newArticlesPill(jump: jump)
+                }
+            }
+            .task(id: home.newArticleCount) {
+                await updatePillShown()
+            }
     }
 
     /// The pill's count going from `0` to positive is deliberately not shown immediately — the
@@ -254,39 +282,70 @@ struct ArticleListView: View {
         return false
     }
 
-    private var articleList: some View {
-        let selectedId = CompactArticleSelection.displayedId(
-            selectedId: home.selectedArticle?.id, articleListIsTopmost: articleListIsTopmost
+    /// The selected row as the list draws it — see `CompactArticleSelection`.
+    private var displayedSelectedId: String? {
+        CompactArticleSelection.displayedId(selectedId: home.selectedArticle?.id, articleListIsTopmost: articleListIsTopmost)
+    }
+
+    private func rowView(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> ArticleRowView {
+        ArticleRowView(
+            model: article,
+            isSelected: article.id == selectedId,
+            isReturnFlashing: article.id == returnFlashId,
+            paneFocused: paneFocused,
+            viewModel: home.viewModel,
+            onSelect: {
+                focusedPane.wrappedValue = .articleList
+                home.viewModel.selectArticle(article: article.row)
+                onOpenArticle()
+            },
+            onContextMenuSelect: { selectForContextMenu(article.row) }
         )
+    }
+
+    #if os(macOS)
+    private var articleList: some View {
+        let selectedId = displayedSelectedId
+        let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
+        return ArticleTableView(
+            rows: displayed,
+            selectedId: selectedId,
+            resetGeneration: tableResetGeneration,
+            scrollRequest: tableScrollRequest,
+            contextMenuSelectionTracker: contextMenuSelectionTracker,
+            makeRow: { rowView($0, selectedId: selectedId, paneFocused: paneFocused) },
+            onBackgroundClick: { focusedPane.wrappedValue = .articleList },
+            onVisibleIdsChanged: { reportVisible($0) }
+        )
+        // Rows scroll under the toolbar, as they did in the `List`; the table insets its content by
+        // the toolbar's height itself.
+        .ignoresSafeArea(edges: .top)
+        .modifier(SoftTopScrollEdge())
+        // The table never takes the first responder, so the pane is made focusable here instead —
+        // `.focused(focusedPane, equals: .articleList)` in `body` still lands on it.
+        .focusable()
+        .focusEffectDisabled()
+    }
+    #else
+    private var articleList: some View {
+        let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
         return List(displayedRows) { article in
-            ArticleRowView(
-                model: article,
-                isSelected: article.id == selectedId,
-                isReturnFlashing: article.id == returnFlashId,
-                paneFocused: paneFocused,
-                viewModel: home.viewModel,
-                onSelect: {
-                    focusedPane.wrappedValue = .articleList
-                    home.viewModel.selectArticle(article: article.row)
-                    onOpenArticle()
-                },
-                onContextMenuSelect: { selectForContextMenu(article.row) }
-            )
-            .equatable()
-            // No horizontal inset of our own: the macOS List already pads each row's content by
-            // 8pt on either side, which alone matches Compose's `listRowHorizontalMargin()`
-            // (8dp). Adding 8 here on top of it doubled the card's gap from the pane edge.
-            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-            .listRowSeparator(.hidden)
-            .onAppear {
-                visibleRows.appearedIds.insert(article.id)
-                scheduleReportVisible()
-            }
-            .onDisappear {
-                visibleRows.appearedIds.remove(article.id)
-                scheduleReportVisible()
-            }
+            rowView(article, selectedId: selectedId, paneFocused: paneFocused)
+                .equatable()
+                // No horizontal inset of our own: the List's own row padding already supplies the
+                // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
+                // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                .listRowSeparator(.hidden)
+                .onAppear {
+                    visibleRows.appearedIds.insert(article.id)
+                    scheduleReportVisible()
+                }
+                .onDisappear {
+                    visibleRows.appearedIds.remove(article.id)
+                    scheduleReportVisible()
+                }
         }
         .listStyle(.plain)
     }
@@ -299,21 +358,23 @@ struct ArticleListView: View {
         visibleRows.reportTask = Task {
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else { return }
-            reportVisible()
+            let indexById = displayed.indexById
+            let ordered = visibleRows.appearedIds
+                .compactMap { id in indexById[id].map { (index: $0, id: id) } }
+                .sorted { $0.index < $1.index }
+                .map(\.id)
+            reportVisible(ordered)
         }
     }
+    #endif
 
-    /// Suppressed during search: the visible rows are search results, not the underlying filter's
-    /// own list, and reporting them as "seen" would corrupt `newArticleCount`'s bookkeeping once
-    /// the search closes (`ArticleListPane.kt`'s own guard).
-    private func reportVisible() {
+    /// Reports the rows on screen, in display order. Suppressed during search: the visible rows are
+    /// search results, not the underlying filter's own list, and reporting them as "seen" would
+    /// corrupt `newArticleCount`'s bookkeeping once the search closes (`ArticleListPane.kt`'s own
+    /// guard).
+    private func reportVisible(_ ids: [String]) {
         guard !home.searchActive else { return }
-        let indexById = displayed.indexById
-        let ordered = visibleRows.appearedIds
-            .compactMap { id in indexById[id].map { (index: $0, id: id) } }
-            .sorted { $0.index < $1.index }
-            .map(\.id)
-        home.viewModel.markArticlesSeen(ids: ordered)
+        home.viewModel.markArticlesSeen(ids: ids)
     }
 
     // MARK: - Row
@@ -327,10 +388,10 @@ struct ArticleListView: View {
     // MARK: - New articles pill
 
     @ViewBuilder
-    private func newArticlesPill(proxy: ScrollViewProxy) -> some View {
+    private func newArticlesPill(jump: @escaping () -> Void) -> some View {
         Button {
             home.viewModel.markAllArticlesSeen()
-            scrollToFreshEnd(proxy)
+            jump()
         } label: {
             Label(LF("home_new_articles", Int64(home.newArticleCount)), systemImage: home.newestFirst ? "arrow.up" : "arrow.down")
                 .font(.callout)
@@ -344,10 +405,12 @@ struct ArticleListView: View {
         .padding(.bottom, home.newestFirst ? 0 : 8)
     }
 
+    #if os(iOS)
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
         proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
     }
+    #endif
 }
 
 /// Pull-to-refresh on iOS (`external-spec.md` §9), scoped to the current selection's feeds and held
@@ -369,6 +432,7 @@ private struct PullToRefreshModifier: ViewModifier {
     }
 }
 
+#if os(iOS)
 /// The article list's on-screen rows and its pending visible-row report. A plain class held in
 /// `@State` rather than `@State` values of their own: every row scrolling in or out writes to it,
 /// and nothing here is drawn, so those writes must not invalidate the list's body.
@@ -379,3 +443,4 @@ private final class VisibleRowTracker {
     /// a short delay — mirroring Compose's `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
     var reportTask: Task<Void, Never>?
 }
+#endif
