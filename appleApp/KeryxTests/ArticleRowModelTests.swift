@@ -227,4 +227,39 @@ struct ArticleRowModelTests {
         )
         #expect(resolved == 0)
     }
+
+    // MARK: - ArticleRowMenuState
+
+    /// A macOS right-click on an unselected row selects it — marking it read — before the menu
+    /// shows, so the menu must offer "Mark as unread".
+    @Test
+    func unreadUnselectedRowIsReadOnceAMacContextClickOpensItsMenu() {
+        #expect(ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, isSelected: false, selectsOnContextClick: true))
+    }
+
+    /// An already-selected row is not selected again, so an article the user marked unread stays so.
+    @Test
+    func unreadSelectedRowStaysUnread() {
+        #expect(!ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, isSelected: true, selectsOnContextClick: true))
+    }
+
+    @Test(arguments: [(false, true), (false, false), (true, true), (true, false)])
+    func readRowStaysRead(isSelected: Bool, selectsOnContextClick: Bool) {
+        #expect(ArticleRowMenuState.readAfterContextMenuOpen(isRead: true, isSelected: isSelected, selectsOnContextClick: selectsOnContextClick))
+    }
+
+    /// An iOS long-press selects nothing, so the menu reflects the row's current state.
+    @Test(arguments: [false, true])
+    func longPressThatDoesNotSelectNeverFlipsTheReadState(isSelected: Bool) {
+        #expect(!ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, isSelected: isSelected, selectsOnContextClick: false))
+    }
+
+    @Test
+    func contextClickSelectsOnlyOnMacOS() {
+        #if os(macOS)
+        #expect(ArticleRowMenuState.selectsOnContextClick)
+        #else
+        #expect(!ArticleRowMenuState.selectsOnContextClick)
+        #endif
+    }
 }

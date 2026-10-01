@@ -125,12 +125,20 @@ struct ArticleRowView: View, Equatable {
             // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
             // (`ArticleRowComponents.kt`) — the actual selection runs on a right-click/Control-
             // click via `.selectsOnContextMenu` above, not as a side effect of this builder (see
-            // `ContextMenuSelectionTracker`'s own doc for why).
+            // `ContextMenuSelectionTracker`'s own doc for why). That selection marks an unread
+            // article read, so the read item is labelled from the state after it, and each item
+            // requests the explicit state its label promises rather than toggling — otherwise
+            // "Mark as read" on a row the right-click just marked read would mark it unread.
+            let readAfterOpen = ArticleRowMenuState.readAfterContextMenuOpen(
+                isRead: model.isRead,
+                isSelected: isSelected,
+                selectsOnContextClick: ArticleRowMenuState.selectsOnContextClick
+            )
             Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
-                viewModel.toggleStar(article: model.row)
+                viewModel.setStarred(article: model.row, starred: !model.isStarred)
             }
-            Button(model.isRead ? Self.markUnreadLabel : Self.markReadLabel) {
-                viewModel.toggleRead(article: model.row)
+            Button(readAfterOpen ? Self.markUnreadLabel : Self.markReadLabel) {
+                viewModel.setRead(article: model.row, read: !readAfterOpen)
             }
             Button(Self.copyUrlLabel, action: onCopyUrl)
             .disabled(!model.hasUsableUrl)

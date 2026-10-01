@@ -94,6 +94,33 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
     static let highlightColor = Color.yellow.opacity(0.4)
 }
 
+/// What an article row's context menu offers, decided from the state the row will be in once the
+/// menu is open rather than from the snapshot it was drawn with.
+enum ArticleRowMenuState {
+    /// Whether opening a row's context menu selects the row first: on macOS a right-click/Control-
+    /// click does (`.selectsOnContextMenu`, `ContextMenuSelectionTracker`); an iOS long-press does not.
+    #if os(macOS)
+    static let selectsOnContextClick = true
+    #else
+    static let selectsOnContextClick = false
+    #endif
+
+    /// The read state the article has once its context menu is open — the state the menu's read item
+    /// is labelled from and inverts. Selecting an article marks it read (external-spec §7), and on
+    /// macOS the right-click selects an unselected row before the menu shows (the selection closure
+    /// only selects a row that isn't already selected), so such a row is read by then even though
+    /// its snapshot still says unread. Matches Compose's `articleRowMenuEntries`
+    /// (`ArticleRowComponents.kt`), whose `selectedByOpen` carries the same side effect.
+    ///
+    /// - Parameters:
+    ///   - isRead: the row's read state as last drawn.
+    ///   - isSelected: whether the row was selected before the menu was opened.
+    ///   - selectsOnContextClick: whether opening the menu selects the row (`selectsOnContextClick`).
+    static func readAfterContextMenuOpen(isRead: Bool, isSelected: Bool, selectsOnContextClick: Bool) -> Bool {
+        isRead || (selectsOnContextClick && !isSelected)
+    }
+}
+
 /// What an article row shows of its feed.
 struct FeedRowInfo: Equatable, Sendable {
     let title: String

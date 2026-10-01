@@ -1312,6 +1312,21 @@ macOS (and on iPad, where the reader shares the screen with the list):
 - Feed ▸ Copy feed URL and Feed ▸ Copy site URL copy their URL but do **not** flash the reader's ✓
   (the reader shows an article, not that feed).
 
+### (SwiftUI) Article row menu read state
+
+The read item of the SwiftUI article row's context menu is labelled from the state the row is in once
+the menu is open (`ArticleRowMenuState.readAfterContextMenuOpen`, covered by `ArticleRowModelTests`),
+and each item sets that explicit state rather than toggling. Whether SwiftUI rebuilds the menu after the
+right-click's selection lands can only be seen in the running app; confirm:
+
+- (macOS) Right-click an unread, unselected article row: the row becomes selected (and read) and the
+  menu says "Mark as unread". Choosing it leaves the article unread — as ⌘⇧U would right now. The
+  star item still matches the article's current star state, and choosing it sets the opposite.
+- (macOS) Right-click the selected row after marking it unread: the menu says "Mark as read" and the
+  article stays unread until that is chosen (the row is not selected again).
+- (iOS) Long-press an unread row: nothing is selected, the menu says "Mark as read", and choosing it
+  marks the article read.
+
 ### (SwiftUI) OPML from the File menu
 
 The SwiftUI File menu's Import/Export only request the operation (`OpmlTransferObservable`, covered
