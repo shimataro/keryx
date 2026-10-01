@@ -1,6 +1,5 @@
 package works.merc.keryx.app.data.cloud
 
-import works.merc.keryx.app.core.CloudStorageType
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -47,14 +46,6 @@ class KeychainTokenStorageTest {
         // Still exactly one item: a single clear leaves nothing behind.
         assertEquals(TokenClearOutcome.CLEARED, storage.clear())
         assertNull(storage.load())
-    }
-
-    @Test
-    fun googleDriveGetsAnAppleOnlyKeychainAccount() {
-        assertEquals("google_drive_apple", appleKeychainAccount(CloudStorageType.GOOGLE_DRIVE))
-        for (type in CloudStorageType.entries - CloudStorageType.GOOGLE_DRIVE) {
-            assertEquals(type.id, appleKeychainAccount(type), "$type shares the desktop app's account")
-        }
     }
 
     @Test

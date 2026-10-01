@@ -18,6 +18,9 @@ reviews:
     - "!**/build/**"
     - "!**/.gradle/**"
     - "!**/.kotlin/**"
+    # appleApp/*.xcodeproj is XcodeGen-generated from project.yml and never committed (see
+    # .gitignore) — guard here too in case a stray copy is ever pushed.
+    - "!appleApp/*.xcodeproj/**"
 
   # Restate the highest-consequence rules from .claude/CLAUDE.md / docs/*.md / .claude/rules/*.md
   # as active review-focus instructions on the paths they apply to. CLAUDE.md itself is already
@@ -104,6 +107,18 @@ reviews:
         the same PR (library name / SPDX identifier / project URL). Test-only dependencies are
         excluded from this requirement.
 
+    - path: "appleApp/**/*.swift"
+      instructions: >
+        UI-facing text must go through the String Catalog (Localizable.xcstrings), which is
+        generated from composeApp's strings.xml by :composeApp:generateStringCatalog and must
+        never be hand-edited (project.yml/build-shared.sh regenerate it before each build).
+        Comments and log/error text must be written in English regardless of the language used
+        elsewhere in the project. Business logic belongs in :shared (presentation/ controllers
+        consumed via KeryxSdk); this directory should stay limited to SwiftUI views, the
+        StateFlow-to-@Observable bridge, and platform-specific (#if os(...)) code — flag domain
+        logic (parsing, merge/sync rules, repository-shaped state) written directly here instead
+        of in Kotlin.
+
     - path: "shared/src/commonMain/sqldelight/**/*.sq"
       instructions: >
         A schema change needs a new `<from-version>.sqm` migration file rather than editing an
@@ -143,7 +158,7 @@ knowledge_base:
       # auto-detect, scoped to the source areas they actually describe. Only the English (.md)
       # doc is referenced, not its .ja.md sibling, to avoid doubling near-duplicate context.
       - files: "docs/app-architecture.md"
-        applyTo: "{shared,composeApp,testing}/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**,appleApp/**"
       - files: "docs/error-design.md"
         applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/db-schema.md"
@@ -153,15 +168,15 @@ knowledge_base:
       - files: "docs/background-update.md"
         applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/testing.md"
-        applyTo: "{shared,composeApp,testing}/src/**"
+        applyTo: "{shared,composeApp,testing}/src/**,appleApp/**"
       - files: "docs/known-issues.md"
         applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/external-spec.md"
         applyTo: "{shared,composeApp,testing}/src/**"
       - files: "docs/build.md"
-        applyTo: "{shared,composeApp,testing}/**"
+        applyTo: "{shared,composeApp,testing}/**,appleApp/**"
       - files: "docs/setup.md"
-        applyTo: "{shared,composeApp,testing}/**"
+        applyTo: "{shared,composeApp,testing}/**,appleApp/**"
       - files: ".claude/rules/fts-index.md"
         applyTo: "shared/src/**/data/local/**"
       - files: ".claude/rules/sync-merge.md"

@@ -11,8 +11,10 @@ import works.merc.keryx.app.data.cloud.DropboxStorage
 import works.merc.keryx.app.data.cloud.OneDriveAuthManager
 import works.merc.keryx.app.data.cloud.OneDriveStorage
 import works.merc.keryx.app.data.cloud.TokenStorage
+import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.CustomUriRedirectTransport
+import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OAuthConnectFlow
 import works.merc.keryx.app.domain.SettingsRepository
@@ -25,6 +27,7 @@ internal fun dropboxProvider(
     client: HttpClient,
     callbackFlow: MutableSharedFlow<OAuthCallbackParams>,
     tokenStorage: TokenStorage,
+    authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ): CloudSession.Provider {
     val auth: CloudAuthManager = DropboxAuthManager(client)
     return CloudSession.Provider(
@@ -35,6 +38,7 @@ internal fun dropboxProvider(
             authManager = auth,
             clientId = BuildConfig.DROPBOX_APP_KEY,
             transport = CustomUriRedirectTransport(callbackFlow),
+            authorizationLauncher = authorizationLauncher,
         ),
         createStorage = { tokenProvider -> DropboxStorage(client, tokenProvider) },
     )
@@ -49,6 +53,7 @@ internal fun oneDriveProvider(
     client: HttpClient,
     callbackFlow: MutableSharedFlow<OAuthCallbackParams>,
     tokenStorage: TokenStorage,
+    authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ): CloudSession.Provider {
     val auth: CloudAuthManager = OneDriveAuthManager(client)
     return CloudSession.Provider(
@@ -59,6 +64,7 @@ internal fun oneDriveProvider(
             authManager = auth,
             clientId = BuildConfig.ONEDRIVE_CLIENT_ID,
             transport = CustomUriRedirectTransport(callbackFlow),
+            authorizationLauncher = authorizationLauncher,
         ),
         createStorage = { tokenProvider -> OneDriveStorage(client, tokenProvider) },
     )
@@ -85,10 +91,14 @@ internal fun oneDriveProvider(
  *   handed in for an extra provider that also uses [CustomUriRedirectTransport] (the Apple app's
  *   Google Drive); desktop's loopback-based one simply ignores it. No default: a platform with none
  *   must say so explicitly (`{ _, _ -> emptyMap() }`) rather than silently omitting a provider slot.
+ * @param authorizationLauncher How Dropbox/OneDrive's connect flow opens the authorize URL —
+ *   the system browser on desktop/Android (the default), or the Apple app's own launcher (an
+ *   `ASWebAuthenticationSession`, wired by Swift through [works.merc.keryx.app.sdk.KeryxSdk.start]).
  */
 fun Module.cloudSessionSingles(
     tokenStorage: (CloudStorageType) -> TokenStorage,
     extraProviders: (client: HttpClient, callbackFlow: MutableSharedFlow<OAuthCallbackParams>) -> Map<CloudStorageType, CloudSession.Provider>,
+    authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ) {
     // Shared by each platform's own OS URI routing and the custom-URI (Dropbox/OneDrive) connect
     // transport.
@@ -102,9 +112,15 @@ fun Module.cloudSessionSingles(
             // Dropbox first, extras (e.g. desktop's Google Drive) in the middle, OneDrive last —
             // matching CloudStorageType's own declaration order, which drives the UI display order.
             providers = buildMap {
-                put(CloudStorageType.DROPBOX, dropboxProvider(client, callbackFlow, tokenStorage(CloudStorageType.DROPBOX)))
+                put(
+                    CloudStorageType.DROPBOX,
+                    dropboxProvider(client, callbackFlow, tokenStorage(CloudStorageType.DROPBOX), authorizationLauncher),
+                )
                 putAll(extraProviders(client, callbackFlow))
-                put(CloudStorageType.ONEDRIVE, oneDriveProvider(client, callbackFlow, tokenStorage(CloudStorageType.ONEDRIVE)))
+                put(
+                    CloudStorageType.ONEDRIVE,
+                    oneDriveProvider(client, callbackFlow, tokenStorage(CloudStorageType.ONEDRIVE), authorizationLauncher),
+                )
             },
             selectedType = {
                 CloudStorageType.fromId(get<SettingsRepository>().getLocalSettings().cloudStorageType)

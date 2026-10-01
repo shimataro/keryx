@@ -600,47 +600,6 @@ fun autoScrollVelocityPxPerSec(
     }
 }
 
-/**
- * Precomputed lookup tables for resolving feed/folder drag-and-drop insertion points by id, built
- * once per [feeds]/[folders] change (see [buildFeedListDropIndex]) rather than re-deriving grouping
- * ad hoc for every drag event.
- */
-internal data class FeedListDropIndex(
-    val folderIdOfFeed: Map<String, String?>,
-    val nextFeedInGroup: Map<String, String?>,
-    val firstFeedIdOfGroup: Map<String?, String?>,
-    val nextFolderId: Map<String, String?>,
-) {
-    /** Where a feed dropped into [folderId] (or the unassigned group when `null`) would land. */
-    fun feedZoneBoundaryFor(folderId: String?): DropBoundary =
-        firstFeedIdOfGroup[folderId]?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
-
-    /** Where a feed dropped just below [feedId], within its own group, would land. */
-    fun belowBoundaryForFeed(feedId: String): DropBoundary =
-        nextFeedInGroup[feedId]?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderIdOfFeed[feedId])
-
-    /** Where a folder dropped just below [folderId] would land. */
-    fun belowBoundaryForFolder(folderId: String): DropBoundary =
-        nextFolderId[folderId]?.let(DropBoundary::BeforeFolder) ?: DropBoundary.AppendFolders
-}
-
-/** Builds a [FeedListDropIndex] from [feeds]/[folders], reusing [groupFeedsByFolder]'s grouping. */
-internal fun buildFeedListDropIndex(feeds: List<Feeds>, folders: List<Folders>): FeedListDropIndex {
-    val folderIdOfFeed = mutableMapOf<String, String?>()
-    val nextFeedInGroup = mutableMapOf<String, String?>()
-    val firstFeedIdOfGroup = mutableMapOf<String?, String?>()
-    for ((folder, feedsInGroup) in groupFeedsByFolder(feeds, folders)) {
-        val groupKey = folder?.id
-        firstFeedIdOfGroup[groupKey] = feedsInGroup.firstOrNull()?.id
-        feedsInGroup.forEachIndexed { index, feed ->
-            folderIdOfFeed[feed.id] = groupKey
-            nextFeedInGroup[feed.id] = feedsInGroup.getOrNull(index + 1)?.id
-        }
-    }
-    val nextFolderId = folders.indices.associate { i -> folders[i].id to folders.getOrNull(i + 1)?.id }
-    return FeedListDropIndex(folderIdOfFeed, nextFeedInGroup, firstFeedIdOfGroup, nextFolderId)
-}
-
 /** Parsed identity of a feed-list `LazyColumn` row, derived from its `key`. */
 internal sealed interface FeedListRowKey {
     data class Folder(val folderId: String) : FeedListRowKey

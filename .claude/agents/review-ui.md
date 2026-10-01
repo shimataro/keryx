@@ -76,8 +76,8 @@ section describes. In particular:
   `composeResources/values/strings.xml` — including tray/notification text built
   outside composition (via `getString`), which is the easy one to miss.
   (CLAUDE.md constraint #3)
-- **Locale parity**: `values/strings.xml` (Japanese, the default and fallback) and
-  `values-en/strings.xml` (English) must define the same key set. A key added to one and not the
+- **Locale parity**: `values/strings.xml` (English, the default and fallback) and
+  `values-ja/strings.xml` (Japanese) must define the same key set. A key added to one and not the
   other is a finding.
 - A hardcoded *English* literal is now just as much a violation as a Japanese one — searching for
   Japanese characters alone no longer finds every case.
@@ -87,5 +87,5 @@ section describes. In particular:
 ## Investigation
 
     grep -c "<string " composeApp/src/commonMain/composeResources/values/strings.xml \
-                       composeApp/src/commonMain/composeResources/values-en/strings.xml
+                       composeApp/src/commonMain/composeResources/values-ja/strings.xml
     grep -rn "contentDescription\|Role\.\|semantics" <changed files>

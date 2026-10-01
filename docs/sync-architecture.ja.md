@@ -189,7 +189,7 @@
 しまいうる — まさにクリアが防ごうとしている「未マージの内容のダウンロードをスキップする」状態そのもの
 である。代償として、切断は実行中の同期の完了を待つ（HTTP タイムアウトが上限）。
 この待ち時間は `SettingsViewModel.disconnecting` でカバーされるため、クラウド同期タブは
-「切断しています…」と表示する。
+止まっているように見せず「切断しています…」と表示する。いずれにせよ、この順序が正しい。
 
 ### 自動同期の抑制
 
@@ -424,13 +424,15 @@ desktop の起動時は `main.kt` の `runBlocking` から `FtsManager.ensureInd
 
 ## クラウド認証（OAuth PKCE + オフラインアクセス）
 
-OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・ブラウザー起動・
-state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（`commonMain`、desktop と Android で共有）
-に集約する。プロバイダー差は
+OAuth 2.0 authorization-code-with-PKCE のオーケストレーション（PKCE 生成・認可 URL 構築・その URL を開く・
+state 検証・コード交換）はプロバイダー共通の `OAuthConnectFlow`（`commonMain`、Apple 版を含む全プラット
+フォームで共有）に集約する。プロバイダー差は
 **リダイレクトの受け取り方（`OAuthRedirectTransport`）とエンドポイント/スコープ（`CloudAuthManager` 実装）**
 だけで、`DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` が `CloudAuthManager` を実装する。いずれも
 オフラインアクセス（Dropbox: `token_access_type=offline`、Google: `access_type=offline` + `prompt=consent`、OneDrive: `offline_access` スコープ）を
-指定し**リフレッシュトークンを取得・保存**する。
+指定し**リフレッシュトークンを取得・保存**する。認可 URL を開く処理自体は、注入された
+`domain/AuthorizationLauncher` を経由する（既定は `DefaultAuthorizationLauncher` で、システムのブラウザを開く）
+——Apple 版が自前のものをどう渡すかは、後述の「Apple 版での OAuth 認可」を参照。
 
 **唯一の例外が Android の Google Drive で、このフローをまったく通らない** —— `OAuthConnectFlow` も
 `OAuthRedirectTransport` も使わず、リフレッシュトークンも持たない。Play 開発者サービスの
@@ -442,8 +444,10 @@ Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android �
 
 - **Dropbox / OneDrive — カスタム URI スキーム**（`CustomUriRedirectTransport`）:
   - **仕組み。** リダイレクト URI は `keryx://oauth2/callback`。両プロバイダーで共有し `state` で識別
-    する。認可 URL は既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送する（`main.kt` が
-    `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+    する。desktop/Android では認可 URL を既定ブラウザーで開き、OS が URL を実行中インスタンスへ配送
+    する（`main.kt` が `parseOAuthUri` して共有 `MutableSharedFlow<OAuthCallbackParams>` に流す）。
+    Apple 版は代わりに `ASWebAuthenticationSession` を使う——詳細は後述の「Apple 版での OAuth 認可」
+    を参照。
   - **OneDrive 固有の事情。** Microsoft Identity platform（`consumers` テナント）と Microsoft Graph を
     使い、Google と違い**クライアントシークレット不要の PKCE パブリッククライアント**。同期 DB は
     アプリ専用フォルダー（`/me/drive/special/approot`、スコープ `Files.ReadWrite.AppFolder`）に保存する。
@@ -466,7 +470,7 @@ Android の Dropbox / OneDrive を指す。残る 1 件は後述の「Android �
   クライアントシークレット（`GOOGLE_DRIVE_CLIENT_SECRET`）もトークン交換・リフレッシュ両方に送る**——PKCE を
   使っていても、「デスクトップアプリ」タイプの Google OAuth クライアントは iOS/Android と違い完全な public
   client 扱いされず、省略すると Google のトークンエンドポイントが `invalid_request: client_secret is missing`
-  で拒否する（詳細は [build.ja.md](build.ja.md)）。
+  で拒否する（詳細は [build.ja.md](build.ja.md)）。スコープは `drive.appdata` のみ（ユーザーの Drive 内のアプリ専用隠しフォルダ）。
 
 OS へのスキーム登録方法はプラットフォームごとに異なる。macOS はパッケージング時に Info.plist
 （`CFBundleURLTypes`）で宣言する。Windows / Linux は起動時に `registerFileAssociations()` が登録し、
@@ -502,7 +506,7 @@ single-instance 経由で実行中インスタンスへ転送する。
 > `Keryx.app` にルーティングするため、`gradlew run` のインスタンスにはリダイレクトが届かない。
 > Windows / Linux では、起動時の登録がパッケージ版ランチャーからの起動でない限り意図的に何もしない
 > （`packagedLauncherPath()`）——JDK の `java` バイナリを `keryx://` のハンドラーとして登録すると
-> Gradle 実行終了後も残ってしまうため。連携を行う/確認する場合は `createDistributable` でビルドした
+> Gradle 実行終了後も残ってしまうため。連携を行う/確認する場合は `./gradlew :composeApp:createDistributable` でビルドした
 > アプリを起動する（詳細は [setup.ja.md](setup.ja.md)）。
 > Google Drive はループバック受信のため、この制約はなく `gradlew run` でも連携を完了できる。
 > Android にはどちらの制約もない——`installGithubDebug` でもリリースパイプライン経由でも、マニフェスト宣言の
@@ -601,11 +605,11 @@ Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は�
 の経路をそのまま使う — ただし desktop 版とは別のクライアントを使う。
 
 - **desktop 版のクライアントを再利用できない理由。** desktop 版の「デスクトップ アプリ」クライアントは
-  loopback リダイレクトと `client_secret` を前提とする（上記「Google Drive（desktop のみ）— Loopback」
+  loopback リダイレクトと `client_secret` を前提とする（上記「Google Drive（デスクトップのみ）— ループバック」
   を参照）。secret をネイティブアプリのバイナリに同梱すると、バイナリ自体から抽出されてしまう。Google
   がネイティブ Apple アプリ向けに用意している答えが **「iOS」アプリケーションタイプ**で、secret を一切
   要求しない（「iOS」タイプは iOS/iPadOS 専用ではなく、ネイティブ macOS アプリにも使われる — 詳細は
-  [build.md](build.ja.md) を参照）。Google のトークンエンドポイントは、この種類のクライアントに対しては
+  [build.ja.md](build.ja.md) を参照）。Google のトークンエンドポイントは、この種類のクライアントに対しては
   `client_secret` なしのトークン交換・リフレッシュを受け入れる。これは「デスクトップ アプリ」クライアント
   （PKCE でも `invalid_request: client_secret is missing` で拒否される。上記参照）とは異なる。
   `GoogleDriveAuthManager.clientSecret` を nullable にしたのはこのためで、desktop 版は secret を渡し、
@@ -617,14 +621,15 @@ Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は�
   関数で、`ApplePlatformModule.kt` の `appleGoogleDriveProvider` がその結果を `CustomUriRedirectTransport`
   の `redirectUri` に渡す。`cloudSessionSingles` が Dropbox・OneDrive 用に用意する既存の
   `MutableSharedFlow<OAuthCallbackParams>` をそのまま共用し、どちらのスキームでリダイレクトが届いても
-  `state` で判別する。Swift 側アプリの実装時には、この Dropbox・OneDrive 用の `keryx://` と並べて、
-  Info.plist の `CFBundleURLTypes`（または `ASWebAuthenticationSession` の `callbackURLScheme`）に
-  このスキームを登録する — 詳細は [build.md](build.ja.md) を参照。
+  `state` で判別する。Swift 側アプリは、このスキームも `keryx://` も Info.plist に登録しない——OS が
+  カスタムスキームのリダイレクトをルーティングする代わりに `ASWebAuthenticationSession` を開くので、
+  必要なのはそのセッション自身の `callbackURLScheme` だけ——詳細は後述の「Apple 版での OAuth 認可」
+  を参照。
 - **別クライアントだが同じ Cloud プロジェクト。** Apple 用クライアントは、上記の Android の場合と同様に
   desktop 版とは別の OAuth クライアントだが、パッケージ署名で自動照合されるのではなく Cloud Console で
   手動作成する — Google の「iOS」クライアントタイプには Android の SHA-1 照合に相当する仕組みが無いため、
   クライアント ID はビルド時定数から読む（`AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`。`DesktopBuildConfig`
-  と同じ方式で `appleMain` にだけ生成される — 詳細は [build.md](build.ja.md)）。上記と同じ理由で、
+  と同じ方式で `appleMain` にだけ生成される — 詳細は [build.ja.md](build.ja.md)）。上記と同じ理由で、
   desktop・Android のクライアントと同じ Cloud プロジェクトに置く必要がある。別プロジェクトにすると、
   Apple 版だけ他の端末と異なる隠しフォルダを読み書きしてしまう。
 - **有効化の判定。** `CloudStorageAvailability.apple.kt` の `googleDriveAvailable` は
@@ -635,23 +640,57 @@ Apple 版（`:shared` の appleMain。macOS と、将来は iOS も対象）は�
   トークンを持ち、Dropbox・OneDrive と同じく `KeychainTokenStorage` に保存する — Play 開発者サービス風の
   `accessTokenProvider` による上書きはここには無い。
 
+### Apple 版での OAuth 認可（`ASWebAuthenticationSession`）
+
+Apple 版のどのプロバイダーも、`OAuthConnectFlow` + `OAuthRedirectTransport` の組み合わせ自体は desktop と
+同じ（Dropbox・OneDrive は `keryx://`、Google Drive は自分専用のクライアント ID 逆順スキーム、いずれも
+カスタム URI スキーム）。違うのは**認可 URL をどう開き、リダイレクトをどう受け取るか**——Apple 版はカスタム
+URI スキームを OS に登録せず、ブラウザも自分では開かない：
+
+- `OAuthConnectFlow` は認可 URL を、`platform/BrowserOpener` を直接呼ぶのではなく、注入された
+  `domain/AuthorizationLauncher`（`fun interface { fun launch(authorizeUrl: String, redirectUri: String) }`）
+  経由で開く。`domain/DefaultAuthorizationLauncher`——どのプラットフォームでも既定——はシステムのブラウザ
+  で開く。
+- `KeryxSdk.start` の `openAuthorization: ((url: String, callbackScheme: String) -> Unit)?` 引数で、
+  Swift 側が自前のランチャーを渡せる。渡された場合、`KeryxSdk` はこれを `AuthorizationLauncher` として
+  ラップし、接続フロー自身の `redirectUri` から `domain/schemeOf`（先頭の `:` より前をすべて取る）で
+  `callbackScheme` を導出してからクロージャーに両方を渡す。Swift 側アプリは
+  `ASWebAuthenticationSession(url:callbackURLScheme:)` を開く——OS がスキームをルーティングするのではなく
+  セッションが直接コールバックを受け取るので、どのプロバイダーについても Info.plist の
+  `CFBundleURLTypes` 登録は不要。
+- セッションの完了ハンドラーは、そのコールバック URL を `KeryxSdk.handleOAuthRedirect(url)` に渡す——
+  desktop/Android で OS がルーティングする `keryx://` リダイレクトとまったく同じ扱いで、両者とも同じ
+  `MutableSharedFlow<OAuthCallbackParams>` を `state` で識別して流れるだけなので、`OAuthConnectFlow`
+  自身はどちらが届いたのか区別できない。
+- ユーザーがセッションをキャンセルした場合は、Swift 側が接続フロー自身のコルーチン（`Task`）をキャンセル
+  する。`OAuthConnectFlow` 自体には別途呼び出すキャンセル経路は無い。
+
 ### トークン保存先
 
 **プロバイダーごとに別インスタンス**の `TokenStorage` を DI（`platformModule`）で構築する（1 インスタンスを
 複数プロバイダーで共有しない。`SecurityCliTokenStorage`/`KeystoreTokenStorage` は結果をインスタンスに
 キャッシュするため共有すると壊れる）。
 Keychain のアカウント名とフォールバックファイル名は `CloudStorageType.id` から導出する（Dropbox は `"dropbox"` で
-従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。`KEYCHAIN_SERVICE` は
-両者共通。
+従来のハードコード値と一致するため既存トークンの移行は不要。Google Drive は `"google_drive"`、OneDrive は `"onedrive"`）。
 
-- Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service, `KeyringTokenStorage`）。
+`KEYCHAIN_SERVICE`（`works.merc.keryx`、`data/cloud/KeychainCoordinates.kt`）はデスクトップの全 OS で共通。
+
+- Windows/Linux: OS セキュアストレージ（java-keyring — Credential Manager / Secret Service,
+  `KeyringTokenStorage`）。
 - macOS: Apple 署名の `/usr/bin/security` CLI に委譲（`SecurityCliTokenStorage`）。java-keyring は共有 JVM
-  から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。
+  から Keychain 書き込みに失敗するため、macOS のみ `security` 経由にしている。項目は通常のログイン
+  Keychain に入る——下のネイティブ Apple アプリはサービス名こそ同じだが、入れ物が別。
 - ネイティブ Apple アプリ（macOS/iOS、`:shared` の appleMain）：`KeychainTokenStorage` が Security フレームワーク経由で
-  Keychain に直接書き込む——サービスもプロバイダーごとのアカウントも同じで、平文へのフォールバックはない（書き込みの失敗は
-  `NOT_PERSISTED`）。Compose 版 macOS が `security` CLI で保存したトークンは引き継がない：ネイティブアプリでは再接続し、
-  同期済みのデータはクラウドから戻る。Google Drive は、Apple 向けの OAuth クライアント（client secret なし）ができるまで
-  提供しない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」を参照。
+  Keychain に直接書き込む——サービスは `works.merc.keryx`、アカウントはどのプロバイダーも同じ。ただし
+  `security` が読み書きする通常のログイン Keychain ではなく、**Data Protection Keychain**
+  （`kSecUseDataProtectionKeychain`。出荷版アプリの `keychain-access-groups` エンタイトルメントが前提）
+  に保存するので、サービス名・アカウントが同じでも Compose 版がそもそも到達できない別の入れ物になる。
+  この分離は `KeryxSdk.start` の `useDataProtectionKeychain = true` だけに依存しており、テスト向けの
+  既定値 `false` のままだと Compose 版のログイン Keychain 上の項目を共有してしまう。平文への
+  フォールバックはない（書き込みの失敗は `NOT_PERSISTED`）。Compose 版が保存した項目からの移行は行わない：
+  ネイティブアプリは常に再接続から始まり、同期済みのデータはクラウドから戻る。Google Drive は、
+  `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` が設定されていれば提供し、空なら選択肢を隠す。前述の「Apple 版での
+  Google Drive（secret 不要な「iOS」タイプの OAuth クライアント）」を参照。
 - Linux のうち Snap パッケージ内だけは、`KeyringTokenStorage` の代わりに `LibSecretTokenStorage` を使う
   （`platform.isSnap` で分岐）。JNA 経由で libsecret を直接呼び出す実装で、libsecret がサンドボックスを
   検知して生の Secret Service ではなく Secret portal（`org.freedesktop.portal.Secret`）経由にルーティング

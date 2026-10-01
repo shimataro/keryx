@@ -58,3 +58,13 @@ constraint already documented for Dropbox and is accepted.
   Windows/Linux), and forwards the redirect through `dispatchOAuthCallbackIfPresent` into the same
   `MutableSharedFlow<OAuthCallbackParams>` shape desktop uses — see `AndroidOAuthCallback.kt`
   and `di/PlatformModule.android.kt`.
+- **Apple (macOS/iOS)** uses the same custom-URI transports as desktop (Dropbox/OneDrive on
+  `keryx://`, Google Drive on its own reversed-client-id scheme), but never registers `keryx://` in
+  Info.plist and never opens a browser directly. `OAuthConnectFlow` opens the authorize URL through
+  an injected `domain/AuthorizationLauncher` (default: `DefaultAuthorizationLauncher`, which calls
+  `BrowserOpener.open` — desktop and Android's behavior, unchanged). `KeryxSdk.start`'s
+  `openAuthorization` closure lets Swift supply its own launcher instead, which hands the URL to an
+  `ASWebAuthenticationSession` and returns the callback URL to `handleOAuthRedirect` directly —
+  there is no OS-level URI scheme to register or route. `domain/schemeOf` derives the session's
+  required `callbackURLScheme` from the connect flow's own redirect URI, so it never needs a second,
+  hardcoded copy of each provider's scheme.

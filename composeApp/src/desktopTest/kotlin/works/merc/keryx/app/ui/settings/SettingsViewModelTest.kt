@@ -9,7 +9,6 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -19,28 +18,19 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
-import works.merc.keryx.app.SuspendingCloudConnectFlow
 import works.merc.keryx.app.core.Clock
-import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
-import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
-import works.merc.keryx.app.data.cloud.CloudFileMeta
-import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
-import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.LocalSettingsStore
@@ -48,34 +38,28 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.opml.OpmlCodec
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
+import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
-import works.merc.keryx.app.domain.CloudConnectFlow
+import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.CloudConnectionService
-import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.InstallLaunchResult
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
-import works.merc.keryx.app.data.remote.UpdateDownloader
-import works.merc.keryx.app.domain.AvailableUpdate
-import works.merc.keryx.app.domain.InstallLaunchResult
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.domain.UpdatePlan
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
+import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
-import works.merc.keryx.app.insertFeedTag
-import works.merc.keryx.app.insertFolder
-import works.merc.keryx.app.insertTag
-import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.FileSelector
@@ -83,12 +67,12 @@ import works.merc.keryx.app.platform.OpenFileRequest
 import works.merc.keryx.app.platform.PathPickedFile
 import works.merc.keryx.app.platform.PickedFile
 import works.merc.keryx.app.platform.SaveFileRequest
+import works.merc.keryx.app.presentation.settings.CloudSyncController
+import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_export_opml
-import works.merc.keryx.app.resources.settings_import_opml
 import works.merc.keryx.app.singleProviderCloudSession
-import works.merc.keryx.app.presentation.formatTimestamp
-import works.merc.keryx.app.ftsManagerIndexed
 import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -100,42 +84,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-
-/** A [CloudStorage] whose every operation fails with an auth error, to drive a sync failure. */
-private class AlwaysFailingCloudStorage : CloudStorage {
-    private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("no token"))
-    override suspend fun authenticate(): Result<Unit> = fail()
-    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = fail()
-    override suspend fun upload(path: String, sourcePath: String, expectedRev: String?): Result<CloudFileMeta> = fail()
-    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = fail()
-    override suspend fun delete(path: String): Result<Unit> = fail()
-    override suspend fun rename(from: String, to: String): Result<Unit> = fail()
-    override suspend fun metadata(path: String): Result<CloudFileMeta?> = fail()
-}
-
-/**
- * A [CloudStorage] whose [metadata] suspends until [gate] resolves — for exercising the in-flight
- * state of a still-running sync, the same way [SuspendingFileSelector] does for an OPML import.
- * Every other method fails cleanly (never called in the "first sync ever" path this drives: two
- * gated [metadata] calls — compressed then legacy, both absent — land on [create]).
- */
-private class GatedCloudStorage(
-    private val gate: CompletableDeferred<Unit>,
-    private val metadataCalls: AtomicInteger? = null,
-) : CloudStorage {
-    private fun <T> fail(): Result<T> = Result.Err(CloudAuthException("not used by this test"))
-    override suspend fun authenticate(): Result<Unit> = Result.Ok(Unit)
-    override suspend fun metadata(path: String): Result<CloudFileMeta?> {
-        metadataCalls?.incrementAndGet()
-        gate.await()
-        return Result.Ok(null)
-    }
-    override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = fail()
-    override suspend fun upload(path: String, sourcePath: String, expectedRev: String?): Result<CloudFileMeta> = fail()
-    override suspend fun create(path: String, sourcePath: String): Result<CloudFileMeta> = fail()
-    override suspend fun delete(path: String): Result<Unit> = Result.Ok(Unit)
-    override suspend fun rename(from: String, to: String): Result<Unit> = Result.Ok(Unit)
-}
 
 /**
  * A [FileSelector] fake: hands back a handle to a fixed path (or null, i.e. "cancelled") and records
@@ -173,8 +121,7 @@ private class SuspendingFileSelector : FileSelector {
  * Counts [dispatch] calls, so a test can assert that `withContext(dispatcher)` actually ran — then
  * runs the block immediately rather than delegating to [Dispatchers.Unconfined], whose real
  * synchronous-execution trick lives behind `isDispatchNeeded() == false` and isn't reached when
- * `dispatch()` is invoked directly (calling it here left the resumed coroutine parked instead of
- * run, so `awaitTrue` timed out).
+ * `dispatch()` is invoked directly.
  */
 private class CountingDispatcher : CoroutineDispatcher() {
     var dispatchCount = 0
@@ -186,34 +133,6 @@ private class CountingDispatcher : CoroutineDispatcher() {
     }
 }
 
-/**
- * Holds every dispatched block until [release] is called, then runs the held blocks and every later
- * one inline. Holding the body of `withContext(dispatcher)` keeps a sync from reaching
- * [works.merc.keryx.app.domain.ActivityCenter.trackSync], so the ViewModel's `idle` stays true.
- */
-private class HoldingDispatcher : CoroutineDispatcher() {
-    private val held = ArrayDeque<Runnable>()
-    private var released = false
-
-    override fun dispatch(context: CoroutineContext, block: Runnable) {
-        synchronized(this) {
-            if (!released) {
-                held.addLast(block)
-                return
-            }
-        }
-        block.run()
-    }
-
-    fun release() {
-        val pending = synchronized(this) {
-            released = true
-            held.toList().also { held.clear() }
-        }
-        pending.forEach { it.run() }
-    }
-}
-
 /** Throws [CancellationException] the moment work is dispatched to it — simulates the coroutine being cancelled mid-`withContext`. */
 private class CancellingDispatcher : CoroutineDispatcher() {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
@@ -221,6 +140,13 @@ private class CancellingDispatcher : CoroutineDispatcher() {
     }
 }
 
+/**
+ * [SettingsViewModel] is now a thin wrapper around [CloudSyncController] / [PreferencesController]
+ * / [OpmlTransfer] (each covered by its own test in `:shared`) plus the two things that stay
+ * Compose/desktop-only: the in-app updater and OPML file picking. This suite therefore covers only
+ * those two areas, plus a couple of delegation smoke tests confirming the wrapper actually forwards
+ * to the controllers rather than reimplementing their logic.
+ */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
 
@@ -229,16 +155,12 @@ class SettingsViewModelTest {
     private val dir = FileIO.join(AppDirs.tempDir(), "settings-vm-test-${Random.nextInt()}")
 
     // ViewModels created via newViewModel(). Their viewModelScope is not tied to runTest's scope,
-    // so it must be cancelled explicitly before driver.close() — otherwise the init collector and
-    // in-flight action coroutines outlive the test and can throw against the closed driver,
-    // surfacing (flakily, on another test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
+    // so it must be cancelled explicitly before driver.close() — otherwise in-flight coroutines
+    // outlive the test and can throw against the closed driver, surfacing (flakily, on another
+    // test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest. The wrapped CloudSyncController
+    // has its own separate viewModelScope and must be cancelled too.
     private val createdViewModels = mutableListOf<SettingsViewModel>()
-
-    /** The SyncRepository handed to the most recently built ViewModel, so a test can drive it. */
-    private lateinit var createdSyncRepository: SyncRepository
-
-    // Every SyncRepository built by newViewModel() gets its own scope for scheduleSync(); track
-    // them all (not just the latest) so tearDown() can cancel every one, same as createdViewModels.
+    private val createdCloudSyncControllers = mutableListOf<CloudSyncController>()
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
 
     @BeforeTest
@@ -251,16 +173,13 @@ class SettingsViewModelTest {
 
     @AfterTest
     fun tearDown() {
-        // cancelAndJoin (not plain cancel) so no coroutine — including work hopping through
-        // withContext(dispatcher) for exportOpml/importOpml/etc. — can still be resuming when
-        // driver.close()/resetMain() run below; a still-resuming one throwing against torn-down
-        // state is what previously surfaced (flakily, on a later test) as
-        // kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
         runBlocking {
             createdViewModels.forEach { it.viewModelScope.coroutineContext.job.cancelAndJoin() }
+            createdCloudSyncControllers.forEach { it.viewModelScope.coroutineContext.job.cancelAndJoin() }
             createdSyncScopes.forEach { it.coroutineContext.job.cancelAndJoin() }
         }
         createdViewModels.clear()
+        createdCloudSyncControllers.clear()
         createdSyncScopes.clear()
         Dispatchers.resetMain()
         driver.close()
@@ -299,10 +218,6 @@ class SettingsViewModelTest {
         return FaviconResolver(client)
     }
 
-    /** An [HttpClient] that answers every request (e.g. revoke) with 200 OK — for auth managers. */
-    private fun okAuthClient(): HttpClient =
-        HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
-
     private fun updateCheckerReturning(tagName: String): UpdateChecker {
         // currentVersion 1.0.0 is stable, so the checker queries releases/latest (a single object).
         val client = HttpClient(
@@ -333,22 +248,9 @@ class SettingsViewModelTest {
     }
 
     private fun newViewModel(
-        connectResult: Result<OAuthTokens> = Result.Ok(OAuthTokens("AT")),
-        tokenStorage: TokenStorage = FakeTokenStorage(),
-        clock: Clock = Clock { 0L },
         updateRepository: UpdateRepository = fakeUpdateRepository(updateCheckerReturning("1.0.0")),
         // Only the OPML import tests need subscribeFeed to actually succeed.
         feedFetcher: FeedFetcher = failingFetcher(),
-        connectFlow: CloudConnectFlow? = null,
-        // Lets a test supply a pre-built (e.g. multi-provider) session instead of the single-Dropbox
-        // one built below, for scenarios like switchTo() that need >1 provider registered at once.
-        cloudSession: CloudSession? = null,
-        // Shared with the SyncRepository built below so a test can drive activityCenter.trackSync {}
-        // to simulate a sync completing and assert the ViewModel reacts to it.
-        activityCenter: ActivityCenter = ActivityCenter(),
-        // Backs the SyncRepository built below. Default: local-only (every sync is a no-op success);
-        // a test can supply a failing storage to exercise the sync-error state.
-        syncCloudProvider: () -> CloudStorage? = { null },
         // Default cancels every OPML pick — a test exercising import/export supplies its own.
         fileSelector: FileSelector = FakeFileSelector(),
         // Passed to the VM's own `dispatcher` (blocking OPML build/write/import work). Default
@@ -356,6 +258,7 @@ class SettingsViewModelTest {
         // to assert it was actually used.
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): SettingsViewModel {
+        val clock = Clock { 0L }
         val syncScheduler = SyncScheduler {}
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so subscribeFeed's indexMissing() works.
@@ -367,726 +270,73 @@ class SettingsViewModelTest {
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
-        // Unconfined write dispatcher so saveLocalSettings persists inline (localSettingsRoundTripsThroughStore
-        // reads it back via store.load()).
+        val opmlTransfer = OpmlTransfer(feedRepository, folderRepository, tagRepository, opmlImporter)
+        // Unconfined write dispatcher so saveLocalSettings persists inline.
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
+        val preferencesController = PreferencesController(settingsRepository)
         val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         createdSyncScopes += syncScope
         val syncRepository = SyncRepository(
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = syncCloudProvider,
+            cloudProvider = { null },
             clock = clock,
             scope = syncScope,
-            activityCenter = activityCenter,
+            activityCenter = ActivityCenter(),
             notificationCenter = NotificationCenter(),
             localDbPath = "unused",
             tempDir = "unused",
         )
-        val session = cloudSession ?: run {
-            val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
-            val authManager = DropboxAuthManager(authClient, clock = clock)
-            singleProviderCloudSession(
-                client = authClient,
-                tokenStorage = tokenStorage,
-                authManager = authManager,
-                clock = clock,
-                connectFlow = connectFlow ?: FakeCloudConnectFlow(connectResult),
-            )
-        }
-        createdSyncRepository = syncRepository
+        val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
+        val authManager = DropboxAuthManager(authClient, clock = clock)
+        val cloudSession = singleProviderCloudSession(
+            client = authClient,
+            tokenStorage = FakeTokenStorage(),
+            authManager = authManager,
+            clock = clock,
+            connectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT"))),
+        )
+        val cloudSyncController = CloudSyncController(
+            cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository), ActivityCenter(),
+            // Unconfined so connectDelegatesToCloudSyncController's testScheduler.advanceUntilIdle()
+            // actually observes the token-save/sync hop, rather than it landing on a real thread.
+            Dispatchers.Unconfined,
+        ).also { createdCloudSyncControllers += it }
         return SettingsViewModel(
-            settingsRepository, session, syncRepository, CloudConnectionService(session, settingsRepository, syncRepository),
-            feedRepository, folderRepository, tagRepository,
-            opmlImporter, updateRepository, activityCenter, dispatcher, fileSelector,
+            cloudSyncController, preferencesController, opmlTransfer, updateRepository, dispatcher, fileSelector,
         ).also { createdViewModels += it }
     }
 
-    @Test
-    fun themeModeSetterPersistsToLocalSettings() = runTest {
-        val vm = newViewModel()
-
-        vm.setThemeMode("dark")
-
-        assertEquals("dark", vm.localSettings.value.themeMode)
-    }
+    // --- Delegation smoke tests: the wrapper must actually forward to its controllers ---
 
     @Test
-    fun fontScaleSetterPersistsToLocalSettings() = runTest {
-        val vm = newViewModel()
-
-        vm.setFontScale(1.5)
-
-        assertEquals(1.5, vm.localSettings.value.fontSizeScale)
-    }
-
-    @Test
-    fun refreshIntervalSetterPersistsToLocalSettings() = runTest {
-        val vm = newViewModel()
-
-        vm.setRefreshIntervalMinutes(15)
-
-        assertEquals(15, vm.localSettings.value.refreshIntervalMinutes)
-    }
-
-    @Test
-    fun notificationEnabledSetterPersistsToLocalSettings() = runTest {
-        val vm = newViewModel()
-
-        vm.setNotificationEnabled(false)
-
-        assertFalse(vm.localSettings.value.notificationEnabled)
-    }
-
-    @Test
-    fun startMinimizedSetterPersistsToLocalSettings() = runTest {
-        val vm = newViewModel()
-
-        vm.setStartMinimized(true)
-
-        assertTrue(vm.localSettings.value.startMinimized)
-    }
-
-    @Test
-    fun localSettingsRoundTripsThroughStore() = runTest {
+    fun setThemeModeDelegatesToPreferencesControllerAndPersists() {
         val store = LocalSettingsStore(dirOverride = dir)
         val vm = newViewModel()
 
         vm.setThemeMode("dark")
 
+        assertEquals("dark", vm.localSettings.value.themeMode)
         assertEquals("dark", store.load().themeMode)
     }
 
     @Test
-    fun updateReadTimeoutUpdatesStateAndRepository() = runTest {
+    fun connectDelegatesToCloudSyncController() = runTest {
         val vm = newViewModel()
-
-        vm.updateReadTimeout(60)
-
-        assertEquals(60, vm.readTimeoutSeconds.value)
-        assertEquals(60, db.global_settingsQueries.get("read_timeout_seconds").executeAsOne().toInt())
-    }
-
-    @Test
-    fun updateCacheRetentionUpdatesStateAndRepositoryWithNullSentinel() = runTest {
-        val vm = newViewModel()
-
-        vm.updateCacheRetention(null)
-
-        assertNull(vm.cacheRetentionDays.value)
-        assertEquals("null", db.global_settingsQueries.get("cache_retention_days").executeAsOne())
-    }
-
-    @Test
-    fun updateCacheRetentionUpdatesStateAndRepositoryWithExplicitValue() = runTest {
-        val vm = newViewModel()
-
-        vm.updateCacheRetention(7)
-
-        assertEquals(7, vm.cacheRetentionDays.value)
-        assertEquals(7, db.global_settingsQueries.get("cache_retention_days").executeAsOne().toInt())
-    }
-
-    @Test
-    fun connectSuccessUpdatesConnectedTypeAndCloudStorageType() = runTest {
-        val tokenStorage = FakeTokenStorage()
-        val vm = newViewModel(
-            connectResult = Result.Ok(OAuthTokens("AT")),
-            tokenStorage = tokenStorage,
-        )
         assertNull(vm.connectedType.value)
-        assertNull(vm.connectingType.value)
 
         vm.connect(CloudStorageType.DROPBOX)
         testScheduler.advanceUntilIdle()
 
         assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-        assertNull(vm.connectingType.value)
-        assertFalse(vm.canCancelConnect.value)
-        assertEquals("dropbox", vm.localSettings.value.cloudStorageType)
-        assertEquals("AT", tokenStorage.load()?.accessToken)
     }
 
-    @Test
-    fun connectFailureResetsConnectingButNotConnected() = runTest {
-        val vm = newViewModel(
-            connectResult = Result.Err(CloudAuthException("connect failed")),
-        )
+    // --- In-app update ---
 
-        vm.connect(CloudStorageType.DROPBOX)
-        testScheduler.advanceUntilIdle()
-
-        assertNull(vm.connectedType.value)
-        assertNull(vm.connectingType.value)
-        assertFalse(vm.canCancelConnect.value)
-        assertNull(vm.localSettings.value.cloudStorageType)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectFailedType.value)
-    }
-
-    @Test
-    fun cancelConnectDuringOAuthWaitResetsConnectingStateAndDoesNotPersist() = runTest {
-        val tokenStorage = FakeTokenStorage()
-        val vm = newViewModel(tokenStorage = tokenStorage, connectFlow = SuspendingCloudConnectFlow())
-
-        vm.connect(CloudStorageType.DROPBOX)
-        testScheduler.advanceUntilIdle()
-        assertEquals(CloudStorageType.DROPBOX, vm.connectingType.value)
-        assertTrue(vm.canCancelConnect.value)
-
-        vm.cancelConnect()
-        testScheduler.advanceUntilIdle()
-
-        assertNull(vm.connectingType.value)
-        assertFalse(vm.canCancelConnect.value)
-        assertNull(vm.connectedType.value)
-        assertNull(vm.connectFailedType.value)
-        assertNull(vm.localSettings.value.cloudStorageType)
-        assertNull(tokenStorage.load())
-    }
-
-    /**
-     * The split this whole feature exists to fix: once OAuth and token save finish, connectingType
-     * must drop to null immediately — before the (potentially long) initial sync starts — while
-     * initialSyncingType picks up covering that sync. Without this split, the cloud-sync tab's
-     * "reset"/"switch provider" buttons stay correctly blocked, but so did "disconnect" (the bug),
-     * which must not be gated on the same flag.
-     */
-    @Test
-    fun initialSyncKeepsConnectingTypeClearWhileSettingInitialSyncingType() = runTest {
-        val gate = CompletableDeferred<Unit>()
-        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
-        assertNull(vm.initialSyncingType.value)
-
-        vm.connect(CloudStorageType.DROPBOX)
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-        assertNull(vm.connectingType.value)
-        assertEquals(CloudStorageType.DROPBOX, vm.initialSyncingType.value)
-
-        gate.complete(Unit)
-        testScheduler.advanceUntilIdle()
-
-        assertNull(vm.initialSyncingType.value)
-    }
-
-    @Test
-    fun syncPhaseMirrorsSyncRepositoryDuringTheInitialSync() = runTest {
-        val gate = CompletableDeferred<Unit>()
-        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
-        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
-
-        vm.connect(CloudStorageType.DROPBOX)
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(SyncPhase.CHECKING, vm.syncPhase.value)
-
-        gate.complete(Unit)
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
-    }
-
-    /**
-     * A manual "sync now" from Home (or anywhere else) also travels through [SyncRepository.syncPhase],
-     * so the ViewModel's collector must mirror it even when this ViewModel didn't start the sync.
-     */
-    @Test
-    fun syncPhaseMirrorsSyncRepositoryDuringManualSync() = runTest {
-        val gate = CompletableDeferred<Unit>()
-        val vm = newViewModel(syncCloudProvider = { GatedCloudStorage(gate) })
-        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
-
-        // Drive the sync through the repository directly, not through vm.connect().
-        val syncJob = launch { createdSyncRepository.sync() }
-        advanceUntilIdle()
-
-        assertEquals(SyncPhase.CHECKING, vm.syncPhase.value)
-
-        gate.complete(Unit)
-        syncJob.join()
-
-        assertEquals(SyncPhase.IDLE, vm.syncPhase.value)
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion below — the ViewModel's
-    // collector runs on the standalone UnconfinedTestDispatcher installed as Main, and the sync on a
-    // real Dispatchers.Default thread, neither on runTest's scheduler, so both the true and the false
-    // side of the transition are polled with real wall-clock waits.
-    @Test
-    fun syncingMirrorsActivityCenter() {
-        val activityCenter = ActivityCenter()
-        val vm = newViewModel(activityCenter = activityCenter)
-        assertFalse(vm.syncing.value)
-
-        val job = CoroutineScope(Dispatchers.Default).launch {
-            activityCenter.trackSync { delay(200) }
-        }
-
-        awaitTrue { vm.syncing.value }
-        awaitTrue { !vm.syncing.value }
-        runBlocking { job.join() }
-    }
-
-    // Note: same reason as syncingMirrorsActivityCenter above — the sync runs on a real thread
-    // outside any virtual scheduler, so this polls with real wall-clock waits. Regression test for
-    // a `drop(1)`-based bug: the syncing collector used to skip the subscription-time replay of
-    // ActivityCenter's sync state on the assumption it always
-    // matched the value the property initializer had already captured. That assumption can fail
-    // when a sync is already running before the ViewModel is even constructed (e.g. the background
-    // loop already syncing when Settings is opened) — the transition back to false can then race
-    // past the subscription point and get silently dropped, leaving `syncing` stuck true forever.
-    @Test
-    fun syncingReflectsActivityCenterAcrossAFullCycleEvenWhenAlreadyRunningAtConstruction() {
-        val activityCenter = ActivityCenter()
-        val gate = CompletableDeferred<Unit>()
-        val job = CoroutineScope(Dispatchers.Default).launch {
-            activityCenter.trackSync { gate.await() }
-        }
-        awaitTrue { activityCenter.activity.value.syncing }
-
-        val vm = newViewModel(activityCenter = activityCenter)
-        assertTrue(vm.syncing.value)
-
-        gate.complete(Unit)
-        awaitTrue { !vm.syncing.value }
-        runBlocking { job.join() }
-    }
-
-    // Note: same reason as disconnectClearsConnectedTypeAndCloudStorageType below — disconnect
-    // performs a real (mocked) HTTP revoke call whose completion is dispatched on a real thread
-    // outside the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
-    @Test
-    fun disconnectSetsDisconnectingUntilTeardownCompletes() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        // Holds the revoke open so the teardown cannot finish on Ktor's IO thread before the
-        // in-flight assertion below runs.
-        val revokeGate = CompletableDeferred<Unit>()
-        val authClient = HttpClient(MockEngine { revokeGate.await(); respond("{}", HttpStatusCode.OK) }) {
-            expectSuccess = false
-        }
-        try {
-            val session = singleProviderCloudSession(
-                client = authClient,
-                tokenStorage = tokenStorage,
-                authManager = DropboxAuthManager(authClient, clock = Clock { 0L }),
-            )
-            val vm = newViewModel(tokenStorage = tokenStorage, cloudSession = session)
-            assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-            assertFalse(vm.disconnecting.value)
-
-            vm.disconnect()
-            assertTrue(vm.disconnecting.value)
-
-            revokeGate.complete(Unit)
-            awaitTrue { vm.connectedType.value == null && !vm.disconnecting.value }
-            assertFalse(vm.disconnecting.value)
-        } finally {
-            revokeGate.complete(Unit)
-            authClient.close()
-        }
-    }
-
-    @Test
-    fun connectSuccessAfterPriorFailureClearsConnectFailedType() = runTest {
-        // A fresh VM per attempt (newViewModel takes a fixed connect result), mirroring how a real
-        // retry would resolve to Ok on the second attempt.
-        val failedVm = newViewModel(
-            connectResult = Result.Err(CloudAuthException("connect failed")),
-        )
-        failedVm.connect(CloudStorageType.DROPBOX)
-        testScheduler.advanceUntilIdle()
-        assertEquals(CloudStorageType.DROPBOX, failedVm.connectFailedType.value)
-
-        val retriedVm = newViewModel(
-            connectResult = Result.Ok(OAuthTokens("AT")),
-        )
-        retriedVm.connect(CloudStorageType.DROPBOX)
-        testScheduler.advanceUntilIdle()
-
-        assertEquals(CloudStorageType.DROPBOX, retriedVm.connectedType.value)
-        assertNull(retriedVm.connectFailedType.value)
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler. `disconnect`
-    // performs a real (mocked) HTTP revoke call whose completion is dispatched on a real
-    // thread outside the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
-    @Test
-    fun disconnectClearsConnectedTypeAndCloudStorageType() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val vm = newViewModel(tokenStorage = tokenStorage)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-
-        vm.disconnect()
-        awaitTrue { vm.connectedType.value == null }
-
-        assertNull(vm.connectedType.value)
-        assertNull(vm.localSettings.value.cloudStorageType)
-        assertNull(tokenStorage.load())
-    }
-
-    // Note: these tests deliberately avoid `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above — switchTo's disconnect(oldType) call
-    // performs a real (mocked) HTTP revoke whose completion is dispatched on a real thread outside
-    // the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
-    @Test
-    fun switchToDisconnectsOldProviderAndConnectsNewProvider() {
-        val dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT"))
-        val googleDriveTokenStorage = FakeTokenStorage()
-        val session = multiProviderCloudSession(
-            client = okAuthClient(),
-            dropboxTokenStorage = dropboxTokenStorage,
-            googleDriveTokenStorage = googleDriveTokenStorage,
-            googleDriveConnectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT2"))),
-        )
-        val vm = newViewModel(cloudSession = session)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-
-        vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { vm.connectingType.value == null }
-
-        assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectedType.value)
-        assertNull(vm.connectingType.value)
-        assertNull(dropboxTokenStorage.load())
-        assertEquals("AT2", googleDriveTokenStorage.load()?.accessToken)
-        assertEquals("google_drive", vm.localSettings.value.cloudStorageType)
-    }
-
-    @Test
-    fun switchToFailureLeavesLocalOnly() {
-        val dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT"))
-        val googleDriveTokenStorage = FakeTokenStorage()
-        val session = multiProviderCloudSession(
-            client = okAuthClient(),
-            dropboxTokenStorage = dropboxTokenStorage,
-            googleDriveTokenStorage = googleDriveTokenStorage,
-            googleDriveConnectFlow = FakeCloudConnectFlow(Result.Err(CloudAuthException("connect failed"))),
-        )
-        val vm = newViewModel(cloudSession = session)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-
-        vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { vm.connectFailedType.value == CloudStorageType.GOOGLE_DRIVE }
-
-        assertNull(vm.connectedType.value)
-        assertEquals(CloudStorageType.GOOGLE_DRIVE, vm.connectFailedType.value)
-        assertNull(vm.connectingType.value)
-        // The Dropbox disconnect already happened (and is irreversible) before the Google Drive
-        // connect attempt was made and failed — this is intentional per switchTo's design, not a bug.
-        assertNull(dropboxTokenStorage.load())
-        assertNull(googleDriveTokenStorage.load())
-        assertNull(vm.localSettings.value.cloudStorageType)
-    }
-
-    @Test
-    fun lastSyncedAtTextReflectsSyncStateOnInit() {
-        val expectedMillis = 1_234_567_890_123L
-        db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, expectedMillis.toString())
-
-        val vm = newViewModel()
-
-        assertEquals(formatTimestamp(expectedMillis), vm.lastSyncedAtText.value)
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above — the ViewModel's reactive collector
-    // runs on the standalone UnconfinedTestDispatcher installed as Main in setUp(), not on
-    // runTest's own TestCoroutineScheduler, so we poll with real wall-clock waits instead.
-    @Test
-    fun lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion() {
-        val activityCenter = ActivityCenter()
-        val vm = newViewModel(activityCenter = activityCenter)
-        assertNull(vm.lastSyncedAtText.value)
-
-        // Simulate what SyncRepository.sync() does on success: write the new sync_state row, then
-        // report a sync cycle through the same ActivityCenter the ViewModel observes. A short real
-        // delay (every real sync does at least one suspending network call) gives the ViewModel's
-        // collector — a StateFlow collector is conflated, so it can miss a value that is replaced
-        // straight away — a chance to actually observe the true state before it flips back to false.
-        val newMillis = 1_234_567_890_123L
-        db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, newMillis.toString())
-        runBlocking { activityCenter.trackSync { delay(50) } }
-
-        awaitTrue { vm.lastSyncedAtText.value == formatTimestamp(newMillis) }
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above.
-    @Test
-    fun disconnectClearsLastSyncedAtText() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, "1234567890123")
-        val vm = newViewModel(tokenStorage = tokenStorage)
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-        assertNotNull(vm.lastSyncedAtText.value)
-
-        vm.disconnect()
-        awaitTrue { vm.connectedType.value == null }
-
-        assertNull(vm.lastSyncedAtText.value)
-    }
-
-    /**
-     * The cloud-sync tab swaps its reset action for a reconnect one off this flag, so it has to
-     * reach the ViewModel at all — it travels on its own collector, separate from the one carrying
-     * [SettingsViewModel.lastSyncError].
-     *
-     * Note: avoids `runTest`'s virtual scheduler for the same reason as
-     * disconnectClearsConnectedTypeAndCloudStorageType above.
-     */
-    @Test
-    fun lastSyncAuthFailedMirrorsSyncRepositoryFlag() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val cloud = AlwaysFailingCloudStorage()
-        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
-
-        runBlocking { createdSyncRepository.sync() }
-
-        awaitTrue { vm.lastSyncAuthFailed.value }
-        assertTrue(vm.lastSyncAuthFailed.value)
-    }
-
-    @Test
-    fun canSyncNowIsFalseWithNoProviderConnected() {
-        val vm = newViewModel()
-        assertNull(vm.connectedType.value)
-
-        assertFalse(vm.canSyncNow.value)
-    }
-
-    /**
-     * The cloud-sync tab's "sync now" follows Home's cloud button: enabled only while nothing else
-     * is running, including a sync this ViewModel didn't start.
-     *
-     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
-     */
-    @Test
-    fun canSyncNowTracksActivityCenterIdleWhileConnected() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val activityCenter = ActivityCenter()
-        val vm = newViewModel(tokenStorage = tokenStorage, activityCenter = activityCenter)
-        assertTrue(vm.canSyncNow.value)
-
-        val gate = CompletableDeferred<Unit>()
-        val job = CoroutineScope(Dispatchers.Default).launch {
-            activityCenter.trackSync { gate.await() }
-        }
-        awaitTrue { !vm.idle.value }
-        assertFalse(vm.canSyncNow.value)
-
-        gate.complete(Unit)
-        awaitTrue { vm.idle.value }
-        assertTrue(vm.canSyncNow.value)
-        runBlocking { job.join() }
-    }
-
-    /**
-     * An authorization failure disables "sync now": a sync would only repeat it, and the row's own
-     * "reconnect" is what fixes it.
-     *
-     * Note: avoids `runTest`'s virtual scheduler for the same reason as
-     * disconnectClearsConnectedTypeAndCloudStorageType above.
-     */
-    @Test
-    fun canSyncNowIsFalseWhileLastSyncFailedOnAuthorization() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val cloud = AlwaysFailingCloudStorage()
-        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
-        assertTrue(vm.canSyncNow.value)
-
-        runBlocking { createdSyncRepository.sync() }
-
-        awaitTrue { vm.lastSyncAuthFailed.value }
-        assertFalse(vm.canSyncNow.value)
-    }
-
-    /**
-     * `syncNow()` runs a real sync through [SyncRepository] — observable as the sync the ViewModel
-     * mirrors — and the button disables itself for as long as that sync runs.
-     *
-     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
-     */
-    @Test
-    fun syncNowRunsASyncAndDisablesItselfUntilItFinishes() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val gate = CompletableDeferred<Unit>()
-        val vm = newViewModel(
-            tokenStorage = tokenStorage,
-            syncCloudProvider = { GatedCloudStorage(gate) },
-            dispatcher = Dispatchers.Default,
-        )
-        assertFalse(vm.syncing.value)
-
-        vm.syncNow()
-
-        // Two separate collectors carry these, so wait on each rather than assume their order.
-        awaitTrue { vm.syncing.value }
-        awaitTrue { vm.syncPhase.value == SyncPhase.CHECKING }
-        assertFalse(vm.canSyncNow.value)
-
-        gate.complete(Unit)
-        awaitTrue { !vm.syncing.value }
-        assertFalse(vm.syncing.value)
-    }
-
-    /**
-     * A second `syncNow()` while the first is still in flight must be ignored. Without a local
-     * in-flight flag the second call can race past [canSyncNow] before the [ActivityCenter]
-     * collector updates [idle], causing a redundant sync to queue behind [SyncRepository]'s mutex.
-     * A [HoldingDispatcher] holds the sync body so the second call lands while `idle` is still
-     * true — the in-flight flag, not the idle gate, must be what rejects it.
-     *
-     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
-     */
-    @Test
-    fun syncNowIgnoresSecondCallWhileFirstIsInFlight() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val gate = CompletableDeferred<Unit>()
-        val metadataCalls = AtomicInteger()
-        val held = HoldingDispatcher()
-        val vm = newViewModel(
-            tokenStorage = tokenStorage,
-            syncCloudProvider = { GatedCloudStorage(gate, metadataCalls) },
-            dispatcher = held,
-        )
-        assertTrue(vm.canSyncNow.value)
-
-        vm.syncNow()
-        try {
-            // The sync body is held, so ActivityCenter hasn't seen it: idle is still true and only
-            // the in-flight flag can be what disables the button.
-            assertTrue(vm.idle.value)
-            assertFalse(vm.canSyncNow.value)
-
-            vm.syncNow() // must be ignored by the in-flight flag, not by idle
-        } finally {
-            // Released even when an assertion above fails: a block still held can never resume,
-            // so tearDown()'s cancelAndJoin would wait on it forever.
-            held.release()
-            gate.complete(Unit)
-        }
-        awaitTrue { vm.canSyncNow.value }
-        // One sync's worth; a second sync queued behind the mutex would double this.
-        assertEquals(2, metadataCalls.get())
-    }
-
-    /**
-     * `reconnect()` must not stop at the teardown half. On Android's Google Drive the disconnect is
-     * the only thing that clears Play services' cached token, but a disconnect that never connects
-     * back would leave the user staring at an unconfigured provider after pressing a button labelled
-     * "reconnect".
-     *
-     * Note: avoids `runTest`'s virtual scheduler for the same reason as
-     * disconnectClearsConnectedTypeAndCloudStorageType above.
-     */
-    @Test
-    fun reconnectTearsDownAndConnectsBackToTheSameProvider() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val cloud = AlwaysFailingCloudStorage()
-        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
-        runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncAuthFailed.value }
-
-        vm.reconnect()
-
-        // Back on the same provider, with the selection persisted again — the teardown cleared both.
-        awaitTrue { vm.connectedType.value == CloudStorageType.DROPBOX }
-        assertEquals(CloudStorageType.DROPBOX, vm.connectedType.value)
-        awaitTrue { vm.localSettings.value.cloudStorageType == CloudStorageType.DROPBOX.id }
-        assertEquals(CloudStorageType.DROPBOX.id, vm.localSettings.value.cloudStorageType)
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above.
-    @Test
-    fun disconnectClearsLastSyncErrorText() {
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val cloud = AlwaysFailingCloudStorage()
-        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
-        runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError.value == ErrorKind.CLOUD_AUTH }
-
-        vm.disconnect()
-        // Await the actual condition being asserted, not just connectedType: lastSyncError is
-        // updated by an independent collector coroutine (init block) reacting to
-        // clearSyncFailureState()'s StateFlow write, so polling connectedType alone gives no
-        // happens-before guarantee for it.
-        awaitTrue { vm.connectedType.value == null && vm.lastSyncError.value == null }
-
-        assertNull(vm.lastSyncError.value)
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above — switchTo's disconnect(oldType) call
-    // performs a real (mocked) HTTP revoke whose completion is dispatched on a real thread outside
-    // the TestCoroutineScheduler, so we poll with real wall-clock waits instead.
-    @Test
-    fun switchToClearsLastSyncErrorTextFromOldProvider() {
-        val dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT"))
-        val googleDriveTokenStorage = FakeTokenStorage()
-        val session = multiProviderCloudSession(
-            client = okAuthClient(),
-            dropboxTokenStorage = dropboxTokenStorage,
-            googleDriveTokenStorage = googleDriveTokenStorage,
-            // Blocks indefinitely on OAuth, so the new provider's own connect/sync never runs —
-            // isolating the fix (clearing on disconnect) from a later successful sync also clearing it.
-            googleDriveConnectFlow = SuspendingCloudConnectFlow(),
-        )
-        val cloud = AlwaysFailingCloudStorage()
-        val vm = newViewModel(cloudSession = session, syncCloudProvider = { cloud })
-        runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError.value == ErrorKind.CLOUD_AUTH }
-
-        vm.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
-        // provider is even disconnected — wait for canCancelConnect instead, which only becomes true
-        // once connect(newType) is underway (i.e. after clearSyncFailureState() has already run). Also
-        // await lastSyncError directly: it's updated by an independent collector coroutine
-        // reacting to clearSyncFailureState()'s StateFlow write, so canCancelConnect alone gives no
-        // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
-        awaitTrue { vm.canCancelConnect.value && vm.lastSyncError.value == null }
-
-        assertNull(vm.lastSyncError.value)
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above.
-    @Test
-    fun lastSyncErrorMirrorsSyncRepositoryLastSyncError() {
-        // The cloud-sync tab shows this as the reason the connected provider isn't syncing, so it has
-        // to track SyncRepository.lastSyncError in both directions.
-        val tokenStorage = FakeTokenStorage()
-        tokenStorage.save(OAuthTokens("AT"))
-        val cloud = AlwaysFailingCloudStorage()
-        var failing = true
-        val vm = newViewModel(tokenStorage = tokenStorage, syncCloudProvider = { if (failing) cloud else null })
-        assertNull(vm.lastSyncError.value)
-
-        runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError.value == ErrorKind.CLOUD_AUTH }
-
-        // Local-only from here on, so the next sync is a success and must clear the reason.
-        failing = false
-        runBlocking { createdSyncRepository.sync() }
-        awaitTrue { vm.lastSyncError.value == null }
-    }
-
-    // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
-    // disconnectClearsConnectedTypeAndCloudStorageType above — UpdateChecker makes a real
-    // (mocked) HTTP call whose completion is dispatched on a real thread outside the
+    // Note: this test deliberately avoids `runTest`'s virtual scheduler — UpdateChecker makes a
+    // real (mocked) HTTP call whose completion is dispatched on a real thread outside the
     // TestCoroutineScheduler, so we poll with real wall-clock waits instead.
     @Test
     fun checkForUpdateSurfacesAvailableResultWithoutTouchingLastUpdateCheckAt() {
@@ -1126,39 +376,7 @@ class SettingsViewModelTest {
         assertEquals(1, requestCount)
     }
 
-    @Test
-    fun buildOpmlDocumentGroupsFeedsByFolderInDisplayOrderAndAnnotatesTags() {
-        db.insertFolder("d1", "Tech", sortOrder = 0L)
-        db.insertFolder("d2", "News", sortOrder = 1L)
-        db.insertFolder("d3", "Empty", sortOrder = 2L)
-        db.insertFeed("f1", url = "https://a.com/feed", folderId = "d1", sortOrder = 0L)
-        db.insertFeed("f2", url = "https://b.com/feed", folderId = "d1", sortOrder = 1L)
-        db.insertFeed("f3", url = "https://c.com/feed", folderId = "d2", sortOrder = 0L)
-        db.insertFeed("f4", url = "https://d.com/feed", sortOrder = 0L) // unfoldered
-        db.insertTag("t1", "kotlin", sortOrder = 0L)
-        db.insertTag("t2", "daily", sortOrder = 1L)
-        db.insertFeedTag("f1", "t2")
-        db.insertFeedTag("f1", "t1")
-        val vm = newViewModel()
-
-        val xml = vm.buildOpmlDocument()
-
-        assertTrue(xml.contains("""<outline text="Tech">"""))
-        // Tags follow the tags' own display (sort_order) order, not attachment order.
-        assertTrue(xml.contains("""category="kotlin,daily""""))
-        // An empty folder has nothing to export, so it is skipped entirely.
-        assertFalse(xml.contains("Empty"))
-
-        val reimported = OpmlCodec.import(xml)
-        // Folders first in folder sort order, feeds in their sort order within each, unfoldered last.
-        assertEquals(
-            listOf("https://a.com/feed", "https://b.com/feed", "https://c.com/feed", "https://d.com/feed"),
-            reimported.map { it.xmlUrl },
-        )
-        assertEquals(listOf("Tech", "Tech", "News", null), reimported.map { it.folderName })
-        assertEquals(listOf("kotlin", "daily"), reimported[0].tags)
-        assertTrue(reimported.drop(1).all { it.tags.isEmpty() })
-    }
+    // --- OPML (file picking + busy state) ---
 
     @Test
     fun exportOpmlWritesTheBuiltDocumentToThePickedPath() = runTest {
@@ -1329,7 +547,7 @@ class SettingsViewModelTest {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition()) {
             check(System.currentTimeMillis() < deadline) { "Timed out waiting for condition" }
-            kotlinx.coroutines.delay(5)
+            delay(5)
         }
     }
 }

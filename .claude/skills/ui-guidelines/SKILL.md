@@ -1073,6 +1073,13 @@ should follow the same rules:
   same channel as the search field, which is what makes the root's bare-key shortcuts and the menu
   bar's F2/Delete accelerators stand aside.
 
+The SwiftUI app follows the same rules with `appleApp/Keryx/Home/InlineRenameField.swift`, driven by
+`SidebarDialogState.renamingRowKey` (a `feedListRowSelectionKey`, so only the rendered copy that was
+asked for edits); the editing state stands the bare Return/Delete accelerators aside through
+`SidebarDialogState.isEditingInline` (not a `HomeFocusedPane` case — on macOS the editor is an AppKit
+field that takes focus itself, so `focusedPane` cannot report it), and it shares
+`inlineRenameValidation` from `:shared`.
+
 Creating still uses a dialog (`FeedListDialogs.kt`'s add folder / add tag): there is no row to edit
 in place yet, and a new tag picks its name and color at once.
 
@@ -1400,15 +1407,28 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     filter is selected — `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results
     states); at a narrow layout, `ArticleListPane`'s own `KeryxExpandedSearchBar`
     (`ui/common/KeryxSearchBar.kt`) instead, reached through `ArticleListTopBar`'s search icon — see
-    "Adaptive pane layout & touch affordances" below → either way, SwiftUI's `.searchable()`.
+    "Adaptive pane layout & touch affordances" below → **already ported, to `.searchable()`**:
+    `FeedListView` (`appleApp/Keryx/Home/FeedListView.swift`) attaches
+    `.searchable(text:placement: .sidebar, …)`, and its `SearchFocusModifier` binds the field to
+    `focusedPane`'s `.search` case through `.searchFocused(_:equals:)` only where that exists
+    (macOS 15 / iOS 18+). On macOS 14 / iOS 17 the field cannot report its focus, so
+    `HomeObservable.textInputFocused` stays false there and the shortcut/focus-handoff logic
+    (`HomeShortcutsKt.homeShortcutFor`'s `textInputFocused`, moving into the results with ↓/↑) does
+    not see it.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
   - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
-    `DropBoundary`, `RowHalf`, `resolveRowHalf`) — hand-computed row-half hit-testing and a manually
-    drawn insertion line (explicitly modeled on macOS Notes' reorder UI) → SwiftUI `List`'s native `.onMove`/`.onInsert`
-    reordering, which draws insertion indicators and row-shift animation for free.
+    `RowHalf`, `resolveRowHalf`) and the shared `presentation/home/FeedListDrag.kt` (`DropBoundary`,
+    `FeedListDropIndex`, `resolveFeedListDropAction`/`resolveFeedListDropHighlight`) — hand-computed
+    row-half hit-testing and a manually drawn insertion line (explicitly modeled on macOS Notes'
+    reorder UI) → **already ported, deliberately not to `.onMove`/`.onInsert`**: the Apple app
+    (`appleApp/Keryx/Home/FeedListDragAndDrop.swift`) calls the same shared `FeedListDrag.kt`
+    functions through a custom `DropDelegate`, so both UIs resolve an identical drop to an identical
+    action/insertion line — porting to `List`'s native reordering would mean re-deriving that same
+    logic a second time in SwiftUI's own terms, and still wouldn't cover this feature's other drop
+    kinds (move-to-folder, tag-attach) that `.onMove` has no equivalent for.
   - `homeKeyboardShortcuts` (`ui/home/KeyboardNav.kt`) — an `onPreviewKeyEvent` key trap for app
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
     menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard

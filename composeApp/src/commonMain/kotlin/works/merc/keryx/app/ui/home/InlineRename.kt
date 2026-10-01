@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.presentation.home.inlineRenameValidation
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.ui.common.KeryxIcon
@@ -44,27 +45,6 @@ private val InlineRenameHorizontalPadding = 6.dp
 /** Size of the "×" cancel glyph. Deliberately smaller than one line of the row's own text, so
  * showing it can never make the editor — and therefore the row — taller than the label it replaced. */
 private val InlineRenameCancelIconSize = 16.dp
-
-/**
- * Whether an edited name may be committed, and the message (if any) that says why not.
- *
- * A blank value is deliberately **not** an error: it produces no message and no red frame, it simply
- * cannot be committed — unless `allowBlank` says a blank value is itself meaningful, in which case
- * it is validated like any other. Shared by [InlineRenameField] and [TextPromptDialog], the app's
- * two single-line-text-entry surfaces, so both agree on what "invalid" means.
- */
-internal data class InlineRenameValidation(val error: String?, val canCommit: Boolean)
-
-/** Validates [text] for [InlineRenameField]. See [InlineRenameValidation]. */
-internal fun inlineRenameValidation(
-    text: String,
-    allowBlank: Boolean,
-    blockingError: (String) -> String?,
-): InlineRenameValidation {
-    val trimmed = text.trim()
-    val error = if (!allowBlank && trimmed.isBlank()) null else blockingError(trimmed)
-    return InlineRenameValidation(error = error, canCommit = (allowBlank || trimmed.isNotBlank()) && error == null)
-}
 
 /**
  * The feed list's in-row name editor: the row's label `Text` swapped for a text field occupying the

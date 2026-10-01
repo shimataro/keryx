@@ -74,6 +74,8 @@ import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.feedsForTag
 import works.merc.keryx.app.presentation.home.groupFeedsByFolder
+import works.merc.keryx.app.presentation.home.isDuplicateFolderName
+import works.merc.keryx.app.presentation.home.isDuplicateTagName
 import works.merc.keryx.app.presentation.home.reorderTargetWithinScope
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -119,6 +121,8 @@ import works.merc.keryx.app.ui.common.KeryxTextField
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
+import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.buildFeedListDropIndex
 
 /** How close to the feed list's top/bottom edge a drag must come before the list auto-scrolls, so a
  * drop target outside the current viewport can still be reached without letting go of the drag. */
@@ -654,7 +658,7 @@ internal fun FeedListPane(
                                     onRenameCommit = { vm.updateFolder(folder.id, it); inlineEdit = null },
                                     onRenameCancel = { inlineEdit = null },
                                     nameError = { name ->
-                                        if (folders.any { it.id != folder.id && it.name == name }) folderNameDuplicateError else null
+                                        if (isDuplicateFolderName(name, folders, excludeId = folder.id)) folderNameDuplicateError else null
                                     },
                                     isDragSource = folder.id == draggedFeedFolderId,
                                     isTouchPrimary = isTouchPrimary,
@@ -714,11 +718,7 @@ internal fun FeedListPane(
                                 onRenameCommit = { vm.updateTag(tag.id, it, tag.color); inlineEdit = null },
                                 onRenameCancel = { inlineEdit = null },
                                 nameError = { name ->
-                                    if (tags.any { it.id != tag.id && it.deleted_at == null && it.name == name }) {
-                                        tagNameDuplicateError
-                                    } else {
-                                        null
-                                    }
+                                    if (isDuplicateTagName(name, tags, excludeId = tag.id)) tagNameDuplicateError else null
                                 },
                                 onSelectColor = { vm.updateTag(tag.id, tag.name, it) },
                                 isTouchPrimary = isTouchPrimary,

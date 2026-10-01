@@ -196,47 +196,21 @@ not just iOS/iPadOS).
    reversed-client-id custom scheme, `com.googleusercontent.apps.NNNN-xxxx:/oauth2redirect`, which
    Google derives from the Client ID automatically (`googleIosClientRedirectUri`,
    `data/cloud/GoogleDriveAuthManager.kt`).
-5. **Register the custom URL schemes in the Swift app's Info.plist.** Two schemes need to be
-   registered: the shared `keryx` scheme (Dropbox/OneDrive, and now Google Drive too — all three
-   disambiguated by `state`) and the Google client's own reversed-client-id scheme from step 4.
-   `CFBundleURLTypes` takes one `<dict>` per scheme, each with its own `CFBundleURLName` and a
-   `CFBundleURLSchemes` array holding just that one scheme string — the same shape the desktop app's
-   Compose packaging already uses for `keryx` (`composeApp/build.gradle.kts`'s
-   `nativeDistributions.macOS.infoPlist.extraKeysRawXml`):
-
-   ```xml
-   <key>CFBundleURLTypes</key>
-   <array>
-       <dict>
-           <key>CFBundleURLName</key>
-           <string>works.merc.keryx.oauth</string>
-           <key>CFBundleURLSchemes</key>
-           <array>
-               <string>keryx</string>
-           </array>
-       </dict>
-       <dict>
-           <key>CFBundleURLName</key>
-           <string>works.merc.keryx.oauth.googledrive</string>
-           <key>CFBundleURLSchemes</key>
-           <array>
-               <string>com.googleusercontent.apps.NNNN-xxxx</string>
-           </array>
-       </dict>
-   </array>
-   ```
-
-   Replace `com.googleusercontent.apps.NNNN-xxxx` with the actual reversed client ID from step 4.
-   Xcode's own editor (target → **Info** tab → **URL Types**, "+") writes the same two keys and can
-   be used instead of hand-editing the XML.
-
-   **This registration is only needed for the redirect-delivery path desktop uses today** — the OS
-   handing the URL to the running app (`NSApplicationDelegate.application(_:open:)` on macOS,
-   `onOpenURL`/`scene(_:openURLContexts:)` on iOS) after the user completes sign-in in the system
-   browser. If the Swift app instead opens the authorization URL through
-   `ASWebAuthenticationSession` and passes the scheme as its `callbackURLScheme` parameter, that
-   session intercepts the redirect itself and needs no `CFBundleURLTypes` entry for it — the two are
-   alternative delivery mechanisms, not both required.
+5. **The shipped `appleApp/` project registers no `CFBundleURLTypes` at all — neither the shared
+   `keryx` scheme nor the Google client's reversed-client-id scheme from step 4.** Both would only
+   be needed for the OS redirect-delivery path desktop uses (`NSApplicationDelegate.application
+   (_:open:)` handing the URL to the already-running app after the user finishes sign-in in the
+   system browser). `appleApp/` instead opens every provider's authorize URL through
+   `ASWebAuthenticationSession`, passing the scheme as its `callbackURLScheme` parameter
+   (`domain/schemeOf` derives it from the connect flow's own redirect URI, so Swift never
+   hardcodes a copy of it) — that session intercepts the redirect itself and needs no
+   `CFBundleURLTypes` entry for it. See [app-architecture.md](app-architecture.md)'s "Apple targets
+   in `:shared`" for the launcher wiring. (If a future need for the OS redirect-delivery path ever
+   arises instead, `CFBundleURLTypes` would take one `<dict>` per scheme, each with its own
+   `CFBundleURLName` and a `CFBundleURLSchemes` array holding just that one scheme string — the same
+   shape the desktop app's Compose packaging already uses for `keryx`
+   (`composeApp/build.gradle.kts`'s `nativeDistributions.macOS.infoPlist.extraKeysRawXml`) — but
+   this is not what the app does today.)
 
 Leaving `googledrive.apple.client.id` empty hides Google Drive on the Apple app only — it has no
 effect on desktop's or Android's own Google Drive keys, and vice versa. See
@@ -247,8 +221,8 @@ appleMain is structured.
 ## String Catalog for the Apple app
 
 The SwiftUI app localizes through an Xcode String Catalog generated from the Compose app's own
-`composeResources/values/strings.xml` (Japanese, the source/fallback language) and
-`values-en/strings.xml`, so both UIs share one source of truth for every user-facing text:
+`composeResources/values/strings.xml` (English, the source/fallback language) and
+`values-ja/strings.xml`, so both UIs share one source of truth for every user-facing text:
 
 ```bash
 ./gradlew :composeApp:generateStringCatalog
@@ -260,6 +234,100 @@ Apple's (`%1$s` → `%1$@`, `%1$d` → `%1$lld`) and turns `<plurals>` into plur
 is a build output — never edit or commit it; change `strings.xml` instead.
 `StringCatalogParityTest` (run by `desktopTest`, which generates the catalog first) fails if the
 catalog and the resources disagree on keys, plural forms or placeholders.
+
+`appleApp/project.yml`'s `sources:` list references the generated file directly
+(`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`), so `xcodegen generate` bundles
+whatever `build-shared.sh`'s prebuild step most recently wrote — the file only needs to exist once,
+before the first `xcodegen generate`. **A Swift call site never uses a literal English string as the
+key** the way `Text("Some Label")` ordinarily would: the catalog's own top-level keys are exactly the
+Android resource names (`home_all_feeds`, `common_cancel`, …), so `appleApp/Keryx/Platform/Localized.swift`'s
+`L(_ key: String) -> String` / `LF(_ key: String, _ args: CVarArg...) -> String` resolve a key through
+`String(localized:)` and hand back a plain, already-localized `String` — pass that into whichever
+view initializer takes a bare `String` (`Text(L("home_all_feeds"))`, `.help(L("article_star"))`, an
+`.alert(LF("home_delete_folder_confirm", folder.name), …)` title, etc.), never the `LocalizedStringKey`-taking
+overload, since the key text itself is not meant to be shown. A `<plurals>` whose forms use more than
+one argument (e.g. "%1$d feed added, %2$d failed") is emitted as a **substitution** rather than plain
+plural variations: a plain variation cannot say which argument picks the plural category, and Xcode
+warns "Use an explicit substitution instead". The first argument drives the category, matching the
+Android convention of passing the counted value first (it is also the `quantity` handed to
+`pluralStringResource`). The Apple app still uses its own fixed-wording, non-plural
+`apple_add_feed_partial_result` for that message (see its comment in `strings.xml`).
+
+`project.yml` sets `developmentLanguage: en` to match the catalog's source language: Xcode refuses to
+export localizations when the two differ, and the development language is also the app's fallback
+(`CFBundleDevelopmentRegion`), which must be English like the Compose app's — a Japanese system gets
+Japanese, every other language falls back to English.
+
+Xcode's localization sync would otherwise warn "Skipping extraction of localizable string with
+non-literal key" once per `Text(L("…"))` call, since it cannot tell that these already pass a
+localized `String`. `project.yml` therefore sets `LOCALIZED_STRING_SWIFTUI_SUPPORT = NO` (nothing in the
+Swift sources is meant to be extracted — the catalog is generated), and `LF` looks the format up
+through `Bundle.localizedString(forKey:)` instead of `NSLocalizedString`, which the sync scans for too.
+
+## Building the SwiftUI app (`appleApp/`)
+
+`appleApp/project.yml` is the source of truth; the `.xcodeproj` is a generated artifact and is
+never committed (see `.gitignore`). Requires **XcodeGen** (`brew install xcodegen`) in addition to
+Xcode itself.
+
+```bash
+cd appleApp
+xcodegen generate                              # writes Keryx.xcodeproj from project.yml
+xcodebuild -scheme Keryx -destination 'platform=macOS' build
+xcodebuild -scheme Keryx -destination 'platform=macOS' test
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build
+```
+
+The scheme's Run and Test actions use the Debug configuration, so the Swift side is built
+unoptimized (`-Onone`). Measure performance with a Release build
+(`xcodebuild -scheme Keryx -configuration Release …`, or Product > Profile in Xcode), never a
+Debug one; the Kotlin XCFramework is Release in every configuration either way. Point a
+measurement run at a scratch database with the `KERYX_DATA_DIR` environment variable rather than
+your real data directory.
+
+`project.yml`'s `prebuildScripts` entry (`Scripts/build-shared.sh`) runs
+`:shared:assembleKeryxSharedReleaseXCFramework` and `:composeApp:generateStringCatalog`
+automatically before each Xcode/`xcodebuild` build, so a plain build picks up the current Kotlin
+source without a separate manual step — there is no Debug variant of the XCFramework wired in;
+every configuration links Release. On a clean checkout, though, Xcode checks that the release
+XCFramework exists while planning the build — before the prebuild script has run — and
+`xcodegen generate` refuses to run while the String Catalog it lists as a source is missing, so run
+`./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog` once
+first (CI does the same). See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
+Xcode project" for why the dependency is wired through `dependencies:` (framework linking) rather
+than `FRAMEWORK_SEARCH_PATHS` or Kotlin/Native's `embedAndSignAppleFrameworkForXcode`, and why
+`KeryxTests` is a standalone (non-hosted) test bundle.
+
+### Signing
+
+The app's entitlements (`Keryx/Keryx.entitlements`: `app-sandbox`, `keychain-access-groups`, …)
+**require signing with a real Apple Development or Developer ID identity and team** — ad-hoc
+signing (`CODE_SIGN_IDENTITY=-`) cannot produce a runnable sandboxed build, even under
+`CODE_SIGN_STYLE=Manual` (fails with "requires a provisioning profile"). To build and run locally:
+
+1. Copy `appleApp/Local.xcconfig.example` to `appleApp/Local.xcconfig` (gitignored).
+2. Fill in `DEVELOPMENT_TEAM` (your Apple ID's team — a free "Personal Team" works) and
+   `CODE_SIGN_IDENTITY` (`Apple Development` is usually right).
+3. `appleApp/Config/Shared.xcconfig` `#include?`s this file, so XcodeGen/Xcode picks it up on the
+   next `xcodegen generate` with no other change.
+
+Without a `Local.xcconfig`, `Shared.xcconfig`'s ad-hoc defaults apply, which compile and link but
+cannot codesign a sandboxed binary — fine for CI verification (below), not for a binary you can
+actually launch.
+
+### CI
+
+The macOS CI job has no Apple ID/team available, so it verifies the build with
+`CODE_SIGNING_ALLOWED=NO` (compiles and links, skips codesigning entirely) rather than a real
+signed build:
+
+```bash
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+`KeryxTests` (Swift Testing, standalone/non-hosted) still runs signed with the CI's ad-hoc identity
+since it produces a `.xctest` bundle rather than a sandboxed app.
 
 ## Packaging
 
@@ -632,8 +700,17 @@ upload key registered with Play and an AAB signed any other way is not publishab
 App icons are at `composeApp/icons/{keryx.icns, keryx.ico, keryx.png}`. Tray icons are at
 `composeApp/src/commonMain/composeResources/drawable/tray_icon*.png` — `tray_icon_outlined.png` (white glyph +
 black outline) for the macOS menu bar and the Linux SNI panel, `tray_icon.png` (full colour) for the Windows
-notification area, the Linux AWT fallback and the window's own title-bar icon. These are generated from shared artwork via
+notification area, the Linux AWT fallback and the window's own title-bar icon. The SwiftUI app's macOS menu bar also
+uses `tray_icon.png`, referenced in place by `appleApp/project.yml` and drawn as a template image. These are generated from shared artwork via
 `design/icons/make_desktop_icons.sh` (it is preferable to commit generated files).
+
+The SwiftUI app's own icon (macOS and iOS alike) is the Icon Composer file
+`appleApp/Keryx/Resources/AppIcon.icon` rather than a PNG set: a teal gradient fill plus the glyph as two
+layers (`pole.svg`, `waves.svg`), from which Xcode renders Liquid Glass, dark and tinted variants and the
+flattened fallbacks for pre-26 OS versions (building it needs Xcode 26 or later). The layer SVGs are copies of
+`design/icons/svg/app_icon_apple_{pole,waves}.svg` — the desktop glyph at the same size (about 65% of the canvas wide), with the
+waves drawn as filled outlines rather than strokes, since the icon renderer draws a stray seam through a stroked
+arc. Edit it in Icon Composer (bundled with Xcode) and keep the two SVG copies in sync.
 
 The app's store/menu category is set per platform in `nativeDistributions`: macOS uses
 `appCategory = "public.app-category.news"` (`LSApplicationCategoryType`) since Apple's App Store

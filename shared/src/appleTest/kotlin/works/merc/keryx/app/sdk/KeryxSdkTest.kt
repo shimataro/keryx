@@ -137,4 +137,84 @@ class KeryxSdkTest {
             sdk.close()
         }
     }
+
+    @Test
+    fun theSharedControllersAreReachableAndStartInTheirLocalOnlyState() = runTest {
+        val sdk = start()
+        try {
+            assertNull(sdk.cloudSyncController.connectedType.value)
+            assertEquals(sdk.availableCloudTypes, sdk.setupController.availableCloudTypes)
+            assertTrue(sdk.preferences.localSettings.value.notificationEnabled)
+            assertNull(sdk.notificationAlerts.alertToSurface.value)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun opmlExportsAndImportsTheSameEmptyDocumentThroughTheSdk() = runTest {
+        val sdk = start()
+        try {
+            val exported = sdk.opml.exportOpml()
+            val outcome = sdk.opml.importOpml(exported)
+            assertEquals(0, outcome.added)
+            assertEquals(0, outcome.failed)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun menuStateGatesEverythingOnHome() = runTest {
+        val sdk = start()
+        try {
+            val onHome = sdk.menuState(
+                onHome = true,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                cloudConnected = false,
+                searchActive = false,
+                unreadOnly = false,
+            )
+            assertTrue(onHome.addItemsEnabled)
+
+            val awayFromHome = sdk.menuState(
+                onHome = false,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                cloudConnected = false,
+                searchActive = false,
+                unreadOnly = false,
+            )
+            assertFalse(awayFromHome.addItemsEnabled)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun importOpenedOpmlPostsAnInfoNotificationForAnEmptyDocument() = runTest {
+        val sdk = start()
+        try {
+            sdk.importOpenedOpml("<opml><body></body></opml>")
+
+            assertEquals(1, sdk.notificationCenter.items.value.size)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun startMaintenanceIsIdempotent() = runTest {
+        val sdk = start()
+        try {
+            // A fresh dataDirectory has no completed setup, so runStartupMaintenance's own gate
+            // makes both calls near-instant no-ops; this only asserts calling it twice doesn't
+            // start a second overlapping loop (which close() below would then fail to join cleanly).
+            sdk.startMaintenance()
+            sdk.startMaintenance()
+        } finally {
+            sdk.close()
+        }
+    }
 }

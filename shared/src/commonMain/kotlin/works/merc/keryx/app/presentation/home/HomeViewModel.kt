@@ -58,6 +58,13 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 
 /**
+ * How long the article-change signal must stay quiet before an active search re-runs — short
+ * enough that a read/star toggle's re-searched row still updates promptly, long enough to coalesce
+ * a refresh's per-feed commits.
+ */
+internal const val SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS = 100L
+
+/**
  * Debounced FTS results tagged with the query/filter that produced them (see
  * [HomeViewModel.searching]).
  */
@@ -97,6 +104,20 @@ class HomeViewModel(
         feedRepository.watchAllFeeds().stateIn(viewModelScope, started, emptyList())
 
     /**
+     * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
+     * ([feedsStructurallyEqual]) — what a refresh rewrites once per fetched feed without anything on
+     * screen reading it. Consumed by the Apple app, which rebuilds its sidebar, feed lookups and
+     * article rows' feed info from this rather than from every [feeds] emission; the comparison
+     * runs on [dispatcher] instead of reading every field across the Swift bridge on the main
+     * thread. Its `Feeds` may therefore lag [feeds] in those three fields — anything needing the
+     * fresh conditional-request fields (a refresh) must resolve the row from [feeds].
+     */
+    val structuralFeeds: StateFlow<List<Feeds>> =
+        feeds.distinctUntilChanged(::feedsStructurallyEqual)
+            .flowOn(dispatcher)
+            .stateIn(viewModelScope, started, emptyList())
+
+    /**
      * A one-shot check for whether any feed exists at all, read directly from
      * [FeedRepository.watchAllFeeds] rather than the already-collected [feeds] above: [feeds]'
      * `Eagerly`-shared `StateFlow` starts at `emptyList()` before its first real emission lands, so
@@ -133,12 +154,14 @@ class HomeViewModel(
     /**
      * Restores the last-selected filter from local settings, falling back to
      * [ArticleFilter.All] if it's missing, undecodable, or points at a feed/tag/folder that
-     * was deleted while the app was closed.
+     * was deleted while the app was closed. The second value says whether the saved filter was
+     * actually reproduced (false for any of those fallbacks).
      */
-    private fun restoreFilter(): ArticleFilter {
-        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All
-        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All
-        return validateFilterTarget(decoded)
+    private fun restoreFilter(): Pair<ArticleFilter, Boolean> {
+        val encoded = settingsRepository.getLocalSettings().lastFilter ?: return ArticleFilter.All to false
+        val decoded = decodeArticleFilter(encoded) ?: return ArticleFilter.All to false
+        val validated = validateFilterTarget(decoded)
+        return validated to (validated == decoded)
     }
 
     /**
@@ -167,7 +190,12 @@ class HomeViewModel(
     // behavior after upgrading.
     private val legacyUnreadFilter = settingsRepository.getLocalSettings().lastFilter == "unread"
 
-    private val _filter = MutableStateFlow<ArticleFilter>(restoreFilter())
+    private val launchFilter = restoreFilter()
+
+    /** Whether the previous session's filter was restored at launch — see [initialHomePane]. */
+    val filterRestoredOnLaunch: Boolean = launchFilter.second
+
+    private val _filter = MutableStateFlow<ArticleFilter>(launchFilter.first)
     val filter: StateFlow<ArticleFilter> = _filter
 
     // Which *rendered row* of the feed list the selection is on — a feed renders once under its
@@ -313,14 +341,25 @@ class HomeViewModel(
                 // unstarred while browsing Starred). Per-field resolution (rather than picking one
                 // map's snapshot outright) covers an article pinned in both at once, e.g. read and
                 // then unstarred while browsing Starred + unread-only.
-                resolvedList = list.map { row ->
-                    row.copy(
-                        is_read = pinnedRead[row.id]?.is_read ?: row.is_read,
-                        is_starred = pinnedUnstarred[row.id]?.is_starred ?: row.is_starred,
-                    )
+                //
+                // Only a pinned row whose resolved fields differ is replaced; every other row keeps
+                // its instance, and once the writes have landed the raw list itself is returned.
+                var resolved: MutableList<ArticleListRow>? = null
+                val presentPinnedIds = HashSet<String>()
+                list.forEachIndexed { index, row ->
+                    val readPin = pinnedRead[row.id]
+                    val unstarPin = pinnedUnstarred[row.id]
+                    if (readPin == null && unstarPin == null) return@forEachIndexed
+                    presentPinnedIds += row.id
+                    val isRead = readPin?.is_read ?: row.is_read
+                    val isStarred = unstarPin?.is_starred ?: row.is_starred
+                    if (isRead != row.is_read || isStarred != row.is_starred) {
+                        val target = resolved ?: list.toMutableList().also { resolved = it }
+                        target[index] = row.copy(is_read = isRead, is_starred = isStarred)
+                    }
                 }
-                val existingIds = list.mapTo(HashSet(list.size)) { it.id }
-                extra = (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in existingIds }.map { id ->
+                resolvedList = resolved ?: list
+                extra = (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in presentPinnedIds }.map { id ->
                     val base = pinnedRead[id] ?: pinnedUnstarred.getValue(id)
                     base.copy(
                         is_read = pinnedRead[id]?.is_read ?: base.is_read,
@@ -458,7 +497,9 @@ class HomeViewModel(
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
             // doesn't auto-notify. search() absorbs the transient articles_fts-dropped case itself.
-            articleChangeSignal,
+            // Debounced: a refresh commits once per fetched feed, and each commit would otherwise
+            // re-run the whole FTS query while a search is showing.
+            articleChangeSignal.debounce(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS),
         ) { q, f, _, _ -> q to f }
             .map { (q, f) ->
                 SearchSnapshot(q, f, if (searchTerms(q).isEmpty()) emptyList() else articleRepository.search(q, f))
@@ -601,6 +642,16 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
+    /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
+    val articleRestoredOnLaunch: Boolean
+
+    /**
+     * The pane that should hold keyboard focus when the home screen first appears, fixed at
+     * construction from what this launch managed to restore — see [resolveInitialHomePane]. Read by
+     * the Apple app; desktop Compose keeps its own `HomeLayoutViewModel.getInitialFocusedPane`.
+     */
+    val initialHomePane: InitialHomePane
+
     init {
         // Restore the last-selected article (not via selectArticle(), to avoid re-marking it as
         // read and clobbering another device's "mark as unread" sync via read_at last-write-wins).
@@ -620,6 +671,12 @@ class HomeViewModel(
             // article instead of jumping back to the top of the list.
             selectionCursorId = restoredArticle.id
         }
+        articleRestoredOnLaunch = restoredArticle != null
+        initialHomePane = resolveInitialHomePane(
+            savedPane = settingsRepository.getLocalSettings().lastFocusedPane,
+            filterRestored = filterRestoredOnLaunch,
+            articleRestored = articleRestoredOnLaunch,
+        )
 
         // Any write to `articles` can be a sync merge propagating a soft-delete tombstone for an
         // article currently pinned here; revalidate the pins so a deleted one can't stay visible.

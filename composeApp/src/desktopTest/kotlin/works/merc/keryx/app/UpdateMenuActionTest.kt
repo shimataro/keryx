@@ -18,6 +18,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
+import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateInstaller
@@ -160,7 +161,7 @@ class UpdateMenuActionTest {
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
-        return Fixture(repo, NotificationCenterViewModel(notificationCenter), installer) { requestCount }
+        return Fixture(repo, NotificationCenterViewModel(notificationCenter, NotificationAlerts(notificationCenter)), installer) { requestCount }
     }
 
     /** A fixture whose check finds version 2.0.0, with a downloadable, digest-matching asset. */

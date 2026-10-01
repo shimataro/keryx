@@ -59,6 +59,24 @@
   concerns that don't need a Compose UI tree, so a Compose-rendering test lives here instead, in
   the one module that is an actual Android application.
 
+- `appleApp/KeryxTests/` — Swift Testing (`import Testing`, `@Suite`/`@Test`/`#expect`) for the
+  SwiftUI app itself, distinct from `:shared`'s Kotlin `appleTest`/`macosTest` above. **A standalone
+  (non-hosted) unit-test bundle** — `project.yml` declares no `dependencies: [{target: Keryx}]`/
+  `TEST_HOST` for it, because a hosted bundle on a `supportedDestinations: [macOS, iOS]` target hits
+  a real XcodeGen/Xcode bug where `TEST_HOST` path computation uses iOS's flat `Keryx.app/Keryx`
+  layout even when building for macOS, whose bundle actually nests the executable under
+  `Keryx.app/Contents/MacOS/Keryx` (see [app-architecture.md](app-architecture.md)'s "The
+  `appleApp/` Xcode project"). Being host-less means these tests cannot drive `AppModel`/`HomeView`
+  directly — they cover the `Bridge/` `StateFlow`-to-`@Observable` adapters and the
+  `Localization/` `NotificationText`/`ErrorKind`-to-string-catalog-key mapping in isolation, feeding
+  them fakes/known enum cases rather than a running `KeryxSdk`. It does statically link
+  `KeryxShared.xcframework` (`project.yml`'s own `dependencies:` for this target), so a test can also
+  build and compare real Kotlin sealed-type values directly — see `FeedListSelectionEqualityTests`,
+  which exercises `FeedListSelectionEquality.swift`'s own `ArticleFilter`/`FeedListRowSelection`/
+  `DropBoundary` comparison and keying functions this way. Run via
+  `xcodebuild -scheme Keryx -destination 'platform=macOS' test` (see
+  [build.md](build.md)'s "Building the SwiftUI app").
+
 New tests are placed at the same relative path as the code under test.
 
 ## Conventions
@@ -176,7 +194,7 @@ source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A de
 
 Project-wide, this is on top of the two Android suites above:
 
-- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, ViewModel layer (Home/Settings/Setup/NotificationCenter, including `SettingsViewModel`'s OPML import/export paths — the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
+- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, the shared `presentation/` state holders every UI (including the SwiftUI app) can reuse — `HomeViewModel`, `SetupController`, `CloudSyncController`, `PreferencesController`, `OpmlTransfer`, `NotificationAlerts`, `computeMenuUiState`, `isDuplicateFolderName`/`isDuplicateTagName` — each tested directly in `:shared`'s own `commonTest`/`desktopTest`, right next to the production code (e.g. `CloudSyncControllerTest.kt` beside `presentation/settings/CloudSyncController.kt`), plus each UI's own thin wrapper where one exists (composeApp's `SettingsViewModel`/`NotificationCenterViewModel` delegate to the shared controllers and are tested only for that delegation plus what stays Compose-only — the in-app updater and OPML's file-picking/busy-state, e.g. `SettingsViewModel`'s OPML import/export paths: the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
 - the Linux/macOS/Windows file-dialog backend split (`FilePickerTest` for `defaultFilePickerBackend`'s OS selection, the extension predicate agreeing with `FileNameExtensionFilter` including accepting directories, the overwrite-confirmation resolution, and dialog-owner selection)
 - the feed-list drag-and-drop rewrite (`parseFeedListDragSourceKey` in `HomeCommonTest.kt` for the pure key-parsing logic; `FeedListDragTest.kt` for the real end-to-end gesture via `performMouseInput`/`performKeyInput` against actual rendered composables — dragging a feed above another and asserting the persisted order, the sub-threshold-move-still-selects case, dropping onto a folder header / a tag row, a right-click landing mid-drag not opening the context menu or aborting the drag, the ghost overlay's appear/disappear lifecycle, Escape-cancel, folder-onto-folder reordering, and a drag pushed out past the pane's horizontal bounds never resolving to a valid target or applying a drop even when it lines up with a row's height)
 - the feed list's in-row rename editor (`InlineRenameValidationTest` in `commonTest` for the shared blank-is-not-an-error validation rule and `toInlineEditTarget` in `HomeCommonTest.kt`; `FeedListInlineRenameTest.kt` for the real end-to-end flow against rendered composables — F2 opening the editor and Enter committing, Escape and the "×" icon cancelling, blur committing a valid name, a duplicate folder name blocking Enter and reverting silently on blur, a blank folder name simply not committing, a blank feed title resetting `custom_title` with the feed's own title shown as the placeholder, renaming a tag leaving its color alone, the tag color dot's popover applying a color immediately both outside and during a rename, and the Feed-menu `RenameFeed` command opening the editor for the current selection)
@@ -273,7 +291,7 @@ Known uncovered areas:
 - On Android, most of what the instrumented suites described in Execution don't reach is still uncovered: `WorkManager`'s actual periodic-job scheduling/execution (only the pure schedule mapping in `BackgroundRefreshSchedule.kt` is tested), real notification posting through `NotificationManagerCompat`, and `AndroidUpdateInstaller`'s `PackageInstaller` session/`BroadcastReceiver`/`canRequestPackageInstalls()` handling (only the pure plan/consent decision it delegates to, `canInstallAndroidApkUpdate`, is tested — see the in-app update pipeline above).
 - **Not actually uncovered — noted here for contrast:** the Storage Access Framework file picker's write-failure path, Keystore-backed token storage's fallback path, and Play services' partially-granted Google Drive consent **are** covered, by `FilePickerDeviceTest.kt`, `KeystoreTokenStorageDeviceTest.kt` and `PlayServicesGoogleDriveAuthDeviceTest.kt` respectively, as is the consent-screen request slot's lifetime, by `AndroidAuthorizationHostDeviceTest.kt` (see `androidDeviceTest/` in "Structure" above).
 - Likewise on desktop, the actual execution of a self-replace/`msiexec` script (`UpdateScriptWriter`'s output) — its own generated text is asserted directly and `DesktopUpdateInstaller` never runs one in a test (see the fake `ProcessLauncher` above) — is a manual check only; see "In-App Update" below. Two more pieces of that path are out of reach of a *unit* test and are covered elsewhere instead.
-- `DittoArchiveExtractor` actually running `ditto` is exercised by `ArchiveExtractorTest.kt`'s `isMacOs`-gated cases (`macos-latest` is in the CI matrix, so they really run; the Linux/Windows runners have no `ditto`, and the installer's own tests inject `InProcessArchiveExtractor` by default). A real signed `.app` surviving the `zip -ry` → `ditto` → `codesign --verify --strict --deep` round trip needs macOS *and* a jpackage bundle, which no test source set has — so `ci.yml`'s "Verify packaging (macOS)" step performs exactly that round trip against the freshly built app image, asserting the symlink count is unchanged and the extracted bundle still verifies. Its companion is `createDistributable`'s own `verifyMacOsBundleSeal`/signature-property guard, which fails the build if the *pre*-zip bundle is already broken (see [build.md](build.md)); between them, neither half of the original defect can reach a release unnoticed.
+- `DittoArchiveExtractor` actually running `ditto` is exercised by `ArchiveExtractorTest.kt`'s `isMacOs`-gated cases (`ci.yml`'s `build-macos-desktop` job runs them on `macos-latest`, so they really run; the Linux/Windows runners have no `ditto`, and the installer's own tests inject `InProcessArchiveExtractor` by default). A real signed `.app` surviving the `zip -ry` → `ditto` → `codesign --verify --strict --deep` round trip needs macOS *and* a jpackage bundle, which no test source set has — so `ci.yml`'s "Verify packaging (macOS)" step performs exactly that round trip against the freshly built app image, asserting the symlink count is unchanged and the extracted bundle still verifies. Its companion is `createDistributable`'s own `verifyMacOsBundleSeal`/signature-property guard, which fails the build if the *pre*-zip bundle is already broken (see [build.md](build.md)); between them, neither half of the original defect can reach a release unnoticed.
 - `FileSystemExtras.move`'s cross-volume fallback is likewise unreachable from a test (a second filesystem cannot be provoked), which is why the link-preserving copy it delegates to is split out as `copyTree` and tested directly.
 - On desktop, `LibSecretTokenStorage`'s actual libsecret binding — `Native.load`ing `libsecret-1.so.0`, the `SecretSchema`/`GError` JNA structures, and the real D-Bus round-trip to `org.freedesktop.portal.Secret` — needs a real Linux desktop session and only runs meaningfully inside the Snap package; only the `LibSecretAccess` seam behind it (store/lookup/clear success and failure) is exercised by `LibSecretTokenStorageTest`, the same split `KeyringAccess`/`KeyringTokenStorageTest` and `CommandRunner`/`SecurityCliTokenStorage` already use. See the manual Snap verification steps in `build.md`'s "Linux Snap package" for what has to be confirmed by hand instead.
 
@@ -1113,6 +1131,28 @@ device/emulator:
     both remain distinguishable against the connected row's teal background. Long-press each icon to check its
   tooltip. While a reset is running, the spinner is visible against its container and the row's
   height doesn't change. Check in both light and dark themes.
+
+### (iOS) The sidebar
+
+The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));
+its drop mapping is covered by `SidebarDropResolverTests`, but the gestures themselves need a simulator or
+device. On an iPhone and an iPad (both orientations), with folders, unfoldered feeds and a tag:
+
+- Long-press a feed row and drag it onto a collapsed folder's row: the row highlights, the folder opens
+  after about half a second without becoming selected, and releasing moves the feed into it.
+- Drag a feed onto the "フォルダーなし" header: it leaves its folder. Drag it onto a tag row: the tag is
+  attached (expand the tag to see it listed).
+- Drag a feed between rows — within its folder, into another folder, to the end of a folder, below an empty
+  folder, among the unfoldered feeds: a gap opens there and the feed lands in it, with no flicker while the
+  finger rests over the opened gap.
+- Over All/Starred, inside the tags, between the Folders header and the first folder, and just below a
+  collapsed folder, the drag shows it is refused and releasing changes nothing.
+- Drag a folder between folders: they reorder, and the folder is never highlighted as a drop target. A
+  folder that was expanded when lifted is expanded again afterwards.
+- A long press without moving opens the context menu (and selects the row); pressing and moving at once
+  lifts the row instead. The row being renamed cannot be dragged.
+- Tapping still selects (and on iPhone opens the article list); folder, tag and section disclosure states
+  survive a relaunch.
 
 ### In-App Update
 

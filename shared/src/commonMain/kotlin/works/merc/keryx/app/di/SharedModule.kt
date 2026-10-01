@@ -39,6 +39,11 @@ import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.NotificationAlerts
+import works.merc.keryx.app.presentation.settings.CloudSyncController
+import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.PreferencesController
+import works.merc.keryx.app.presentation.setup.SetupController
 
 /**
  * Bindings every app built on :shared needs — database, repositories, sync, notifications.
@@ -62,6 +67,10 @@ fun sharedModule(): Module = module {
     single { NotificationCenter() }
     single { ActivityCenter() }
     single { NewArticleNotifier(get()) }
+    // The gate on whether [updateModule] may be used at all (checkForUpdateAndNotify reads it
+    // before touching the updater), so it lives here rather than in that optional module: a build
+    // without the updater — the Apple app — must still be able to ask, and be told no.
+    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 
     // Long-lived scope for debounced sync + background work. The handler doesn't change any
     // existing behavior (SupervisorJob's semantics and every launch/async's own exception handling
@@ -120,7 +129,6 @@ fun updateModule(): Module = module {
     single { UpdateChecker(client = get(), currentVersion = AppInfo.version, repoSlug = AppInfo.updateRepo, location = get()) }
     single { UpdateDownloader(get()) }
     single { UpdateRepository(checker = get(), downloader = get(), installer = get(), notificationCenter = get(), scope = get(), location = get()) }
-    single<SelfUpdateCheckSupport> { SelfUpdateCheckSupport { selfUpdateCheckSupported } }
 }
 
 /**
@@ -129,4 +137,9 @@ fun updateModule(): Module = module {
  */
 fun presentationModule(): Module = module {
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { SetupController(get(), get(), get(), get()) }
+    single { NotificationAlerts(get()) }
+    single { CloudSyncController(get(), get(), get(), get()) }
+    single { PreferencesController(get()) }
+    single { OpmlTransfer(get(), get(), get(), get()) }
 }

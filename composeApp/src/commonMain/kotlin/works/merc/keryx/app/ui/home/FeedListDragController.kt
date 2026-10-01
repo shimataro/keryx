@@ -44,6 +44,14 @@ import kotlin.math.roundToInt
 import org.jetbrains.compose.resources.painterResource
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.presentation.home.DropBoundary
+import works.merc.keryx.app.presentation.home.FeedListDropIndex
+import works.merc.keryx.app.presentation.home.FeedListDraggedItem
+import works.merc.keryx.app.presentation.home.FeedListDropAction
+import works.merc.keryx.app.presentation.home.FeedListDropTarget
+import works.merc.keryx.app.presentation.home.FeedListRowHalf
+import works.merc.keryx.app.presentation.home.resolveFeedListDropAction
+import works.merc.keryx.app.presentation.home.resolveFeedListDropHighlight
 
 /** Test tag on [FeedDragGhost]'s inner chip `Box`, present only while a drag is in progress —
  * `FeedListDragTest` asserts on its presence/absence to verify the ghost's lifecycle. */
@@ -55,6 +63,26 @@ internal sealed interface DraggedItem {
 
     data class Feed(val feedId: String, override val title: String) : DraggedItem
     data class Folder(val folderId: String, override val title: String) : DraggedItem
+}
+
+/** Strips the display title Compose's own drag ghost needs, for the shared drop-resolution rules. */
+private fun DraggedItem.toShared(): FeedListDraggedItem = when (this) {
+    is DraggedItem.Feed -> FeedListDraggedItem.Feed(feedId)
+    is DraggedItem.Folder -> FeedListDraggedItem.Folder(folderId)
+}
+
+/** Reduces a `LazyColumn` row key's parsed identity to the shared, key-format-free drop target. */
+private fun FeedListRowKey.toDropTarget(): FeedListDropTarget = when (this) {
+    is FeedListRowKey.Folder -> FeedListDropTarget.FolderHeader(folderId)
+    FeedListRowKey.NoFolderHeader -> FeedListDropTarget.NoFolderHeader
+    is FeedListRowKey.Feed -> FeedListDropTarget.FeedRow(feedId)
+    is FeedListRowKey.Tag -> FeedListDropTarget.TagHeader(tagId)
+    FeedListRowKey.Other -> FeedListDropTarget.Other
+}
+
+private fun RowHalf.toShared(): FeedListRowHalf = when (this) {
+    RowHalf.TOP -> FeedListRowHalf.TOP
+    RowHalf.BOTTOM -> FeedListRowHalf.BOTTOM
 }
 
 /**
@@ -258,48 +286,18 @@ internal class FeedListDragController(
             overlay.hasValidTarget = false
             return
         }
-        val localY = pos.y
-        val dropIndex = dropIndexState.value
-        val feedId = (item as? DraggedItem.Feed)?.feedId
-        val draggedFolderId = (item as? DraggedItem.Folder)?.folderId
-        val band = bandAt(localY) ?: run {
+        val band = bandAt(pos.y) ?: run {
             activeBoundaryState.value = null
             hoveredAttachTagIdState.value = null
             overlay.hasValidTarget = false
             return
         }
-        val half = resolveRowHalf(localY, band)
-        val rowKey = parseFeedListRowKey(band.key)
-        hoveredAttachTagIdState.value = null
-        activeBoundaryState.value = when {
-            feedId != null -> when (rowKey) {
-                is FeedListRowKey.Folder -> dropIndex.feedZoneBoundaryFor(rowKey.folderId)
-                FeedListRowKey.NoFolderHeader -> dropIndex.feedZoneBoundaryFor(null)
-                is FeedListRowKey.Feed -> if (half == RowHalf.TOP) {
-                    DropBoundary.BeforeFeed(rowKey.feedId)
-                } else {
-                    dropIndex.belowBoundaryForFeed(rowKey.feedId)
-                }
-                is FeedListRowKey.Tag -> {
-                    hoveredAttachTagIdState.value = rowKey.tagId
-                    null
-                }
-                FeedListRowKey.Other -> null
-            }
-            draggedFolderId != null -> when (rowKey) {
-                is FeedListRowKey.Folder -> when {
-                    rowKey.folderId == draggedFolderId -> null
-                    half == RowHalf.TOP -> DropBoundary.BeforeFolder(rowKey.folderId)
-                    else -> dropIndex.belowBoundaryForFolder(rowKey.folderId)
-                }
-                is FeedListRowKey.Feed -> dropIndex.folderIdOfFeed[rowKey.feedId]
-                    ?.takeIf { it != draggedFolderId }
-                    ?.let(dropIndex::belowBoundaryForFolder)
-                else -> null
-            }
-            else -> null
-        }
-        overlay.hasValidTarget = activeBoundaryState.value != null || hoveredAttachTagIdState.value != null
+        val half = resolveRowHalf(pos.y, band).toShared()
+        val target = parseFeedListRowKey(band.key).toDropTarget()
+        val (boundary, tagId) = resolveFeedListDropHighlight(item.toShared(), target, half, dropIndexState.value)
+        activeBoundaryState.value = boundary
+        hoveredAttachTagIdState.value = tagId
+        overlay.hasValidTarget = boundary != null || tagId != null
     }
 
     /**
@@ -310,59 +308,19 @@ internal class FeedListDragController(
      */
     fun end(pos: Offset): Boolean {
         val item = overlay.item ?: return false
-        val dropIndex = dropIndexState.value
         val band = if (isWithinHost(pos)) bandAt(pos.y) else null
         val half = band?.let { resolveRowHalf(pos.y, it) }
         clear()
         if (band == null || half == null) return false
-        val rowKey = parseFeedListRowKey(band.key)
-        if (item is DraggedItem.Feed) {
-            val feedId = item.feedId
-            return when (rowKey) {
-                is FeedListRowKey.Folder -> {
-                    vm.moveFeed(feedId, rowKey.folderId, dropIndex.firstFeedIdOfGroup[rowKey.folderId])
-                    true
-                }
-                FeedListRowKey.NoFolderHeader -> {
-                    vm.moveFeed(feedId, null, dropIndex.firstFeedIdOfGroup[null])
-                    true
-                }
-                is FeedListRowKey.Feed -> {
-                    val insertBeforeId = if (half == RowHalf.TOP) {
-                        rowKey.feedId
-                    } else {
-                        dropIndex.nextFeedInGroup[rowKey.feedId]
-                    }
-                    vm.moveFeed(feedId, dropIndex.folderIdOfFeed[rowKey.feedId], insertBeforeId)
-                    true
-                }
-                is FeedListRowKey.Tag -> {
-                    vm.setFeedTag(feedId, rowKey.tagId, true)
-                    true
-                }
-                FeedListRowKey.Other -> false
-            }
+        val target = parseFeedListRowKey(band.key).toDropTarget()
+        val action = resolveFeedListDropAction(item.toShared(), target, half.toShared(), dropIndexState.value)
+            ?: return false
+        when (action) {
+            is FeedListDropAction.MoveFeed -> vm.moveFeed(action.feedId, action.folderId, action.targetFeedId)
+            is FeedListDropAction.AttachTag -> vm.setFeedTag(action.feedId, action.tagId, true)
+            is FeedListDropAction.ReorderFolder -> vm.reorderFolders(action.draggedFolderId, action.targetFolderId)
         }
-        val draggedFolderId = (item as DraggedItem.Folder).folderId
-        return when (rowKey) {
-            is FeedListRowKey.Folder -> {
-                if (rowKey.folderId == draggedFolderId) return false
-                val insertBeforeId = if (half == RowHalf.TOP) {
-                    rowKey.folderId
-                } else {
-                    dropIndex.nextFolderId[rowKey.folderId]
-                }
-                vm.reorderFolders(draggedFolderId, insertBeforeId)
-                true
-            }
-            is FeedListRowKey.Feed -> {
-                val ownerFolderId = dropIndex.folderIdOfFeed[rowKey.feedId] ?: return false
-                if (ownerFolderId == draggedFolderId) return false
-                vm.reorderFolders(draggedFolderId, dropIndex.nextFolderId[ownerFolderId])
-                true
-            }
-            else -> false
-        }
+        return true
     }
 
     /** Aborts the drag without committing anything (Escape, focus loss, composition teardown). */

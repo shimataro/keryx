@@ -7,6 +7,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.NotificationText
+import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
@@ -37,7 +38,8 @@ class PendingNotificationActionHostTest {
             val (driver, db) = inMemoryDb()
             useHomeViewModel(driver, db) { fixture ->
                 var focused: HomePane? = null
-                val notifVm = NotificationCenterViewModel(NotificationCenter())
+                val notificationCenter = NotificationCenter()
+                val notifVm = NotificationCenterViewModel(notificationCenter, NotificationAlerts(notificationCenter))
                 setContent {
                     PendingNotificationActionHost(fixture.vm, notifVm, layout, onFocusPane = { focused = it })
                 }

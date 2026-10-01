@@ -18,6 +18,7 @@ import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.ui.navigation.Screen
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.resources.Res
@@ -74,7 +75,7 @@ import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
-import works.merc.keryx.app.ui.menu.computeMenuUiState
+import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.ui.settings.PROJECT_URL
 import works.merc.keryx.app.ui.settings.SettingsViewModel
 
@@ -142,7 +143,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val selectionTarget = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
 
     val ui = computeMenuUiState(
-        screen = screen,
+        onHome = screen == Screen.Home,
         hasSelectedArticle = selected != null,
         selectedArticleHasUrl = hasUsableUrl(selected?.url),
         activity = activity,

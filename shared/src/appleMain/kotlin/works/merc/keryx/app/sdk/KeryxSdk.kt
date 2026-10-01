@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
@@ -18,8 +19,10 @@ import works.merc.keryx.app.di.applePlatformModule
 import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
@@ -27,10 +30,21 @@ import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.backgroundUpdateLoop
+import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.parseOAuthUri
+import works.merc.keryx.app.domain.runStartupMaintenance
+import works.merc.keryx.app.domain.schemeOf
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.presentation.home.AddFeedController
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.NotificationAlerts
+import works.merc.keryx.app.presentation.menu.MenuUiState
+import works.merc.keryx.app.presentation.menu.computeMenuUiState
+import works.merc.keryx.app.presentation.settings.CloudSyncController
+import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.PreferencesController
+import works.merc.keryx.app.presentation.setup.SetupController
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -62,10 +76,95 @@ class KeryxSdk private constructor(private val koin: Koin) {
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> get() = CloudStorageAvailability.available
 
+    private var setupControllerCreated = false
+
+    /** The setup/onboarding screen's shared state holder: local-only vs. connecting a provider. */
+    val setupController: SetupController get() = koin.get<SetupController>().also { setupControllerCreated = true }
+
+    private var cloudSyncControllerCreated = false
+
+    /** The settings screen's cloud-sync state and actions (connect/disconnect/switch/reconnect/…). */
+    val cloudSyncController: CloudSyncController
+        get() = koin.get<CloudSyncController>().also { cloudSyncControllerCreated = true }
+
+    /** Typed setters over `LocalSettings`/`global_settings`. */
+    val preferences: PreferencesController get() = koin.get()
+
+    /** Builds/parses the OPML document itself; picking a file to write/read stays with Swift. */
+    val opml: OpmlTransfer get() = koin.get()
+
+    private var notificationAlertsCreated = false
+
+    /** Which warning/error still needs announcing in a transient surface with no queue of its own
+     * (Android's foreground Snackbar equivalent — a future SwiftUI surface could use the same
+     * signal instead of reimplementing the recurrence-dedup rule). */
+    val notificationAlerts: NotificationAlerts
+        get() = koin.get<NotificationAlerts>().also { notificationAlertsCreated = true }
+
+    /**
+     * Enabled/checked state for a menu/`Commands` item — see
+     * [works.merc.keryx.app.presentation.menu.computeMenuUiState]'s own doc for what each
+     * parameter gates.
+     */
+    fun menuState(
+        onHome: Boolean,
+        hasSelectedArticle: Boolean,
+        selectedArticleHasUrl: Boolean,
+        cloudConnected: Boolean,
+        searchActive: Boolean,
+        unreadOnly: Boolean,
+        hasSelectedFeed: Boolean = false,
+        textInputFocused: Boolean = false,
+        hasRenamableSelection: Boolean = false,
+        selectedFeedHasSiteUrl: Boolean = false,
+    ): MenuUiState = computeMenuUiState(
+        onHome = onHome,
+        hasSelectedArticle = hasSelectedArticle,
+        selectedArticleHasUrl = selectedArticleHasUrl,
+        activity = homeViewModel.activity.value,
+        cloudConnected = cloudConnected,
+        searchActive = searchActive,
+        unreadOnly = unreadOnly,
+        hasSelectedFeed = hasSelectedFeed,
+        textInputFocused = textInputFocused,
+        hasRenamableSelection = hasRenamableSelection,
+        selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
+    )
+
     /** A fresh add-feed state machine, one per add-feed sheet. */
     fun newAddFeedController(): AddFeedController {
         val home = homeViewModel
         return AddFeedController(home::resolvePreview, home::subscribeFeeds)
+    }
+
+    private var maintenanceStarted = false
+
+    /**
+     * Starts the startup maintenance sequence ([runStartupMaintenance]: cache cleanup, initial
+     * sync, feed refresh, update check, FTS heal) and the periodic background-refresh loop
+     * ([backgroundUpdateLoop]) on the SDK's own background scope. Call once per foreground app
+     * launch; idempotent, so a repeated call (e.g. from a view that appears more than once) is a
+     * no-op rather than starting a second overlapping loop. Neither is awaited — like desktop's
+     * `main.kt`, both keep running independently for as long as this instance lives.
+     */
+    @Throws(Exception::class, CancellationException::class)
+    fun startMaintenance() {
+        if (maintenanceStarted) return
+        maintenanceStarted = true
+        val scope = koin.get<CoroutineScope>()
+        scope.launch { runStartupMaintenance(koin) }
+        scope.launch { backgroundUpdateLoop(koin) }
+    }
+
+    /**
+     * Imports feeds from an OPML file the app was opened with (mirrors desktop's/Android's own
+     * ".opml file association" handling) and posts an INFO notification with the result. Errors are
+     * caught and logged internally — see [importOpmlAndNotify] — so this never throws for a
+     * malformed file; only cancellation propagates.
+     */
+    @Throws(CancellationException::class)
+    suspend fun importOpenedOpml(xml: String) {
+        koin.get<CoroutineScope>().async { importOpmlAndNotify(koin, xml) }.await()
     }
 
     /**
@@ -98,6 +197,9 @@ class KeryxSdk private constructor(private val koin: Koin) {
         // The app scope also runs prepareSearchIndex*()'s FTS work, so this waits for (or cancels)
         // that too.
         if (homeViewModelCreated) homeViewModel.viewModelScope.coroutineContext.job.cancelAndJoin()
+        if (setupControllerCreated) setupController.viewModelScope.coroutineContext.job.cancelAndJoin()
+        if (cloudSyncControllerCreated) cloudSyncController.viewModelScope.coroutineContext.job.cancelAndJoin()
+        if (notificationAlertsCreated) notificationAlerts.viewModelScope.coroutineContext.job.cancelAndJoin()
         koin.get<CoroutineScope>().coroutineContext.job.cancelAndJoin()
         // SettingsRepository keeps its own writer scope; flush it and stop it before AppDirs is
         // reset below, so no late write lands outside this instance's data directory.
@@ -162,6 +264,20 @@ class KeryxSdk private constructor(private val koin: Koin) {
          * @param postOsNotification Posts that notification (message, count); may do nothing.
          * @param dataDirectory Where to keep all app data instead of Application Support — for
          *   previews and tests; `null` in the shipping app.
+         * @param openAuthorization Opens a cloud provider's OAuth authorize URL for the user —
+         *   the shipping app hands both arguments to an `ASWebAuthenticationSession`
+         *   (`callbackScheme` is that session's `callbackURLScheme`, derived from the connect
+         *   flow's own redirect URI, e.g. `keryx` or a Google reversed-client-id scheme). `null`
+         *   (the default) falls back to opening the system browser, which previews and tests that
+         *   never actually connect a provider can safely ignore.
+         * @param useDataProtectionKeychain Whether cloud tokens go in the Data Protection Keychain
+         *   rather than the ordinary login Keychain — see `data/cloud/KeychainTokenStorage.kt`'s own
+         *   doc for why. The shipping app passes `true`; it needs the `keychain-access-groups`
+         *   entitlement and a real code signature, so this defaults to `false` for tests/previews
+         *   that build with an ad-hoc or no signature at all. Never leave it `false` in a shipping
+         *   build: the service and account match the Compose desktop build's, so the Data Protection
+         *   Keychain is the only thing keeping the two apps off each other's items (one's
+         *   disconnect would revoke the other's refresh token).
          * @throws works.merc.keryx.app.data.local.DatabaseTooNewException if a newer build migrated
          *   the database.
          */
@@ -170,14 +286,25 @@ class KeryxSdk private constructor(private val koin: Koin) {
             newArticlesText: (count: Int) -> String,
             postOsNotification: (message: String, count: Int) -> Unit,
             dataDirectory: String?,
+            openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
+            useDataProtectionKeychain: Boolean = false,
         ): KeryxSdk {
             AppDirs.rootOverride = dataDirectory
             val messages = object : NotificationMessages {
                 override suspend fun newArticles(count: Int): String = newArticlesText(count)
             }
             val sink = OsNotificationSink { message, count -> postOsNotification(message, count) }
+            val authorizationLauncher = openAuthorization?.let { open ->
+                AuthorizationLauncher { authorizeUrl, redirectUri ->
+                    open(authorizeUrl, schemeOf(redirectUri).orEmpty())
+                }
+            } ?: DefaultAuthorizationLauncher
             val koin = koinApplication {
-                modules(sharedModule(), presentationModule(), applePlatformModule(messages, sink))
+                modules(
+                    sharedModule(),
+                    presentationModule(),
+                    applePlatformModule(messages, sink, authorizationLauncher, useDataProtectionKeychain),
+                )
             }.koin
             // Open the database now, so a too-new file is reported here, as a Swift error — unwrapped
             // from Koin's own instance-creation wrapper so the app can recognise it. A failed start

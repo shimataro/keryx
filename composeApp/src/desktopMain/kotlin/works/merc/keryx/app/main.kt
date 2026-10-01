@@ -56,6 +56,7 @@ import works.merc.keryx.app.di.configureImageLoader
 import works.merc.keryx.app.di.platformModule
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
+import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.SettingsRepository

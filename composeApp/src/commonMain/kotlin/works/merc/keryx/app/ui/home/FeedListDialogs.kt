@@ -14,6 +14,8 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.isDuplicateFolderName
+import works.merc.keryx.app.presentation.home.isDuplicateTagName
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_delete
@@ -69,7 +71,7 @@ internal fun FeedListDialogs(
         TextPromptDialog(
             title = stringResource(Res.string.home_add_tag),
             hint = stringResource(Res.string.home_new_tag_hint),
-            blockingError = { name -> if (tags.any { it.name == name }) duplicateError else null },
+            blockingError = { name -> if (isDuplicateTagName(name, tags)) duplicateError else null },
             extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
             onConfirm = { vm.createTag(it, color); onShowAddTagChange(false) },
             onDismiss = { onShowAddTagChange(false) },
@@ -81,7 +83,7 @@ internal fun FeedListDialogs(
         TextPromptDialog(
             title = stringResource(Res.string.home_add_tag),
             hint = stringResource(Res.string.home_new_tag_hint),
-            blockingError = { name -> if (tags.any { it.name == name }) duplicateError else null },
+            blockingError = { name -> if (isDuplicateTagName(name, tags)) duplicateError else null },
             extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
             onConfirm = { name ->
                 vm.createTag(name, color)?.let { vm.setFeedTag(feedId, it, true) }
@@ -105,7 +107,7 @@ internal fun FeedListDialogs(
         TextPromptDialog(
             title = stringResource(Res.string.home_add_folder),
             hint = stringResource(Res.string.home_new_folder_hint),
-            blockingError = { name -> if (folders.any { it.name == name }) duplicateError else null },
+            blockingError = { name -> if (isDuplicateFolderName(name, folders)) duplicateError else null },
             onConfirm = { vm.createFolder(it); onShowAddFolderChange(false) },
             onDismiss = { onShowAddFolderChange(false) },
         )
@@ -115,7 +117,7 @@ internal fun FeedListDialogs(
         TextPromptDialog(
             title = stringResource(Res.string.home_add_folder),
             hint = stringResource(Res.string.home_new_folder_hint),
-            blockingError = { name -> if (folders.any { it.name == name }) duplicateError else null },
+            blockingError = { name -> if (isDuplicateFolderName(name, folders)) duplicateError else null },
             onConfirm = { name ->
                 vm.createFolder(name)?.let { vm.moveFeed(feedId, it) }
                 onCreatingFolderForFeedIdChange(null)

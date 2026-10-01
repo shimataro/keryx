@@ -75,6 +75,38 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun wrapArticleHtmlKeepsAnIndentedMultiLineBodyByteForByte() {
+        // Regression: the document template's indentation used to be stripped with trimIndent()
+        // after the body was interpolated, so a pre-formatted body whose every line is indented
+        // at least as deeply as the template (8 spaces) lost that indentation too — including
+        // inside <pre>, where whitespace is content.
+        val body = listOf(
+            "        <div>",
+            "          <pre>",
+            "            fun main() {",
+            "                println(\"hi\")",
+            "            }",
+            "          </pre>",
+            "        </div>",
+        ).joinToString("\n")
+        val result = wrapArticleHtml(theme, title = "", meta = "", body = body)
+        assertTrue(result.contains(body), "body was altered:\n$result")
+    }
+
+    @Test
+    fun noContentAndPlaceholderDocumentsStillStripTheTemplateIndentation() {
+        val body = "<p>x</p>"
+        listOf(
+            wrapArticleHtml(theme, title = "", meta = "", body = body),
+            articleNoContentHtml(theme, title = "t", meta = "", message = "m"),
+            articlePlaceholderHtml(theme, message = "m"),
+        ).forEach { document ->
+            assertTrue(document.startsWith("<!doctype html>\n<html>\n<head>\n"), document)
+            assertTrue(document.endsWith("\n</body>\n</html>"), document)
+        }
+    }
+
+    @Test
     fun wrapArticleHtmlContainsExpectedColorsAndFontSize() {
         val customTheme = theme.copy(linkColor = 0xFFFF0000.toInt(), fontScale = 1.5f)
         val result = wrapArticleHtml(customTheme, title = "", meta = "", body = "<p>body</p>")

@@ -8,8 +8,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Guards the two shipped locales (values/strings.xml = Japanese default, values-en/strings.xml =
- * English) against silently drifting apart: a key present in one but not the other would fall
+ * Guards the two shipped locales (values/strings.xml = English default, values-ja/strings.xml =
+ * Japanese) against silently drifting apart: a key present in one but not the other would fall
  * back to the wrong language for that one string instead of failing loudly.
  */
 class StringsXmlParityTest {
@@ -28,19 +28,19 @@ class StringsXmlParityTest {
     }
 
     @Test
-    fun englishLocaleTranslatesEveryDefaultLocaleKey() {
-        val ja = parseResources("values/strings.xml")
-        val en = parseResources("values-en/strings.xml")
+    fun japaneseLocaleTranslatesEveryDefaultLocaleKey() {
+        val en = parseResources("values/strings.xml")
+        val ja = parseResources("values-ja/strings.xml")
 
-        assertEquals(ja.keys, en.keys, "values-en/strings.xml is missing or has extra keys compared to values/strings.xml")
-        for (key in ja.keys) {
-            assertEquals(ja.getValue(key), en.getValue(key), "\"$key\" is a <${ja[key]}> in the default locale but a <${en[key]}> in English")
+        assertEquals(en.keys, ja.keys, "values-ja/strings.xml is missing or has extra keys compared to values/strings.xml")
+        for (key in en.keys) {
+            assertEquals(en.getValue(key), ja.getValue(key), "\"$key\" is a <${en[key]}> in the default locale but a <${ja[key]}> in Japanese")
         }
     }
 
     @Test
-    fun everyEnglishPluralHasBothOneAndOtherQuantities() {
-        val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(resourcesDir, "values-en/strings.xml"))
+    fun everyDefaultLocalePluralHasBothOneAndOtherQuantities() {
+        val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File(resourcesDir, "values/strings.xml"))
         val plurals = doc.documentElement.getElementsByTagName("plurals")
         for (i in 0 until plurals.length) {
             val plural = plurals.item(i) as Element
@@ -49,7 +49,7 @@ class StringsXmlParityTest {
             }
             assertTrue(
                 "one" in quantities && "other" in quantities,
-                "<plurals name=\"${plural.getAttribute("name")}\"> in values-en/strings.xml must have both " +
+                "<plurals name=\"${plural.getAttribute("name")}\"> in values/strings.xml must have both " +
                     "\"one\" and \"other\" quantities, found $quantities",
             )
         }

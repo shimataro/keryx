@@ -40,7 +40,9 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.presentation.RelativeTime
 import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.relativeTimeOf
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.notification_dismiss
 import works.merc.keryx.app.resources.notification_dismiss_all
@@ -218,29 +220,6 @@ private fun NotificationRow(
 
 /** How often an open notification panel re-reads the clock; minutes are the finest unit shown. */
 private const val RELATIVE_TIME_REFRESH_MS = 60_000L
-
-/** Which relative-time label a notification row shows, given how long ago it was raised. */
-internal sealed interface RelativeTime {
-    data object Now : RelativeTime
-    data class Minutes(val count: Int) : RelativeTime
-    data class Hours(val count: Int) : RelativeTime
-    data class Days(val count: Int) : RelativeTime
-
-    /** Older than a week: shown as an absolute date and time instead. */
-    data object Absolute : RelativeTime
-}
-
-/**
- * Buckets [diffMillis] (now minus the notification's timestamp) into a [RelativeTime]. A negative
- * difference (a timestamp slightly ahead of the clock) counts as [RelativeTime.Now].
- */
-internal fun relativeTimeOf(diffMillis: Long): RelativeTime = when {
-    diffMillis < 60_000L -> RelativeTime.Now
-    diffMillis < 3_600_000L -> RelativeTime.Minutes((diffMillis / 60_000L).toInt())
-    diffMillis < 86_400_000L -> RelativeTime.Hours((diffMillis / 3_600_000L).toInt())
-    diffMillis < 604_800_000L -> RelativeTime.Days((diffMillis / 86_400_000L).toInt())
-    else -> RelativeTime.Absolute
-}
 
 /**
  * Formats [timestampMillis] relative to [nowMillis] for display in notification rows. The caller

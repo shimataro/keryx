@@ -149,6 +149,21 @@ Split into what every target needs in common, and what's specific to the Android
 - **The NDK is not needed** (the project builds no native code of its own — don't install it by
   mistake).
 
+#### For the Apple (macOS / iOS) Target
+
+Building `:shared`'s Apple targets and the SwiftUI app (`appleApp/`) needs a Mac on Apple Silicon.
+
+- **Xcode**, installed from the App Store or [developer.apple.com](https://developer.apple.com/xcode/).
+- **XcodeGen** (`brew install xcodegen`) — generates `appleApp/Keryx.xcodeproj` from
+  `appleApp/project.yml`, which is the file actually kept in Git; the generated `.xcodeproj` is not.
+- **An Apple ID with a team** (even a free "Personal Team") to build a *runnable* `appleApp/`
+  locally — its sandbox entitlements cannot be ad-hoc signed at all (see
+  [build.md](build.md)'s "Signing" under "Building the SwiftUI app"). Not needed to build/test
+  `:shared`'s own Apple targets (`:shared:macosArm64Test`, `:shared:iosSimulatorArm64Test`,
+  `:shared:assembleKeryxSharedReleaseXCFramework`), which carry no entitlements — only needed once
+  you actually run `xcodegen generate`/`xcodebuild` against `appleApp/` and want more than a
+  compile-and-link check.
+
 #### Linux-Specific
 
 - **Xvfb**: required to get `./gradlew build` through on a headless machine (an SSH session, a

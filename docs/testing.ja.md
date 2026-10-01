@@ -66,6 +66,25 @@
   絞っているため、Compose を実際にレンダリングするテストは、実際に Android アプリケーションである
   唯一のモジュールであるこちらに置く。
 
+- `appleApp/KeryxTests/` ——SwiftUI アプリ自身に対する Swift Testing（`import Testing`、
+  `@Suite`/`@Test`/`#expect`）で、上記の `:shared` の Kotlin `appleTest`/`macosTest` とは別物。
+  **単体で完結する（アプリに寄生しない）テストバンドル**——`project.yml` はこのターゲットに
+  `dependencies: [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS,
+  iOS]` のターゲットに寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：ビルド対象が
+  macOS であっても `TEST_HOST` のパス計算は iOS 流のフラットな `Keryx.app/Keryx` レイアウトを
+  使ってしまい、macOS の実際のバンドルは実行ファイルを `Keryx.app/Contents/MacOS/Keryx` の下に
+  ネストするため（[app-architecture.ja.md](app-architecture.ja.md) の「`appleApp/` の Xcode
+  プロジェクト」参照）。アプリに寄生しないということは、これらのテストが `AppModel`/`HomeView` を
+  直接動かせないということでもある——代わりに `Bridge/` の `StateFlow` → `@Observable` アダプタと、
+  `Localization/` の `NotificationText`/`ErrorKind` → String Catalog キーの対応づけを、フェイクや
+  既知の enum ケースを与えて単体で検証する。`KeryxShared.xcframework` は静的リンクしている
+  （`project.yml` のこのターゲット自身の `dependencies:`）ため、Kotlin の sealed 型の値を
+  実際に組み立てて比較するテストも書ける——`FeedListSelectionEquality.swift` の
+  `ArticleFilter`/`FeedListRowSelection`/`DropBoundary` の比較・キー生成関数をこの方法で検証する
+  `FeedListSelectionEqualityTests` を参照。実行は
+  `xcodebuild -scheme Keryx -destination 'platform=macOS' test`（[build.ja.md](build.ja.md) の
+  「SwiftUI アプリ（`appleApp/`）のビルド」参照）。
+
 新しいテストは対象コードと同じ相対パスに置く。
 
 ## 規約
@@ -200,7 +219,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 プロジェクト全体で見ると——
 
-- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、ViewModel 層（Home/Settings/Setup/NotificationCenter。`SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
+- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、どの UI（SwiftUI 版を含む）からも再利用できる共有の `presentation/` state holder——`HomeViewModel`、`SetupController`、`CloudSyncController`、`PreferencesController`、`OpmlTransfer`、`NotificationAlerts`、`computeMenuUiState`、`isDuplicateFolderName`/`isDuplicateTagName`——を、それぞれ本体のすぐ隣（例：`CloudSyncControllerTest.kt` は `presentation/settings/CloudSyncController.kt` の隣）で `:shared` 自身の `commonTest`/`desktopTest` として直接テストしていること、加えて存在する場合は各 UI 自身の薄いラッパー（composeApp の `SettingsViewModel`/`NotificationCenterViewModel` は共有コントローラへ委譲し、その委譲部分と、Compose 側だけに残るもの——アプリ内アップデータと OPML のファイル選択/ビジー状態——だけをテストする。例えば `SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
 - Linux/macOS/Windows のファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、上書き確認の解決、ダイアログの親ウインドウ選択）
 - フィード一覧のドラッグ&ドロップの書き直し（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt` で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際のエンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と判定されずドロップも適用されないこと）
 - フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）
@@ -298,7 +317,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - Android 側では、「実行」節にある計装スイートが届かない範囲の大半はまだ未カバーである: `WorkManager` の実際の定期ジョブスケジューリングと実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、`NotificationManagerCompat` 経由の実通知投稿、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である `canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
 - **実際には未カバーではない——対比として記載:** Storage Access Framework のファイルピッカーの書き込み失敗経路、Keystore を使ったトークン保存のフォールバック経路、Play 開発者サービスで一部のスコープしか許諾されなかった Google Drive の同意結果は**カバーされている**——それぞれ `FilePickerDeviceTest.kt`、`KeystoreTokenStorageDeviceTest.kt`、`PlayServicesGoogleDriveAuthDeviceTest.kt`。同意画面リクエストのスロットの寿命も `AndroidAuthorizationHostDeviceTest.kt` でカバーされている（上記「構成」の `androidDeviceTest/` 参照）。
 - 同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに*ユニット*テストでは到達できない箇所が2つあり、それぞれ別の形でカバーしている。
-- `DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の`isMacOs` ゲート付きテストがカバーしている（CI マトリクスに `macos-latest` があるので実際に走る。Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階でバンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。
+- `DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の`isMacOs` ゲート付きテストがカバーしている（`ci.yml` の `build-macos-desktop` ジョブが `macos-latest` 上で実行するので実際に走る。Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階でバンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。
 - `FileSystemExtras.move` のボリューム跨ぎフォールバックも同様にテストから到達できない（2つ目のファイルシステムを用意できない）ため、その委譲先であるリンク保持コピーを `copyTree` として切り出し、直接テストしている。
 - デスクトップでは、`LibSecretTokenStorage` の実際の libsecret バインディング——`libsecret-1.so.0` の `Native.load`、`SecretSchema`／`GError` の JNA 構造体、`org.freedesktop.portal.Secret` への実際の D-Bus ラウンドトリップ——は実機の Linux デスクトップセッションが必要で、意味のある形で動くのは Snap パッケージ内だけである。その背後にある `LibSecretAccess` seam（store/lookup/clear の成功・失敗）だけが `LibSecretTokenStorageTest` でテストされており、`KeyringAccess`／`KeyringTokenStorageTest` や `CommandRunner`／`SecurityCliTokenStorage` と同じ切り分け方である。手動で確認すべき内容は `build.ja.md`「Linux Snap パッケージ」の手動検証手順を参照。
 
@@ -1183,6 +1202,28 @@ thumb の比率計算そのものは `ScrollIndicatorGeometryTest.kt` が単体�
     ティール地の上で判別できることを確認する。各アイコンを長押ししてツールチップを確認。
   リセット実行中はスピナーが器の上で見えること・行の高さが変わらないこと。ライト／ダーク両テーマで
   確認する。
+
+### （iOS）サイドバー
+
+iOS のサイドバーは UIKit のコレクションビューである（[app-architecture.ja.md](app-architecture.ja.md) の
+「サイドバー（iOS）」を参照）。ドロップの対応付けは `SidebarDropResolverTests` で確かめているが、操作そのものは
+シミュレーターか実機で確かめる必要がある。iPhone と iPad（縦横とも）で、フォルダー、フォルダーなしのフィード、
+タグがある状態で：
+
+- フィードの行を長押しして、閉じたフォルダーの行に重ねる。行がハイライトされ、約 0.5 秒でフォルダーが開き
+  （選択はされない）、離すとフィードがそのフォルダーに入る。
+- フィードを「フォルダーなし」のヘッダーに重ねると、フォルダーから外れる。タグの行に重ねると、タグが付く
+  （タグを開くと一覧に出る）。
+- フィードを行の間に動かす（同じフォルダーの中、別のフォルダー、フォルダーの末尾、空のフォルダーの下、フォルダー
+  なしのフィードの間）。そこに隙間が開いてフィードが入り、開いた隙間の上で指を止めてもちらつかない。
+- すべて／スター付きの上、タグの中、フォルダーのヘッダーと最初のフォルダーの間、閉じたフォルダーのすぐ下では、
+  ドロップできない表示になり、離しても何も変わらない。
+- フォルダーをフォルダーの間に動かすと並べ替わり、フォルダーがドロップ先としてハイライトされることはない。
+  持ち上げたときに開いていたフォルダーは、終わった後も開いている。
+- 動かさずに長押しするとコンテキストメニューが開く（行も選択される）。押してすぐ動かすと、代わりに行が持ち
+  上がる。名前変更中の行はドラッグできない。
+- タップは今までどおり選択になる（iPhone では記事一覧を開く）。フォルダー、タグ、セクションの開閉状態は再起動
+  後も残る。
 
 ### アプリ内アップデート
 

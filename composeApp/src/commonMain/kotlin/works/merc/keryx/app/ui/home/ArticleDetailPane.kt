@@ -79,7 +79,7 @@ import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.platform.setNativeWebViewImportantForAccessibility
 import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
-import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.articleMetaText
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
@@ -497,19 +497,6 @@ private fun ArticleDetailToolbar(
         }
     }
 }
-
-/**
- * Formats the article author and publication time as a metadata line.
- *
- * Blank authors and unavailable publication times are omitted.
- *
- * @param author The article's author, if available.
- * @param publishedAt The article's publication time in Unix milliseconds, if available.
- * @return The formatted metadata line, or an empty string when neither value is available.
- */
-internal fun articleMetaText(author: String?, publishedAt: Long?): String =
-    listOfNotNull(author?.takeIf { it.isNotBlank() }, formatTimestamp(publishedAt).ifBlank { null })
-        .joinToString(" · ")
 
 /**
  * One pager page's rendered document, plus the two values [ArticleWebView] needs alongside it.

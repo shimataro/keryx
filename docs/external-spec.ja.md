@@ -18,8 +18,8 @@
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform（現行） |
 | Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
-| iOS / iPadOS | 予定（SwiftUI ネイティブ UI。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照） |
-| macOS（ネイティブ） | 予定 — ユーザー向けには上記の Compose 版に代わる、ネイティブ SwiftUI 版 macOS アプリ（Apple Silicon）。共有ロジックはすでに対応済み |
+| iOS / iPadOS | 開発中（SwiftUI ネイティブ UI。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照） |
+| macOS（ネイティブ） | 開発中 — ユーザー向けには上記の Compose 版に代わる、ネイティブ SwiftUI 版 macOS アプリ（Apple Silicon）。共有ロジックはすでに対応済み |
 
 ## 3. 対応フォーマット
 
@@ -150,16 +150,17 @@ Google Play 開発者サービスがインストール済みかつ有効かつ�
 
 ## 8. アクセシビリティ・国際化
 
-- UI 文言はすべて Compose Resources（日本語の `values/strings.xml` ——既定かつフォールバック——に加え、
-  同じキー集合の英語 `values-en/strings.xml`）で管理。システムロケールに応じて選択し、いずれの言語にも
-  該当しなければ日本語へフォールバック。
+- UI 文言はすべて Compose Resources（英語の `values/strings.xml` ——既定かつフォールバック——に加え、
+  同じキー集合の日本語 `values-ja/strings.xml`）で管理。システムロケールに応じて選択し、いずれの言語にも
+  該当しなければ英語へフォールバック。SwiftUI アプリも同じ規則に従う（String Catalog はこれらのファイルから
+  生成され、開発言語は英語）。
 - 文字サイズ設定（`LocalDensity` の fontScale に反映）。
 
 ## 9. UI 方針
 
 **各プラットフォームは、単一の共通デザインシステムではなく、それぞれ自身のネイティブな UI 作法に従う。**
 macOS はフラットで SF 寄りの見た目、Android は Material 3 自身のコンポーネント・形状・リップル
-フィードバック、iOS は将来的にネイティブ SwiftUI になる。**Windows と Linux は意図的な例外**である —
+フィードバック、iOS はネイティブ SwiftUI で開発中（§2 参照）。**Windows と Linux は意図的な例外**である —
 Java/Swing 自身のプラットフォーム統合機能は両 OS を同程度にネイティブ化するには力不足なため
 （後述の Look & Feel・コンテキストメニュー・ファイルダイアログの詳細、および
 `known-issues.ja.md` を参照）、両者は独自のネイティブ化を持つ代わりに macOS のフラットな

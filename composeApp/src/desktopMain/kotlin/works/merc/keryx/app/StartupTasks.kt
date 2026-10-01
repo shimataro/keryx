@@ -1,26 +1,19 @@
 package works.merc.keryx.app
 
-import kotlinx.coroutines.delay
 import org.koin.core.Koin
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.Log
-import works.merc.keryx.app.core.MILLIS_PER_MINUTE
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.domain.RefreshCycleRunner
-import works.merc.keryx.app.domain.SyncTrigger
-import works.merc.keryx.app.domain.checkForUpdateAndNotify
+import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.importOpmlAndNotify
-import works.merc.keryx.app.domain.maybeRebuildFtsIndex
 import works.merc.keryx.app.domain.runMaintenanceStep
 import works.merc.keryx.app.domain.runStartupMaintenance
-import works.merc.keryx.app.domain.shouldCheckForUpdate
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.update.cleanUpStaleSelfReplaceArtifacts
@@ -37,39 +30,6 @@ internal suspend fun runStartupTasks(koin: Koin) {
     runMaintenanceStep("translocationWarning") { warnIfAppTranslocated(koin) }
     runMaintenanceStep("staleSelfReplaceCleanup") { cleanUpStaleSelfReplaceArtifacts(koin.get<InstallLocation>()) }
     runStartupMaintenance(koin)
-}
-
-/**
- * Runs periodic background maintenance tasks.
- *
- * Feed refreshing and synchronization occur when the configured refresh interval is positive.
- * Update checks and full-text index maintenance run independently of feed refresh settings. Each
- * step runs through [runMaintenanceStep] for the same reason [runStartupTasks] does — a failure in
- * one (e.g. a feed fetch timing out) must not skip the sync/`checkForUpdateAndNotify`/
- * `maybeRebuildFtsIndex` for the rest of this cycle.
- */
-internal suspend fun backgroundUpdateLoop(koin: Koin) {
-    val settingsRepository = koin.get<SettingsRepository>()
-    while (true) {
-        val minutes = settingsRepository.getLocalSettings().refreshIntervalMinutes
-        delay(if (minutes <= 0) MILLIS_PER_MINUTE else minutes * MILLIS_PER_MINUTE)
-        // See runStartupTasks's own comment: nothing here should touch local_settings.json before
-        // setup completes.
-        if (!settingsRepository.isSetupComplete()) continue
-        if (minutes > 0) {
-            // One RefreshCycleRunner cycle (refresh, notify, then sync if connected), so the gap
-            // between the two stages isn't mistaken for idle; each stage still isolates its own
-            // failure through `step`.
-            runMaintenanceStep("refreshCycle") {
-                koin.get<RefreshCycleRunner>().run(trigger = SyncTrigger.AUTOMATIC, step = ::runMaintenanceStep)
-            }
-        }
-        val settings = settingsRepository.getLocalSettings()
-        if (shouldCheckForUpdate(SystemClock.nowMillis(), settings.lastUpdateCheckAt, settings.updateCheckIntervalHours)) {
-            runMaintenanceStep("updateCheck") { checkForUpdateAndNotify(koin) }
-        }
-        runMaintenanceStep("ftsRebuild") { maybeRebuildFtsIndex(koin) }
-    }
 }
 
 /**

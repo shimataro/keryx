@@ -1,0 +1,13 @@
+// Shared build settings for every configuration (Debug and Release alike — signing doesn't
+// differ by configuration here). Defaults to ad-hoc signing with no team, which is what CI and a
+// fresh checkout build with. A developer's own Local.xcconfig (gitignored — see
+// Local.xcconfig.example) overrides DEVELOPMENT_TEAM/CODE_SIGN_STYLE below with their own Apple
+// Developer team, which every entitled feature (Keychain access groups, the sandbox) needs to
+// actually work on a real device/login session. See docs/setup.md's "Apple targets" for the
+// one-time setup.
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "../Local.xcconfig"

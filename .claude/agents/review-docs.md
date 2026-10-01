@@ -89,7 +89,7 @@ Report a specific stale sentence with its location, not "the docs may need updat
 ## Checklist — prose quality
 
 Applies to `docs/*.md` and `*.ja.md`, `README.md`, `THIRD-PARTY-LICENSES.md`, and the user-facing
-strings in `values/strings.xml` (Japanese) and `values-en/strings.xml` (English).
+strings in `values/strings.xml` (English) and `values-ja/strings.xml` (Japanese).
 
 - Sentences that are hard to parse on one read: buried subject, stacked modifiers, a pronoun with no
   clear referent.

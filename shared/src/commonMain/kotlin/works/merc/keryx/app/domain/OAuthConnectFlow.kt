@@ -8,14 +8,13 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.CloudAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.Pkce
-import works.merc.keryx.app.platform.BrowserOpener
 
 /**
  * Generic desktop OAuth 2.0 authorization-code-with-PKCE connect flow, shared by
  * every provider. It generates the PKCE verifier/challenge and state, has the
  * [transport] deliver the redirect (custom URI scheme for Dropbox, loopback
- * server for Google), opens the authorize URL in the browser, waits for the
- * callback, validates the state, and exchanges the code for tokens via
+ * server for Google), opens the authorize URL via [authorizationLauncher], waits
+ * for the callback, validates the state, and exchanges the code for tokens via
  * [authManager].
  *
  * Only the redirect [transport] differs between providers; the OAuth
@@ -26,6 +25,7 @@ class OAuthConnectFlow(
     private val clientId: String,
     private val transport: OAuthRedirectTransport,
     private val timeoutMillis: Long = OAUTH_CONNECT_TIMEOUT_MS,
+    private val authorizationLauncher: AuthorizationLauncher = DefaultAuthorizationLauncher,
 ) : CloudConnectFlow {
 
     override suspend fun connect(): Result<OAuthTokens> {
@@ -43,7 +43,7 @@ class OAuthConnectFlow(
         var redirectUri: String? = null
         val callback = transport.capture(state, timeoutMillis) { uri ->
             redirectUri = uri
-            BrowserOpener.open(authManager.buildAuthorizeUrl(clientId, uri, challenge, state))
+            authorizationLauncher.launch(authManager.buildAuthorizeUrl(clientId, uri, challenge, state), uri)
         } ?: run {
             // Timed out: the OAuth redirect callback never reached the app within timeoutMillis.
             // On macOS this most often means the keryx:// URI was routed to a different/stale bundle

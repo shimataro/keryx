@@ -37,14 +37,30 @@
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
                   NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
-                  ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表）、article/（ArticleWebViewHtml——
-                  リーダーの HTML 文書・CSP・テーマ CSS）、Formatting（formatTimestamp）。ペイン構成・フォーカス・幅は UI ごと
+                  ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
+                  サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
+                  あるかどうか。NameValidation——フォルダ・タグの新規作成/リネームダイアログが共有する
+                  重複名チェック。FeedListDrag——DropBoundary/FeedListDropIndex/buildFeedListDropIndex/
+                  resolveFeedListDropAction/resolveFeedListDropHighlight。フィードリストのドラッグ＆
+                  ドロップにおけるドロップ先の判定で、Compose と Apple アプリが共有する。TagColors——
+                  TAG_COLOR_PALETTE。タグの色選択が共有する 8 色のパレット）、article/（ArticleWebViewHtml——
+                  リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
+                  プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
+                  接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——
+                  `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
+                  組み立て・解析。ファイルの選択は各 UI が担当）、menu/（MenuUiState + computeMenuUiState——
+                  メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
+                  `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
+                  リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
+                  リーダーが共有）、RelativeTime（relativeTimeOf——タイムスタンプの経過時間を
+                  now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）。
+                  ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
@@ -56,8 +72,8 @@
                   分割された、全ペイン共通のプレーンな M3 見た目のコンポーネント）, menu/（MenuController）
     LaunchArg.kt  起動時の引数（`keryx://` URI か `.opml` パスか）を分類する — プラットフォーム非依存、パッケージ直下
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq（7 テーブル）
-  commonMain/composeResources/  values/strings.xml（日本語、デフォルト/フォールバック）,
-    values-en/strings.xml（英語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
+  commonMain/composeResources/  values/strings.xml（英語、デフォルト/フォールバック）,
+    values-ja/strings.xml（日本語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
     *ベクター*形式——ビットマップ資産（`app_icon.png`、`onedrive.png`、トレイの PNG 群）は対象外）
@@ -67,7 +83,7 @@
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理は commonMain の StartupMaintenanceTasks に委譲）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト
     appmenu/   KDE Global Menu / D-Bus アプリケーションメニュー連携（AppMenuBarHost, AppMenuConnection,
@@ -1109,20 +1125,33 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   残す。Windows・Linux・Android は引き続き Compose アプリを使う。
 - SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
   サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
-- **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）、`keryx://`
-  スキーム、OPML のドキュメントタイプを共有し、同じデータを共有してもよい。一方の起動中に LaunchServices（Finder、`open`）経由で
-  もう一方を起動しても、起動中のアプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI
-  アプリを検知できないので、同時に起動しないことは強制ではなく運用ルールである。
-- 両者は別々のコミットからビルドされた状態で同じ `keryx.db` を開きうるため、`PRAGMA user_version` が実行中アプリのスキーマより
-  **新しい**データベースは、開かずに拒否する（上記「DatabaseDriverFactory」を参照）。
-- どちらのアプリもトークンを Keychain の同じサービス（`works.merc.keryx`）に保存する。Dropbox と OneDrive は
-  両者で同じ OAuth クライアントを使うため、その項目はアカウント（`CloudStorageType.id`）も desktop アプリと共有する。
-  Google Drive は共有しない：Apple アプリの「iOS」タイプの OAuth クライアントは desktop のものとは別で、リフレッシュ
-  トークンは発行したクライアントに紐付くため、Apple 専用の別アカウント（`google_drive_apple`。
-  `data/cloud/KeychainTokenStorage.kt` の `appleKeychainAccount`）を使い、どちらのアプリも相手のトークンを上書きしない。
-  サービスとアカウントを共有するのは名前付けの仕組みにすぎず、一方のアプリが他方の項目を実際に読めるかどうかは
-  Keychain のアクセス制御で決まる（desktop アプリは `security` CLI 経由で書き込み、SwiftUI アプリはサンドボックス内で
-  動く）ため、保証はされない——読めない場合は SwiftUI アプリで再接続し、同期済みのデータはクラウドから戻す。
+- **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）と OPML の
+  ドキュメントタイプを共有する。一方の起動中に LaunchServices（Finder、`open`）経由でもう一方を起動しても、起動中の
+  アプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI アプリを検知できないので、
+  同時に起動しないことは強制ではなく運用ルールである。
+- **両者はデータを共有しない。** SwiftUI アプリはサンドボックス化されているため、そのコンテナ
+  （`~/Library/Containers/works.merc.keryx/Data/...`）は Compose ビルドの `~/Library/Application Support/Keryx` とは
+  別のファイルシステム上の場所にあり、両者の間に移行処理は無い——これは埋め忘れではなく意図した決定であり、2 つの
+  インストールは今後もずっと独立したままになる（Compose 版 macOS ビルドは、SwiftUI アプリ公開後も内部・開発用として
+  残る。上のひとつ上の箇条書きを参照）。それぞれの `PRAGMA user_version` ガード（上記「DatabaseDriverFactory」参照）は、
+  同じアプリの異なるビルドどうしがスキーマの新旧で食い違う通常のケース向けであり、アプリをまたいだアクセス向けでは
+  ない——どちらのアプリも、もう一方の DB ファイルを開くことは決してないため。
+- **SwiftUI アプリは `keryx://` スキームを登録しない。** 使い道が無いため：OAuth はデスクトップ・Android が使うカスタム
+  URI リダイレクトではなく、Swift 自身の `ASWebAuthenticationSession` と各プロバイダー自身のコールバックスキームで
+  駆動する（下記「`:shared` の Apple ターゲット」参照）。`keryx://` を所有するのは Compose ビルドのみ。
+- **どちらのアプリも、同じ Keychain 項目には書き込まない。** 共有すると、一方のアプリが切断した際
+  （プロバイダーのリフレッシュトークンも失効させる）に、もう一方の同期が黙って壊れてしまう。しかも
+  Compose 版は、SwiftUI 版がこの Bundle ID を持つより前から存在している。両アプリともサービス名は
+  `works.merc.keryx`（Compose 側は `data/cloud/KeychainCoordinates.kt` の `KEYCHAIN_SERVICE`）、
+  アカウントもプロバイダーごとに同じで、両者を分けているのは名前ではなく入れ物である：SwiftUI 版は
+  Compose 版の `security` CLI が読み書きする通常のログイン Keychain ではなく、**Data Protection Keychain**
+  （`kSecUseDataProtectionKeychain`。`keychain-access-groups` エンタイトルメントが前提）にすべての項目を
+  保存し、これは Compose 版がまったく到達できない別の入れ物になる。したがってこの分離は、SwiftUI 版が
+  `KeryxSdk.start` に `useDataProtectionKeychain = true` を渡すことだけに依存している——テスト向けの
+  既定値 `false` のままだと、ログイン Keychain 上の Compose 版の項目そのものに書き込んでしまう。
+  Compose 版のサービス名は意図的に変えておらず、既存ユーザーのトークンに移行は不要。詳細は
+  sync-architecture.ja.md の「トークン保存先」と `data/cloud/KeychainTokenStorage.kt` 自身の doc を
+  参照。
 
 ### 共有 Kotlin コード
 
@@ -1152,25 +1181,250 @@ Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そして
 `NativeSqliteDriver`、専用コネクションが必要な ATTACH マージと `VACUUM INTO` スナップショットには
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
-確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
-`appleKeychainAccount(type)`——`CloudStorageType.id`、ただし Google Drive は `google_drive_apple`。「配布と共存」参照——、初回ロック解除後に読み取り可能。平文へのフォールバックはない）。Google Drive は、
+確認している。トークンは Data Protection Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。初回ロック解除後に
+読み取り可能で、平文へのフォールバックはない。サービス・アカウントと、Compose 版の項目と分かれる仕組みは
+[sync-architecture.ja.md](sync-architecture.ja.md) の「トークン保存先」を参照。上の「配布と共存」も参照）。Google Drive は、
 `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
 設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
-共通 `keryx://oauth2/callback` リダイレクトとは異なり、そのクライアント自身のクライアント ID を逆順にした
+共通 `keryx://oauth2/callback` リダイレクト（このスキーム自体、Apple アプリは登録しない。後述）とは異なり、
+そのクライアント自身のクライアント ID を逆順にした
 カスタムスキーム（`com.googleusercontent.apps.<id>:/oauth2redirect`）を使う。詳細は
 sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプリ内アップデート（`updateModule`）は
 組み込まない：このアプリは App Store または Sparkle が更新する。
 
+どのプロバイダーも、認可 URL とリダイレクト URI の組み立て自体はデスクトップと同じ
+（`OAuthConnectFlow` + `CustomUriRedirectTransport`）。ただし Apple アプリはブラウザを開かず、カスタム URI
+スキームを OS に登録もしない：`KeryxSdk.start` の `openAuthorization` クロージャが `AuthorizationLauncher`
+を渡し、URL をそのまま Swift に手渡す。Swift は `ASWebAuthenticationSession` を開く——このセッションに
+必要な `callbackURLScheme` は `domain/schemeOf` が接続フロー自身のリダイレクト URI から導出するので、
+Swift 側が各プロバイダーのスキームを別途ハードコードする必要はない。セッションのコールバック URL は、OS が
+ルーティングする `keryx://` リダイレクトとまったく同じように `handleOAuthRedirect` に渡す。デスクトップと
+Android は影響を受けない（`AuthorizationLauncher` の既定はシステムのブラウザを開く、従来どおりの動作）。
+
+### `appleApp/` の Xcode プロジェクト
+
+`appleApp/` は SwiftUI アプリを収め、`composeApp/`/`androidApp/` と並んで置かれている。`.xcodeproj` は
+コミットしない——**XcodeGen** が `appleApp/project.yml` から生成する（`xcodegen generate`）。これは
+SQLDelight・Compose Resources がリポジトリの他の場所で自分のソースファイルからコードを生成するのと
+同じ考え方である。ターゲットは `Keryx` の 1 つだけで両プラットフォームをカバーし
+（`supportedDestinations: [macOS, iOS]`）、同期を保つべき別の iOS ターゲットは存在しない。
+
+- **`:shared` の取り込み**：`project.yml` の `dependencies:` が、あらかじめビルドした
+  `KeryxShared.xcframework` をリンクする（`embed: false, link: true`——静的フレームワークには実行時に
+  埋め込むものが無いため、これが適切）。これは XcodeGen 本来のフレームワーク依存の仕組みであり、
+  `FRAMEWORK_SEARCH_PATHS`/`OTHER_LDFLAGS -framework`（`.framework` バンドル単体しか解決できず、
+  `.xcframework` のプラットフォームごとのスライスは解決できない）でも、Kotlin/Native の
+  `embedAndSignAppleFrameworkForXcode` 便利タスク（*動的*フレームワークを単一プラットフォームの
+  ターゲットへライブ埋め込みするためのものであり、このリポジトリの `supportedDestinations` でまとめた
+  マルチプラットフォームターゲットに対してはそもそも解決できない）でもない。`prebuildScripts` の1項目
+  （`Scripts/build-shared.sh`）がビルドのたびに `:shared:assembleKeryxSharedReleaseXCFramework` と
+  `:composeApp:generateStringCatalog` を実行するので、Xcode プロジェクトは常に最新の Kotlin ソースを
+  リンクする——**常に Release 版の XCFramework** を使う。Swift アプリを Xcode の Debug 構成でビルドして
+  も同様で、`project.yml` に別の Debug 用スライスは配線していない。
+- **署名とエンタイトルメント**：`Keryx/Keryx.entitlements` は `app-sandbox`・`network.client`・
+  `files.user-selected.read-write`・`keychain-access-groups`（`$(AppIdentifierPrefix)works.merc.keryx`。
+  Data Protection Keychain のアクセスグループ。上の「配布と共存」参照）を宣言する。**サンドボックスの
+  エンタイトルメントは、実在する Apple Development / Developer ID の証明書とチームでしか署名できない**
+  ——アドホック署名（`CODE_SIGN_IDENTITY=-`）は `CODE_SIGN_STYLE=Manual` にしても失敗する
+  （「requires a provisioning profile」）ので、チームが無い状態で実行可能なエンタイトルメント付きビルドを
+  作る方法は無い。`Config/Shared.xcconfig` がアドホック・チーム無しの既定値を設定したうえで、Git 管理外の
+  `Local.xcconfig`（見本は `Local.xcconfig.example`）を `#include?` するので、開発者自身のチームは
+  コミット済みの設定に触れずにきれいに上書きできる。CI にはチームが無いため、代わりに
+  `CODE_SIGNING_ALLOWED=NO` でビルドする——これはコンパイルとリンクは行うがコード署名は一切行わないので、
+  ビルドが通ることだけを確認し、実行可能なサンドボックスアプリまでは確認しない（`docs/testing.ja.md`
+  参照）。
+- **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
+  [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
+  寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS
+  であっても `TEST_HOST` のパス計算は iOS 流のフラットな `Keryx.app/Keryx` レイアウトを使ってしまい、
+  macOS の実際のバンドルは実行ファイルを `Keryx.app/Contents/MacOS/Keryx` の下にネストするため、テスト
+  バンドルがホストを見つけられない。アプリに寄生しないということは、`KeryxTests` が `AppModel`/`HomeView`
+  を直接検証できないということでもある——代わりに `Bridge/`/`Localization/` のアダプタを単体で検証する。
+- iOS シミュレータは arm64 スライスのみを出荷する（`project.yml` の
+  `EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64`）。リポジトリの他の部分と同じ Apple Silicon 専用の
+  方針に合わせている。
+
+### サイドバー（macOS）
+
+サイドバーは標準のソースリストである。`.sidebar` スタイルの `List(selection:)` を使い、フォルダーとタグは
+`DisclosureGroup`、行は未読数を `.badge` で出す `Label` にしている。そのため、行の高さ、フォント、アイコンサイズ
+（システムの「サイドバーのアイコンサイズ」設定）、選択の形、開閉三角、インデントは、メモアプリや Finder と同じく
+すべて `NSOutlineView` が描く（`Home/FeedListView+SourceList.swift`）。標準の選択は、行のキーを介して共有の選択に接続する
+（`feedListRowSelection(forKey:in:)`）。←/→ はペイン移動のまま保つため（`external-spec.md` §9）、アウトライン
+標準の開閉より先に横取りしている。
+
+グループの区別は、Compose のような区切り線ではなく、Finder やメールと同じくセクションヘッダーで行う。
+フォルダーとタグのヘッダーは開閉でき（状態は Apple 版だけの表示状態で、`@AppStorage` に保存する）、
+セクション間の余白は固定値で上書きせず、システムのソースリスト既定に任せる。選択中のフィルターの別のコピーに
+付けるエコー（Compose では SECONDARY の薄い塗り）は、塗らずにタイトルを `Color.accentColor` にする（アイコンは
+ソースリストがもともとアクセント色にしている）。選択とドロップ先はシステムの色のままにする。
+
+ドラッグ＆ドロップは、Compose と同じ共有ルール
+（`presentation/home/FeedListDrag.kt` の `resolveFeedListDropHighlight`/`resolveFeedListDropAction`）を適用する。
+UI ごとに異なるのはフィードバックだけで、macOS では `NSOutlineView`/Finder のソースリストの慣習に従う
+（`Home/FeedListDropPresentation.swift`）。
+
+- **ドラッグは `List` 自身の行ドラッグ用フックである `.itemProvider` で開始する。** クリックとドラッグの判定は、
+  行全体で `List` が行う。SwiftUI のジェスチャー方式のドラッグ元は、これらの行では使えない。`.onDrag`/`.draggable`
+  は行の内容が描かれている部分でマウスダウンを取るため、アイコンや名前をクリックしても選択されない。`Button` の行は
+  ドラッグそのものを奪う。
+- プロバイダーのクロージャはドラッグ開始時に実行され、すべてのドロップ先はそのドラッグ中の項目を基に検証する。
+  ペイロードは専用のエクスポート型（`works.merc.keryx.app.feedlistitem`、`project.yml` の
+  `UTExportedTypeDeclarations` で宣言）を使うため、他アプリからのテキストのドラッグが並べ替えと誤認されることはない。
+- フィードバック：行間には挿入線（インデントはアウトライン自身が付ける）、フィードを落とすフォルダー・「フォルダーなし」・
+  タグの行にはアクセントカラーのハイライト、共有ルールで何も起きない位置では `.forbidden`、そしてシステムの
+  スプリングロード設定に従うスプリングロードフォルダー。
+
+### サイドバー（iOS）
+
+iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectionView` のリストで描く
+（`Home/Sidebar/SidebarCollectionView.swift`、`UIViewControllerRepresentable` で包む）。サイドバー自身が
+コレクションビューのデリゲートを持つためで、理由はドラッグ＆ドロップにある（後述）。`FeedListView` は両プラット
+フォーム共通の外枠（ツールバー、`.searchable` の検索欄、シート、アラート、名前変更の自動キャンセル）を持ったまま、
+行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。
+
+- **データの流れ。** `FeedListView.body` が `SidebarRenderState` を作る。中身は `SidebarOutline`（セクションごとの
+  木構造と展開状態）、各行の `SidebarRowContent`（タイトル、アイコン、エラー状態、エコーのハイライト、名前
+  変更中か）、表示する選択、名前変更中・色選択中のキーで、どれも `Home/Sidebar/` にある UIKit に依存しない
+  モデルから作り、`KeryxTests` でテストしている。コントローラーはこれを 3 段で反映する。構造が違うセクションの
+  スナップショットだけを適用し、次に内容が変わった行だけをその場で再構成し（スクロール位置や、入力途中の名前など
+  セル内の SwiftUI の状態が残る）、最後に選択を合わせる。アイテムは文字列だけで作る `SidebarItemID` で、
+  diffable data source が求める `Sendable` を満たす。
+- **未読数。** 未読数はあえて `SidebarRenderState` に含めない。記事を 1 件読むたび、更新中にフィードを 1 件
+  取得するたびに変わるため、`FeedListView.body` で読むと、そのたびにアウトラインと全行の内容を作り直すことに
+  なるからである。代わりにコントローラー自身が `HomeObservable` の 5 つの未読数を観測し
+  （`withObservationTracking`。変更のたびに登録し直すので、まとまった変更は 1 回の読み取りにまとまる）、
+  `SidebarUnreadCounts` のスナップショットにして、表示する数が変わったセルだけを再構成する
+  （`SidebarUnreadCounts.changedItems`。行からどの数を出すかは `SidebarItemID.unreadSource` が、macOS の
+  ソースリストの行と同じ `SidebarUnreadSource` に対応付ける）。行は常に最新のスナップショットから構成する。
+  ドラッグ中は再構成を控え、ドラッグ終了時の強制適用でセルを追いつかせる。
+- **セクションとヘッダー。** グループは macOS と同じで、すべて／スター付き（ヘッダーなし）、フォルダー、常にある
+  「フォルダーなし」、タグ。ヘッダーは補助ビューではなくセクションの*先頭のアイテム*にする
+  （`headerMode = .firstItemInSection`）。ドロップ先にできるのはアイテムだけだからである。フォルダーとタグの
+  ヘッダーはヘッダー型のアウトライン開閉で畳め、macOS と同じ `@AppStorage` のフラグを使う。フォルダーとタグの行は
+  セル型の開閉なので、行をタップすると選択になり、シェブロンだけが開閉する。開閉は
+  `toggleFolderCollapsed`/`toggleTagExpanded` に渡し、ビューモデルが新しい状態を出すまでは要求した状態を
+  覚えておく。その間に別の更新が来ても行が畳み戻らないようにするためである。
+- **行。** 各行は `UICollectionViewListCell` で、共通の `SidebarRowLabel` を `UIHostingConfiguration` で載せる。
+  未読数は `UICellAccessory.label`。幅が compact のときは inset grouped、regular のときはサイドバーの見た目に
+  なる。背景の設定で、選択とドラッグ中のドロップ先を `SelectionColor` で塗って文字とアイコンを白にする。選択中の
+  フィルターの別のコピーに付けるエコーは塗らず、タイトルとアイコンを `AccentColor` にするだけにする（選択色の
+  薄い塗りは、明るいリストではくすんで見える）。それ以外では、載せた内容はその状態でシステムのセルが使う文字色に
+  合わせる。タップは `List` の
+  ときと同じ `CompactSidebarSelection` のルールで処理する。
+  畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
+- **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
+  （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
+  同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。行の選択は、
+  UIKit が最初にメニューを求めたときではなく、実際にメニューが出るとき（`willDisplayContextMenu`）に行う。
+  ドラッグに変わる長押しでもメニューは求められるからである。
+- **インラインの名前変更**は同じ `InlineRenameField` を使い、iOS では自前の `@FocusState` でフォーカスを管理する。
+  セルは別のホスティングツリーで、`HomeView` の `focusedPane` が届かないためである。別の行をタップすると先に編集を
+  終えて確定する。名前変更中の行は選択もドラッグもできない。
+- **タグの色の選択**は `TagColorPicker` を UIKit のポップオーバーに載せ、コントローラーがタグのセルから表示する。
+  表示は `SidebarDialogState.colorPickingTagId` で決まる（色の丸とメニューの「色を変更」がこれを設定する）。
+- UI テストはアクセシビリティ識別子で行を探す。行は `feedListRowSelectionKey`、ヘッダーは `header:<section>`。
+  矢印キーは macOS と同じく `HomeView` のキー処理が受け持つ（コレクションビューは `allowsFocus = false`）。
+
+**ドラッグ＆ドロップ**は macOS や Compose と同じ共有ルールを使い、このサイドバーを SwiftUI の `List` にしない
+理由でもある。iOS の `List` 自体が `UICollectionView` で、そのドラッグ＆ドロップのデリゲートは SwiftUI が内部で
+占有している（`CollectionViewListDragAndDropController`）。そのため行の `.onDrop`/`.dropDestination`、`List`
+全体の `.onDrop`、同じリストの別の場所からドラッグした項目への `.onInsert` は一切呼ばれず、動くのは 1 つの
+`ForEach` 内の `.onMove` だけである。さらにドラッグの開始時に*別の*行の `.onDrag` プロバイダーまで呼ばれるので、
+ドラッグ中の項目を副チャネルに記録しても上書きされてしまう。そこでメモアプリと同じく、コレクションビュー自身が
+デリゲートを持つ（`Home/Sidebar/SidebarCollectionViewController+DragDrop.swift`）。対応付けは UIKit に依存しない
+`SidebarDropResolver` が行う（`KeryxTests` でテストしている）。
+
+- **ドラッグ中の行はドラッグ項目の `localObject`** で、`SidebarDragContext` はセッションの `localContext` で
+  受け渡す。セッションはアプリ内に限り、アイテムプロバイダーはデータを持たない。ドラッグするのは持ち上げた行
+  だけで、ヘッダー、すべて／スター付き、タグ、名前変更中の行はドラッグしない。
+- **行の上か、行の間か。** フィードをフォルダーの行（上 1/4 はその上の行間のまま）、「フォルダーなし」の
+  ヘッダー、タグの行に重ねると `.insertIntoDestinationIndexPath` を提案し、セルのドロップ状態で `SelectionColor` の
+  ハイライトを描く。それ以外は行間（`.insertAtDestinationIndexPath`）で、UIKit が隙間を開けて示す。
+  行間の位置は UIKit が移動を数えるのと同じく、ドラッグ中の行（フォルダーならその中のフィードも。持ち上げた
+  フォルダーはアウトラインが畳む）を除いて数える。開いた隙間の上に指があるあいだ、UIKit はドラッグ中の行自身の
+  インデックスパスを返すので、そのときは直前の位置を保つ。ドロップ時のコーディネーターの行き先は本当の隙間で
+  ある。どの位置も `FeedListDropTarget` と上下半分に直して `resolveFeedListDropAction` に通し、`nil` なら
+  `.forbidden`（タグの中、フィードにとってのセクションの先頭、閉じたフォルダーのすぐ下など）、そうでなければ
+  `applyFeedListDropAction` で適用する。
+- **行の上へのドロップは、プレビューをその行の中央へ縮める**（`UIDragPreviewTarget`）。UIKit の既定は
+  ドラッグ中の行のスナップショットをターゲットの bounds いっぱいに合わせるので、ドロップのアニメーションの間
+  ずっと、ドラッグ中のフィード名がターゲットのタイトルに重なってしまう。
+- **スプリングロード**は、フィードを閉じたフォルダーに入れる位置に来たときにシステムの `springLoadingDelay()`
+  のタイマーを始め、発火時にもう一度確かめる。UIKit の `isSpringLoaded` は、開いた行を選択してしまうので使わない。
+- **ドロップ自身の結果は `performDropWith` の中で、共有の状態より先に反映する。** UIKit は、そこから戻る時点で
+  データソースが結果を映していることを前提にしている。ビューモデルの状態は遅れて届くので、以前はドロップした行が
+  着地し、隙間が閉じ、その後で行が動く 2 段階のアニメーションになっていた。`SidebarDropPreview`（UIKit 非依存で
+  `KeryxTests` がテストする）が、リポジトリの `reorderIds` と同じ規則でアウトラインを先読みする。あとから届く状態は
+  同じ構造なので、何も起きない。
+- **ドラッグ中は状態を反映しない**（UIKit のプレースホルダーと隙間を乱すため）。最新の状態はドラッグの終わりに
+  反映し、UIKit が畳んだままにする持ち上げたフォルダーもそこで開き直す。
+
+### 記事一覧（macOS）
+
+macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定した `NSTableView` である
+（`Home/ArticleTableView.swift`、`NSViewRepresentable`）。iOS は `List` のまま。
+
+- **理由。** macOS の `List` も中身は `NSTableView` だが、行の高さは自動計算で、変更を反映するときに、先頭に
+  見えている行より上に挿入された行をすべて計測する（`_keepTopRowStableAtLeastOnce` の中の
+  `_doAutomaticRowHeightsForInsertedAndVisibleRows`）。先頭の行の位置を保つためである。古い未読記事を
+  表示した状態で「未読のみ」を解除したり、全件表示で並べ替えたりすると、数千行が一度に挿入される。
+  記事 11,585 件・未読 18 件の環境では、メインスレッドのサンプルの 99.6% がこの計測で、数分間操作を
+  受け付けず、UIFoundation の行分割の assert（`-[_NSLineMetrics widthOfSubstringWithRange:]`）でクラッシュする
+  こともあった。かかる時間は、アンカー行より上に入る行数だけで決まる。未読記事が全件の先頭近くにあれば、
+  同じ操作が 0.4 秒で終わる。
+- **固定の高さ。** 記事行の高さはすべて同じ（タイトルは常に 2 行分、フィード名と日時は 1 行分を確保する）
+  なので、見本の行を 1 回だけ計測し、それ以外は計測しない。見本は、両方の行に和文と絵文字を入れ、ペインの
+  最小幅で測る。各セルは、行を行自身の理想の高さで配置する（`fixedSize(vertical:)`）。セルの固定の高さを
+  提案すると、ちょうど 2 行に収まるタイトルを SwiftUI が 1 行で組んでしまうためである。
+- **更新。** 行の集合や並び順が変わったら、テーブルを再読み込みし、先頭に見えていた行を、その行番号だけから
+  元の画面位置に戻す（`Home/ArticleTableLayout.swift`、`KeryxTests` でテストしている）。そのため、上に挿入
+  された行は画面外に入る。新着ピルはこれを前提にしている（`freshSideUnseenCount`）。フィルターを切り替えた
+  ときは先頭に戻る。行が変わらない変更では、`ArticleRowView` が変わった可視セルだけを描き直す。
+- **それ以外は SwiftUI のまま。** 行は同じ `ArticleRowView` をホストしたもので、選択、クリック、コンテキスト
+  メニューは行自身が扱う。ペインのフォーカスでは、`List` の中のテーブルと同じくテーブルがファーストレスポンダーに
+  なるが、キーはすべてレスポンダーチェーンの上位へ渡すので、`HomeView` のキー処理は変わらない。行の
+  ホスティングビューはファーストレスポンダーにならない。`List` と違い、representable は上位のコンテナに付けた
+  バインディングではフォーカスされないので、ペインの `.focused` は representable 自身に付け、
+  `.focusable(interactions: .edit)` を指定する。既定の指定はシステムの「キーボードナビゲーション」設定（既定で
+  オフ）に従うため、そのままではペインにまったくフォーカスが入らなかった。新着数のための表示中の行の報告は、`onAppear`/`onDisappear`
+  ではなくクリップビューの表示範囲から作る。ホストされた行は SwiftUI の environment を引き継がないので、
+  コンテキストメニューのトラッカーは明示的に渡す。`List` なら自動で付いた、ツールバー下のソフトな
+  スクロールエッジ効果は `scrollEdgeEffectStyle` で指定する。
+
+### 選択の表示（iOS）
+
+compact 幅（分割ビューが 1 つのスタックに畳まれた状態）では、サイドバーと記事一覧の行はナビゲーションの
+リンクなので、どちらも一番手前の列に戻ったときに選択を画面に残さない（`CompactSidebarSelection`、
+`CompactArticleSelection`）。`HomeViewModel` の共有の選択は変えない。記事詳細から記事一覧に戻ると、読んでいた
+行を中立の灰色で一瞬光らせ、約 0.35 秒で消す。iOS のリストの作法で、Android の中立色のリップルと同じ役割である。
+
+regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと記事一覧のどちらも選択を残し、`SelectionColor` で
+塗って文字を白にする。この色アセットは Keryx のティールで、ライトでは Compose 版の選択と同じ `#00897B`、ダーク
+では `#00796B` にしている。ダークの `AccentColor`（`#4DB6AC`）の上では白文字が読めない（2.4:1）ため、それより
+暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
+同じくタッチ主体の Android も薄くしない（`external-spec.md` §9）。
+
 ### `KeryxSdk`：Swift からの入口
 
 `sdk/KeryxSdk.kt`（appleMain）は、Swift アプリが生成する唯一のもの：
-`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` がオブジェクトグラフ
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:openAuthorization:useDataProtectionKeychain:)`
+がオブジェクトグラフ
 （`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`。Koin は内部に隠す）を構築し、DB を開き——
 `DatabaseTooNewException` はここで Swift のエラーとして現れる——`homeViewModel`・`notificationCenter`・
 `newArticleNotifier`（新着記事が見つかった更新ごとの新着テキスト。OS 通知の送り先にも渡される）・`syncRepository`・
 `settingsRepository`・`cloudSession`・`availableCloudTypes`（このビルドで設定済みの
-クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`
-を提供する。`completeConnect(type, tokens)` と `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
+クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`、
+そして Compose の設定・セットアップ画面が今では自前実装ではなく包んでいるのと同じ `presentation/` コントローラ
+——`setupController`・`cloudSyncController`・`preferences`（`PreferencesController`）・`opml`
+（`OpmlTransfer`）・`notificationAlerts`・`menuState(…)`（`presentation/menu/computeMenuUiState` への直接
+パススルーで、`Commands`／メニュー項目の有効・チェック状態を返す）——を提供する。`startMaintenance()` は、
+`domain/StartupMaintenanceTasks.kt` の `runStartupMaintenance` と `domain/BackgroundRefreshLoop.kt` の
+`backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——フォアグラウンド起動ごとに1回呼ぶ。
+冪等なので、繰り返し呼んでもループが二重に始まることはない。`importOpenedOpml(xml)` は、アプリがある文書を
+開いた状態で起動したとき用に `domain/OpmlOpenHandler.kt` の `importOpmlAndNotify` を包む（デスクトップ版・
+Android 版自身の「`.opml` ファイル関連付け」の扱いと同じ）。`completeConnect(type, tokens)` と
+`tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
 `suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を
 フラッシュする。`tearDown` は切断（トークンを失効）し、同期失敗状態とプロバイダーごとの同期マーカーを消去し、
@@ -1179,7 +1433,17 @@ sync-architecture.ja.md の「Apple 版での Google Drive」を参照。アプ�
 ——`KeryxSdk` がその実行を SDK 自身のバックグラウンドスコープに乗せて結果を待つ。生のサービスをそのまま渡して
 Swift の `@MainActor` 呼び出し元がメインスレッド外へのディスパッチ（Compose 側の `withContext(dispatcher)` に相当
 するもの）を自前で行うことは期待していない。`dataDirectory` は、
-すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。`close()` は、
+すべてのアプリ用ディレクトリを指定したパスの下に置く（ユーザーの実データを開いてはならないプレビューやテスト向け）。
+`openAuthorization` は `((url: String, callbackScheme: String) -> Unit)?`——`null`（既定）ならシステムのブラウザに
+フォールバックする。これは、実際にプロバイダーへ接続することのないプレビューやテストが安全に無視できる値。
+出荷版アプリは `ASWebAuthenticationSession` を開くクロージャを渡す（上記「`:shared` 内の Apple ターゲット」参照）。
+**3 つのコールバック（`newArticlesText`・`postOsNotification`・`openAuthorization`）はすべて
+`nonisolated` な文脈で組み立てなければならない**——Kotlin 側はこれらを自身のバックグラウンド
+ディスパッチャから呼び出す（例えばバックグラウンド/起動時の更新で見つかった新着記事を伝える
+`NewArticleNotifier` は `Dispatchers.Default` 上で動く）。`@MainActor` な型・メソッドの中で書いた
+クロージャリテラルはその分離を引き継いでしまい、Swift 6 はそこに実行時の「実行キューが一致して
+いるか」のチェックを入れるため、Kotlin がメインスレッド外から呼ぶとトラップしてクラッシュする。
+`close()` は、
 まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
 HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。
 `handleOAuthRedirect` は、接続フローがリダイレクトを待ち受けていなければ `false` を返し、そのリダイレクトは破棄する。

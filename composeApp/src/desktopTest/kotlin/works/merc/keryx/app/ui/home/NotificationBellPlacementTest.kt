@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
+import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.Test
@@ -78,7 +79,8 @@ class NotificationBellPlacementTest {
 
     private fun runWithHost(layout: PaneLayout, depth: Int, assertBellCount: (Int) -> Unit) = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
-        val notifVm = NotificationCenterViewModel(NotificationCenter())
+        val notificationCenter = NotificationCenter()
+        val notifVm = NotificationCenterViewModel(notificationCenter, NotificationAlerts(notificationCenter))
         useHomeViewModel(driver, db) { fixture ->
             setContent { ContentAreaTestHost(fixture.vm, notifVm, layout, depth) }
             waitForIdle()

@@ -27,6 +27,7 @@ import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.resources.tray_icon_outlined
 import works.merc.keryx.app.resources.tray_quit
 import works.merc.keryx.app.resources.tray_show
+import works.merc.keryx.app.resources.tray_tooltip_unread
 import java.awt.image.BufferedImage
 
 /**
@@ -100,7 +101,7 @@ internal fun ApplicationScope.KeryxTray(
     val trayBaseImage = rememberDrawableImage(trayIconResource)
     val updateState by updateStateFlow.collectAsState()
 
-    val tooltip = if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME
+    val tooltip = if (unreadCount > 0) stringResource(Res.string.tray_tooltip_unread, APP_NAME, unreadCount) else APP_NAME
     val showLabel = stringResource(Res.string.tray_show)
     val hideLabel = stringResource(Res.string.tray_hide)
     val quitLabel = stringResource(Res.string.tray_quit)
@@ -136,6 +137,7 @@ internal fun ApplicationScope.KeryxTray(
                 trayBaseImage = trayBaseImage,
                 notificationIcon = notificationIcon,
                 unreadCount = unreadCount,
+                tooltip = tooltip,
                 windowVisible = windowVisible,
                 showLabel = showLabel,
                 hideLabel = hideLabel,

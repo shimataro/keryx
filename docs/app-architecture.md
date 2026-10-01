@@ -39,16 +39,33 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
                   actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
                   the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
-                  HomeShortcuts — the keyboard-shortcut table over logical keys), article/ (ArticleWebViewHtml —
-                  the reader's HTML document, CSP and theme CSS), Formatting (formatTimestamp). Pane
-                  layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
+                  which warning/error still needs announcing in a transient surface with no queue of
+                  its own, e.g. Android's foreground Snackbar; NameValidation — the folder/tag
+                  duplicate-name check every create/rename dialog shares; FeedListDrag —
+                  DropBoundary/FeedListDropIndex/buildFeedListDropIndex/resolveFeedListDropAction/
+                  resolveFeedListDropHighlight, the feed-list drag-and-drop drop-target resolution
+                  shared by Compose and the Apple app; TagColors — TAG_COLOR_PALETTE, the tag
+                  color-picker's shared 8-color palette), article/ (ArticleWebViewHtml —
+                  the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
+                  local-only vs. a cloud provider and running the connect flow through to the initial
+                  sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
+                  sync-now and `canSyncNow`; PreferencesController — typed setters over `LocalSettings`
+                  and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
+                  leaving file picking to each UI), menu/ (MenuUiState + computeMenuUiState — enabled/
+                  checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
+                  than Compose's own `Screen` type), Formatting (formatTimestamp, articleMetaText —
+                  the reader's "author · date" meta line, shared by Compose's 3-pane reader and the
+                  Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
+                  into now/minutes/hours/days/absolute, shared by both apps' notification center
+                  rows). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -61,8 +78,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   feel components shared by every pane), menu/ (MenuController)
     LaunchArg.kt  Classifies a raw launch argument (`keryx://` URI vs `.opml` path) — platform-independent, package root
   commonMain/sqldelight/works/merc/keryx/app/data/local/db/  *.sq (7 tables)
-  commonMain/composeResources/  values/strings.xml (Japanese, default/fallback), values-en/strings.xml
-    (English, same key set), drawable/ (icons are Android Vector Drawable XML,
+  commonMain/composeResources/  values/strings.xml (English, default/fallback), values-ja/strings.xml
+    (Japanese, same key set), drawable/ (icons are Android Vector Drawable XML,
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
     target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)
@@ -71,7 +88,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
     update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/backgroundUpdateLoop/handleOpenedOpmlFile — the desktop-only orchestration, delegating the actual maintenance work to commonMain's StartupMaintenanceTasks) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects
     appmenu/   KDE Global Menu / D-Bus application-menu integration (AppMenuBarHost, AppMenuConnection,
@@ -1099,23 +1116,37 @@ around.
   Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
   Developer ID build adds Sparkle, which the App Store build must not contain.
 - **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
-  share the bundle ID (`works.merc.keryx`), the `keryx://` scheme and the OPML document types, and
-  may share the same data. Launching one through LaunchServices (Finder, `open`) while the other is
-  running just activates the running one. `./gradlew :composeApp:run` bypasses LaunchServices and
-  cannot detect the SwiftUI app, so not running both is an operating rule, not an enforced one.
-- Because the two may open the same `keryx.db` built from different commits, a database whose
-  `PRAGMA user_version` is **newer** than the running app's schema is refused rather than opened
-  (see "DatabaseDriverFactory" above).
-- Both apps keep tokens in the Keychain under the same service (`works.merc.keryx`). Dropbox and
-  OneDrive use the same OAuth client on both, so their items also share the account
-  (`CloudStorageType.id`) with the desktop app. Google Drive does not: the Apple app's "iOS"-type
-  OAuth client differs from desktop's, and a refresh token is bound to the client that issued it,
-  so it uses a separate Apple-only account (`google_drive_apple`, `appleKeychainAccount` in
-  `data/cloud/KeychainTokenStorage.kt`) that neither app can overwrite for the other. Sharing a
-  service and account is only the naming mechanism: whether one app can actually read the other's
-  item is decided by Keychain access control (the desktop app writes through the `security` CLI,
-  the SwiftUI app runs sandboxed), so it is not guaranteed — when it can't, the SwiftUI app
-  reconnects, and synced data comes back from the cloud.
+  share the bundle ID (`works.merc.keryx`) and the OPML document types. Launching one through
+  LaunchServices (Finder, `open`) while the other is running just activates the running one.
+  `./gradlew :composeApp:run` bypasses LaunchServices and cannot detect the SwiftUI app, so not
+  running both is an operating rule, not an enforced one.
+- **The two apps do not share data.** The SwiftUI app is sandboxed, so its container
+  (`~/Library/Containers/works.merc.keryx/Data/...`) is a different filesystem location than the
+  Compose build's `~/Library/Application Support/Keryx`, and there is no migration between them —
+  a deliberate decision, not a gap: the two remain independent installs indefinitely, and the
+  Compose macOS build stays available for internal/development use after the SwiftUI app ships
+  (see the bullet above). Each app's own `PRAGMA user_version` guard (see "DatabaseDriverFactory"
+  above) exists for the ordinary case of two builds of the *same* app disagreeing on schema
+  version, not for cross-app access, since neither app ever opens the other's database file.
+- **The SwiftUI app does not register the `keryx://` scheme.** It has no use for it: OAuth is
+  driven by Swift's own `ASWebAuthenticationSession` with each provider's own callback scheme (see
+  "Apple targets in `:shared`" below), never the custom-URI redirect desktop/Android use. Only the
+  Compose build owns `keryx://`.
+- **The two apps never write to the same Keychain item.** Sharing one would let either app's
+  disconnect (which also revokes the provider's refresh token) silently break the other's sync, and
+  the Compose build predates the SwiftUI app owning this bundle ID at all. Both use the same
+  service name, `works.merc.keryx` (`KEYCHAIN_SERVICE` in `data/cloud/KeychainCoordinates.kt` on
+  the Compose side), and the same per-provider account — what keeps them apart is the store, not
+  the name: the SwiftUI app stores every item in the **Data Protection Keychain**
+  (`kSecUseDataProtectionKeychain`, gated on the `keychain-access-groups` entitlement) rather than
+  the ordinary login Keychain the Compose build's `security` CLI reads and writes, a separate store
+  the Compose build cannot reach at all. That separation therefore rests entirely on the SwiftUI app
+  passing `useDataProtectionKeychain = true` to `KeryxSdk.start`: with `false` (the parameter's
+  default, meant for tests) it would land in the login Keychain on exactly the Compose build's
+  items. The Compose build's own service name is deliberately left unchanged, so its existing
+  users' tokens need no migration. See
+  "Token Storage" in [sync-architecture.md](sync-architecture.md) and
+  `data/cloud/KeychainTokenStorage.kt`'s own doc.
 
 ### Shared Kotlin code
 
@@ -1153,28 +1184,273 @@ sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
 `platform/RawSqliteConnection.kt` (SQLiter's sqlite3 bindings) for the ATTACH merge and the
 `VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
 trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
-(3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
-(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `appleKeychainAccount(type)` —
-`CloudStorageType.id`, except `google_drive_apple` for Google Drive; see "Distribution and coexistence" —
-readable after first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
+(3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Data
+Protection Keychain (`data/cloud/KeychainTokenStorage.kt`; readable after first unlock, no
+plaintext fallback — see "Token Storage" in [sync-architecture.md](sync-architecture.md) for the
+service/account and how it stays apart from the Compose build's items, and "Distribution and coexistence" above). Google Drive is offered once an Apple-type
 ("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
 — gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/
-OneDrive's shared `keryx://oauth2/callback` redirect, uses that client's own reversed-client-id
-custom scheme (`com.googleusercontent.apps.<id>:/oauth2redirect`); see sync-architecture.md's
-"Google Drive on Apple". The in-app updater (`updateModule`) is not installed: the App Store or
-Sparkle update this app.
+OneDrive's shared `keryx://oauth2/callback` redirect (a scheme the Apple app itself never registers
+— see below), uses that client's own reversed-client-id custom scheme
+(`com.googleusercontent.apps.<id>:/oauth2redirect`); see sync-architecture.md's "Google Drive on
+Apple". The in-app updater (`updateModule`) is not installed: the App Store or Sparkle update this
+app.
+
+Every provider's connect flow still builds its authorize URL and redirect URI exactly as desktop
+does (`OAuthConnectFlow` + `CustomUriRedirectTransport`), but the Apple app never opens a browser
+and never registers a custom URI scheme with the OS: `KeryxSdk.start`'s `openAuthorization` closure
+supplies an `AuthorizationLauncher` that hands the URL straight to Swift, which opens an
+`ASWebAuthenticationSession` — `domain/schemeOf` derives that session's required
+`callbackURLScheme` from the connect flow's own redirect URI, so Swift needs no separate, hardcoded
+copy of each provider's scheme. The session's callback URL is handed to `handleOAuthRedirect`
+exactly like an OS-routed `keryx://` redirect would be; desktop and Android are unaffected
+(`AuthorizationLauncher` defaults to opening the system browser, their existing behavior).
+
+### The `appleApp/` Xcode project
+
+`appleApp/` holds the SwiftUI app, sitting beside `composeApp/`/`androidApp/`. The `.xcodeproj` is
+never committed — **XcodeGen** generates it from `appleApp/project.yml` (`xcodegen generate`), the
+same way SQLDelight/Compose Resources generate code from their own source files elsewhere in the
+repo. One target, `Keryx`, covers both platforms (`supportedDestinations: [macOS, iOS]`); there is
+no separate iOS target to keep in sync.
+
+- **Consuming `:shared`**: `project.yml`'s `dependencies:` links the prebuilt
+  `KeryxShared.xcframework` (`embed: false, link: true` — appropriate for a *static* framework,
+  which has nothing to embed at runtime). This is XcodeGen's native framework-dependency mechanism,
+  not `FRAMEWORK_SEARCH_PATHS`/`OTHER_LDFLAGS -framework` (which only resolves a bare `.framework`
+  bundle, not an `.xcframework`'s per-platform slices) and not Kotlin/Native's
+  `embedAndSignAppleFrameworkForXcode` convenience task (built for live-embedding a *dynamic*
+  framework into a single-platform target; it does not resolve against this repo's
+  `supportedDestinations`-grouped multiplatform target at all). A `prebuildScripts` entry
+  (`Scripts/build-shared.sh`) runs `:shared:assembleKeryxSharedReleaseXCFramework` and
+  `:composeApp:generateStringCatalog` before every build, so the Xcode project always links the
+  current Kotlin source — **always the Release XCFramework variant**, even for an Xcode Debug
+  build of the Swift app, since there is no separate debug slice wired in `project.yml`.
+- **Signing and entitlements**: `Keryx/Keryx.entitlements` declares `app-sandbox`,
+  `network.client`, `files.user-selected.read-write`, and `keychain-access-groups`
+  (`$(AppIdentifierPrefix)works.merc.keryx`, the Data Protection Keychain access group — see
+  "Distribution and coexistence" above). **A sandboxed entitlement can only be signed by a real
+  Apple Development/Developer ID identity and team** — ad-hoc signing (`CODE_SIGN_IDENTITY=-`)
+  fails even under `CODE_SIGN_STYLE=Manual` ("requires a provisioning profile"), so there is no way
+  to produce a runnable, entitled build without one. `Config/Shared.xcconfig` sets ad-hoc/no-team
+  defaults and then `#include?`s a gitignored `Local.xcconfig` (templated by
+  `Local.xcconfig.example`), so a developer's own team overrides cleanly without touching the
+  committed config. CI has no team available, so it builds with `CODE_SIGNING_ALLOWED=NO` instead —
+  this compiles and links but never codesigns, so it verifies the build only, not a runnable
+  sandboxed app (see `docs/testing.md`).
+- **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
+  `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
+  `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
+  computation uses the iOS-style flat `Keryx.app/Keryx` layout even when the active destination is
+  macOS, whose bundle actually nests the executable under `Keryx.app/Contents/MacOS/Keryx`, so the
+  test bundle fails to find its host. Being host-less means `KeryxTests` cannot exercise `AppModel`/
+  `HomeView` directly; it covers the `Bridge/`/`Localization/` adapters in isolation instead.
+- iOS Simulator only ships an arm64 slice (`EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64` in
+  `project.yml`), matching the rest of the repo's Apple-Silicon-only convention.
+
+### Sidebar (macOS)
+
+The sidebar is a native source list — `List(selection:)` in `.sidebar` style, with folders and tags
+as `DisclosureGroup`s and rows as `Label`s with `.badge` unread counts — so row height, font, icon
+size (the system's sidebar icon size setting), selection shape, disclosure triangles and
+indentation all come from `NSOutlineView`, as in Notes and Finder (`Home/FeedListView+SourceList.swift`). The
+native selection is bridged to the shared one by row key (`feedListRowSelection(forKey:in:)`), and
+←/→ are taken before the outline's own expand/collapse so they keep moving between panes
+(`external-spec.md` §9).
+
+Groups are told apart the way Finder and Mail do it: by section headers, not divider lines as in
+Compose. The Folders and Tags headers collapse (the state is native-only view state, stored in
+`@AppStorage`), and the spacing between sections is left to the system's source-list defaults
+rather than overridden with fixed values. The echo of the selected filter's other copies (Compose's
+faint SECONDARY fill) is the title in `Color.accentColor` with no fill — the icons are already
+accent-tinted by the source list — while the selection and a drop target keep the system's own
+colors.
+
+Drag and drop applies the same shared rules as Compose
+(`presentation/home/FeedListDrag.kt`'s `resolveFeedListDropHighlight`/`resolveFeedListDropAction`);
+only the feedback is per UI, and on macOS it follows the source-list conventions of
+`NSOutlineView`/Finder (`Home/FeedListDropPresentation.swift`).
+
+- **A drag starts through `.itemProvider`, the `List`'s own row-drag hook.** The list then tells a
+  click from a drag anywhere in the row. SwiftUI's gesture-based sources do not work in these rows:
+  `.onDrag`/`.draggable` take the mouse-down wherever the row's content is drawn, so clicking an
+  icon or title never selects, and a `Button` row swallows the drag altogether.
+- The provider closure runs when the drag begins; every drop target validates against that
+  in-progress item. The payload uses its own exported type (`works.merc.keryx.app.feedlistitem`,
+  declared under `UTExportedTypeDeclarations` in `project.yml`), so a text drag from another app is
+  never taken for a reorder.
+- Feedback: an insertion line between rows (indented by the outline itself), an accent highlight on
+  a folder, "No folder" or tag row a feed is dropped onto, `.forbidden` wherever the shared rules
+  resolve no action, and spring-loaded folders that follow the system's spring-loading setting.
+
+### Sidebar (iOS)
+
+The iOS sidebar is a UIKit `UICollectionView` list rather than SwiftUI's `List`
+(`Home/Sidebar/SidebarCollectionView.swift`, wrapped in a `UIViewControllerRepresentable`), so that the
+sidebar owns the collection view's delegates — the reason is drag and drop, see below.
+`FeedListView` keeps the frame both platforms share (toolbar, `.searchable` field, sheets, alerts,
+the rename auto-cancel) and only swaps the rows: the source list under `#if os(macOS)`, the collection
+view on iOS.
+
+- **Data flow.** `FeedListView.body` builds a `SidebarRenderState` — the `SidebarOutline` (each
+  section's tree and which items are expanded), every row's `SidebarRowContent` (title, icon, error
+  state, echo highlight, whether it is being renamed), the displayed selection and the
+  rename/color-picker keys — from UIKit-free models under `Home/Sidebar/` that `KeryxTests` covers. The
+  controller applies it in three steps: only the section snapshots whose structure differs, then
+  reconfiguring only the rows whose content changed (in place, so scroll position and the SwiftUI
+  state inside a cell, like a half-typed name, survive), then the selection. Items are
+  `SidebarItemID`s built from strings alone, so they are `Sendable` for the diffable data source.
+- **Unread counts.** The counts are deliberately not part of `SidebarRenderState`: they change on
+  every article read and every feed fetched during a refresh, and reading them in `FeedListView.body`
+  would rebuild the outline and every row's contents each time. The controller instead observes
+  `HomeObservable`'s five counts itself (`withObservationTracking`, re-registered after each change,
+  which coalesces a burst into one read) into a `SidebarUnreadCounts` snapshot, and reconfigures only
+  the cells whose shown count changed (`SidebarUnreadCounts.changedItems`, with
+  `SidebarItemID.unreadSource` mapping a row to the same `SidebarUnreadSource` the macOS source-list
+  rows read). A row is always configured from the latest snapshot; mid-drag the reconfiguring is held
+  back, and the forced apply at the drag's end catches the cells up.
+- **Sections and headers.** The same groups as macOS: All/Starred (no header), Folders, the
+  always-present "No folder", Tags. The headers are the *first item* of their section
+  (`headerMode = .firstItemInSection`), not supplementary views, because only an item can be a drop
+  destination; the Folders and Tags headers collapse with a header-style outline disclosure and keep
+  the same `@AppStorage` flags as macOS. Folder and tag rows carry a cell-style disclosure, so tapping
+  the row selects it and only the chevron expands or collapses it; the toggles feed
+  `toggleFolderCollapsed`/`toggleTagExpanded`, with the requested state held until the view model
+  publishes it so an unrelated update in between cannot fold the row back.
+- **Rows.** Each row is a `UICollectionViewListCell` hosting the shared `SidebarRowLabel` through
+  `UIHostingConfiguration`; the unread count is a `UICellAccessory.label`. The list is inset grouped at
+  a compact width and sidebar-styled at a regular one. The background configuration paints the selection
+  and, while dragging, the drop target in `SelectionColor` with white text and icons; the echo of the
+  selected filter's other copies is no fill at all, only the title and icon in `AccentColor` (a faint
+  fill of the selection color reads as a dull smudge on a light list); otherwise the hosted content
+  takes the text color a system cell would use in that state. A tap goes through the same `CompactSidebarSelection` rules as the `List` did; while the
+  collapsed sidebar shows no selection (it is the topmost column on an iPhone), it shows no echo either.
+- **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
+  (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
+  macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
+  drag. The row is selected when the menu actually appears (`willDisplayContextMenu`), not when UIKit
+  first asks for it, since a long press that turns into a drag asks too.
+- **In-place rename** uses the same `InlineRenameField`, which on iOS tracks its own `@FocusState`: the
+  cell is a separate hosting tree that `HomeView`'s `focusedPane` cannot reach. Tapping another row ends
+  editing first, which commits the edit; the renaming row can be neither selected nor dragged.
+- **The tag color picker** is `TagColorPicker` in a UIKit popover presented by the controller from the
+  tag's cell, driven by `SidebarDialogState.colorPickingTagId` (the dot and the "Change color" menu item
+  both set it).
+- UI tests find rows by accessibility identifier: the row's `feedListRowSelectionKey`, or
+  `header:<section>` for a header. Arrow keys stay with `HomeView`'s own key handling
+  (`allowsFocus = false` on the collection view), as on macOS.
+
+**Drag and drop** applies the same shared rules as macOS and Compose, and is why this sidebar is not
+a SwiftUI `List`. On iOS that `List` is itself a `UICollectionView` whose drag and drop delegates
+SwiftUI keeps to itself (`CollectionViewListDragAndDropController`): a row's `.onDrop`/
+`.dropDestination`, an `.onDrop` on the whole `List`, and `.onInsert` for an item dragged from
+elsewhere in the same list are never called — only `.onMove` within one `ForEach` works — and
+starting a drag also calls *other* rows' `.onDrag` providers, so a side channel recording the dragged
+item gets overwritten. As in Notes, the collection view therefore takes the delegates itself
+(`Home/Sidebar/SidebarCollectionViewController+DragDrop.swift`), with the mapping in the UIKit-free
+`SidebarDropResolver` (tested in `KeryxTests`):
+
+- **The dragged row travels as the drag item's `localObject`** and a `SidebarDragContext` as the
+  session's `localContext`; the session is restricted to the app and its item provider carries no data.
+  Only the lifted row is dragged — never a header, All/Starred, a tag, or the row being renamed.
+- **Onto a row or between rows.** A feed over a folder row (below its top quarter, which stays the gap
+  above it), the "No folder" header or a tag row is proposed as `.insertIntoDestinationIndexPath`, and
+  the cell's drop state paints it in `SelectionColor`; anywhere else it is a gap
+  (`.insertAtDestinationIndexPath`), which UIKit draws by opening space. A gap's index is counted the way
+  UIKit numbers a move: with the dragged row (and, for a folder, its feeds — the outline collapses a
+  lifted folder) left out. While the finger is over the gap it has already opened, UIKit reports the
+  dragged row's own index path, so the previous position is kept then; at the drop the coordinator's
+  destination is the real gap. Every position becomes a `FeedListDropTarget` and half, goes through
+  `resolveFeedListDropAction` — `nil` is `.forbidden`, e.g. inside the tags, above a section's first
+  row for a feed, or just below a collapsed folder — and is applied with `applyFeedListDropAction`.
+- **Dropping onto a row shrinks the preview into its center** (`UIDragPreviewTarget`) instead of using
+  UIKit's default, a snapshot of the dragged row fitted to the target's bounds, which would lay the dragged
+  feed's name over the target's title for the whole drop animation.
+- **Spring loading** is a timer of the system's `springLoadingDelay()` started when a feed would drop
+  into a collapsed folder and checked again when it fires, not UIKit's `isSpringLoaded`, which selects
+  the row it springs.
+- **The drop's own result is applied inside `performDropWith`**, ahead of the shared state: UIKit expects the
+  data source to show it when that returns, and the view model's state only arrives afterwards, which used to
+  let the dropped row land, its gap close, and the row move in a second animation. `SidebarDropPreview`
+  (UIKit-free, tested in `KeryxTests`) predicts the outline with the repositories' `reorderIds` rules;
+  the state that follows has the same structure, so it changes nothing.
+- **State is not applied mid-drag** (it would disturb UIKit's placeholder and gap); the latest state is
+  applied when the drag ends, which also re-expands a lifted folder that UIKit left collapsed.
+
+### Article list (macOS)
+
+The macOS article list is an `NSTableView` with one fixed row height
+(`Home/ArticleTableView.swift`, an `NSViewRepresentable`), not SwiftUI's `List`; iOS keeps its `List`.
+
+- **Why.** The macOS `List` is itself an `NSTableView`, but with automatic row heights, and applying a
+  change measures every row inserted above the top visible one (`_doAutomaticRowHeightsForInsertedAndVisibleRows`
+  under `_keepTopRowStableAtLeastOnce`) to keep that row in place. Turning "unread only" off with an
+  old unread article on screen, or re-sorting the full list, inserts thousands of rows at once: with
+  11,585 articles and 18 unread, 99.6% of the main thread's samples were in that measuring, the app
+  stopped responding for minutes, and it sometimes crashed on an assertion in UIFoundation's line
+  breaker (`-[_NSLineMetrics widthOfSubstringWithRange:]`). How long it took depended only on how many
+  rows landed above the anchor row — the same toggle with the unread articles near the top of the
+  full list finished in 0.4s.
+- **Fixed height.** Every article row has the same height (the title always reserves two lines, the
+  feed/timestamp line one), so the table measures one sample row once — Japanese text and an emoji
+  in both lines, at the pane's minimum width — and never measures another. Each cell lays its row out
+  at the row's own ideal height (`fixedSize(vertical:)`): proposed the cell's fixed height instead,
+  SwiftUI sets a title that fits in exactly two lines on one.
+- **Updates.** A change to the set or order of rows reloads the table and puts the top visible row
+  back where it was on screen from its index alone (`Home/ArticleTableLayout.swift`, tested in
+  `KeryxTests`), so rows inserted above it land out of view — which the new-articles pill relies on
+  (`freshSideUnseenCount`). A filter switch goes back to the top instead. A change that keeps the
+  rows re-renders only the visible cells whose `ArticleRowView` differs.
+- **Everything else stays SwiftUI's.** Rows are the same hosted `ArticleRowView`s: selection, clicks
+  and context menus are theirs. The table takes the first responder for the pane focus, as the
+  `List`'s own table did, but passes every key on up the responder chain, so `HomeView`'s key
+  handling is unchanged; a row's hosting view never takes it. Unlike a `List`, a representable is not
+  focused through a binding on a container above it, so the pane's `.focused` sits on the
+  representable itself, with `.focusable(interactions: .edit)` — the default follows the system's
+  keyboard-navigation setting, which is off by default, and the pane then took no focus at all. The visible-row report for
+  the new-articles count comes from the clip view's bounds rather than `onAppear`/`onDisappear`. A
+  hosted row does not inherit SwiftUI's environment, so the context-menu tracker is passed in
+  explicitly, and the soft scroll edge effect under the toolbar, which the `List` got for free, is
+  asked for with `scrollEdgeEffectStyle`.
+
+### Selection display (iOS)
+
+At a compact width (the split view collapsed into one stack), the sidebar's and the article list's
+rows are navigation links, so neither list keeps a selection on screen once it is the topmost column
+again (`CompactSidebarSelection`, `CompactArticleSelection`); the shared selection in `HomeViewModel`
+is unchanged. Popping the reader back to the article list flashes the row just read in a neutral gray
+that fades out over about 0.35 s — the iOS list idiom, and the role Android's neutral ripple pulse
+plays there.
+
+At a regular width (iPad, a large iPhone in landscape) the selection stays, in both the sidebar and the
+article list, filled with `SelectionColor` under white text. That asset is Keryx's teal — `#00897B` in
+light mode, the same as the Compose app's selection — but `#00796B` in dark mode, darker than
+`AccentColor`'s `#4DB6AC`, on which white text would be unreadable (2.4:1). Unlike macOS it is not
+dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
+touch-first too, does not dim either (`external-spec.md` §9).
 
 ### `KeryxSdk`: the Swift entry point
 
 `sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
-`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:)` builds the object
-graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin kept internal),
+`KeryxSdk.companion.start(newArticlesText:postOsNotification:dataDirectory:openAuthorization:useDataProtectionKeychain:)`
+builds the object graph (`sharedModule()` + `presentationModule()` + `applePlatformModule(…)`, Koin
+kept internal),
 opens the database — a `DatabaseTooNewException` surfaces here as a Swift error — and hands out
 `homeViewModel`, `notificationCenter`, `newArticleNotifier` (the new-articles text of every refresh
 that found some, also passed to the OS notification sink), `syncRepository`, `settingsRepository`,
 `cloudSession`, `availableCloudTypes` (the cloud providers configured in this build, in display
-order — `CloudStorageAvailability.available`), `newAddFeedController()` and
-`handleOAuthRedirect(url)`. `completeConnect(type, tokens)` and `tearDownConnection(type)` are
+order — `CloudStorageAvailability.available`), `newAddFeedController()`,
+`handleOAuthRedirect(url)`, and the same `presentation/` controllers the Compose settings/setup
+screens now wrap rather than reimplement — `setupController`, `cloudSyncController`,
+`preferences` (`PreferencesController`), `opml` (`OpmlTransfer`), `notificationAlerts`, and
+`menuState(…)` (a direct passthrough to `presentation/menu/computeMenuUiState` for a
+`Commands`/menu item's enabled/checked state). `startMaintenance()` starts
+`domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s
+`backgroundUpdateLoop` on the SDK's own background scope — call once per foreground launch;
+idempotent, so a repeated call doesn't start a second overlapping loop.
+`importOpenedOpml(xml)` wraps `domain/OpmlOpenHandler.kt`'s `importOpmlAndNotify`, for a document the
+app was opened with (mirrors desktop's/Android's own ".opml file association" handling).
+`completeConnect(type, tokens)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:
 `completeConnect` saves the tokens, selects the provider and flushes the local settings before any
@@ -1185,7 +1461,16 @@ the Keychain, so — like `prepareSearchIndex()` below — `KeryxSdk` runs them 
 background scope itself and awaits the result, rather than exposing the raw service and trusting a
 Swift `@MainActor` call site to dispatch off its own thread the way the Compose UI's
 `withContext(dispatcher)` does. `dataDirectory` puts every app directory
-under a given path, for previews and tests that must not open the user's real data. `close()` stops
+under a given path, for previews and tests that must not open the user's real data.
+`openAuthorization` is `((url: String, callbackScheme: String) -> Unit)?` — `null` (the default)
+falls back to opening the system browser, which previews and tests that never actually connect a
+provider can safely ignore; the shipping app passes a closure that opens an
+`ASWebAuthenticationSession` (see "Apple targets in `:shared`" above). **All three callbacks
+(`newArticlesText`, `postOsNotification`, `openAuthorization`) must be built in a `nonisolated`
+context** — Kotlin invokes them from its own background dispatchers (e.g. a background/startup
+refresh's `NewArticleNotifier` runs on `Dispatchers.Default`), and a closure literal written
+inside a `@MainActor` type/method would inherit that isolation; Swift 6 then guards it with a
+runtime executor check that traps when Kotlin calls it off the main thread. `close()` stops
 and joins every coroutine that can still read the database before closing it, flushes and stops
 the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
 `dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the

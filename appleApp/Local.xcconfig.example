@@ -1,0 +1,9 @@
+// Copy this file to Local.xcconfig (same directory) and fill in your own Apple Developer team.
+// Local.xcconfig is gitignored — never commit your team ID.
+//
+// Without this file, the app builds and runs with ad-hoc signing (no team), which is enough for
+// CI and for a first build, but Keychain access groups and other entitled features only work
+// under automatic signing with a real team.
+
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+CODE_SIGN_IDENTITY = Apple Development

@@ -20,6 +20,7 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.UpdateDownloader
+import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
@@ -217,6 +218,16 @@ class StartupMaintenanceTasksTest {
         } finally {
             driver.close()
         }
+    }
+
+    @Test
+    fun sharedModuleAloneProvidesTheSelfUpdateCheckGate() {
+        // A build without the optional updateModule (the Apple app) still runs the shared startup
+        // sequence, whose update-check step asks this gate first — so the gate must come from
+        // sharedModule itself, or that step fails with NoDefinitionFoundException.
+        val koin = koinApplication { modules(sharedModule()) }.koin
+
+        assertNotNull(koin.getOrNull<SelfUpdateCheckSupport>())
     }
 
     @Test

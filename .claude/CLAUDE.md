@@ -61,6 +61,12 @@ memory:
 ./gradlew :composeApp:packageDmg     # Package (macOS; use packageMsi/packageDeb on Windows/Linux)
 ./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test  # Apple-target tests (Mac + Xcode)
 ./gradlew :shared:assembleKeryxSharedReleaseXCFramework         # Framework for the SwiftUI app
+
+# appleApp/ (SwiftUI, macOS + iOS — XcodeGen project, see docs/build.md)
+cd appleApp && xcodegen generate                                # (re)generate Keryx.xcodeproj from project.yml
+xcodebuild -scheme Keryx -destination 'platform=macOS' build     # Build the SwiftUI app (macOS)
+xcodebuild -scheme Keryx -destination 'platform=macOS' test      # Run KeryxTests (Swift Testing)
+xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' build  # Build (iOS Simulator)
 ```
 
 ## Branching
@@ -161,10 +167,19 @@ composeApp/src/                  # Compose UI for desktop + Android (depends on 
 │   ├── ui/         # Compose screens + Compose-side ViewModels + theme + i18n
 │   ├── platform/   # Compose-typed expect declarations (NativeMenu, BackHandler, …)
 │   └── di/         # appModule + expect platformModule
-├── commonMain/composeResources/ # values/strings.xml (i18n), drawable (tray icons)
+├── commonMain/composeResources/ # values/ (English, default) + values-ja/ strings.xml (i18n), drawable (tray icons)
 ├── desktopMain/kotlin/…/        # main.kt, tray, app menu, token storages, update installer
 └── commonTest/, desktopTest/    # UI + ViewModel tests
 testing/src/                     # test-only helpers (DbTestSupport, fakes) for both modules
+appleApp/                        # SwiftUI app (macOS + iOS), consumes :shared as KeryxShared.xcframework
+├── project.yml                  # XcodeGen source of truth — Keryx.xcodeproj is generated, never committed
+├── Scripts/                     # build-shared.sh (prebuild: assembles the XCFramework + string catalog)
+├── Config/                      # Shared.xcconfig (+ gitignored Local.xcconfig for real signing team)
+├── Keryx/
+│   ├── App/        # KeryxApp, AppModel (owns KeryxSdk), startup-failure view
+│   ├── Bridge/     # StateFlow -> @Observable adapters
+│   └── Home/       # SwiftUI screens
+└── KeryxTests/                  # Swift Testing, standalone (non-hosted) bundle
 ```
 
 The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
@@ -185,8 +200,8 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    Details → `.claude/rules/sync-merge.md`.
 3. **No hardcoded user-facing strings.** All UI text goes through Compose
    Multiplatform resources. Two locales ship: `composeResources/values/strings.xml`
-   (Japanese — the default, and the fallback for any unsupported language) and
-   `composeResources/values-en/strings.xml` (English). **The two must define the
+   (English — the default, and the fallback for any unsupported language) and
+   `composeResources/values-ja/strings.xml` (Japanese). **The two must define the
    same key set**; a key added to one and not the other is a bug. The mechanism
    applies to every string a user can see — including tray/notification text built
    outside composition (see `NotificationMessages` + `getString`). Note that a
