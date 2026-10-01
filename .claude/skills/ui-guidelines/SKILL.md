@@ -1075,7 +1075,9 @@ should follow the same rules:
 
 The SwiftUI app follows the same rules with `appleApp/Keryx/Home/InlineRenameField.swift`, driven by
 `SidebarDialogState.renamingRowKey` (a `feedListRowSelectionKey`, so only the rendered copy that was
-asked for edits); it reports `HomeFocusedPane.rowNameEditor` as its text-input focus and shares
+asked for edits); the editing state stands the bare Return/Delete accelerators aside through
+`SidebarDialogState.isEditingInline` (not a `HomeFocusedPane` case — on macOS the editor is an AppKit
+field that takes focus itself, so `focusedPane` cannot report it), and it shares
 `inlineRenameValidation` from `:shared`.
 
 Creating still uses a dialog (`FeedListDialogs.kt`'s add folder / add tag): there is no row to edit
@@ -1405,12 +1407,14 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     filter is selected — `SearchResults.kt`'s `CenteredHint` covers the too-short-query / no-results
     states); at a narrow layout, `ArticleListPane`'s own `KeryxExpandedSearchBar`
     (`ui/common/KeryxSearchBar.kt`) instead, reached through `ArticleListTopBar`'s search icon — see
-    "Adaptive pane layout & touch affordances" below → **already ported, deliberately not to
-    `.searchable()`**: `FeedListView.searchField` (`appleApp/Keryx/Home/FeedListView.swift`) is a
-    plain `TextField`, because `.searchable()` cannot report its own focus state before macOS 15
-    (`.searchFocused(_:)`), which the shortcut/focus-handoff logic (`HomeShortcutsKt.homeShortcutFor`'s
-    `textInputFocused`, and moving into the results with ↓/↑) needs. Revisit `.searchable()` once the
-    deployment target reaches macOS 15.
+    "Adaptive pane layout & touch affordances" below → **already ported, to `.searchable()`**:
+    `FeedListView` (`appleApp/Keryx/Home/FeedListView.swift`) attaches
+    `.searchable(text:placement: .sidebar, …)`, and its `SearchFocusModifier` binds the field to
+    `focusedPane`'s `.search` case through `.searchFocused(_:equals:)` only where that exists
+    (macOS 15 / iOS 18+). On macOS 14 / iOS 17 the field cannot report its focus, so
+    `HomeObservable.textInputFocused` stays false there and the shortcut/focus-handoff logic
+    (`HomeShortcutsKt.homeShortcutFor`'s `textInputFocused`, moving into the results with ↓/↑) does
+    not see it.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
