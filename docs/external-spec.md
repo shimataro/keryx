@@ -188,9 +188,9 @@ after a sign-in expires). Routes may differ only in *which
 item* they act on — a context menu acts on the row it was opened on — never in what happens to it;
 feedback tied to a particular on-screen control appears whenever that control is showing the item
 acted on. A key that works only in one pane is shown beside a menu item only while it would work:
-Feed ▸ Rename and Delete stay clickable whenever a feed-list item is selected, but list F2 (Return
-on macOS) and Delete — and respond to them — only while the feed list has keyboard focus and no
-text field is being typed into.
+Feed ▸ Rename and Delete stay clickable whenever a feed-list item is selected, but the list
+shortcuts F2 (Return on macOS) and Delete are shown, and respond, only while the feed list has
+keyboard focus and no text field is being typed into.
 
 ### Adaptive layout (width) and touch input (Android)
 

@@ -1482,16 +1482,18 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
     menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard
     key-equivalent conflict resolution.
-  - `Snackbar`/`SnackbarHost` (OPML import/export results) — weaker candidate than the
+  - `Snackbar`/`SnackbarHost` (Android only) — weaker candidate than the
     others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
-    banner view rather than a drop-in native replacement. (The URL-copied feedback is no longer purely
-    an inline-icon affair — see `ArticleUrlCopier`'s own KDoc: Android now also reports it via a
-    real M3 `Snackbar`, from the shared copy handler on every route, below API 33 only, where the OS
-    itself doesn't already show a clipboard-copy confirmation. Android's second use is `HomeScreen`'s `ForegroundAlertSnackbar`, which announces a
-    warning/error the moment it is raised — the bell's badge alone only reaches a user already looking
-    at the pane hosting it, and these alerts are raised asynchronously by the startup tasks and the
-    background worker with no OS notification behind them; see `docs/error-design.md`. Desktop still
-    has none of either, per this app's no-in-app-snackbar convention.)
+    banner view rather than a drop-in native replacement. It has exactly two uses. The first is the
+    URL-copied confirmation — see `ArticleUrlCopier`'s own KDoc: reported via a real M3 `Snackbar`,
+    from the shared copy handler on every route, below API 33 only, where the OS itself doesn't
+    already show a clipboard-copy confirmation. The second is `HomeScreen`'s `ForegroundAlertSnackbar`,
+    which announces a warning/error the moment it is raised — the bell's badge alone only reaches a
+    user already looking at the pane hosting it, and these alerts are raised asynchronously by the
+    startup tasks and the background worker with no OS notification behind them; see
+    `docs/error-design.md`. OPML import/export results are not among them: they are shown inline in
+    Settings ▸ Data on every route. Desktop has no snackbar at all, per this app's
+    no-in-app-snackbar convention.
   - **Desktop only.** The Settings dialog's tab switcher (desktop's `KeryxTabDialog`
     actual in `KeryxDialogs.desktop.kt`) now uses Material3's
     `SecondaryScrollableTabRow`/`Tab` via the shared `KeryxDialogTabs` helper, making
