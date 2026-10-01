@@ -455,6 +455,9 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   nothing), while "Copy URL" stays enabled in all three. With the feed selected, Feed ▸ Open Site and the feed
   row's "Open site" are greyed out while "Copy site URL" stays enabled. Check the SwiftUI app's row menu,
   reader toolbar, Article/Feed menus and sidebar menu the same way.
+- Select the last article in the list, mark it unread (⌘/Ctrl+Shift+U or the reader's button), then press J
+  (and ↓ with the article list focused): nothing happens and the article stays unread. Likewise select the
+  first article, mark it unread and press K / ↑: it stays unread. (`HomeViewModelTest` covers the rule.)
 - Toggling light/dark theme (and the font-size setting) while an article is open re-renders the
   reader in the new theme/scale immediately (scroll resets to the top — expected).
 - (Windows) On startup, the reader renders in its correct pane position (no stray blank/misplaced

@@ -1188,7 +1188,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun selectNextAndSelectPreviousMoveThroughListAndClampAtEnds() = runTest {
+    fun selectNextAndSelectPreviousMoveThroughListAndStopAtEnds() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 1L, publishedAt = 3L, createdAt = 3L)
         db.insertArticle("a2", "f1", isRead = 1L, publishedAt = 2L, createdAt = 2L)
@@ -1217,7 +1217,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals("a3", vm.selectedArticle.value?.id)
 
-        // Clamp at the last item.
+        // Stop at the last item.
         vm.selectNext()
         testScheduler.advanceUntilIdle()
         assertEquals("a3", vm.selectedArticle.value?.id)
@@ -1230,10 +1230,86 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals("a1", vm.selectedArticle.value?.id)
 
-        // Clamp at the first item.
+        // Stop at the first item.
         vm.selectPrevious()
         testScheduler.advanceUntilIdle()
         assertEquals("a1", vm.selectedArticle.value?.id)
+    }
+
+    @Test
+    fun selectNextAtTheLastArticleDoesNotReMarkItRead() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.articles.value.first { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+        vm.markSelectedUnread()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+
+        // J at the last article is a no-op, like a swipe: the article stays unread.
+        vm.selectNext()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+    }
+
+    @Test
+    fun selectPreviousAtTheFirstArticleDoesNotReMarkItRead() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.articles.value.first { it.id == "a1" })
+        testScheduler.advanceUntilIdle()
+        vm.markSelectedUnread()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        vm.selectPrevious()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+    }
+
+    @Test
+    fun moveSelectionNeverSelectsWhereCanSelectReportsFalse() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("a2", "f1", isRead = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a3", "f1", isRead = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        // Walk the whole list in both directions: whenever canSelectNext/canSelectPrevious says
+        // false, the matching keyboard step must leave the selection exactly where it was (and
+        // whenever it says true, the step must move) — keyboard and swipe agree at every row.
+        for (id in listOf("a1", "a2", "a3")) {
+            for (forward in listOf(true, false)) {
+                vm.selectArticle(vm.articles.value.first { it.id == id })
+                testScheduler.advanceUntilIdle()
+                val can = if (forward) vm.canSelectNext() else vm.canSelectPrevious()
+
+                if (forward) vm.selectNext() else vm.selectPrevious()
+                testScheduler.advanceUntilIdle()
+
+                val moved = vm.selectedArticle.value?.id != id
+                assertEquals(can, moved, "row $id, forward=$forward")
+            }
+        }
     }
 
     @Test

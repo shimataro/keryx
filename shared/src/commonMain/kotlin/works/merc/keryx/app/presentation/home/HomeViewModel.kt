@@ -819,9 +819,10 @@ class HomeViewModel(
      * Whether [selectNext] would actually land on a different article.
      *
      * Read by the article reader's swipe gesture (`ui/home/ArticleSwipeNav.kt`) to decide whether a
-     * drag in that direction moves the content or only rubber-bands, so the two must agree with
-     * [moveSelection]'s own clamping — which is why both resolve the current row through the same
-     * [selectionIndex] helper.
+     * drag in that direction moves the content or only rubber-bands, and by its screen-reader
+     * actions, so the two must agree with [moveSelection]: at the last article both do nothing
+     * (J/↓ is a no-op there, exactly like a swipe), which is why both resolve the current row
+     * through the same [selectionIndex] helper.
      *
      * @return `true` when there is a following article to move to.
      */
@@ -840,6 +841,7 @@ class HomeViewModel(
      * @return `true` when there is a preceding article to move to.
      */
     fun canSelectPrevious(): Boolean = selectionIndex(currentArticles()) > 0
+    // Agrees with moveSelection: at the first article K/↑ is a no-op, like a swipe.
 
     /**
      * Provides the article rows currently displayed in the center pane.
@@ -849,14 +851,18 @@ class HomeViewModel(
     fun currentArticles(): List<ArticleListRow> =
         if (searchActive.value) searchResults.value.map { it.article } else articles.value
 
+    /**
+     * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end
+     * of the list it does nothing — re-selecting the same article would mark it read again (undoing
+     * a "mark as unread"), and the swipe gesture and screen-reader actions already stop there
+     * ([canSelectNext]/[canSelectPrevious]).
+     */
     private fun moveSelection(delta: Int) {
         val list = currentArticles()
         if (list.isEmpty()) return
         val index = selectionIndex(list)
-        val next = when {
-            index < 0 -> 0
-            else -> (index + delta).coerceIn(0, list.lastIndex)
-        }
+        val next = if (index < 0) 0 else index + delta
+        if (next == index || next !in list.indices) return
         selectArticle(list[next])
     }
 
