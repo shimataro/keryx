@@ -892,6 +892,16 @@ application menu, a context menu, a keyboard shortcut, or a gesture. To keep tha
   *unread* — so the row's menu must say "Mark as unread", not the "Mark as read" the pre-click
   snapshot suggests (`articleRowMenuEntries`). Have the item request the explicit state its label
   promises (`HomeViewModel.setRead`/`setStarred`) rather than a blind toggle.
+- **A bare-key accelerator is attached only while its key route is live — detach it, don't disable
+  the item.** A menu item's enablement follows the selection, like the matching context-menu item;
+  a key that only works in one pane (Feed ▸ Rename's F2/Return, Delete's Delete — they act only
+  while the feed list has keyboard focus and no text field does) is shown and bound beside the item
+  only while pressing it would run it. Read the same predicate the key handler reads
+  (`feedListItemKeysActive` → `MenuUiState.renameOrDeleteShortcutActive` → `shortcut = null` in
+  `AppMenuTree.kt`; SwiftUI's `.keyboardShortcut(… ? … : nil)`), and have the key handler leave the
+  key unconsumed (`null` handler) whenever it doesn't hold. Disabling the item instead would make it
+  unclickable for a reason unrelated to clicking; leaving the accelerator attached would let a
+  native menu fire it from another pane or from inside a text field.
 - When adding or changing a route, compare it against every existing route for the same action,
   not just the one it was copied from.
 
@@ -1105,8 +1115,9 @@ should follow the same rules:
   reorder drag watches the `Initial` pointer pass on an ancestor, so it is switched off
   (`feedListReorderDrag(enabled = …)`) while editing, or a press-and-sweep to select text would
   become a row drag. Likewise the pane reports editing focus through `onTextInputFocusChange`, the
-  same channel as the search field, which is what makes the root's bare-key shortcuts and the menu
-  bar's F2/Delete accelerators stand aside.
+  same channel as the search field, which is what makes the root's bare-key shortcuts stand aside
+  and detaches the menu bar's F2/Delete accelerators (`feedListItemKeysActive`) — the Feed menu's
+  items themselves stay enabled.
 
 The SwiftUI macOS app follows the same rules with `appleApp/Keryx/Home/InlineRenameField.swift` (iOS renames
 in `NamePromptSheet` instead — see "Sidebar (iOS)" in `docs/app-architecture.md`), driven by
@@ -1448,7 +1459,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     `.searchable(text:placement: .sidebar, …)`, and its `SearchFocusModifier` binds the field to
     `focusedPane`'s `.search` case through `.searchFocused(_:equals:)` only where that exists
     (macOS 15 / iOS 18+). On macOS 14 / iOS 17 the field cannot report its focus, so
-    `HomeObservable.textInputFocused` stays false there and the shortcut/focus-handoff logic
+    `HomeView`'s own `textInputFocused` stays false there and the shortcut/focus-handoff logic
     (`HomeShortcutsKt.homeShortcutFor`'s `textInputFocused`, moving into the results with ↓/↑) does
     not see it.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —

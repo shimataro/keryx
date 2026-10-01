@@ -34,9 +34,10 @@ data class MenuUiState(
     val syncEnabled: Boolean,
     val openSettingsEnabled: Boolean,
     /** Refresh/Tags/Move to folder for the selected feed — feed-specific operations, so they
-     * require a selected feed, and require the search field not to be the thing actually holding
-     * keyboard focus. Not gated on the feed list pane holding focus, matching the feed row's own
-     * context menu, which acts on the row regardless of pane focus. */
+     * require a selected feed, and nothing else: not the feed list pane holding focus, and not the
+     * absence of a focused text field — matching the feed row's own context menu, which acts on the
+     * row regardless of either. (None of these items has a bare-key accelerator that typing could
+     * trigger; see [renameOrDeleteShortcutActive] for the ones that do.) */
     val feedActionsEnabled: Boolean,
     /** Copy site URL for the selected feed — like [feedActionsEnabled] but additionally requires
      * the feed to actually have a (non-blank) site URL, mirroring [copyUrlEnabled]'s relationship to
@@ -48,10 +49,18 @@ data class MenuUiState(
     val feedSiteOpenEnabled: Boolean,
     /** Rename/Delete — unlike [feedActionsEnabled] these act on whatever feed list item is
      * selected (feed, folder or tag: `resolveFeedListSelectionTarget` resolves it and
-     * `FeedListPane` opens the matching dialog), so they only require *some* renamable selection.
-     * The search-field guard is the same: Rename/Delete's F2/Delete accelerator would otherwise be
-     * live while the user is typing a search query. */
+     * `FeedListPane` starts the inline editor or opens the matching dialog), so they only require
+     * *some* renamable selection. Like the row's own context menu, the items stay enabled whichever
+     * pane has focus and while a text field is being typed into: only their bare-key accelerator is
+     * scoped, by [renameOrDeleteShortcutActive]. */
     val renameOrDeleteEnabled: Boolean,
+    /** Whether Rename/Delete carry their bare accelerator (F2 or Return, and Delete) right now —
+     * [renameOrDeleteEnabled] *and* the feed list's own item keys being live (the feed list holds
+     * keyboard focus and no text field does; Compose's `feedListItemKeysActive`). A menu shows
+     * a key beside an item only while pressing it would run that item: a bare accelerator can't
+     * defer to a focused text field or to another pane, so it is detached rather than left to fire
+     * where the in-window key handling would do nothing. The item itself stays clickable. */
+    val renameOrDeleteShortcutActive: Boolean,
 )
 
 /**
@@ -71,6 +80,9 @@ data class MenuUiState(
  *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
+ * [feedListKeysActive] — whether the feed list's bare item keys (F2/Return, Delete) would act
+ * right now — enables no item; it only decides whether rename/delete show and bind their bare
+ * accelerator ([MenuUiState.renameOrDeleteShortcutActive]).
  */
 fun computeMenuUiState(
     onHome: Boolean,
@@ -82,7 +94,7 @@ fun computeMenuUiState(
     searchActive: Boolean,
     unreadOnly: Boolean,
     hasSelectedFeed: Boolean = false,
-    textInputFocused: Boolean = false,
+    feedListKeysActive: Boolean = false,
     hasRenamableSelection: Boolean = false,
     selectedFeedHasSiteUrl: Boolean = false,
     selectedFeedSiteCanOpenInBrowser: Boolean,
@@ -100,8 +112,9 @@ fun computeMenuUiState(
     refreshAllEnabled = onHome && activity.idle,
     syncEnabled = onHome && canSyncNow,
     openSettingsEnabled = onHome,
-    feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
-    renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
-    feedSiteCopyEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
-    feedSiteOpenEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedSiteCanOpenInBrowser,
+    feedActionsEnabled = onHome && hasSelectedFeed,
+    renameOrDeleteEnabled = onHome && hasRenamableSelection,
+    renameOrDeleteShortcutActive = onHome && hasRenamableSelection && feedListKeysActive,
+    feedSiteCopyEnabled = onHome && hasSelectedFeed && selectedFeedHasSiteUrl,
+    feedSiteOpenEnabled = onHome && hasSelectedFeed && selectedFeedSiteCanOpenInBrowser,
 )

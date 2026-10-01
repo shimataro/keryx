@@ -437,6 +437,21 @@ confirm the routes really agree on screen, with a provider connected:
   Sync now and the Settings button are enabled straight away (once the initial sync finishes), and
   Settings ▸ Cloud sync shows the provider as connected — no restart needed.
 
+The Feed menu's Rename/Delete items and their bare keys (F2 — Return on macOS — and Delete) share one
+rule, `feedListItemKeysActive` (`ui/home/HomePaneLayout.kt`): the keys act, and the menu shows them,
+only while the feed list has keyboard focus and no text field does; the items stay enabled whenever
+something renamable is selected. `MenuStateTest`/`AppMenuTreeTest`/`KeyboardNavTest` cover the rule;
+confirm on screen that the native menu really follows it:
+
+- Select a feed, then click an article so the article list has focus: Feed ▸ Rename and Delete are
+  enabled but show no F2/Delete hint, F2 and Delete do nothing, and clicking Rename starts the feed
+  row's inline editor. Click back into the feed list: the hints reappear and F2/Delete act again.
+- (macOS) With the article list focused, Return never starts a rename; with the feed list focused it
+  does.
+- Type into the search field: the Feed menu's items (Refresh Feed, Tags, Move to Folder, Copy Feed URL,
+  …, Rename, Delete) stay enabled, Delete/Backspace edit the query rather than deleting the feed, and
+  Feed ▸ Rename starts the inline editor. Check the SwiftUI app's Feed menu the same way.
+
 The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/
 enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmation:

@@ -129,15 +129,6 @@ final class HomeObservable: ObservableAssignment {
     /// same reason Compose's own pulse lives in the screen's `ArticleUrlCopier`, not the ViewModel.
     private(set) var copyPulse: Int = 0
 
-    /// Whether a text field (the sidebar's search field, currently) holds keyboard focus — plain UI
-    /// state written by `HomeView`'s own `focusedPane` tracking, not a `HomeViewModel` `StateFlow`.
-    /// Read by `HomeCommands.menuState` so the Feed/Article menu's bare-key accelerators (Return/
-    /// Delete) and its `feedActionsEnabled`-gated items agree with `HomeShortcutsKt.homeShortcutFor`'s
-    /// own `textInputFocused` guard, matching Compose's `MenuController.textInputFocused`
-    /// (`HomeScreen.kt`). Always false on macOS 14 / iOS 17, where the system search field cannot
-    /// report its focus (see `FeedListView`'s `SearchFocusModifier`).
-    var textInputFocused = false
-
     init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
         self.makeAddFeedController = makeAddFeedController

@@ -61,13 +61,16 @@ class MenuBarVisibilityTest {
         openWebsite = {}, openProjectPage = {}, updateAction = {}, about = {},
     )
 
-    private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
+    /** [feedListKeysActive] defaults to true (the feed list holds keyboard focus), so the bare
+     * rename/delete accelerators are part of the tree. */
+    private fun tree(menuBarVisible: Boolean = false, feedListKeysActive: Boolean = true) = buildAppMenuTree(
         ui = computeMenuUiState(
             onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true,
             selectedArticleCanOpenInBrowser = true,
             activity = ActivitySnapshot(), canSyncNow = true,
             searchActive = false, unreadOnly = false,
-            hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedSiteCanOpenInBrowser = false,
+            hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
+            selectedFeedSiteCanOpenInBrowser = false,
         ),
         labels = labels(),
         actions = actions(),

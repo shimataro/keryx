@@ -62,12 +62,12 @@ class AppMenuTreeTest {
         openWebsite = {}, openProjectPage = {}, updateAction = { updateActionInvoked = true }, about = {},
     )
 
-    private fun enabledUi() = computeMenuUiState(
+    private fun enabledUi(feedListKeysActive: Boolean = true) = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
         searchActive = false, unreadOnly = true,
-        hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
-        selectedFeedSiteCanOpenInBrowser = true,
+        hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
+        selectedFeedHasSiteUrl = true, selectedFeedSiteCanOpenInBrowser = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
@@ -367,7 +367,9 @@ class AppMenuTreeTest {
 
     @Test
     fun `the selected-item accelerators are attached to their items`() {
-        val root = tree(enabledUi())
+        // feedListKeysActive = true: the feed list holds keyboard focus, so the bare rename/delete
+        // keys are live and attached too.
+        val root = tree(enabledUi(feedListKeysActive = true))
         assertEquals(AppMenuShortcut.ToggleRead, root.menu("Article").item("ToggleRead").shortcut)
         assertEquals(AppMenuShortcut.ToggleStar, root.menu("Article").item("ToggleStar").shortcut)
         assertEquals(AppMenuShortcut.OpenInBrowser, root.menu("Article").item("OpenInBrowser").shortcut)
@@ -375,5 +377,18 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.FeedRefresh, root.menu("Feed").item("FeedRefresh").shortcut)
         assertEquals(AppMenuShortcut.FeedRename, root.menu("Feed").item("FeedRename").shortcut)
         assertEquals(AppMenuShortcut.FeedUnsubscribe, root.menu("Feed").item("FeedUnsubscribe").shortcut)
+    }
+
+    @Test
+    fun `bare rename and delete accelerators are detached while the feed list keys are inactive`() {
+        // Another pane (or a text field) has keyboard focus: F2/Return and Delete would do nothing
+        // in-window, so the menu neither shows nor binds them, but the items stay clickable.
+        val feed = tree(enabledUi(feedListKeysActive = false)).menu("Feed")
+        assertNull(feed.item("FeedRename").shortcut)
+        assertNull(feed.item("FeedUnsubscribe").shortcut)
+        assertTrue(feed.item("FeedRename").enabled)
+        assertTrue(feed.item("FeedUnsubscribe").enabled)
+        // Modified (Ctrl/⌘+Shift) selected-item accelerators are unaffected.
+        assertEquals(AppMenuShortcut.FeedRefresh, feed.item("FeedRefresh").shortcut)
     }
 }

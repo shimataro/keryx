@@ -33,8 +33,10 @@ import works.merc.keryx.app.ui.home.renameKey
  * keys `KeyboardNav.kt` and the context menus use). `Rename`/`Unsubscribe` are the deliberate
  * exception — [ctrl] is `false`, so they keep their original bare accelerator (F2/Return, Delete),
  * since a bare "act on the focused/selected item" key is itself an established convention
- * (file-manager rename/delete); see [MenuUiState.renameOrDeleteEnabled]'s `textInputFocused`
- * guard for how that stays safe.
+ * (file-manager rename/delete). A bare key would otherwise fire from any pane and from inside a
+ * text field, so [buildAppMenuTree] attaches these two only while the feed list's own keys are
+ * live ([MenuUiState.renameOrDeleteShortcutActive]) and detaches them — rather than disabling the
+ * item — otherwise: the items stay clickable, and no hint promises a key that would do nothing.
  *
  * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for
  * this key — plain strings, so it lives here alongside [key] rather than in `appmenu/`. The AWT
@@ -319,9 +321,21 @@ internal fun buildAppMenuTree(
         // Rename/Unsubscribe act on whatever feed list item is selected (feed, folder or tag), so
         // unlike the items above they use renameOrDeleteEnabled, not feedActionsEnabled.
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedRename, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
+        // Their bare accelerators are attached only while the feed list's keys are live (see
+        // AppMenuShortcut's KDoc); the items themselves follow the selection alone.
+        AppMenuNode.Item(
+            labels.feedRename,
+            ui.renameOrDeleteEnabled,
+            AppMenuShortcut.FeedRename.takeIf { ui.renameOrDeleteShortcutActive },
+            actions.renameSelectedFeed,
+        ),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedUnsubscribe, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),
+        AppMenuNode.Item(
+            labels.feedUnsubscribe,
+            ui.renameOrDeleteEnabled,
+            AppMenuShortcut.FeedUnsubscribe.takeIf { ui.renameOrDeleteShortcutActive },
+            actions.unsubscribeSelectedFeed,
+        ),
     )
 
     val helpItems = buildList {

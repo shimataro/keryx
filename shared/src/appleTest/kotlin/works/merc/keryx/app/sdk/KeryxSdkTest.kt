@@ -177,7 +177,7 @@ class KeryxSdkTest {
                 searchActive = false,
                 unreadOnly = false,
                 hasSelectedFeed = false,
-                textInputFocused = false,
+                feedListKeysActive = false,
                 hasRenamableSelection = false,
                 selectedFeedHasSiteUrl = false,
                 selectedFeedSiteCanOpenInBrowser = false,
@@ -193,7 +193,7 @@ class KeryxSdkTest {
                 searchActive = false,
                 unreadOnly = false,
                 hasSelectedFeed = false,
-                textInputFocused = false,
+                feedListKeysActive = false,
                 hasRenamableSelection = false,
                 selectedFeedHasSiteUrl = false,
                 selectedFeedSiteCanOpenInBrowser = false,
@@ -210,7 +210,7 @@ class KeryxSdkTest {
                 searchActive = false,
                 unreadOnly = false,
                 hasSelectedFeed = false,
-                textInputFocused = false,
+                feedListKeysActive = false,
                 hasRenamableSelection = false,
                 selectedFeedHasSiteUrl = false,
                 selectedFeedSiteCanOpenInBrowser = false,
@@ -218,6 +218,26 @@ class KeryxSdkTest {
             assertTrue(syncEnabled(onHome = true, canSyncNow = true))
             assertFalse(syncEnabled(onHome = true, canSyncNow = false))
             assertFalse(syncEnabled(onHome = false, canSyncNow = true))
+
+            // Rename/Delete stay clickable with a selection; only their bare accelerator follows
+            // whether the sidebar's own item keys are live (HomeCommands' `.keyboardShortcut`).
+            fun renameState(feedListKeysActive: Boolean) = sdk.menuState(
+                onHome = true,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = false,
+                searchActive = false,
+                unreadOnly = false,
+                hasSelectedFeed = true,
+                feedListKeysActive = feedListKeysActive,
+                hasRenamableSelection = true,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
+            )
+            assertTrue(renameState(feedListKeysActive = false).renameOrDeleteEnabled)
+            assertFalse(renameState(feedListKeysActive = false).renameOrDeleteShortcutActive)
+            assertTrue(renameState(feedListKeysActive = true).renameOrDeleteShortcutActive)
         } finally {
             sdk.close()
         }

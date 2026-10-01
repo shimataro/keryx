@@ -67,6 +67,21 @@ fun feedListIsDrawer(layout: PaneLayout): Boolean = layout != PaneLayout.Triple
 fun keyboardPaneFor(focusedPane: HomePane, feedDrawerOpen: Boolean): HomePane =
     if (feedDrawerOpen) HomePane.FeedList else focusedPane
 
+/**
+ * Whether the feed list's own bare item keys — F2 (Return on macOS) to rename and Delete/Backspace
+ * to unsubscribe/delete the selected row — act right now: only while [keyboardPane] (see
+ * [keyboardPaneFor]) is the feed list and no text field holds focus ([textInputFocused]).
+ *
+ * The single rule every route of those keys reads: `HomeScreen` hands `homeKeyboardShortcuts` its
+ * rename/delete handlers only while this holds (so the key is otherwise left unconsumed for
+ * whoever else wants it), and the application menu attaches the same bare accelerator — and shows
+ * its hint — beside Feed ▸ Rename/Delete only while it holds (`MenuController.feedListKeysActive`
+ * → `MenuUiState.renameOrDeleteShortcutActive`). The menu items themselves stay enabled whenever
+ * something renamable is selected, like the row's own context menu.
+ */
+fun feedListItemKeysActive(keyboardPane: HomePane, textInputFocused: Boolean): Boolean =
+    keyboardPane == HomePane.FeedList && !textInputFocused
+
 /** The widths the feed list and article list panes are laid out at, per [triplePaneWidths]. */
 internal data class TriplePaneWidths(val feedWidth: Dp, val articleWidth: Dp)
 

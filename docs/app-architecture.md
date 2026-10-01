@@ -890,6 +890,17 @@ which could both resolve `true` at once (`PaneLayout.Dual` with the drawer open)
 keyboard-focus ring on two panes simultaneously — `keyboardPaneFor` makes that structurally
 impossible, since every consumer now reads the one value it resolves to at most once.
 
+The F2/Delete feed-list shortcuts narrow that one step further through
+**`feedListItemKeysActive(keyboardPane, textInputFocused)`** (same file): the keys act only while
+`keyboardPane` is the feed list *and* no text field (the search field, a row's inline editor) holds
+focus. `HomeScreen` passes `homeKeyboardShortcuts` its rename/delete handlers only while it holds —
+a `null` handler leaves the key unconsumed — and mirrors it into `MenuController.feedListKeysActive`,
+from which `computeMenuUiState` derives `renameOrDeleteShortcutActive`: the application menu's
+Feed ▸ Rename/Delete carry their bare accelerator only then (`AppMenuTree.kt` sets the item's
+`shortcut` to `null` otherwise, which Swing renders as no accelerator at all), while the items
+themselves stay enabled for any selection, like the row's context menu. The SwiftUI app feeds its
+own equivalent (`HomeCommands.bareKeysActive`) into the same `renameOrDeleteShortcutActive`.
+
 **`focusedPane` itself only ever *advances* at `PaneLayout.Single`.** `HomePane.ordinal + 1`
 doubles as the navigation stack's current depth, so `HomeScreen` needs no separate depth state —
 `platform/BackHandler` (a real back-gesture/button interception on Android, a no-op on desktop)

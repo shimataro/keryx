@@ -895,6 +895,18 @@ feedListIsDrawer(paneLayout) && drawerState.isOpen`——開いている間は `
 `keyboardPaneFor` はこれを構造的に不可能にする。すべての消費側が、この関数が解決する
 ただ一つの値だけを読むようになったからである。
 
+F2/Delete のフィード一覧ショートカットは、同じファイルの
+**`feedListItemKeysActive(keyboardPane, textInputFocused)`** でさらに一段絞り込む: キーが効くのは
+`keyboardPane` がフィード一覧で、*かつ* テキスト欄（検索欄、行のインライン編集欄）がフォーカスを
+持っていないときだけである。`HomeScreen` はこれが成り立つ間だけ `homeKeyboardShortcuts` に名前変更・
+削除のハンドラーを渡し（ハンドラーが `null` ならキーは消費されない）、同じ値を
+`MenuController.feedListKeysActive` に反映する。`computeMenuUiState` はそこから
+`renameOrDeleteShortcutActive` を導き、アプリケーションメニューのフィード ▸ 名前変更・削除は
+そのときだけキー単体のアクセラレータを持つ（それ以外では `AppMenuTree.kt` が項目の `shortcut` を
+`null` にし、Swing ではアクセラレータ自体が付かない）。項目自体は行のコンテキストメニューと同じく、
+選択があれば常に有効。SwiftUI 版は自前の同等の判定（`HomeCommands.bareKeysActive`）を同じ
+`renameOrDeleteShortcutActive` に渡す。
+
 **`focusedPane` 自体が「進む」のは `PaneLayout.Single` のときだけである。**
 `HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、`HomeScreen` は別途深さの
 状態を持つ必要がない——`platform/BackHandler`（Android では実際の戻るジェスチャー/ボタンを

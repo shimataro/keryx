@@ -68,6 +68,8 @@ class FeedListInlineRenameTest {
         var renameSelectedRequestId by remember { mutableStateOf(0) }
         var deleteSelectedRequestId by remember { mutableStateOf(0) }
         var textInput by remember { mutableStateOf<HomeTextInput?>(null) }
+        // The feed list is the only pane here, so it is always the keyboard target.
+        val feedListKeysActive = feedListItemKeysActive(HomePane.FeedList, textInputFocused = textInput != null)
         Box(
             Modifier.testTag(ROOT_TEST_TAG).size(320.dp, 700.dp).focusable().homeKeyboardShortcuts(
                 textInputFocused = textInput != null,
@@ -78,8 +80,8 @@ class FeedListInlineRenameTest {
                 onRight = {},
                 onNextArticle = {},
                 onPreviousArticle = {},
-                onFeedListRename = { renameSelectedRequestId++ },
-                onFeedListDelete = { deleteSelectedRequestId++ },
+                onFeedListRename = if (feedListKeysActive) ({ renameSelectedRequestId++ }) else null,
+                onFeedListDelete = if (feedListKeysActive) ({ deleteSelectedRequestId++ }) else null,
                 onSearch = {},
                 isMacOs = false,
             ),

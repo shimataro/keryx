@@ -18,7 +18,7 @@ class MenuStateTest {
         searchActive: Boolean = false,
         unreadOnly: Boolean = false,
         hasSelectedFeed: Boolean = false,
-        textInputFocused: Boolean = false,
+        feedListKeysActive: Boolean = false,
         hasRenamableSelection: Boolean = false,
         selectedFeedHasSiteUrl: Boolean = false,
         selectedFeedSiteCanOpenInBrowser: Boolean = false,
@@ -32,7 +32,7 @@ class MenuStateTest {
         searchActive = searchActive,
         unreadOnly = unreadOnly,
         hasSelectedFeed = hasSelectedFeed,
-        textInputFocused = textInputFocused,
+        feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = hasRenamableSelection,
         selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
         selectedFeedSiteCanOpenInBrowser = selectedFeedSiteCanOpenInBrowser,
@@ -129,8 +129,7 @@ class MenuStateTest {
     @Test
     fun article_and_url_actions_require_a_selected_article_with_url() {
         // articleActionsEnabled/copyUrlEnabled/openInBrowserEnabled require only a selection (and
-        // URL) — computeMenuUiState has no pane-focus input to gate them on, unlike
-        // feedActionsEnabled/renameOrDeleteEnabled's textInputFocused guard. See MenuUiState.kt's
+        // URL) — computeMenuUiState has no pane-focus input to gate them on. See MenuUiState.kt's
         // articleActionsEnabled doc for why.
         val ui = state(hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true)
         assertTrue(ui.articleActionsEnabled)
@@ -212,11 +211,21 @@ class MenuStateTest {
     }
 
     @Test
-    fun feed_actions_disabled_while_the_search_field_has_focus_even_with_a_feed_selected() {
-        // Rename/Unsubscribe's app-menu accelerator is a bare F2/Delete with no equivalent to
-        // KeyboardNav.kt's textInputFocused suppression, so this flag has to do that job instead.
-        val ui = state(hasSelectedFeed = true, textInputFocused = true)
-        assertFalse(ui.feedActionsEnabled)
+    fun feed_actions_stay_enabled_while_a_text_input_has_focus() {
+        // A focused text field leaves feedListKeysActive false; none of the feed actions has a
+        // bare-key accelerator that typing could trigger, so the items — like the row's own context
+        // menu — stay enabled, including the site-URL ones and Rename/Delete themselves.
+        val ui = state(
+            hasSelectedFeed = true,
+            hasRenamableSelection = true,
+            selectedFeedHasSiteUrl = true,
+            selectedFeedSiteCanOpenInBrowser = true,
+            feedListKeysActive = false,
+        )
+        assertTrue(ui.feedActionsEnabled)
+        assertTrue(ui.feedSiteCopyEnabled)
+        assertTrue(ui.feedSiteOpenEnabled)
+        assertTrue(ui.renameOrDeleteEnabled)
     }
 
     // --- Feed site-URL actions (copy site URL / open site) additionally require a site URL ---
@@ -254,18 +263,6 @@ class MenuStateTest {
         assertFalse(ui.feedSiteOpenEnabled)
     }
 
-    @Test
-    fun feed_site_url_actions_disabled_while_the_search_field_has_focus() {
-        val ui = state(
-            hasSelectedFeed = true,
-            selectedFeedHasSiteUrl = true,
-            selectedFeedSiteCanOpenInBrowser = true,
-            textInputFocused = true,
-        )
-        assertFalse(ui.feedSiteCopyEnabled)
-        assertFalse(ui.feedSiteOpenEnabled)
-    }
-
     // --- Rename/delete follow the selection, whatever its type ---
 
     @Test
@@ -285,12 +282,22 @@ class MenuStateTest {
     }
 
     @Test
-    fun rename_or_delete_disabled_while_the_search_field_has_focus_even_with_a_selection() {
-        // Same guard as feedActionsEnabled: the bare F2/Delete accelerator must not be live while
-        // the user is typing a search query.
-        val ui = state(hasSelectedFeed = true, hasRenamableSelection = true, textInputFocused = true)
-        assertFalse(ui.renameOrDeleteEnabled)
-        assertFalse(ui.feedActionsEnabled)
+    fun rename_or_delete_stays_enabled_while_feed_list_keys_are_inactive() {
+        // Another pane (or a text field) has keyboard focus: the bare keys do nothing there, but
+        // the menu item still acts on the selection when clicked, like the row's context menu.
+        val ui = state(hasRenamableSelection = true, feedListKeysActive = false)
+        assertTrue(ui.renameOrDeleteEnabled)
+        assertFalse(ui.renameOrDeleteShortcutActive)
+    }
+
+    @Test
+    fun rename_or_delete_shortcut_requires_feed_list_keys_active_and_a_selection() {
+        assertTrue(state(hasRenamableSelection = true, feedListKeysActive = true).renameOrDeleteShortcutActive)
+        assertFalse(state(hasRenamableSelection = false, feedListKeysActive = true).renameOrDeleteShortcutActive)
+        assertFalse(state(hasRenamableSelection = true, feedListKeysActive = false).renameOrDeleteShortcutActive)
+        assertFalse(
+            state(onHome = false, hasRenamableSelection = true, feedListKeysActive = true).renameOrDeleteShortcutActive,
+        )
     }
 
     // --- Checkbox passthrough ---

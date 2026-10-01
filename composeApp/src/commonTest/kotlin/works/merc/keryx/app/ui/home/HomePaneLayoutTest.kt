@@ -438,4 +438,18 @@ class HomePaneLayoutTest {
         }
     }
 
+    // --- feedListItemKeysActive ---
+
+    @Test
+    fun feedListItemKeysActiveOnlyForTheFeedListWithNoTextInputFocused() {
+        for (pane in HomePane.entries) {
+            for (textInputFocused in listOf(false, true)) {
+                assertEquals(
+                    pane == HomePane.FeedList && !textInputFocused,
+                    feedListItemKeysActive(pane, textInputFocused),
+                    "pane=$pane textInputFocused=$textInputFocused",
+                )
+            }
+        }
+    }
 }

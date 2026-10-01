@@ -209,6 +209,10 @@ fun HomeScreen() {
     // HomePaneLayout.kt's keyboardPaneFor for why this, and not focusedPane or feedDrawerOpen
     // alone, is the one value every one of those call sites should read.
     val keyboardPane = keyboardPaneFor(focusedPane, feedDrawerOpen)
+    // Whether F2/Return and Delete/Backspace act on the selected feed-list row right now — the one
+    // rule both the key handler below and the menu bar's bare accelerators read (see
+    // HomePaneLayout.kt's feedListItemKeysActive).
+    val feedListKeysActive = feedListItemKeysActive(keyboardPane, textInputFocused)
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val density = LocalDensity.current
@@ -264,11 +268,12 @@ fun HomeScreen() {
         }
     }
 
-    // Mirrors that focus state into MenuController (composition-local state -> StateFlow, same
-    // pattern App.kt already uses for currentScreen): a native Swing accelerator has no equivalent
-    // to KeyboardNav.kt's textInputFocused suppression, so AppMenuBar needs this to disable the
-    // Feed menu's bare-key items (F2/Delete) while the user is actually typing.
-    LaunchedEffect(textInputFocused) { menuController.textInputFocused.value = textInputFocused }
+    // Mirrors feedListKeysActive into MenuController (composition-local state -> StateFlow, same
+    // pattern App.kt already uses for currentScreen): a native Swing accelerator can't defer to a
+    // focused text field or another pane the way homeKeyboardShortcuts does, so AppMenuBar attaches
+    // the Feed menu's bare F2/Return and Delete accelerators only while this holds — the items
+    // themselves stay clickable either way.
+    LaunchedEffect(feedListKeysActive) { menuController.feedListKeysActive.value = feedListKeysActive }
 
     val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap) {
         buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap)
@@ -433,8 +438,10 @@ fun HomeScreen() {
                     },
                     onNextArticle = { vm.selectNext() },
                     onPreviousArticle = { vm.selectPrevious() },
-                    onFeedListRename = { if (keyboardPane == HomePane.FeedList) feedListRenameRequestId++ },
-                    onFeedListDelete = { if (keyboardPane == HomePane.FeedList) feedListDeleteRequestId++ },
+                    // Null (key left unconsumed) whenever the feed list isn't the keyboard target —
+                    // the same rule that decides whether the menu bar shows these keys.
+                    onFeedListRename = if (feedListKeysActive) ({ feedListRenameRequestId++ }) else null,
+                    onFeedListDelete = if (feedListKeysActive) ({ feedListDeleteRequestId++ }) else null,
                     onSearch = { focusSearch() },
                     onKeyboardEngaged = { keyboardEngaged = true },
                     // Same rule the article list's own pull gesture uses, so the shortcut exists

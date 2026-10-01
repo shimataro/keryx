@@ -127,15 +127,6 @@ struct HomeView: View {
             contextMenuSelectionTracker.stopMonitoring()
         }
         #endif
-        // Mirrors into `HomeObservable` so `HomeCommands.menuState` (a different `View` entirely,
-        // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
-        // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.
-        .onChange(of: focusedPane, initial: true) { _, _ in
-            home.textInputFocused = textInputFocused
-        }
-        .onChange(of: sidebarDialogs.isEditingInline) { _, _ in
-            home.textInputFocused = textInputFocused
-        }
         // Restored on next launch by `applyInitialFocus` — matches Compose's own
         // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
         // `HomePane` counterpart (the field lives in the sidebar, not a pane of its own here), so it

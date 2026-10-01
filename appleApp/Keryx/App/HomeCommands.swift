@@ -26,7 +26,9 @@ struct HomeCommands: Commands {
     /// Return/Delete against the menu before any view's own `.onKeyPress`/text field ever sees it —
     /// so Backspace inside `NamePromptSheet`'s text field, or Return/Delete while the article list or
     /// reader holds focus, would trigger the sidebar's rename/delete instead of editing text or doing
-    /// nothing, acting on whatever the sidebar happens to have selected underneath.
+    /// nothing, acting on whatever the sidebar happens to have selected underneath. Fed to
+    /// `sdk.menuState` as `feedListKeysActive`; the items read the resulting
+    /// `renameOrDeleteShortcutActive` and are otherwise left clickable (detach, don't disable).
     private var bareKeysActive: Bool {
         focusedPane.flatMap { $0 } == .feedList
             && !model.sidebarDialogs.isPresenting && !model.sidebarDialogs.isEditingInline
@@ -180,11 +182,11 @@ struct HomeCommands: Commands {
 
                 Divider()
                 Button(renameLabel(home)) { performRename(home) }
-                    .keyboardShortcut(bareKeysActive ? KeyboardShortcut(.return, modifiers: []) : nil)
+                    .keyboardShortcut(state.renameOrDeleteShortcutActive ? KeyboardShortcut(.return, modifiers: []) : nil)
                     .disabled(!state.renameOrDeleteEnabled)
                 Divider()
                 Button(deleteLabel(home), role: .destructive) { performDelete(home) }
-                    .keyboardShortcut(bareKeysActive ? KeyboardShortcut(.delete, modifiers: []) : nil)
+                    .keyboardShortcut(state.renameOrDeleteShortcutActive ? KeyboardShortcut(.delete, modifiers: []) : nil)
                     .disabled(!state.renameOrDeleteEnabled)
             }
         }
@@ -202,8 +204,10 @@ struct HomeCommands: Commands {
     /// (kept by `HomeObservable.feedListSelectionTarget`). Everything read here is a narrow value
     /// `HomeObservable` only reassigns when it changes, so an article selection alone does not
     /// rebuild the menu bar.
-    /// `textInputFocused` reads `HomeObservable`'s own mirror of `HomeView`'s `focusedPane`, so
-    /// this reacts to the search field the same way `HomeShortcutsKt.homeShortcutFor` does.
+    /// `feedListKeysActive` is `bareKeysActive` (the sidebar holds keyboard focus, no sheet or inline
+    /// editor is up), so `state.renameOrDeleteShortcutActive` — not a second copy of the rule here —
+    /// decides whether Rename/Delete carry their bare Return/Delete accelerator; the items
+    /// themselves stay enabled with any selection, matching Compose's `AppMenuTree.kt`.
     private func menuState(_ home: HomeObservable) -> MenuUiState {
         let target = selectionTarget(home)
         var hasSelectedFeed = false
@@ -221,7 +225,8 @@ struct HomeCommands: Commands {
                 articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
                 refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,
-                feedSiteCopyEnabled: false, feedSiteOpenEnabled: false, renameOrDeleteEnabled: false
+                feedSiteCopyEnabled: false, feedSiteOpenEnabled: false, renameOrDeleteEnabled: false,
+                renameOrDeleteShortcutActive: false
             )
         }
         return sdk.menuState(
@@ -233,7 +238,7 @@ struct HomeCommands: Commands {
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
             hasSelectedFeed: hasSelectedFeed,
-            textInputFocused: home.textInputFocused,
+            feedListKeysActive: bareKeysActive,
             hasRenamableSelection: target != nil,
             selectedFeedHasSiteUrl: selectedFeedHasSiteUrl,
             selectedFeedSiteCanOpenInBrowser: selectedFeedSiteCanOpenInBrowser

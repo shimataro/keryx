@@ -121,7 +121,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val appScope = koinInject<CoroutineScope>()
 
     val screen by menuController.currentScreen.collectAsState()
-    val textInputFocused by menuController.textInputFocused.collectAsState()
+    val feedListKeysActive by menuController.feedListKeysActive.collectAsState()
     val selected by homeVm.selectedArticle.collectAsState()
     val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
@@ -154,7 +154,7 @@ internal fun FrameWindowScope.AppMenuBar(
         searchActive = searchActive,
         unreadOnly = unreadOnly,
         hasSelectedFeed = selectedFeed != null,
-        textInputFocused = textInputFocused,
+        feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = selectionTarget != null,
         selectedFeedHasSiteUrl = hasUsableUrl(selectedFeed?.site_url),
         selectedFeedSiteCanOpenInBrowser = canOpenInBrowser(selectedFeed?.site_url),

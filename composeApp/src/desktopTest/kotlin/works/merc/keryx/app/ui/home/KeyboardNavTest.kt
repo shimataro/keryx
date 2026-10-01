@@ -29,8 +29,11 @@ class KeyboardNavTest {
         textInputFocused: Boolean = false,
         isMacOs: Boolean = false,
         withRefreshList: Boolean = false,
-        // Records an R KeyDown the shortcuts left unconsumed as "unconsumedR", via an onKeyEvent
-        // behind them — opt-in so every other test's expected list stays unchanged.
+        // False passes null rename/delete handlers, as HomeScreen does while the feed list isn't
+        // the keyboard target (feedListItemKeysActive).
+        withFeedListKeys: Boolean = true,
+        // Records an R/F2/Return/Delete KeyDown the shortcuts left unconsumed as "unconsumedR" etc.,
+        // via an onKeyEvent behind them — opt-in so every other test's expected list stays unchanged.
         trackUnconsumed: Boolean = false,
         press: KeyInjectionScope.() -> Unit,
     ): List<String> {
@@ -47,8 +50,8 @@ class KeyboardNavTest {
                         onRight = { fired += "right" },
                         onNextArticle = { fired += "nextArticle" },
                         onPreviousArticle = { fired += "previousArticle" },
-                        onFeedListRename = { fired += "feedListRename" },
-                        onFeedListDelete = { fired += "feedListDelete" },
+                        onFeedListRename = if (withFeedListKeys) ({ fired += "feedListRename" }) else null,
+                        onFeedListDelete = if (withFeedListKeys) ({ fired += "feedListDelete" }) else null,
                         onSearch = { fired += "search" },
                         onPageUp = { fired += "pageUp" },
                         onPageDown = { fired += "pageDown" },
@@ -57,7 +60,14 @@ class KeyboardNavTest {
                         onRefreshList = if (withRefreshList) ({ fired += "refreshList" }) else null,
                         isMacOs = isMacOs,
                     ).onKeyEvent { event ->
-                        if (trackUnconsumed && event.type == KeyEventType.KeyDown && event.key == Key.R) fired += "unconsumedR"
+                        if (trackUnconsumed && event.type == KeyEventType.KeyDown) {
+                            when (event.key) {
+                                Key.R -> fired += "unconsumedR"
+                                Key.F2 -> fired += "unconsumedF2"
+                                Key.Enter -> fired += "unconsumedEnter"
+                                Key.Delete -> fired += "unconsumedDelete"
+                            }
+                        }
                         false
                     },
                 )
@@ -178,6 +188,29 @@ class KeyboardNavTest {
     @Test
     fun backspaceFiresOnFeedListDeleteOnly() {
         assertEquals(listOf("feedListDelete"), firedEvents { pressKey(Key.Backspace) })
+    }
+
+    @Test
+    fun f2AndDeleteAreLeftUnconsumedWhenTheFeedListHandlersAreNull() {
+        // Another pane (or nothing) owns the keys, so they must reach whoever else wants them —
+        // the same condition under which the menu bar detaches its bare accelerators.
+        assertEquals(
+            listOf("unconsumedF2"),
+            firedEvents(withFeedListKeys = false, trackUnconsumed = true) { pressKey(Key.F2) },
+        )
+        assertEquals(
+            listOf("unconsumedDelete"),
+            firedEvents(withFeedListKeys = false, trackUnconsumed = true) { pressKey(Key.Delete) },
+        )
+        assertEquals(
+            listOf("unconsumedEnter"),
+            firedEvents(withFeedListKeys = false, isMacOs = true, trackUnconsumed = true) { pressKey(Key.Enter) },
+        )
+    }
+
+    @Test
+    fun f2IsConsumedWhenTheFeedListRenameHandlerIsProvided() {
+        assertEquals(listOf("feedListRename"), firedEvents(trackUnconsumed = true) { pressKey(Key.F2) })
     }
 
     @Test

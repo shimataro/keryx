@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
 /**
  * [MenuController] bridges the desktop application menu bar (built outside any screen's
  * composition) to whichever screen owns the target state. These tests cover its two pieces of
- * shared state — [MenuController.currentScreen] and [MenuController.textInputFocused] — and the
+ * shared state — [MenuController.currentScreen] and [MenuController.feedListKeysActive] — and the
  * one-shot [MenuController.commands] flow, including the [MenuCommand.RenameFeed] /
  * [MenuCommand.UnsubscribeFeed] commands the Feed menu's rename/unsubscribe items send.
  */
@@ -27,9 +27,9 @@ class MenuControllerTest {
     }
 
     @Test
-    fun textInputFocusedDefaultsToFalse() {
+    fun feedListKeysActiveDefaultsToFalse() {
         val controller = MenuController()
-        assertFalse(controller.textInputFocused.value)
+        assertFalse(controller.feedListKeysActive.value)
     }
 
     @Test
@@ -46,15 +46,15 @@ class MenuControllerTest {
     }
 
     @Test
-    fun textInputFocusedReflectsWhateverIsWrittenToIt() {
-        // HomeScreen mirrors its local textInputFocused state here the same way.
+    fun feedListKeysActiveReflectsWhateverIsWrittenToIt() {
+        // HomeScreen mirrors its local feedListItemKeysActive result here the same way.
         val controller = MenuController()
 
-        controller.textInputFocused.value = true
-        assertTrue(controller.textInputFocused.value)
+        controller.feedListKeysActive.value = true
+        assertTrue(controller.feedListKeysActive.value)
 
-        controller.textInputFocused.value = false
-        assertFalse(controller.textInputFocused.value)
+        controller.feedListKeysActive.value = false
+        assertFalse(controller.feedListKeysActive.value)
     }
 
     @Test
@@ -127,9 +127,9 @@ class MenuControllerTest {
         val b = MenuController()
 
         a.currentScreen.value = Screen.Home
-        a.textInputFocused.value = true
+        a.feedListKeysActive.value = true
 
         assertEquals(Screen.Setup, b.currentScreen.value)
-        assertFalse(b.textInputFocused.value)
+        assertFalse(b.feedListKeysActive.value)
     }
 }
