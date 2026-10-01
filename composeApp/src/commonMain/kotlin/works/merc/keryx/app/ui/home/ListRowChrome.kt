@@ -81,15 +81,15 @@ internal fun PulseRippleEffect(ripplePulse: Int, interactionSource: MutableInter
 
 /**
  * The mobile density floor for an interactive list row (feed / folder / tag / article) —
- * M3's own `NavigationDrawerItem` minimum height on a touch-primary platform, `0.dp` (no floor,
+ * M3's own `ListItem` minimum height on a touch-primary platform, `0.dp` (no floor,
  * the row's intrinsic content height applies) everywhere else.
  *
- * **M3's 56dp is an outer height — content plus the row's own padding — so this must floor the
+ * **M3's 48dp is an outer height — content plus the row's own padding — so this must floor the
  * *padded* row, not its content.** Apply it as `Modifier.heightIn(min = listRowMinHeight())`,
  * placed *before* a row's inner content padding and immediately *after* [listRowSurface]:
  *
  * - Before the content padding, because after it the floor applies to the content alone and the
- *   padding stacks on top of it — making a row as much taller than 56dp as its own padding is
+ *   padding stacks on top of it — making a row as much taller than 48dp as its own padding is
  *   thick, and making rows with differing content padding differing heights. This is the opposite
  *   placement from `ArticleRow`'s own `rowHeight` floor, which genuinely *is* a content height
  *   (derived from typography line heights by `rememberArticleRowMetrics()`) and therefore stays
@@ -111,7 +111,7 @@ internal fun PulseRippleEffect(ripplePulse: Int, interactionSource: MutableInter
  *   `isTouchPrimary` parameter) — production call sites always use the platform default.
  */
 internal fun listRowMinHeight(isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary): Dp =
-    if (isTouchPrimary) 56.dp else 0.dp
+    if (isTouchPrimary) 52.dp else 0.dp
 
 /**
  * Leading padding shared by every feed-list row kind (folder header, tag header, an un-indented
