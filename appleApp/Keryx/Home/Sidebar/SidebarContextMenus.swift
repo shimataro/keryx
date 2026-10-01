@@ -51,8 +51,9 @@ enum SidebarContextMenus {
         ])
     }
 
-    /// Refresh, Move to Folder ▸, Assign tags ▸, a separator, the URL/site actions, a separator,
-    /// Rename, a separator, Unsubscribe — `FeedListDragAndDrop.kt:553-593`'s order.
+    /// Refresh, Assign tags ▸, Move to Folder ▸, a separator, the URL/site actions, a separator,
+    /// Rename, a separator, Unsubscribe — `FeedListDragAndDrop.kt`'s order, which is also the Feed
+    /// menu's (`AppMenuTree.kt`, `HomeCommands.swift`).
     private static func feedMenu(
         _ feed: Feeds,
         instance: FeedListRowSelection,
@@ -89,8 +90,8 @@ enum SidebarContextMenus {
         return UIMenu(title: reason, children: [
             UIMenu(options: .displayInline, children: [
                 UIAction(title: L("home_refresh"), image: UIImage(systemName: "arrow.clockwise")) { _ in home.refreshFeed(feed) },
-                moveToFolder,
                 assignTags,
+                moveToFolder,
             ]),
             UIMenu(options: .displayInline, children: [
                 UIAction(title: L("home_copy_feed_url"), image: UIImage(systemName: "link")) { _ in copyToPasteboard(feed.url) },

@@ -38,7 +38,7 @@ class AppMenuTreeTest {
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
         feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
-        feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
+        feedNoFolder = "NoFolder", feedNewFolder = "NewFolder", feedNewTag = "NewTag", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
         feedCopyUrl = "FeedCopyUrl", feedCopySiteUrl = "FeedCopySiteUrl", feedOpenSite = "FeedOpenSite",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
@@ -47,6 +47,8 @@ class AppMenuTreeTest {
     private var toggledTagId: String? = null
     private var toggledTagAttached: Boolean? = null
     private var movedToFolderId: String? = null
+    private var newFolderInvoked = false
+    private var newTagInvoked = false
     private var updateActionInvoked = false
 
     private fun actions() = AppMenuActions(
@@ -57,6 +59,7 @@ class AppMenuTreeTest {
         refreshSelectedFeed = {},
         toggleFeedTag = { tagId, attached -> toggledTagId = tagId; toggledTagAttached = attached },
         moveFeedToFolder = { movedToFolderId = it },
+        newFolderForSelectedFeed = { newFolderInvoked = true }, newTagForSelectedFeed = { newTagInvoked = true },
         renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
         copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
         openWebsite = {}, openProjectPage = {}, updateAction = { updateActionInvoked = true }, about = {},
@@ -250,6 +253,49 @@ class AppMenuTreeTest {
 
         moveToFolder.items.filterIsInstance<AppMenuNode.CheckboxItem>().first { it.label == "NoFolder" }.onCheckedChange(true)
         assertNull(movedToFolderId)
+    }
+
+    @Test
+    fun `the tags submenu ends with a new-tag item that invokes its action`() {
+        val tags = tree(enabledUi(), feedMenu = selectedFeedMenu(tags = listOf(tag("t1", "Kotlin")))).menu("Feed").submenu("AssignTags")
+        assertEquals(listOf("Kotlin", "NewTag"), tags.items.map { (it as? AppMenuNode.CheckboxItem)?.label ?: (it as AppMenuNode.Item).label })
+        val newTag = tags.items.last() as AppMenuNode.Item
+        assertTrue(newTag.enabled)
+        newTag.onClick()
+        assertTrue(newTagInvoked)
+    }
+
+    @Test
+    fun `the tags submenu is never empty, even with no tags`() {
+        val tags = tree(enabledUi(), feedMenu = selectedFeedMenu(tags = emptyList())).menu("Feed").submenu("AssignTags")
+        assertEquals(listOf("NewTag"), tags.items.filterIsInstance<AppMenuNode.Item>().map { it.label })
+        assertEquals(1, tags.items.size)
+    }
+
+    @Test
+    fun `the move-to-folder submenu ends with a new-folder item that invokes its action`() {
+        val moveToFolder = tree(
+            enabledUi(),
+            feedMenu = selectedFeedMenu(folders = listOf(folder("d1", "Tech"))),
+        ).menu("Feed").submenu("MoveToFolder")
+        assertEquals(3, moveToFolder.items.size)
+        val newFolder = moveToFolder.items.last() as AppMenuNode.Item
+        assertEquals("NewFolder", newFolder.label)
+        assertTrue(newFolder.enabled)
+        newFolder.onClick()
+        assertTrue(newFolderInvoked)
+    }
+
+    @Test
+    fun `the feed menu orders refresh then tags then move to folder`() {
+        val labels = tree(enabledUi()).menu("Feed").items.mapNotNull {
+            when (it) {
+                is AppMenuNode.Item -> it.label
+                is AppMenuNode.Menu -> it.label
+                else -> null
+            }
+        }
+        assertEquals(listOf("FeedRefresh", "AssignTags", "MoveToFolder"), labels.dropWhile { it != "FeedRefresh" }.take(3))
     }
 
     @Test

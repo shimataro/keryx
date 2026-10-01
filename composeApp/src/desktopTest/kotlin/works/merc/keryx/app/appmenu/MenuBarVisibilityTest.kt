@@ -46,7 +46,7 @@ class MenuBarVisibilityTest {
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
         feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
-        feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
+        feedNoFolder = "NoFolder", feedNewFolder = "NewFolder", feedNewTag = "NewTag", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
         feedCopyUrl = "FeedCopyUrl", feedCopySiteUrl = "FeedCopySiteUrl", feedOpenSite = "FeedOpenSite",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
@@ -57,6 +57,7 @@ class MenuBarVisibilityTest {
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
+        newFolderForSelectedFeed = {}, newTagForSelectedFeed = {},
         renameSelectedFeed = {}, unsubscribeSelectedFeed = { unsubscribeCalled = true },
         copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
         openWebsite = {}, openProjectPage = {}, updateAction = {}, about = {},

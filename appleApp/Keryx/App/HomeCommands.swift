@@ -124,8 +124,8 @@ struct HomeCommands: Commands {
                     .disabled(!state.syncEnabled)
                 Divider()
                 // The rest all act on the currently selected feed-list item, matching Compose's own
-                // Feed menu (`AppMenuTree.kt:275-324`) exactly: Refresh, Tags ▸, Move to folder ▸, a
-                // separator, the URL/site actions, a separator, Rename, a separator, Unsubscribe —
+                // Feed menu (`AppMenuTree.kt`) exactly: Refresh, Tags ▸, Move to folder ▸ (each closing
+                // with its "New …" item), a separator, the URL/site actions, a separator, Rename, a separator, Unsubscribe —
                 // Rename/Unsubscribe alone use `renameOrDeleteEnabled` (they act on whatever's
                 // selected — feed, folder or tag — not only a feed).
                 Button(L("home_refresh")) {
@@ -143,6 +143,11 @@ struct HomeCommands: Commands {
                             ))
                         }
                     }
+                    // Closes the submenu like the sidebar row's own menu (`FeedListView+SourceList`)
+                    // and Compose's `AppMenuTree.kt`, so Tags is never empty.
+                    Button(L("home_new_tag")) {
+                        if let feed = selectedFeed(home) { model.sidebarDialogs.creatingTagForFeed = feed }
+                    }
                 }
                 .disabled(!state.feedActionsEnabled)
 
@@ -158,6 +163,7 @@ struct HomeCommands: Commands {
                                 set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
                             ))
                         }
+                        Button(L("home_new_folder")) { model.sidebarDialogs.creatingFolderForFeed = feed }
                     }
                 }
                 .disabled(!state.feedActionsEnabled)

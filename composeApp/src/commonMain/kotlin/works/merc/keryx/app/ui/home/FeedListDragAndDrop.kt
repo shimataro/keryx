@@ -548,6 +548,18 @@ internal fun FeedRow(
                 items = {
                     listOf(
                         NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
+                        // Refresh → Tags → Move to folder, matching the menu bar's Feed menu
+                        // (AppMenuTree.kt) and the SwiftUI app's, separators included.
+                        NativeSubMenu(
+                            label = assignTagsLabel,
+                            items = tags.map { tag ->
+                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
+                                    onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
+                                }
+                            } + listOf(
+                                NativeMenuItem(newTagLabel) { onCreateNewTagForFeed() },
+                            ),
+                        ),
                         NativeSubMenu(
                             label = moveToFolderLabel,
                             items = buildList {
@@ -565,16 +577,6 @@ internal fun FeedRow(
                                 }
                                 add(NativeMenuItem(newFolderLabel) { onCreateNewFolderForFeed() })
                             },
-                        ),
-                        NativeSubMenu(
-                            label = assignTagsLabel,
-                            items = tags.map { tag ->
-                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
-                                    onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
-                                }
-                            } + listOf(
-                                NativeMenuItem(newTagLabel) { onCreateNewTagForFeed() },
-                            ),
                         ),
                         NativeMenuSeparator,
                         NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },

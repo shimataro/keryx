@@ -32,6 +32,8 @@ import works.merc.keryx.app.resources.home_menu_delete_tag
 import works.merc.keryx.app.resources.home_menu_rename_folder
 import works.merc.keryx.app.resources.home_menu_rename_tag
 import works.merc.keryx.app.resources.home_move_to_folder
+import works.merc.keryx.app.resources.home_new_folder
+import works.merc.keryx.app.resources.home_new_tag
 import works.merc.keryx.app.resources.home_no_folder
 import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
@@ -202,6 +204,8 @@ internal fun FrameWindowScope.AppMenuBar(
         feedAssignTags = stringResource(Res.string.home_assign_tags),
         feedMoveToFolder = stringResource(Res.string.home_move_to_folder),
         feedNoFolder = stringResource(Res.string.home_no_folder),
+        feedNewFolder = stringResource(Res.string.home_new_folder),
+        feedNewTag = stringResource(Res.string.home_new_tag),
         feedRename = renameLabel,
         feedUnsubscribe = deleteLabel,
         feedCopyUrl = stringResource(Res.string.home_copy_feed_url),
@@ -235,6 +239,8 @@ internal fun FrameWindowScope.AppMenuBar(
         refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it) } },
         toggleFeedTag = { tagId, attached -> selectedFeed?.let { homeVm.setFeedTag(it.id, tagId, attached) } },
         moveFeedToFolder = { folderId -> selectedFeed?.let { homeVm.moveFeed(it.id, folderId) } },
+        newFolderForSelectedFeed = { menuController.send(MenuCommand.NewFolderForSelectedFeed) },
+        newTagForSelectedFeed = { menuController.send(MenuCommand.NewTagForSelectedFeed) },
         renameSelectedFeed = { menuController.send(MenuCommand.RenameFeed) },
         unsubscribeSelectedFeed = { menuController.send(MenuCommand.UnsubscribeFeed) },
         copyFeedUrl = { menuController.send(MenuCommand.CopyFeedUrl) },

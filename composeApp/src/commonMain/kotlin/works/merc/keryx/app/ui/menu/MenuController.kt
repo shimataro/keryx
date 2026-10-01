@@ -23,6 +23,10 @@ enum class MenuCommand {
     CopyUrl,
     RenameFeed,
     UnsubscribeFeed,
+    /** Feed ▸ Move to folder ▸ New folder… — create a folder and move the selected feed into it. */
+    NewFolderForSelectedFeed,
+    /** Feed ▸ Tags ▸ New tag… — create a tag and attach it to the selected feed. */
+    NewTagForSelectedFeed,
     CopyFeedUrl,
     CopySiteUrl,
     About,

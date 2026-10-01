@@ -285,6 +285,17 @@ internal fun FeedListPane(
         if (target != null) vm.revealFeedListRow(target.rowInstance)
         inlineEdit = target
     }
+    // Shared by every feed row's "New folder…"/"New tag…" context-menu items and the Feed menu's
+    // matching submenu items (MenuCommand.NewFolderForSelectedFeed/NewTagForSelectedFeed): open the
+    // create dialog that, on confirm, files the feed into the new folder / attaches the new tag.
+    fun createFolderForFeed(feedId: String) {
+        creatingFolderForFeedId = feedId
+    }
+    fun createTagForFeed(feedId: String) {
+        creatingTagForFeedId = feedId
+    }
+    fun selectedFeedId(): String? =
+        (resolveFeedListSelectionTarget(filter, feeds, folders, tags) as? FeedListSelectionTarget.Feed)?.feed?.id
     fun openDeleteDialogForSelection() {
         when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
             is FeedListSelectionTarget.Feed -> confirmingUnsubscribeFeed = target.feed
@@ -312,6 +323,8 @@ internal fun FeedListPane(
                 MenuCommand.AddTag -> showAddTag = true
                 MenuCommand.RenameFeed -> startInlineRenameForSelection()
                 MenuCommand.UnsubscribeFeed -> openDeleteDialogForSelection()
+                MenuCommand.NewFolderForSelectedFeed -> selectedFeedId()?.let(::createFolderForFeed)
+                MenuCommand.NewTagForSelectedFeed -> selectedFeedId()?.let(::createTagForFeed)
                 else -> {}
             }
         }
@@ -605,8 +618,8 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                 isTouchPrimary = isTouchPrimary,
-                                onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
-                                onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
+                                onCreateNewFolderForFeed = { createFolderForFeed(feed.id) },
+                                onCreateNewTagForFeed = { createTagForFeed(feed.id) },
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
@@ -776,8 +789,8 @@ internal fun FeedListPane(
                                     isTouchPrimary = isTouchPrimary,
                                     onMoveUp = null,
                                     onMoveDown = null,
-                                    onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
-                                    onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
+                                    onCreateNewFolderForFeed = { createFolderForFeed(feed.id) },
+                                    onCreateNewTagForFeed = { createTagForFeed(feed.id) },
                                 )
                             }
                         }

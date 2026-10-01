@@ -248,10 +248,19 @@ extension FeedListView {
             // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
             // selection runs on a right-click/Control-click via `.selectsOnContextMenu` above, not
             // as a side effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
-            // Order matches `FeedListDragAndDrop.kt:553-593` exactly: Refresh, Move to Folder ▸,
-            // Assign tags ▸, a separator, the URL/site actions, a separator, Rename, a separator,
-            // Unsubscribe.
+            // Order matches `FeedListDragAndDrop.kt` and the Feed menu (`HomeCommands.swift`) exactly:
+            // Refresh, Assign tags ▸, Move to Folder ▸, a separator, the URL/site actions, a
+            // separator, Rename, a separator, Unsubscribe.
             Button(L("home_refresh")) { home.refreshFeed(feed) }
+            Menu(L("home_assign_tags")) {
+                ForEach(sortedTags, id: \.id) { tag in
+                    Toggle(tag.name, isOn: Binding(
+                        get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
+                        set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
+                    ))
+                }
+                Button(L("home_new_tag")) { dialogs.creatingTagForFeed = feed }
+            }
             Menu(L("home_move_to_folder")) {
                 Toggle(L("home_no_folder"), isOn: Binding(
                     get: { feed.folder_id == nil },
@@ -264,15 +273,6 @@ extension FeedListView {
                     ))
                 }
                 Button(L("home_new_folder")) { dialogs.creatingFolderForFeed = feed }
-            }
-            Menu(L("home_assign_tags")) {
-                ForEach(sortedTags, id: \.id) { tag in
-                    Toggle(tag.name, isOn: Binding(
-                        get: { home.feedTagMap[feed.id]?.contains(tag.id) ?? false },
-                        set: { attached in home.viewModel.setFeedTag(feedId: feed.id, tagId: tag.id, attached: attached) }
-                    ))
-                }
-                Button(L("home_new_tag")) { dialogs.creatingTagForFeed = feed }
             }
             Divider()
             Button(L("home_copy_feed_url")) { copyToPasteboard(feed.url) }

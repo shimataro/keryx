@@ -129,6 +129,9 @@ internal data class AppMenuLabels(
     val feedAssignTags: String,
     val feedMoveToFolder: String,
     val feedNoFolder: String,
+    /** The "New folder…" / "New tag…" items closing the Move-to-folder / Tags submenus. */
+    val feedNewFolder: String,
+    val feedNewTag: String,
     /** Rename/delete wording for the *currently selected* item — a feed, folder or tag, not always
      * a feed (`AppMenuBar` picks the matching string per selection type). */
     val feedRename: String,
@@ -165,6 +168,10 @@ internal data class AppMenuActions(
     val refreshSelectedFeed: () -> Unit,
     val toggleFeedTag: (tagId: String, attached: Boolean) -> Unit,
     val moveFeedToFolder: (folderId: String?) -> Unit,
+    /** Opens the create-folder dialog that files the selected feed into the new folder. */
+    val newFolderForSelectedFeed: () -> Unit,
+    /** Opens the create-tag dialog that attaches the new tag to the selected feed. */
+    val newTagForSelectedFeed: () -> Unit,
     val renameSelectedFeed: () -> Unit,
     val unsubscribeSelectedFeed: () -> Unit,
     val copyFeedUrl: () -> Unit,
@@ -194,8 +201,9 @@ internal data class SelectedFeedMenuData(
  * Builds the application menu tree from the current [ui] state, resolved [labels] and [actions].
  *
  * The menu shape is fixed at startup **except** for the Feed menu's Tags/Move-to-folder submenus,
- * whose item count follows [selectedFeedMenu]'s tag/folder lists and can therefore change while the
- * app is running: [isMacOs] is a process constant, and [menuBarToggle] only ever adds/removes the
+ * whose item count follows [selectedFeedMenu]'s tag/folder lists (one checkbox per tag/folder, plus
+ * "No folder" in Move to folder, plus a trailing "New tag…"/"New folder…" item in each — so neither
+ * submenu is ever empty) and can therefore change while the app is running: [isMacOs] is a process constant, and [menuBarToggle] only ever adds/removes the
  * trailing "Show Menu Bar" item. Everything else (including the rest of this tree) varies only by
  * label / enabled / checked, which is what keeps the D-Bus node ids stable across rebuilds for that
  * fixed portion (see `AppMenuLayoutBuilder`, which documents why the variable-length region is
@@ -278,6 +286,8 @@ internal fun buildAppMenuTree(
         AppMenuNode.Item(labels.syncNow, ui.syncEnabled, onClick = actions.sync),
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, AppMenuShortcut.FeedRefresh, actions.refreshSelectedFeed),
+        // Both submenus end with a "New …" item, like the feed row's context menu
+        // (FeedListDragAndDrop.kt), so Tags always has at least that one entry.
         AppMenuNode.Menu(
             label = labels.feedAssignTags,
             enabled = ui.feedActionsEnabled,
@@ -288,7 +298,7 @@ internal fun buildAppMenuTree(
                     checked = tag.id in selectedFeedMenu.attachedTagIds,
                     onCheckedChange = { attached -> actions.toggleFeedTag(tag.id, attached) },
                 )
-            },
+            } + AppMenuNode.Item(labels.feedNewTag, enabled = true, onClick = actions.newTagForSelectedFeed),
         ),
         AppMenuNode.Menu(
             label = labels.feedMoveToFolder,
@@ -312,6 +322,7 @@ internal fun buildAppMenuTree(
                         ),
                     )
                 }
+                add(AppMenuNode.Item(labels.feedNewFolder, enabled = true, onClick = actions.newFolderForSelectedFeed))
             },
         ),
         AppMenuNode.Separator,

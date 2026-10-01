@@ -456,6 +456,11 @@ confirm on screen that the native menu really follows it:
   editor. Collapse it again and use Feed ▸ Rename: same result. Restart the app — the folder stays expanded
   (collapse state is saved locally like any manual expand). A feed selected through an expanded tag's nested
   row never expands its collapsed folder.
+- With a feed selected, Feed ▸ Tags ▸ New tag… and Feed ▸ Move to Folder ▸ New folder… (the last item of each
+  submenu, also present when there are no tags yet) open the same dialog as the feed row's own context-menu
+  items, and confirming it attaches the new tag to / moves the feed into the new folder. The feed row's
+  context menu lists Refresh, Tags, Move to Folder in that order — the Feed menu's order — on every platform;
+  check the SwiftUI app's Feed menu (both "New …" items) and sidebar row menu (macOS and iOS) the same way.
 
 The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/
