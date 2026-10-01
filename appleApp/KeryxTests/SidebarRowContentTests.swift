@@ -32,7 +32,7 @@ struct SidebarRowContentTests {
     @Test
     func rowsShowTheirTitleAndIcon() {
         let all = contents()
-        #expect(all[.all]?.icon == .symbol("tray.full"))
+        #expect(all[.all]?.icon == .symbol("doc.text.fill"))
         #expect(all[.starred]?.icon == .symbol("star"))
         #expect(all[.folder("d1")]?.title == "name-d1")
         #expect(all[.folder("d1")]?.icon == .symbol("folder"))

@@ -89,7 +89,7 @@ struct NotificationBell: View {
                 Button {
                     notifications.dismissAll()
                 } label: {
-                    Image(systemName: "trash")
+                    Image(systemName: "xmark.bin")
                 }
                 .buttonStyle(.plain)
                 .disabled(isEmpty)
@@ -235,7 +235,7 @@ struct NotificationBell: View {
     }
 
     private func levelIcon(_ level: AppNotificationLevel) -> String {
-        level == .error ? "xmark.octagon.fill" : level == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill"
+        level == .error ? "exclamationmark.circle.fill" : level == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill"
     }
 
     /// The level as words, so it does not rest on the icon's shape and color alone.

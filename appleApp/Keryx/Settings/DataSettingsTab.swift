@@ -34,14 +34,14 @@ struct DataSettingsTab: View {
                 Button {
                     isImporting = true
                 } label: {
-                    Label(L("settings_import_opml"), systemImage: "square.and.arrow.down")
+                    Label(L("settings_import_opml"), systemImage: "arrow.down.doc")
                 }
                 .disabled(opmlTransfer.isBusy)
                 Button {
                     exportDocument = opmlTransfer.exportDocument()
                     isExporting = true
                 } label: {
-                    Label(L("settings_export_opml"), systemImage: "square.and.arrow.up")
+                    Label(L("settings_export_opml"), systemImage: "arrow.up.doc")
                 }
                 .disabled(opmlTransfer.isBusy)
                 if opmlTransfer.isBusy {

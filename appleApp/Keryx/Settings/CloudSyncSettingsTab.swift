@@ -186,7 +186,7 @@ struct CloudSyncSettingsTab: View {
             }
         } else if cloudSync.connectingType == type && cloudSync.canCancelConnect {
             // Still waiting on the OAuth browser redirect — offer an explicit abort.
-            actionButton(L("common_abort"), systemImage: "xmark.circle") { confirmAbort = type }
+            actionButton(L("common_abort"), systemImage: "xmark") { confirmAbort = type }
         } else {
             // Idle, or past the cancellable window (finishing up: saving tokens/settings/syncing) —
             // the connect/switch button itself shows a spinner rather than swapping to a separate
@@ -277,7 +277,7 @@ struct CloudSyncSettingsTab: View {
                 if cloudSync.syncing && cloudSync.connectedType != nil {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "icloud")
+                    Image(systemName: "cloud")
                 }
                 Text(L("menu_feed_sync_now"))
             }

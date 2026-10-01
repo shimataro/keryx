@@ -28,7 +28,7 @@ struct SettingsView: View {
                 if cloudSyncAvailable {
                     sectionLink(SettingsNavigation.Tab.cloudSync, titleKey: "settings_cloud_sync", systemImage: "cloud")
                 }
-                sectionLink(SettingsNavigation.Tab.data, titleKey: "settings_tab_data", systemImage: "externaldrive")
+                sectionLink(SettingsNavigation.Tab.data, titleKey: "settings_tab_data", systemImage: "cylinder.split.1x2")
             }
             .navigationTitle(L("settings_title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -98,7 +98,7 @@ struct SettingsView: View {
             }
 
             DataSettingsTab(preferences: preferences, opmlTransfer: opmlTransfer)
-                .tabItem { Label(L("settings_tab_data"), systemImage: "externaldrive") }
+                .tabItem { Label(L("settings_tab_data"), systemImage: "cylinder.split.1x2") }
                 .tag(SettingsNavigation.Tab.data)
         }
         // A `Form` defaults to checkboxes on macOS; the Compose dialog uses switches (`SwitchRow`).

@@ -35,9 +35,9 @@ struct SidebarRowLabel<IconPopover: View>: View {
                     // ordinary fetch error gets no tooltip, only the accessibility label below.
                     Group {
                         if isGone {
-                            Image(systemName: "exclamationmark.triangle.fill").help(L("home_feed_gone"))
+                            Image(systemName: "exclamationmark.circle.fill").help(L("home_feed_gone"))
                         } else {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                            Image(systemName: "exclamationmark.circle.fill")
                         }
                     }
                     .foregroundStyle(.orange)
