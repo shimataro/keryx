@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
-import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.presentation.home.articleUrlCopyPlan
 
 /**
  * The one handler behind every route to "copy article URL" — the reader's toolbar button, the
@@ -29,10 +29,10 @@ import works.merc.keryx.app.presentation.home.hasUsableUrl
  * reader wasn't composed (a phone-width article list) or for a row other than the one it shows
  * (an Android long-press doesn't select first) wrote the clipboard silently.
  *
- * [copy] writes the clipboard, then:
- * - bumps [pulse] — which the reader watches to flash its copy button's inline ✓ — but only when
- *   the copied article is the one the reader shows ([displayedArticleId]), so the ✓ never confirms
- *   a URL other than the one that button would copy;
+ * [copy] carries out the shared [articleUrlCopyPlan] (the same decision the SwiftUI app uses): it
+ * writes the clipboard when the plan says so, then:
+ * - bumps [pulse] — which the reader watches to flash its copy button's inline ✓ — when the plan
+ *   flashes it (the copied article is the one the reader shows, [displayedArticleId]);
  * - shows the "URL copied" snackbar when [showsSnackbar] and a [snackbarHostState] exist. That is
  *   Android below API 33 only: desktop has no in-app snackbar convention (no host — see
  *   `LocalSnackbarHostState`), and from API 33 the OS shows its own clipboard confirmation
@@ -54,15 +54,16 @@ class ArticleUrlCopier(
 
     private var copyJob: Job? = null
 
-    /** Copies [url] (article [articleId]'s); does nothing when it isn't usable ([hasUsableUrl]). */
+    /** Copies [url] (article [articleId]'s) as [articleUrlCopyPlan] decides — nothing when it isn't usable. */
     fun copy(url: String?, articleId: String) {
-        if (url == null || !hasUsableUrl(url)) return
+        val plan = articleUrlCopyPlan(url, articleId, displayedArticleId())
+        if (!plan.writeClipboard || url == null) return
         val previous = copyJob
         copyJob = scope.launch {
             // Dismisses the previous copy's snackbar (showSnackbar clears it when cancelled).
             previous?.cancel()
             clipboard.setClipEntry(ClipboardEntries.ofText(url))
-            if (articleId == displayedArticleId()) pulse++
+            if (plan.flashCopied) pulse++
             if (showsSnackbar) snackbarHostState?.showSnackbar(copiedMessage)
         }
     }

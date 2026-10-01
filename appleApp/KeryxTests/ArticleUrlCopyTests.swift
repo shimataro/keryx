@@ -1,7 +1,7 @@
 import Testing
 
-/// Covers `ArticleUrlCopy`, the decision every article "Copy URL" route shares: what reaches the
-/// pasteboard, and when the reader's ✓ pulses.
+/// Covers `ArticleUrlCopy`, which every article "Copy URL" route goes through, carrying out the shared
+/// `articleUrlCopyPlan`: what reaches the pasteboard, and when the reader's ✓ pulses.
 @Suite
 struct ArticleUrlCopyTests {
     /// Records what a `perform` call copied and how often it pulsed.

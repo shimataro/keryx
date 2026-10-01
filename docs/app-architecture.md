@@ -266,6 +266,7 @@ Examples in the code today:
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
 | Open Settings ▸ Data for a waiting OPML request | `presentation/settings/OpmlTransferController.kt`'s `shouldPresentOpmlRequest` (a request is waiting and nothing runs) | Compose's `App.kt` and SwiftUI's `OpmlRequestPresenter` (through `OpmlTransferObservable.shouldPresentRequest`) |
+| Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓?) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |
 | Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
 
 **Adding a route to an existing action** means calling its existing handler/predicate. If no shared

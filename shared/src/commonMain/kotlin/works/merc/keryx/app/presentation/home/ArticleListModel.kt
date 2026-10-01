@@ -8,6 +8,29 @@ import works.merc.keryx.app.domain.ArticleListRow
 fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
 
 /**
+ * What one "copy article URL" does — the decision [articleUrlCopyPlan] makes for every route and both
+ * UIs; each UI only carries it out.
+ *
+ * @property writeClipboard Whether the URL is written to the clipboard (and the platform's own
+ *   copy feedback, e.g. Android's snackbar, follows it).
+ * @property flashCopied Whether the reader's copy button flashes its ✓ — only when the copied
+ *   article is the one the reader shows. Never true without [writeClipboard].
+ */
+data class ArticleUrlCopyPlan(val writeClipboard: Boolean, val flashCopied: Boolean)
+
+/**
+ * The one decision behind every "copy article URL" route (reader button, keyboard shortcut, menu
+ * bar, context menu) in both UIs — Compose's `ArticleUrlCopier`, SwiftUI's `ArticleUrlCopy`. An
+ * unusable [url] ([hasUsableUrl]) copies nothing; a usable one is always copied; and the ✓ flashes
+ * only when [articleId] is the [displayedArticleId], so it never confirms a URL other than the one
+ * that button would copy.
+ */
+fun articleUrlCopyPlan(url: String?, articleId: String, displayedArticleId: String?): ArticleUrlCopyPlan {
+    if (!hasUsableUrl(url)) return ArticleUrlCopyPlan(writeClipboard = false, flashCopied = false)
+    return ArticleUrlCopyPlan(writeClipboard = true, flashCopied = articleId == displayedArticleId)
+}
+
+/**
  * Whether [url] may be opened in the external browser — the single enablement rule *and* guard for
  * every route of "Open in browser" (toolbar button, menu bar, keyboard shortcut, context menu), for
  * an article's URL or a feed's site URL alike: only http(s) qualifies.
