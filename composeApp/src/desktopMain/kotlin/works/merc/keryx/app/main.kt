@@ -42,7 +42,6 @@ import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.core.APP_NAME
-import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
@@ -78,10 +77,11 @@ import works.merc.keryx.app.resources.tray_icon
 import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
+import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.tray.shouldHideOnTrayAction
 import works.merc.keryx.app.tray.shouldOpenSettingsAfterUpdateCheck
 import works.merc.keryx.app.tray.SniConnection
-import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.theme.installLookAndFeel
@@ -309,7 +309,7 @@ fun main(args: Array<String>) {
     appScope.launch { backgroundUpdateLoop(koin) }
 
     val updateRepository = koin.get<UpdateRepository>()
-    val notificationCenterViewModel = koin.get<NotificationCenterViewModel>()
+    val settingsOpenRequests = koin.get<SettingsOpenRequests>()
 
     val menuController = koin.get<MenuController>()
 
@@ -488,16 +488,21 @@ fun main(args: Array<String>) {
         val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
         val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
 
+        // The tray's update entry acts on the settings dialog's Updates tab, so it is disabled while
+        // Settings is unreachable (first-run Setup) — the same gate the Help menu's copy follows.
+        val currentScreen by menuController.currentScreen.collectAsState()
+
         KeryxTray(
             sniConnection = sniConnection,
             notificationIcon = dockBaseImage,
             unreadCount = unreadCount,
             windowVisible = windowVisible,
             updateStateFlow = updateRepository.state,
+            settingsReachable = currentScreen == Screen.Home,
             onToggle = { windowVisible = !windowVisible },
             onQuit = exitApp,
             onUpdateAction = {
-                onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterViewModel)
+                onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, settingsOpenRequests)
             },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
@@ -742,19 +747,19 @@ internal fun onUpdateMenuItemClicked(
     state: UpdateState,
     scope: CoroutineScope,
     updateRepository: UpdateRepository,
-    notificationCenterViewModel: NotificationCenterViewModel,
+    settingsOpenRequests: SettingsOpenRequests,
     openUrl: (String) -> Unit = BrowserOpener::open,
 ) {
     when (state) {
         UpdateState.Idle, UpdateState.UpToDate ->
-            checkForUpdateAndShowIfAvailable(scope, updateRepository, notificationCenterViewModel)
+            checkForUpdateAndShowIfAvailable(scope, updateRepository, settingsOpenRequests)
         is UpdateState.Available ->
             if (state.update.installable) {
-                startAndShowUpdatesTab(updateRepository, notificationCenterViewModel)
+                startAndShowUpdatesTab(updateRepository, settingsOpenRequests)
             } else {
                 openUrl(state.update.releaseUrl)
             }
-        is UpdateState.Failed -> startAndShowUpdatesTab(updateRepository, notificationCenterViewModel)
+        is UpdateState.Failed -> startAndShowUpdatesTab(updateRepository, settingsOpenRequests)
         is UpdateState.Ready -> updateRepository.performPrimaryAction()
         UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing -> Unit
     }
@@ -767,9 +772,9 @@ internal fun onUpdateMenuItemClicked(
  * tray/app-menu (which closes right away) isn't left wondering whether anything happened until they
  * reopen it. [UpdateState.Ready] deliberately does NOT go through this — see [onUpdateMenuItemClicked].
  */
-private fun startAndShowUpdatesTab(updateRepository: UpdateRepository, notificationCenterViewModel: NotificationCenterViewModel) {
+private fun startAndShowUpdatesTab(updateRepository: UpdateRepository, settingsOpenRequests: SettingsOpenRequests) {
     updateRepository.performPrimaryAction()
-    bringToFrontAndShowUpdatesTab(notificationCenterViewModel)
+    bringToFrontAndShowUpdatesTab(settingsOpenRequests)
 }
 
 /**
@@ -785,30 +790,28 @@ private fun startAndShowUpdatesTab(updateRepository: UpdateRepository, notificat
 private fun checkForUpdateAndShowIfAvailable(
     scope: CoroutineScope,
     updateRepository: UpdateRepository,
-    notificationCenterViewModel: NotificationCenterViewModel,
+    settingsOpenRequests: SettingsOpenRequests,
 ) {
     if (updateRepository.state.value is UpdateState.Checking) return
     scope.launch {
         updateRepository.check()
         if (shouldOpenSettingsAfterUpdateCheck(updateRepository.state.value)) {
-            bringToFrontAndShowUpdatesTab(notificationCenterViewModel)
+            bringToFrontAndShowUpdatesTab(settingsOpenRequests)
         }
     }
 }
 
 /**
  * Brings the window to front (the click may well have come from the tray while it was hidden) and
- * opens the settings dialog on the Updates tab — the same effect as clicking a `ShowSettingsTab` row
- * in the notification center (`NotificationCenterViewModel.requestAction` ->
- * [NotificationCenterViewModel.pendingAction] -> `App.kt`'s `LaunchedEffect(pendingAction)`), but
- * requested as a bare action with no notification behind it. This is deliberately independent of whatever [UpdateRepository.check] itself posts to the notification
- * center (that's for the bell's history), since [startAndShowUpdatesTab]'s callers never call
- * `check()` at all. Shared by both call sites so the two effects (raise window, navigate) can never
- * come apart.
+ * asks the [SettingsOpenRequests] router — the one every Settings route goes through — for the
+ * settings dialog on the Updates tab. This is deliberately independent of whatever
+ * [UpdateRepository.check] itself posts to the notification center (that's for the bell's history),
+ * since [startAndShowUpdatesTab]'s callers never call `check()` at all. Shared by both call sites so
+ * the two effects (raise window, navigate) can never come apart.
  */
-private fun bringToFrontAndShowUpdatesTab(notificationCenterViewModel: NotificationCenterViewModel) {
+private fun bringToFrontAndShowUpdatesTab(settingsOpenRequests: SettingsOpenRequests) {
     activationRequests.tryEmit(Unit)
-    notificationCenterViewModel.requestAction(AppNotificationAction.ShowSettingsTab("updates"))
+    settingsOpenRequests.request("updates")
 }
 
 /**

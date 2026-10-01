@@ -19,6 +19,7 @@ import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
@@ -68,7 +69,6 @@ import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
 import works.merc.keryx.app.tray.updateMenuEntry
-import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -117,7 +117,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val homeVm = koinInject<HomeViewModel>()
     val settingsVm = koinInject<SettingsViewModel>()
     val updateRepository = koinInject<UpdateRepository>()
-    val notificationCenterVm = koinInject<NotificationCenterViewModel>()
+    val settingsOpenRequests = koinInject<SettingsOpenRequests>()
     // The same application-lifetime scope `main.kt` uses as `appScope` (a single Koin registration,
     // so there is no ambiguity): an update check must outlive this menu's own composition.
     val appScope = koinInject<CoroutineScope>()
@@ -139,7 +139,6 @@ internal fun FrameWindowScope.AppMenuBar(
     // already rounded to 5% steps by `updateMenuEntry` → `roundedTrayProgressPercent`, so the D-Bus
     // `LayoutUpdated` traffic on Linux stays at exactly the tray's own existing rate.
     val updateState by updateRepository.state.collectAsState()
-    val updateEntry = updateMenuEntry(updateState)
 
     val selectedFeed = (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
     // Rename/delete act on any selected feed list item, so they resolve the same feed/folder/tag
@@ -161,6 +160,10 @@ internal fun FrameWindowScope.AppMenuBar(
         selectedFeedHasSiteUrl = hasUsableUrl(selectedFeed?.site_url),
         selectedFeedSiteCanOpenInBrowser = canOpenInBrowser(selectedFeed?.site_url),
     )
+
+    // Disabled wherever Settings can't open (the entry acts on its Updates tab) — the same gate as
+    // the Settings… item itself.
+    val updateEntry = updateMenuEntry(updateState, settingsReachable = ui.openSettingsEnabled)
 
     // Rename/delete wording follows the selected item's type. A `null` target falls back to the
     // feed wording; the two items are disabled in that case, so the text is never acted on.
@@ -252,7 +255,7 @@ internal fun FrameWindowScope.AppMenuBar(
         // state change between this composition and the click is honoured — the same wiring
         // `main.kt` gives the tray's own entry.
         updateAction = {
-            onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterVm)
+            onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, settingsOpenRequests)
         },
         about = { menuController.send(MenuCommand.About) },
     )

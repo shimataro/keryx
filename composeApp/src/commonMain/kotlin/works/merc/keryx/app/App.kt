@@ -20,6 +20,7 @@ import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.ui.navigation.rememberNavigator
 import works.merc.keryx.app.ui.settings.AboutDialog
 import works.merc.keryx.app.ui.settings.SettingsDialog
@@ -75,24 +76,33 @@ fun App() {
         // Both dialogs are modeless windows shown over Home, tracked by boolean state here.
         var showAbout by remember { mutableStateOf(false) }
         var showSettings by remember { mutableStateOf(false) }
-        // Which tab the settings dialog opens on. Normally "general"; a notification's
-        // ShowSettingsTab action points it at the tab where that problem is fixable.
+        // Which tab the settings dialog opens on, from the last released SettingsOpenRequest.
         var settingsInitialTab by remember { mutableStateOf("general") }
         // Bumped on every explicit tab-navigation request so the dialog re-navigates even when
         // settingsInitialTab is reassigned the same value it already holds (see SettingsDialog's
         // rememberSelectedTabId, which keys off this instead of the tab id's value).
         var settingsTabRequestToken by remember { mutableStateOf(0) }
 
-        // A notification's "open this settings tab" action is resolved here, because the settings
-        // dialog lives in this composition (HomeScreen resolves the actions targeting its own panes).
+        // Every route that opens Settings goes through the one SettingsOpenRequests router (see its
+        // KDoc), which holds a request made over Setup until Home is showing. This is its single
+        // consumer: it re-runs whenever a request arrives or the destination changes.
+        val settingsOpenRequests = koinInject<SettingsOpenRequests>()
+        val settingsRequest by settingsOpenRequests.pending.collectAsState()
+        LaunchedEffect(settingsRequest, navigator.current) {
+            val released = settingsOpenRequests.release(navigator.current) ?: return@LaunchedEffect
+            settingsInitialTab = released.tabId
+            settingsTabRequestToken++
+            showSettings = true
+        }
+
+        // A notification's "open this settings tab" action is forwarded to the router (HomeScreen
+        // resolves the actions targeting its own panes).
         val notifVm = koinInject<NotificationCenterViewModel>()
         val pendingAction by notifVm.pendingAction.collectAsState()
         LaunchedEffect(pendingAction) {
             val action = pendingAction?.action
             if (action is AppNotificationAction.ShowSettingsTab) {
-                settingsInitialTab = action.tabId
-                settingsTabRequestToken++
-                showSettings = true
+                settingsOpenRequests.request(action.tabId)
                 notifVm.clearPendingAction()
             }
         }
@@ -101,15 +111,10 @@ fun App() {
             menuController.commands.collect { command ->
                 when (command) {
                     MenuCommand.About -> showAbout = true
-                    // Home-gated, matching the menu item's enabled state; the native macOS
-                    // "Settings…" item is always enabled but is a no-op away from Home.
-                    MenuCommand.OpenSettings ->
-                        if (navigator.current == Screen.Home) {
-                            // Opened by the user, not by a notification: always start on the first tab.
-                            settingsInitialTab = "general"
-                            settingsTabRequestToken++
-                            showSettings = true
-                        }
+                    // Dropped (not held) away from Home, matching the menu item's enabled state; the
+                    // native macOS "Settings…" item is always enabled but is a no-op away from Home.
+                    // Opened by the user, not by a notification: always start on the first tab.
+                    MenuCommand.OpenSettings -> settingsOpenRequests.requestIfReachable("general", navigator.current)
                     else -> {}
                 }
             }

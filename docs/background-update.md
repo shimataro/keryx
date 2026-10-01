@@ -399,7 +399,11 @@ each a separate, explicit click (Updates tab button, or that menu item).
   `shouldOpenSettingsAfterUpdateCheck`), a non-installable find reads "New version available" and
   opens the release page in the browser instead, and the states with an action already in flight
   (`Checking`/`Downloading`/`Verifying`/`Installing`) are shown disabled rather than removed so the
-  menu never changes shape underneath the user. The Updates tab's own headline row follows the
+  menu never changes shape underneath the user. While first-run Setup is showing, every state of
+  the item is disabled (label unchanged) in both the tray and the Help menu, because whatever it
+  does lands on the settings dialog's Updates tab and Settings never opens over Setup — the same
+  gate as the Settings… item itself (`updateMenuEntry`'s `settingsReachable`; every route that
+  opens Settings goes through `ui/navigation/SettingsOpenRequests.kt`). The Updates tab's own headline row follows the
   same rule — no "Download" button renders there at all for that plan, rather than a disabled one
   (see `ui-guidelines`'s "prefer disabled over hidden" carve-out, which this is: there is nothing
   *temporarily* inactive about a form the in-app installer can never handle) — replaced by the

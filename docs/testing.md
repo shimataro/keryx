@@ -437,6 +437,15 @@ confirm the routes really agree on screen, with a provider connected:
   Sync now and the Settings button are enabled straight away (once the initial sync finishes), and
   Settings ▸ Cloud sync shows the provider as connected — no restart needed.
 
+Every route that opens Settings goes through one router, `SettingsOpenRequests`
+(`ui/navigation/`), which never lets the dialog open over first-run Setup
+(`SettingsOpenRequestsTest`). Confirm on a fresh profile, with Setup on screen:
+
+- The tray's update item and Help ▸ the update item are disabled (their label still follows the
+  update state), and ⌘, / Settings… (macOS app menu) does nothing — no Settings window appears, and
+  none appears later once Setup is finished either.
+- After finishing Setup, the tray/Help update item is enabled again and opens Settings on Updates.
+
 The Feed menu's Rename/Delete items and their bare keys (F2 — Return on macOS — and Delete) share one
 rule, `feedListItemKeysActive` (`ui/home/HomePaneLayout.kt`): the keys act, and the menu shows them,
 only while the feed list has keyboard focus and no text field does; the items stay enabled whenever

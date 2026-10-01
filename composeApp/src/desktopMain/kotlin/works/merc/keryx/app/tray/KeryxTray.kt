@@ -56,6 +56,8 @@ import java.awt.image.BufferedImage
  * download-progress tick used to force all of it to recompose because that scope itself read
  * `UpdateState` directly. Passing the flow instead confines each tick's recomposition to this
  * function and [updateMenuEntry].
+ * @param settingsReachable Whether the settings dialog can open right now (Home is showing, not
+ * first-run Setup); the update entry is disabled otherwise — see [updateMenuEntry].
  * @param onToggle Invoked to show or hide the application window.
  * @param onQuit Invoked to quit the application.
  * @param onNotificationClicked Invoked to bring the window to front when a notification is
@@ -80,6 +82,7 @@ internal fun ApplicationScope.KeryxTray(
     unreadCount: Long,
     windowVisible: Boolean,
     updateStateFlow: StateFlow<UpdateState>,
+    settingsReachable: Boolean,
     onToggle: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,
@@ -106,7 +109,7 @@ internal fun ApplicationScope.KeryxTray(
     val hideLabel = stringResource(Res.string.tray_hide)
     val quitLabel = stringResource(Res.string.tray_quit)
     val toggleLabel = if (windowVisible) hideLabel else showLabel
-    val updateEntry = updateMenuEntry(updateState)
+    val updateEntry = updateMenuEntry(updateState, settingsReachable)
 
     when {
         isMacOs -> {

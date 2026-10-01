@@ -14,11 +14,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
-import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
-import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateInstaller
@@ -27,7 +25,8 @@ import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
-import works.merc.keryx.app.ui.home.NotificationCenterViewModel
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequest
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
@@ -124,7 +123,7 @@ class UpdateMenuActionTest {
 
     private class Fixture(
         val repo: UpdateRepository,
-        val viewModel: NotificationCenterViewModel,
+        val settingsOpenRequests: SettingsOpenRequests,
         val installer: RecordingInstaller,
         val downloadRequestCount: () -> Int,
     )
@@ -161,7 +160,7 @@ class UpdateMenuActionTest {
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
-        return Fixture(repo, NotificationCenterViewModel(notificationCenter, NotificationAlerts(notificationCenter)), installer) { requestCount }
+        return Fixture(repo, SettingsOpenRequests(), installer) { requestCount }
     }
 
     /** A fixture whose check finds version 2.0.0, with a downloadable, digest-matching asset. */
@@ -176,7 +175,7 @@ class UpdateMenuActionTest {
     }
 
     private fun click(f: Fixture, state: UpdateState = f.repo.state.value) =
-        onUpdateMenuItemClicked(state, trackedScope(), f.repo, f.viewModel, openedUrls::add)
+        onUpdateMenuItemClicked(state, trackedScope(), f.repo, f.settingsOpenRequests, openedUrls::add)
 
     // --- Available ---
 
@@ -193,7 +192,7 @@ class UpdateMenuActionTest {
         assertTrue(openedUrls.isEmpty(), "an installable update must never open the release page")
         // Starting the download closes the tray/menu with no other feedback, so this also opens the
         // Updates tab — see main.kt's startAndShowUpdatesTab.
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
+        assertEquals(SettingsOpenRequest("updates"), f.settingsOpenRequests.pending.value)
     }
 
     @Test
@@ -208,7 +207,7 @@ class UpdateMenuActionTest {
         assertEquals(listOf(available.update.releaseUrl), openedUrls.toList())
         assertEquals(0, f.downloadRequestCount(), "nothing is downloadable here")
         assertIs<UpdateState.Available>(f.repo.state.value)
-        assertNull(f.viewModel.pendingAction.value, "the release page is the entire hand-off here")
+        assertNull(f.settingsOpenRequests.pending.value, "the release page is the entire hand-off here")
     }
 
     // --- Ready / Failed ---
@@ -226,7 +225,7 @@ class UpdateMenuActionTest {
         assertEquals(listOf("2.0.0"), f.installer.installedVersions.toList())
         // Install is followed shortly by the app restarting, so there's nothing worth opening the
         // Updates tab for here — unlike Available/Failed.
-        assertNull(f.viewModel.pendingAction.value)
+        assertNull(f.settingsOpenRequests.pending.value)
     }
 
     @Test
@@ -240,7 +239,7 @@ class UpdateMenuActionTest {
         click(f)
 
         await(describe = { "the retry never issued a second request" }) { f.downloadRequestCount() == 2 }
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
+        assertEquals(SettingsOpenRequest("updates"), f.settingsOpenRequests.pending.value)
     }
 
     // --- states with an action already in flight ---
@@ -273,8 +272,8 @@ class UpdateMenuActionTest {
         click(f, UpdateState.Idle)
 
         awaitState(f.repo) { it is UpdateState.Available }
-        await(describe = { "the updates tab was never requested" }) { f.viewModel.pendingAction.value != null }
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
+        await(describe = { "the updates tab was never requested" }) { f.settingsOpenRequests.pending.value != null }
+        assertEquals(SettingsOpenRequest("updates"), f.settingsOpenRequests.pending.value)
     }
 
     @Test
@@ -287,7 +286,7 @@ class UpdateMenuActionTest {
         settle()
 
         assertEquals(UpdateState.UpToDate, f.repo.state.value)
-        assertNull(f.viewModel.pendingAction.value)
+        assertNull(f.settingsOpenRequests.pending.value)
     }
 
     /**
@@ -302,6 +301,6 @@ class UpdateMenuActionTest {
 
         awaitState(f.repo) { it is UpdateState.Available }
         settle()
-        assertNull(f.viewModel.pendingAction.value)
+        assertNull(f.settingsOpenRequests.pending.value)
     }
 }

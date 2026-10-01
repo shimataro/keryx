@@ -32,10 +32,20 @@ import works.merc.keryx.app.resources.update_up_to_date
  * (pure functions only); [roundedTrayProgressPercent] is reached from there without an import,
  * being in this same package.
  *
+ * [settingsReachable] is `false` while the settings dialog cannot be opened (first-run Setup is
+ * showing — see `SettingsOpenRequests`). Every state is then shown disabled, because whatever the
+ * entry does it does on the settings dialog's Updates tab; the label still follows [state].
+ *
  * See `main.kt`'s `onUpdateMenuItemClicked` for what a click on this entry does in each state.
  */
 @Composable
-internal fun updateMenuEntry(state: UpdateState): TrayUpdateEntry = when (state) {
+internal fun updateMenuEntry(state: UpdateState, settingsReachable: Boolean): TrayUpdateEntry {
+    val entry = updateMenuEntryForState(state)
+    return if (settingsReachable) entry else entry.copy(enabled = false)
+}
+
+@Composable
+private fun updateMenuEntryForState(state: UpdateState): TrayUpdateEntry = when (state) {
     UpdateState.Idle -> TrayUpdateEntry(stringResource(Res.string.update_check_for_update), enabled = true)
     UpdateState.Checking -> TrayUpdateEntry(stringResource(Res.string.update_checking), enabled = false)
     UpdateState.UpToDate -> TrayUpdateEntry(stringResource(Res.string.update_up_to_date), enabled = true)

@@ -401,6 +401,10 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   「新しいバージョンがあります」となり、代わりにブラウザでリリースページを開く。すでに動作が
   進行中の状態（`Checking`／`Downloading`／`Verifying`／`Installing`）では、項目を消すのではなく
   無効化して表示するので、メニューの形がユーザーの目の前で変わることはない。
+  初回セットアップの表示中は、トレイでも Help メニューでも、この項目はどの状態でも無効になる
+  （ラベルはそのまま）。項目の動作はすべて設定ダイアログの Updates タブで行われ、設定はセットアップの
+  上には決して開かないため——設定…項目自身と同じ条件である（`updateMenuEntry` の
+  `settingsReachable`。設定を開く経路はすべて `ui/navigation/SettingsOpenRequests.kt` を通る）。
   Updates タブ自身の見出し行も同じ
   規則に従う——そのプランでは無効化されたボタンではなく、「ダウンロード」ボタンそのものが
   一切描画されない（`ui-guidelines` の「非表示より無効化を優先する」の例外に当たる: アプリ内
