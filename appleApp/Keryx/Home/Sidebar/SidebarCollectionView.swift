@@ -14,7 +14,6 @@ struct SidebarRenderState: Equatable {
     /// `CompactSidebarSelection.displayedKey`).
     let selectedItem: SidebarItemID?
     let renamingKey: String?
-    let colorPickingTagId: String?
 }
 
 /// What the collection view asks of `FeedListView` — the same operations the macOS source list
@@ -28,9 +27,6 @@ struct SidebarCollectionActions {
     var menu: (SidebarItemID) -> UIMenu?
     /// The row's in-place name editor, while it is being renamed.
     var editor: (SidebarItemID) -> InlineRenameField?
-    var showColorPicker: (_ tagId: String) -> Void
-    var pickColor: (_ tagId: String, _ hex: String?) -> Void
-    var dismissColorPicker: () -> Void
     /// The shared lookup tables the drop rules resolve against.
     var dropIndex: () -> FeedListDropIndex
     /// Applies a drop the shared rules resolved (`applyFeedListDropAction`).
@@ -58,8 +54,7 @@ struct SidebarCollectionView: UIViewControllerRepresentable {
     }
 }
 
-final class SidebarCollectionViewController: UIViewController, UICollectionViewDelegate,
-    UIPopoverPresentationControllerDelegate {
+final class SidebarCollectionViewController: UIViewController, UICollectionViewDelegate {
     var actions: SidebarCollectionActions
     private(set) var state: SidebarRenderState?
 
@@ -77,8 +72,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// ticking) must not collapse the row back.
     private var pendingExpansion: [SidebarItemID: (expanded: Bool, since: ContinuousClock.Instant)] = [:]
     private static let pendingExpansionTimeout: Duration = .seconds(2)
-
-    private weak var colorPicker: UIViewController?
 
     /// Whether a drag from this list is under way — see `apply(_:force:)`.
     var dragInProgress = false
@@ -234,18 +227,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         }
         cell.accessories = accessories
         let editor = content.isRenaming ? actions.editor(item) : nil
-        let onIconTap: (() -> Void)?
-        if case .tag(let tagId) = item {
-            onIconTap = { [weak self] in self?.actions.showColorPicker(tagId) }
-        } else {
-            onIconTap = nil
-        }
         cell.contentConfiguration = UIHostingConfiguration {
             SidebarCellContent(
                 content: content,
                 editor: editor,
-                color: Color(uiColor: textColor),
-                onIconTap: onIconTap
+                color: Color(uiColor: textColor)
             )
         }
     }
@@ -288,10 +274,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         if newState.renamingKey != old?.renamingKey, let key = newState.renamingKey,
            let item = newState.outline.allItems.first(where: { $0.selectionKey == key }) {
             scrollIntoView(item)
-        }
-        if newState.colorPickingTagId != old?.colorPickingTagId {
-            // Presenting from inside a SwiftUI update is not allowed; do it right after.
-            DispatchQueue.main.async { [weak self] in self?.updateColorPicker(newState.colorPickingTagId) }
         }
         // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
         // here, on the forced apply at the drag's end.
@@ -352,8 +334,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             outline: outline,
             contents: current.contents,
             selectedItem: current.selectedItem,
-            renamingKey: current.renamingKey,
-            colorPickingTagId: current.colorPickingTagId
+            renamingKey: current.renamingKey
         )
         applyStructure(outline, animated: false)
     }
@@ -500,53 +481,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
               let menu = actions.menu(item) else { return nil }
         return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: nil) { _ in menu }
     }
-
-    // MARK: - Tag color popover
-
-    private func updateColorPicker(_ tagId: String?) {
-        if let colorPicker {
-            colorPicker.dismiss(animated: true)
-            self.colorPicker = nil
-        }
-        guard let tagId, let state else { return }
-        let item = SidebarItemID.tag(tagId)
-        guard let indexPath = dataSource.indexPath(for: item) else {
-            actions.dismissColorPicker()
-            return
-        }
-        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
-        collectionView.layoutIfNeeded()
-        guard let cell = collectionView.cellForItem(at: indexPath) else {
-            actions.dismissColorPicker()
-            return
-        }
-        var selectedHex: String?
-        if case .tagColor(let hex) = state.contents[item]?.icon { selectedHex = hex }
-        let picker = UIHostingController(rootView: TagColorPicker(selectedHex: selectedHex) { [weak self] hex in
-            self?.actions.pickColor(tagId, hex)
-        })
-        picker.modalPresentationStyle = .popover
-        picker.preferredContentSize = picker.sizeThatFits(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 200))
-        if let popover = picker.popoverPresentationController {
-            popover.sourceView = cell.contentView
-            // The color dot sits at the row's leading edge.
-            let leading = cell.contentView.directionalLayoutMargins.leading
-            popover.sourceRect = CGRect(x: leading, y: 0, width: 20, height: cell.contentView.bounds.height)
-            popover.delegate = self
-        }
-        present(picker, animated: true)
-        colorPicker = picker
-    }
-
-    /// A popover even on iPhone, like the macOS dot's — not a sheet for a single row of swatches.
-    func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle {
-        .none
-    }
-
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        colorPicker = nil
-        actions.dismissColorPicker()
-    }
 }
 
 /// A row's hosted content — the shared `SidebarRowLabel` in the colors of the cell's current state.
@@ -554,7 +488,6 @@ private struct SidebarCellContent: View {
     let content: SidebarRowContent
     let editor: InlineRenameField?
     let color: Color
-    let onIconTap: (() -> Void)?
 
     var body: some View {
         SidebarRowLabel(
@@ -563,7 +496,6 @@ private struct SidebarCellContent: View {
             isErroring: content.isErroring,
             isGone: content.isGone,
             editor: editor,
-            onIconTap: onIconTap,
             symbolTint: color
         )
         .foregroundStyle(color)

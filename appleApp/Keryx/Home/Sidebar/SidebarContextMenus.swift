@@ -23,12 +23,32 @@ enum SidebarContextMenus {
             guard let tag = home.tags.first(where: { $0.id == id }) else { return nil }
             return UIMenu(children: [
                 UIAction(title: L("home_edit_tag_menu")) { _ in dialogs.startRename(instance) },
-                UIAction(title: L("home_change_tag_color_menu")) { _ in dialogs.colorPickingTagId = tag.id },
+                colorMenu(for: tag, home: home),
                 UIAction(title: L("home_delete_tag_menu"), attributes: .destructive) { _ in dialogs.deletingTag = tag },
             ])
         case .all, .starred, .sectionHeader, .noFolderHeader:
             return nil
         }
+    }
+
+    /// "Change color ▸" with the swatches as a palette — a row of colored dots, the current one checked —
+    /// in place of a popover: a popover is a poor fit on an iPhone, and a menu item reads by name for
+    /// VoiceOver where a bare dot would not.
+    private static func colorMenu(for tag: Tags, home: HomeObservable) -> UIMenu {
+        let colors: [String?] = [nil] + TagColorsKt.TAG_COLOR_PALETTE
+        let actions = colors.map { hex in
+            UIAction(
+                title: TagColorNames.name(for: hex),
+                image: UIImage(systemName: "circle.fill")?
+                    .withTintColor(UIColor(colorFromHex(hex)), renderingMode: .alwaysOriginal),
+                state: tag.color == hex ? .on : .off
+            ) { _ in
+                home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
+            }
+        }
+        return UIMenu(title: L("home_change_tag_color_menu"), children: [
+            UIMenu(options: [.displayInline, .displayAsPalette], children: actions),
+        ])
     }
 
     /// Refresh, Move to Folder ▸, Assign tags ▸, a separator, the URL/site actions, a separator,

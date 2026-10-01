@@ -27,12 +27,6 @@ final class SidebarDialogState {
     /// The feed a feed-row's "Assign tags ▸ New tag…" menu item was chosen for — the created tag is
     /// attached to this feed on confirm (`FeedListDialogs.kt`'s own `creatingTagForFeedId`).
     var creatingTagForFeed: Feeds?
-    /// The tag whose color picker popover the iOS sidebar is showing — from the tag's color dot or
-    /// its "Change color" menu item. Held here rather than in the row, because the iOS sidebar's rows
-    /// are collection-view cells that present the popover from UIKit (the macOS row keeps its own
-    /// popover state).
-    var colorPickingTagId: String?
-
     /// Starts editing `instance`'s name in place. All and Starred have no name to edit, so they do
     /// nothing.
     func startRename(_ instance: FeedListRowSelection) {
@@ -55,6 +49,6 @@ final class SidebarDialogState {
     var isPresenting: Bool {
         isAddingFeed || isAddingFolder || isAddingTag
             || deletingFolder != nil || deletingTag != nil || unsubscribingFeed != nil
-            || creatingFolderForFeed != nil || creatingTagForFeed != nil || colorPickingTagId != nil
+            || creatingFolderForFeed != nil || creatingTagForFeed != nil
     }
 }

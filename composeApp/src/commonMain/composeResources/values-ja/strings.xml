@@ -369,4 +369,15 @@
     <!-- Apple (SwiftUI) app only — the button that closes the iOS Settings sheet. macOS reaches
          Settings as a window of its own, and Compose's dialog closes through its own controls. -->
     <string name="apple_settings_done">完了</string>
+    <!-- Apple (SwiftUI) app only — the names of the tag colors, which VoiceOver reads and the iOS
+         palette menu shows (Compose's swatches carry no names). Same order as TAG_COLOR_PALETTE. -->
+    <string name="apple_tag_color_none">色なし</string>
+    <string name="apple_tag_color_red">赤</string>
+    <string name="apple_tag_color_orange">オレンジ</string>
+    <string name="apple_tag_color_amber">黄</string>
+    <string name="apple_tag_color_green">緑</string>
+    <string name="apple_tag_color_blue">青</string>
+    <string name="apple_tag_color_indigo">藍</string>
+    <string name="apple_tag_color_purple">紫</string>
+    <string name="apple_tag_color_pink">ピンク</string>
 </resources>

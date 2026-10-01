@@ -1333,9 +1333,11 @@ view on iOS.
 - **In-place rename** uses the same `InlineRenameField`, which on iOS tracks its own `@FocusState`: the
   cell is a separate hosting tree that `HomeView`'s `focusedPane` cannot reach. Tapping another row ends
   editing first, which commits the edit; the renaming row can be neither selected nor dragged.
-- **The tag color picker** is `TagColorPicker` in a UIKit popover presented by the controller from the
-  tag's cell, driven by `SidebarDialogState.colorPickingTagId` (the dot and the "Change color" menu item
-  both set it).
+- **A tag's color** is changed from its long-press menu: "Change color ▸" opens the swatches as a palette
+  (`UIMenu` with `.displayAsPalette`), each named by `TagColorNames` and the current one checked. There is
+  no popover on iOS — it is a poor fit on an iPhone — so the tag's color dot is only decoration there
+  (macOS keeps its dot popover, `TagColorPicker`). The new-tag sheet's swatches (`TagColorSwatchRow`,
+  shared with the macOS popover) are 44pt touch targets read out by color name.
 - UI tests find rows by accessibility identifier: the row's `feedListRowSelectionKey`, or
   `header:<section>` for a header. Arrow keys stay with `HomeView`'s own key handling
   (`allowsFocus = false` on the collection view), as on macOS.

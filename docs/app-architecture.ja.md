@@ -1321,8 +1321,10 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
 - **インラインの名前変更**は同じ `InlineRenameField` を使い、iOS では自前の `@FocusState` でフォーカスを管理する。
   セルは別のホスティングツリーで、`HomeView` の `focusedPane` が届かないためである。別の行をタップすると先に編集を
   終えて確定する。名前変更中の行は選択もドラッグもできない。
-- **タグの色の選択**は `TagColorPicker` を UIKit のポップオーバーに載せ、コントローラーがタグのセルから表示する。
-  表示は `SidebarDialogState.colorPickingTagId` で決まる（色の丸とメニューの「色を変更」がこれを設定する）。
+- **タグの色**は長押しメニューから変える。「色を変更 ▸」を開くと色見本がパレット（`.displayAsPalette` の `UIMenu`）で
+  並び、各色は `TagColorNames` の名前を持ち、現在の色にチェックが付く。iOS にポップオーバーはない（iPhone では
+  向かないため）。タグの色の丸は飾りにすぎない（macOS は丸のポップオーバー `TagColorPicker` のまま）。新規タグ
+  シートの色見本（macOS のポップオーバーと共通の `TagColorSwatchRow`）は 44pt のタッチ領域で、色名が読み上げられる。
 - UI テストはアクセシビリティ識別子で行を探す。行は `feedListRowSelectionKey`、ヘッダーは `header:<section>`。
   矢印キーは macOS と同じく `HomeView` のキー処理が受け持つ（コレクションビューは `allowsFocus = false`）。
 

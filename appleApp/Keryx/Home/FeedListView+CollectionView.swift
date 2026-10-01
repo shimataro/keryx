@@ -26,8 +26,7 @@ extension FeedListView {
                 renamingRowKey: dialogs.renamingRowKey
             ),
             selectedItem: displayedKey == nil ? nil : SidebarItemID(home.selectedRowInstance),
-            renamingKey: dialogs.renamingRowKey,
-            colorPickingTagId: dialogs.colorPickingTagId
+            renamingKey: dialogs.renamingRowKey
         )
     }
 
@@ -37,14 +36,6 @@ extension FeedListView {
             setExpanded: setExpanded,
             menu: { SidebarContextMenus.menu(for: $0, home: home, dialogs: dialogs) },
             editor: renameEditor(for:),
-            showColorPicker: { dialogs.colorPickingTagId = $0 },
-            pickColor: { tagId, hex in
-                if let tag = home.tags.first(where: { $0.id == tagId }) {
-                    home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
-                }
-                dialogs.colorPickingTagId = nil
-            },
-            dismissColorPicker: { dialogs.colorPickingTagId = nil },
             dropIndex: { dropIndex },
             applyDrop: { applyFeedListDropAction($0, home: home) }
         )

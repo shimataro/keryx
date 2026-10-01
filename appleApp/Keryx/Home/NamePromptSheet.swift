@@ -104,22 +104,7 @@ struct NamePromptSheet: View {
     }
 
     private var colorPicker: some View {
-        HStack(spacing: 8) {
-            swatch(nil)
-            ForEach(TagColorsKt.TAG_COLOR_PALETTE, id: \.self) { hex in swatch(hex) }
-        }
-    }
-
-    /// A single swatch — `hex == nil` is the "no color" option, matching Compose's own
-    /// `TagColorPicker` (`TagColorPicker.kt`), which always offers it alongside `TagColorsKt.TAG_COLOR_PALETTE`.
-    private func swatch(_ hex: String?) -> some View {
-        Circle()
-            .fill(colorFromHex(hex))
-            .frame(width: 20, height: 20)
-            .overlay(
-                Circle().strokeBorder(Color.primary, lineWidth: color == hex ? 2 : 0)
-            )
-            .onTapGesture { color = hex }
+        TagColorSwatchRow(selectedHex: color) { color = $0 }
     }
 
     private func confirm() {
