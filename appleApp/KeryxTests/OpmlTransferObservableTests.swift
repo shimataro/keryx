@@ -165,6 +165,22 @@ struct OpmlTransferObservableTests {
     }
 
     @Test
+    func shouldPresentRequestFollowsTheWaitingRequestAndTheBusyState() {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
+        #expect(!observable.shouldPresentRequest, "nothing is waiting")
+
+        observable.request(OpmlRequestImportFile.shared)
+        #expect(observable.shouldPresentRequest, "a request made while idle opens the Data tab")
+
+        _ = observable.beginImport()
+        #expect(!observable.shouldPresentRequest, "waits while an operation runs")
+
+        observable.reportImportCancelled()
+        #expect(observable.shouldPresentRequest, "opens once the run finishes")
+    }
+
+    @Test
     func aResultIsShownOnceAndThenCleared() async throws {
         let fake = FakeOpmlTransferring(importOutcome: OpmlResultImported(added: 3, failed: 0))
         let observable = OpmlTransferObservable(controller: fake)

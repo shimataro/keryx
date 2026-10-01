@@ -186,3 +186,12 @@ class OpmlTransferController(
         const val TAG = "OpmlTransfer"
     }
 }
+
+/**
+ * The single definition of when a request waiting for Settings ▸ Data ([OpmlTransferController.pendingRequest])
+ * should open it: whenever one is waiting and nothing is running — a request made mid-run opens the
+ * tab once that run finishes. Both UIs call this (Compose's `App.kt`, SwiftUI's
+ * `OpmlRequestPresenter` via `OpmlTransferObservable.shouldPresentRequest`) rather than each
+ * re-deriving it.
+ */
+fun shouldPresentOpmlRequest(pending: OpmlRequest?, busy: Boolean): Boolean = pending != null && !busy

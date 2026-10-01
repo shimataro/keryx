@@ -67,6 +67,12 @@ final class OpmlTransferObservable {
     private(set) var statusMessage: String?
     private(set) var statusIsError = false
 
+    /// Whether a waiting request should open Settings ▸ Data now — Kotlin's
+    /// `shouldPresentOpmlRequest`, the same rule Compose's `App.kt` uses.
+    var shouldPresentRequest: Bool {
+        OpmlTransferControllerKt.shouldPresentOpmlRequest(pending: pendingRequest, busy: isBusy)
+    }
+
     init(controller: OpmlTransferring) {
         self.controller = controller
     }

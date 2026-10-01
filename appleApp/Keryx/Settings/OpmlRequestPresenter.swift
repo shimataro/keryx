@@ -4,7 +4,9 @@ import SwiftUI
 /// (`OpmlTransferObservable.pendingRequest` — asked for by the File menu or an `.opml` file the app
 /// was opened with), so `DataSettingsTab` can carry it out. Applied to Home only, so a file opened
 /// during Setup waits until Setup is done — matching Compose, whose single Settings router never opens
-/// over Setup (`SettingsOpenRequests`). Waits while another operation runs, like Compose's `App.kt`.
+/// over Setup (`SettingsOpenRequests`). When to open is `OpmlTransferObservable.shouldPresentRequest`
+/// — the shared `shouldPresentOpmlRequest` Compose's `App.kt` also calls (it waits while another
+/// operation runs).
 struct OpmlRequestPresenter: ViewModifier {
     let opmlTransfer: OpmlTransferObservable
     let settingsNavigation: SettingsNavigation
@@ -13,12 +15,8 @@ struct OpmlRequestPresenter: ViewModifier {
     @Environment(\.openSettings) private var openSettings
     #endif
 
-    private var shouldPresent: Bool {
-        opmlTransfer.pendingRequest != nil && !opmlTransfer.isBusy
-    }
-
     func body(content: Content) -> some View {
-        content.onChange(of: shouldPresent, initial: true) { _, present in
+        content.onChange(of: opmlTransfer.shouldPresentRequest, initial: true) { _, present in
             guard present else { return }
             settingsNavigation.show(tabId: SettingsNavigation.Tab.data)
             #if os(macOS)

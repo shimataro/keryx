@@ -16,6 +16,7 @@ import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.rememberNotificationPermissionRequester
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
+import works.merc.keryx.app.presentation.settings.shouldPresentOpmlRequest
 import works.merc.keryx.app.ui.home.HomeScreen
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -103,7 +104,7 @@ fun App() {
         val pendingOpmlRequest by opmlController.pendingRequest.collectAsState()
         val opmlBusy by opmlController.busy.collectAsState()
         LaunchedEffect(pendingOpmlRequest, opmlBusy) {
-            if (pendingOpmlRequest != null && !opmlBusy) settingsOpenRequests.request("data")
+            if (shouldPresentOpmlRequest(pendingOpmlRequest, opmlBusy)) settingsOpenRequests.request("data")
         }
 
         // A notification's "open this settings tab" action is forwarded to the router (HomeScreen

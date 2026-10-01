@@ -257,6 +257,7 @@
 | 今すぐ同期 | `presentation/settings/ManualSync.kt`（`canSyncNow` / `syncNow`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
+| 待っている OPML の要求で設定 ▸ データを開く | `presentation/settings/OpmlTransferController.kt` の `shouldPresentOpmlRequest`（要求が待っていて、何も実行中でない） | Compose の `App.kt` と SwiftUI の `OpmlRequestPresenter`（`OpmlTransferObservable.shouldPresentRequest` 経由） |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
 
 **既存の操作に経路を足す**ときは、既存のハンドラ/述語を呼ぶ。共通のものがまだない（操作の処理が 1 つの経路の中に
