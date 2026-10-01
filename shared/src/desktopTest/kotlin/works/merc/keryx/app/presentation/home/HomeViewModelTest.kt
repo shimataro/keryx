@@ -1734,6 +1734,71 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun setReadIsIdempotentForAnAlreadyReadArticle() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val a1 = vm.articles.value.first { it.id == "a1" }
+
+        // Unlike toggleRead, an explicit "read" on an already-read article never flips it unread.
+        vm.setRead(a1, read = true)
+        testScheduler.advanceUntilIdle()
+        vm.setRead(a1, read = true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    /**
+     * The article row's context menu: right-clicking an unread row selects it (marking it read),
+     * then "Mark as unread" is chosen with the row's pre-selection snapshot, which still says unread.
+     * The explicit intent must win over that snapshot — toggleRead would have marked it read again.
+     */
+    @Test
+    fun setReadFalseClearsThePinAndUpdatesSelection() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        val staleUnreadSnapshot = vm.articles.value.first { it.id == "a1" }
+        vm.selectArticle(staleUnreadSnapshot)
+        testScheduler.advanceUntilIdle()
+        // Selecting marked it read; the read pin keeps it in the unread-only list.
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+
+        vm.setRead(staleUnreadSnapshot, read = false)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+        // No stale read pin left overriding the row: it resolves to unread from the query itself.
+        assertEquals(0L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    @Test
+    fun setStarredAppliesTheRequestedStateRegardlessOfTheSnapshot() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val unstarredSnapshot = vm.articles.value.first { it.id == "a1" }
+
+        vm.setStarred(unstarredSnapshot, starred = true)
+        testScheduler.advanceUntilIdle()
+        vm.setStarred(unstarredSnapshot, starred = true)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_starred)
+    }
+
+    @Test
     fun markAllReadDelegatesToRepositoryAndPinsVisibleUnread() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)

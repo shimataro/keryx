@@ -885,6 +885,11 @@ application menu, a context menu, a keyboard shortcut, or a gesture. To keep tha
   `copyPulse` that flashes the reader's copy button ✓; the button itself raises the same ✓ locally.
 - A context-menu item that shows a shortcut hint (`NativeMenuShortcut`) is promising the user it is
   the same command as that shortcut — check the two really share a handler.
+- A toggle item's label must match what its shortcut would do **right now**. Example: right-clicking
+  an unread article row selects it and so marks it read, which means ⌘/Ctrl+Shift+U would now mark it
+  *unread* — so the row's menu must say "Mark as unread", not the "Mark as read" the pre-click
+  snapshot suggests (`articleRowMenuEntries`). Have the item request the explicit state its label
+  promises (`HomeViewModel.setRead`/`setStarred`) rather than a blind toggle.
 - When adding or changing a route, compare it against every existing route for the same action,
   not just the one it was copied from.
 
@@ -922,7 +927,12 @@ Modifier.nativeContextMenu(
   exists (see `AppMenuTree.kt`'s Feed menu), separators included, so the two
   surfaces read as the same menu.
 - `onOpen` fires just before the menu shows; call sites typically use it to
-  select the right-clicked row. On Android, `onOpen` is intentionally ignored:
+  select the right-clicked row. `items` is read immediately after it, **before
+  any recomposition**, so the row's captured state is still the pre-`onOpen`
+  snapshot: labels must describe the state *after* `onOpen`'s side effects
+  (selecting an article marks it read — see `ArticleRow`'s `selectedByOpen`).
+  Select only when not already selected, so a right-click never re-applies a
+  side effect the user just undid. On Android, `onOpen` is intentionally ignored:
   a long-press only opens the menu and never selects the row. Keep any side
   effects inside `onOpen` desktop-only (e.g. row selection), not required for
   the action to work on Android. An **empty** `items` list shows no menu and

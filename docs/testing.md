@@ -457,6 +457,10 @@ peer creation still works from inside the click's own call stack:
 - The separators in a feed row's menu render as real native dividers on every platform (a
   dash-labelled item on macOS, a `JPopupMenu.Separator` on Windows/Linux) — not as a visible menu
   item — and stay in place across a resync (e.g. toggling a tag) without the menu rebuilding.
+- Right-clicking an unread, unselected article row selects it (marking it read) and its menu
+  offers "Mark as unread" — matching what ⌘/Ctrl+Shift+U would now do. Choosing it leaves the
+  article unread (the dot comes back and stays). Right-clicking that same, still-selected row again
+  offers "Mark as read" and does not mark it read on its own.
 - Right-clicking an article row with no usable URL still shows "Copy URL" and "Open in Browser"
   grayed out (disabled) rather than omitting them; an article with a URL shows both enabled.
 - Copying an article's URL from its row's right-click menu flashes the reader's copy button to ✓

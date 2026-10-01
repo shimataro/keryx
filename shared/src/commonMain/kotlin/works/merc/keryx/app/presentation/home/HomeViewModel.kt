@@ -893,22 +893,32 @@ class HomeViewModel(
      *
      * @param article The article whose read state should be toggled.
      */
-    fun toggleRead(article: ArticleListRow) {
-        val nowRead = article.is_read == 0L
+    fun toggleRead(article: ArticleListRow) = setRead(article, read = article.is_read == 0L)
+
+    /**
+     * Sets an article's read state to [read] and persists it — an explicit intent rather than a
+     * toggle, so a caller that displayed "Mark as unread" (e.g. a context menu whose row became read
+     * through its own `onOpen`) always gets exactly that, whatever [article]'s snapshot says.
+     * Setting the state the article already has is a harmless no-op in effect.
+     *
+     * @param article The article whose read state should be set.
+     * @param read Whether the article should end up read.
+     */
+    fun setRead(article: ArticleListRow, read: Boolean) {
         // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) {
-            if (nowRead) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
+            if (read) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
-        if (nowRead) {
+        if (read) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
         } else {
             _pinnedReadArticles.update { it - article.id }
         }
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_read = if (nowRead) 1L else 0L) }
+            _selectedArticle.update { it?.copy(is_read = if (read) 1L else 0L) }
         }
     }
 
@@ -922,8 +932,16 @@ class HomeViewModel(
      *
      * @param article The article whose starred state should be toggled.
      */
-    fun toggleStar(article: ArticleListRow) {
-        val starred = article.is_starred == 0L
+    fun toggleStar(article: ArticleListRow) = setStarred(article, starred = article.is_starred == 0L)
+
+    /**
+     * Sets an article's starred state to [starred] — the explicit-intent counterpart of
+     * [toggleStar], for a caller that displayed a specific "Star"/"Unstar" label (see [setRead]).
+     *
+     * @param article The article whose starred state should be set.
+     * @param starred Whether the article should end up starred.
+     */
+    fun setStarred(article: ArticleListRow, starred: Boolean) {
         // Only the Starred filter's query excludes an unstarred article, so only pin there —
         // switching into Starred later already starts from a fresh, un-pinned query (selectFilter).
         // Re-starring UPDATES the pin to the confirmed value rather than clearing it outright: the DB
