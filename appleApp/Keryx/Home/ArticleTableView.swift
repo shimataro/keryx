@@ -180,19 +180,19 @@ struct ArticleTableView: NSViewRepresentable {
         /// Reloads for a new set or order of rows, keeping the top visible row where it was on
         /// screen — or going to the top after a filter switch.
         private func applyStructureChange(from old: ArticleRowList) {
-            guard let table else { return }
+            guard let table, let scrollView else { return }
             let anchor = currentAnchor(in: old)
-            table.reloadData()
-            let offset = ArticleTableLayout.scrollOffset(
-                oldIds: old.rows.map(\.id),
-                newIndexById: rows.indexById,
-                newCount: rows.rows.count,
-                anchor: anchor,
-                rowHeight: table.rowHeight,
-                viewportHeight: viewportHeight,
-                resetToTop: resetPending
-            )
-            scroll(toContentOffset: offset)
+            ArticleTableReload.reload(table, in: scrollView) {
+                ArticleTableLayout.scrollOffset(
+                    oldIds: old.rows.map(\.id),
+                    newIndexById: rows.indexById,
+                    newCount: rows.rows.count,
+                    anchor: anchor,
+                    rowHeight: table.rowHeight,
+                    viewportHeight: viewportHeight,
+                    resetToTop: resetPending
+                )
+            }
             resetPending = false
         }
 
@@ -275,9 +275,7 @@ struct ArticleTableView: NSViewRepresentable {
         /// toolbar.
         private func scroll(toContentOffset offset: CGFloat) {
             guard let scrollView else { return }
-            let clipView = scrollView.contentView
-            clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: offset - scrollView.contentInsets.top))
-            scrollView.reflectScrolledClipView(clipView)
+            ArticleTableReload.scroll(scrollView, toContentOffset: offset)
         }
 
         // MARK: - Visible rows
