@@ -81,14 +81,17 @@ final class OpmlTransferObservable {
         reportImportFailure()
     }
 
-    func importOpml(from url: URL) {
-        guard !isBusy else { return }
+    /// Returns the running import so a caller (in practice, `OpmlTransferObservableTests`) can
+    /// await its completion; `nil` when nothing was started (busy, or the URL couldn't be accessed).
+    @discardableResult
+    func importOpml(from url: URL) -> Task<Void, Never>? {
+        guard !isBusy else { return nil }
         guard url.startAccessingSecurityScopedResource() else {
             reportImportFailure()
-            return
+            return nil
         }
         isBusy = true
-        Task {
+        return Task {
             defer {
                 url.stopAccessingSecurityScopedResource()
                 isBusy = false
