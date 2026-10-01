@@ -57,8 +57,9 @@ Conventions: `docs/testing.md`. Layout is `commonTest/` (pure + Ktor `MockEngine
 
 ## Checklist — CI, packaging, release
 
-- Does the change affect `.github/workflows/ci.yml` (build matrix over ubuntu / macos / windows
-  plus the macOS-only `build-apple` job for the SwiftUI app, JDK 25, `xvfb-run` on Linux for Compose
+- Does the change affect `.github/workflows/ci.yml` (build matrix over ubuntu / macos / windows,
+  full `build` on ubuntu only and desktop tests + packaging elsewhere, plus the macOS-only
+  `build-apple` job for the SwiftUI app, JDK 25, `xvfb-run` on Linux for Compose
   UI tests, wrapper validation via setup-gradle), `codeql.yml` (which needs a manual build
   command because KMP has no root `testClasses`), or `release.yml`?
 - Does it add a packaging prerequisite the runners do not have (`fakeroot`, `rpm`, WiX, Xcode CLT)?

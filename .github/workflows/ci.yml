@@ -56,20 +56,20 @@ jobs:
       # plain, unconfigured `./gradlew build` should have. Only release.yml (which does publish)
       # passes -PandroidReleaseSigningRequired=true to turn that same unconfigured state into a
       # hard failure instead.
-      # macOS runs only the desktop test suites (some cases, like ArchiveExtractorTest's `ditto`
-      # ones, only run there) and its packaging below, not a plain `build`: that would repeat the
-      # Android build this job already does on Linux and link every Kotlin/Native framework in both
-      # build types (~11 min, never build-cached). The Apple side (Kotlin/Native tests, XCFramework,
-      # SwiftUI app) is `build-apple`'s job instead, run in parallel.
+      # Only Linux runs the full `build`. Its Android half (assemble, lint, host tests) produces the
+      # same result on any host OS, so macOS and Windows run just the desktop test suites (where
+      # the OS-specific code paths are — e.g. ArchiveExtractorTest's `ditto` cases only run on
+      # macOS) and their packaging below. On macOS a plain `build` would also link every
+      # Kotlin/Native framework in both build types (~11 min, never build-cached); the Apple side
+      # (Kotlin/Native tests, XCFramework, SwiftUI app) is `build-apple`'s job instead, run in
+      # parallel.
       - name: Build & Test
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             xvfb-run -a --server-args="-screen 0 1920x1080x24" ./gradlew build --no-configuration-cache
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            ./gradlew :shared:desktopTest :composeApp:desktopTest --no-configuration-cache
           else
-            ./gradlew build --no-configuration-cache
+            ./gradlew :shared:desktopTest :composeApp:desktopTest --no-configuration-cache
           fi
         env:
           DROPBOX_APP_KEY: ""
