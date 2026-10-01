@@ -873,6 +873,21 @@ the way an inline style outranks a plain element selector in a real CSS cascade.
 feed's own color winning even against the app's dark theme — see `InlineStyle`'s KDoc for why that
 is the faithful behavior, not a bug to "fix" by forcing every span through the theme's own colors.
 
+## Actions with more than one route
+
+`docs/external-spec.md`'s "Actions with more than one route" (§9) requires an action to behave
+identically — effect, enablement, feedback — whether it runs from a toolbar button, the
+application menu, a context menu, a keyboard shortcut, or a gesture. To keep that true:
+
+- Route every entry point through **one shared handler** rather than re-implementing the effect
+  (and forgetting the feedback) at each call site. Example: every non-button route to "copy
+  article URL" calls `HomeScreen`'s `copyArticleUrl`, which both writes the clipboard and bumps the
+  `copyPulse` that flashes the reader's copy button ✓; the button itself raises the same ✓ locally.
+- A context-menu item that shows a shortcut hint (`NativeMenuShortcut`) is promising the user it is
+  the same command as that shortcut — check the two really share a handler.
+- When adding or changing a route, compare it against every existing route for the same action,
+  not just the one it was copied from.
+
 ## Context menus
 
 Right-click menus use a real OS-native menu, not Material3's

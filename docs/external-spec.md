@@ -165,6 +165,17 @@ versions. Light / dark / system support. 3-pane layout (feed list / article list
 article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
 (see below).
 
+### Actions with more than one route
+
+**An action reachable by more than one route — a toolbar button, the application menu, a context
+menu, a keyboard shortcut, a gesture — behaves identically whichever route invokes it**: the same
+effect, the same enabled/disabled state, and the same feedback. For example, the ✓ the reader's
+copy button shows after a URL copy appears whether the copy came from that button,
+⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu. Routes may differ only in *which
+item* they act on — a context menu acts on the row it was opened on — never in what happens to it;
+feedback tied to a particular on-screen control appears whenever that control is showing the item
+acted on.
+
 ### Adaptive layout (width) and touch input (Android)
 
 **3-pane width (desktop's steady state).** The window can never narrow below the width all three

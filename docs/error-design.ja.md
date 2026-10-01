@@ -78,7 +78,9 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 
 - 通知センター（履歴・手動で消す）を主とする。デスクトップには**アプリ内スナックバーが無い**——
   確認はインライン表現で行う（コピーは操作元の✓、OPML はボタン近くの結果テキスト、購読は一覧出現＋
-  ダイアログ内表示）。Android だけはプラットフォーム固有の例外で、URL コピーの確認を M3 の `Snackbar` で
+  ダイアログ内表示）。記事 URL のコピーは、ボタン・キーボードショートカット・メニューバー・記事行の
+  コンテキストメニューのどの経路から行っても、リーダーのコピーボタンに ✓ を表示する
+  （[external-spec.ja.md](external-spec.ja.md#複数の経路から実行できる操作) の「複数の経路から実行できる操作」を参照）。Android だけはプラットフォーム固有の例外で、URL コピーの確認を M3 の `Snackbar` で
   表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が既にクリップボードコピーの確認を
   表示するため、Snackbar を出すとそれと重複してしまう（`platform/PlatformOs.kt` の
   `platformShowsOwnCopyConfirmation` と `ui/home/HomeCommon.kt` の `LocalSnackbarHostState` を参照）。

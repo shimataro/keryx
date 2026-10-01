@@ -72,7 +72,10 @@ from the `NotificationMessages` interface (just `newArticles(count)`), which eac
 
 - The notification center (history, manually dismissed) is the primary channel. Desktop has **no in-app snackbar** —
   confirmations use inline expressions instead (copy shows a ✓ near the action source, OPML shows result text near
-  the button, subscription shows the list appearance + in-dialog display). Android is the one platform-specific
+  the button, subscription shows the list appearance + in-dialog display). An article-URL copy shows its ✓ on the
+  reader's copy button whichever route it came from (the button, the keyboard shortcut, the menu bar, or the article
+  row's context menu) — see "Actions with more than one route" in
+  [external-spec.md](external-spec.md#actions-with-more-than-one-route). Android is the one platform-specific
   exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the
   OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see
   `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s
