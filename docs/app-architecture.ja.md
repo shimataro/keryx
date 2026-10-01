@@ -1181,10 +1181,9 @@ Foundation/POSIX（ファイル）、AppKit/UIKit（URL を開く）、そして
 `NativeSqliteDriver`、専用コネクションが必要な ATTACH マージと `VACUUM INTO` スナップショットには
 `platform/RawSqliteConnection.kt`（SQLiter の sqlite3 バインディング）を使う。**SQLite は同梱しない**：trigram トークナイザ付きの
 FTS5 と `VACUUM INTO` は macOS 14 / iOS 17（3.43）以降のシステム SQLite に含まれ、macOS と iOS シミュレータ上の `appleTest` で
-確認している。トークンは Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。サービス `works.merc.keryx`、アカウント
-`type.id`——Compose 版と同じサービス・アカウントだが、保存先が Data Protection Keychain である時点で
-Compose 版のログイン Keychain 上の項目とはすでに分かれている。「配布と共存」参照——、初回ロック解除後に読み取り
-可能。平文へのフォールバックはない）。Google Drive は、
+確認している。トークンは Data Protection Keychain に保存する（`data/cloud/KeychainTokenStorage.kt`。初回ロック解除後に
+読み取り可能で、平文へのフォールバックはない。サービス・アカウントと、Compose 版の項目と分かれる仕組みは
+[sync-architecture.ja.md](sync-architecture.ja.md) の「トークン保存先」を参照。上の「配布と共存」も参照）。Google Drive は、
 `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` で Apple 向け（「iOS」タイプ、client secret なし）のクライアントを
 設定すれば提供される — 他のプロバイダーと同じ「ID が空なら選択肢を隠す」規約で判定する。Dropbox・OneDrive の
 共通 `keryx://oauth2/callback` リダイレクト（このスキーム自体、Apple アプリは登録しない。後述）とは異なり、

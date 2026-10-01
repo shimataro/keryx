@@ -1184,11 +1184,10 @@ sqlite3 — through SQLDelight's `NativeSqliteDriver` for the app database, and
 `platform/RawSqliteConnection.kt` (SQLiter's sqlite3 bindings) for the ATTACH merge and the
 `VACUUM INTO` snapshot, which need one dedicated connection. **No bundled SQLite**: FTS5 with the
 trigram tokenizer and `VACUUM INTO` are present in the system SQLite from macOS 14 / iOS 17
-(3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Keychain
-(`data/cloud/KeychainTokenStorage.kt`, service `works.merc.keryx`, account `type.id` — the same
-service and account the Compose build uses, since the Data Protection Keychain this app stores in
-already keeps it apart from the Compose build's login-Keychain items; see "Distribution and coexistence" — readable after
-first unlock; no plaintext fallback). Google Drive is offered once an Apple-type
+(3.43), verified by `appleTest` on macOS and the iOS simulator. Tokens go to the Data
+Protection Keychain (`data/cloud/KeychainTokenStorage.kt`; readable after first unlock, no
+plaintext fallback — see "Token Storage" in [sync-architecture.md](sync-architecture.md) for the
+service/account and how it stays apart from the Compose build's items, and "Distribution and coexistence" above). Google Drive is offered once an Apple-type
 ("iOS") OAuth client (no client secret) is configured for it via `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID`
 — gated the same "empty id hides the option" way as every other provider — and, unlike Dropbox/
 OneDrive's shared `keryx://oauth2/callback` redirect (a scheme the Apple app itself never registers

@@ -18,8 +18,8 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform (current) |
 | Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md)) |
-| iOS / iPadOS | Planned (native SwiftUI UI, sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md)) |
-| macOS (native) | Planned — a native SwiftUI macOS app (Apple Silicon) that replaces the Compose one above for users; the shared logic is already built for it |
+| iOS / iPadOS | In development (native SwiftUI UI, sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md)) |
+| macOS (native) | In development — a native SwiftUI macOS app (Apple Silicon) that replaces the Compose one above for users; the shared logic is already built for it |
 
 ## 3. Supported Formats
 
@@ -153,7 +153,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 **Each platform follows its own native UI idiom rather than one shared design system.** macOS gets
 a flat, SF-leaning look; Android gets Material 3's own components, shapes, and ripple feedback; iOS
-will eventually get native SwiftUI. **Windows and Linux are the deliberate exception**: Java/Swing's
+is getting native SwiftUI (in development — see §2). **Windows and Linux are the deliberate exception**: Java/Swing's
 own platform integration is too limited to give either OS a comparably native treatment (see the
 Look & Feel, context-menu, and file-dialog specifics below, and `known-issues.md`), so both
 share macOS's flat look instead of getting one of their own. Material 3 is Android's concrete

@@ -269,7 +269,7 @@ on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `arti
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 
-OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, opening that URL, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by every platform including the Apple app). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**. Opening the authorize URL itself goes through an injected `domain/AuthorizationLauncher` (default: the system browser, `desktop`/Android's unchanged behavior) — see "OAuth authorization on Apple" below for how the Apple app supplies its own.
+OAuth 2.0 authorization-code-with-PKCE orchestration (PKCE generation, authorization URL building, opening that URL, state verification, code exchange) is consolidated in `OAuthConnectFlow` (`commonMain`, shared by every platform including the Apple app). Provider differences are only in **redirect reception method (`OAuthRedirectTransport`) and endpoints/scopes (`CloudAuthManager` implementation)**, so `DropboxAuthManager` / `GoogleDriveAuthManager` / `OneDriveAuthManager` implement `CloudAuthManager`. All request offline access (Dropbox: `token_access_type=offline`, Google: `access_type=offline` + `prompt=consent`, OneDrive: `offline_access` scope) to **obtain and save refresh tokens**. Opening the authorize URL itself goes through an injected `domain/AuthorizationLauncher` (default: `DefaultAuthorizationLauncher`, which opens the system browser) — see "OAuth authorization on Apple" below for how the Apple app supplies its own.
 
 **The one exception is Google Drive on Android, which does not go through this flow at all** — no `OAuthConnectFlow`, no `OAuthRedirectTransport`, and no refresh token. Play services' `AuthorizationClient` runs the whole consent interaction and hands the app a short-lived access token directly, re-issuing one on demand instead. Everything in this section up to "Token Storage" therefore describes desktop's three providers plus Android's Dropbox and OneDrive; see "Google Drive on Android" below for the remaining case.
 
@@ -468,7 +468,7 @@ opens a browser directly:
 - `OAuthConnectFlow` opens the authorize URL through an injected `domain/AuthorizationLauncher`
   (`fun interface { fun launch(authorizeUrl: String, redirectUri: String) }`) rather than calling
   `platform/BrowserOpener` itself. `domain/DefaultAuthorizationLauncher` — the default on every
-  platform — opens it in the system browser, unchanged from before this seam existed.
+  platform — opens it in the system browser.
 - `KeryxSdk.start`'s `openAuthorization: ((url: String, callbackScheme: String) -> Unit)?` parameter
   lets Swift supply its own launcher. When set, `KeryxSdk` wraps it into an `AuthorizationLauncher`
   that derives `callbackScheme` from the connect flow's own `redirectUri` via `domain/schemeOf`
@@ -501,8 +501,9 @@ opens a browser directly:
   default `false` (for tests) would share the Compose build's login-Keychain items. There is no
   plaintext fallback (a failed write is `NOT_PERSISTED`). No migration from the Compose build's own
   items is attempted — the native app always starts by reconnecting, and synced data comes back
-  from the cloud. Google Drive is not offered there until an Apple-type OAuth client (no client
-  secret) exists; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md).
+  from the cloud. Google Drive is offered there when `AppleBuildConfig.GOOGLE_DRIVE_CLIENT_ID` is
+  configured (and hidden when it is empty); see "Google Drive on Apple (secretless "iOS"-type OAuth
+  client)" above.
 - Linux, inside the Snap package specifically: `LibSecretTokenStorage` instead of `KeyringTokenStorage`, gated on `platform.isSnap`. It calls libsecret directly via JNA, which detects the sandbox and routes through the Secret portal (`org.freedesktop.portal.Secret`) instead of raw Secret Service, encrypting the token JSON in a local file with a per-app master secret obtained from that portal — the snap declares no `password-manager-service` plug at all (Snapcraft reviewers decline auto-connect for that interface on principle, and nothing here would use a manually-connected one anyway, since `KeyringTokenStorage` is unreachable from inside the snap by design). See `build.md`'s "Linux Snap package" for the full reasoning; not applied outside the snap, so existing deb/rpm users' Secret Service items are unaffected.
 - **Fallback file and outcome reporting**:
   - On failure for any of the above, fallback to a file in the data directory
