@@ -112,10 +112,17 @@ struct ArticleDetailView: View {
             Button {
                 home.viewModel.toggleStarSelected()
             } label: {
-                Label(
-                    L(article?.is_starred == 1 ? "article_unstar" : "article_star"),
-                    systemImage: article?.is_starred == 1 ? "star.fill" : "star"
-                )
+                Label {
+                    Text(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
+                } icon: {
+                    // Tinted only while starred, matching the article row's star (a status indicator, which
+                    // the HIG allows to carry color); otherwise the toolbar's default monochrome applies.
+                    if article?.is_starred == 1 {
+                        Image(systemName: "star.fill").foregroundStyle(.yellow)
+                    } else {
+                        Image(systemName: "star")
+                    }
+                }
             }
             .disabled(article == nil)
             .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
