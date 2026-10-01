@@ -61,6 +61,46 @@ sealed interface FeedListRowSelection {
 }
 
 /**
+ * The collapsed containers that stand between a feed-list row and the screen — see
+ * [containersToRevealFor]. Each is `null` when nothing needs expanding.
+ */
+data class FeedListReveal(val folderToExpand: String?, val tagToExpand: String?) {
+    val isNoOp: Boolean get() = folderToExpand == null && tagToExpand == null
+}
+
+/**
+ * Which folder/tag must be expanded for the exact row [instance] to render, given the current
+ * [collapsedFolderIds] / [expandedTagIds]. Used before starting an inline rename from F2/Return or
+ * the Feed menu on a selection that is hidden (`HomeViewModel.revealFeedListRow`): an editor needs a
+ * rendered row to live in.
+ *
+ * Only [instance]'s own container counts — a [FeedListRowSelection.FeedInFolderGroup] reveals the
+ * feed's own folder (never a tag that happens to carry it), a [FeedListRowSelection.FeedInTag]
+ * reveals that tag (never the feed's folder), so another rendered copy of the same feed is never
+ * the reason something expands. Folder, tag, All and Starred rows are always rendered.
+ */
+fun containersToRevealFor(
+    instance: FeedListRowSelection,
+    feeds: List<Feeds>,
+    collapsedFolderIds: Set<String>,
+    expandedTagIds: Set<String>,
+): FeedListReveal = when (instance) {
+    is FeedListRowSelection.FeedInFolderGroup -> FeedListReveal(
+        folderToExpand = feeds.find { it.id == instance.feedId }?.folder_id?.takeIf { it in collapsedFolderIds },
+        tagToExpand = null,
+    )
+    is FeedListRowSelection.FeedInTag -> FeedListReveal(
+        folderToExpand = null,
+        tagToExpand = instance.tagId.takeIf { it !in expandedTagIds },
+    )
+    FeedListRowSelection.All,
+    FeedListRowSelection.Starred,
+    is FeedListRowSelection.Folder,
+    is FeedListRowSelection.Tag,
+    -> FeedListReveal(folderToExpand = null, tagToExpand = null)
+}
+
+/**
  * Groups [feeds] by [folders], preserving [feeds]' order within each group.
  * Returns one `(folder, feedsInFolder)` pair per element of [folders] (in
  * [folders]' order, even if empty), followed by a final `(null, unassignedFeeds)`

@@ -451,6 +451,11 @@ confirm on screen that the native menu really follows it:
 - Type into the search field: the Feed menu's items (Refresh Feed, Tags, Move to Folder, Copy Feed URL,
   …, Rename, Delete) stay enabled, Delete/Backspace edit the query rather than deleting the feed, and
   Feed ▸ Rename starts the inline editor. Check the SwiftUI app's Feed menu the same way.
+- Select a feed inside a folder, then collapse that folder (the selection stays on the hidden feed). Press F2
+  (Return on macOS) with the feed list focused: the folder expands and the feed's row opens in the inline
+  editor. Collapse it again and use Feed ▸ Rename: same result. Restart the app — the folder stays expanded
+  (collapse state is saved locally like any manual expand). A feed selected through an expanded tag's nested
+  row never expands its collapsed folder.
 
 The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/

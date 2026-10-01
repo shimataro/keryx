@@ -235,7 +235,10 @@ other tappable way out. List rows (feeds, folders, tags, articles) grow to a tal
 touch density on Android. Keyboard navigation (arrow keys between panes, J/K between articles,
 F2/Delete on the selected feed-list item) is not desktop-exclusive: an Android tablet can have a
 physical keyboard attached, and the same shortcuts work there too, including reaching into the
-feed-list drawer at a narrower layout. At the first or last article, J/K (and ↑/↓ in the article list)
+feed-list drawer at a narrower layout. Renaming a feed whose row is hidden inside a collapsed folder
+(selected before the folder was collapsed) — with F2/Return or Feed ▸ Rename — first expands that
+folder so the name can be edited in its row; like any expand/collapse, that state is kept on this
+device only and is not synced. At the first or last article, J/K (and ↑/↓ in the article list)
 do nothing — exactly like the reader's swipe and its screen-reader actions — rather than re-selecting the
 same article, which would mark it read again. The selected row in whichever pane holds keyboard focus
 gets a `secondary` outline to show where a keypress will land — Android's own M3 selection color

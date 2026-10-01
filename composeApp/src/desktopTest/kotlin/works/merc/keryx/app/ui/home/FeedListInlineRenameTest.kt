@@ -436,6 +436,58 @@ class FeedListInlineRenameTest {
     }
 
     @Test
+    fun f2OnAFeedHiddenInACollapsedFolderExpandsThatFolderAndStartsEditing() = runDesktopComposeUiTest {
+        // The feed was selected, then its folder collapsed over it: the selection stays on the
+        // feed's (now unrendered) folder-group row. F2 must reveal it rather than silently do nothing.
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            vm.toggleFolderCollapsed("d1")
+            waitForIdle()
+            onNodeWithTag(ROOT_TEST_TAG).requestFocus()
+            onNodeWithTag(ROOT_TEST_TAG).performKeyInput { pressKey(Key.F2) }
+            waitForIdle()
+            waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+
+            assertTrue("d1" !in vm.collapsedFolderIds.value)
+            editor().assertIsDisplayed()
+            typeName("Revealed and renamed")
+            pressEnter()
+            assertEquals("Revealed and renamed", db.customTitleOf("a"))
+        }
+    }
+
+    @Test
+    fun theRenameFeedMenuCommandRevealsAFeedHiddenInACollapsedFolder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            val menuController = testMenuController
+            setInlineRenameContent(vm, menuController)
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            vm.toggleFolderCollapsed("d1")
+            onNodeWithTag(ROOT_TEST_TAG).requestFocus()
+            waitForIdle()
+
+            menuController.send(MenuCommand.RenameFeed)
+            waitForIdle()
+            waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+
+            assertTrue("d1" !in vm.collapsedFolderIds.value)
+            editor().assertIsDisplayed()
+            typeName("From the menu, revealed")
+            pressEnter()
+            assertEquals("From the menu, revealed", db.customTitleOf("a"))
+        }
+    }
+
+    @Test
     fun folderRowRenameStillWorksWhenTheFeedIsAlsoAttachedToATag() = runDesktopComposeUiTest {
         // No regression: a feed carrying a tag that also renders under it must still edit its
         // folder-group row when that's the instance actually selected.

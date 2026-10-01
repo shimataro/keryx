@@ -514,6 +514,46 @@ class FeedListModelTest {
         // No selection at all: any read row counts.
         assertTrue(hasHideableRead(rows, selectedId = null))
     }
+
+    // --- containersToRevealFor ---
+
+    @Test
+    fun revealExpandsOnlyTheSelectedFolderGroupRowsOwnFolder() {
+        val feeds = listOf(feed("a", folderId = "d1"))
+        val reveal = containersToRevealFor(
+            FeedListRowSelection.FeedInFolderGroup("a"),
+            feeds,
+            collapsedFolderIds = setOf("d1", "d2"),
+            expandedTagIds = emptySet(),
+        )
+        // The feed's tag (collapsed or not) is never touched for its folder-group row.
+        assertEquals(FeedListReveal(folderToExpand = "d1", tagToExpand = null), reveal)
+    }
+
+    @Test
+    fun revealExpandsOnlyTheSelectedTagNestedRowsOwnTag() {
+        val feeds = listOf(feed("a", folderId = "d1"))
+        val reveal = containersToRevealFor(
+            FeedListRowSelection.FeedInTag("a", "t1"),
+            feeds,
+            collapsedFolderIds = setOf("d1"),
+            expandedTagIds = emptySet(),
+        )
+        // The feed's collapsed folder stays collapsed: that's a different copy of the feed.
+        assertEquals(FeedListReveal(folderToExpand = null, tagToExpand = "t1"), reveal)
+    }
+
+    @Test
+    fun revealIsANoOpForAnAlreadyVisibleRow() {
+        val feeds = listOf(feed("a", folderId = "d1"), feed("b"))
+        assertTrue(containersToRevealFor(FeedListRowSelection.FeedInFolderGroup("a"), feeds, emptySet(), emptySet()).isNoOp)
+        // An unfiled feed has no folder to expand.
+        assertTrue(containersToRevealFor(FeedListRowSelection.FeedInFolderGroup("b"), feeds, setOf("d1"), emptySet()).isNoOp)
+        assertTrue(containersToRevealFor(FeedListRowSelection.FeedInTag("a", "t1"), feeds, emptySet(), setOf("t1")).isNoOp)
+        assertTrue(containersToRevealFor(FeedListRowSelection.Folder("d1"), feeds, setOf("d1"), emptySet()).isNoOp)
+        assertTrue(containersToRevealFor(FeedListRowSelection.Tag("t1"), feeds, emptySet(), emptySet()).isNoOp)
+        assertTrue(containersToRevealFor(FeedListRowSelection.All, feeds, setOf("d1"), emptySet()).isNoOp)
+    }
 }
 
 private fun hideableArticle(id: String, read: Boolean): ArticleListRow = ArticleListRow(

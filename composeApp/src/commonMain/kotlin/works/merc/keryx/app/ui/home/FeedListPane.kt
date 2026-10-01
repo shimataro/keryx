@@ -275,9 +275,15 @@ internal fun FeedListPane(
     // items (via MenuCommand.RenameFeed/UnsubscribeFeed): resolve the currently selected filter
     // against this pane's own already-collected rows and start the same inline edit (or open the
     // same confirmation dialog) the context menu's Rename/Edit and Unsubscribe/Delete items do.
+    // A selection can be hidden inside a collapsed folder (a feed selected before its folder was
+    // collapsed), and an editor needs a rendered row to live in, so the row's own container is
+    // expanded first (vm.revealFeedListRow — only that exact instance's folder or tag, never another
+    // copy's).
     fun startInlineRenameForSelection() {
-        inlineEdit = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
+        val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
             ?.toInlineEditTarget(selectedRowInstance)
+        if (target != null) vm.revealFeedListRow(target.rowInstance)
+        inlineEdit = target
     }
     fun openDeleteDialogForSelection() {
         when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
@@ -374,23 +380,21 @@ internal fun FeedListPane(
         if (index != null) listState.scrollToIndexIfNeeded(index)
     }
 
+    // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
+    // the list — computed once per composition from the same collected state the rows render from.
+    val editRowIndex = inlineEdit?.let { target ->
+        feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+    }
+
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
     // view, and an editor the user cannot see would swallow every keystroke with nothing to show.
     // target.rowInstance is the exact rendered row the edit is on (a feed's folder-group row, or the
     // specific tag-nested copy it was selected through — see InlineEditTarget), so this never scrolls
-    // to (or expands the folder behind) the wrong copy of the same feed.
-    LaunchedEffect(inlineEdit) {
-        val target = inlineEdit ?: return@LaunchedEffect
-        val index = feedListRowIndex(
-            target.rowInstance,
-            feeds,
-            folders,
-            tags,
-            collapsedFolderIds,
-            feedTagMap,
-            expandedTagIds,
-        ) ?: return@LaunchedEffect
-        listState.scrollToIndexIfNeeded(index)
+    // to the wrong copy of the same feed. Keyed on the row's appearance too: a row revealed by
+    // startInlineRenameForSelection's folder expansion only renders once the collected collapse
+    // state catches up, a frame after the edit started.
+    LaunchedEffect(inlineEdit, editRowIndex != null) {
+        if (editRowIndex != null) listState.scrollToIndexIfNeeded(editRowIndex)
     }
 
     // An in-progress edit's row can vanish out from under it — its tag collapses, the feed is
@@ -399,18 +403,29 @@ internal fun FeedListPane(
     // stay stuck, permanently suppressing bare-key shortcuts and drag-reordering. Deliberately does
     // not scroll — only clears the stranded state — so it never fights a user who scrolled away for
     // unrelated reasons.
-    LaunchedEffect(inlineEdit, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+    //
+    // "Vanished" means the row was rendered for this edit and no longer is (editRowSeen). A row not
+    // rendered *yet* is not stranded: revealing a collapsed folder updates the ViewModel at once but
+    // reaches collapsedFolderIds above only on a later frame, so clearing on that first frame would
+    // cancel every rename that needed the reveal. A row the ViewModel's live state can't render
+    // either is cleared at once, so an edit can never wait forever on a row that will never come.
+    var editRowSeen by remember(inlineEdit) { mutableStateOf(false) }
+    LaunchedEffect(inlineEdit, editRowIndex) {
         val target = inlineEdit ?: return@LaunchedEffect
-        val stillRendered = feedListRowIndex(
+        if (editRowIndex != null) {
+            editRowSeen = true
+            return@LaunchedEffect
+        }
+        val renderableNow = feedListRowIndex(
             target.rowInstance,
             feeds,
             folders,
             tags,
-            collapsedFolderIds,
+            vm.collapsedFolderIds.value,
             feedTagMap,
-            expandedTagIds,
+            vm.expandedTagIds.value,
         ) != null
-        if (!stillRendered) inlineEdit = null
+        if (editRowSeen || !renderableNow) inlineEdit = null
     }
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)

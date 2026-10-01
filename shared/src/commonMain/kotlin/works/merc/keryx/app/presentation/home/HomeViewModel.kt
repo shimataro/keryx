@@ -645,6 +645,25 @@ class HomeViewModel(
         settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
 
+    /**
+     * Expands whatever collapsed folder or tag hides the exact row [instance] (see
+     * [containersToRevealFor]), persisting it like [toggleFolderCollapsed]/[toggleTagExpanded] do —
+     * collapse state is device-local and never synced. Idempotent: an already-visible row changes
+     * nothing and writes nothing. Called before an inline rename starts on the selection (F2/Return,
+     * the Feed menu), whose editor needs a rendered row.
+     */
+    fun revealFeedListRow(instance: FeedListRowSelection) {
+        val reveal = containersToRevealFor(instance, feeds.value, _collapsedFolderIds.value, _expandedTagIds.value)
+        reveal.folderToExpand?.let { folderId ->
+            _collapsedFolderIds.value = _collapsedFolderIds.value - folderId
+            settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
+        }
+        reveal.tagToExpand?.let { tagId ->
+            _expandedTagIds.value = _expandedTagIds.value + tagId
+            settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
+        }
+    }
+
     /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
     val articleRestoredOnLaunch: Boolean
 

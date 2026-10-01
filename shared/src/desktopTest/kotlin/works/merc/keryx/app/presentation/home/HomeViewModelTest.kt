@@ -3468,6 +3468,52 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun revealExpandsOnlyTheSelectedInstancesFolderAndPersists() = runTest {
+        db.insertFolder("d1", "Kotlin")
+        db.insertFolder("d2", "Other")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertTag("t1", "Tag")
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.toggleFolderCollapsed("d1")
+        vm.toggleFolderCollapsed("d2")
+        testScheduler.advanceUntilIdle()
+
+        vm.revealFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"))
+
+        assertEquals(setOf("d2"), vm.collapsedFolderIds.value)
+        assertEquals(setOf("d2"), store.load().collapsedFolderIds)
+        // Revealing the folder-group row leaves the feed's tags alone.
+        assertTrue(vm.expandedTagIds.value.isEmpty())
+
+        vm.revealFeedListRow(FeedListRowSelection.FeedInTag("f1", "t1"))
+
+        assertEquals(setOf("t1"), vm.expandedTagIds.value)
+        assertEquals(setOf("t1"), store.load().expandedTagIds)
+    }
+
+    @Test
+    fun revealIsANoOpForAnAlreadyVisibleRow() = runTest {
+        db.insertFolder("d1", "Kotlin")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertTag("t1", "Tag")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.toggleTagExpanded("t1")
+        testScheduler.advanceUntilIdle()
+        val collapsedBefore = vm.collapsedFolderIds.value
+        val expandedBefore = vm.expandedTagIds.value
+
+        vm.revealFeedListRow(FeedListRowSelection.FeedInFolderGroup("f1"))
+        vm.revealFeedListRow(FeedListRowSelection.FeedInTag("f1", "t1"))
+        vm.revealFeedListRow(FeedListRowSelection.Folder("d1"))
+
+        assertEquals(collapsedBefore, vm.collapsedFolderIds.value)
+        assertEquals(expandedBefore, vm.expandedTagIds.value)
+    }
+
+    @Test
     fun deleteFolderRemovesItFromCollapsedFolderIds() = runTest {
         db.insertFolder("d1", "Kotlin")
         val store = LocalSettingsStore(dirOverride = dir)
