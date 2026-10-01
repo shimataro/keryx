@@ -119,7 +119,9 @@ internal const val ARTICLE_READER_TEST_TAG = "article-reader"
  *
  * @param vm The view model supplying the selected article and handling article actions.
  * @param onActivated Invoked when the pane is activated.
- * @param copyPulse A counter that signals a keyboard copy action for the selected article.
+ * @param copyPulse A counter bumped whenever the selected article's URL is copied from outside this
+ *   pane (keyboard shortcut, menu bar, article-row context menu); each increment flashes the copy
+ *   button's inline ✓. Only increments made while this pane is composed count.
  */
 @Composable
 fun ArticleDetailPane(
@@ -216,9 +218,7 @@ internal fun ArticleDetailPaneContent(
     reader: @Composable (html: String, body: String, articleUrl: String?, active: Boolean) -> Unit =
         { html, body, articleUrl, active -> ArticleWebView(html, body, articleUrl, active) },
 ) {
-    // Inline "copied" feedback for the toolbar copy button. Kept above any conditional so this
-    // composable never leaves/re-enters composition — otherwise LaunchedEffect(copyPulse) would
-    // re-fire with a stale pulse value and flash ✓ without a copy.
+    // Inline "copied" feedback for the toolbar copy button.
     var showCopied by remember { mutableStateOf(false) }
     LaunchedEffect(showCopied) {
         if (showCopied) {
@@ -237,10 +237,13 @@ internal fun ArticleDetailPaneContent(
     LaunchedEffect(showCopied) {
         if (showCopied && !platformShowsOwnCopyConfirmation) snackbarHostState?.showSnackbar(copiedMessage)
     }
-    // Keyboard ⌘/Ctrl+Shift+C copies the selected article (shown in this pane), so mirror the
-    // button's feedback here. Initial copyPulse == 0 is skipped; only increments from HomeScreen
-    // fire it.
-    LaunchedEffect(copyPulse) { if (copyPulse != 0) showCopied = true }
+    // A copy of the selected article (shown in this pane) made through another route — keyboard,
+    // menu bar, or the article row's context menu — mirrors the button's feedback here. Only pulses
+    // raised after this pane entered composition count: HomeScreen composes the pane in a different
+    // branch per layout (and not at all while a phone-width screen shows the article list), so it
+    // can re-enter with a copyPulse bumped long ago, which must not flash ✓ without a copy.
+    val pulseAtEntry = remember { copyPulse }
+    LaunchedEffect(copyPulse) { if (copyPulse != pulseAtEntry) showCopied = true }
 
     val placeholderText = stringResource(Res.string.home_no_article_selected)
     val noContentText = stringResource(Res.string.article_no_content)

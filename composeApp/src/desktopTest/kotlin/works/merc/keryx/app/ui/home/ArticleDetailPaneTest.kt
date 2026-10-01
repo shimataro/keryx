@@ -210,6 +210,76 @@ class ArticleDetailPaneTest {
         onNodeWithContentDescription("URL をコピーしました").assertExists()
     }
 
+    // --- Copy pulses from other routes (keyboard, menu bar, article-row context menu) ---
+
+    @Test
+    fun aPulseRaisedBeforeCompositionDoesNotFlashTheCopiedState() = runDesktopComposeUiTest {
+        val snackbarHostState = SnackbarHostState()
+        setContent {
+            CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+                ArticleDetailPaneContent(
+                    article = testArticle(),
+                    modifier = Modifier.size(400.dp, 500.dp),
+                    copyPulse = 5,
+                    reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                )
+            }
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").assertExists()
+        assertEquals(null, snackbarHostState.currentSnackbarData)
+    }
+
+    @Test
+    fun aPulseRaisedWhileComposedFlashesTheCopiedState() = runDesktopComposeUiTest {
+        var copyPulse by mutableStateOf(5)
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(400.dp, 500.dp),
+                copyPulse = copyPulse,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        copyPulse = 6
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピーしました").assertExists()
+    }
+
+    @Test
+    fun aPulseRaisedWhileThePaneWasAbsentDoesNotFlashOnReEntry() = runDesktopComposeUiTest {
+        val snackbarHostState = SnackbarHostState()
+        var copyPulse by mutableStateOf(0)
+        var shown by mutableStateOf(true)
+        setContent {
+            CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+                if (shown) {
+                    ArticleDetailPaneContent(
+                        article = testArticle(),
+                        modifier = Modifier.size(400.dp, 500.dp),
+                        copyPulse = copyPulse,
+                        reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        shown = false
+        waitForIdle()
+        copyPulse = 1
+        waitForIdle()
+        shown = true
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").assertExists()
+        assertEquals(null, snackbarHostState.currentSnackbarData)
+    }
+
     // --- Swipe-to-navigate accessibility actions (the reader's screen-reader counterpart for
     // articleSwipeNavigation's pointer-only gesture — see ArticleSwipeNav.kt's
     // articleSwipeAccessibilityActions). ---
