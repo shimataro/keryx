@@ -239,6 +239,37 @@ and `androidApp` depends on it to produce the installable APK.
 | Repository | Business logic, sync, conflict resolution | Kotlin classes |
 | DataSource | DB / HTTP / file IO | SQLDelight / Ktor / java.io equivalent |
 
+### One implementation per action
+
+An action with more than one route (toolbar button, menu bar, context menu, keyboard shortcut,
+gesture, accessibility action, tray) or more than one UI (Compose, SwiftUI) gets its effect, its
+enabled/disabled condition and its feedback from a single shared piece of code that every route
+calls. A route only collects its input (which item) and calls it; it never re-implements the
+effect, the enablement or the feedback. This is what keeps the routes behaving identically, as
+`external-spec.md` §9 ("Actions with more than one route") requires.
+
+The work is split in two:
+
+- **The decision and the enablement predicate** live in `:shared` `presentation/` — a pure function
+  or a ViewModel method — whenever both UIs need them, so Compose and SwiftUI call the same code
+  rather than each re-deriving it. This follows from the state holders already living in shared
+  code (see "Shared Kotlin code" under "Apple Native Apps (SwiftUI)").
+- **The platform-side execution** (writing the clipboard, showing a snackbar, moving a window)
+  stays per UI, and is one handler per UI — not one per route.
+
+Examples in the code today:
+
+| Action | The one implementation | Routes that call it |
+| --- | --- | --- |
+| Sync now | `presentation/settings/ManualSync.kt` (`canSyncNow` / `syncNow`), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
+| Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
+| Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
+| Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
+
+**Adding a route to an existing action** means calling its existing handler/predicate. If no shared
+one exists yet — the action's logic still sits inside one route — extract it first, move the other
+routes onto it, and only then add the new route.
+
 ## Key Classes
 
 ### DatabaseDriverFactory (expect / actual)

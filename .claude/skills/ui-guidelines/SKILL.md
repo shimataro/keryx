@@ -875,9 +875,14 @@ is the faithful behavior, not a bug to "fix" by forcing every span through the t
 
 ## Actions with more than one route
 
-`docs/external-spec.md`'s "Actions with more than one route" (§9) requires an action to behave
-identically — effect, enablement, feedback — whether it runs from a toolbar button, the
-application menu, a context menu, a keyboard shortcut, or a gesture. To keep that true:
+**One action, one implementation** (`.claude/CLAUDE.md` constraint #10): an action with more than
+one route (toolbar button, menu bar, context menu, keyboard shortcut, gesture, accessibility action,
+tray) or more than one UI (Compose, SwiftUI) gets its effect, its enabled/disabled condition and its
+feedback from a single shared piece of code that every route calls. A route only collects its input
+(which item) and calls it. That is how `docs/external-spec.md`'s "Actions with more than one route"
+(§9) — the same effect, enablement and feedback whichever route runs it — stays true. Where each
+part lives, with the current examples, is `docs/app-architecture.md`'s "One implementation per
+action". In practice:
 
 - Route every entry point through **one shared handler** rather than re-implementing the effect
   (and forgetting the feedback) at each call site. Example: every route to "copy article URL" —
@@ -885,6 +890,12 @@ application menu, a context menu, a keyboard shortcut, or a gesture. To keep tha
   which writes the clipboard, bumps the pulse that flashes the reader's copy button ✓, and shows
   Android's "URL copied" snackbar; the reader only watches the pulse. Keep feedback in the shared
   handler rather than in one pane, or it goes missing whenever that pane isn't composed.
+- **A decision both UIs need goes in `:shared` `presentation/`, and Swift calls it** — a pure
+  function or a ViewModel method — rather than being re-derived in Compose and again in SwiftUI.
+  Examples: "Sync now"'s `ManualSync.canSyncNow`/`syncNow`, and the menu's enabled/checked flags
+  from `computeMenuUiState` (the desktop menu bar and SwiftUI's `Commands` read the same
+  `MenuUiState`). Only the platform-side execution (clipboard, snackbar, window) stays per UI, as
+  one handler per UI.
 - A context-menu item that shows a shortcut hint (`NativeMenuShortcut`) is promising the user it is
   the same command as that shortcut — check the two really share a handler.
 - A toggle item's label must match what its shortcut would do **right now**. Example: right-clicking
@@ -902,6 +913,10 @@ application menu, a context menu, a keyboard shortcut, or a gesture. To keep tha
   key unconsumed (`null` handler) whenever it doesn't hold. Disabling the item instead would make it
   unclickable for a reason unrelated to clicking; leaving the accelerator attached would let a
   native menu fire it from another pane or from inside a text field.
+- **Adding a route to an existing action means calling its existing handler/predicate.** If there
+  isn't a shared one yet — the logic still lives inside one route — extract it first, move the
+  existing routes onto it, then add the new route. Never copy the logic of the route you started
+  from.
 - When adding or changing a route, compare it against every existing route for the same action,
   not just the one it was copied from.
 

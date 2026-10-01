@@ -233,6 +233,34 @@
 | Repository | ビジネスロジック・同期・競合解決 | Kotlin クラス |
 | DataSource | DB / HTTP / ファイル IO | SQLDelight / Ktor / dart:io 相当（java.io） |
 
+### 1 つの操作には 1 つの実装
+
+複数の経路（ツールバーのボタン・メニューバー・コンテキストメニュー・キーボードショートカット・ジェスチャー・
+アクセシビリティ操作・トレイ）や複数の UI（Compose・SwiftUI）から実行できる操作は、効果・有効/無効の条件・
+フィードバックを、全経路が呼ぶ共通のコード 1 か所から得る。経路は入力（どの項目に対してか）を集めてそれを呼ぶ
+だけで、効果・有効条件・フィードバックを自前で再実装しない。これにより、`external-spec.md` §9（「複数の経路から
+実行できる操作」）が求めるとおり、どの経路も同じように振る舞う。
+
+役割は 2 つに分かれる。
+
+- **判断と有効条件の述語**は、両 UI が必要とする限り `:shared` の `presentation/`（純粋関数または ViewModel の
+  メソッド）に置く。Compose と SwiftUI はそれぞれ判断を導き直すのではなく、同じコードを呼ぶ。これは state holder が
+  すでに共有コードにあることからの帰結である（「Apple ネイティブアプリ（SwiftUI）」の「共有 Kotlin コード」を参照）。
+- **プラットフォーム側の実行**（クリップボードへの書き込み、スナックバーの表示、ウィンドウ操作）は UI ごとに持ち、
+  それも UI ごとに 1 つのハンドラにまとめる。経路ごとには持たない。
+
+現在のコードにある実例:
+
+| 操作 | 唯一の実装 | それを呼ぶ経路 |
+| --- | --- | --- |
+| 今すぐ同期 | `presentation/settings/ManualSync.kt`（`canSyncNow` / `syncNow`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
+| メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
+| 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
+| 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
+
+**既存の操作に経路を足す**ときは、既存のハンドラ/述語を呼ぶ。共通のものがまだない（操作の処理が 1 つの経路の中に
+ある）場合は、先にそれを切り出して他の経路をそこへ移し、それから新しい経路を足す。
+
 ## 主要クラス
 
 ### DatabaseDriverFactory（expect / actual）

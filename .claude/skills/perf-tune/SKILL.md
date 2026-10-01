@@ -66,7 +66,7 @@ speed-up and must never be reported as one.
 
 ## Non-negotiable invariants
 
-Hard stops. See `.claude/CLAUDE.md` "Critical constraints" #1–#9 and `docs/*.md`.
+Hard stops. See `.claude/CLAUDE.md` "Critical constraints" #1–#10 and `docs/*.md`.
 Each entry says *why* it breaks — a bare prohibition list does not survive
 contact with a tempting optimization.
 

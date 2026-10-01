@@ -33,6 +33,11 @@ roles, divider policy, sticky section headers, article card style, layout stabil
 count, metadata lines, flat native-feel components, context-menu and dialog/popup rules, icon usage
 via `ui/common/KeryxIcons.kt`.
 
+- Does any route to an action have its own effect, enablement condition or feedback instead of the
+  action's shared handler/predicate ("Actions with more than one route")? A typical case: a
+  context-menu item that advertises a shortcut hint but isn't the same handler as that shortcut.
+  A decision duplicated between Compose and SwiftUI is `review-architecture`'s, not yours.
+
 **The guideline text can also be the thing that is wrong.** When a change deliberately alters a
 behavior the guideline describes as normative, the guideline — and the KDoc on the constants it
 refers to — has gone stale, and that is a finding of its own. Report the specific stale sentence

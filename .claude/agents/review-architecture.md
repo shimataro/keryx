@@ -34,6 +34,12 @@ directly rather than re-reading them.
   sync/DB, so sync and conflict-resolution changes stay contained to `domain/`.
 - Does a ViewModel hold business logic (sync, conflict resolution, multi-step DB
   work) that belongs in a Repository?
+- Does every action reachable by more than one route (or from both UIs) take its effect,
+  enablement and feedback from one shared handler/predicate (`.claude/CLAUDE.md` constraint #10)?
+  Flag a route that re-implements any of the three instead of calling it, and a decision that
+  belongs in `:shared` `presentation/` but is computed separately in Compose and in SwiftUI. The
+  cross-UI duplication is a boundary finding and yours, not `review-quality`'s; one route diverging
+  within a UI is `review-ui`'s.
 
 ## Checklist — platform boundaries
 
