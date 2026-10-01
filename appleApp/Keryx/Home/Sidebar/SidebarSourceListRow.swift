@@ -1,15 +1,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// Which of `HomeObservable`'s unread counts a source-list row shows.
-enum SidebarUnreadSource: Equatable {
-    case total
-    case starred
-    case feed(String)
-    case folder(String)
-    case tag(String)
-}
-
 /// One macOS source-list row's label, highlight and unread badge. A `View` of its own, reading its
 /// unread count in its own body, so a count ticking during a refresh or on every article read
 /// re-evaluates the rows alone rather than `FeedListView` and the whole outline; and `Equatable`, so

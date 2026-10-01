@@ -1284,12 +1284,20 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
 行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。
 
 - **データの流れ。** `FeedListView.body` が `SidebarRenderState` を作る。中身は `SidebarOutline`（セクションごとの
-  木構造と展開状態）、各行の `SidebarRowContent`（タイトル、アイコン、未読数、エラー状態、エコーのハイライト、名前
+  木構造と展開状態）、各行の `SidebarRowContent`（タイトル、アイコン、エラー状態、エコーのハイライト、名前
   変更中か）、表示する選択、名前変更中・色選択中のキーで、どれも `Home/Sidebar/` にある UIKit に依存しない
   モデルから作り、`KeryxTests` でテストしている。コントローラーはこれを 3 段で反映する。構造が違うセクションの
   スナップショットだけを適用し、次に内容が変わった行だけをその場で再構成し（スクロール位置や、入力途中の名前など
   セル内の SwiftUI の状態が残る）、最後に選択を合わせる。アイテムは文字列だけで作る `SidebarItemID` で、
   diffable data source が求める `Sendable` を満たす。
+- **未読数。** 未読数はあえて `SidebarRenderState` に含めない。記事を 1 件読むたび、更新中にフィードを 1 件
+  取得するたびに変わるため、`FeedListView.body` で読むと、そのたびにアウトラインと全行の内容を作り直すことに
+  なるからである。代わりにコントローラー自身が `HomeObservable` の 5 つの未読数を観測し
+  （`withObservationTracking`。変更のたびに登録し直すので、まとまった変更は 1 回の読み取りにまとまる）、
+  `SidebarUnreadCounts` のスナップショットにして、表示する数が変わったセルだけを再構成する
+  （`SidebarUnreadCounts.changedItems`。行からどの数を出すかは `SidebarItemID.unreadSource` が、macOS の
+  ソースリストの行と同じ `SidebarUnreadSource` に対応付ける）。行は常に最新のスナップショットから構成する。
+  ドラッグ中は再構成を控え、ドラッグ終了時の強制適用でセルを追いつかせる。
 - **セクションとヘッダー。** グループは macOS と同じで、すべて／スター付き（ヘッダーなし）、フォルダー、常にある
   「フォルダーなし」、タグ。ヘッダーは補助ビューではなくセクションの*先頭のアイテム*にする
   （`headerMode = .firstItemInSection`）。ドロップ先にできるのはアイテムだけだからである。フォルダーとタグの

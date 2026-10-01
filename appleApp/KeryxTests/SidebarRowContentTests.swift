@@ -8,7 +8,6 @@ struct SidebarRowContentTests {
 
     private func contents(
         feeds: [Feeds] = F.feeds,
-        unreadByFeed: [String: Int64] = [:],
         selectionDisplayed: Bool = true,
         selectedRow: FeedListRowSelection = FeedListRowSelectionAll(),
         filter: ArticleFilter = ArticleFilterAll(),
@@ -17,11 +16,6 @@ struct SidebarRowContentTests {
         SidebarRowContent.build(
             outline: F.outline(feeds: feeds),
             model: F.model(feeds: feeds),
-            unreadByFeed: unreadByFeed,
-            unreadByFolder: ["d1": 7],
-            unreadByTag: ["t1": 3],
-            totalUnread: 10,
-            starredUnreadCount: 2,
             selectionDisplayed: selectionDisplayed,
             selectedRow: selectedRow,
             filter: filter,
@@ -36,18 +30,15 @@ struct SidebarRowContentTests {
     }
 
     @Test
-    func rowsShowTheirTitleIconAndUnreadCount() {
-        let all = contents(unreadByFeed: ["a": 4])
-        #expect(all[.all]?.unreadCount == 10)
-        #expect(all[.starred]?.unreadCount == 2)
+    func rowsShowTheirTitleAndIcon() {
+        let all = contents()
+        #expect(all[.all]?.icon == .symbol("tray.full"))
+        #expect(all[.starred]?.icon == .symbol("star"))
         #expect(all[.folder("d1")]?.title == "name-d1")
         #expect(all[.folder("d1")]?.icon == .symbol("folder"))
-        #expect(all[.folder("d1")]?.unreadCount == 7)
         #expect(all[.tag("t1")]?.icon == .tagColor(hex: nil))
-        #expect(all[.tag("t1")]?.unreadCount == 3)
         #expect(all[.feed("a")]?.icon == .favicon(url: "https://example.com/a.ico"))
-        #expect(all[.feed("a")]?.unreadCount == 4)
-        #expect(all[.feedInTag(feedId: "a", tagId: "t1")]?.unreadCount == 4)
+        #expect(all[.feedInTag(feedId: "a", tagId: "t1")]?.icon == .favicon(url: "https://example.com/a.ico"))
         #expect(all[.noFolderHeader]?.icon == nil)
         #expect(all[.sectionHeader(.folders)]?.icon == nil)
     }
@@ -96,9 +87,9 @@ struct SidebarRowContentTests {
 
     @Test
     func changedItemsAreOnlyTheRowsWhoseContentDiffers() {
-        let before = contents(unreadByFeed: ["a": 1, "b": 1])
-        let after = contents(unreadByFeed: ["a": 2, "b": 1])
-        #expect(SidebarRowContent.changedItems(from: before, to: after) == [.feed("a"), .feedInTag(feedId: "a", tagId: "t1")])
+        let before = contents()
+        let after = contents(renamingRowKey: "feed-in-tag:t1:a")
+        #expect(SidebarRowContent.changedItems(from: before, to: after) == [.feedInTag(feedId: "a", tagId: "t1")])
         #expect(SidebarRowContent.changedItems(from: before, to: before).isEmpty)
     }
 

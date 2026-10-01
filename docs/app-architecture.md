@@ -1293,13 +1293,22 @@ the rename auto-cancel) and only swaps the rows: the source list under `#if os(m
 view on iOS.
 
 - **Data flow.** `FeedListView.body` builds a `SidebarRenderState` — the `SidebarOutline` (each
-  section's tree and which items are expanded), every row's `SidebarRowContent` (title, icon, unread
-  count, error state, echo highlight, whether it is being renamed), the displayed selection and the
+  section's tree and which items are expanded), every row's `SidebarRowContent` (title, icon, error
+  state, echo highlight, whether it is being renamed), the displayed selection and the
   rename/color-picker keys — from UIKit-free models under `Home/Sidebar/` that `KeryxTests` covers. The
   controller applies it in three steps: only the section snapshots whose structure differs, then
   reconfiguring only the rows whose content changed (in place, so scroll position and the SwiftUI
   state inside a cell, like a half-typed name, survive), then the selection. Items are
   `SidebarItemID`s built from strings alone, so they are `Sendable` for the diffable data source.
+- **Unread counts.** The counts are deliberately not part of `SidebarRenderState`: they change on
+  every article read and every feed fetched during a refresh, and reading them in `FeedListView.body`
+  would rebuild the outline and every row's contents each time. The controller instead observes
+  `HomeObservable`'s five counts itself (`withObservationTracking`, re-registered after each change,
+  which coalesces a burst into one read) into a `SidebarUnreadCounts` snapshot, and reconfigures only
+  the cells whose shown count changed (`SidebarUnreadCounts.changedItems`, with
+  `SidebarItemID.unreadSource` mapping a row to the same `SidebarUnreadSource` the macOS source-list
+  rows read). A row is always configured from the latest snapshot; mid-drag the reconfiguring is held
+  back, and the forced apply at the drag's end catches the cells up.
 - **Sections and headers.** The same groups as macOS: All/Starred (no header), Folders, the
   always-present "No folder", Tags. The headers are the *first item* of their section
   (`headerMode = .firstItemInSection`), not supplementary views, because only an item can be a drop

@@ -127,7 +127,7 @@ struct FeedListView: View {
                 }
         }
         #else
-        SidebarCollectionView(state: collectionState, actions: collectionActions)
+        SidebarCollectionView(home: home, state: collectionState, actions: collectionActions)
             .ignoresSafeArea()
             .focusable()
             .focusEffectDisabled()

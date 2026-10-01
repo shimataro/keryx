@@ -20,11 +20,6 @@ extension FeedListView {
             contents: SidebarRowContent.build(
                 outline: outline,
                 model: sidebar,
-                unreadByFeed: home.unreadByFeed,
-                unreadByFolder: home.unreadByFolder,
-                unreadByTag: home.unreadByTag,
-                totalUnread: home.totalUnread,
-                starredUnreadCount: home.starredUnreadCount,
                 selectionDisplayed: displayedKey != nil,
                 selectedRow: home.selectedRowInstance,
                 filter: home.filter,

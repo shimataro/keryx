@@ -148,6 +148,7 @@ targets:
       - path: Keryx/Home/Sidebar/SidebarItemID.swift
       - path: Keryx/Home/Sidebar/SidebarOutline.swift
       - path: Keryx/Home/Sidebar/SidebarRowContent.swift
+      - path: Keryx/Home/Sidebar/SidebarUnreadCounts.swift
       - path: Keryx/Home/Sidebar/SidebarDropResolver.swift
       - path: Keryx/Home/Sidebar/SidebarDropPreview.swift
       - path: Keryx/Home/ArticleTableLayout.swift

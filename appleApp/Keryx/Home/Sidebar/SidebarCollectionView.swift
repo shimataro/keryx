@@ -3,8 +3,10 @@ import KeryxShared
 import SwiftUI
 import UIKit
 
-/// Everything the iOS sidebar renders, as plain values — rebuilt by `FeedListView.body` on every
-/// change it observes and handed to the collection view, which works out what actually changed.
+/// Everything the iOS sidebar renders apart from the unread counts, as plain values — rebuilt by
+/// `FeedListView.body` on every change it observes and handed to the collection view, which works
+/// out what actually changed. The counts are observed by the collection view itself (see
+/// `SidebarCollectionViewController.observeUnreadCounts()`).
 struct SidebarRenderState: Equatable {
     let outline: SidebarOutline
     let contents: [SidebarItemID: SidebarRowContent]
@@ -40,11 +42,14 @@ struct SidebarCollectionActions {
 /// The iOS sidebar: a `UICollectionView` list rather than SwiftUI's `List`, so the sidebar owns its
 /// collection view's delegates — see "Sidebar (iOS)" in `docs/app-architecture.md`.
 struct SidebarCollectionView: UIViewControllerRepresentable {
+    /// Read only by the controller, for the unread counts — never in this view's own update, so a
+    /// count change does not re-run `updateUIViewController`.
+    let home: HomeObservable
     let state: SidebarRenderState
     let actions: SidebarCollectionActions
 
     func makeUIViewController(context: Context) -> SidebarCollectionViewController {
-        let controller = SidebarCollectionViewController(actions: actions)
+        let controller = SidebarCollectionViewController(home: home, actions: actions)
         controller.apply(state)
         return controller
     }
@@ -59,6 +64,12 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     UIPopoverPresentationControllerDelegate {
     var actions: SidebarCollectionActions
     private(set) var state: SidebarRenderState?
+
+    private let home: HomeObservable
+    /// The latest unread counts — what a row is painted with whenever it is configured.
+    private var unreadCounts: SidebarUnreadCounts
+    /// The counts the on-screen cells were last brought in line with — see `refreshUnreadCounts()`.
+    private var renderedUnreadCounts: SidebarUnreadCounts
 
     private(set) var collectionView: UICollectionView!
     private(set) var dataSource: UICollectionViewDiffableDataSource<SidebarSection, SidebarItemID>!
@@ -76,9 +87,14 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// The latest state handed over mid-drag, applied when the drag ends.
     private(set) var deferredState: SidebarRenderState?
 
-    init(actions: SidebarCollectionActions) {
+    init(home: HomeObservable, actions: SidebarCollectionActions) {
+        self.home = home
         self.actions = actions
+        let counts = Self.unreadCounts(of: home)
+        unreadCounts = counts
+        renderedUnreadCounts = counts
         super.init(nibName: nil, bundle: nil)
+        observeUnreadCounts()
     }
 
     @available(*, unavailable)
@@ -183,6 +199,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// icon, no fill — a faint fill reads as a dull smudge), or neither.
     private func updateRow(_ cell: UICollectionViewListCell, _ item: SidebarItemID, _ cellState: UICellConfigurationState) {
         guard let content = state?.contents[item] else { return }
+        let unreadCount = unreadCounts.count(for: item)
         let dropTarget = Self.isDropTarget(cellState)
         let filled = dropTarget || cellState.isSelected
         var background = cell.defaultBackgroundConfiguration().updated(for: cellState)
@@ -206,8 +223,8 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 
         var accessories: [UICellAccessory] = [
             .label(
-                text: String(content.unreadCount),
-                options: .init(isHidden: content.unreadCount == 0, tintColor: filled ? .white : nil)
+                text: String(unreadCount),
+                options: .init(isHidden: unreadCount == 0, tintColor: filled ? .white : nil)
             ),
         ]
         switch item {
@@ -278,6 +295,53 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             // Presenting from inside a SwiftUI update is not allowed; do it right after.
             DispatchQueue.main.async { [weak self] in self?.updateColorPicker(newState.colorPickingTagId) }
         }
+        // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
+        // here, on the forced apply at the drag's end.
+        refreshUnreadCounts()
+    }
+
+    // MARK: - Unread counts
+
+    private static func unreadCounts(of home: HomeObservable) -> SidebarUnreadCounts {
+        SidebarUnreadCounts(
+            byFeed: home.unreadByFeed,
+            byFolder: home.unreadByFolder,
+            byTag: home.unreadByTag,
+            total: home.totalUnread,
+            starred: home.starredUnreadCount
+        )
+    }
+
+    /// Observes `home`'s five unread counts, outside SwiftUI, so a change reconfigures only the cells
+    /// whose count changed (`SidebarUnreadCounts.changedItems`). `withObservationTracking` fires once
+    /// per registration, from inside the mutation (before the new value is stored), so the change is
+    /// read on a later main-actor turn and the observation re-registered then — every mutation in
+    /// between is coalesced into that one read. It ends with the controller (`weak self`).
+    private func observeUnreadCounts() {
+        withObservationTracking {
+            _ = Self.unreadCounts(of: home)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.unreadCountsDidChange() }
+        }
+    }
+
+    private func unreadCountsDidChange() {
+        // Re-registering and reading in the same turn, so no change published after it is missed.
+        observeUnreadCounts()
+        unreadCounts = Self.unreadCounts(of: home)
+        refreshUnreadCounts()
+    }
+
+    /// Reconfigures the cells whose count differs from what they were last brought in line with.
+    /// Held back mid-drag, where UIKit's placeholder and gap own the layout: a cell configured then
+    /// already paints the latest count, and the rest catch up from `apply(_:force:)` when it ends.
+    private func refreshUnreadCounts() {
+        guard !dragInProgress, isViewLoaded else { return }
+        let changed = SidebarUnreadCounts.changedItems(
+            dataSource.snapshot().itemIdentifiers, from: renderedUnreadCounts, to: unreadCounts
+        )
+        renderedUnreadCounts = unreadCounts
+        reconfigure(Set(changed))
     }
 
     /// Shows a drop's result in the list before the shared state carrying it arrives (see

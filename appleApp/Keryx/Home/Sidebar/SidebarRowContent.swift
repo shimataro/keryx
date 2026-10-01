@@ -38,15 +38,15 @@ extension SidebarRowStaticContent {
     }
 }
 
-/// Everything one iOS sidebar row displays, as plain values — what its hosted cell is configured
-/// from. Comparing the previous and the current contents (`changedItems`) tells the collection view
-/// which cells to reconfigure in place, so an unread count ticking during a refresh never rebuilds
-/// the list.
+/// Everything one iOS sidebar row displays apart from its unread count, as plain values — what its
+/// hosted cell is configured from. Comparing the previous and the current contents (`changedItems`)
+/// tells the collection view which cells to reconfigure in place. The unread count is deliberately
+/// not part of it: the collection view observes the counts itself (`SidebarUnreadCounts`), so a count
+/// ticking during a refresh or on every article read never rebuilds these contents.
 struct SidebarRowContent: Equatable, Sendable {
     let title: String
     /// `nil` for a section header.
     let icon: SidebarRowIcon?
-    let unreadCount: Int64
     let isErroring: Bool
     let isGone: Bool
     /// `.none` or `.echo`; the drop highlight is the cell's own drop state, not content.
@@ -66,21 +66,15 @@ struct SidebarRowContent: Equatable, Sendable {
     static func build(
         outline: SidebarOutline,
         model: SidebarModel,
-        unreadByFeed: [String: Int64],
-        unreadByFolder: [String: Int64],
-        unreadByTag: [String: Int64],
-        totalUnread: Int64,
-        starredUnreadCount: Int64,
         selectionDisplayed: Bool,
         selectedRow: FeedListRowSelection,
         filter: ArticleFilter,
         renamingRowKey: String?
     ) -> [SidebarItemID: SidebarRowContent] {
-        func row(_ item: SidebarItemID, _ base: SidebarRowStaticContent, unread: Int64) -> SidebarRowContent {
+        func row(_ item: SidebarItemID, _ base: SidebarRowStaticContent) -> SidebarRowContent {
             SidebarRowContent(
                 title: base.title,
                 icon: base.icon,
-                unreadCount: unread,
                 isErroring: base.isErroring,
                 isGone: base.isGone,
                 highlight: selectionDisplayed
@@ -92,7 +86,7 @@ struct SidebarRowContent: Equatable, Sendable {
 
         func header(_ key: String) -> SidebarRowContent {
             SidebarRowContent(
-                title: L(key), icon: nil, unreadCount: 0, isErroring: false, isGone: false,
+                title: L(key), icon: nil, isErroring: false, isGone: false,
                 highlight: .none, isRenaming: false
             )
         }
@@ -103,22 +97,22 @@ struct SidebarRowContent: Equatable, Sendable {
         for item in items {
             switch item {
             case .all:
-                contents[item] = row(item, .all, unread: totalUnread)
+                contents[item] = row(item, .all)
             case .starred:
-                contents[item] = row(item, .starred, unread: starredUnreadCount)
+                contents[item] = row(item, .starred)
             case .sectionHeader(let section):
                 contents[item] = header(section == .tags ? "home_tags" : "home_folders")
             case .noFolderHeader:
                 contents[item] = header("home_no_folder")
             case .folder(let id):
                 guard let base = model.folderContents[id] else { continue }
-                contents[item] = row(item, base, unread: unreadByFolder[id] ?? 0)
+                contents[item] = row(item, base)
             case .tag(let id):
                 guard let base = model.tagContents[id] else { continue }
-                contents[item] = row(item, base, unread: unreadByTag[id] ?? 0)
+                contents[item] = row(item, base)
             case .feed(let id), .feedInTag(let id, _):
                 guard let base = model.feedContents[id] else { continue }
-                contents[item] = row(item, base, unread: unreadByFeed[id] ?? 0)
+                contents[item] = row(item, base)
             }
         }
         return contents
