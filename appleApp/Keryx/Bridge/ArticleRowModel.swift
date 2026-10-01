@@ -26,9 +26,12 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
     let isRead: Bool
     let isStarred: Bool
     let url: String
-    /// `hasUsableUrl(url)`, resolved once here rather than through the bridge on every body
-    /// evaluation (the row's context menu reads it twice). Derived from `url`, so not compared.
+    /// `hasUsableUrl(url)` (Copy URL's rule), resolved once here rather than through the bridge on
+    /// every body evaluation. Derived from `url`, so not compared.
     let hasUsableUrl: Bool
+    /// `canOpenInBrowser(url)` (Open in Browser's stricter http(s) rule), resolved once for the same
+    /// reason. Derived from `url`, so not compared.
+    let canOpenInBrowser: Bool
 
     static func == (lhs: ArticleRowModel, rhs: ArticleRowModel) -> Bool {
         lhs.id == rhs.id
@@ -64,6 +67,7 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
         let url = row.url
         self.url = url
         hasUsableUrl = ArticleListModelKt.hasUsableUrl(url: url)
+        canOpenInBrowser = ArticleListModelKt.canOpenInBrowser(url: url)
     }
 
     /// Splits `marked` at its `\u{0002}`/`\u{0003}` markers into an `AttributedString` whose matched

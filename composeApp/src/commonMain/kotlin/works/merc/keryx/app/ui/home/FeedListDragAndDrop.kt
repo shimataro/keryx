@@ -46,6 +46,7 @@ import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.NativeSubMenu
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
@@ -522,7 +523,10 @@ internal fun FeedRow(
     val copyFeedUrlLabel = stringResource(Res.string.home_copy_feed_url)
     val copySiteUrlLabel = stringResource(Res.string.home_copy_site_url)
     val openSiteLabel = stringResource(Res.string.home_open_site)
-    val siteUrlUsable = hasUsableUrl(feed.site_url)
+    // Copy and open have their own rules, shared with every other route (the menu bar's Feed menu):
+    // any non-blank site URL can be copied, but only an http(s) one is opened.
+    val siteUrlCopyable = hasUsableUrl(feed.site_url)
+    val siteUrlOpenable = canOpenInBrowser(feed.site_url)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
@@ -574,8 +578,8 @@ internal fun FeedRow(
                         ),
                         NativeMenuSeparator,
                         NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
-                        NativeMenuItem(copySiteUrlLabel, enabled = siteUrlUsable) { onCopySiteUrl() },
-                        NativeMenuItem(openSiteLabel, enabled = siteUrlUsable) { onOpenSite() },
+                        NativeMenuItem(copySiteUrlLabel, enabled = siteUrlCopyable) { onCopySiteUrl() },
+                        NativeMenuItem(openSiteLabel, enabled = siteUrlOpenable) { onOpenSite() },
                         NativeMenuSeparator,
                         NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
                         NativeMenuSeparator,

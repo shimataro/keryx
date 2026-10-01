@@ -90,7 +90,10 @@ struct ArticleDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         let article = home.selectedArticle
-        let hasUsableUrl = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+        // Separate rules, shared with every other route: any non-blank URL can be copied, but only
+        // an http(s) one is opened.
+        let copyEnabled = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+        let openEnabled = article.map { ArticleListModelKt.canOpenInBrowser(url: $0.url) } ?? false
 
         // Default placement: `.navigation` items of this column land at the end of the *previous*
         // column's toolbar section instead of at the start of this one.
@@ -141,15 +144,15 @@ struct ArticleDetailView: View {
             } label: {
                 Label(L("article_copy_url"), systemImage: copyConfirmed ? "checkmark" : "doc.on.doc")
             }
-            .disabled(!hasUsableUrl)
+            .disabled(!copyEnabled)
             .help(L("article_copy_url"))
 
             Button {
-                if let article { openInBrowser(article.url) }
+                if let article { openInBrowserIfAllowed(article.url) }
             } label: {
                 Label(L("article_open_in_browser"), systemImage: "globe")
             }
-            .disabled(!hasUsableUrl)
+            .disabled(!openEnabled)
             .help(L("article_open_in_browser"))
         }
     }

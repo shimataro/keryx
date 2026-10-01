@@ -449,6 +449,12 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   browser) is visible but disabled; selecting an article with a URL enables all four, while an
   article with a blank URL leaves the copy/open-in-browser pair visible but disabled rather than
   hiding them. The toolbar's position and height never change between any of these states.
+- Subscribe to a local test feed whose item `<link>` is not http(s) (e.g. `file:///etc/hosts`), and whose
+  channel `<link>` (the site URL) is too, then select that article: "Open in Browser" is greyed out in the
+  article row's context menu, the reader toolbar, and the menu bar's Article menu (⌘/Ctrl+Shift+O does
+  nothing), while "Copy URL" stays enabled in all three. With the feed selected, Feed ▸ Open Site and the feed
+  row's "Open site" are greyed out while "Copy site URL" stays enabled. Check the SwiftUI app's row menu,
+  reader toolbar, Article/Feed menus and sidebar menu the same way.
 - Toggling light/dark theme (and the font-size setting) while an article is open re-renders the
   reader in the new theme/scale immediately (scroll resets to the top — expected).
 - (Windows) On startup, the reader renders in its correct pane position (no stray blank/misplaced

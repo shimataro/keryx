@@ -2,9 +2,24 @@ package works.merc.keryx.app.presentation.home
 
 import works.merc.keryx.app.domain.ArticleListRow
 
-/** Whether [url] is present and non-blank — the single rule for when URL-dependent actions
- * (open in browser, copy URL) are available, for an article's URL or a feed's site URL alike. */
+/** Whether [url] is present and non-blank — the single rule for when "copy URL" is available, on
+ * every route, for an article's URL or a feed's site URL alike. Opening a URL in the browser has its
+ * own, stricter rule: [canOpenInBrowser]. */
 fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
+
+/**
+ * Whether [url] may be opened in the external browser — the single enablement rule *and* guard for
+ * every route of "Open in browser" (toolbar button, menu bar, keyboard shortcut, context menu), for
+ * an article's URL or a feed's site URL alike: only http(s) qualifies.
+ *
+ * Security: an article's URL (and a feed's site URL) is unvalidated input from the feed, and
+ * `BrowserOpener` hands whatever it gets to the OS (`open` / `rundll32` / `xdg-open` /
+ * `ACTION_VIEW`), so a `file:`, `javascript:` or custom-scheme link must never reach it.
+ * `BrowserOpener` itself stays unrestricted because the app's own fixed links use other schemes
+ * (Settings' `mailto:`). A relative or scheme-less link is rejected too; copying it is still
+ * allowed ([hasUsableUrl]).
+ */
+fun canOpenInBrowser(url: String?): Boolean = isHttpOrHttpsUrl(url)
 
 /**
  * Whether the article list's "hide read articles" action has anything to do: at least one row in

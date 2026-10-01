@@ -109,6 +109,41 @@ class ArticleDetailPaneTest {
     }
 
     @Test
+    fun openInBrowserButtonIsDisabledForANonHttpUrlWhileCopyStaysEnabled() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(url = "file:///etc/passwd"),
+                modifier = Modifier.size(400.dp, 500.dp),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").assertIsEnabled()
+        onNodeWithContentDescription("ブラウザーで開く").assertIsNotEnabled()
+    }
+
+    @Test
+    fun openInBrowserButtonInvokesTheSharedHandlerWithTheDisplayedArticle() = runDesktopComposeUiTest {
+        val article = testArticle()
+        val opened = mutableListOf<Articles>()
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(400.dp, 500.dp),
+                onOpenInBrowser = { opened += it },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("ブラウザーで開く").performClick()
+        waitForIdle()
+
+        assertEquals(listOf(article), opened)
+    }
+
+    @Test
     fun copyAndOpenAreVisibleButDisabledWithNoSelection() = runDesktopComposeUiTest {
         setContent {
             ArticleDetailPaneContent(

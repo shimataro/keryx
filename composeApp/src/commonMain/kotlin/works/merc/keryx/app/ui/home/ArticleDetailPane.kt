@@ -77,6 +77,7 @@ import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.presentation.articleMetaText
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.presentation.home.readerContents
@@ -120,6 +121,9 @@ internal const val ARTICLE_READER_TEST_TAG = "article-reader"
  *   button's inline ✓. Only increments made while this pane is composed count.
  * @param onCopyUrl The shared "copy article URL" handler ([ArticleUrlCopier.copy]) the toolbar's copy
  *   button calls with the displayed article; the pane never writes the clipboard itself.
+ * @param onOpenInBrowser The shared "open in browser" handler ([openInBrowserIfAllowed]) the
+ *   toolbar's open button calls with the displayed article. The button is enabled only for an
+ *   http(s) URL ([canOpenInBrowser]); copying needs only a non-blank one.
  */
 @Composable
 fun ArticleDetailPane(
@@ -128,6 +132,7 @@ fun ArticleDetailPane(
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onCopyUrl: (Articles) -> Unit = {},
+    onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     // Overridable only so a desktopTest can exercise the touch-primary branch below without a real
@@ -173,6 +178,7 @@ fun ArticleDetailPane(
         onActivated = onActivated,
         copyPulse = copyPulse,
         onCopyUrl = onCopyUrl,
+        onOpenInBrowser = onOpenInBrowser,
         onToggleStar = { vm.toggleStarSelected() },
         onMarkUnread = { vm.markSelectedUnread() },
         onNavigateUp = onNavigateUp,
@@ -210,6 +216,7 @@ internal fun ArticleDetailPaneContent(
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onCopyUrl: (Articles) -> Unit = {},
+    onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
@@ -296,6 +303,7 @@ internal fun ArticleDetailPaneContent(
                 onToggleStar = onToggleStar,
                 onMarkUnread = onMarkUnread,
                 onCopyUrl = { article?.let(onCopyUrl) },
+                onOpenInBrowser = { article?.let(onOpenInBrowser) },
                 onNavigateUp = onNavigateUp,
             )
         }
@@ -411,12 +419,15 @@ private fun ArticleDetailToolbar(
     onToggleStar: () -> Unit,
     onMarkUnread: () -> Unit,
     onCopyUrl: () -> Unit,
+    onOpenInBrowser: () -> Unit,
     onNavigateUp: (() -> Unit)? = null,
 ) {
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
-    val url = article?.url.orEmpty()
-    val copyOpenEnabled = hasArticle && hasUsableUrl(article.url)
+    // Separate rules, shared with every other route: any non-blank URL can be copied, but only an
+    // http(s) one is opened.
+    val copyEnabled = hasArticle && hasUsableUrl(article.url)
+    val openEnabled = hasArticle && canOpenInBrowser(article.url)
 
     val titleContent: (@Composable () -> Unit)? = if (feedName != null) {
         {
@@ -469,7 +480,7 @@ private fun ArticleDetailToolbar(
             )
             TooltipIconButton(
                 tooltip = copyUrlTooltip,
-                enabled = copyOpenEnabled,
+                enabled = copyEnabled,
                 onClick = onCopyUrl,
             ) {
                 KeryxIcon(
@@ -478,7 +489,7 @@ private fun ArticleDetailToolbar(
                 )
             }
             val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
-            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = copyOpenEnabled, onClick = { BrowserOpener.open(url) }) {
+            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {
                 KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
             }
         }

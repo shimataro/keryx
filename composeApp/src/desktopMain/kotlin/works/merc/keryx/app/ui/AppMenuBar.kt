@@ -19,7 +19,9 @@ import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
@@ -146,6 +148,7 @@ internal fun FrameWindowScope.AppMenuBar(
         onHome = screen == Screen.Home,
         hasSelectedArticle = selected != null,
         selectedArticleHasUrl = hasUsableUrl(selected?.url),
+        selectedArticleCanOpenInBrowser = canOpenInBrowser(selected?.url),
         activity = activity,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
@@ -154,6 +157,7 @@ internal fun FrameWindowScope.AppMenuBar(
         textInputFocused = textInputFocused,
         hasRenamableSelection = selectionTarget != null,
         selectedFeedHasSiteUrl = hasUsableUrl(selectedFeed?.site_url),
+        selectedFeedSiteCanOpenInBrowser = canOpenInBrowser(selectedFeed?.site_url),
     )
 
     // Rename/delete wording follows the selected item's type. A `null` target falls back to the
@@ -235,7 +239,7 @@ internal fun FrameWindowScope.AppMenuBar(
         unsubscribeSelectedFeed = { menuController.send(MenuCommand.UnsubscribeFeed) },
         copyFeedUrl = { menuController.send(MenuCommand.CopyFeedUrl) },
         copyFeedSiteUrl = { menuController.send(MenuCommand.CopySiteUrl) },
-        openFeedSite = { selectedFeed?.site_url?.takeIf { hasUsableUrl(it) }?.let(BrowserOpener::open) },
+        openFeedSite = { openInBrowserIfAllowed(selectedFeed?.site_url) },
         openWebsite = { BrowserOpener.open(websiteUrl) },
         openProjectPage = { BrowserOpener.open(PROJECT_URL) },
         // Reads `state.value` fresh rather than closing over the `updateState` snapshot above, so a

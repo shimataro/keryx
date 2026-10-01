@@ -278,8 +278,8 @@ extension FeedListView {
             Button(L("home_copy_feed_url")) { copyToPasteboard(feed.url) }
             Button(L("home_copy_site_url")) { if let site = feed.site_url { copyToPasteboard(site) } }
                 .disabled(!ArticleListModelKt.hasUsableUrl(url: feed.site_url))
-            Button(L("home_open_site")) { if let site = feed.site_url { openInBrowser(site) } }
-                .disabled(!ArticleListModelKt.hasUsableUrl(url: feed.site_url))
+            Button(L("home_open_site")) { openInBrowserIfAllowed(feed.site_url) }
+                .disabled(!ArticleListModelKt.canOpenInBrowser(url: feed.site_url))
             Divider()
             Button(L("home_rename_feed")) { dialogs.startRename(instance) }
             Divider()

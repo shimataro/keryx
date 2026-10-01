@@ -37,6 +37,7 @@ struct ArticleRowModelTests {
         #expect(m.url == "https://example.com/a1")
         #expect(m.highlightedTitle == nil)
         #expect(m.hasUsableUrl)
+        #expect(m.canOpenInBrowser)
     }
 
     @Test
@@ -45,6 +46,18 @@ struct ArticleRowModelTests {
             id: "a1", feed_id: "f1", title: "Title", url: "", published_at: nil, created_at: 0, is_read: 0, is_starred: 0
         )
         #expect(!model(blank).hasUsableUrl)
+        #expect(!model(blank).canOpenInBrowser)
+    }
+
+    /// Open in Browser's http(s) rule is stricter than Copy URL's non-blank one: a `file:` or
+    /// relative link can be copied but is never opened.
+    @Test(arguments: ["file:///etc/passwd", "javascript:alert(1)", "/relative/path"])
+    func nonHttpUrlIsCopyableButNotOpenable(url: String) {
+        let row = ArticleListRow(
+            id: "a1", feed_id: "f1", title: "Title", url: url, published_at: nil, created_at: 0, is_read: 0, is_starred: 0
+        )
+        #expect(model(row).hasUsableUrl)
+        #expect(!model(row).canOpenInBrowser)
     }
 
     @Test

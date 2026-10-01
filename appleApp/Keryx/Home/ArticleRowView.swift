@@ -135,9 +135,9 @@ struct ArticleRowView: View, Equatable {
             Button(Self.copyUrlLabel, action: onCopyUrl)
             .disabled(!model.hasUsableUrl)
             Button(Self.openInBrowserLabel) {
-                openInBrowser(model.url)
+                openInBrowserIfAllowed(model.url)
             }
-            .disabled(!model.hasUsableUrl)
+            .disabled(!model.canOpenInBrowser)
         }
     }
 

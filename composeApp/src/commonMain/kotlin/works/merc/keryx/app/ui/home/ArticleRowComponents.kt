@@ -46,6 +46,7 @@ import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -186,7 +187,10 @@ internal fun articleRowMenuEntries(
 ): List<NativeMenuEntry> {
     val read = article.is_read == 1L || selectedByOpen
     val starred = article.is_starred == 1L
-    val urlUsable = hasUsableUrl(article.url)
+    // Copy and open have their own rules, shared with every other route to each: any non-blank
+    // URL can be copied, but only an http(s) one is opened.
+    val copyEnabled = hasUsableUrl(article.url)
+    val openEnabled = canOpenInBrowser(article.url)
     return listOf(
         NativeMenuItem(
             if (starred) strings.unstar else strings.star,
@@ -196,10 +200,10 @@ internal fun articleRowMenuEntries(
             if (read) strings.markAsUnread else strings.markAsRead,
             NativeMenuShortcut(Key.U, ctrl = true, shift = true),
         ) { onSetRead(!read) },
-        NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = urlUsable) {
+        NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = copyEnabled) {
             onCopyUrl()
         },
-        NativeMenuItem(strings.openInBrowser, NativeMenuShortcut(Key.O, ctrl = true, shift = true), enabled = urlUsable) {
+        NativeMenuItem(strings.openInBrowser, NativeMenuShortcut(Key.O, ctrl = true, shift = true), enabled = openEnabled) {
             onOpenInBrowser()
         },
     )

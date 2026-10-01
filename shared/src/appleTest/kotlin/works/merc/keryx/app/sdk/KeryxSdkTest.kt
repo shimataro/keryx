@@ -172,9 +172,15 @@ class KeryxSdkTest {
                 onHome = true,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
                 canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                hasSelectedFeed = false,
+                textInputFocused = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
             )
             assertTrue(onHome.addItemsEnabled)
 
@@ -182,9 +188,15 @@ class KeryxSdkTest {
                 onHome = false,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
                 canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                hasSelectedFeed = false,
+                textInputFocused = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
             )
             assertFalse(awayFromHome.addItemsEnabled)
 
@@ -193,9 +205,15 @@ class KeryxSdkTest {
                 onHome = onHome,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
                 canSyncNow = canSyncNow,
                 searchActive = false,
                 unreadOnly = false,
+                hasSelectedFeed = false,
+                textInputFocused = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
             ).syncEnabled
             assertTrue(syncEnabled(onHome = true, canSyncNow = true))
             assertFalse(syncEnabled(onHome = true, canSyncNow = false))

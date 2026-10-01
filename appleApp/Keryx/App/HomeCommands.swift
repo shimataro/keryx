@@ -99,17 +99,17 @@ struct HomeCommands: Commands {
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(!state.articleActionsEnabled)
                 Button(L("menu_article_open_in_browser")) {
-                    if let url = home.selectedArticle?.url { openInBrowser(url) }
+                    openInBrowserIfAllowed(home.selectedArticle?.url)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
-                .disabled(!state.urlActionsEnabled)
+                .disabled(!state.openInBrowserEnabled)
                 Button(L("menu_article_copy_url")) {
                     if let article = home.selectedArticle {
                         home.copyArticleUrl(url: article.url, articleId: article.id)
                     }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(!state.urlActionsEnabled)
+                .disabled(!state.copyUrlEnabled)
             }
         }
 
@@ -172,11 +172,11 @@ struct HomeCommands: Commands {
                         copyToPasteboard(site)
                     }
                 }
-                .disabled(!state.feedSiteUrlActionsEnabled)
+                .disabled(!state.feedSiteCopyEnabled)
                 Button(L("home_open_site")) {
-                    if let site = selectedFeed(home)?.site_url { openInBrowser(site) }
+                    openInBrowserIfAllowed(selectedFeed(home)?.site_url)
                 }
-                .disabled(!state.feedSiteUrlActionsEnabled)
+                .disabled(!state.feedSiteOpenEnabled)
 
                 Divider()
                 Button(renameLabel(home)) { performRename(home) }
@@ -196,7 +196,8 @@ struct HomeCommands: Commands {
     }
 
     /// `sdk.menuState(...)` needs several booleans this app doesn't track anywhere else yet
-    /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`hasRenamableSelection`); resolved the same way
+    /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`selectedFeedSiteCanOpenInBrowser`/
+    /// `hasRenamableSelection`); resolved the same way
     /// `HomeView`'s own rename/delete keyboard handling does, via `resolveFeedListSelectionTarget`
     /// (kept by `HomeObservable.feedListSelectionTarget`). Everything read here is a narrow value
     /// `HomeObservable` only reassigns when it changes, so an article selection alone does not
@@ -207,30 +208,35 @@ struct HomeCommands: Commands {
         let target = selectionTarget(home)
         var hasSelectedFeed = false
         var selectedFeedHasSiteUrl = false
+        var selectedFeedSiteCanOpenInBrowser = false
         if let target, case .feed(let f) = onEnum(of: target) {
             hasSelectedFeed = true
             selectedFeedHasSiteUrl = ArticleListModelKt.hasUsableUrl(url: f.feed.site_url)
+            selectedFeedSiteCanOpenInBrowser = ArticleListModelKt.canOpenInBrowser(url: f.feed.site_url)
         }
         guard let sdk = model.sdk else {
             return MenuUiState(
                 addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, unreadOnlyEnabled: false,
                 unreadOnlyChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
-                articleActionsEnabled: false, urlActionsEnabled: false, refreshAllEnabled: false,
+                articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
+                refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,
-                feedSiteUrlActionsEnabled: false, renameOrDeleteEnabled: false
+                feedSiteCopyEnabled: false, feedSiteOpenEnabled: false, renameOrDeleteEnabled: false
             )
         }
         return sdk.menuState(
             onHome: !model.needsSetup,
             hasSelectedArticle: home.hasSelectedArticle,
             selectedArticleHasUrl: home.selectedArticleHasUsableUrl,
+            selectedArticleCanOpenInBrowser: home.selectedArticleCanOpenInBrowser,
             canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
             hasSelectedFeed: hasSelectedFeed,
             textInputFocused: home.textInputFocused,
             hasRenamableSelection: target != nil,
-            selectedFeedHasSiteUrl: selectedFeedHasSiteUrl
+            selectedFeedHasSiteUrl: selectedFeedHasSiteUrl,
+            selectedFeedSiteCanOpenInBrowser: selectedFeedSiteCanOpenInBrowser
         )
     }
 

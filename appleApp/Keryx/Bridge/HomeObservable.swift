@@ -107,6 +107,8 @@ final class HomeObservable: ObservableAssignment {
     private(set) var hasSelectedArticle = false
     private(set) var selectedArticleId: String?
     private(set) var selectedArticleHasUsableUrl = false
+    /// `canOpenInBrowser` for the selected article's URL — Open in Browser's own (http(s)) rule.
+    private(set) var selectedArticleCanOpenInBrowser = false
     /// The sidebar item the selected filter resolves to (`resolveFeedListSelectionTarget`).
     private(set) var feedListSelectionTarget: FeedListSelectionTarget?
     private(set) var selectedFeedName: String?
@@ -471,6 +473,7 @@ final class HomeObservable: ObservableAssignment {
             assignIfChanged(\.hasSelectedArticle, v != nil)
             assignIfChanged(\.selectedArticleId, v?.id)
             assignIfChanged(\.selectedArticleHasUsableUrl, ArticleListModelKt.hasUsableUrl(url: v?.url))
+            assignIfChanged(\.selectedArticleCanOpenInBrowser, ArticleListModelKt.canOpenInBrowser(url: v?.url))
         }
     }
 

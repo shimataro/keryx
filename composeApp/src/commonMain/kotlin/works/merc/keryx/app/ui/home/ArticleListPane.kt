@@ -68,7 +68,6 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
-import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
@@ -153,6 +152,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onCopyArticleUrl An article row's "Copy URL" context-menu item. `HomeScreen` routes it
  *   through the same handler as the keyboard shortcut and menu bar so the reader shows the same
  *   copied feedback; the default copies with no feedback.
+ * @param onOpenArticleInBrowser An article row's "Open in Browser" context-menu item — the same
+ *   guarded handler ([openInBrowserIfAllowed]) as the reader's button, the keyboard shortcut and the
+ *   menu bar, so only an http(s) URL is ever opened.
  */
 @Composable
 fun ArticleListPane(
@@ -169,6 +171,7 @@ fun ArticleListPane(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
+    onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
     // a real touch-primary platform to run on; every real call site relies on the default.
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
@@ -376,6 +379,7 @@ fun ArticleListPane(
         onSetRead = { article, read -> vm.setRead(article, read) },
         onSetStarred = { article, starred -> vm.setStarred(article, starred) },
         onCopyArticleUrl = onCopyArticleUrl,
+        onOpenArticleInBrowser = onOpenArticleInBrowser,
         modifier = modifier,
         listState = listState,
         returnRipplePulse = branchReturnRipplePulse,
@@ -649,6 +653,7 @@ internal fun ArticleListPaneContent(
     onSetRead: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
+    onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
@@ -788,7 +793,7 @@ internal fun ArticleListPaneContent(
                             onSetRead = { read -> onSetRead(article, read) },
                             onSetStarred = { starred -> onSetStarred(article, starred) },
                             onCopyUrl = { onCopyArticleUrl(article) },
-                            onOpenInBrowser = { BrowserOpener.open(article.url) },
+                            onOpenInBrowser = { onOpenArticleInBrowser(article) },
                             titleOverride = titleMarkedById?.get(article.id)?.let {
                                 markedToAnnotatedString(it.ifBlank { article.title })
                             },

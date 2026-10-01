@@ -267,8 +267,8 @@ internal fun buildAppMenuTree(
         AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, AppMenuShortcut.ToggleRead, actions.toggleRead),
         AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, AppMenuShortcut.ToggleStar, actions.toggleStar),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.openInBrowser, ui.urlActionsEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
-        AppMenuNode.Item(labels.copyUrl, ui.urlActionsEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),
+        AppMenuNode.Item(labels.openInBrowser, ui.openInBrowserEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
+        AppMenuNode.Item(labels.copyUrl, ui.copyUrlEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),
     )
 
     val feedItems = listOf(
@@ -314,8 +314,8 @@ internal fun buildAppMenuTree(
         ),
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedCopyUrl, ui.feedActionsEnabled, onClick = actions.copyFeedUrl),
-        AppMenuNode.Item(labels.feedCopySiteUrl, ui.feedSiteUrlActionsEnabled, onClick = actions.copyFeedSiteUrl),
-        AppMenuNode.Item(labels.feedOpenSite, ui.feedSiteUrlActionsEnabled, onClick = actions.openFeedSite),
+        AppMenuNode.Item(labels.feedCopySiteUrl, ui.feedSiteCopyEnabled, onClick = actions.copyFeedSiteUrl),
+        AppMenuNode.Item(labels.feedOpenSite, ui.feedSiteOpenEnabled, onClick = actions.openFeedSite),
         // Rename/Unsubscribe act on whatever feed list item is selected (feed, folder or tag), so
         // unlike the items above they use renameOrDeleteEnabled, not feedActionsEnabled.
         AppMenuNode.Separator,

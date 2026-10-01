@@ -59,7 +59,6 @@ import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.platform.BackHandler
-import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -281,7 +280,7 @@ fun HomeScreen() {
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
     // selection at call time (vm.selectedArticle.value) so a command collected once stays correct.
     fun openSelectedInBrowser() {
-        vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let { BrowserOpener.open(it) }
+        openInBrowserIfAllowed(vm.selectedArticle.value?.url)
     }
     fun copySelectedUrl() {
         vm.selectedArticle.value?.let { urlCopier.copy(it.url, it.id) }
@@ -536,6 +535,7 @@ fun HomeScreen() {
                             notifVm = notifVm,
                             onAddFeedClick = { showAddFeed = true },
                             onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
+                            onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -546,6 +546,7 @@ fun HomeScreen() {
                             onActivated = { activatePane(HomePane.ArticleDetail) },
                             copyPulse = urlCopier.pulse,
                             onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                            onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
                         )
                     }
                     }
@@ -659,13 +660,15 @@ fun HomeScreen() {
                                     returnRipplePulse = articleReturnRipplePulse,
                                     onAddFeedClick = { showAddFeed = true },
                                     onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
+                                    onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,
                                     modifier = paneModifier,
                                     onActivated = { activatePane(HomePane.ArticleDetail) },
                                     copyPulse = urlCopier.pulse,
-                            onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                                    onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                                    onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
                                     // Dual the reader is a permanent neighbor of the article list,

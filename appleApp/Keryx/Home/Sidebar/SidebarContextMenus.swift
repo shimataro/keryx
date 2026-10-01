@@ -79,7 +79,8 @@ enum SidebarContextMenus {
         } + [
             UIAction(title: L("home_new_tag"), image: UIImage(systemName: "plus")) { _ in dialogs.creatingTagForFeed = feed },
         ])
-        let siteAttributes: UIMenuElement.Attributes = ArticleListModelKt.hasUsableUrl(url: feed.site_url) ? [] : .disabled
+        let siteCopyAttributes: UIMenuElement.Attributes = ArticleListModelKt.hasUsableUrl(url: feed.site_url) ? [] : .disabled
+        let siteOpenAttributes: UIMenuElement.Attributes = ArticleListModelKt.canOpenInBrowser(url: feed.site_url) ? [] : .disabled
         // The warning icon in the row has no hover tooltip on touch, so an erroring feed's menu says
         // why: the same two localized reasons as the row's accessibility label (never the raw
         // `last_error` text).
@@ -93,11 +94,11 @@ enum SidebarContextMenus {
             ]),
             UIMenu(options: .displayInline, children: [
                 UIAction(title: L("home_copy_feed_url"), image: UIImage(systemName: "link")) { _ in copyToPasteboard(feed.url) },
-                UIAction(title: L("home_copy_site_url"), image: UIImage(systemName: "doc.on.doc"), attributes: siteAttributes) { _ in
+                UIAction(title: L("home_copy_site_url"), image: UIImage(systemName: "doc.on.doc"), attributes: siteCopyAttributes) { _ in
                     if let site = feed.site_url { copyToPasteboard(site) }
                 },
-                UIAction(title: L("home_open_site"), image: UIImage(systemName: "safari"), attributes: siteAttributes) { _ in
-                    if let site = feed.site_url { openInBrowser(site) }
+                UIAction(title: L("home_open_site"), image: UIImage(systemName: "safari"), attributes: siteOpenAttributes) { _ in
+                    openInBrowserIfAllowed(feed.site_url)
                 },
             ]),
             UIMenu(options: .displayInline, children: [

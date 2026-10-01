@@ -80,7 +80,6 @@ import works.merc.keryx.app.presentation.home.reorderTargetWithinScope
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
-import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
@@ -589,7 +588,7 @@ internal fun FeedListPane(
                                 onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                                 onCopyFeedUrl = { copyUrl(feed.url) },
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
-                                onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
+                                onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                 isTouchPrimary = isTouchPrimary,
                                 onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
                                 onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
@@ -758,7 +757,7 @@ internal fun FeedListPane(
                                     onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                                     onCopyFeedUrl = { copyUrl(feed.url) },
                                     onCopySiteUrl = { feed.site_url?.let(copyUrl) },
-                                    onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
+                                    onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                     isTouchPrimary = isTouchPrimary,
                                     onMoveUp = null,
                                     onMoveDown = null,

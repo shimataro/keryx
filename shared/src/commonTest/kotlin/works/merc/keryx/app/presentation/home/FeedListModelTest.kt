@@ -356,6 +356,19 @@ class FeedListModelTest {
     }
 
     @Test
+    fun canOpenInBrowserAcceptsOnlyHttpAndHttps() {
+        for (url in listOf(
+            null, "", "   ", "file:///etc/passwd", "javascript:alert(1)", "keryx://oauth2/callback",
+            "mailto:someone@example.com", "/relative/path", "example.com/no-scheme", "ftp://example.com",
+        )) {
+            assertEquals(false, canOpenInBrowser(url), "should reject $url")
+        }
+        for (url in listOf("https://x", "http://x", "HTTP://X", "HtTpS://example.com/a?b=c", "  https://padded.example  ")) {
+            assertEquals(true, canOpenInBrowser(url), "should accept $url")
+        }
+    }
+
+    @Test
     fun groupFeedsByFolderReturnsOnePairPerFolderInOrderPlusUnassignedLast() {
         val folders = listOf(folder("d1"), folder("d2"))
         val feeds = listOf(feed("f1", folderId = "d1"), feed("f2"))

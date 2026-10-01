@@ -35,10 +35,12 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
+import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.feedsForTag
 import works.merc.keryx.app.presentation.home.groupFeedsByFolder
 import works.merc.keryx.app.presentation.home.renameHomeKey
@@ -109,6 +111,17 @@ internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
  * reading this local (the reader, say) is on screen.
  */
 internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState?> { null }
+
+/**
+ * The one handler behind every route to "Open in browser" (an article's URL: the reader's button,
+ * the menu bar, the keyboard shortcut, the article row's context menu) and "Open site" (a feed's
+ * site URL: the feed row's context menu, the menu bar): opens [url] only when [canOpenInBrowser]
+ * allows it, so a non-http(s) link from the feed is never handed to the OS, whichever route asked.
+ * The routes' enablement uses the same predicate.
+ */
+internal fun openInBrowserIfAllowed(url: String?) {
+    url?.takeIf(::canOpenInBrowser)?.let(BrowserOpener::open)
+}
 
 /**
  * Click-to-focus for a pane's background — on a mouse+keyboard platform there is no OS-level

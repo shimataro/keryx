@@ -104,23 +104,27 @@ class KeryxSdk private constructor(private val koin: Koin) {
     /**
      * Enabled/checked state for a menu/`Commands` item — see
      * [works.merc.keryx.app.presentation.menu.computeMenuUiState]'s own doc for what each
-     * parameter gates.
+     * parameter gates. Every parameter is explicit (no defaults), so a Swift caller can't silently
+     * leave one at a value that enables an item it shouldn't.
      */
     fun menuState(
         onHome: Boolean,
         hasSelectedArticle: Boolean,
         selectedArticleHasUrl: Boolean,
+        selectedArticleCanOpenInBrowser: Boolean,
         canSyncNow: Boolean,
         searchActive: Boolean,
         unreadOnly: Boolean,
-        hasSelectedFeed: Boolean = false,
-        textInputFocused: Boolean = false,
-        hasRenamableSelection: Boolean = false,
-        selectedFeedHasSiteUrl: Boolean = false,
+        hasSelectedFeed: Boolean,
+        textInputFocused: Boolean,
+        hasRenamableSelection: Boolean,
+        selectedFeedHasSiteUrl: Boolean,
+        selectedFeedSiteCanOpenInBrowser: Boolean,
     ): MenuUiState = computeMenuUiState(
         onHome = onHome,
         hasSelectedArticle = hasSelectedArticle,
         selectedArticleHasUrl = selectedArticleHasUrl,
+        selectedArticleCanOpenInBrowser = selectedArticleCanOpenInBrowser,
         activity = homeViewModel.activity.value,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
@@ -129,6 +133,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
         textInputFocused = textInputFocused,
         hasRenamableSelection = hasRenamableSelection,
         selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
+        selectedFeedSiteCanOpenInBrowser = selectedFeedSiteCanOpenInBrowser,
     )
 
     /** A fresh add-feed state machine, one per add-feed sheet. */

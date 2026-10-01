@@ -5,6 +5,8 @@ import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.NativeMenuItem
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Covers [articleRowMenuEntries]: the article row's context menu is labelled from the read state
@@ -24,11 +26,11 @@ class ArticleRowMenuTest {
         zone = TimeZone.UTC,
     )
 
-    private fun article(read: Boolean, starred: Boolean = false) = ArticleListRow(
+    private fun article(read: Boolean, starred: Boolean = false, url: String = "https://example.com/a1") = ArticleListRow(
         id = "a1",
         feed_id = "f1",
         title = "Article",
-        url = "https://example.com/a1",
+        url = url,
         published_at = 0L,
         created_at = 0L,
         is_read = if (read) 1L else 0L,
@@ -93,5 +95,18 @@ class ArticleRowMenuTest {
         starred.first().onClick()
 
         assertEquals(listOf(true, false), requested)
+    }
+
+    @Test
+    fun openIsDisabledForANonHttpUrlWhileCopyStaysEnabled() {
+        // Same rules as every other route: any non-blank URL can be copied, only http(s) is opened.
+        for (url in listOf("file:///etc/passwd", "javascript:alert(1)", "/relative/path")) {
+            val menu = entries(article(read = true, url = url), selectedByOpen = false)
+
+            assertTrue(menu.single { it.label == "Copy URL" }.enabled, "copy for $url")
+            assertFalse(menu.single { it.label == "Open in Browser" }.enabled, "open for $url")
+        }
+        val http = entries(article(read = true), selectedByOpen = false)
+        assertTrue(http.single { it.label == "Open in Browser" }.enabled)
     }
 }

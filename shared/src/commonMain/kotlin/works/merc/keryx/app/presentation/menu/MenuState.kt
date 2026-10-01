@@ -25,8 +25,11 @@ data class MenuUiState(
      * article-detail toolbar stays clickable for the selected article regardless of which pane
      * has keyboard focus, so the menu mirrors that. */
     val articleActionsEnabled: Boolean,
-    /** Open in browser / copy URL — require a selected article that has a URL. */
-    val urlActionsEnabled: Boolean,
+    /** Copy URL — requires a selected article with a non-blank URL (`hasUsableUrl`). */
+    val copyUrlEnabled: Boolean,
+    /** Open in browser — requires a selected article whose URL is http(s) (`canOpenInBrowser`), a
+     * stricter rule than [copyUrlEnabled]: any other scheme is never handed to the OS. */
+    val openInBrowserEnabled: Boolean,
     val refreshAllEnabled: Boolean,
     val syncEnabled: Boolean,
     val openSettingsEnabled: Boolean,
@@ -35,11 +38,14 @@ data class MenuUiState(
      * keyboard focus. Not gated on the feed list pane holding focus, matching the feed row's own
      * context menu, which acts on the row regardless of pane focus. */
     val feedActionsEnabled: Boolean,
-    /** Copy site URL / open site for the selected feed — like [feedActionsEnabled] but
-     * additionally requires the feed to actually have a (non-blank) site URL, mirroring
-     * [urlActionsEnabled]'s relationship to [articleActionsEnabled]. "Copy feed URL" doesn't need
-     * this: a feed's own subscription URL is never blank, so it uses [feedActionsEnabled] directly. */
-    val feedSiteUrlActionsEnabled: Boolean,
+    /** Copy site URL for the selected feed — like [feedActionsEnabled] but additionally requires
+     * the feed to actually have a (non-blank) site URL, mirroring [copyUrlEnabled]'s relationship to
+     * [articleActionsEnabled]. "Copy feed URL" doesn't need this: a feed's own subscription URL is
+     * never blank, so it uses [feedActionsEnabled] directly. */
+    val feedSiteCopyEnabled: Boolean,
+    /** Open site for the selected feed — like [feedSiteCopyEnabled] but requires the site URL to be
+     * http(s) (`canOpenInBrowser`), the same rule as [openInBrowserEnabled]. */
+    val feedSiteOpenEnabled: Boolean,
     /** Rename/Delete — unlike [feedActionsEnabled] these act on whatever feed list item is
      * selected (feed, folder or tag: `resolveFeedListSelectionTarget` resolves it and
      * `FeedListPane` opens the matching dialog), so they only require *some* renamable selection.
@@ -52,7 +58,10 @@ data class MenuUiState(
  * Computes [MenuUiState] from the current app/UI state. Pure so it can be tested directly.
  *
  * Most items are gated on [onHome] (their targets live in Home's composition). Article/URL actions
- * additionally require a selection (and a non-blank URL for the latter). Sort can't be toggled
+ * additionally require a selection; copying a URL requires it to be non-blank
+ * ([selectedArticleHasUrl] / [selectedFeedHasSiteUrl], `hasUsableUrl`), opening it in the browser
+ * requires it to be http(s) ([selectedArticleCanOpenInBrowser] / [selectedFeedSiteCanOpenInBrowser],
+ * `canOpenInBrowser`). The open inputs deliberately have no default, so no caller can forget them. Sort can't be toggled
  * while the Search scope is active (search order is fixed to relevance rank). Refresh is
  * suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while a refresh, a sync, or a
  * refresh-then-sync cycle (which also covers the gap between the two), is already in flight. Sync
@@ -67,6 +76,7 @@ fun computeMenuUiState(
     onHome: Boolean,
     hasSelectedArticle: Boolean,
     selectedArticleHasUrl: Boolean,
+    selectedArticleCanOpenInBrowser: Boolean,
     activity: ActivitySnapshot,
     canSyncNow: Boolean,
     searchActive: Boolean,
@@ -75,6 +85,7 @@ fun computeMenuUiState(
     textInputFocused: Boolean = false,
     hasRenamableSelection: Boolean = false,
     selectedFeedHasSiteUrl: Boolean = false,
+    selectedFeedSiteCanOpenInBrowser: Boolean,
 ): MenuUiState = MenuUiState(
     addItemsEnabled = onHome,
     opmlEnabled = onHome,
@@ -84,11 +95,13 @@ fun computeMenuUiState(
     toggleSortEnabled = onHome && !searchActive,
     markAllReadEnabled = onHome,
     articleActionsEnabled = onHome && hasSelectedArticle,
-    urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
+    copyUrlEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
+    openInBrowserEnabled = onHome && hasSelectedArticle && selectedArticleCanOpenInBrowser,
     refreshAllEnabled = onHome && activity.idle,
     syncEnabled = onHome && canSyncNow,
     openSettingsEnabled = onHome,
     feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
     renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
-    feedSiteUrlActionsEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
+    feedSiteCopyEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
+    feedSiteOpenEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedSiteCanOpenInBrowser,
 )
