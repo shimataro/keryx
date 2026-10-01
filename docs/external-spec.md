@@ -312,7 +312,11 @@ has finished too, not just the feed fetches. A pull made while a refresh or sync
 background refresh, say) starts nothing new; the indicator simply stays up until the running one
 finishes. The same refresh is also reachable without the gesture, wherever the gesture itself is
 available: as a TalkBack custom action on the list ("Refresh this list"), and from a physical
-keyboard with Ctrl+Shift+R.
+keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width screen
+shows the reader alone, and not while the feed-list drawer covers the list. On desktop the same
+chord is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a different
+platform (desktop has no pull gesture to mirror, and its menu bar already owns the chord), not two
+routes to one action.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

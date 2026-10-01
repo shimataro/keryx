@@ -1219,6 +1219,16 @@ emulator that it really appears from every route:
 - On API 33+, none of those routes shows a Snackbar from the app (only the OS's own clipboard
   confirmation).
 
+### (Android) Ctrl+Shift+R refresh-list shortcut
+
+`HomePaneLayoutTest` covers `articleListOnScreen`; confirm on an emulator with a hardware keyboard:
+
+- With the article list on screen (phone or tablet width, and a large tablet's 3-pane layout), Ctrl+Shift+R
+  shows the pull-to-refresh indicator and refreshes the selected list's feeds, as a pull does.
+- At phone width with an article open (the reader alone), Ctrl+Shift+R does nothing. Open the feed-list
+  drawer at phone or tablet width: Ctrl+Shift+R does nothing until the drawer is closed again.
+- While search results are showing, Ctrl+Shift+R does nothing (as before).
+
 ### (Android) Reordering with TalkBack while renaming
 
 `FeedListDragTest.kt` covers that no reorder action is exposed while a row is being renamed; confirm with

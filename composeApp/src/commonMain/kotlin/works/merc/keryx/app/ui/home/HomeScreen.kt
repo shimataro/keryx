@@ -444,9 +444,13 @@ fun HomeScreen() {
                     onFeedListDelete = if (feedListKeysActive) ({ feedListDeleteRequestId++ }) else null,
                     onSearch = { focusSearch() },
                     onKeyboardEngaged = { keyboardEngaged = true },
-                    // Same rule the article list's own pull gesture uses, so the shortcut exists
-                    // exactly where the gesture does.
-                    onRefreshList = if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) {
+                    // Same rule the article list's own pull gesture uses, plus the list actually
+                    // being on screen (not the reader alone, not behind the open drawer), so the
+                    // shortcut exists exactly where the gesture can be made.
+                    onRefreshList = if (
+                        pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty()) &&
+                        articleListOnScreen(paneLayout, focusedPane, feedDrawerOpen)
+                    ) {
                         vm::pullToRefresh
                     } else {
                         null

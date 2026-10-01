@@ -14,6 +14,7 @@ import works.merc.keryx.app.core.WINDOW_DEFAULT_WIDTH
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class HomePaneLayoutTest {
@@ -450,6 +451,28 @@ class HomePaneLayoutTest {
                     "pane=$pane textInputFocused=$textInputFocused",
                 )
             }
+        }
+    }
+
+    // --- articleListOnScreen ---
+
+    @Test
+    fun articleListOnScreenFollowsTheVisiblePanesAndTheDrawer() {
+        // Triple: always on screen (no drawer there, so feedDrawerOpen is always false).
+        for (pane in HomePane.entries) {
+            assertTrue(articleListOnScreen(PaneLayout.Triple, pane, feedDrawerOpen = false), "Triple pane=$pane")
+        }
+        // Dual: list and reader side by side at every depth — unless the drawer covers them.
+        for (pane in HomePane.entries) {
+            assertTrue(articleListOnScreen(PaneLayout.Dual, pane, feedDrawerOpen = false), "Dual pane=$pane")
+            assertFalse(articleListOnScreen(PaneLayout.Dual, pane, feedDrawerOpen = true), "Dual drawer pane=$pane")
+        }
+        // Single: the list at depth 1–2, the reader alone at depth 3; the drawer hides either.
+        assertTrue(articleListOnScreen(PaneLayout.Single, HomePane.FeedList, feedDrawerOpen = false))
+        assertTrue(articleListOnScreen(PaneLayout.Single, HomePane.ArticleList, feedDrawerOpen = false))
+        assertFalse(articleListOnScreen(PaneLayout.Single, HomePane.ArticleDetail, feedDrawerOpen = false))
+        for (pane in HomePane.entries) {
+            assertFalse(articleListOnScreen(PaneLayout.Single, pane, feedDrawerOpen = true), "Single drawer pane=$pane")
         }
     }
 }

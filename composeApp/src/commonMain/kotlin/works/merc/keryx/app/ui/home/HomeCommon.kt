@@ -430,7 +430,10 @@ val SearchHighlightSpanStyle = SpanStyle(
  * platform (a mouse has no pull gesture, and desktop's own app menu already owns the same
  * shortcut), never over search results (refreshing the feeds behind a result list isn't what the
  * gesture means there), and never with no feeds at all (nothing to refresh). The single rule both
- * `ArticleListPane` and `HomeScreen`'s keyboard handling read, so the two can never disagree.
+ * `ArticleListPane` and `HomeScreen`'s keyboard handling read, so the two can never disagree. The
+ * keyboard shortcut additionally requires the list to be on screen (`articleListOnScreen`): the
+ * gesture and the accessibility action live on the list itself and so can't be reached while it is
+ * hidden, but a key press reaches `HomeScreen` regardless.
  */
 internal fun pullRefreshAvailable(isTouchPrimary: Boolean, searchActive: Boolean, hasNoFeeds: Boolean): Boolean =
     isTouchPrimary && !searchActive && !hasNoFeeds

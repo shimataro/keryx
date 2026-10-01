@@ -56,8 +56,8 @@ enum class HomeTextInput { SearchField, RowNameEditor }
  *   read/star state, network) that shouldn't fire from an easily-mistyped bare key.
  * - Ctrl+Shift+R (no Meta) : refresh the article list's current selection — the hardware-keyboard
  *   counterpart of the touch-only pull-to-refresh gesture, handled only when [onRefreshList] is
- *   non-null. `HomeScreen` passes it only where `pullRefreshAvailable` holds, which is never on
- *   desktop, so it never competes with desktop's own Ctrl+Shift+R app-menu accelerator
+ *   non-null. `HomeScreen` passes it only where `pullRefreshAvailable` holds and the article list
+ *   is on screen (`articleListOnScreen`) — never on desktop, so it never competes with desktop's own Ctrl+Shift+R app-menu accelerator
  *   (refresh-selected-feed); a `null` [onRefreshList] leaves the key unconsumed.
  * - J / K / F2 / Return / Delete / Backspace all require neither Ctrl nor Meta to be held, so they
  *   never shadow the OS's own Ctrl/Cmd+<key> bindings
