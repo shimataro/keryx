@@ -203,7 +203,7 @@ struct ArticleListView: View {
             Button {
                 home.viewModel.markAllRead()
             } label: {
-                Label(L("home_mark_all_read"), systemImage: "checklist.checked")
+                Label(L("home_mark_all_read"), systemImage: "checkmark.circle")
             }
             .help(L("home_mark_all_read"))
         }

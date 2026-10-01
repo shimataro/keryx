@@ -130,7 +130,7 @@ struct ArticleDetailView: View {
             Button {
                 home.viewModel.markSelectedUnread()
             } label: {
-                Label(L("article_mark_as_unread"), systemImage: "envelope.badge")
+                Label(L("article_mark_as_unread"), systemImage: "circle")
             }
             .disabled(article == nil)
             .help(L("article_mark_as_unread"))
@@ -140,7 +140,7 @@ struct ArticleDetailView: View {
                 copyToPasteboard(article.url)
                 home.pulseCopy()
             } label: {
-                Label(L("article_copy_url"), systemImage: copyConfirmed ? "checkmark" : "link")
+                Label(L("article_copy_url"), systemImage: copyConfirmed ? "checkmark" : "doc.on.doc")
             }
             .disabled(!hasUsableUrl)
             .help(L("article_copy_url"))
@@ -148,7 +148,7 @@ struct ArticleDetailView: View {
             Button {
                 if let article { openInBrowser(article.url) }
             } label: {
-                Label(L("article_open_in_browser"), systemImage: "safari")
+                Label(L("article_open_in_browser"), systemImage: "globe")
             }
             .disabled(!hasUsableUrl)
             .help(L("article_open_in_browser"))

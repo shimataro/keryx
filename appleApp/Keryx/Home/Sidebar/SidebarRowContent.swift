@@ -20,7 +20,7 @@ struct SidebarRowStaticContent: Equatable, Sendable {
     var isErroring = false
     var isGone = false
 
-    static var all: SidebarRowStaticContent { SidebarRowStaticContent(title: L("home_all_feeds"), icon: .symbol("tray.full")) }
+    static var all: SidebarRowStaticContent { SidebarRowStaticContent(title: L("home_all_feeds"), icon: .symbol("doc.text.fill")) }
     static var starred: SidebarRowStaticContent { SidebarRowStaticContent(title: L("home_starred"), icon: .symbol("star")) }
 }
 
