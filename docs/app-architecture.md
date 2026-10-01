@@ -1399,8 +1399,12 @@ The macOS article list is an `NSTableView` with one fixed row height
 - **Updates.** A change to the set or order of rows reloads the table and puts the top visible row
   back where it was on screen from its index alone (`Home/ArticleTableLayout.swift`, tested in
   `KeryxTests`), so rows inserted above it land out of view — which the new-articles pill relies on
-  (`freshSideUnseenCount`). A filter switch goes back to the top instead. A change that keeps the
-  rows re-renders only the visible cells whose `ArticleRowView` differs.
+  (`freshSideUnseenCount`). A filter switch goes back to the top instead. The table is laid out
+  between the reload and the scroll (`Home/ArticleTableReload.swift`): `reloadData()` defers
+  shrinking the table's frame, and a scroll made before that lands is shifted again once it does,
+  leaving the list scrolled above its first row — fewer rows (a refresh dropping the read articles
+  kept on screen, hide-read) then float mid-list over blank space. A change that keeps the rows
+  re-renders only the visible cells whose `ArticleRowView` differs.
 - **Everything else stays SwiftUI's.** Rows are the same hosted `ArticleRowView`s: selection, clicks
   and context menus are theirs. The table takes the first responder for the pane focus, as the
   `List`'s own table did, but passes every key on up the responder chain, so `HomeView`'s key
