@@ -147,5 +147,6 @@ fun presentationModule(): Module = module {
     single { PreferencesController(get()) }
     single { OpmlTransfer(get(), get(), get(), get()) }
     // Every OPML route (Data tab, File menu, opened .opml file) shares this one busy/result state.
-    single { OpmlTransferController(get()) }
+    // Imports run on the app scope (above), so KeryxSdk.close() waits for/cancels one from any UI.
+    single { OpmlTransferController(get(), get()) }
 }

@@ -70,8 +70,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   center); OpmlTransferController — the one OPML busy flag,
                   last result and pending request (`OpmlRequest`) every route and UI shares: the File
                   menu only `request`s, Settings ▸ Data carries the request out (`consumeRequest`,
-                  handed out only while nothing runs), and a result is kept until the Data tab shows
-                  it), menu/ (MenuUiState + computeMenuUiState — enabled/
+                  handed out only while nothing runs), a result is kept until the Data tab shows
+                  it, and an import runs on the app scope, so `KeryxSdk.close()` waits for — and
+                  cancels — one started from any UI), menu/ (MenuUiState + computeMenuUiState — enabled/
                   checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
                   than Compose's own `Screen` type), Formatting (formatTimestamp, articleMetaText —
                   the reader's "author · date" meta line, shared by Compose's 3-pane reader and the

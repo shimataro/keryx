@@ -5,12 +5,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -421,24 +417,5 @@ class CloudSyncController(
 
     private companion object {
         const val TAG = "CloudSyncController"
-    }
-}
-
-/**
- * A read-only [StateFlow] whose [value] is [compute]d from other state flows on every read, and
- * whose collectors receive [changes] (deduplicated) — a derived value that, unlike one produced by
- * `stateIn`, can never be observed out of step with its inputs.
- */
-@OptIn(ExperimentalForInheritanceCoroutinesApi::class)
-private class DerivedStateFlow<T>(
-    private val compute: () -> T,
-    private val changes: Flow<T>,
-) : StateFlow<T> {
-    override val value: T get() = compute()
-    override val replayCache: List<T> get() = listOf(value)
-
-    override suspend fun collect(collector: FlowCollector<T>): Nothing {
-        changes.distinctUntilChanged().collect(collector)
-        awaitCancellation()
     }
 }

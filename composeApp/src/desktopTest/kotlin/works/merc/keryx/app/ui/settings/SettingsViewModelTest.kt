@@ -167,6 +167,10 @@ private class CancellingDispatcher : CoroutineDispatcher() {
     }
 }
 
+private const val ONE_FEED_OPML = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
+private const val TWO_FEED_OPML =
+    """<opml><body><outline text="A" xmlUrl="https://ex.com/a"/><outline text="B" xmlUrl="https://ex.com/b"/></body></opml>"""
+
 /**
  * [SettingsViewModel] is now a thin wrapper around [CloudSyncController] / [PreferencesController]
  * / [OpmlTransfer] (each covered by its own test in `:shared`) plus the two things that stay
@@ -239,6 +243,24 @@ class SettingsViewModelTest {
         return FeedFetcher(client)
     }
 
+    /** [succeedingFetcher], with every response held until [gate] completes. */
+    private fun gatedSucceedingFetcher(gate: CompletableDeferred<Unit>): FeedFetcher {
+        val rss = """<?xml version="1.0"?><rss version="2.0"><channel>
+            <title>Feed</title><link>https://ex.com</link>
+            </channel></rss>"""
+        val client = HttpClient(
+            MockEngine {
+                gate.await()
+                respond(rss, HttpStatusCode.OK)
+            },
+        ) {
+            followRedirects = false
+            expectSuccess = false
+            install(HttpTimeout)
+        }
+        return FeedFetcher(client)
+    }
+
     private fun missingFaviconResolver(): FaviconResolver {
         val client = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }) {
             followRedirects = false
@@ -301,7 +323,9 @@ class SettingsViewModelTest {
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
         val opmlTransfer = OpmlTransfer(feedRepository, folderRepository, tagRepository, opmlImporter)
-        val opmlController = OpmlTransferController(opmlTransfer, Dispatchers.Unconfined).also { lastOpmlController = it }
+        // Stands in for the app scope the controller runs imports on.
+        val opmlScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it }
+        val opmlController = OpmlTransferController(opmlTransfer, opmlScope, Dispatchers.Unconfined).also { lastOpmlController = it }
         // Unconfined write dispatcher so saveLocalSettings persists inline.
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
@@ -581,7 +605,7 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun importOpmlRunsTheReadAndImportOnTheInjectedDispatcher() = runTest {
+    fun importOpmlRunsTheFileReadOnTheInjectedDispatcher() = runTest {
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
         val path = FileIO.join(dir, "import-dispatcher.opml")
         FileIO.writeText(path, xml)
@@ -627,6 +651,26 @@ class SettingsViewModelTest {
         awaitTrue { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
         assertFalse(vm.opmlBusy.value)
+    }
+
+    @Test
+    fun importDocumentRunsThroughTheSharedControllerAndRefusesASecondConcurrentRun() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(feedFetcher = gatedSucceedingFetcher(gate))
+
+        vm.importDocument(ONE_FEED_OPML)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+        assertTrue(vm.opmlBusy.value, "busy while the import runs")
+
+        // Refused while the first one still runs: nothing changes, and only one import happens.
+        vm.importDocument(TWO_FEED_OPML)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+
+        gate.complete(Unit)
+        awaitTrue { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
+        assertFalse(vm.opmlBusy.value)
+        assertEquals(1, db.feedsQueries.getAllIncludingDeleted().executeAsList().size)
     }
 
     @Test

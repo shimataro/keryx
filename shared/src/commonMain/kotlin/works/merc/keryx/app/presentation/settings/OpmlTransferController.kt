@@ -2,11 +2,16 @@ package works.merc.keryx.app.presentation.settings
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.Log
 
@@ -54,23 +59,33 @@ sealed interface OpmlRequest {
  *   [consumeRequest], which hands it out only while nothing is running (a request made mid-run is
  *   carried out afterwards). The last request wins.
  *
+ * @param scope The app scope (`KeryxSdk.close()` cancels and joins it), where [importResult] runs
+ *   the import, so closing the SDK waits for — and cancels — an import started from any UI, rather
+ *   than closing the database under one still running in a UI's own scope (a Swift `Task`).
  * @param dispatcher Where [importResult] runs the import (network fetches and DB writes), so a
  *   caller on the main thread (the SwiftUI app) never blocks it.
  */
 class OpmlTransferController(
     private val transfer: OpmlTransfer,
+    private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val _running = MutableStateFlow<OpmlOperation?>(null)
-    private val _busy = MutableStateFlow(false)
     private val _result = MutableStateFlow<OpmlResult?>(null)
     private val _pendingRequest = MutableStateFlow<OpmlRequest?>(null)
 
     /** The operation currently running, or `null`. */
     val running: StateFlow<OpmlOperation?> = _running.asStateFlow()
 
-    /** Whether any OPML operation is running ([running] is non-null). */
-    val busy: StateFlow<Boolean> = _busy.asStateFlow()
+    /**
+     * Whether any OPML operation is running ([running] is non-null). Derived from [running] on every
+     * read (not a copy kept in step by hand, nor a `stateIn` one that would lag it), so the two can
+     * never disagree.
+     */
+    val busy: StateFlow<Boolean> = DerivedStateFlow(
+        compute = { _running.value != null },
+        changes = _running.map { it != null },
+    )
 
     /** The last finished operation's outcome, until [clearResult] (or the next [tryBegin]). */
     val result: StateFlow<OpmlResult?> = _result.asStateFlow()
@@ -99,7 +114,6 @@ class OpmlTransferController(
      */
     fun tryBegin(operation: OpmlOperation): Boolean {
         if (!_running.compareAndSet(null, operation)) return false
-        _busy.value = true
         _result.value = null
         return true
     }
@@ -111,7 +125,6 @@ class OpmlTransferController(
     fun finish(result: OpmlResult?) {
         _result.value = result
         _running.value = null
-        _busy.value = false
     }
 
     /** Clears [result] once a UI has shown it. */
@@ -123,20 +136,34 @@ class OpmlTransferController(
     fun exportDocument(): String = transfer.exportOpml()
 
     /**
-     * Imports [xml] on [dispatcher] and maps the outcome to an [OpmlResult], without touching [busy]
-     * — for a caller that already holds the operation via [tryBegin]. `null` [xml] (the file could
-     * not be read) and any failure are [OpmlResult.ImportFailed]; cancellation propagates.
+     * Imports [xml] and maps the outcome to an [OpmlResult], without touching [busy] — for a caller
+     * that already holds the operation via [tryBegin]. `null` [xml] (the file could not be read) and
+     * any failure are [OpmlResult.ImportFailed]; cancellation propagates.
+     *
+     * The import runs on the app [scope] (on [dispatcher]), not the caller's, so `KeryxSdk.close()` —
+     * which cancels and joins that scope — waits for and cancels an import started from any UI.
+     * A failure is mapped inside that coroutine, so it never reaches the scope's exception handler.
+     * When the caller is cancelled, this waits for the import to actually stop before rethrowing, so
+     * the caller's [finish] never releases [busy] while the import is still writing.
      */
     suspend fun importResult(xml: String?): OpmlResult {
         if (xml == null) return OpmlResult.ImportFailed
+        val job = scope.async {
+            try {
+                val outcome = withContext(dispatcher) { transfer.importOpml(xml) }
+                OpmlResult.Imported(outcome.added, outcome.failed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.warn(TAG, "Failed to import OPML", e)
+                OpmlResult.ImportFailed
+            }
+        }
         return try {
-            val outcome = withContext(dispatcher) { transfer.importOpml(xml) }
-            OpmlResult.Imported(outcome.added, outcome.failed)
+            job.await()
         } catch (e: CancellationException) {
+            withContext(NonCancellable) { job.cancelAndJoin() }
             throw e
-        } catch (e: Throwable) {
-            Log.warn(TAG, "Failed to import OPML", e)
-            OpmlResult.ImportFailed
         }
     }
 

@@ -6,7 +6,10 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.runTest
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
@@ -61,8 +64,12 @@ class OpmlOpenHandlerTest {
         koin = testKoin()
     }
 
+    /** Stands in for the app scope the controller runs imports on; cancelled before the driver closes. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
     @AfterTest
     fun tearDown() {
+        appScope.cancel()
         driver.close()
     }
 
@@ -90,7 +97,7 @@ class OpmlOpenHandlerTest {
         return koinApplication {
             modules(
                 module {
-                    single { OpmlTransferController(transfer, Dispatchers.Unconfined) }
+                    single { OpmlTransferController(transfer, appScope, Dispatchers.Unconfined) }
                     single { NotificationCenter() }
                 },
             )

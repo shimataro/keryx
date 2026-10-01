@@ -183,7 +183,9 @@ class SettingsViewModel(
             var result: OpmlResult? = null
             try {
                 val source = fileSelector.pickOpenFile(opmlFileRequests.import()) ?: return@launch
-                result = withContext(dispatcher) { opmlController.importResult(readOrNull(source)) }
+                // Only the read hops here; importResult dispatches the import itself.
+                val xml = withContext(dispatcher) { readOrNull(source) }
+                result = opmlController.importResult(xml)
             } finally {
                 opmlController.finish(result)
             }
@@ -193,18 +195,11 @@ class SettingsViewModel(
     /**
      * Imports an already-read OPML document (an `.opml` file the app was opened with); `null` [xml]
      * means reading it failed and finishes with [OpmlResult.ImportFailed]. A no-op while any OPML
-     * operation is running.
+     * operation is running. The whole run is [OpmlTransferController.importDocument], the same one
+     * the SwiftUI app calls.
      */
     fun importDocument(xml: String?) {
-        if (!opmlController.tryBegin(OpmlOperation.Importing)) return
-        viewModelScope.launch {
-            var result: OpmlResult? = null
-            try {
-                result = withContext(dispatcher) { opmlController.importResult(xml) }
-            } finally {
-                opmlController.finish(result)
-            }
-        }
+        viewModelScope.launch { opmlController.importDocument(xml) }
     }
 
     /** [PickedFile.readText], with a read failure (other than cancellation) logged and mapped to `null`. */

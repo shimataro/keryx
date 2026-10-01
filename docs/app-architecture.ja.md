@@ -63,7 +63,8 @@
                   設定 ▸ データが実行する。通知センターには何も出さない）。OpmlTransferController——全経路・全 UI が
                   共有する唯一の OPML の busy・直近の結果・保留中の要求（`OpmlRequest`）。ファイルメニューは
                   `request` するだけで、設定 ▸ データがその要求を実行し（`consumeRequest`。何も実行中でない
-                  ときだけ渡す）、結果はデータタブが表示するまで保持される）、menu/（MenuUiState + computeMenuUiState——
+                  ときだけ渡す）、結果はデータタブが表示するまで保持される。インポートはアプリのスコープで動くので、
+                  どの UI から始めたものも `KeryxSdk.close()` が待ち合わせ、キャンセルする）、menu/（MenuUiState + computeMenuUiState——
                   メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
                   `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
                   リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
