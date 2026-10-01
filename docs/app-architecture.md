@@ -1336,6 +1336,10 @@ view on iOS.
   shown for as long as `SidebarDialogState.renamingRowKey` names a row that still exists (the menu, the
   swipe action and the keyboard all go through `startRename`); `SidebarRenameTarget` resolves the row to what
   the sheet edits, and the rules are the shared `inlineRenameValidation`'s. macOS keeps `InlineRenameField`.
+- **Swipe actions.** A feed row swipes to "Unsubscribe" and "Rename", a folder or tag row to "Delete" and
+  "Rename" (`SidebarSwipeActions`, `trailingSwipeActionsConfigurationProvider`). Each only opens the sheet or
+  confirmation its context-menu item does, so a full swipe is off (the first action is the destructive one)
+  and nothing is offered mid-drag.
 - **A tag's color** is changed from its long-press menu: "Change color ▸" opens the swatches as a palette
   (`UIMenu` with `.displayAsPalette`), each named by `TagColorNames` and the current one checked. There is
   no popover on iOS — it is a poor fit on an iPhone — so the tag's color dot is only decoration there

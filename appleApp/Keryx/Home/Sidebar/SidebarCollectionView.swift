@@ -24,6 +24,8 @@ struct SidebarCollectionActions {
     /// A disclosure was toggled by the user.
     var setExpanded: (SidebarItemID, Bool) -> Void
     var menu: (SidebarItemID) -> UIMenu?
+    /// A swipe action was chosen on a row.
+    var performSwipe: (SidebarSwipeAction, SidebarItemID) -> Void
     /// The shared lookup tables the drop rules resolve against.
     var dropIndex: () -> FeedListDropIndex
     /// Applies a drop the shared rules resolved (`applyFeedListDropAction`).
@@ -128,6 +130,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             // A header is the section's first item, so it can be a drop destination; All/Starred
             // have none.
             configuration.headerMode = section == .smart || section == nil ? .none : .firstItemInSection
+            configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+                self?.swipeActionsConfiguration(at: indexPath)
+            }
             return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
         }
     }
@@ -447,6 +452,37 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             return
         }
         actions.select(item)
+    }
+
+    // MARK: - Swipe actions
+
+    /// The trailing swipe actions of the row at `indexPath` (`SidebarSwipeActions`), none mid-drag.
+    /// Every action only opens its sheet or confirmation, so each one reports "not performed" and the
+    /// row closes again instead of animating away before anything was confirmed.
+    private func swipeActionsConfiguration(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard !dragInProgress, let item = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        let contextualActions = SidebarSwipeActions.available(for: item).map { action -> UIContextualAction in
+            let contextual = UIContextualAction(style: action == .rename ? .normal : .destructive, title: Self.swipeTitle(action)) {
+                [weak self] _, _, completion in
+                self?.actions.performSwipe(action, item)
+                completion(false)
+            }
+            contextual.image = UIImage(systemName: action == .rename ? "pencil" : "trash")
+            return contextual
+        }
+        guard !contextualActions.isEmpty else { return nil }
+        let configuration = UISwipeActionsConfiguration(actions: contextualActions)
+        // A full swipe would run the first action, and that is the destructive one.
+        configuration.performsFirstActionWithFullSwipe = false
+        return configuration
+    }
+
+    private static func swipeTitle(_ action: SidebarSwipeAction) -> String {
+        switch action {
+        case .rename: return L("home_rename_feed")
+        case .unsubscribe: return L("home_unsubscribe_menu")
+        case .delete: return L("common_delete")
+        }
     }
 
     // MARK: - Context menus

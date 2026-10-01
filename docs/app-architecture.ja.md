@@ -1324,6 +1324,10 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   `SidebarDialogState.renamingRowKey` が実在する行を指している間表示される（メニュー・スワイプ・キーボードはすべて
   `startRename` を通る）。`SidebarRenameTarget` が行をシートの編集対象に解決し、規則は共有の `inlineRenameValidation`
   に従う。macOS は `InlineRenameField` のまま。
+- **スワイプ操作。** フィード行は「購読解除」と「名前変更」、フォルダー・タグ行は「削除」と「名前変更」を末尾側への
+  スワイプで出す（`SidebarSwipeActions`、`trailingSwipeActionsConfigurationProvider`）。どれもコンテキストメニューの
+  同じ項目と同様に、シートか確認を開くだけなので、フルスワイプは無効にしている（先頭の操作が破壊的なため）。
+  ドラッグ中は何も出さない。
 - **タグの色**は長押しメニューから変える。「色を変更 ▸」を開くと色見本がパレット（`.displayAsPalette` の `UIMenu`）で
   並び、各色は `TagColorNames` の名前を持ち、現在の色にチェックが付く。iOS にポップオーバーはない（iPhone では
   向かないため）。タグの色の丸は飾りにすぎない（macOS は丸のポップオーバー `TagColorPicker` のまま）。新規タグ

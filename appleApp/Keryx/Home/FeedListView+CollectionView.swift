@@ -33,6 +33,7 @@ extension FeedListView {
             select: selectRow,
             setExpanded: setExpanded,
             menu: { SidebarContextMenus.menu(for: $0, home: home, dialogs: dialogs) },
+            performSwipe: performSwipe,
             dropIndex: { dropIndex },
             applyDrop: { applyFeedListDropAction($0, home: home) }
         )
@@ -48,6 +49,22 @@ extension FeedListView {
             focusedPane.wrappedValue = .feedList
         }
         if tap.navigates { onOpenArticleList() }
+    }
+
+    /// A swipe action opens the same sheet or confirmation the row's context menu does.
+    private func performSwipe(_ action: SidebarSwipeAction, _ item: SidebarItemID) {
+        switch (action, item) {
+        case (.rename, _):
+            if let instance = item.rowSelection { dialogs.startRename(instance) }
+        case (.unsubscribe, .feed(let id)), (.unsubscribe, .feedInTag(let id, _)):
+            dialogs.unsubscribingFeed = home.feedsById[id]
+        case (.delete, .folder(let id)):
+            dialogs.deletingFolder = home.folders.first { $0.id == id }
+        case (.delete, .tag(let id)):
+            dialogs.deletingTag = home.tags.first { $0.id == id }
+        default:
+            break
+        }
     }
 
     /// `toggleFolderCollapsed`/`toggleTagExpanded` flip the state, so they only run when the
