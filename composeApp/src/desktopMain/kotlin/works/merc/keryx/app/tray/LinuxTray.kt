@@ -35,6 +35,7 @@ internal fun LinuxTray(
     trayBaseImage: BufferedImage?,
     notificationIcon: BufferedImage?,
     unreadCount: Long,
+    tooltip: String,
     windowVisible: Boolean,
     showLabel: String,
     hideLabel: String,
@@ -94,8 +95,8 @@ internal fun LinuxTray(
     LaunchedEffect(item, pixmaps) {
         item.updateIcon(pixmaps)
     }
-    LaunchedEffect(item, unreadCount) {
-        item.updateToolTip(if (unreadCount > 0) "$APP_NAME ($unreadCount)" else APP_NAME)
+    LaunchedEffect(item, tooltip) {
+        item.updateToolTip(tooltip)
     }
     LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel, updateEntry) {
         menu.updateState(TrayMenuState(toggleLabel, quitLabel, updateEntry))
