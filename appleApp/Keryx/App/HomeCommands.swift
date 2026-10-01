@@ -104,9 +104,8 @@ struct HomeCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(!state.urlActionsEnabled)
                 Button(L("menu_article_copy_url")) {
-                    if let url = home.selectedArticle?.url {
-                        copyToPasteboard(url)
-                        home.pulseCopy()
+                    if let article = home.selectedArticle {
+                        home.copyArticleUrl(url: article.url, articleId: article.id)
                     }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -165,14 +164,12 @@ struct HomeCommands: Commands {
                 Button(L("home_copy_feed_url")) {
                     if let feed = selectedFeed(home) {
                         copyToPasteboard(feed.url)
-                        home.pulseCopy()
                     }
                 }
                 .disabled(!state.feedActionsEnabled)
                 Button(L("home_copy_site_url")) {
                     if let site = selectedFeed(home)?.site_url {
                         copyToPasteboard(site)
-                        home.pulseCopy()
                     }
                 }
                 .disabled(!state.feedSiteUrlActionsEnabled)

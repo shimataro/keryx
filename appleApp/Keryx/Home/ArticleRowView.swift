@@ -17,6 +17,9 @@ struct ArticleRowView: View, Equatable {
     let viewModel: HomeViewModel
     let onSelect: () -> Void
     let onContextMenuSelect: () -> Void
+    /// The shared article-URL copy handler (`HomeObservable.copyArticleUrl`), so the context menu's
+    /// Copy URL flashes the reader's ✓ exactly like the menu bar's command and the reader's button.
+    let onCopyUrl: () -> Void
 
     #if os(macOS)
     private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
@@ -129,9 +132,7 @@ struct ArticleRowView: View, Equatable {
             Button(model.isRead ? Self.markUnreadLabel : Self.markReadLabel) {
                 viewModel.toggleRead(article: model.row)
             }
-            Button(Self.copyUrlLabel) {
-                copyToPasteboard(model.url)
-            }
+            Button(Self.copyUrlLabel, action: onCopyUrl)
             .disabled(!model.hasUsableUrl)
             Button(Self.openInBrowserLabel) {
                 openInBrowser(model.url)

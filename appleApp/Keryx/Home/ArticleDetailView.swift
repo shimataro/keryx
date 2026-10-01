@@ -137,8 +137,7 @@ struct ArticleDetailView: View {
 
             Button {
                 guard let article else { return }
-                copyToPasteboard(article.url)
-                home.pulseCopy()
+                home.copyArticleUrl(url: article.url, articleId: article.id)
             } label: {
                 Label(L("article_copy_url"), systemImage: copyConfirmed ? "checkmark" : "doc.on.doc")
             }

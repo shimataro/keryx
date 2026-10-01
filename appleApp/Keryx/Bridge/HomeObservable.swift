@@ -119,9 +119,10 @@ final class HomeObservable: ObservableAssignment {
     private(set) var syncAuthFailed: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
-    /// Bumped by every URL-copy action (the reader's own button, and eventually the menu bar's/
-    /// keyboard's Copy URL command — see `HomeCommands.swift`) so any UI observing it can flash a
-    /// "copied" confirmation, matching Compose's own `copyPulse` (`HomeScreen.kt`). Not itself a
+    /// Bumped by every copy of the displayed article's URL (`copyArticleUrl`, shared by the reader's
+    /// own button, the menu bar's / keyboard's Copy URL command and the article row's context menu)
+    /// so the reader can flash a "copied" confirmation, matching Compose's own copy pulse
+    /// (`HomeScreen.kt`). Copying a feed or site URL never bumps it. Not itself a
     /// `HomeViewModel` `StateFlow` — this is UI-only feedback state, kept here alongside it for the
     /// same reason `HomeScreen.kt`'s own `copyPulse` lives in the Compose screen, not the ViewModel.
     private(set) var copyPulse: Int = 0
@@ -163,8 +164,15 @@ final class HomeObservable: ObservableAssignment {
         viewModel.refreshFeed(feed: currentFeed(id: feed.id) ?? feed)
     }
 
-    func pulseCopy() {
-        copyPulse += 1
+    /// The one handler every "Copy URL" route for an article goes through — see `ArticleUrlCopy`.
+    func copyArticleUrl(url: String?, articleId: String) {
+        ArticleUrlCopy.perform(
+            url: url,
+            articleId: articleId,
+            selectedId: selectedArticleId,
+            copy: copyToPasteboard,
+            pulse: { copyPulse += 1 }
+        )
     }
 
     /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including

@@ -1188,6 +1188,18 @@ device. On an iPhone and an iPad (both orientations), with folders, unfoldered f
 - Tapping still selects (and on iPhone opens the article list); folder, tag and section disclosure states
   survive a relaunch.
 
+### (SwiftUI) Copy URL feedback
+
+Every article "Copy URL" route in the SwiftUI app goes through `HomeObservable.copyArticleUrl`
+(the decision itself is `ArticleUrlCopy`, covered by `ArticleUrlCopyTests`); confirm on screen, on
+macOS (and on iPad, where the reader shares the screen with the list):
+
+- Right-click (long-press, on iPad) an article row and choose "Copy URL": the reader's copy button
+  flashes ✓, exactly as Article ▸ Copy URL (⌘⇧C) and the button itself do, and the pasteboard holds
+  that article's URL.
+- Feed ▸ Copy feed URL and Feed ▸ Copy site URL copy their URL but do **not** flash the reader's ✓
+  (the reader shows an article, not that feed).
+
 ### In-App Update
 
 Nothing past `canInstallAndroidApkUpdate`/the pure state-machine functions is exercised by an

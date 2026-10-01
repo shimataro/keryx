@@ -302,7 +302,8 @@ struct ArticleListView: View {
                 home.viewModel.selectArticle(article: article.row)
                 onOpenArticle()
             },
-            onContextMenuSelect: { selectForContextMenu(article.row) }
+            onContextMenuSelect: { selectForContextMenu(article.row) },
+            onCopyUrl: { home.copyArticleUrl(url: article.url, articleId: article.id) }
         )
     }
 
