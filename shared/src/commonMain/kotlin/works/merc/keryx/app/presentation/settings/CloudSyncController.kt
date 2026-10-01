@@ -11,6 +11,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +28,7 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.awaitCancellableConnect
 import works.merc.keryx.app.presentation.formatTimestamp
@@ -45,6 +47,8 @@ class CloudSyncController(
     private val syncRepository: SyncRepository,
     private val cloudConnectionService: CloudConnectionService,
     private val activityCenter: ActivityCenter,
+    // Watched for provider changes made outside this controller (see [connectedType]).
+    private val settingsRepository: SettingsRepository,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -53,7 +57,21 @@ class CloudSyncController(
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
 
-    /** The currently-connected provider, or null (local-only). At most one at a time. */
+    /** The provider selection [connectedType]'s initial value was read against. */
+    private val initialCloudStorageTypeId = settingsRepository.localSettings.value.cloudStorageType
+
+    /**
+     * The currently-connected provider, or null (local-only). At most one at a time.
+     *
+     * This controller's own connect / disconnect / switch paths write it directly, so the row
+     * updates the instant they finish; it is also re-derived from [CloudSession.connectedType]
+     * whenever the persisted provider selection (`cloudStorageType`) changes, because a provider
+     * can be connected or disconnected by code that never goes through this controller — the
+     * first-run setup screen's own connect (`SetupController`), most importantly, which on desktop
+     * runs while this controller already exists. Without that, [canSyncNow] would stay false and
+     * the cloud-sync tab would show "not connected" until the app restarted. The same signal
+     * Home's `cloudConnected` re-evaluates on.
+     */
     private val _connectedType = MutableStateFlow(cloudSession.connectedType())
     val connectedType = _connectedType.asStateFlow()
 
@@ -157,6 +175,19 @@ class CloudSyncController(
 
     init {
         refreshLastSyncedAt()
+        viewModelScope.launch {
+            // Skips the subscription-time replay while it still matches what the initializer above
+            // already read, so construction does not pay a second secure-store round trip; any
+            // later (or already-different) selection re-reads it. collectLatest: a newer selection
+            // supersedes a read still in flight, so a slow read can never land after a newer one.
+            var skipUnchanged = true
+            settingsRepository.localSettings.map { it.cloudStorageType }.distinctUntilChanged().collectLatest { id ->
+                val unchanged = skipUnchanged && id == initialCloudStorageTypeId
+                skipUnchanged = false
+                if (unchanged) return@collectLatest
+                _connectedType.value = withContext(dispatcher) { cloudSession.connectedType() }
+            }
+        }
         viewModelScope.launch {
             syncRepository.lastSyncError.collect { _lastSyncError.value = it }
         }

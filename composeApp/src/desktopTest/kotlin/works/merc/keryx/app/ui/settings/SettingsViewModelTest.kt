@@ -300,6 +300,7 @@ class SettingsViewModelTest {
         )
         val cloudSyncController = CloudSyncController(
             cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository), ActivityCenter(),
+            settingsRepository,
             // Unconfined so connectDelegatesToCloudSyncController's testScheduler.advanceUntilIdle()
             // actually observes the token-save/sync hop, rather than it landing on a real thread.
             Dispatchers.Unconfined,

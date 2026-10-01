@@ -39,6 +39,7 @@ import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
@@ -146,6 +147,9 @@ class CloudSyncControllerTest {
     /** The SyncRepository handed to the most recently built controller, so a test can drive it. */
     private lateinit var createdSyncRepository: SyncRepository
 
+    /** The SettingsRepository handed to the most recently built controller. */
+    private lateinit var createdSettingsRepository: SettingsRepository
+
     // Every SyncRepository built by newController() gets its own scope for scheduleSync(); track
     // them all (not just the latest) so tearDown() can cancel every one, same as createdControllers.
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
@@ -173,6 +177,18 @@ class CloudSyncControllerTest {
         Dispatchers.resetMain()
         driver.close()
         File(dir).deleteRecursively()
+    }
+
+    /**
+     * A [CloudSession] `selectedType` that reads the provider from the settings the next
+     * [newController] builds, the way production's does (`CloudPlatformModule`), seeded with
+     * [initial]. Needed wherever a test switches providers: the controller re-derives
+     * `connectedType` from the session whenever `cloudStorageType` changes, so a selection pinned to
+     * one provider would report the new one as disconnected.
+     */
+    private fun settingsBackedSelection(initial: CloudStorageType): () -> CloudStorageType? {
+        LocalSettingsStore(dirOverride = dir).save(LocalSettings(cloudStorageType = initial.id))
+        return { CloudStorageType.fromId(createdSettingsRepository.getLocalSettings().cloudStorageType) }
     }
 
     private fun okAuthClient(): HttpClient =
@@ -227,9 +243,10 @@ class CloudSyncControllerTest {
             )
         }
         createdSyncRepository = syncRepository
+        createdSettingsRepository = settingsRepository
         return CloudSyncController(
             session, syncRepository, CloudConnectionService(session, settingsRepository, syncRepository),
-            activityCenter, dispatcher,
+            activityCenter, settingsRepository, dispatcher,
         ).also { createdControllers += it }
     }
 
@@ -482,6 +499,7 @@ class CloudSyncControllerTest {
             client = okAuthClient(),
             dropboxTokenStorage = dropboxTokenStorage,
             googleDriveTokenStorage = googleDriveTokenStorage,
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
             googleDriveConnectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT2"))),
         )
         val controller = newController(cloudSession = session)
@@ -504,6 +522,7 @@ class CloudSyncControllerTest {
             client = okAuthClient(),
             dropboxTokenStorage = dropboxTokenStorage,
             googleDriveTokenStorage = googleDriveTokenStorage,
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
             googleDriveConnectFlow = FakeCloudConnectFlow(Result.Err(CloudAuthException("connect failed"))),
         )
         val controller = newController(cloudSession = session)
@@ -596,6 +615,40 @@ class CloudSyncControllerTest {
         val controller = newController()
         assertNull(controller.connectedType.value)
 
+        assertFalse(controller.canSyncNow.value)
+    }
+
+    /**
+     * A provider connected by code other than this controller — the first-run setup screen's
+     * `SetupController`, which on desktop runs while this controller already exists — must still
+     * reach [CloudSyncController.connectedType] and [CloudSyncController.canSyncNow] without a
+     * restart, and so must a disconnect made the same way.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun providerChangeMadeOutsideTheControllerUpdatesConnectedTypeAndCanSyncNow() {
+        val tokenStorage = FakeTokenStorage()
+        val authClient = okAuthClient()
+        val session = singleProviderCloudSession(
+            client = authClient,
+            tokenStorage = tokenStorage,
+            authManager = DropboxAuthManager(authClient, clock = { 0L }),
+        )
+        val controller = newController(cloudSession = session)
+        assertNull(controller.connectedType.value)
+        assertFalse(controller.canSyncNow.value)
+
+        // What SetupController.connect does once OAuth succeeds, through its own service instance.
+        val outside = CloudConnectionService(session, createdSettingsRepository, createdSyncRepository)
+        runBlocking { outside.completeConnect(CloudStorageType.DROPBOX, OAuthTokens("AT")) }
+
+        awaitTrue { controller.connectedType.value == CloudStorageType.DROPBOX }
+        assertTrue(controller.canSyncNow.value)
+
+        runBlocking { outside.tearDown(CloudStorageType.DROPBOX) }
+
+        awaitTrue { controller.connectedType.value == null }
         assertFalse(controller.canSyncNow.value)
     }
 
@@ -778,6 +831,7 @@ class CloudSyncControllerTest {
             client = okAuthClient(),
             dropboxTokenStorage = dropboxTokenStorage,
             googleDriveTokenStorage = googleDriveTokenStorage,
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
             // Blocks indefinitely on OAuth, so the new provider's own connect/sync never runs —
             // isolating the fix (clearing on disconnect) from a later successful sync also clearing it.
             googleDriveConnectFlow = SuspendingCloudConnectFlow(),

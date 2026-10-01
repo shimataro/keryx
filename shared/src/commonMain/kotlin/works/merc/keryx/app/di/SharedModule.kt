@@ -139,7 +139,7 @@ fun presentationModule(): Module = module {
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SetupController(get(), get(), get(), get()) }
     single { NotificationAlerts(get()) }
-    single { CloudSyncController(get(), get(), get(), get()) }
+    single { CloudSyncController(get(), get(), get(), get(), get()) }
     single { PreferencesController(get()) }
     single { OpmlTransfer(get(), get(), get(), get()) }
 }
