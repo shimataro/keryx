@@ -4,6 +4,23 @@ import works.merc.keryx.app.core.TRAY_ACTION_NOTIFICATION_RECENCY_MS
 import works.merc.keryx.app.domain.UpdateState
 
 /**
+ * `main.kt`'s `lastNotificationSentAtMillis` while no new-article notification has been sent yet,
+ * and the value a tray click that cannot be a notification click passes for it ([trayIconAction]'s
+ * default). [shouldHideOnTrayAction] treats it as "no notification" rather than as one sent at the
+ * epoch.
+ */
+internal const val NO_NOTIFICATION_MILLIS = 0L
+
+/** What a tray click does to the main window. */
+internal enum class TrayWindowAction {
+    /** Hide the window to the tray (`windowVisible = false`). */
+    Hide,
+
+    /** Show it through `activationRequests`: un-minimize, bring to front and focus. */
+    Activate,
+}
+
+/**
  * Whether the window counts as shown for every tray decision: visible **and** not minimized. A
  * minimized window is still `windowVisible` (it was never hidden to the tray), but there is nothing
  * of it on screen, so the tray must offer "Show" for it and showing it must un-minimize it.
@@ -28,7 +45,8 @@ internal fun trayWindowShown(windowVisible: Boolean, windowMinimized: Boolean): 
  * The recency input exists for the Windows/Linux-fallback `onTrayAction` hook, shared between a
  * tray-icon click and a notification-balloon click with no platform way to tell them apart (see the
  * `onTrayAction` KDoc on [KeryxTray]). The macOS icon click and the Linux SNI `Activate` cannot be a
- * notification click, so `main.kt` calls this for them with no notification timestamp (`0`). The
+ * notification click, so `main.kt` calls this for them with no notification timestamp
+ * ([NO_NOTIFICATION_MILLIS]). The
  * residual gap on the shared hook: a genuine icon click inside the recency window right after a
  * notification still activates instead of hiding (documented in `docs/testing.md`).
  */
@@ -40,10 +58,40 @@ internal fun shouldHideOnTrayAction(
     lastNotificationSentAtMillis: Long,
     recencyWindowMs: Long = TRAY_ACTION_NOTIFICATION_RECENCY_MS,
 ): Boolean {
-    val notifiedRecently = lastNotificationSentAtMillis != 0L &&
+    val notifiedRecently = lastNotificationSentAtMillis != NO_NOTIFICATION_MILLIS &&
         nowMillis - lastNotificationSentAtMillis < recencyWindowMs
     return trayWindowShown(windowVisible, windowMinimized) && windowFocused && !notifiedRecently
 }
+
+/**
+ * What the tray menu's Show/Hide item does: [TrayWindowAction.Hide] when the window is shown
+ * ([trayWindowShown]), otherwise [TrayWindowAction.Activate]. Focus is deliberately not an input —
+ * see [trayWindowShown].
+ */
+internal fun trayMenuToggleAction(windowVisible: Boolean, windowMinimized: Boolean): TrayWindowAction =
+    if (trayWindowShown(windowVisible, windowMinimized)) TrayWindowAction.Hide else TrayWindowAction.Activate
+
+/**
+ * What a click on the tray icon does: [TrayWindowAction.Hide] exactly when [shouldHideOnTrayAction]
+ * says so, otherwise [TrayWindowAction.Activate].
+ *
+ * @param lastNotificationSentAtMillis When the last new-article notification was sent. Left at
+ *   [NO_NOTIFICATION_MILLIS] for an icon click that cannot be a notification click (the macOS icon,
+ *   Linux SNI's `Activate`); only the Windows/Linux-fallback hook shared with a notification-balloon
+ *   click passes the real timestamp.
+ */
+internal fun trayIconAction(
+    windowVisible: Boolean,
+    windowMinimized: Boolean,
+    windowFocused: Boolean,
+    nowMillis: Long,
+    lastNotificationSentAtMillis: Long = NO_NOTIFICATION_MILLIS,
+): TrayWindowAction =
+    if (shouldHideOnTrayAction(windowVisible, windowMinimized, windowFocused, nowMillis, lastNotificationSentAtMillis)) {
+        TrayWindowAction.Hide
+    } else {
+        TrayWindowAction.Activate
+    }
 
 /** What a click on the single update menu entry (tray and Help menu) runs on the Updates tab. */
 internal enum class UpdateMenuAction {

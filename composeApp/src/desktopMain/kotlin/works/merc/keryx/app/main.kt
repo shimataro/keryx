@@ -78,7 +78,10 @@ import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.ui.navigation.Screen
 import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
-import works.merc.keryx.app.tray.shouldHideOnTrayAction
+import works.merc.keryx.app.tray.NO_NOTIFICATION_MILLIS
+import works.merc.keryx.app.tray.TrayWindowAction
+import works.merc.keryx.app.tray.trayIconAction
+import works.merc.keryx.app.tray.trayMenuToggleAction
 import works.merc.keryx.app.tray.trayWindowShown
 import works.merc.keryx.app.tray.UpdateMenuAction
 import works.merc.keryx.app.tray.updateMenuAction
@@ -396,10 +399,10 @@ fun main(args: Array<String>) {
         // deliberate icon click) or bring it to front (everything else, which also covers a
         // minimized window and a notification click landing while it is merely backgrounded).
         var windowFocused by remember { mutableStateOf(false) }
-        // Read by onTrayAction below (see shouldHideOnTrayAction) so a notification-balloon click
+        // Read by onTrayAction below (see trayIconAction) so a notification-balloon click
         // landing while the window happens to already be visible and focused still activates
         // instead of hiding it, on the Windows/Linux fallback where the two clicks share one hook.
-        var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
+        var lastNotificationSentAtMillis by remember { mutableStateOf(NO_NOTIFICATION_MILLIS) }
         val windowState = remember {
             val restored = restoredWindowState(saved, screenBounds())
             WindowState(
@@ -436,7 +439,7 @@ fun main(args: Array<String>) {
         }
 
         // Tracks when a new-article notification was last sent, for onTrayAction's recency bias
-        // below (shouldHideOnTrayAction). A plain additional collector of the same SharedFlow
+        // below (trayIconAction). A plain additional collector of the same SharedFlow
         // KeryxTray itself collects - safe and already the established pattern for this flow.
         LaunchedEffect(Unit) {
             newArticleNotifications.collect { lastNotificationSentAtMillis = SystemClock.nowMillis() }
@@ -497,6 +500,15 @@ fun main(args: Array<String>) {
         // Settings is unreachable (first-run Setup) — the same gate the Help menu's copy follows.
         val currentScreen by menuController.currentScreen.collectAsState()
 
+        // Every tray route ends here: the decision is the route's own pure function in
+        // tray/TrayActionPolicy.kt, the effect is applied in this one place.
+        fun applyTrayWindowAction(action: TrayWindowAction) {
+            when (action) {
+                TrayWindowAction.Hide -> windowVisible = false
+                TrayWindowAction.Activate -> activationRequests.tryEmit(Unit)
+            }
+        }
+
         KeryxTray(
             sniConnection = sniConnection,
             notificationIcon = dockBaseImage,
@@ -507,20 +519,13 @@ fun main(args: Array<String>) {
             windowShown = trayWindowShown(windowVisible, windowState.isMinimized),
             updateStateFlow = updateRepository.state,
             settingsReachable = currentScreen == Screen.Home,
-            onToggle = {
-                if (trayWindowShown(windowVisible, windowState.isMinimized)) {
-                    windowVisible = false
-                } else {
-                    activationRequests.tryEmit(Unit)
-                }
-            },
+            onToggle = { applyTrayWindowAction(trayMenuToggleAction(windowVisible, windowState.isMinimized)) },
             // macOS's left click and Linux SNI's Activate cannot be a notification click (see
             // onNotificationClicked below), so no notification timestamp is passed for them.
             onIconClick = {
-                val hide = shouldHideOnTrayAction(
-                    windowVisible, windowState.isMinimized, windowFocused, nowMillis = 0L, lastNotificationSentAtMillis = 0L,
+                applyTrayWindowAction(
+                    trayIconAction(windowVisible, windowState.isMinimized, windowFocused, SystemClock.nowMillis()),
                 )
-                if (hide) windowVisible = false else activationRequests.tryEmit(Unit)
             },
             onQuit = exitApp,
             onUpdateAction = {
@@ -535,19 +540,16 @@ fun main(args: Array<String>) {
             // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
             // icon and a notification balloon (unlike onNotificationClicked above, which Linux SNI
             // can wire separately - see KeryxTray's KDoc; macOS has no equivalent, see
-            // known-issues.md), with no platform way to tell them apart. shouldHideOnTrayAction
-            // (tray/TrayActionPolicy.kt) decides: hide only what looks like a deliberate icon
+            // known-issues.md), with no platform way to tell them apart. trayIconAction
+            // (tray/TrayActionPolicy.kt) decides with the notification timestamp: hide only what looks like a deliberate icon
             // click, otherwise activate - see its KDoc for the exact heuristic and its documented
             // residual gap.
             onTrayAction = {
-                val hide = shouldHideOnTrayAction(
-                    windowVisible, windowState.isMinimized, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis,
+                applyTrayWindowAction(
+                    trayIconAction(
+                        windowVisible, windowState.isMinimized, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis,
+                    ),
                 )
-                if (hide) {
-                    windowVisible = false
-                } else {
-                    activationRequests.tryEmit(Unit)
-                }
             },
             newArticleNotifications = newArticleNotifications,
         )

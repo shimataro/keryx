@@ -1,5 +1,6 @@
 package works.merc.keryx.app.tray
 
+import works.merc.keryx.app.core.TRAY_ACTION_NOTIFICATION_RECENCY_MS
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.domain.AvailableUpdate
@@ -177,5 +178,90 @@ class TrayActionPolicyTest {
         ).forEach { state ->
             assertEquals(UpdateMenuAction.None, updateMenuAction(state), state.toString())
         }
+    }
+
+    // trayMenuToggleAction / trayIconAction: what main.kt's onToggle, onIconClick and onTrayAction
+    // apply through their one shared effect handler.
+
+    @Test
+    fun `menu toggle hides a shown window`() {
+        assertEquals(TrayWindowAction.Hide, trayMenuToggleAction(windowVisible = true, windowMinimized = false))
+    }
+
+    @Test
+    fun `menu toggle activates a window hidden to the tray`() {
+        assertEquals(TrayWindowAction.Activate, trayMenuToggleAction(windowVisible = false, windowMinimized = false))
+    }
+
+    @Test
+    fun `menu toggle activates a minimized window`() {
+        assertEquals(TrayWindowAction.Activate, trayMenuToggleAction(windowVisible = true, windowMinimized = true))
+    }
+
+    @Test
+    fun `icon click hides only a shown and focused window`() {
+        for (visible in listOf(true, false)) {
+            for (minimized in listOf(true, false)) {
+                for (focused in listOf(true, false)) {
+                    val expected = if (visible && !minimized && focused) TrayWindowAction.Hide else TrayWindowAction.Activate
+                    assertEquals(
+                        expected,
+                        trayIconAction(visible, minimized, focused, nowMillis = 100_000L),
+                        "visible=$visible minimized=$minimized focused=$focused",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `icon click activates a minimized window even while it is focused`() {
+        assertEquals(
+            TrayWindowAction.Activate,
+            trayIconAction(windowVisible = true, windowMinimized = true, windowFocused = true, nowMillis = 100_000L),
+        )
+    }
+
+    @Test
+    fun `icon click without a notification timestamp equals the notification-aware call with none sent`() {
+        for (visible in listOf(true, false)) {
+            for (minimized in listOf(true, false)) {
+                for (focused in listOf(true, false)) {
+                    assertEquals(
+                        trayIconAction(visible, minimized, focused, nowMillis = 100_000L, lastNotificationSentAtMillis = NO_NOTIFICATION_MILLIS),
+                        trayIconAction(visible, minimized, focused, nowMillis = 100_000L),
+                        "visible=$visible minimized=$minimized focused=$focused",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `icon click activates instead of hiding right after a notification`() {
+        assertEquals(
+            TrayWindowAction.Activate,
+            trayIconAction(
+                windowVisible = true,
+                windowMinimized = false,
+                windowFocused = true,
+                nowMillis = 100_000L,
+                lastNotificationSentAtMillis = 100_000L - TRAY_ACTION_NOTIFICATION_RECENCY_MS + 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `icon click hides again once the notification has left the recency window`() {
+        assertEquals(
+            TrayWindowAction.Hide,
+            trayIconAction(
+                windowVisible = true,
+                windowMinimized = false,
+                windowFocused = true,
+                nowMillis = 100_000L,
+                lastNotificationSentAtMillis = 100_000L - TRAY_ACTION_NOTIFICATION_RECENCY_MS,
+            ),
+        )
     }
 }
