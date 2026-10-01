@@ -11,8 +11,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
-import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.article_url_copied
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -20,6 +18,8 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.presentation.home.articleUrlCopyPlan
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.article_url_copied
 
 /**
  * The one handler behind every route to "copy article URL" — the reader's toolbar button, the

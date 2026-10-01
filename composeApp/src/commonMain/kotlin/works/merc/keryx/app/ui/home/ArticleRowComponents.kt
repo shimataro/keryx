@@ -210,6 +210,16 @@ internal fun articleRowMenuEntries(
 }
 
 /**
+ * What the most recent context-menu open did to an [ArticleRow]'s selection, carried from the menu's
+ * `onOpen` to its `items()`. A plain mutable holder, deliberately not snapshot state — see its use
+ * in [ArticleRow].
+ */
+private class ContextMenuOpenSelection {
+    /** Whether that open selected the row (and so marked its article read). */
+    var selectedByOpen = false
+}
+
+/**
  * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
  * @param article The article to display.
@@ -255,7 +265,7 @@ internal fun ArticleRow(
     // onOpen). A plain holder rather than snapshot state: it is written by onOpen and read by the
     // menu's items() immediately afterwards, in the same pointer handler and before any
     // recomposition, so nothing in composition ever reads it.
-    val selectedByOpen = remember { BooleanArray(1) }
+    val openSelection = remember { ContextMenuOpenSelection() }
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
     PulseRippleEffect(ripplePulse, interactionSource)
@@ -267,7 +277,7 @@ internal fun ArticleRow(
                 items = {
                     articleRowMenuEntries(
                         article = article,
-                        selectedByOpen = selectedByOpen[0],
+                        selectedByOpen = openSelection.selectedByOpen,
                         strings = strings,
                         onSetRead = onSetRead,
                         onSetStarred = onSetStarred,
@@ -279,7 +289,7 @@ internal fun ArticleRow(
                 // again an article the user just marked unread from this very menu or ⌘⇧U.
                 // Reset on every open, so it only ever describes this right-click.
                 onOpen = {
-                    selectedByOpen[0] = !selected
+                    openSelection.selectedByOpen = !selected
                     if (!selected) onClick()
                 },
             )

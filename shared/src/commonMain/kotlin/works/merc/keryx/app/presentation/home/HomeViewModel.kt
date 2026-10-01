@@ -855,12 +855,13 @@ class HomeViewModel(
     }
 
     /**
-     * Whether [selectPrevious] would actually land on a different article.
+     * Whether [selectPrevious] would actually land on a different article. Agrees with
+     * [moveSelection], which leaves the first article selected as a no-op (K/↑ there does nothing,
+     * like a swipe past the start).
      *
      * @return `true` when there is a preceding article to move to.
      */
     fun canSelectPrevious(): Boolean = selectionIndex(currentArticles()) > 0
-    // Agrees with moveSelection: at the first article K/↑ is a no-op, like a swipe.
 
     /**
      * Provides the article rows currently displayed in the center pane.

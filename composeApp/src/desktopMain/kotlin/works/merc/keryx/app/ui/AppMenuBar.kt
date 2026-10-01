@@ -13,16 +13,16 @@ import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.onUpdateMenuItemClicked
-import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.HomeViewModel
-import works.merc.keryx.app.ui.navigation.Screen
-import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
-import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
+import works.merc.keryx.app.presentation.menu.computeMenuUiState
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_copy_feed_url
@@ -59,7 +59,6 @@ import works.merc.keryx.app.resources.menu_help
 import works.merc.keryx.app.resources.menu_help_about
 import works.merc.keryx.app.resources.menu_help_project_page
 import works.merc.keryx.app.resources.menu_help_website
-import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.resources.menu_view
 import works.merc.keryx.app.resources.menu_view_mark_all_read
@@ -67,7 +66,9 @@ import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.tray.updateMenuEntry
+import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -78,9 +79,8 @@ import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
-import works.merc.keryx.app.presentation.menu.computeMenuUiState
-import works.merc.keryx.app.presentation.settings.OpmlRequest
-import works.merc.keryx.app.presentation.settings.OpmlTransferController
+import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.ui.settings.PROJECT_URL
 import works.merc.keryx.app.ui.settings.SettingsViewModel
 
@@ -119,7 +119,9 @@ internal fun FrameWindowScope.AppMenuBar(
     val opmlController = koinInject<OpmlTransferController>()
     val updateRepository = koinInject<UpdateRepository>()
     val settingsOpenRequests = koinInject<SettingsOpenRequests>()
-    // An application-lifetime single, so a check it starts outlives this menu's own composition.
+    // A Koin `single` (AppModule), never held by a ViewModelStore and so never cleared: an update
+    // check it starts runs on its own viewModelScope, which this menu recomposing or leaving
+    // composition does not cancel.
     val settingsVm = koinInject<SettingsViewModel>()
 
     val screen by menuController.currentScreen.collectAsState()

@@ -279,25 +279,21 @@ internal fun FeedListPane(
     // collapsed), and an editor needs a rendered row to live in, so the row's own container is
     // expanded first (vm.revealFeedListRow — only that exact instance's folder or tag, never another
     // copy's).
+    //
+    // The selection is resolved once per change of its inputs rather than by each caller. A State
+    // (not a plain remembered val), because the callers run from effects launched once
+    // (LaunchedEffect(Unit) below) and must read the current target, not the first composition's.
+    val selectionTarget by remember {
+        derivedStateOf { resolveFeedListSelectionTarget(filter, feeds, folders, tags) }
+    }
     fun startInlineRenameForSelection() {
-        val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
-            ?.toInlineEditTarget(selectedRowInstance)
+        val target = selectionTarget?.toInlineEditTarget(selectedRowInstance)
         if (target != null) vm.revealFeedListRow(target.rowInstance)
         inlineEdit = target
     }
-    // Shared by every feed row's "New folder…"/"New tag…" context-menu items and the Feed menu's
-    // matching submenu items (MenuCommand.NewFolderForSelectedFeed/NewTagForSelectedFeed): open the
-    // create dialog that, on confirm, files the feed into the new folder / attaches the new tag.
-    fun createFolderForFeed(feedId: String) {
-        creatingFolderForFeedId = feedId
-    }
-    fun createTagForFeed(feedId: String) {
-        creatingTagForFeedId = feedId
-    }
-    fun selectedFeedId(): String? =
-        (resolveFeedListSelectionTarget(filter, feeds, folders, tags) as? FeedListSelectionTarget.Feed)?.feed?.id
+    fun selectedFeedId(): String? = (selectionTarget as? FeedListSelectionTarget.Feed)?.feed?.id
     fun openDeleteDialogForSelection() {
-        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
+        when (val target = selectionTarget) {
             is FeedListSelectionTarget.Feed -> confirmingUnsubscribeFeed = target.feed
             is FeedListSelectionTarget.Folder -> confirmingDeleteFolder = target.folder
             is FeedListSelectionTarget.Tag -> confirmingDeleteTag = target.tag
@@ -323,8 +319,10 @@ internal fun FeedListPane(
                 MenuCommand.AddTag -> showAddTag = true
                 MenuCommand.RenameFeed -> startInlineRenameForSelection()
                 MenuCommand.UnsubscribeFeed -> openDeleteDialogForSelection()
-                MenuCommand.NewFolderForSelectedFeed -> selectedFeedId()?.let(::createFolderForFeed)
-                MenuCommand.NewTagForSelectedFeed -> selectedFeedId()?.let(::createTagForFeed)
+                // Same create dialogs as a feed row's "New folder…"/"New tag…" items: on confirm,
+                // they file the feed into the new folder / attach the new tag.
+                MenuCommand.NewFolderForSelectedFeed -> selectedFeedId()?.let { creatingFolderForFeedId = it }
+                MenuCommand.NewTagForSelectedFeed -> selectedFeedId()?.let { creatingTagForFeedId = it }
                 else -> {}
             }
         }
@@ -397,6 +395,10 @@ internal fun FeedListPane(
     // aside while any row is being renamed: the drag would steal a text-selection sweep from the
     // field, and every route to an action must agree on when it is available.
     val reorderAllowed = inlineEdit == null
+    // A row's screen-reader "move up/down" target, or null (no action offered) at the edge of its
+    // scope or while reordering stands aside.
+    fun reorderTarget(orderedIds: List<String>, index: Int, delta: Int) =
+        if (reorderAllowed) reorderTargetWithinScope(orderedIds, index, delta) else null
 
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
     // the list — computed once per composition from the same collected state the rows render from.
@@ -623,15 +625,15 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                 isTouchPrimary = isTouchPrimary,
-                                onCreateNewFolderForFeed = { createFolderForFeed(feed.id) },
-                                onCreateNewTagForFeed = { createTagForFeed(feed.id) },
+                                onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
+                                onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
-                                onMoveUp = reorderTargetWithinScope(feedIdsInGroup, index, -1)?.takeIf { reorderAllowed }?.let { target ->
+                                onMoveUp = reorderTarget(feedIdsInGroup, index, -1)?.let { target ->
                                     { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
                                 },
-                                onMoveDown = reorderTargetWithinScope(feedIdsInGroup, index, 1)?.takeIf { reorderAllowed }?.let { target ->
+                                onMoveDown = reorderTarget(feedIdsInGroup, index, 1)?.let { target ->
                                     { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
                                 },
                             )
@@ -698,10 +700,10 @@ internal fun FeedListPane(
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.
-                                    onMoveUp = reorderTargetWithinScope(folderIds, folderIndex, -1)?.takeIf { reorderAllowed }?.let { target ->
+                                    onMoveUp = reorderTarget(folderIds, folderIndex, -1)?.let { target ->
                                         { vm.reorderFolders(folder.id, target.insertBeforeId) }
                                     },
-                                    onMoveDown = reorderTargetWithinScope(folderIds, folderIndex, 1)?.takeIf { reorderAllowed }?.let { target ->
+                                    onMoveDown = reorderTarget(folderIds, folderIndex, 1)?.let { target ->
                                         { vm.reorderFolders(folder.id, target.insertBeforeId) }
                                     },
                                 )
@@ -794,8 +796,8 @@ internal fun FeedListPane(
                                     isTouchPrimary = isTouchPrimary,
                                     onMoveUp = null,
                                     onMoveDown = null,
-                                    onCreateNewFolderForFeed = { createFolderForFeed(feed.id) },
-                                    onCreateNewTagForFeed = { createTagForFeed(feed.id) },
+                                    onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
+                                    onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 )
                             }
                         }
