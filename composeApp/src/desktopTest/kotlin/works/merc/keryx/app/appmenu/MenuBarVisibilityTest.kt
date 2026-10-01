@@ -76,7 +76,7 @@ class MenuBarVisibilityTest {
             activity = ActivitySnapshot(), canSyncNow = true,
             searchActive = false, unreadOnly = false, opmlBusy = false,
             hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
-            selectedFeedSiteCanOpenInBrowser = false,
+            selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
         ),
         labels = labels(),
         actions = actions(),

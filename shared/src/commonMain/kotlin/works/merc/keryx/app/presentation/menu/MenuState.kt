@@ -71,22 +71,25 @@ data class MenuUiState(
  * additionally require a selection; copying a URL requires it to be non-blank
  * ([selectedArticleHasUrl] / [selectedFeedHasSiteUrl], `hasUsableUrl`), opening it in the browser
  * requires it to be http(s) ([selectedArticleCanOpenInBrowser] / [selectedFeedSiteCanOpenInBrowser],
- * `canOpenInBrowser`). The open inputs deliberately have no default, so no caller can forget them. Sort can't be toggled
- * while the Search scope is active (search order is fixed to relevance rank). Refresh is
- * suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while a refresh, a sync, or a
+ * `canOpenInBrowser`). Sort can't be toggled while the Search scope is active (search order is
+ * fixed to relevance rank). Refresh is suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while a refresh, a sync, or a
  * refresh-then-sync cycle (which also covers the gap between the two), is already in flight. Sync
  * follows [canSyncNow] — `ManualSync.canSyncNow`, the one predicate every "Sync now" route shares
  * (it already covers the idle check, a connected account, connect/disconnect/reset in flight and
  * an authorization failure).
  *
  * OPML import/export is disabled while [opmlBusy] (`OpmlTransferController.busy`), the same busy
- * flag the settings Data tab's buttons follow. The input has no default, like the open inputs.
+ * flag the settings Data tab's buttons follow.
  *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
  * [feedListKeysActive] — whether the feed list's bare item keys (F2/Return, Delete) would act
  * right now — enables no item; it only decides whether rename/delete show and bind their bare
  * accelerator ([MenuUiState.renameOrDeleteShortcutActive]).
+ *
+ * Every input is required (no defaults): an input a caller forgot would otherwise silently leave an
+ * item enabled or disabled against the app's actual state. Each menu (Compose's `AppMenuBar`, the
+ * SwiftUI app's `Commands` through `KeryxSdk.menuState`) passes all of them.
  */
 fun computeMenuUiState(
     onHome: Boolean,
@@ -98,10 +101,10 @@ fun computeMenuUiState(
     searchActive: Boolean,
     unreadOnly: Boolean,
     opmlBusy: Boolean,
-    hasSelectedFeed: Boolean = false,
-    feedListKeysActive: Boolean = false,
-    hasRenamableSelection: Boolean = false,
-    selectedFeedHasSiteUrl: Boolean = false,
+    hasSelectedFeed: Boolean,
+    feedListKeysActive: Boolean,
+    hasRenamableSelection: Boolean,
+    selectedFeedHasSiteUrl: Boolean,
     selectedFeedSiteCanOpenInBrowser: Boolean,
 ): MenuUiState = MenuUiState(
     addItemsEnabled = onHome,

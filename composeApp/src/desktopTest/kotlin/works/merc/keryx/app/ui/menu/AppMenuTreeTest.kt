@@ -77,7 +77,8 @@ class AppMenuTreeTest {
         onHome = false, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), canSyncNow = false,
         searchActive = true, unreadOnly = false, opmlBusy = false,
-        hasSelectedFeed = false, hasRenamableSelection = false, selectedFeedSiteCanOpenInBrowser = false,
+        hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = false,
+        selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     /** A folder (or tag) selected: a rename/delete target, but no feed-specific selection. */
@@ -85,14 +86,16 @@ class AppMenuTreeTest {
         onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(), canSyncNow = true,
         searchActive = false, unreadOnly = false, opmlBusy = false,
-        hasSelectedFeed = false, hasRenamableSelection = true, selectedFeedSiteCanOpenInBrowser = false,
+        hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = true,
+        selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
         searchActive = false, unreadOnly = true, opmlBusy = false,
-        hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedSiteCanOpenInBrowser = false,
+        hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true,
+        selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     private fun selectedFeedMenu(
@@ -160,7 +163,7 @@ class AppMenuTreeTest {
             onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = false,
             activity = ActivitySnapshot(), canSyncNow = true,
             searchActive = false, unreadOnly = false, opmlBusy = false,
-            hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
+            hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
             selectedFeedSiteCanOpenInBrowser = false,
         )
         val root = tree(ui)
