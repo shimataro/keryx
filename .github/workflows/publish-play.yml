@@ -93,9 +93,8 @@ jobs:
           distribution: temurin
           java-version: '25'
 
-      - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@v6
-
+      # setup-gradle validates the Gradle wrapper jars by default (`validate-wrappers`), so
+      # there is no separate wrapper-validation step.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
