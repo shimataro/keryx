@@ -226,7 +226,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     func updateStatusItemAppearance(unreadCount: Int64 = 0) {
         let hasUnread = unreadCount > 0
         statusItem?.button?.image = hasUnread ? Self.trayImageUnread : Self.trayImage
-        statusItem?.button?.toolTip = hasUnread ? "\(L("app_name")) (\(unreadCount))" : L("app_name")
+        let label = hasUnread ? LF("tray_tooltip_unread", L("app_name"), Int(unreadCount)) : L("app_name")
+        statusItem?.button?.toolTip = label
+        // An image-only button has no title for VoiceOver to read; the image carries no description.
+        statusItem?.button?.setAccessibilityLabel(label)
     }
 
     private static let trayImageSize = NSSize(width: 18, height: 18)

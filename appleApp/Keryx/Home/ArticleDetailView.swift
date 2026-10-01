@@ -51,6 +51,8 @@ struct ArticleDetailView: View {
         .toolbar { toolbarContent }
         .onChange(of: home.copyPulse) { _, _ in
             copyConfirmed = true
+            // The checkmark is the only other confirmation, and VoiceOver does not see it change.
+            AccessibilityNotification.Announcement(L("article_url_copied")).post()
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
                 copyConfirmed = false

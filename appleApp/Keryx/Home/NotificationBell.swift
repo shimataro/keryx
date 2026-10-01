@@ -193,6 +193,7 @@ struct NotificationBell: View {
         HStack(alignment: .top) {
             Image(systemName: levelIcon(notification.level))
                 .foregroundStyle(levelColor(notification.level))
+                .accessibilityLabel(levelLabel(notification.level))
             VStack(alignment: .leading, spacing: 2) {
                 Text(notificationText(notification.text))
                     .multilineTextAlignment(.leading)
@@ -213,6 +214,8 @@ struct NotificationBell: View {
         }
         .buttonStyle(.plain)
         .help(L("notification_dismiss"))
+        // `.help` is not read on iOS, so without this VoiceOver reads only the symbol's name.
+        .accessibilityLabel(L("notification_dismiss"))
     }
 
     /// Mirrors Compose's own `formatRelativeTime` (`NotificationCenterSheet.kt`), bucketing through
@@ -233,6 +236,11 @@ struct NotificationBell: View {
 
     private func levelIcon(_ level: AppNotificationLevel) -> String {
         level == .error ? "xmark.octagon.fill" : level == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill"
+    }
+
+    /// The level as words, so it does not rest on the icon's shape and color alone.
+    private func levelLabel(_ level: AppNotificationLevel) -> String {
+        L(level == .error ? "notification_level_error" : level == .warning ? "notification_level_warning" : "notification_level_info")
     }
 
     private func levelColor(_ level: AppNotificationLevel) -> Color {

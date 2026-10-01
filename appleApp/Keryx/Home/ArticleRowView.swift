@@ -115,6 +115,8 @@ struct ArticleRowView: View, Equatable {
         }
         .buttonStyle(.plain)
         .accessibilityValue(stateAccessibilityValue)
+        // The selection is otherwise only a background fill, which VoiceOver cannot see.
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .selectsOnContextMenu(id: model.id, perform: onContextMenuSelect)
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`

@@ -76,26 +76,29 @@ struct InlineRenameField: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            Group {
             #if os(macOS)
-            RenameTextField(
-                text: $text,
-                placeholder: placeholder,
-                handle: fieldHandle,
-                onSubmit: { finish(commit: true, restoreFocus: true) },
-                onCancel: { finish(commit: false, restoreFocus: true) },
-                onFocusLost: { finish(commit: true, restoreFocus: false) }
-            )
+                RenameTextField(
+                    text: $text,
+                    placeholder: placeholder,
+                    handle: fieldHandle,
+                    onSubmit: { finish(commit: true, restoreFocus: true) },
+                    onCancel: { finish(commit: false, restoreFocus: true) },
+                    onFocusLost: { finish(commit: true, restoreFocus: false) }
+                )
             #else
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .lineLimit(1)
-                .focused($fieldFocused)
-                .onSubmit { finish(commit: true, restoreFocus: true) }
-                .onKeyPress(.escape) {
-                    finish(commit: false, restoreFocus: true)
-                    return .handled
-                }
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1)
+                    .focused($fieldFocused)
+                    .onSubmit { finish(commit: true, restoreFocus: true) }
+                    .onKeyPress(.escape) {
+                        finish(commit: false, restoreFocus: true)
+                        return .handled
+                    }
             #endif
+            }
+            .accessibilityHint(validation.error ?? "")
             // Escape has no touch equivalent and is hard to discover, so the editor also carries an
             // explicit cancel. Not focusable, so pressing it doesn't first take focus off the field
             // and commit the edit.
@@ -123,7 +126,11 @@ struct InlineRenameField: View {
                 .allowsHitTesting(false)
         }
         .help(validation.error ?? "")
-        .accessibilityValue(validation.error ?? "")
+        // The red border and `.help` reach neither VoiceOver nor (for `.help`) iOS, so a new error
+        // is announced as it appears.
+        .onChange(of: validation.error) { _, error in
+            if let error { AccessibilityNotification.Announcement(error).post() }
+        }
         #if os(macOS)
         // Another pane (or the search field) taking focus ends the edit; a click on another row is
         // reported by the field itself (`onFocusLost`). Any other value is not a focus loss: the

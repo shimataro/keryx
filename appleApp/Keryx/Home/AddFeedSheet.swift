@@ -73,6 +73,7 @@ struct AddFeedSheet: View {
             HStack {
                 Spacer()
                 Button(L("common_cancel"), role: .cancel) { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
                 confirmButton
                     .keyboardShortcut(.defaultAction)
             }
