@@ -22,13 +22,20 @@ final class HomeObservable: ObservableAssignment {
     let makeAddFeedController: () -> AddFeedController
 
     /// The latest `feeds` emission, always — the rows action-time lookups (`currentFeed(id:)`)
-    /// resolve through. Views should read `hasFeeds` / `feedsById` / `sidebar` instead, which only
-    /// change with the feed list's structure (`FeedStructureKey`).
-    private(set) var feeds: [Feeds] = []
+    /// resolve through. Not observed: a refresh re-emits it once per fetched feed, so views read
+    /// `hasFeeds` / `feedsById` / `sidebar` / `subscribedFeedUrls` instead, which only change with
+    /// `HomeViewModel.structuralFeeds`.
+    @ObservationIgnored private(set) var feeds: [Feeds] = []
     private(set) var hasFeeds = false
-    /// Rebuilt only when the feed list's structure changes, so its `Feeds` may lag behind `feeds`
-    /// in the fields `FeedStructureKey` leaves out.
+    /// The latest `structuralFeeds` emission — what `sidebar`, `feedsById` and the selection target
+    /// are built from. Its `Feeds` may lag behind `feeds` in `etag` / `last_modified` /
+    /// `updated_at` (`feedsStructurallyEqual`). Not observed: views read what is derived from it.
+    @ObservationIgnored private var structuralFeeds: [Feeds] = []
+    /// Built from `structuralFeeds`, so its `Feeds` lag behind `feeds` the same way.
     private(set) var feedsById: [String: Feeds] = [:]
+    /// Every subscribed feed's `url`, for the add-feed sheet's already-subscribed check
+    /// (`addFeedAlreadySubscribed(url:subscribedUrls:)`); assigned only when it changes.
+    private(set) var subscribedFeedUrls: Set<String> = []
     private(set) var tags: [Tags] = []
     private(set) var folders: [Folders] = []
     private(set) var feedTagMap: [String: Set<String>] = [:]
@@ -88,14 +95,12 @@ final class HomeObservable: ObservableAssignment {
     /// Each feed's title and favicon as the article rows show them; a `feeds` emission that leaves
     /// this unchanged (a refresh updating etags and error counts) does not touch the rows.
     private var feedRowInfo: [String: FeedRowInfo] = [:]
-    /// Gates the `feeds`-derived rebuilds on the fields views actually read — see `FeedStructureKey`.
-    @ObservationIgnored private var feedStructure = FeedStructureTracker()
     @ObservationIgnored private var sidebarRebuild: CoalescedAction?
     private(set) var newArticleCount: Int = 0
 
     private(set) var selectedArticle: Articles?
     // Narrow facts about the selection for the menu bar (`HomeCommands`) and the article list,
-    // assigned only when they change: reading `selectedArticle` / `filter` / `feeds` there directly
+    // assigned only when they change: reading `selectedArticle` / `filter` / the feed list there directly
     // made every article selection, star/read toggle and feed refresh re-evaluate them all.
     private(set) var hasSelectedArticle = false
     private(set) var selectedArticleId: String?
@@ -148,7 +153,7 @@ final class HomeObservable: ObservableAssignment {
     }
 
     /// The current row for `id`: the `Feeds` the sidebar and `feedsById` hold may carry a stale
-    /// `etag` / `last_modified` (see `FeedStructureKey`), which a refresh sends as its conditional
+    /// `etag` / `last_modified` (see `structuralFeeds`), which a refresh sends as its conditional
     /// request.
     func currentFeed(id: String) -> Feeds? {
         feeds.first { $0.id == id }
@@ -186,6 +191,7 @@ final class HomeObservable: ObservableAssignment {
     /// preserves the same actor isolation for each child task.
     func startObserving() async {
         async let t1: () = observeFeeds()
+        async let t1b: () = observeStructuralFeeds()
         async let t2: () = observeTags()
         async let t3: () = observeFolders()
         async let t4: () = observeFeedTagMap()
@@ -220,7 +226,7 @@ final class HomeObservable: ObservableAssignment {
         _ = await t31
         #endif
         _ = await (
-            t1, t2, t3, t4, t5, t6, t7, t8, t9, t10,
+            t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t26, t27, t28, t29, t30
         )
@@ -230,9 +236,16 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.feeds {
             feeds = v
             assignIfChanged(\.hasFeeds, !v.isEmpty)
-            // A refresh re-emits `feeds` once per fetched feed, mostly changing only the fields no
-            // view reads; everything below holds the `Feeds` objects and is left alone then.
-            guard feedStructure.accept(v) else { continue }
+        }
+    }
+
+    /// Everything derived from the feed list's structure. `HomeViewModel` already drops the
+    /// emissions that change only fields no view reads (a refresh re-emits `feeds` once per fetched
+    /// feed), so each one arriving here is worth rebuilding for.
+    private func observeStructuralFeeds() async {
+        for await v in viewModel.structuralFeeds {
+            structuralFeeds = v
+            assignIfChanged(\.subscribedFeedUrls, Set(v.map(\.url)))
             feedsById = Dictionary(uniqueKeysWithValues: v.map { ($0.id, $0) })
             let info = feedsById.mapValues { FeedRowInfo(title: $0.displayTitle(), faviconUrl: $0.favicon_url) }
             if info != feedRowInfo {
@@ -367,7 +380,7 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func updateFeedListSelectionTarget() {
-        let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: feeds, folders: folders, tags: tags)
+        let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: structuralFeeds, folders: folders, tags: tags)
         let unchanged = switch (feedListSelectionTarget, target) {
         case (nil, nil): true
         case let (old?, new?): (old as? NSObject)?.isEqual(new) ?? false
@@ -379,7 +392,7 @@ final class HomeObservable: ObservableAssignment {
     /// Runs through `sidebarRebuild` only, once per MainActor turn in which any of its inputs changed.
     private func rebuildSidebar() {
         let model = SidebarModel(
-            feeds: feeds,
+            feeds: structuralFeeds,
             folders: folders,
             tags: tags,
             feedTagMap: feedTagMap,

@@ -142,7 +142,6 @@ targets:
       - path: Keryx/Platform/DockBadge.swift
       - path: Keryx/Bridge/ArticleRowModel.swift
       - path: Keryx/Bridge/SidebarModel.swift
-      - path: Keryx/Bridge/FeedStructureKey.swift
       - path: Keryx/Bridge/ObservableAssignment.swift
       - path: Keryx/Home/SidebarRowHighlight.swift
       - path: Keryx/Home/Sidebar/SidebarItemID.swift

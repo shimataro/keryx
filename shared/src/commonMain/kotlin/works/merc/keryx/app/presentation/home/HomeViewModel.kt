@@ -104,6 +104,20 @@ class HomeViewModel(
         feedRepository.watchAllFeeds().stateIn(viewModelScope, started, emptyList())
 
     /**
+     * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
+     * ([feedsStructurallyEqual]) — what a refresh rewrites once per fetched feed without anything on
+     * screen reading it. Consumed by the Apple app, which rebuilds its sidebar, feed lookups and
+     * article rows' feed info from this rather than from every [feeds] emission; the comparison
+     * runs on [dispatcher] instead of reading every field across the Swift bridge on the main
+     * thread. Its `Feeds` may therefore lag [feeds] in those three fields — anything needing the
+     * fresh conditional-request fields (a refresh) must resolve the row from [feeds].
+     */
+    val structuralFeeds: StateFlow<List<Feeds>> =
+        feeds.distinctUntilChanged(::feedsStructurallyEqual)
+            .flowOn(dispatcher)
+            .stateIn(viewModelScope, started, emptyList())
+
+    /**
      * A one-shot check for whether any feed exists at all, read directly from
      * [FeedRepository.watchAllFeeds] rather than the already-collected [feeds] above: [feeds]'
      * `Eagerly`-shared `StateFlow` starts at `emptyList()` before its first real emission lands, so

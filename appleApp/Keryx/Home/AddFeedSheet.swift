@@ -18,7 +18,7 @@ struct AddFeedSheet: View {
     }
 
     private var alreadySubscribed: Bool {
-        AddFeedPreviewResolverKt.addFeedAlreadySubscribed(url: addFeed.state.url, feeds: home.feeds)
+        AddFeedPreviewResolverKt.addFeedAlreadySubscribed(url: addFeed.state.url, subscribedUrls: home.subscribedFeedUrls)
     }
 
     var body: some View {

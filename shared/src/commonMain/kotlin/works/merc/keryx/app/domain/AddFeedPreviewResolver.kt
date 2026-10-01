@@ -55,7 +55,20 @@ fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String
  * @return `true` if [url] matches an existing subscription, `false` otherwise.
  */
 fun addFeedAlreadySubscribed(url: String, feeds: List<Feeds>): Boolean =
-    url.isNotBlank() && feeds.any { it.url == UrlResolver.withDefaultScheme(url) }
+    addFeedAlreadySubscribed(url, feeds.mapTo(HashSet()) { it.url })
+
+/**
+ * Determines whether the entered URL (after scheme normalization) is one of [subscribedUrls] — the
+ * same check as the `List<Feeds>` overload, for a caller that already holds the subscribed URLs as a
+ * set (the Apple app keeps one, rebuilt only when the feed list's structure changes, rather than
+ * scanning every bridged `Feeds` per keystroke).
+ *
+ * @param url The feed URL entered by the user.
+ * @param subscribedUrls The `url` of every current subscription.
+ * @return `true` if [url] matches an existing subscription, `false` otherwise.
+ */
+fun addFeedAlreadySubscribed(url: String, subscribedUrls: Set<String>): Boolean =
+    url.isNotBlank() && UrlResolver.withDefaultScheme(url) in subscribedUrls
 
 /**
  * Preview/subscribe orchestration for the add-feed dialog, split out of `HomeViewModel` to keep

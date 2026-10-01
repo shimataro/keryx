@@ -3970,6 +3970,49 @@ class HomeViewModelTest {
         assertTrue(addFeedAlreadySubscribed("feed/f1", feeds))
     }
 
+    @Test
+    fun addFeedAlreadySubscribedSetOverloadMatchesAfterSchemeNormalization() {
+        val urls = setOf("https://feed/f1")
+
+        assertFalse(addFeedAlreadySubscribed("", urls))
+        assertFalse(addFeedAlreadySubscribed("   ", urls))
+        assertFalse(addFeedAlreadySubscribed("https://feed/other", urls))
+        assertTrue(addFeedAlreadySubscribed("https://feed/f1", urls))
+        // No scheme typed: withDefaultScheme prepends https:// before comparing.
+        assertTrue(addFeedAlreadySubscribed("feed/f1", urls))
+        assertFalse(addFeedAlreadySubscribed("feed/f1", emptySet()))
+    }
+
+    /**
+     * [HomeViewModel.structuralFeeds] must skip a refresh's per-feed re-emission that only rewrites
+     * the cache headers, while still passing on a change a view reads (here, a rename) — and
+     * [HomeViewModel.feeds] itself keeps emitting both.
+     */
+    @Test
+    fun structuralFeedsSkipsCacheHeaderOnlyChangesButEmitsOtherChanges() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        val emissions = mutableListOf<List<String?>>()
+        backgroundScope.launch { vm.structuralFeeds.collect { list -> emissions += list.map { it.custom_title } } }
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("f1"), vm.structuralFeeds.value.map { it.id })
+        val afterLoad = emissions.size
+
+        db.feedsQueries.updateCacheHeaders("\"v2\"", "Wed, 30 Sep 2026 00:00:00 GMT", 1_000L, "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals("\"v2\"", vm.feeds.value.single().etag)
+        assertEquals(afterLoad, emissions.size)
+        // The structural list keeps the row it last emitted, so its cache headers lag.
+        assertNull(vm.structuralFeeds.value.single().etag)
+
+        db.feedsQueries.updateCustomTitle("Mine", 2_000L, 2_000L, "f1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(afterLoad + 1, emissions.size)
+        assertEquals(listOf<String?>("Mine"), emissions.last())
+        assertEquals("\"v2\"", vm.structuralFeeds.value.single().etag)
+    }
+
     // --- Reader pager: pagerArticles / articleContents / requestArticleContent ---
 
     /**
