@@ -44,6 +44,7 @@ import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.presentation.settings.CloudSyncController
 import works.merc.keryx.app.presentation.settings.ManualSync
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 
@@ -145,4 +146,6 @@ fun presentationModule(): Module = module {
     single { CloudSyncController(get(), get(), get(), get(), get()) } bind ManualSync::class
     single { PreferencesController(get()) }
     single { OpmlTransfer(get(), get(), get(), get()) }
+    // Every OPML route (Data tab, File menu, opened .opml file) shares this one busy/result state.
+    single { OpmlTransferController(get()) }
 }

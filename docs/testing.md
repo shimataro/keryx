@@ -194,7 +194,7 @@ source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A de
 
 Project-wide, this is on top of the two Android suites above:
 
-- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, the shared `presentation/` state holders every UI (including the SwiftUI app) can reuse — `HomeViewModel`, `SetupController`, `CloudSyncController`, `PreferencesController`, `OpmlTransfer`, `NotificationAlerts`, `computeMenuUiState`, `isDuplicateFolderName`/`isDuplicateTagName` — each tested directly in `:shared`'s own `commonTest`/`desktopTest`, right next to the production code (e.g. `CloudSyncControllerTest.kt` beside `presentation/settings/CloudSyncController.kt`), plus each UI's own thin wrapper where one exists (composeApp's `SettingsViewModel`/`NotificationCenterViewModel` delegate to the shared controllers and are tested only for that delegation plus what stays Compose-only — the in-app updater and OPML's file-picking/busy-state, e.g. `SettingsViewModel`'s OPML import/export paths: the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
+- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, the shared `presentation/` state holders every UI (including the SwiftUI app) can reuse — `HomeViewModel`, `SetupController`, `CloudSyncController`, `PreferencesController`, `OpmlTransfer`, `OpmlTransferController`, `NotificationAlerts`, `computeMenuUiState`, `isDuplicateFolderName`/`isDuplicateTagName` — each tested directly in `:shared`'s own `commonTest`/`desktopTest`, right next to the production code (e.g. `CloudSyncControllerTest.kt` beside `presentation/settings/CloudSyncController.kt`), plus each UI's own thin wrapper where one exists (composeApp's `SettingsViewModel`/`NotificationCenterViewModel` delegate to the shared controllers and are tested only for that delegation plus what stays Compose-only — the in-app updater and OPML's file-picking/busy-state, e.g. `SettingsViewModel`'s OPML import/export paths: the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
 - the Linux/macOS/Windows file-dialog backend split (`FilePickerTest` for `defaultFilePickerBackend`'s OS selection, the extension predicate agreeing with `FileNameExtensionFilter` including accepting directories, the overwrite-confirmation resolution, and dialog-owner selection)
 - the feed-list drag-and-drop rewrite (`parseFeedListDragSourceKey` in `HomeCommonTest.kt` for the pure key-parsing logic; `FeedListDragTest.kt` for the real end-to-end gesture via `performMouseInput`/`performKeyInput` against actual rendered composables — dragging a feed above another and asserting the persisted order, the sub-threshold-move-still-selects case, dropping onto a folder header / a tag row, a right-click landing mid-drag not opening the context menu or aborting the drag, the ghost overlay's appear/disappear lifecycle, Escape-cancel, folder-onto-folder reordering, and a drag pushed out past the pane's horizontal bounds never resolving to a valid target or applying a drop even when it lines up with a row's height)
 - the feed list's in-row rename editor (`InlineRenameValidationTest` in `commonTest` for the shared blank-is-not-an-error validation rule and `toInlineEditTarget` in `HomeCommonTest.kt`; `FeedListInlineRenameTest.kt` for the real end-to-end flow against rendered composables — F2 opening the editor and Enter committing, Escape and the "×" icon cancelling, blur committing a valid name, a duplicate folder name blocking Enter and reverting silently on blur, a blank folder name simply not committing, a blank feed title resetting `custom_title` with the feed's own title shown as the placeholder, renaming a tag leaving its color alone, the tag color dot's popover applying a color immediately both outside and during a rename, and the Feed-menu `RenameFeed` command opening the editor for the current selection)
@@ -761,9 +761,14 @@ session, and on GNOME:
 - All chooser chrome ("開く"/"キャンセル"/"ファイル名"/…) renders in **Japanese** on a packaged build —
   this is what the `jdk.localedata` module addition in `composeApp/build.gradle.kts` is for; if it
   reads in English, that module list is the first thing to check.
-- Invoke import/export from all three places and confirm the chooser is owned by the right window:
-  (1) the Settings dialog's buttons — the chooser appears **above** Settings, never behind it; (2) the
-  in-window menu bar File ▸; (3) the KDE Global Menu File ▸ with the in-window bar hidden.
+- Invoke import/export from all three places — (1) the Settings dialog's buttons; (2) the in-window
+  menu bar File ▸; (3) the KDE Global Menu File ▸ with the in-window bar hidden. (2) and (3) first
+  open Settings ▸ Data (`OpmlTransferController`'s pending request); in every case the chooser
+  appears **above** Settings, never behind it, and the spinner and the result text appear on the Data
+  tab's buttons. While one runs, File ▸ Import/Export are disabled.
+- Start an import from File ▸, close Settings while it is still running, then reopen Settings ▸ Data
+  after it finishes: the result text is shown once; switching tabs and back (or reopening Settings
+  later) shows no stale result.
 - Switch the in-app theme light ↔ dark without restarting, then reopen the chooser: it renders in the
   new FlatLaf theme.
 - While a large OPML import runs, the app stays responsive — the import button's spinner keeps
@@ -1281,6 +1286,16 @@ macOS (and on iPad, where the reader shares the screen with the list):
   that article's URL.
 - Feed ▸ Copy feed URL and Feed ▸ Copy site URL copy their URL but do **not** flash the reader's ✓
   (the reader shows an article, not that feed).
+
+### (SwiftUI) OPML from the File menu
+
+The SwiftUI File menu's Import/Export only request the operation (`OpmlTransferObservable`, covered
+by `OpmlTransferObservableTests`); confirm on macOS:
+
+- File ▸ Import OPML… (⌘I) opens Settings on the Data tab and the open panel appears from there; the
+  spinner and the result text (both counts when some feeds failed) appear on the Data tab. Export
+  (⌘E) likewise ends with the result text on the Data tab.
+- While an import runs, File ▸ Import/Export are disabled.
 
 ### In-App Update
 

@@ -50,7 +50,11 @@ final class AppModel {
             // `PreferencesObservable.startObserving`).
             Task { await preferences.startObserving() }
             self.cloudSync = CloudSyncObservable(controller: sdk.cloudSyncController)
-            self.opmlTransfer = OpmlTransferObservable(opml: sdk.opml)
+            let opmlTransfer = OpmlTransferObservable(controller: sdk.opmlController)
+            self.opmlTransfer = opmlTransfer
+            // The one observation of the shared OPML state, for the app's lifetime: the File menu,
+            // the Settings window and Home's request presenter all read it.
+            Task { await opmlTransfer.startObserving(sdk.opmlController) }
             self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
             // Requesting authorization is `KeryxApp`'s job now, gated on `notificationEnabled`

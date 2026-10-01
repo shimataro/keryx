@@ -43,6 +43,7 @@ import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.presentation.settings.CloudSyncController
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 import kotlin.coroutines.cancellation.CancellationException
@@ -93,6 +94,13 @@ class KeryxSdk private constructor(private val koin: Koin) {
     /** Builds/parses the OPML document itself; picking a file to write/read stays with Swift. */
     val opml: OpmlTransfer get() = koin.get()
 
+    /**
+     * The one OPML busy/result/request state every route shares — the Data settings tab, the File
+     * menu (which only [OpmlTransferController.request]s, then shows Settings ▸ Data), and an opened
+     * `.opml` file — mirrored in Swift by `OpmlTransferObservable`.
+     */
+    val opmlController: OpmlTransferController get() = koin.get()
+
     private var notificationAlertsCreated = false
 
     /** Which warning/error still needs announcing in a transient surface with no queue of its own
@@ -115,6 +123,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
         canSyncNow: Boolean,
         searchActive: Boolean,
         unreadOnly: Boolean,
+        opmlBusy: Boolean,
         hasSelectedFeed: Boolean,
         feedListKeysActive: Boolean,
         hasRenamableSelection: Boolean,
@@ -129,6 +138,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
         canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
+        opmlBusy = opmlBusy,
         hasSelectedFeed = hasSelectedFeed,
         feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = hasRenamableSelection,

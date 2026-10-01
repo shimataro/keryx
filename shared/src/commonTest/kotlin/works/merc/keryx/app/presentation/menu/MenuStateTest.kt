@@ -17,6 +17,7 @@ class MenuStateTest {
         canSyncNow: Boolean = false,
         searchActive: Boolean = false,
         unreadOnly: Boolean = false,
+        opmlBusy: Boolean = false,
         hasSelectedFeed: Boolean = false,
         feedListKeysActive: Boolean = false,
         hasRenamableSelection: Boolean = false,
@@ -31,12 +32,22 @@ class MenuStateTest {
         canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
+        opmlBusy = opmlBusy,
         hasSelectedFeed = hasSelectedFeed,
         feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = hasRenamableSelection,
         selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
         selectedFeedSiteCanOpenInBrowser = selectedFeedSiteCanOpenInBrowser,
     )
+
+    // --- OPML ---
+
+    @Test
+    fun opml_items_are_disabled_while_an_opml_operation_runs() {
+        assertTrue(state(onHome = true, opmlBusy = false).opmlEnabled)
+        assertFalse(state(onHome = true, opmlBusy = true).opmlEnabled)
+        assertFalse(state(onHome = false, opmlBusy = false).opmlEnabled)
+    }
 
     // --- Home gating ---
 

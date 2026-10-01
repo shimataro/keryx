@@ -68,7 +68,7 @@ class AppMenuTreeTest {
     private fun enabledUi(feedListKeysActive: Boolean = true) = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = true,
+        searchActive = false, unreadOnly = true, opmlBusy = false,
         hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = true, selectedFeedSiteCanOpenInBrowser = true,
     )
@@ -76,7 +76,7 @@ class AppMenuTreeTest {
     private fun disabledUi() = computeMenuUiState(
         onHome = false, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), canSyncNow = false,
-        searchActive = true, unreadOnly = false,
+        searchActive = true, unreadOnly = false, opmlBusy = false,
         hasSelectedFeed = false, hasRenamableSelection = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
@@ -84,14 +84,14 @@ class AppMenuTreeTest {
     private fun folderSelectedUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = false,
+        searchActive = false, unreadOnly = false, opmlBusy = false,
         hasSelectedFeed = false, hasRenamableSelection = true, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = true,
+        searchActive = false, unreadOnly = true, opmlBusy = false,
         hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedSiteCanOpenInBrowser = false,
     )
 
@@ -159,7 +159,7 @@ class AppMenuTreeTest {
         val ui = computeMenuUiState(
             onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = false,
             activity = ActivitySnapshot(), canSyncNow = true,
-            searchActive = false, unreadOnly = false,
+            searchActive = false, unreadOnly = false, opmlBusy = false,
             hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
             selectedFeedSiteCanOpenInBrowser = false,
         )

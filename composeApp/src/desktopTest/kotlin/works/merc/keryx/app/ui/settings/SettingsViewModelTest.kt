@@ -68,7 +68,13 @@ import works.merc.keryx.app.platform.PathPickedFile
 import works.merc.keryx.app.platform.PickedFile
 import works.merc.keryx.app.platform.SaveFileRequest
 import works.merc.keryx.app.presentation.settings.CloudSyncController
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import works.merc.keryx.app.presentation.settings.OpmlOperation
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlResult
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_export_opml
@@ -99,8 +105,12 @@ private class FakeFileSelector(
     var lastSaveRequest: SaveFileRequest? = null
         private set
 
+    var openCount = 0
+        private set
+
     override suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? {
         lastOpenRequest = request
+        openCount++
         return openPath?.let(::PathPickedFile)
     }
 
@@ -162,6 +172,9 @@ class SettingsViewModelTest {
     private val createdViewModels = mutableListOf<SettingsViewModel>()
     private val createdCloudSyncControllers = mutableListOf<CloudSyncController>()
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
+
+    /** The [OpmlTransferController] behind the last [newViewModel] — what the File menu would call. */
+    private lateinit var lastOpmlController: OpmlTransferController
 
     @BeforeTest
     fun setUp() {
@@ -271,6 +284,7 @@ class SettingsViewModelTest {
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
         val opmlTransfer = OpmlTransfer(feedRepository, folderRepository, tagRepository, opmlImporter)
+        val opmlController = OpmlTransferController(opmlTransfer, Dispatchers.Unconfined).also { lastOpmlController = it }
         // Unconfined write dispatcher so saveLocalSettings persists inline.
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
@@ -306,7 +320,7 @@ class SettingsViewModelTest {
             Dispatchers.Unconfined,
         ).also { createdCloudSyncControllers += it }
         return SettingsViewModel(
-            cloudSyncController, preferencesController, opmlTransfer, updateRepository, dispatcher, fileSelector,
+            cloudSyncController, preferencesController, opmlController, updateRepository, dispatcher, fileSelector,
         ).also { createdViewModels += it }
     }
 
@@ -456,7 +470,7 @@ class SettingsViewModelTest {
         vm.exportOpml()
 
         assertNull(vm.opmlResult.value)
-        assertFalse(vm.exportingOpml.value)
+        assertFalse(vm.opmlBusy.value)
     }
 
     @Test
@@ -504,7 +518,7 @@ class SettingsViewModelTest {
         vm.importOpml()
 
         assertNull(vm.opmlResult.value)
-        assertFalse(vm.importingOpml.value)
+        assertFalse(vm.opmlBusy.value)
     }
 
     @Test
@@ -532,15 +546,102 @@ class SettingsViewModelTest {
         val vm = newViewModel(fileSelector = selector)
 
         vm.importOpml()
-        assertTrue(vm.importingOpml.value)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+        assertTrue(vm.opmlBusy.value, "busy from the moment the file dialog opens")
 
-        // Guarded no-op: importingOpml is still true, so this must not touch exportingOpml at all.
+        // Guarded no-op: the import is still running, so this must not start an export.
         vm.exportOpml()
-        assertFalse(vm.exportingOpml.value)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
 
         selector.openDeferred.complete(null)
         assertNull(vm.opmlResult.value)
-        assertFalse(vm.importingOpml.value)
+        assertFalse(vm.opmlBusy.value)
+    }
+
+    @Test
+    fun importDocumentImportsAnAlreadyReadDocument() = runTest {
+        val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
+        val vm = newViewModel(feedFetcher = succeedingFetcher())
+
+        vm.importDocument(xml)
+
+        awaitTrue { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
+        assertFalse(vm.opmlBusy.value)
+    }
+
+    @Test
+    fun importDocumentReportsFailedForAnUnreadableFile() = runTest {
+        val vm = newViewModel()
+
+        vm.importDocument(null)
+
+        assertEquals(OpmlResult.ImportFailed, vm.opmlResult.value)
+        assertFalse(vm.opmlBusy.value)
+    }
+
+    @Test
+    fun startingANewOperationClearsThePreviousResult() = runTest {
+        val selector = SuspendingFileSelector()
+        val vm = newViewModel(fileSelector = selector)
+        vm.importDocument(null)
+        assertEquals(OpmlResult.ImportFailed, vm.opmlResult.value)
+
+        vm.importOpml()
+
+        assertNull(vm.opmlResult.value, "a stale result must not outlive the next operation's start")
+        selector.openDeferred.complete(null)
+    }
+
+    @Test
+    fun aPendingRequestIsHandedOutOnlyWhileNothingRuns() = runTest {
+        val selector = SuspendingFileSelector()
+        val vm = newViewModel(fileSelector = selector)
+        vm.importOpml()
+
+        lastOpmlController.request(OpmlRequest.ExportFile)
+        assertNull(vm.consumeOpmlRequest(), "not consumable while the import runs")
+        assertEquals(OpmlRequest.ExportFile, vm.pendingOpmlRequest.value)
+
+        selector.openDeferred.complete(null)
+        assertEquals(OpmlRequest.ExportFile, vm.consumeOpmlRequest())
+        assertNull(vm.pendingOpmlRequest.value)
+    }
+
+    // --- DataTab carrying out a request from outside the tab (File menu, opened .opml file) ---
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun dataTabCarriesOutAPendingMenuImportExactlyOnce() {
+        val selector = FakeFileSelector(openPath = null)
+        val vm = newViewModel(fileSelector = selector)
+        lastOpmlController.request(OpmlRequest.ImportFile)
+
+        runDesktopComposeUiTest {
+            setContent { DataTabContent(vm) }
+            waitForIdle()
+        }
+
+        assertEquals(1, selector.openCount, "the file dialog opens from inside Settings ▸ Data, once")
+        assertNull(vm.pendingOpmlRequest.value)
+        assertFalse(vm.opmlBusy.value)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun dataTabLeavesAPendingRequestAloneWhileAnOperationRuns() {
+        val selector = FakeFileSelector(openPath = null)
+        val vm = newViewModel(fileSelector = selector)
+        lastOpmlController.tryBegin(OpmlOperation.Exporting)
+        lastOpmlController.request(OpmlRequest.ImportFile)
+
+        runDesktopComposeUiTest {
+            setContent { DataTabContent(vm) }
+            waitForIdle()
+        }
+
+        assertEquals(0, selector.openCount)
+        assertEquals(OpmlRequest.ImportFile, vm.pendingOpmlRequest.value)
     }
 
     /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */

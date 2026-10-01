@@ -74,8 +74,9 @@ struct KeryxApp: App {
                         oauthCoordinator: model.oauthCoordinator,
                         onDone: { model.completeSetup() }
                     )
-                } else if let notifications = model.notifications {
+                } else if let notifications = model.notifications, let opmlTransfer = model.opmlTransfer {
                     HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, settingsNavigation: model.settingsNavigation, preferences: preferences)
+                        .modifier(OpmlRequestPresenter(opmlTransfer: opmlTransfer, settingsNavigation: model.settingsNavigation))
                         #if os(macOS)
                         .modifier(UnreadCountObserver(home: home) { count in
                             updateDockBadge(count)

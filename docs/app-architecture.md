@@ -64,7 +64,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
                   tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
-                  leaving file picking to each UI), menu/ (MenuUiState + computeMenuUiState — enabled/
+                  leaving file picking to each UI; OpmlTransferController — the one OPML busy flag,
+                  last result and pending request (`OpmlRequest`) every route and UI shares: the File
+                  menu only `request`s, Settings ▸ Data carries the request out (`consumeRequest`,
+                  handed out only while nothing runs), and a result is kept until the Data tab shows
+                  it), menu/ (MenuUiState + computeMenuUiState — enabled/
                   checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
                   than Compose's own `Screen` type), Formatting (formatTimestamp, articleMetaText —
                   the reader's "author · date" meta line, shared by Compose's 3-pane reader and the
@@ -1485,7 +1489,10 @@ that found some, also passed to the OS notification sink), `syncRepository`, `se
 order — `CloudStorageAvailability.available`), `newAddFeedController()`,
 `handleOAuthRedirect(url)`, and the same `presentation/` controllers the Compose settings/setup
 screens now wrap rather than reimplement — `setupController`, `cloudSyncController`,
-`preferences` (`PreferencesController`), `opml` (`OpmlTransfer`), `notificationAlerts`, and
+`preferences` (`PreferencesController`), `opml` (`OpmlTransfer`), `opmlController`
+(`OpmlTransferController`, mirrored by Swift's `OpmlTransferObservable`; the SwiftUI File menu only
+requests, and a Home-only `OpmlRequestPresenter` shows Settings on the Data tab, which carries the
+request out), `notificationAlerts`, and
 `menuState(…)` (a direct passthrough to `presentation/menu/computeMenuUiState` for a
 `Commands`/menu item's enabled/checked state). `startMaintenance()` starts
 `domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s

@@ -32,14 +32,13 @@ struct DataSettingsTab: View {
             // in a single row wrapped their titles at a phone width.
             Section(L("settings_data_management")) {
                 Button {
-                    isImporting = true
+                    startImport()
                 } label: {
                     Label(L("settings_import_opml"), systemImage: "arrow.down.doc")
                 }
                 .disabled(opmlTransfer.isBusy)
                 Button {
-                    exportDocument = opmlTransfer.exportDocument()
-                    isExporting = true
+                    startExport()
                 } label: {
                     Label(L("settings_export_opml"), systemImage: "arrow.up.doc")
                 }
@@ -60,12 +59,11 @@ struct DataSettingsTab: View {
                 VStack(alignment: .leading) {
                     HStack {
                         Button(L("settings_import_opml")) {
-                            isImporting = true
+                            startImport()
                         }
                         .disabled(opmlTransfer.isBusy)
                         Button(L("settings_export_opml")) {
-                            exportDocument = opmlTransfer.exportDocument()
-                            isExporting = true
+                            startExport()
                         }
                         .disabled(opmlTransfer.isBusy)
                         if opmlTransfer.isBusy {
@@ -90,14 +88,57 @@ struct DataSettingsTab: View {
         ) { result in
             opmlTransfer.reportExportResult(result)
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [opmlContentType, .xml]) { result in
+        // The multiple-selection overload, purely because it is the one with `onCancellation` — the
+        // import has already begun (busy) when the panel opens, so dismissing it must end it.
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [opmlContentType, .xml],
+            allowsMultipleSelection: false
+        ) { result in
             switch result {
-            case .success(let url):
-                opmlTransfer.importOpml(from: url)
+            case .success(let urls):
+                if let url = urls.first {
+                    opmlTransfer.importOpml(from: url)
+                } else {
+                    opmlTransfer.reportImportCancelled()
+                }
             case .failure:
                 opmlTransfer.reportImportPanelFailure()
             }
+        } onCancellation: {
+            opmlTransfer.reportImportCancelled()
         }
+        // Carries out an import/export asked for outside this tab (the File menu, an opened .opml
+        // file) here, so it gets the same panel, spinner and result as the buttons above — matching
+        // Compose's `DataTab`. Waits while another operation runs (`takeRequest()` is `nil` then).
+        .task(id: RequestTrigger(pending: opmlTransfer.pendingRequest != nil, busy: opmlTransfer.isBusy)) {
+            guard let request = opmlTransfer.takeRequest() else { return }
+            switch onEnum(of: request) {
+            case .importFile: startImport()
+            case .exportFile: startExport()
+            case .importDocument(let document): opmlTransfer.importDocument(xml: document.xml)
+            }
+        }
+        // Shows a finished result once — including one that finished while Settings was closed.
+        .task(id: opmlTransfer.result != nil) {
+            opmlTransfer.showPendingResult()
+        }
+    }
+
+    private struct RequestTrigger: Equatable {
+        let pending: Bool
+        let busy: Bool
+    }
+
+    private func startImport() {
+        guard opmlTransfer.beginImport() else { return }
+        isImporting = true
+    }
+
+    private func startExport() {
+        guard let document = opmlTransfer.prepareExport() else { return }
+        exportDocument = document
+        isExporting = true
     }
 
     private var cacheRetentionBinding: Binding<Int?> {

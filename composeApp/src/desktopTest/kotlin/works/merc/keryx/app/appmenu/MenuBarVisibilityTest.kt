@@ -74,7 +74,7 @@ class MenuBarVisibilityTest {
             onHome = onHome, hasSelectedArticle = true, selectedArticleHasUrl = true,
             selectedArticleCanOpenInBrowser = true,
             activity = ActivitySnapshot(), canSyncNow = true,
-            searchActive = false, unreadOnly = false,
+            searchActive = false, unreadOnly = false, opmlBusy = false,
             hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
             selectedFeedSiteCanOpenInBrowser = false,
         ),

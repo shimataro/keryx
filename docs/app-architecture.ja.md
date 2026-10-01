@@ -58,7 +58,10 @@
                   Home のツールバーのボタンとフィードメニュー（`HomeViewModel.sync()`/`canSyncNow` 経由。
                   `runs` の各イベントで既読ピンを刈り込み直す）とクラウド同期タブが使う。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
-                  組み立て・解析。ファイルの選択は各 UI が担当）、menu/（MenuUiState + computeMenuUiState——
+                  組み立て・解析。ファイルの選択は各 UI が担当。OpmlTransferController——全経路・全 UI が
+                  共有する唯一の OPML の busy・直近の結果・保留中の要求（`OpmlRequest`）。ファイルメニューは
+                  `request` するだけで、設定 ▸ データがその要求を実行し（`consumeRequest`。何も実行中でない
+                  ときだけ渡す）、結果はデータタブが表示するまで保持される）、menu/（MenuUiState + computeMenuUiState——
                   メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
                   `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
                   リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
@@ -1457,7 +1460,9 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`、
 そして Compose の設定・セットアップ画面が今では自前実装ではなく包んでいるのと同じ `presentation/` コントローラ
 ——`setupController`・`cloudSyncController`・`preferences`（`PreferencesController`）・`opml`
-（`OpmlTransfer`）・`notificationAlerts`・`menuState(…)`（`presentation/menu/computeMenuUiState` への直接
+（`OpmlTransfer`）・`opmlController`（`OpmlTransferController`。Swift の `OpmlTransferObservable` が
+ミラーする。SwiftUI のファイルメニューは要求を出すだけで、Home 専用の `OpmlRequestPresenter` が設定を
+データタブで開き、そのタブが要求を実行する）・`notificationAlerts`・`menuState(…)`（`presentation/menu/computeMenuUiState` への直接
 パススルーで、`Commands`／メニュー項目の有効・チェック状態を返す）——を提供する。`startMaintenance()` は、
 `domain/StartupMaintenanceTasks.kt` の `runStartupMaintenance` と `domain/BackgroundRefreshLoop.kt` の
 `backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——フォアグラウンド起動ごとに1回呼ぶ。

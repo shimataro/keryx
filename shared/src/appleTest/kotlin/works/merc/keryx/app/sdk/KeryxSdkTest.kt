@@ -176,6 +176,7 @@ class KeryxSdkTest {
                 canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                opmlBusy = false,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,
                 hasRenamableSelection = false,
@@ -192,6 +193,7 @@ class KeryxSdkTest {
                 canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                opmlBusy = false,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,
                 hasRenamableSelection = false,
@@ -209,6 +211,7 @@ class KeryxSdkTest {
                 canSyncNow = canSyncNow,
                 searchActive = false,
                 unreadOnly = false,
+                opmlBusy = false,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,
                 hasRenamableSelection = false,
@@ -229,6 +232,7 @@ class KeryxSdkTest {
                 canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                opmlBusy = false,
                 hasSelectedFeed = true,
                 feedListKeysActive = feedListKeysActive,
                 hasRenamableSelection = true,
@@ -238,6 +242,25 @@ class KeryxSdkTest {
             assertTrue(renameState(feedListKeysActive = false).renameOrDeleteEnabled)
             assertFalse(renameState(feedListKeysActive = false).renameOrDeleteShortcutActive)
             assertTrue(renameState(feedListKeysActive = true).renameOrDeleteShortcutActive)
+
+            // Import/Export follow the shared OPML busy flag the SwiftUI menu passes in.
+            fun opmlEnabled(opmlBusy: Boolean) = sdk.menuState(
+                onHome = true,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = false,
+                searchActive = false,
+                unreadOnly = false,
+                opmlBusy = opmlBusy,
+                hasSelectedFeed = false,
+                feedListKeysActive = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
+            ).opmlEnabled
+            assertTrue(opmlEnabled(opmlBusy = false))
+            assertFalse(opmlEnabled(opmlBusy = true))
         } finally {
             sdk.close()
         }

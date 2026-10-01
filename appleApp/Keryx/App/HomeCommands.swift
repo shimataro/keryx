@@ -1,9 +1,5 @@
 import KeryxShared
 import SwiftUI
-#if os(macOS)
-import AppKit
-import UniformTypeIdentifiers
-#endif
 
 /// The application menu bar's dynamic items (File/View/Article/Feed/Help) — see
 /// `presentation/menu/MenuState.kt`'s `computeMenuUiState` for the enabled/checked rules this
@@ -54,10 +50,12 @@ struct HomeCommands: Commands {
                     .disabled(!state.addItemsEnabled)
                 #if os(macOS)
                 Divider()
-                Button(L("menu_file_import_opml")) { importOpml() }
+                // Both only ask; `OpmlRequestPresenter` (Home) then shows Settings ▸ Data, which
+                // carries the request out with its own panel, spinner and result.
+                Button(L("menu_file_import_opml")) { model.opmlTransfer?.request(OpmlRequestImportFile.shared) }
                     .keyboardShortcut("i", modifiers: .command)
                     .disabled(!state.opmlEnabled)
-                Button(L("menu_file_export_opml")) { exportOpml() }
+                Button(L("menu_file_export_opml")) { model.opmlTransfer?.request(OpmlRequestExportFile.shared) }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(!state.opmlEnabled)
                 #endif
@@ -243,6 +241,7 @@ struct HomeCommands: Commands {
             canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
+            opmlBusy: model.opmlTransfer?.isBusy ?? false,
             hasSelectedFeed: hasSelectedFeed,
             feedListKeysActive: bareKeysActive,
             hasRenamableSelection: target != nil,
@@ -304,33 +303,4 @@ struct HomeCommands: Commands {
         case .tag(let t): model.sidebarDialogs.deletingTag = t.tag
         }
     }
-
-    #if os(macOS)
-    /// Shares `AppModel.opmlTransfer`'s busy-guard and result state with the Data settings tab
-    /// (`DataSettingsTab.swift`), so triggering this from the menu can't race a run already started
-    /// from there, matching Compose's own `SettingsViewModel` routing both entry points through one
-    /// state (`AppMenuBar.kt`).
-    private func importOpml() {
-        guard let opmlTransfer = model.opmlTransfer, !opmlTransfer.isBusy else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml, .xml]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        opmlTransfer.importOpml(from: url)
-    }
-
-    private func exportOpml() {
-        guard let opmlTransfer = model.opmlTransfer, let document = opmlTransfer.exportDocument() else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml]
-        panel.nameFieldStringValue = "keryx.opml"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try document.text.write(to: url, atomically: true, encoding: .utf8)
-            opmlTransfer.reportExportResult(.success(url))
-        } catch {
-            opmlTransfer.reportExportResult(.failure(error))
-        }
-    }
-    #endif
 }

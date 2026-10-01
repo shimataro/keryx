@@ -14,7 +14,8 @@ import works.merc.keryx.app.domain.ActivitySnapshot
 data class MenuUiState(
     /** Add feed/folder/tag — only meaningful on Home. */
     val addItemsEnabled: Boolean,
-    /** OPML import/export — available once past initial setup. */
+    /** OPML import/export — available once past initial setup, and not while an OPML operation
+     * is already running (whichever route started it — see `OpmlTransferController.busy`). */
     val opmlEnabled: Boolean,
     val searchEnabled: Boolean,
     val unreadOnlyEnabled: Boolean,
@@ -78,6 +79,9 @@ data class MenuUiState(
  * (it already covers the idle check, a connected account, connect/disconnect/reset in flight and
  * an authorization failure).
  *
+ * OPML import/export is disabled while [opmlBusy] (`OpmlTransferController.busy`), the same busy
+ * flag the settings Data tab's buttons follow. The input has no default, like the open inputs.
+ *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
  * [feedListKeysActive] — whether the feed list's bare item keys (F2/Return, Delete) would act
@@ -93,6 +97,7 @@ fun computeMenuUiState(
     canSyncNow: Boolean,
     searchActive: Boolean,
     unreadOnly: Boolean,
+    opmlBusy: Boolean,
     hasSelectedFeed: Boolean = false,
     feedListKeysActive: Boolean = false,
     hasRenamableSelection: Boolean = false,
@@ -100,7 +105,7 @@ fun computeMenuUiState(
     selectedFeedSiteCanOpenInBrowser: Boolean,
 ): MenuUiState = MenuUiState(
     addItemsEnabled = onHome,
-    opmlEnabled = onHome,
+    opmlEnabled = onHome && !opmlBusy,
     searchEnabled = onHome,
     unreadOnlyEnabled = onHome,
     unreadOnlyChecked = unreadOnly,

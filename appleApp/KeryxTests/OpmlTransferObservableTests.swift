@@ -3,130 +3,209 @@ import KeryxShared
 import Testing
 
 /// Fakes `OpmlTransferring` — `KeryxTests` is standalone/non-hosted, so this substitutes for a
-/// running `KeryxSdk`'s real `OpmlTransfer`. `@unchecked Sendable` (not an `actor`/`@MainActor`
-/// class): `OpmlImportOutcome` isn't itself `Sendable`, and an `actor`'s own isolated
-/// implementation of `importOpml(xml:)` would then be barred from returning it across the
-/// isolation boundary — a restriction the real `OpmlTransfer` (a plain, non-isolated conformance)
-/// never hits. This class's own tiny bit of mutable state (`importCallCount`) is protected by a
-/// lock instead, so it's genuinely safe to mark `Sendable` despite the compiler not verifying it.
+/// running `KeryxSdk`'s real `OpmlTransferController`, with the same rules in miniature: one
+/// operation at a time, a request handed out only while nothing runs. `@unchecked Sendable` (not an
+/// `actor`/`@MainActor` class): the Kotlin result types aren't themselves `Sendable`, and an actor's
+/// isolated `importResult(xml:)` would be barred from returning one across the isolation boundary —
+/// a restriction the real controller (a plain, non-isolated conformance) never hits. The mutable
+/// state is protected by a lock instead.
 final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
-    private let exportOpmlResult: String
-    private let importResult: Swift.Result<OpmlImportOutcome, Error>
+    private let importOutcome: OpmlResult
     private let importDelayNanoseconds: UInt64
     private let lock = NSLock()
-    private var _importCallCount = 0
-    var importCallCount: Int {
-        lock.withLock { _importCallCount }
-    }
+    private var running: OpmlOperation?
+    private var pending: OpmlRequest?
+    private var _importedXml: [String?] = []
+    private var _finishedResults: [OpmlResult?] = []
+    private var _clearCount = 0
 
-    init(
-        exportOpmlResult: String = "",
-        importResult: Swift.Result<OpmlImportOutcome, Error> = .success(OpmlImportOutcome(added: 0, failed: 0)),
-        importDelayNanoseconds: UInt64 = 0
-    ) {
-        self.exportOpmlResult = exportOpmlResult
-        self.importResult = importResult
+    var importedXml: [String?] { lock.withLock { _importedXml } }
+    var finishedResults: [OpmlResult?] { lock.withLock { _finishedResults } }
+    var clearCount: Int { lock.withLock { _clearCount } }
+    var isRunning: Bool { lock.withLock { running != nil } }
+
+    init(importOutcome: OpmlResult = OpmlResultImported(added: 0, failed: 0), importDelayNanoseconds: UInt64 = 0) {
+        self.importOutcome = importOutcome
         self.importDelayNanoseconds = importDelayNanoseconds
     }
 
-    func exportOpml() -> String { exportOpmlResult }
+    func tryBegin(operation: OpmlOperation) -> Bool {
+        lock.withLock {
+            guard running == nil else { return false }
+            running = operation
+            return true
+        }
+    }
 
-    func importOpml(xml: String) async throws -> OpmlImportOutcome {
+    func finish(result: OpmlResult?) {
+        lock.withLock {
+            running = nil
+            _finishedResults.append(result)
+        }
+    }
+
+    func exportDocument() -> String { "<opml/>" }
+
+    func importResult(xml: String?) async throws -> OpmlResult {
         if importDelayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: importDelayNanoseconds)
         }
-        lock.withLock { _importCallCount += 1 }
-        switch importResult {
-        case .success(let outcome): return outcome
-        case .failure(let error): throw error
+        lock.withLock { _importedXml.append(xml) }
+        return xml == nil ? OpmlResultImportFailed.shared : importOutcome
+    }
+
+    func request(request: OpmlRequest) {
+        lock.withLock { pending = request }
+    }
+
+    func consumeRequest() -> OpmlRequest? {
+        lock.withLock {
+            guard running == nil else { return nil }
+            defer { pending = nil }
+            return pending
         }
     }
-}
 
-private struct FakeImportError: Error {}
+    func clearResult() {
+        lock.withLock { _clearCount += 1 }
+    }
+}
 
 @MainActor
 @Suite
 struct OpmlTransferObservableTests {
-    private func writeTempOpmlFile() throws -> URL {
+    private func writeTempOpmlFile(_ text: String = "<opml></opml>") throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".opml")
-        try "<opml></opml>".write(to: url, atomically: true, encoding: .utf8)
+        try text.write(to: url, atomically: true, encoding: .utf8)
         return url
     }
 
     @Test
-    func exportDocumentIsNilWhileBusy() async throws {
+    func busyCoversTheWholeImportIncludingThePanel() async throws {
         let fake = FakeOpmlTransferring(importDelayNanoseconds: 50_000_000)
-        let observable = OpmlTransferObservable(opml: fake)
+        let observable = OpmlTransferObservable(controller: fake)
         let url = try writeTempOpmlFile()
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let task = try #require(observable.importOpml(from: url))
-        #expect(observable.isBusy)
-        #expect(observable.exportDocument() == nil)
+        #expect(observable.beginImport())
+        #expect(observable.isBusy, "busy from the moment the open panel is shown")
+        #expect(observable.prepareExport() == nil, "a second operation is refused")
 
-        await task.value
+        await observable.importOpml(from: url).value
+
         #expect(!observable.isBusy)
+        #expect(!fake.isRunning)
+        #expect(fake.importedXml == ["<opml></opml>"])
     }
 
     @Test
-    func secondImportWhileBusyIsIgnored() async throws {
-        let fake = FakeOpmlTransferring(importDelayNanoseconds: 50_000_000)
-        let observable = OpmlTransferObservable(opml: fake)
-        let url = try writeTempOpmlFile()
-        defer { try? FileManager.default.removeItem(at: url) }
+    func dismissingTheImportPanelEndsTheOperationWithNothingToShow() {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
 
-        let task = try #require(observable.importOpml(from: url))
-        #expect(observable.importOpml(from: url) == nil)
-        await task.value
+        #expect(observable.beginImport())
+        observable.reportImportCancelled()
 
-        #expect(fake.importCallCount == 1)
+        #expect(!observable.isBusy)
+        #expect(!fake.isRunning)
+        #expect(observable.result == nil)
     }
 
     @Test
-    func successfulImportWithNoFailuresReportsSuccess() async throws {
-        let fake = FakeOpmlTransferring(importResult: .success(OpmlImportOutcome(added: 3, failed: 0)))
-        let observable = OpmlTransferObservable(opml: fake)
-        let url = try writeTempOpmlFile()
-        defer { try? FileManager.default.removeItem(at: url) }
+    func anExportIsRecordedWhenTheSavePanelReportsBack() {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
 
-        let task = try #require(observable.importOpml(from: url))
+        #expect(observable.prepareExport() != nil)
+        observable.reportExportResult(.success(URL(fileURLWithPath: "/tmp/keryx.opml")))
+
+        #expect(!observable.isBusy)
+        #expect(!fake.isRunning)
+        let result = try? #require(observable.result)
+        #expect(result.map { !OpmlTransferObservable.statusText(for: $0).1 } == true)
+    }
+
+    @Test
+    func anUnreadableOpenedFileFinishesAsImportFailed() async throws {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
+
+        let task = try #require(observable.importDocument(xml: nil))
         await task.value
 
-        #expect(!observable.statusIsError)
+        let result = try #require(observable.result)
+        #expect(observable.statusIsErrorFor(result))
+        #expect(fake.importedXml == [nil])
+    }
+
+    @Test
+    func importDocumentIsRefusedWhileAnotherOperationRuns() {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
+        _ = observable.beginImport()
+
+        #expect(observable.importDocument(xml: "<opml/>") == nil)
+        #expect(fake.importedXml.isEmpty)
+    }
+
+    @Test
+    func aRequestIsTakenOnlyWhileNothingRuns() {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
+        _ = observable.beginImport()
+
+        observable.request(OpmlRequestExportFile.shared)
+        #expect(observable.pendingRequest != nil)
+        #expect(observable.takeRequest() == nil, "waits for the running import")
+
+        observable.reportImportCancelled()
+        #expect(observable.takeRequest() != nil)
+        #expect(observable.pendingRequest == nil)
+        #expect(observable.takeRequest() == nil, "handed out once")
+    }
+
+    @Test
+    func aResultIsShownOnceAndThenCleared() async throws {
+        let fake = FakeOpmlTransferring(importOutcome: OpmlResultImported(added: 3, failed: 0))
+        let observable = OpmlTransferObservable(controller: fake)
+        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        await task.value
+
+        observable.showPendingResult()
+
         #expect(observable.statusMessage != nil)
+        #expect(!observable.statusIsError)
+        #expect(observable.result == nil)
+        #expect(fake.clearCount == 1)
+
+        observable.showPendingResult()
+        #expect(fake.clearCount == 1, "nothing left to show on a later visit")
     }
 
     @Test
-    func partialFailureReportsFailure() async throws {
-        let fake = FakeOpmlTransferring(importResult: .success(OpmlImportOutcome(added: 2, failed: 1)))
-        let observable = OpmlTransferObservable(opml: fake)
-        let url = try writeTempOpmlFile()
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        let task = try #require(observable.importOpml(from: url))
-        await task.value
-
-        #expect(observable.statusIsError)
+    func aPartialFailureShowsBothCountsAsAnError() {
+        let (message, isError) = OpmlTransferObservable.statusText(for: OpmlResultImported(added: 2, failed: 1))
+        #expect(isError)
+        #expect(message.contains(" / "), "added and failed counts are both shown, like Compose's opmlImportedText")
     }
 
     @Test
-    func thrownErrorReportsFailure() async throws {
-        let fake = FakeOpmlTransferring(importResult: .failure(FakeImportError()))
-        let observable = OpmlTransferObservable(opml: fake)
-        let url = try writeTempOpmlFile()
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        let task = try #require(observable.importOpml(from: url))
-        await task.value
-
-        #expect(observable.statusIsError)
+    func aFullSuccessShowsOnlyTheAddedCount() {
+        let (message, isError) = OpmlTransferObservable.statusText(for: OpmlResultImported(added: 2, failed: 0))
+        #expect(!isError)
+        #expect(!message.contains(" / "))
     }
 
     @Test
-    func panelFailureReportsFailure() {
-        let observable = OpmlTransferObservable(opml: FakeOpmlTransferring())
-        observable.reportImportPanelFailure()
-        #expect(observable.statusIsError)
+    func exportResultsMapToTheirStatus() {
+        #expect(!OpmlTransferObservable.statusText(for: OpmlResultExported.shared).1)
+        #expect(OpmlTransferObservable.statusText(for: OpmlResultExportFailed.shared).1)
+        #expect(OpmlTransferObservable.statusText(for: OpmlResultImportFailed.shared).1)
+    }
+}
+
+private extension OpmlTransferObservable {
+    func statusIsErrorFor(_ result: OpmlResult) -> Bool {
+        Self.statusText(for: result).1
     }
 }

@@ -5,9 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageType
@@ -15,30 +13,26 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.FileSelector
+import works.merc.keryx.app.platform.PickedFile
 import works.merc.keryx.app.platform.PlatformFileSelector
 import works.merc.keryx.app.presentation.settings.CloudSyncController
-import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlOperation
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlResult
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController
-
-/** A transient result of an OPML operation, surfaced inline near the action. */
-sealed interface OpmlResult {
-    data class Imported(val added: Int, val failed: Int) : OpmlResult
-    data object Exported : OpmlResult
-    data object ExportFailed : OpmlResult
-    data object ImportFailed : OpmlResult
-}
 
 /**
  * The Compose settings screen's own ViewModel — a thin wrapper around the shared
- * [CloudSyncController] / [PreferencesController] / [OpmlTransfer], plus the two things that stay
- * Compose/desktop-only: the in-app updater ([UpdateRepository], since the SwiftUI app updates
- * through the App Store or Sparkle instead) and OPML file picking (native file dialogs are
- * platform-specific; [OpmlTransfer] only builds/parses the document itself).
+ * [CloudSyncController] / [PreferencesController] / [OpmlTransferController], plus the two things
+ * that stay Compose/desktop-only: the in-app updater ([UpdateRepository], since the SwiftUI app
+ * updates through the App Store or Sparkle instead) and OPML file picking (native file dialogs are
+ * platform-specific; [OpmlTransferController] owns the busy/result state and the document work).
  */
 class SettingsViewModel(
     private val cloudSyncController: CloudSyncController,
     private val preferencesController: PreferencesController,
-    private val opmlTransfer: OpmlTransfer,
+    private val opmlController: OpmlTransferController,
     private val updateRepository: UpdateRepository,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
@@ -116,37 +110,37 @@ class SettingsViewModel(
     /** Hands the current [UpdateState.Ready] download off to the OS installer. */
     fun installUpdate() = updateRepository.install()
 
-    // --- OPML (file picking + busy state stay here; the byte-level work is OpmlTransfer's) ---
+    // --- OPML (file picking stays here; busy/result/requests are OpmlTransferController's) ---
 
-    private val _opmlResult = MutableStateFlow<OpmlResult?>(null)
-    val opmlResult: StateFlow<OpmlResult?> = _opmlResult.asStateFlow()
+    /** The last OPML operation's outcome, until the Data tab shows it ([clearOpmlResult]). */
+    val opmlResult: StateFlow<OpmlResult?> = opmlController.result
 
-    /** True while an OPML import is running (a native file dialog then per-feed fetches). */
-    private val _importingOpml = MutableStateFlow(false)
-    val importingOpml = _importingOpml.asStateFlow()
+    /** Whether any OPML operation is running, whichever route started it. */
+    val opmlBusy: StateFlow<Boolean> = opmlController.busy
 
-    /** True while an OPML export is running. */
-    private val _exportingOpml = MutableStateFlow(false)
-    val exportingOpml = _exportingOpml.asStateFlow()
+    /** The running OPML operation (for the matching button's spinner), or `null`. */
+    val opmlRunning: StateFlow<OpmlOperation?> = opmlController.running
+
+    /** An import/export asked for from the File menu or an opened `.opml` file, waiting for the Data tab. */
+    val pendingOpmlRequest: StateFlow<OpmlRequest?> = opmlController.pendingRequest
+
+    /** Takes the waiting [pendingOpmlRequest] when nothing is running (see [OpmlTransferController.consumeRequest]). */
+    fun consumeOpmlRequest(): OpmlRequest? = opmlController.consumeRequest()
 
     /**
      * Exports subscribed feeds, folders, and tags to a user-selected OPML file.
      *
-     * Updates [opmlResult] to [OpmlResult.Exported] on success, [OpmlResult.ExportFailed] on failure,
-     * or `null` if the user cancels the file picker.
+     * Finishes with [OpmlResult.Exported] on success, [OpmlResult.ExportFailed] on failure, or `null`
+     * if the user cancels the file picker. A no-op while any OPML operation is running.
      */
     fun exportOpml() {
-        if (_exportingOpml.value || _importingOpml.value) return
+        if (!opmlController.tryBegin(OpmlOperation.Exporting)) return
         viewModelScope.launch {
-            _exportingOpml.value = true
+            var result: OpmlResult? = null
             try {
-                val target = fileSelector.pickSaveFile(opmlFileRequests.export())
-                if (target == null) {
-                    _opmlResult.value = null
-                    return@launch
-                }
-                _opmlResult.value = try {
-                    withContext(dispatcher) { target.writeText(opmlTransfer.exportOpml()) }
+                val target = fileSelector.pickSaveFile(opmlFileRequests.export()) ?: return@launch
+                result = try {
+                    withContext(dispatcher) { target.writeText(opmlController.exportDocument()) }
                     OpmlResult.Exported
                 } catch (e: CancellationException) {
                     throw e
@@ -155,45 +149,57 @@ class SettingsViewModel(
                     OpmlResult.ExportFailed
                 }
             } finally {
-                _exportingOpml.value = false
+                opmlController.finish(result)
             }
         }
     }
 
     /**
-     * Imports feeds, folders, and tags from a selected OPML or XML file.
+     * Imports feeds, folders, and tags from a selected OPML or XML file. A no-op while any OPML
+     * operation is running.
      */
     fun importOpml() {
-        if (_importingOpml.value || _exportingOpml.value) return
+        if (!opmlController.tryBegin(OpmlOperation.Importing)) return
         viewModelScope.launch {
-            _importingOpml.value = true
+            var result: OpmlResult? = null
             try {
-                val source = fileSelector.pickOpenFile(opmlFileRequests.import())
-                if (source == null) {
-                    _opmlResult.value = null
-                    return@launch
-                }
-                _opmlResult.value = try {
-                    val outcome = withContext(dispatcher) { source.readText()?.let { opmlTransfer.importOpml(it) } }
-                    if (outcome == null) OpmlResult.ImportFailed else OpmlResult.Imported(outcome.added, outcome.failed)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    Log.warn(TAG, "Failed to import OPML", e)
-                    OpmlResult.ImportFailed
-                }
+                val source = fileSelector.pickOpenFile(opmlFileRequests.import()) ?: return@launch
+                result = withContext(dispatcher) { opmlController.importResult(readOrNull(source)) }
             } finally {
-                _importingOpml.value = false
+                opmlController.finish(result)
             }
         }
     }
 
     /**
-     * Clears the latest OPML import or export result.
+     * Imports an already-read OPML document (an `.opml` file the app was opened with); `null` [xml]
+     * means reading it failed and finishes with [OpmlResult.ImportFailed]. A no-op while any OPML
+     * operation is running.
      */
-    fun clearOpmlResult() {
-        _opmlResult.value = null
+    fun importDocument(xml: String?) {
+        if (!opmlController.tryBegin(OpmlOperation.Importing)) return
+        viewModelScope.launch {
+            var result: OpmlResult? = null
+            try {
+                result = withContext(dispatcher) { opmlController.importResult(xml) }
+            } finally {
+                opmlController.finish(result)
+            }
+        }
     }
+
+    /** [PickedFile.readText], with a read failure (other than cancellation) logged and mapped to `null`. */
+    private suspend fun readOrNull(source: PickedFile): String? = try {
+        source.readText()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Log.warn(TAG, "Failed to read the picked OPML file", e)
+        null
+    }
+
+    /** Clears the latest OPML import or export result once it has been shown. */
+    fun clearOpmlResult() = opmlController.clearResult()
 
     private companion object {
         const val TAG = "SettingsVM"

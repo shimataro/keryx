@@ -80,8 +80,9 @@ import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.ui.settings.PROJECT_URL
-import works.merc.keryx.app.ui.settings.SettingsViewModel
 
 /**
  * Desktop application menu bar. On macOS this renders in the system (screen) menu bar; on
@@ -115,7 +116,7 @@ internal fun FrameWindowScope.AppMenuBar(
 ) {
     val menuController = koinInject<MenuController>()
     val homeVm = koinInject<HomeViewModel>()
-    val settingsVm = koinInject<SettingsViewModel>()
+    val opmlController = koinInject<OpmlTransferController>()
     val updateRepository = koinInject<UpdateRepository>()
     val settingsOpenRequests = koinInject<SettingsOpenRequests>()
     // The same application-lifetime scope `main.kt` uses as `appScope` (a single Koin registration,
@@ -130,6 +131,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val searchActive by homeVm.searchActive.collectAsState()
     val unreadOnly by homeVm.unreadOnly.collectAsState()
     val canSyncNow by homeVm.canSyncNow.collectAsState()
+    val opmlBusy by opmlController.busy.collectAsState()
     val feeds by homeVm.feeds.collectAsState()
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
@@ -154,6 +156,7 @@ internal fun FrameWindowScope.AppMenuBar(
         canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
+        opmlBusy = opmlBusy,
         hasSelectedFeed = selectedFeed != null,
         feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = selectionTarget != null,
@@ -224,8 +227,10 @@ internal fun FrameWindowScope.AppMenuBar(
         addFeed = { menuController.send(MenuCommand.AddFeed) },
         addFolder = { menuController.send(MenuCommand.AddFolder) },
         addTag = { menuController.send(MenuCommand.AddTag) },
-        importOpml = { settingsVm.importOpml() },
-        exportOpml = { settingsVm.exportOpml() },
+        // Carried out by Settings ▸ Data (App.kt opens it for a pending request), so the file
+        // dialog, spinner and result appear in the same place as for the tab's own buttons.
+        importOpml = { opmlController.request(OpmlRequest.ImportFile) },
+        exportOpml = { opmlController.request(OpmlRequest.ExportFile) },
         closeWindow = onCloseWindow,
         openSettings = { menuController.send(MenuCommand.OpenSettings) },
         quit = onQuit,

@@ -15,6 +15,7 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.rememberNotificationPermissionRequester
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.ui.home.HomeScreen
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -93,6 +94,16 @@ fun App() {
             settingsInitialTab = released.tabId
             settingsTabRequestToken++
             showSettings = true
+        }
+
+        // An OPML import/export asked for outside Settings (the File menu, an opened .opml file) is
+        // carried out by Settings ▸ Data, so a waiting request opens it there. Keyed on busy too: a
+        // request made while an operation runs is shown once that one finishes.
+        val opmlController = koinInject<OpmlTransferController>()
+        val pendingOpmlRequest by opmlController.pendingRequest.collectAsState()
+        val opmlBusy by opmlController.busy.collectAsState()
+        LaunchedEffect(pendingOpmlRequest, opmlBusy) {
+            if (pendingOpmlRequest != null && !opmlBusy) settingsOpenRequests.request("data")
         }
 
         // A notification's "open this settings tab" action is forwarded to the router (HomeScreen

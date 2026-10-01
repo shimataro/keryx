@@ -219,7 +219,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 プロジェクト全体で見ると——
 
-- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、どの UI（SwiftUI 版を含む）からも再利用できる共有の `presentation/` state holder——`HomeViewModel`、`SetupController`、`CloudSyncController`、`PreferencesController`、`OpmlTransfer`、`NotificationAlerts`、`computeMenuUiState`、`isDuplicateFolderName`/`isDuplicateTagName`——を、それぞれ本体のすぐ隣（例：`CloudSyncControllerTest.kt` は `presentation/settings/CloudSyncController.kt` の隣）で `:shared` 自身の `commonTest`/`desktopTest` として直接テストしていること、加えて存在する場合は各 UI 自身の薄いラッパー（composeApp の `SettingsViewModel`/`NotificationCenterViewModel` は共有コントローラへ委譲し、その委譲部分と、Compose 側だけに残るもの——アプリ内アップデータと OPML のファイル選択/ビジー状態——だけをテストする。例えば `SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
+- 上記の Android の2スイートに加えて、`commonTest`/`desktopTest`（上記の `./gradlew :shared:desktopTest :composeApp:desktopTest` で実行）がパーサ、フェッチャのリダイレクト/304/404/410/タイムアウト/ディスカバリ、OPML、Dropbox ストレージ/認証、PKCE、OAuth ループバックサーバ、マージ（後勝ち・OR マージ・衝突ガード・FK ガード）、スキーマ、ローカル設定、記事 upsert、URL リゾルバ、日時パーサ、Result、Repository 層（Article/Feed/Tag/Settings）、CloudSession、NotificationCenter、IdGenerator、SyncRepository、どの UI（SwiftUI 版を含む）からも再利用できる共有の `presentation/` state holder——`HomeViewModel`、`SetupController`、`CloudSyncController`、`PreferencesController`、`OpmlTransfer`、`OpmlTransferController`、`NotificationAlerts`、`computeMenuUiState`、`isDuplicateFolderName`/`isDuplicateTagName`——を、それぞれ本体のすぐ隣（例：`CloudSyncControllerTest.kt` は `presentation/settings/CloudSyncController.kt` の隣）で `:shared` 自身の `commonTest`/`desktopTest` として直接テストしていること、加えて存在する場合は各 UI 自身の薄いラッパー（composeApp の `SettingsViewModel`/`NotificationCenterViewModel` は共有コントローラへ委譲し、その委譲部分と、Compose 側だけに残るもの——アプリ内アップデータと OPML のファイル選択/ビジー状態——だけをテストする。例えば `SettingsViewModel` の OPML インポート/エクスポート経路——構築したドキュメント/読み込んだファイルがピックしたパスと往復すること、ローカライズ済みのリクエスト内容が `FakeFileSelector` に渡ること、キャンセル、そしてドキュメントの構築/書き込み/取り込み処理が EDT ではなく注入したディスパッチャ上で実行されることを含む）
 - Linux/macOS/Windows のファイルダイアログのバックエンド分岐（`FilePickerTest`：`defaultFilePickerBackend` の OS 判定、`FileNameExtensionFilter` と一致する拡張子述語——ディレクトリを accept することを含む——、上書き確認の解決、ダイアログの親ウインドウ選択）
 - フィード一覧のドラッグ&ドロップの書き直し（`HomeCommonTest.kt` の `parseFeedListDragSourceKey` で純粋なキー解析ロジックを、`FeedListDragTest.kt` で実際にレンダリングしたコンポーザブルに対して `performMouseInput`/`performKeyInput` を使う実際のエンドツーエンドのジェスチャーをカバー——フィードを別のフィードの上にドラッグして永続化された順序を検証、しきい値未満の移動でも選択は効くケース、フォルダーヘッダー/タグ行へのドロップ、ドラッグ中に右クリックが来てもコンテキストメニューが開かずドラッグも中断されないこと、ゴーストオーバーレイの表示/非表示のライフサイクル、Escape によるキャンセル、フォルダー同士の並べ替え、ペインの水平方向の範囲を越えて押し出されたドラッグが行の高さと一致していても有効なドロップ先と判定されずドロップも適用されないこと）
 - フィード一覧の行内リネーム編集（`commonTest` の `InlineRenameValidationTest` で「空欄はエラーではないが確定もできない」という共有バリデーション規則を、`HomeCommonTest.kt` で `toInlineEditTarget` を、`FeedListInlineRenameTest.kt` で実際にレンダリングしたコンポーザブルに対するエンドツーエンドの挙動をカバー——F2 で編集を開始し Enter で確定、Escape と「×」アイコンでのキャンセル、blur による確定、フォルダー名の重複が Enter をブロックし blur では静かに元へ戻ること、フォルダー名の空欄が単に確定不可であること、フィード名を空欄で確定すると `custom_title` がリセットされフィード自身のタイトルが `placeholder` に出ること、タグのリネームが色に触れないこと、タグの色ドットのポップオーバーがリネーム中かどうかに関わらず即座に色を反映すること、Feed メニューの `RenameFeed` コマンドが現在の選択に対して編集を開始すること）
@@ -820,9 +820,13 @@ OPML のファイルダイアログは実際の OS ウインドウ（macOS は `
 - チューザの文言（「開く」「キャンセル」「ファイル名」…）がパッケージ版で**日本語**になっていること
   ——これが `composeApp/build.gradle.kts` に `jdk.localedata` モジュールを追加した理由であり、英語で
   表示される場合はまずそのモジュール一覧を確認する。
-- インポート/エクスポートを 3 つの経路すべてから起動し、チューザの親ウインドウが正しいことを確認する:
-  (1) Settings のボタン——チューザが Settings の**手前**に出る、(2) ウインドウ内メニューバーの
-  File ▸、(3) 内蔵バーを隠した状態の KDE Global Menu の File ▸。
+- インポート/エクスポートを 3 つの経路すべてから起動する——(1) Settings のボタン、(2) ウインドウ内
+  メニューバーの File ▸、(3) 内蔵バーを隠した状態の KDE Global Menu の File ▸。(2) と (3) はまず
+  設定 ▸ データを開く（`OpmlTransferController` の保留中の要求）。どの場合もチューザが Settings の
+  **手前**に出て背後に隠れず、スピナーと結果テキストがデータタブのボタンに出ること。実行中は
+  File ▸ インポート/エクスポートが無効になること。
+- File ▸ からインポートを始め、実行中に設定を閉じ、終わった後に設定 ▸ データを開き直す: 結果テキストが
+  1 回だけ表示され、タブを切り替えて戻っても（後で設定を開き直しても）古い結果は出ないこと。
 - 再起動せずにアプリ内テーマをライト⇔ダークで切り替えてからチューザを開き直すと、新しい FlatLaf
   テーマで描画される。
 - 大きな OPML のインポート中もアプリが応答し続ける——インポートボタンのスピナーが回り続け、
@@ -1353,6 +1357,16 @@ SwiftUI 版で記事の「URL をコピー」を行う経路は、すべて `Hom
   ボタン自身と同じように、リーダーのコピーボタンが ✓ になり、ペーストボードにはその記事の URL が入っていること。
 - フィード ▸ フィード URL をコピー / サイト URL をコピーは URL をコピーするが、リーダーの ✓ は**出さない**こと
   （リーダーが表示しているのは記事であり、そのフィードではないため）。
+
+### （SwiftUI）ファイルメニューからの OPML
+
+SwiftUI のファイルメニューのインポート／エクスポートは要求を出すだけである（`OpmlTransferObservable`。
+`OpmlTransferObservableTests` がカバー）。macOS で確認する:
+
+- ファイル ▸ OPML をインポート…（⌘I）で設定がデータタブで開き、そこからオープンパネルが出る。スピナーと
+  結果テキスト（一部のフィードが失敗した場合は両方の件数）がデータタブに出る。エクスポート（⌘E）も同様に、
+  結果テキストがデータタブに出て終わる。
+- インポート中はファイル ▸ インポート／エクスポートが無効になる。
 
 ### アプリ内アップデート
 

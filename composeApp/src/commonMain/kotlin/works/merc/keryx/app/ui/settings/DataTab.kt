@@ -23,6 +23,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.presentation.settings.OpmlOperation
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlResult
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -59,11 +62,27 @@ internal fun DataTabContent(vm: SettingsViewModel) {
     val readTimeoutSeconds by vm.readTimeoutSeconds.collectAsState()
     val cacheRetentionDays by vm.cacheRetentionDays.collectAsState()
     val opmlResult by vm.opmlResult.collectAsState()
-    val importingOpml by vm.importingOpml.collectAsState()
-    val exportingOpml by vm.exportingOpml.collectAsState()
+    val opmlRunning by vm.opmlRunning.collectAsState()
+    val opmlBusy by vm.opmlBusy.collectAsState()
+    val pendingOpmlRequest by vm.pendingOpmlRequest.collectAsState()
     // Inline status shown right under the OPML import/export buttons (macOS-style transient text).
     var opmlStatus by remember { mutableStateOf<String?>(null) }
 
+    // Carries out an import/export asked for outside this tab (the File menu, an opened .opml file)
+    // here, so it gets the same file dialog, spinner and result as the buttons below. Waits while
+    // another operation runs; consumeOpmlRequest() hands the request out only once nothing does.
+    LaunchedEffect(pendingOpmlRequest, opmlBusy) {
+        if (pendingOpmlRequest == null || opmlBusy) return@LaunchedEffect
+        when (val request = vm.consumeOpmlRequest()) {
+            OpmlRequest.ImportFile -> vm.importOpml()
+            OpmlRequest.ExportFile -> vm.exportOpml()
+            is OpmlRequest.ImportDocument -> vm.importDocument(request.xml)
+            null -> Unit
+        }
+    }
+
+    // Shows a finished operation's result once and clears it — including one that finished while
+    // the settings dialog was closed, which is therefore shown on the next visit to this tab.
     LaunchedEffect(opmlResult) {
         opmlStatus = when (val r = opmlResult) {
             is OpmlResult.Exported -> getString(Res.string.settings_export_success)
@@ -108,10 +127,11 @@ internal fun DataTabContent(vm: SettingsViewModel) {
         }
 
         Section(stringResource(Res.string.settings_data_management)) {
-            // Disable both while either OPML op runs (import can take a while — one fetch per feed)
-            // so the buttons don't look inert/re-triggerable; the running one shows a spinner in
-            // place of its icon.
-            val opmlBusy = importingOpml || exportingOpml
+            // Disable both while any OPML op runs, whichever route started it (import can take a
+            // while — one fetch per feed) so the buttons don't look inert/re-triggerable; the running
+            // one shows a spinner in place of its icon.
+            val importingOpml = opmlRunning == OpmlOperation.Importing
+            val exportingOpml = opmlRunning == OpmlOperation.Exporting
             Row {
                 FlatTonalButton(onClick = { vm.importOpml() }, enabled = !opmlBusy) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
