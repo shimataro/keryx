@@ -256,7 +256,7 @@ jobs:
   # debug frameworks too would add ~5 min without verifying anything the release link and the
   # test-binary links don't already.
   build-apple:
-    name: Build & Test (macos-latest SwiftUI)
+    name: Build & Test (macos-latest / SwiftUI)
     runs-on: macos-latest
     timeout-minutes: 30
     # Job-level so every Gradle invocation here — including the one Scripts/build-shared.sh makes
