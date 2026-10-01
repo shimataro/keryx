@@ -141,6 +141,7 @@ targets:
       - path: Keryx/Platform/Localized.swift
       - path: Keryx/Platform/DockBadge.swift
       - path: Keryx/Bridge/ArticleRowModel.swift
+      - path: Keryx/Bridge/ReaderPagerIndex.swift
       - path: Keryx/Bridge/SidebarModel.swift
       - path: Keryx/Bridge/ObservableAssignment.swift
       - path: Keryx/Home/SidebarRowHighlight.swift

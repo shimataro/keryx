@@ -12,7 +12,9 @@ import Observation
 /// child task (see its own comment).
 ///
 /// One `observe*` loop per `StateFlow` exposed. This class only carries what the app screens have
-/// needed so far; add a property + loop pair here as more of `HomeViewModel`'s state is read.
+/// needed so far; add a property + loop pair here as more of `HomeViewModel`'s state is read. Not
+/// `pagerArticles`: that flow is `WhileSubscribed`, and observing it here would keep it running for
+/// the app's whole life — the iOS pager collects it itself, while on screen (`ReaderPagerObservable`).
 @MainActor
 @Observable
 final class HomeObservable: ObservableAssignment {
@@ -110,13 +112,6 @@ final class HomeObservable: ObservableAssignment {
     private(set) var selectedFeedName: String?
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
-    /// The rows the iOS reader's swipe pager pages through (`HomeViewModel.pagerArticles`) — the
-    /// search results while a search is active, so a swipe steps exactly as J/K does. Observed on
-    /// iOS only: that flow runs only while collected, and macOS has no pager to collect it for.
-    private(set) var pagerArticles: [ArticleListRow] = []
-    /// Each `pagerArticles` row's position, rebuilt with it — for the pager's membership and
-    /// neighbour lookups without a scan (or a round trip through `readerPages`).
-    private(set) var pagerIndexById: [String: Int] = [:]
     private(set) var cloudConnected: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
@@ -221,10 +216,6 @@ final class HomeObservable: ObservableAssignment {
         async let t28: () = observeArticleContents()
         async let t29: () = observeCloudConnected()
         async let t30: () = observeActivity()
-        #if os(iOS)
-        async let t31: () = observePagerArticles()
-        _ = await t31
-        #endif
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
@@ -469,17 +460,6 @@ final class HomeObservable: ObservableAssignment {
     private func observeArticleContents() async {
         for await v in viewModel.articleContents { articleContents = v }
     }
-
-    #if os(iOS)
-    private func observePagerArticles() async {
-        for await v in viewModel.pagerArticles {
-            pagerArticles = v
-            var index = [String: Int](minimumCapacity: v.count)
-            for (i, row) in v.enumerated() { index[row.id] = i }
-            pagerIndexById = index
-        }
-    }
-    #endif
 
     private func observeCloudConnected() async {
         for await v in viewModel.cloudConnected { assignIfChanged(\.cloudConnected, v.boolValue) }
