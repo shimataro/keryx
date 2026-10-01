@@ -125,7 +125,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()
     val unreadOnly by homeVm.unreadOnly.collectAsState()
-    val cloudConnected by homeVm.cloudConnected.collectAsState()
+    val canSyncNow by homeVm.canSyncNow.collectAsState()
     val feeds by homeVm.feeds.collectAsState()
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
@@ -147,7 +147,7 @@ internal fun FrameWindowScope.AppMenuBar(
         hasSelectedArticle = selected != null,
         selectedArticleHasUrl = hasUsableUrl(selected?.url),
         activity = activity,
-        cloudConnected = cloudConnected,
+        canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
         hasSelectedFeed = selectedFeed != null,

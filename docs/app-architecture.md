@@ -57,7 +57,12 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
-                  sync-now and `canSyncNow`; PreferencesController — typed setters over `LocalSettings`
+                  sync-now and `canSyncNow`, re-reading the connected provider whenever
+                  `cloudStorageType` changes so a connect made in Setup reaches it; it is also the one
+                  ManualSync — `canSyncNow`/`syncNow()`/`runs` — that every "Sync now" route shares:
+                  Home's toolbar button and the Feed menu (via `HomeViewModel.sync()`/`canSyncNow`,
+                  which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
+                  tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
                   leaving file picking to each UI), menu/ (MenuUiState + computeMenuUiState — enabled/
                   checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
@@ -1094,8 +1099,9 @@ next time the user toggles unread-only back on, defeating the reset entirely.
 
 `pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
 selection (if it qualifies), and every call site that runs it is a moment the read pin is expected
-to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), a completed
-refresh/sync (`HomeRefreshController.repinSelected`), and the article list toolbar's explicit "hide
+to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), either side
+of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
+started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search

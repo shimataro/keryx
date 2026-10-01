@@ -11,6 +11,7 @@ import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
 import works.merc.keryx.app.presentation.home.newHomeViewModel
+import works.merc.keryx.app.presentation.settings.ManualSync
 
 /**
  * Builds a [HomeViewModel] over [driver]/[db], runs [block] against it, then tears the whole
@@ -29,9 +30,11 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     activityCenter: ActivityCenter = ActivityCenter(),
     tokenStorage: TokenStorage = HomeViewModelFixtureTokenStorage(),
     appKey: String = "",
+    // See newHomeViewModel's own parameter: null builds the real CloudSyncController.
+    manualSync: ManualSync? = null,
     block: suspend (HomeViewModelFixture) -> T,
 ): T {
-    val fixture = newHomeViewModel(driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey)
+    val fixture = newHomeViewModel(driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync)
     return try {
         // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and
         // doing that from a `finally` would mask the assertion failure that actually ended [block].

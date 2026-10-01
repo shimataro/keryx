@@ -192,7 +192,10 @@ struct FeedListView: View {
                     busyTitleKey: "home_syncing",
                     systemImage: "arrow.triangle.2.circlepath",
                     busy: home.activity.syncing,
-                    enabled: home.activity.idle,
+                    // The predicate every "Sync now" route shares (ManualSync.canSyncNow); an
+                    // expired sign-in, the one disabled state the user must act on, says so.
+                    enabled: home.canSyncNow,
+                    disabledHelpKey: home.syncAuthFailed ? "home_sync_auth_failed" : nil,
                     action: { home.viewModel.sync() }
                 )
             }
@@ -587,7 +590,15 @@ private struct ToolbarActivityButton: View {
     let systemImage: String
     let busy: Bool
     let enabled: Bool
+    /// Replaces the hover help while the button is disabled (and not busy), to say why.
+    var disabledHelpKey: String?
     let action: () -> Void
+
+    private var helpKey: String {
+        if busy { return busyTitleKey }
+        if !enabled, let disabledHelpKey { return disabledHelpKey }
+        return titleKey
+    }
 
     var body: some View {
         #if os(iOS)
@@ -616,7 +627,7 @@ private struct ToolbarActivityButton: View {
             }
         }
         .disabled(!enabled)
-        .help(L(busy ? busyTitleKey : titleKey))
+        .help(L(helpKey))
         #endif
     }
 }

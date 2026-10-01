@@ -171,7 +171,10 @@ article detail) + keyboard navigation, adapting down to fewer simultaneous panes
 menu, a keyboard shortcut, a gesture — behaves identically whichever route invokes it**: the same
 effect, the same enabled/disabled state, and the same feedback. For example, the ✓ the reader's
 copy button shows after a URL copy appears whether the copy came from that button,
-⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu. Routes may differ only in *which
+⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu; likewise "Sync now" is enabled
+in the feed list toolbar, the Feed menu and Settings ▸ Cloud sync at exactly the same moments
+(disabled during a connect, disconnect, reset or initial sync, while anything else is running, and
+after a sign-in expires). Routes may differ only in *which
 item* they act on — a context menu acts on the row it was opened on — never in what happens to it;
 feedback tied to a particular on-screen control appears whenever that control is showing the item
 acted on.

@@ -172,7 +172,7 @@ class KeryxSdkTest {
                 onHome = true,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
-                cloudConnected = false,
+                canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
             )
@@ -182,11 +182,24 @@ class KeryxSdkTest {
                 onHome = false,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
-                cloudConnected = false,
+                canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
             )
             assertFalse(awayFromHome.addItemsEnabled)
+
+            // "Sync now" follows the shared ManualSync predicate it is handed, on Home only.
+            fun syncEnabled(onHome: Boolean, canSyncNow: Boolean) = sdk.menuState(
+                onHome = onHome,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                canSyncNow = canSyncNow,
+                searchActive = false,
+                unreadOnly = false,
+            ).syncEnabled
+            assertTrue(syncEnabled(onHome = true, canSyncNow = true))
+            assertFalse(syncEnabled(onHome = true, canSyncNow = false))
+            assertFalse(syncEnabled(onHome = false, canSyncNow = true))
         } finally {
             sdk.close()
         }

@@ -31,6 +31,9 @@ import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.presentation.settings.FakeManualSync
+import works.merc.keryx.app.presentation.settings.ManualSync
+import works.merc.keryx.app.presentation.settings.ManualSyncEdge
 import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome
@@ -216,6 +219,8 @@ class HomeViewModelTest {
         cloudProvider: (() -> works.merc.keryx.app.data.cloud.CloudStorage?)? = null,
         // What FtsSearch runs its queries through — a test can wrap `driver` to count searches.
         ftsDriver: SqlDriver = driver,
+        // Home's "Sync now" delegate; a test that needs to drive or inspect it passes its own.
+        manualSync: ManualSync = FakeManualSync(),
     ): HomeViewModel {
         val articleRepository = ArticleRepository(db, FtsSearch(ftsDriver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the subscribe/refresh path's indexMissing() works.
@@ -257,7 +262,7 @@ class HomeViewModelTest {
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner,
+            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner, manualSync,
             Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
@@ -1907,6 +1912,60 @@ class HomeViewModelTest {
 
         // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+    }
+
+    // --- "Sync now" delegates to the shared ManualSync ---
+
+    @Test
+    fun syncDelegatesToTheSharedManualSync() = runTest {
+        val manualSync = FakeManualSync()
+        val vm = newViewModel(manualSync = manualSync)
+
+        vm.sync()
+
+        assertEquals(1, manualSync.syncNowCalls)
+    }
+
+    @Test
+    fun canSyncNowPassesTheSharedManualSyncPredicateThrough() = runTest {
+        val manualSync = FakeManualSync(canSyncNow = false)
+        val vm = newViewModel(manualSync = manualSync)
+        assertFalse(vm.canSyncNow.value)
+
+        manualSync.canSyncNow.value = true
+
+        assertTrue(vm.canSyncNow.value)
+    }
+
+    /**
+     * A manual sync started from another route (the cloud-sync settings tab) must re-trim Home's
+     * pinned read rows just like one started from Home's own button: the re-trim follows
+     * [ManualSync.runs], not [HomeViewModel.sync].
+     */
+    @Test
+    fun manualSyncEdgesReTrimPinnedRowsEvenWhenHomeDidNotStartTheSync() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val manualSync = FakeManualSync()
+        val vm = newViewModel(manualSync = manualSync)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        // Both were read by selecting them; both stay pinned while browsing.
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        manualSync.emit(ManualSyncEdge.Started)
+        manualSync.emit(ManualSyncEdge.Finished)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+        assertEquals(0, manualSync.syncNowCalls)
     }
 
     // --- canHideRead / hideRead ---

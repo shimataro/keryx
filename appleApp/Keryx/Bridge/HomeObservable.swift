@@ -113,6 +113,10 @@ final class HomeObservable: ObservableAssignment {
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
     private(set) var cloudConnected: Bool = false
+    /// `HomeViewModel.canSyncNow` — the "Sync now" predicate every route shares.
+    private(set) var canSyncNow: Bool = false
+    /// `HomeViewModel.syncAuthFailed` — why the sync button is disabled, when it is the sign-in.
+    private(set) var syncAuthFailed: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
     /// Bumped by every URL-copy action (the reader's own button, and eventually the menu bar's/
@@ -226,10 +230,13 @@ final class HomeObservable: ObservableAssignment {
         async let t28: () = observeArticleContents()
         async let t29: () = observeCloudConnected()
         async let t30: () = observeActivity()
+        async let t31: () = observeCanSyncNow()
+        async let t32: () = observeSyncAuthFailed()
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
-            t21, t22, t23, t24, t25, t26, t27, t28, t29, t30
+            t21, t22, t23, t24, t25, t26, t27, t28, t29, t30,
+            t31, t32
         )
     }
 
@@ -477,5 +484,13 @@ final class HomeObservable: ObservableAssignment {
 
     private func observeActivity() async {
         for await v in viewModel.activity { assignIfChanged(\.activity, v) }
+    }
+
+    private func observeCanSyncNow() async {
+        for await v in viewModel.canSyncNow { assignIfChanged(\.canSyncNow, v.boolValue) }
+    }
+
+    private func observeSyncAuthFailed() async {
+        for await v in viewModel.syncAuthFailed { assignIfChanged(\.syncAuthFailed, v.boolValue) }
     }
 }

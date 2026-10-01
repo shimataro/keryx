@@ -416,6 +416,27 @@ Cloud-data corruption recovery needs a real cloud connection end to end, so conf
 - With the cloud DB still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
 - After a successful reset, confirm automatic syncing resumes (a read/star toggle triggers a real sync again).
 
+"Sync now" has three routes — the feed list toolbar's cloud button, Feed ▸ Sync now in the menu bar
+(the SwiftUI app's `Commands` too), and the button in Settings ▸ Cloud sync — which all run
+`ManualSync.syncNow()` and follow `ManualSync.canSyncNow` (`presentation/settings/ManualSync.kt`).
+`MenuStateTest`/`HomeViewModelTest`/`CloudSyncControllerTest` cover the predicate and delegation;
+confirm the routes really agree on screen, with a provider connected:
+
+- While a provider is connecting, disconnecting, resetting its cloud data, or running its
+  connect-time initial sync, and while any refresh or sync is running, the toolbar button, the Feed
+  menu item and the Settings button are all disabled; once it ends all three are enabled again
+  together. (Keep Settings open while checking the menu bar.)
+- Make the provider reject the token (e.g. revoke the app's access in the provider's account
+  settings), then sync: once the authorization failure is recorded, all three are disabled, and
+  hovering (long-pressing, on Android) the toolbar button shows "Sign-in expired — reconnect in
+  Settings". Reconnecting from Settings ▸ Cloud sync enables all three again.
+- Under "unread only", read a few articles on Home, then press Sync now in Settings ▸ Cloud sync:
+  back on Home the read rows other than the selected one are gone, exactly as after pressing the
+  toolbar button.
+- On a fresh profile, finish first-run Setup by connecting a provider: Home's sync button, Feed ▸
+  Sync now and the Settings button are enabled straight away (once the initial sync finishes), and
+  Settings ▸ Cloud sync shows the provider as connected — no restart needed.
+
 The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/
 enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmation:

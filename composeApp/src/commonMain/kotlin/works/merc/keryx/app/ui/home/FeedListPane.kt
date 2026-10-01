@@ -109,6 +109,7 @@ import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_sync
+import works.merc.keryx.app.resources.home_sync_auth_failed
 import works.merc.keryx.app.resources.home_syncing
 import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
@@ -865,7 +866,9 @@ private fun FeedListAutoScrollEffect(
 /**
  * [FeedListPane]'s top toolbar row: an `app_name` title on a platform with no native application
  * menu bar (see [hasNativeAppMenu] below — desktop's own window title bar already names the app,
- * so this stays untitled there), then add feed / refresh all / cloud sync (when [cloudConnected]).
+ * so this stays untitled there), then add feed / refresh all / cloud sync (shown when
+ * [cloudConnected], enabled by `HomeViewModel.canSyncNow` — the predicate every "Sync now" route
+ * shares).
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
  *
@@ -926,10 +929,18 @@ private fun FeedListToolbarRow(
                     }
                 }
                 if (cloudConnected) {
+                    // Enabled exactly when every other "Sync now" route is (ManualSync.canSyncNow).
+                    // The one disabled state the user must act on — an expired sign-in — says so.
+                    val canSyncNow by vm.canSyncNow.collectAsState()
+                    val syncAuthFailed by vm.syncAuthFailed.collectAsState()
                     val syncTooltip = stringResource(
-                        if (syncing) Res.string.home_syncing else Res.string.home_sync,
+                        when {
+                            syncing -> Res.string.home_syncing
+                            !canSyncNow && syncAuthFailed -> Res.string.home_sync_auth_failed
+                            else -> Res.string.home_sync
+                        },
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = activity.idle) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = canSyncNow) {
                         if (syncing) {
                             SmallSpinner()
                         } else {

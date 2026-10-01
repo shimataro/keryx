@@ -13,7 +13,7 @@ class MenuStateTest {
         hasSelectedArticle: Boolean = false,
         selectedArticleHasUrl: Boolean = false,
         activity: ActivitySnapshot = ActivitySnapshot(),
-        cloudConnected: Boolean = false,
+        canSyncNow: Boolean = false,
         searchActive: Boolean = false,
         unreadOnly: Boolean = false,
         hasSelectedFeed: Boolean = false,
@@ -25,7 +25,7 @@ class MenuStateTest {
         hasSelectedArticle = hasSelectedArticle,
         selectedArticleHasUrl = selectedArticleHasUrl,
         activity = activity,
-        cloudConnected = cloudConnected,
+        canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
         hasSelectedFeed = hasSelectedFeed,
@@ -54,7 +54,7 @@ class MenuStateTest {
             onHome = false,
             hasSelectedArticle = true,
             selectedArticleHasUrl = true,
-            cloudConnected = true,
+            canSyncNow = true,
             hasSelectedFeed = true,
             hasRenamableSelection = true,
             selectedFeedHasSiteUrl = true,
@@ -144,25 +144,31 @@ class MenuStateTest {
     }
 
     @Test
-    fun sync_requires_connection_and_not_syncing() {
-        assertFalse(state(cloudConnected = false).syncEnabled)
-        assertFalse(state(cloudConnected = true, activity = ActivitySnapshot(syncCount = 1)).syncEnabled)
-        assertTrue(state(cloudConnected = true).syncEnabled)
+    fun sync_follows_can_sync_now() {
+        // canSyncNow is ManualSync's one predicate — shared with Home's toolbar button and the
+        // cloud-sync settings tab — so the menu adds nothing of its own beyond onHome.
+        assertFalse(state(canSyncNow = false).syncEnabled)
+        assertTrue(state(canSyncNow = true).syncEnabled)
     }
 
     @Test
-    fun sync_also_disabled_while_refreshing() {
-        // Mirrors FeedListPane's toolbar buttons, which block Sync while a refresh is running.
-        assertFalse(state(cloudConnected = true, activity = ActivitySnapshot(feedRefreshCount = 1)).syncEnabled)
+    fun sync_disabled_on_an_authorization_failure_even_while_connected_and_idle() {
+        // An authorization failure leaves the app connected and idle; only canSyncNow knows to
+        // disable sync then, and the menu must agree with the toolbar and Settings.
+        assertFalse(state(canSyncNow = false, activity = ActivitySnapshot()).syncEnabled)
     }
 
     @Test
-    fun refresh_all_and_sync_disabled_while_a_refresh_cycle_is_running() {
+    fun sync_disabled_away_from_home_even_when_can_sync_now() {
+        assertFalse(state(onHome = false, canSyncNow = true).syncEnabled)
+    }
+
+    @Test
+    fun refresh_all_disabled_while_a_refresh_cycle_is_running() {
         // The gap between a cycle's refresh and its sync has neither per-operation flag up, but the
         // cycle as a whole is still busy.
-        val ui = state(cloudConnected = true, activity = ActivitySnapshot(refreshCycleCount = 1))
+        val ui = state(activity = ActivitySnapshot(refreshCycleCount = 1))
         assertFalse(ui.refreshAllEnabled)
-        assertFalse(ui.syncEnabled)
     }
 
     // --- Feed actions require Home + a selected feed ---

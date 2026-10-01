@@ -227,7 +227,7 @@ struct HomeCommands: Commands {
             onHome: !model.needsSetup,
             hasSelectedArticle: home.hasSelectedArticle,
             selectedArticleHasUrl: home.selectedArticleHasUsableUrl,
-            cloudConnected: home.cloudConnected,
+            canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
             hasSelectedFeed: hasSelectedFeed,

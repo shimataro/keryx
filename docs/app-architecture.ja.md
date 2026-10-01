@@ -52,7 +52,11 @@
                   TAG_COLOR_PALETTE。タグの色選択が共有する 8 色のパレット）、article/（ArticleWebViewHtml——
                   リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
-                  接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——
+                  接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。接続中のプロバイダは
+                  `cloudStorageType` が変わるたびに読み直すので、セットアップでの接続も反映される。これは
+                  すべての「今すぐ同期」経路が共有する唯一の ManualSync（`canSyncNow`/`syncNow()`/`runs`）でもあり、
+                  Home のツールバーのボタンとフィードメニュー（`HomeViewModel.sync()`/`canSyncNow` 経由。
+                  `runs` の各イベントで既読ピンを刈り込み直す）とクラウド同期タブが使う。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
                   組み立て・解析。ファイルの選択は各 UI が担当）、menu/（MenuUiState + computeMenuUiState——
                   メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
@@ -1106,7 +1110,8 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 `pinnedReadArticlesKeepingSelected()` は `_pinnedReadArticles` を、選択中の記事（それが対象条件を
 満たす場合のみ）だけに刈り込み直す。これを呼び出す箇所はどれも、既読ピンに削るだけの価値がある
 エントリが溜まっていることが見込まれる瞬間である——「未読のみ」を ON にした瞬間（`setUnreadOnly`）、
-リフレッシュ／同期が完了した瞬間（`HomeRefreshController.repinSelected`）、そして記事一覧ツールバーの
+リフレッシュの前後（`HomeRefreshController`）と手動同期の前後（`ManualSync.runs` の各イベント。設定画面から
+始めた同期も含む）、そして記事一覧ツールバーの
 明示的な「既読記事を非表示」操作（`HomeViewModel.hideRead`）——最後の 1 つだけがユーザーが直接引き金を引く
 呼び出し箇所で、「未読のみ」自体からは抜けずに、厳密な未読のみからずれてしまった一覧をその状態へ
 引き戻すためのものである。`hideRead` は `canHideRead`（`unreadOnly`・現在画面に出ている一覧——検索中

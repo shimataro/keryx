@@ -53,10 +53,12 @@ data class MenuUiState(
  *
  * Most items are gated on [onHome] (their targets live in Home's composition). Article/URL actions
  * additionally require a selection (and a non-blank URL for the latter). Sort can't be toggled
- * while the Search scope is active (search order is fixed to relevance rank). Refresh/sync are
- * suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while either operation, or a
- * refresh-then-sync cycle (which also covers the gap between the two), is already in flight — and
- * sync additionally requires a connected cloud account.
+ * while the Search scope is active (search order is fixed to relevance rank). Refresh is
+ * suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while a refresh, a sync, or a
+ * refresh-then-sync cycle (which also covers the gap between the two), is already in flight. Sync
+ * follows [canSyncNow] — `ManualSync.canSyncNow`, the one predicate every "Sync now" route shares
+ * (it already covers the idle check, a connected account, connect/disconnect/reset in flight and
+ * an authorization failure).
  *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
@@ -66,7 +68,7 @@ fun computeMenuUiState(
     hasSelectedArticle: Boolean,
     selectedArticleHasUrl: Boolean,
     activity: ActivitySnapshot,
-    cloudConnected: Boolean,
+    canSyncNow: Boolean,
     searchActive: Boolean,
     unreadOnly: Boolean,
     hasSelectedFeed: Boolean = false,
@@ -84,7 +86,7 @@ fun computeMenuUiState(
     articleActionsEnabled = onHome && hasSelectedArticle,
     urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
     refreshAllEnabled = onHome && activity.idle,
-    syncEnabled = onHome && cloudConnected && activity.idle,
+    syncEnabled = onHome && canSyncNow,
     openSettingsEnabled = onHome,
     feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
     renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,

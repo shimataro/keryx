@@ -56,6 +56,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.presentation.settings.ManualSync
 
 /**
  * How long the article-change signal must stay quiet before an active search re-runs — short
@@ -86,6 +87,8 @@ class HomeViewModel(
     private val activityCenter: ActivityCenter,
     private val clock: Clock,
     private val refreshCycleRunner: RefreshCycleRunner,
+    // The one "Sync now" every route shares (CloudSyncController in production) — see [sync].
+    private val manualSync: ManualSync,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
@@ -1304,11 +1307,18 @@ class HomeViewModel(
         dispatcher = dispatcher,
         runner = refreshCycleRunner,
         feedRepository = feedRepository,
-        syncRepository = syncRepository,
         activityCenter = activityCenter,
         currentFilter = { _filter.value },
-        repinSelected = { _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected() },
+        repinSelected = ::repinSelected,
     )
+
+    /**
+     * Re-trims the pinned read articles down to the current selection — around every refresh and
+     * every manual sync, so rows read during the previous browse don't outlive it.
+     */
+    private fun repinSelected() {
+        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+    }
 
     /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
     fun refreshFeed(feed: Feeds) = refreshController.refreshFeed(feed)
@@ -1334,8 +1344,34 @@ class HomeViewModel(
      */
     fun pullToRefreshAll() = refreshController.pullToRefresh(ArticleFilter.All)
 
-    /** Synchronizes local data with the cloud. See [HomeRefreshController.sync]. */
-    fun sync() = refreshController.sync()
+    /**
+     * "Sync now" from Home (toolbar button, Feed menu). Delegates to the one [ManualSync] every
+     * route shares, so it runs under the same guard as the cloud-sync settings tab's button and is
+     * a no-op whenever [canSyncNow] is false. The pinned-row re-trim around it happens in the
+     * [ManualSync.runs] collector below, not here, so it covers a sync started from Settings too.
+     */
+    fun sync() = manualSync.syncNow()
+
+    /**
+     * Whether "Sync now" is enabled — the same [ManualSync.canSyncNow] every route follows (toolbar,
+     * Feed menu, cloud-sync settings tab).
+     */
+    val canSyncNow: StateFlow<Boolean> get() = manualSync.canSyncNow
+
+    /**
+     * Whether the last sync failed on authorization — the one reason [canSyncNow] is false that the
+     * user has to act on (reconnect in Settings), so Home's sync button explains it in its tooltip.
+     */
+    val syncAuthFailed: StateFlow<Boolean> get() = syncRepository.lastSyncAuthFailed
+
+    init {
+        // Re-trim on both edges of every manual sync, whichever route started it: before, so rows
+        // read until now don't carry into the synced list; after, against the selection as it
+        // stands then (it may have changed while the sync ran).
+        viewModelScope.launch {
+            manualSync.runs.collect { repinSelected() }
+        }
+    }
 
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
      *  cloud DB). Errors surface via the notification center from [SyncRepository]. */

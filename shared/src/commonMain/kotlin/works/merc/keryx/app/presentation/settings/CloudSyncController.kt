@@ -12,7 +12,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -37,8 +40,9 @@ import works.merc.keryx.app.presentation.formatTimestamp
  * The settings screen's cloud-sync state and actions: connecting/disconnecting/switching/
  * reconnecting a provider, resetting cloud data, and running a manual sync — shared with the
  * SwiftUI app (via `KeryxSdk.cloudSyncController`) so both UIs follow the same connect →
- * complete-connect → initial-sync ordering, and the same `canSyncNow` gating Home's own cloud
- * button follows. Split out of what was `SettingsViewModel` (see `.claude/CLAUDE.md`'s "Apple
+ * complete-connect → initial-sync ordering. Also the one [ManualSync]: Home's toolbar button and
+ * the Feed menu's "Sync now" run [syncNow] and follow [canSyncNow] exactly like this tab's own
+ * button does. Split out of what was `SettingsViewModel` (see `.claude/CLAUDE.md`'s "Apple
  * Native Apps (SwiftUI)" in `docs/app-architecture.md`); [SettingsViewModel] in `:composeApp` now
  * wraps this rather than owning the logic itself.
  */
@@ -52,7 +56,7 @@ class CloudSyncController(
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-) : ViewModel() {
+) : ViewModel(), ManualSync {
 
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
@@ -142,12 +146,12 @@ class CloudSyncController(
     val idle = _idle.asStateFlow()
 
     /**
-     * Whether the cloud-sync tab's "sync now" button is enabled: a provider is connected, nothing
-     * else is running (see [idle]), no connect / switch / disconnect / reset is in flight (each
-     * would race the sync), and the last sync did not fail on authorization — a sync then would
-     * only repeat that failure, and the row's own "reconnect" is the action that fixes it.
+     * Whether "sync now" is enabled — on every route (see [ManualSync]): a provider is connected,
+     * nothing else is running (see [idle]), no connect / switch / disconnect / reset is in flight
+     * (each would race the sync), and the last sync did not fail on authorization — a sync then
+     * would only repeat that failure, and the row's own "reconnect" is the action that fixes it.
      */
-    val canSyncNow: StateFlow<Boolean>
+    override val canSyncNow: StateFlow<Boolean>
 
     /** [canSyncNow]'s condition, read synchronously — what [syncNow]'s own guard checks. */
     private fun canSyncNowNow(): Boolean =
@@ -161,6 +165,10 @@ class CloudSyncController(
      * once the first finishes.
      */
     private val _manualSyncInFlight = MutableStateFlow(false)
+
+    // Buffered so tryEmit never drops an edge for a collector that is merely slow; a run emits two.
+    private val _runs = MutableSharedFlow<ManualSyncEdge>(extraBufferCapacity = 4)
+    override val runs: SharedFlow<ManualSyncEdge> = _runs.asSharedFlow()
 
     init {
         // Derived, not stateIn'd: its value is recomputed from the inputs on every read, so it can
@@ -222,15 +230,17 @@ class CloudSyncController(
     }
 
     /**
-     * Runs a manual sync — the same [SyncRepository.sync] Home's cloud button triggers. Progress,
+     * Runs a manual sync ([SyncRepository.sync]) — for every route, see [ManualSync]. Progress,
      * the new last-synced time and any failure all surface through the state this controller
-     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncError]).
+     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncError]); [runs] brackets
+     * it with a started/finished pair.
      */
-    fun syncNow() {
+    override fun syncNow() {
         if (!canSyncNowNow()) return
         _manualSyncInFlight.value = true
         viewModelScope.launch {
             try {
+                _runs.tryEmit(ManualSyncEdge.Started)
                 withContext(dispatcher) { syncRepository.sync() }
             } catch (e: CancellationException) {
                 throw e
@@ -238,6 +248,7 @@ class CloudSyncController(
                 Log.error(TAG, "Manual sync failed", e)
             } finally {
                 _manualSyncInFlight.value = false
+                _runs.tryEmit(ManualSyncEdge.Finished)
             }
         }
     }

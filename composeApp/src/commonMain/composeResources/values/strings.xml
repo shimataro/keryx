@@ -120,6 +120,7 @@
     <string name="home_already_subscribed">You’re already subscribed to this feed</string>
     <string name="home_sync">Sync</string>
     <string name="home_syncing">Syncing…</string>
+    <string name="home_sync_auth_failed">Sign-in expired — reconnect in Settings</string>
     <string name="home_notifications">Notifications</string>
     <string name="home_open_site">Open site</string>
     <string name="home_no_article_selected">Select an article</string>

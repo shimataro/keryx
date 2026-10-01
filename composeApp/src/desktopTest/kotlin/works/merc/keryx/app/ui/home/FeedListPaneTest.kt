@@ -49,6 +49,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.settings.FakeManualSync
 
 private val TEST_PANE_HEIGHT = 600.dp
 
@@ -338,6 +339,31 @@ class FeedListPaneTest {
             }
         } finally {
             testScope.cancel()
+        }
+    }
+
+    /**
+     * The toolbar's sync button follows the shared "Sync now" predicate (`ManualSync.canSyncNow`)
+     * rather than its own idle check — so it is disabled whenever the Feed menu item and the
+     * cloud-sync settings tab's button are, e.g. on an authorization failure while idle.
+     */
+    @Test
+    fun syncButtonFollowsTheSharedCanSyncNow() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val tokenStorage = FeedListPaneTestTokenStorage().apply { save(OAuthTokens("AT", "RT")) }
+        val manualSync = FakeManualSync(canSyncNow = false)
+        useHomeViewModel(
+            driver, db, tokenStorage = tokenStorage, appKey = "test-app-key", manualSync = manualSync,
+        ) { fixture ->
+            setContent { FeedListPaneTestHost(fixture.vm, 300.dp) }
+            waitForIdle()
+            onNodeWithContentDescription("同期").assertIsNotEnabled()
+
+            manualSync.canSyncNow.value = true
+            waitForIdle()
+            onNodeWithContentDescription("同期").assertIsEnabled().performClick()
+            waitForIdle()
+            assertEquals(1, manualSync.syncNowCalls)
         }
     }
 

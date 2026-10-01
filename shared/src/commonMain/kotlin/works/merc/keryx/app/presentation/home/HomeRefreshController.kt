@@ -15,12 +15,11 @@ import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
-import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncTrigger
 
 /**
- * The refresh / sync actions of [HomeViewModel] — toolbar and menu "refresh all", pull-to-refresh,
- * a single feed's refresh, and "sync now" — kept out of the ViewModel itself, which only delegates
+ * The refresh actions of [HomeViewModel] — toolbar and menu "refresh all", pull-to-refresh, and a
+ * single feed's refresh — kept out of the ViewModel itself, which only delegates
  * to this. A plain class the ViewModel creates and owns, not a Koin binding: it runs on the
  * ViewModel's own [scope] and dies with it.
  *
@@ -39,7 +38,6 @@ internal class HomeRefreshController(
     private val dispatcher: CoroutineDispatcher,
     private val runner: RefreshCycleRunner,
     private val feedRepository: FeedRepository,
-    private val syncRepository: SyncRepository,
     private val activityCenter: ActivityCenter,
     private val currentFilter: () -> ArticleFilter,
     private val repinSelected: () -> Unit,
@@ -102,17 +100,6 @@ internal class HomeRefreshController(
             } finally {
                 _pullRefreshingFilters.update { it - filter }
             }
-        }
-    }
-
-    /** Synchronizes local data with the cloud. */
-    fun sync() {
-        repinSelected()
-        // IO off the UI thread: a sync writes the downloaded cloud DB to disk, runs the ATTACH
-        // merge, VACUUM INTOs a snapshot and reads it all back.
-        scope.launch {
-            withContext(dispatcher) { syncRepository.sync() }
-            repinSelected()
         }
     }
 

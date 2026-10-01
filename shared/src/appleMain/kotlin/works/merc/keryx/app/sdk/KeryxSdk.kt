@@ -110,7 +110,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
         onHome: Boolean,
         hasSelectedArticle: Boolean,
         selectedArticleHasUrl: Boolean,
-        cloudConnected: Boolean,
+        canSyncNow: Boolean,
         searchActive: Boolean,
         unreadOnly: Boolean,
         hasSelectedFeed: Boolean = false,
@@ -122,7 +122,7 @@ class KeryxSdk private constructor(private val koin: Koin) {
         hasSelectedArticle = hasSelectedArticle,
         selectedArticleHasUrl = selectedArticleHasUrl,
         activity = homeViewModel.activity.value,
-        cloudConnected = cloudConnected,
+        canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
         hasSelectedFeed = hasSelectedFeed,
@@ -198,7 +198,11 @@ class KeryxSdk private constructor(private val koin: Koin) {
         // that too.
         if (homeViewModelCreated) homeViewModel.viewModelScope.coroutineContext.job.cancelAndJoin()
         if (setupControllerCreated) setupController.viewModelScope.coroutineContext.job.cancelAndJoin()
-        if (cloudSyncControllerCreated) cloudSyncController.viewModelScope.coroutineContext.job.cancelAndJoin()
+        // HomeViewModel resolves CloudSyncController itself (as its ManualSync), so creating either
+        // one creates the controller.
+        if (cloudSyncControllerCreated || homeViewModelCreated) {
+            cloudSyncController.viewModelScope.coroutineContext.job.cancelAndJoin()
+        }
         if (notificationAlertsCreated) notificationAlerts.viewModelScope.coroutineContext.job.cancelAndJoin()
         koin.get<CoroutineScope>().coroutineContext.job.cancelAndJoin()
         // SettingsRepository keeps its own writer scope; flush it and stop it before AppDirs is

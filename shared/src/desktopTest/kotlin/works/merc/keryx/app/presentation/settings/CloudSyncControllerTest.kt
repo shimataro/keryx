@@ -731,6 +731,65 @@ class CloudSyncControllerTest {
     }
 
     /**
+     * [CloudSyncController.runs] brackets every `syncNow()` with Started then Finished — what Home
+     * re-trims its pinned rows on, whichever route started the sync.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun syncNowEmitsStartedThenFinished() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val controller = newController(tokenStorage = tokenStorage)
+        val edges = java.util.concurrent.CopyOnWriteArrayList<ManualSyncEdge>()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch { controller.runs.collect { edges += it } }
+        try {
+            controller.syncNow()
+
+            awaitTrue { edges.size == 2 }
+            assertEquals(listOf(ManualSyncEdge.Started, ManualSyncEdge.Finished), edges.toList())
+        } finally {
+            runBlocking { collector.cancelAndJoin() }
+        }
+    }
+
+    /** A failing sync still ends with Finished, so a collector is never left mid-run. */
+    @Test
+    fun syncNowEmitsFinishedEvenWhenTheSyncFails() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        val edges = java.util.concurrent.CopyOnWriteArrayList<ManualSyncEdge>()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch { controller.runs.collect { edges += it } }
+        try {
+            controller.syncNow()
+
+            awaitTrue { edges.size == 2 }
+            assertEquals(listOf(ManualSyncEdge.Started, ManualSyncEdge.Finished), edges.toList())
+            awaitTrue { controller.lastSyncAuthFailed.value }
+        } finally {
+            runBlocking { collector.cancelAndJoin() }
+        }
+    }
+
+    /** A `syncNow()` that its guard turns away starts nothing, so it emits no edge either. */
+    @Test
+    fun syncNowEmitsNothingWhenItCannotSync() {
+        val controller = newController()
+        assertFalse(controller.canSyncNow.value)
+        val edges = java.util.concurrent.CopyOnWriteArrayList<ManualSyncEdge>()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch { controller.runs.collect { edges += it } }
+        try {
+            controller.syncNow()
+
+            assertTrue(edges.isEmpty())
+        } finally {
+            runBlocking { collector.cancelAndJoin() }
+        }
+    }
+
+    /**
      * A second `syncNow()` while the first is still in flight must be ignored. Without a local
      * in-flight flag the second call can race past [CloudSyncController.canSyncNow] before the
      * [ActivityCenter] collector updates [CloudSyncController.idle], causing a redundant sync to
