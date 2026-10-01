@@ -27,6 +27,7 @@ class TrayActionPolicyTest {
         assertTrue(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
                 nowMillis = 100_000L,
                 lastNotificationSentAtMillis = 0L,
@@ -40,6 +41,7 @@ class TrayActionPolicyTest {
         assertFalse(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
                 nowMillis = 100_000L,
                 lastNotificationSentAtMillis = 99_000L,
@@ -53,6 +55,7 @@ class TrayActionPolicyTest {
         assertTrue(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
                 nowMillis = 100_000L,
                 lastNotificationSentAtMillis = 95_000L,
@@ -66,6 +69,7 @@ class TrayActionPolicyTest {
         assertTrue(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
                 nowMillis = 1_000L,
                 lastNotificationSentAtMillis = 0L,
@@ -79,6 +83,7 @@ class TrayActionPolicyTest {
         assertFalse(
             shouldHideOnTrayAction(
                 windowVisible = false,
+                windowMinimized = false,
                 windowFocused = true,
                 nowMillis = 100_000L,
                 lastNotificationSentAtMillis = 0L,
@@ -92,7 +97,48 @@ class TrayActionPolicyTest {
         assertFalse(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = false,
+                nowMillis = 100_000L,
+                lastNotificationSentAtMillis = 0L,
+                recencyWindowMs = 5_000L,
+            ),
+        )
+    }
+
+    // --- trayWindowShown / minimized windows ---
+
+    @Test
+    fun `a minimized window is not shown, so the tray offers Show for it`() {
+        assertTrue(trayWindowShown(windowVisible = true, windowMinimized = false))
+        assertFalse(trayWindowShown(windowVisible = true, windowMinimized = true))
+        assertFalse(trayWindowShown(windowVisible = false, windowMinimized = false))
+        assertFalse(trayWindowShown(windowVisible = false, windowMinimized = true))
+    }
+
+    /** Only a visible, un-minimized, focused window is hidden by an icon click; all else activates. */
+    @Test
+    fun `an icon click hides only a shown and focused window, across the whole matrix`() {
+        for (visible in listOf(true, false)) for (minimized in listOf(true, false)) for (focused in listOf(true, false)) {
+            val hides = shouldHideOnTrayAction(
+                windowVisible = visible,
+                windowMinimized = minimized,
+                windowFocused = focused,
+                nowMillis = 100_000L,
+                lastNotificationSentAtMillis = 0L,
+                recencyWindowMs = 5_000L,
+            )
+            assertEquals(visible && !minimized && focused, hides, "visible=$visible minimized=$minimized focused=$focused")
+        }
+    }
+
+    @Test
+    fun `a minimized window that still reports focus is activated, not hidden`() {
+        assertFalse(
+            shouldHideOnTrayAction(
+                windowVisible = true,
+                windowMinimized = true,
+                windowFocused = true,
                 nowMillis = 100_000L,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,

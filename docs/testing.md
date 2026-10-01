@@ -876,7 +876,9 @@ unread articles) and click it while the window is in each of these states:
   instead.
 - On a different Space → macOS switches to that Space and brings the window to front (OS default;
   confirm it still holds on the OS version under test).
-- Also confirm a plain click on the tray icon itself still toggles show/hide as before.
+- Also confirm a plain click on the tray icon itself hides the window only while it is shown and
+  focused, and brings it to front otherwise (shown but another app active, minimized, or hidden to
+  the tray) — the same `shouldHideOnTrayAction` rule as Windows, without the notification bias.
 
 (Linux, SNI host present — KDE/GNOME) Clicking a notification's body (`LinuxNotifier`'s `"default"`
 action, routed through `SniConnection.notificationActionInvoked` and filtered by
@@ -889,9 +891,10 @@ workspace), plus:
   come to front. This is the check for the id-filtering in `PendingNotificationIds`/
   `consumeIfOwn` — the `ActionInvoked` D-Bus signal is unscoped by sender, so without correct
   filtering, any application's notification click would wrongly activate Keryx.
-- Also confirm a plain click on the tray icon itself still toggles show/hide as before (the SNI
-  icon's `Activate`/`SecondaryActivate` path is unrelated to `ActionInvoked`, but worth
-  reconfirming alongside the above).
+- Also confirm a plain click on the tray icon itself hides the window only while it is shown and
+  focused, and brings it to front otherwise, as on macOS (the SNI icon's
+  `Activate`/`SecondaryActivate` path is unrelated to `ActionInvoked`, but worth reconfirming
+  alongside the above).
 - If no notification daemon is present, or the daemon doesn't honor the `"default"` action key,
   notifications should still display (best-effort) with no crash — clicking them just does
   nothing, same as before this change.
@@ -916,8 +919,19 @@ see the KDoc on `shouldHideOnTrayAction` and the wiring in `main.kt`), confirm b
   unfocused) → the window comes to front and gets focus, rather than being hidden.
 - With the window minimized to the tray (hidden), click the tray icon or a notification → the
   window restores and comes to front.
-- The "表示"/"非表示" tray menu item still toggles deterministically regardless of focus state
-  (it uses the unchanged `onToggle`, not `onTrayAction`).
+- The Show/Hide tray menu item does not look at focus (opening the tray menu itself takes focus from
+  the window on Windows): it reads "Hide" and hides whenever the window is shown, and reads "Show"
+  otherwise (`trayWindowShown`).
+
+**Minimized windows, every tray (macOS, Windows, Linux SNI, and the AWT fallback).** Minimize the
+window (not hide it to the tray), then:
+
+- Open the tray menu → the item reads "Show" (not "Hide"). Choose it → the window is un-minimized,
+  brought to front and focused — the same `activationRequests` path a second launch uses — rather
+  than staying minimized or being hidden.
+- Minimize again and click the tray icon (left-click on macOS/SNI, double-click on Windows) → the
+  window is likewise restored and focused, never hidden.
+- Restore the window, then open the tray menu → it reads "Hide" again.
 
 - The tray icon asset depends on how the platform draws it. macOS and Linux-with-an-SNI-host get the white glyph +
   black outline (`tray_icon_outlined.png`), which needs real alpha and at least ~22px. The Windows notification area
@@ -936,7 +950,7 @@ likely each is to be wrong):
   If a bad entry is picked, trim `SNI_ICON_SIZES`.
 - Package with `./gradlew :composeApp:createDistributable` and launch `build/compose/binaries/main/app/Keryx/bin/Keryx`
   — a missing jlink module (`jdk.security.auth`) only shows up there, never under `run`.
-- Left-click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
+- Left-click hides a shown, focused window and brings it to front otherwise (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
 - Right-click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
   *without* reopening the menu (exercises `AboutToShow` + `ItemsPropertiesUpdated`).
 - The unread dot appears/disappears live (`NewIcon` reaches the host).

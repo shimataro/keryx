@@ -79,6 +79,7 @@ import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.ui.navigation.Screen
 import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.tray.shouldHideOnTrayAction
+import works.merc.keryx.app.tray.trayWindowShown
 import works.merc.keryx.app.tray.UpdateMenuAction
 import works.merc.keryx.app.tray.updateMenuAction
 import works.merc.keryx.app.tray.SniConnection
@@ -390,10 +391,10 @@ fun main(args: Array<String>) {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
         // Mirrors windowVisible's role: mutated inside Window{}'s content (the only place
         // LocalWindowInfo.current is resolvable, see the LaunchedEffect further down) and read
-        // here, before Window{} is even composed, by the Windows/Linux tray-fallback's
-        // onTrayAction below - it needs to know whether a click should hide the window (visible
-        // and focused - a deliberate icon click) or bring it to front (everything else, which
-        // also covers a notification click landing while the window is merely backgrounded).
+        // here, before Window{} is even composed, by the tray's onIconClick/onTrayAction below -
+        // they need to know whether a click should hide the window (shown and focused - a
+        // deliberate icon click) or bring it to front (everything else, which also covers a
+        // minimized window and a notification click landing while it is merely backgrounded).
         var windowFocused by remember { mutableStateOf(false) }
         // Read by onTrayAction below (see shouldHideOnTrayAction) so a notification-balloon click
         // landing while the window happens to already be visible and focused still activates
@@ -500,10 +501,27 @@ fun main(args: Array<String>) {
             sniConnection = sniConnection,
             notificationIcon = dockBaseImage,
             unreadCount = unreadCount,
-            windowVisible = windowVisible,
+            // trayWindowShown (tray/TrayActionPolicy.kt): a minimized window is not "shown", so
+            // every tray offers "Show" for it and showing goes through activationRequests, which
+            // un-minimizes, raises and focuses it — the one path every "show" route takes.
+            windowShown = trayWindowShown(windowVisible, windowState.isMinimized),
             updateStateFlow = updateRepository.state,
             settingsReachable = currentScreen == Screen.Home,
-            onToggle = { windowVisible = !windowVisible },
+            onToggle = {
+                if (trayWindowShown(windowVisible, windowState.isMinimized)) {
+                    windowVisible = false
+                } else {
+                    activationRequests.tryEmit(Unit)
+                }
+            },
+            // macOS's left click and Linux SNI's Activate cannot be a notification click (see
+            // onNotificationClicked below), so no notification timestamp is passed for them.
+            onIconClick = {
+                val hide = shouldHideOnTrayAction(
+                    windowVisible, windowState.isMinimized, windowFocused, nowMillis = 0L, lastNotificationSentAtMillis = 0L,
+                )
+                if (hide) windowVisible = false else activationRequests.tryEmit(Unit)
+            },
             onQuit = exitApp,
             onUpdateAction = {
                 onUpdateMenuItemClicked(
@@ -522,7 +540,10 @@ fun main(args: Array<String>) {
             // click, otherwise activate - see its KDoc for the exact heuristic and its documented
             // residual gap.
             onTrayAction = {
-                if (shouldHideOnTrayAction(windowVisible, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis)) {
+                val hide = shouldHideOnTrayAction(
+                    windowVisible, windowState.isMinimized, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis,
+                )
+                if (hide) {
                     windowVisible = false
                 } else {
                     activationRequests.tryEmit(Unit)

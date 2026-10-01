@@ -701,6 +701,11 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
 `newArticleNotifications` を自分で消費する（キューされた `TrayState` 通知を実際の OS 通知に変えるのは
 Compose の `Tray()` だけであるため）。
 
+4 つの実装はいずれも同じ表示判定 `tray/TrayActionPolicy.kt` の `trayWindowShown`（表示中**かつ**
+最小化されていない）を使い、表示/非表示ラベルと `main.kt` の唯一のメニュー項目ハンドラを決める。ハンドラは
+表示中なら隠し、それ以外は `activationRequests`（最小化解除・前面化・フォーカス）を通す。アイコンの
+クリックは、表示中*かつフォーカス中*のときだけ隠し（`shouldHideOnTrayAction`）、それ以外は前面に出す。
+
 **Linux で SNI が必要な理由**: `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` はアイコン描画の *前* に
 24x24 のキャンバス全面をコンポーネント背景色で塗り潰し、さらに `sun.awt.X11.XSystemTrayPeer` は
 トレイマネージャーの `_NET_SYSTEM_TRAY_VISUAL` を読まないため XEmbed ウィンドウにアルファチャンネルが

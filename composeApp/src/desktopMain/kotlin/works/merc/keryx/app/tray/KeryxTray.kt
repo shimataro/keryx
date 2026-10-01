@@ -34,7 +34,7 @@ import java.awt.image.BufferedImage
  * The application's system-tray icon, dispatching to the per-platform implementation, and
  * configuring its icon, actions, unread badge, and notifications.
  *
- * - macOS uses [MacTray] (a raw AWT `TrayIcon`, so a left click toggles the window instead of
+ * - macOS uses [MacTray] (a raw AWT `TrayIcon`, so a left click runs [onIconClick] instead of
  *   opening the menu).
  * - Linux uses [LinuxTray] whenever [sniConnection] is non-null, because AWT's X11 tray cannot
  *   draw a transparent icon (see the KDoc there).
@@ -49,7 +49,8 @@ import java.awt.image.BufferedImage
  * @param sniConnection The Linux Status Notifier Item connection, when available.
  * @param notificationIcon The icon used for Linux SNI notifications.
  * @param unreadCount The number of unread articles displayed in the tray.
- * @param windowVisible Whether the application window is currently visible.
+ * @param windowShown Whether the application window is currently shown — visible and not minimized
+ * ([trayWindowShown]); drives every implementation's Show/Hide label.
  * @param updateStateFlow Source of the in-app update state. Collected here, inside [KeryxTray]'s
  * own composable scope, rather than by the caller — `main.kt`'s root `application {}` composes far
  * more than the tray (the window, the Dock icon, single-instance/reopen handling), and every
@@ -58,7 +59,11 @@ import java.awt.image.BufferedImage
  * function and [updateMenuEntry].
  * @param settingsReachable Whether the settings dialog can open right now (Home is showing, not
  * first-run Setup); the update entry is disabled otherwise — see [updateMenuEntry].
- * @param onToggle Invoked to show or hide the application window.
+ * @param onToggle Invoked for the Show/Hide menu item: hides the window when [windowShown],
+ * otherwise shows it through `activationRequests` (see `main.kt`).
+ * @param onIconClick Invoked for a plain click on the tray icon where it cannot be a notification
+ * click — macOS's left click and Linux SNI's `Activate`/`SecondaryActivate`. `main.kt` hides only a
+ * shown and focused window and brings it to front otherwise ([shouldHideOnTrayAction]).
  * @param onQuit Invoked to quit the application.
  * @param onNotificationClicked Invoked to bring the window to front when a notification is
  * clicked, on Linux SNI (via [LinuxTray]'s `ActionInvoked` D-Bus signal) - the only platform that
@@ -80,10 +85,11 @@ internal fun ApplicationScope.KeryxTray(
     sniConnection: SniConnection?,
     notificationIcon: BufferedImage?,
     unreadCount: Long,
-    windowVisible: Boolean,
+    windowShown: Boolean,
     updateStateFlow: StateFlow<UpdateState>,
     settingsReachable: Boolean,
     onToggle: () -> Unit,
+    onIconClick: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,
     onNotificationClicked: () -> Unit,
@@ -108,7 +114,7 @@ internal fun ApplicationScope.KeryxTray(
     val showLabel = stringResource(Res.string.tray_show)
     val hideLabel = stringResource(Res.string.tray_hide)
     val quitLabel = stringResource(Res.string.tray_quit)
-    val toggleLabel = if (windowVisible) hideLabel else showLabel
+    val toggleLabel = if (windowShown) hideLabel else showLabel
     val updateEntry = updateMenuEntry(updateState, settingsReachable)
 
     when {
@@ -123,9 +129,10 @@ internal fun ApplicationScope.KeryxTray(
                 showLabel = showLabel,
                 hideLabel = hideLabel,
                 quitLabel = quitLabel,
-                windowVisible = windowVisible,
+                windowShown = windowShown,
                 updateEntry = updateEntry,
                 onToggle = onToggle,
+                onIconClick = onIconClick,
                 onQuit = onQuit,
                 onUpdateAction = onUpdateAction,
                 newArticleNotifications = newArticleNotifications,
@@ -141,12 +148,13 @@ internal fun ApplicationScope.KeryxTray(
                 notificationIcon = notificationIcon,
                 unreadCount = unreadCount,
                 tooltip = tooltip,
-                windowVisible = windowVisible,
+                windowShown = windowShown,
                 showLabel = showLabel,
                 hideLabel = hideLabel,
                 quitLabel = quitLabel,
                 updateEntry = updateEntry,
                 onToggle = onToggle,
+                onIconClick = onIconClick,
                 onQuit = onQuit,
                 onUpdateAction = onUpdateAction,
                 onNotificationClicked = onNotificationClicked,
@@ -161,7 +169,7 @@ internal fun ApplicationScope.KeryxTray(
             WindowsTray(
                 image = trayBadgedImage,
                 tooltip = tooltip,
-                windowVisible = windowVisible,
+                windowShown = windowShown,
                 showLabel = showLabel,
                 hideLabel = hideLabel,
                 quitLabel = quitLabel,

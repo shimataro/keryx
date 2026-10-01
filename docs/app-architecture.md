@@ -696,6 +696,11 @@ a `TrayIcon` MouseEvent carries *device* pixels on Windows but *points* on macOS
 `Window.setLocation` wants user space on both. Both consume `newArticleNotifications` themselves,
 since only Compose's `Tray()` turns a queued `TrayState` notification into a real OS one.
 
+All four share one visibility check, `tray/TrayActionPolicy.kt`'s `trayWindowShown` (visible **and**
+not minimized), for the Show/Hide label and for `main.kt`'s single menu-item handler, which hides a
+shown window and otherwise goes through `activationRequests` (un-minimize, raise, focus); an icon
+click hides only a shown *and focused* window (`shouldHideOnTrayAction`) and activates otherwise.
+
 **Why Linux needs SNI.** `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` fills the whole 24x24 canvas
 with the component background *before* drawing the icon, and `sun.awt.X11.XSystemTrayPeer` never reads
 the tray manager's `_NET_SYSTEM_TRAY_VISUAL`, so the XEmbed window has no alpha channel at all. An AWT

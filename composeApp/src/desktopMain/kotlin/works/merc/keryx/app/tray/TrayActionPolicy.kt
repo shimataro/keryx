@@ -4,19 +4,37 @@ import works.merc.keryx.app.core.TRAY_ACTION_NOTIFICATION_RECENCY_MS
 import works.merc.keryx.app.domain.UpdateState
 
 /**
- * Decides what `onTrayAction` (KeryxTray's Windows/Linux-fallback click hook, shared between a
- * tray-icon click and a notification-balloon click with no platform way to tell them apart -
- * see the `onTrayAction` KDoc on [KeryxTray]) should do: `true` hides the window, `false` brings
- * it to front/activates.
+ * Whether the window counts as shown for every tray decision: visible **and** not minimized. A
+ * minimized window is still `windowVisible` (it was never hidden to the tray), but there is nothing
+ * of it on screen, so the tray must offer "Show" for it and showing it must un-minimize it.
  *
- * Hides only what looks like a deliberate icon click - the window already visible and focused,
- * and no notification sent within [recencyWindowMs] - otherwise activates, which also covers
- * the window being backgrounded/hidden and a notification landing while it was already focused.
- * The residual gap: a genuine icon click inside the recency window right after a notification
- * still activates instead of hiding (documented in `docs/testing.md`).
+ * Drives the tray menu's Show/Hide label in every tray implementation (macOS, Linux SNI, Windows and
+ * the Compose `Tray()` fallback — see [KeryxTray]) and `main.kt`'s one menu-item handler: hide when
+ * shown, otherwise `activationRequests` (un-minimize, bring to front, focus). The menu item does not
+ * look at focus: opening the tray menu itself takes focus away from the window on Windows.
+ */
+internal fun trayWindowShown(windowVisible: Boolean, windowMinimized: Boolean): Boolean =
+    windowVisible && !windowMinimized
+
+/**
+ * Decides what a click on the tray **icon** should do: `true` hides the window, `false` brings it
+ * to front/activates (through `activationRequests`, which also un-minimizes it).
+ *
+ * Hides only what looks like a deliberate icon click on a window the user is looking at — shown
+ * ([trayWindowShown]) and focused, and no notification sent within [recencyWindowMs] — otherwise
+ * activates, which also covers the window being minimized, backgrounded or hidden, and a
+ * notification landing while it was already focused.
+ *
+ * The recency input exists for the Windows/Linux-fallback `onTrayAction` hook, shared between a
+ * tray-icon click and a notification-balloon click with no platform way to tell them apart (see the
+ * `onTrayAction` KDoc on [KeryxTray]). The macOS icon click and the Linux SNI `Activate` cannot be a
+ * notification click, so `main.kt` calls this for them with no notification timestamp (`0`). The
+ * residual gap on the shared hook: a genuine icon click inside the recency window right after a
+ * notification still activates instead of hiding (documented in `docs/testing.md`).
  */
 internal fun shouldHideOnTrayAction(
     windowVisible: Boolean,
+    windowMinimized: Boolean,
     windowFocused: Boolean,
     nowMillis: Long,
     lastNotificationSentAtMillis: Long,
@@ -24,7 +42,7 @@ internal fun shouldHideOnTrayAction(
 ): Boolean {
     val notifiedRecently = lastNotificationSentAtMillis != 0L &&
         nowMillis - lastNotificationSentAtMillis < recencyWindowMs
-    return windowVisible && windowFocused && !notifiedRecently
+    return trayWindowShown(windowVisible, windowMinimized) && windowFocused && !notifiedRecently
 }
 
 /** What a click on the single update menu entry (tray and Help menu) runs on the Updates tab. */

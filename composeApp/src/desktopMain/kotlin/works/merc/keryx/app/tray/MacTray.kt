@@ -92,7 +92,7 @@ internal class MacTrayMenu(
  * `Tray()` wires the icon's popup menu via `TrayIcon.setPopupMenu()`, which on
  * macOS shows the popup on *any* click (left or right) - a long-standing
  * AWT/macOS limitation (Compose upstream has an unresolved TODO for this). To
- * get "right-click = menu, left-click = toggle", this bypasses `setPopupMenu`
+ * get "right-click = menu, left-click = show/hide", this bypasses `setPopupMenu`
  * and drives a raw `TrayIcon`/[MacTrayMenu] pair with a manual `MouseListener`.
  *
  * @param image The tray icon image; when `null`, no tray UI is displayed.
@@ -100,8 +100,10 @@ internal class MacTrayMenu(
  * @param showLabel The menu label used when the window is hidden.
  * @param hideLabel The menu label used when the window is visible.
  * @param quitLabel The menu label for quitting the application.
- * @param windowVisible Whether the application window is currently visible.
- * @param onToggle Called when the tray icon or toggle menu item is activated.
+ * @param windowShown Whether the application window is currently shown (visible and not
+ *   minimized — see [trayWindowShown]); picks the toggle item's label.
+ * @param onToggle Called when the toggle menu item is activated.
+ * @param onIconClick Called for a left click on the tray icon.
  * @param onQuit Called when the quit menu item is activated.
  * @param newArticleNotifications Notifications to display as macOS user notifications.
  */
@@ -112,9 +114,10 @@ internal fun MacTray(
     showLabel: String,
     hideLabel: String,
     quitLabel: String,
-    windowVisible: Boolean,
+    windowShown: Boolean,
     updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
+    onIconClick: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
@@ -122,6 +125,7 @@ internal fun MacTray(
     val image = image ?: return
 
     val currentOnToggle by rememberUpdatedState(onToggle)
+    val currentOnIconClick by rememberUpdatedState(onIconClick)
     val currentOnQuit by rememberUpdatedState(onQuit)
     val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
 
@@ -160,7 +164,7 @@ internal fun MacTray(
         val listener = object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 when (e.button) {
-                    MouseEvent.BUTTON1 -> currentOnToggle()
+                    MouseEvent.BUTTON1 -> currentOnIconClick()
                     MouseEvent.BUTTON3 -> {
                         // TrayIcon's MouseEvent x/y are already screen-absolute
                         // coordinates. Translate them into dummyFrame's local
@@ -185,8 +189,8 @@ internal fun MacTray(
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
-    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel) {
-        menu.setLabels(toggle = if (windowVisible) hideLabel else showLabel, quit = quitLabel)
+    LaunchedEffect(menu, windowShown, showLabel, hideLabel, quitLabel) {
+        menu.setLabels(toggle = if (windowShown) hideLabel else showLabel, quit = quitLabel)
     }
     LaunchedEffect(menu, updateEntry) {
         menu.setUpdateEntry(updateEntry)
