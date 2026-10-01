@@ -1219,6 +1219,16 @@ emulator that it really appears from every route:
 - On API 33+, none of those routes shows a Snackbar from the app (only the OS's own clipboard
   confirmation).
 
+### (Android) Reordering with TalkBack while renaming
+
+`FeedListDragTest.kt` covers that no reorder action is exposed while a row is being renamed; confirm with
+TalkBack on an emulator:
+
+- Without an open editor, a feed or folder row's TalkBack actions menu offers "Move up"/"Move down"
+  where a move is possible. Start renaming that row (long-press → Rename, or F2 on a hardware keyboard):
+  while the editor is open, neither that row nor any other offers the move actions, and the drag handle
+  does not start a drag. Close the editor (× or Enter): the actions come back.
+
 ### (iOS) The sidebar
 
 The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));

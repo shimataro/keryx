@@ -1114,7 +1114,9 @@ should follow the same rules:
 - **Nothing else may claim the row's pointers or keys while an editor is open.** The feed pane's
   reorder drag watches the `Initial` pointer pass on an ancestor, so it is switched off
   (`feedListReorderDrag(enabled = …)`) while editing, or a press-and-sweep to select text would
-  become a row drag. Likewise the pane reports editing focus through `onTextInputFocusChange`, the
+  become a row drag. The drag and its accessibility actions ("Move up"/"Move down",
+  `reorderAccessibilityActions`) share one gate, `FeedListPane`'s `reorderAllowed`, so a screen
+  reader can't reorder rows under an open editor either. Likewise the pane reports editing focus through `onTextInputFocusChange`, the
   same channel as the search field, which is what makes the root's bare-key shortcuts stand aside
   and detaches the menu bar's F2/Delete accelerators (`feedListItemKeysActive`) — the Feed menu's
   items themselves stay enabled.

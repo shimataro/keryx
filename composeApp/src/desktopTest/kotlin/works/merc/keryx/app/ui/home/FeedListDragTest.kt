@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -368,6 +369,72 @@ class FeedListDragTest {
             waitForIdle()
 
             assertEquals(listOf("d2", "d1"), db.foldersQueries.watchAll().executeAsList().map { it.id })
+        }
+    }
+
+    /** Starts the inline rename on the current selection the way the Feed menu does, and waits for it. */
+    private fun ComposeUiTest.startRenameFromMenu() {
+        testMenuController.send(MenuCommand.RenameFeed)
+        waitForIdle()
+        waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    /** Escape closes the editor; afterwards no editor is left mounted to blur-commit at teardown. */
+    private fun ComposeUiTest.cancelRename() {
+        onNodeWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).performKeyInput { pressKey(Key.Escape) }
+        waitForIdle()
+        waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+    }
+
+    /**
+     * Reordering stands aside while a row is being renamed — the drag gesture already did, and its
+     * screen-reader counterpart must agree, or TalkBack could reorder rows under an open editor.
+     */
+    @Test
+    fun noReorderAccessibilityActionIsExposedWhileARowIsBeingRenamed() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            waitForIdle()
+            assertEquals(listOf("下に移動"), customActionLabels(feedRowTestTag("a")))
+
+            startRenameFromMenu()
+
+            assertEquals(emptyList(), customActionLabels(feedRowTestTag("a")))
+            assertEquals(emptyList(), customActionLabels(feedRowTestTag("b")))
+
+            cancelRename()
+
+            assertEquals(listOf("下に移動"), customActionLabels(feedRowTestTag("a")))
+            assertEquals(listOf("上に移動"), customActionLabels(feedRowTestTag("b")))
+        }
+    }
+
+    @Test
+    fun noFolderReorderAccessibilityActionIsExposedWhileAFolderIsBeingRenamed() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Alpha", sortOrder = 0L)
+        db.insertFolder("d2", "Beta", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setFeedListDragContent(vm, isTouchPrimary = true)
+            vm.selectFilter(ArticleFilter.Folder("d1"))
+            waitForIdle()
+            assertEquals(listOf("下に移動"), customActionLabels(folderRowTestTag("d1")))
+
+            startRenameFromMenu()
+
+            assertEquals(emptyList(), customActionLabels(folderRowTestTag("d1")))
+            assertEquals(emptyList(), customActionLabels(folderRowTestTag("d2")))
+
+            cancelRename()
+
+            assertEquals(listOf("下に移動"), customActionLabels(folderRowTestTag("d1")))
+            assertEquals(listOf("上に移動"), customActionLabels(folderRowTestTag("d2")))
         }
     }
 

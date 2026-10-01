@@ -393,6 +393,11 @@ internal fun FeedListPane(
         if (index != null) listState.scrollToIndexIfNeeded(index)
     }
 
+    // Reordering — the drag gesture and its screen-reader "move up/down" actions alike — stands
+    // aside while any row is being renamed: the drag would steal a text-selection sweep from the
+    // field, and every route to an action must agree on when it is available.
+    val reorderAllowed = inlineEdit == null
+
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
     // the list — computed once per composition from the same collected state the rows render from.
     val editRowIndex = inlineEdit?.let { target ->
@@ -539,7 +544,7 @@ internal fun FeedListPane(
                     // The drag gesture watches the *Initial* pointer pass on this ancestor Box, so
                     // without this gate a press-and-sweep to select text inside an open inline
                     // editor would be stolen from the field and turned into a row drag.
-                    .feedListReorderDrag(dragController, enabled = inlineEdit == null, isTouchPrimary = isTouchPrimary),
+                    .feedListReorderDrag(dragController, enabled = reorderAllowed, isTouchPrimary = isTouchPrimary),
             ) {
                 // Every slot below carries an explicit key and contentType. This list interleaves
                 // several structurally different row kinds, and an unkeyed `item {}` falls back to an
@@ -623,10 +628,10 @@ internal fun FeedListPane(
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
-                                onMoveUp = reorderTargetWithinScope(feedIdsInGroup, index, -1)?.let { target ->
+                                onMoveUp = reorderTargetWithinScope(feedIdsInGroup, index, -1)?.takeIf { reorderAllowed }?.let { target ->
                                     { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
                                 },
-                                onMoveDown = reorderTargetWithinScope(feedIdsInGroup, index, 1)?.let { target ->
+                                onMoveDown = reorderTargetWithinScope(feedIdsInGroup, index, 1)?.takeIf { reorderAllowed }?.let { target ->
                                     { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
                                 },
                             )
@@ -693,10 +698,10 @@ internal fun FeedListPane(
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.
-                                    onMoveUp = reorderTargetWithinScope(folderIds, folderIndex, -1)?.let { target ->
+                                    onMoveUp = reorderTargetWithinScope(folderIds, folderIndex, -1)?.takeIf { reorderAllowed }?.let { target ->
                                         { vm.reorderFolders(folder.id, target.insertBeforeId) }
                                     },
-                                    onMoveDown = reorderTargetWithinScope(folderIds, folderIndex, 1)?.let { target ->
+                                    onMoveDown = reorderTargetWithinScope(folderIds, folderIndex, 1)?.takeIf { reorderAllowed }?.let { target ->
                                         { vm.reorderFolders(folder.id, target.insertBeforeId) }
                                     },
                                 )
