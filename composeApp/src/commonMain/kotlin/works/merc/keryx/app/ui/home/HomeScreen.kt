@@ -120,8 +120,9 @@ fun HomeScreen() {
     // ArticleDetailPane/ArticleWebViewCarousel/the reader lambda — see KeyboardNav.kt's own KDoc
     // and FallbackReaderScrollHost's. A no-op wherever the native WebView is showing instead.
     val fallbackReaderScrollHost = remember { FallbackReaderScrollHost() }
-    // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
-    // inline ✓ (the keyboard copies the selected article, which that pane already shows).
+    // Bumped by copyArticleUrl whenever the selected article's URL is copied from outside the reader
+    // (keyboard shortcut, menu bar, article-row context menu); ArticleDetailPane watches it to flash
+    // its copy button's inline ✓, so every route gives the same feedback as the button itself.
     var copyPulse by remember { mutableStateOf(0) }
     val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
@@ -277,13 +278,19 @@ fun HomeScreen() {
     fun openSelectedInBrowser() {
         vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let { BrowserOpener.open(it) }
     }
-    fun copySelectedUrl() {
-        vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let {
-            scope.launch {
-                clipboard.setClipEntry(ClipboardEntries.ofText(it))
-                copyPulse++
-            }
+    // The one handler behind every non-button route to "copy article URL". The ✓ is only flashed
+    // when the copied article is the one the reader shows: an Android long-press menu doesn't select
+    // its row first, so it can copy a different one. (A desktop right-click does select first;
+    // should that selection still be loading, the copy just goes without the ✓, never a wrong one.)
+    fun copyArticleUrl(url: String, articleId: String) {
+        if (!hasUsableUrl(url)) return
+        scope.launch {
+            clipboard.setClipEntry(ClipboardEntries.ofText(url))
+            if (articleId == vm.selectedArticle.value?.id) copyPulse++
         }
+    }
+    fun copySelectedUrl() {
+        vm.selectedArticle.value?.let { copyArticleUrl(it.url, it.id) }
     }
     fun focusSearch() {
         // Opens the bar at a narrow layout (a no-op at Triple, where HomeScreen's own
@@ -537,6 +544,7 @@ fun HomeScreen() {
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
                             onAddFeedClick = { showAddFeed = true },
+                            onCopyArticleUrl = { copyArticleUrl(it.url, it.id) },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -658,6 +666,7 @@ fun HomeScreen() {
                                     },
                                     returnRipplePulse = articleReturnRipplePulse,
                                     onAddFeedClick = { showAddFeed = true },
+                                    onCopyArticleUrl = { copyArticleUrl(it.url, it.id) },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,

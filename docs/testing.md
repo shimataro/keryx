@@ -459,6 +459,11 @@ peer creation still works from inside the click's own call stack:
   item — and stay in place across a resync (e.g. toggling a tag) without the menu rebuilding.
 - Right-clicking an article row with no usable URL still shows "Copy URL" and "Open in Browser"
   grayed out (disabled) rather than omitting them; an article with a URL shows both enabled.
+- Copying an article's URL from its row's right-click menu flashes the reader's copy button to ✓
+  for about 1.5 seconds, exactly as ⌘/Ctrl+Shift+C, the menu bar, and the button itself do — also
+  when the row wasn't selected before the right-click (it becomes selected, then shows ✓).
+- After copying an article's URL and letting the ✓ revert, narrowing the window from three panes
+  to two (or widening it back) does not flash the ✓ again.
 - Right-clicking a tag row shows "Edit", "Change color", and "Delete"; choosing "Change color"
   opens the same anchored popover the color dot itself opens (positioned at the dot, not at the
   click), and picking a swatch there applies immediately.

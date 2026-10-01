@@ -150,6 +150,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onAddFeedClick Invoked from the empty state's "Add feed" button, shown instead of the
  *   usual "no articles" message when there are no feeds at all — see [ArticleListPaneContent]'s own
  *   KDoc. `null` hides the button (leaving the message on its own); every real caller supplies it.
+ * @param onCopyArticleUrl An article row's "Copy URL" context-menu item. `HomeScreen` routes it
+ *   through the same handler as the keyboard shortcut and menu bar so the reader shows the same
+ *   copied feedback; the default copies with no feedback.
  */
 @Composable
 fun ArticleListPane(
@@ -165,6 +168,7 @@ fun ArticleListPane(
     onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
+    onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
     // a real touch-primary platform to run on; every real call site relies on the default.
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
@@ -371,6 +375,7 @@ fun ArticleListPane(
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
         onToggleRead = { vm.toggleRead(it) },
         onToggleStar = { vm.toggleStar(it) },
+        onCopyArticleUrl = onCopyArticleUrl,
         modifier = modifier,
         listState = listState,
         returnRipplePulse = branchReturnRipplePulse,
@@ -423,8 +428,8 @@ private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
 }
 
 /**
- * Remembers a "copy URL to clipboard" action, shared by [ArticleListPaneContent]'s article rows
- * (both the current filter's own list and search results), and by [FeedListPane]'s feed rows.
+ * Remembers a plain "copy URL to clipboard" action with no feedback of its own, used by
+ * [FeedListPane]'s feed rows and by [rememberPlainArticleUrlCopy].
  */
 @Composable
 internal fun rememberCopyUrlAction(): (String) -> Unit {
@@ -433,6 +438,16 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
     return remember(clipboard, scope) {
         { url: String -> scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(url)) } }
     }
+}
+
+/**
+ * The default for [ArticleListPane]'s and [ArticleListPaneContent]'s `onCopyArticleUrl`: copies the
+ * row's URL without the reader's copied feedback. `HomeScreen` passes its own handler instead.
+ */
+@Composable
+internal fun rememberPlainArticleUrlCopy(): (ArticleListRow) -> Unit {
+    val copyUrl = rememberCopyUrlAction()
+    return remember(copyUrl) { { row: ArticleListRow -> copyUrl(row.url) } }
 }
 
 /**
@@ -633,6 +648,7 @@ internal fun ArticleListPaneContent(
     onSelectArticle: (ArticleListRow) -> Unit,
     onToggleRead: (ArticleListRow) -> Unit = {},
     onToggleStar: (ArticleListRow) -> Unit = {},
+    onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
@@ -752,7 +768,6 @@ internal fun ArticleListPaneContent(
             } else {
                 val rowMetrics = rememberArticleRowMetrics()
                 val rowStrings = rememberArticleRowStrings()
-                val copyUrl = rememberCopyUrlAction()
                 // contentPadding's bottom clears the navigation bar on Android's edge-to-edge
                 // layout (see HomeScreen's Scaffold); zero on desktop (WindowInsets.safeDrawing).
                 LazyColumn(
@@ -772,7 +787,7 @@ internal fun ArticleListPaneContent(
                             onClick = { onSelectArticle(article) },
                             onToggleRead = { onToggleRead(article) },
                             onToggleStar = { onToggleStar(article) },
-                            onCopyUrl = { copyUrl(article.url) },
+                            onCopyUrl = { onCopyArticleUrl(article) },
                             onOpenInBrowser = { BrowserOpener.open(article.url) },
                             titleOverride = titleMarkedById?.get(article.id)?.let {
                                 markedToAnnotatedString(it.ifBlank { article.title })

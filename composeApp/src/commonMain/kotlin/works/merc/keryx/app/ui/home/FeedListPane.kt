@@ -226,8 +226,8 @@ internal fun FeedListPane(
     DisposableEffect(Unit) {
         onDispose { onTextInputFocusChange(null) }
     }
-    // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item, mirroring
-    // ArticleListPane's rememberCopyUrlAction() for article rows.
+    // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item. Plain copy with
+    // no feedback: unlike an article's URL, there is no on-screen copy control to flash.
     val copyUrl = rememberCopyUrlAction()
 
     var showAddTag by remember { mutableStateOf(false) }
