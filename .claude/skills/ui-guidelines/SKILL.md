@@ -933,7 +933,15 @@ Modifier.nativeContextMenu(
   count) is expected to be stable per call site across ordinary
   recompositions. It may still change when the underlying data does (a folder
   is added), which rebuilds the native widgets; labels and checked states are
-  synced on every change without a rebuild.
+  re-synced on every right-click without a rebuild.
+- **A click performs exactly what the open menu displayed.** `items` is read
+  once per right-click (after `onOpen`), and a click resolves against that
+  shown list (`LazyNativePopup`'s `shownEntries`), never against what the call
+  site would build by the time the user clicks — the row may have recomposed
+  in between (`onOpen`'s own side effects, a sync reordering folders/tags).
+  So the action captured in each entry must be the one its label and
+  checkmark promise; don't write an `onClick` that re-reads live state to
+  decide what to do.
 - Do not reach for `androidx.compose.material3.DropdownMenu` for this kind of
   menu going forward.
 - **A `clickable` nested inside a row that also carries `nativeContextMenu`

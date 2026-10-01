@@ -235,7 +235,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - KDE Global Menu / AppMenu（`AppMenuTreeTest`＝共有メニューツリーモデルの形状／`isMacOs` による省略／有効・チェック状態のミラーリング／任意の「メニューバーを表示」項目、`AppMenuLayoutBuilderTest`＝再帰的な `com.canonical.dbusmenu` レイアウト／プロパティフィルタリング／チェックボックスマッピング／行きがけ順 id の安定性、`AppMenuRevisionTest`＝revision の増分／`AboutToShow`／クリックディスパッチ／重複排除なし、`AppMenuSignatureTest`＝`com.canonical.AppMenu.Registrar` のワイヤーシグネチャ、`MenuBarVisibilityTest`＝AWT キーコードマップ／ショートカット→ノードのマッチャ／表示状態の永続化）
 - `SqliteConnectionPropertiesTest`（本番の接続プロパティが実際に全接続へ届くこと——外部キー有効化、`busy_timeout` 適用——は単発の `PRAGMA` では担保できない。JVM ドライバは文ごとに新しい接続を開くため）
 - `FormatTimestampTest`（`formatTimestamp` の正確な出力を固定する。他のタイムスタンプ検証は期待値をその関数自体から導出するため、この検証はできない）
-- `LazyNativePopupTest`（最初の右クリックまでネイティブなものは何も構築されない。`LocalNativeWindow` が null になる Compose UI テストでは観測できない）
+- `LazyNativePopupTest`（最初の右クリックまでネイティブなものは何も構築されない。`LocalNativeWindow` が null になる Compose UI テストでは観測できない。あわせて、クリックは呼び出し側のその後の項目ではなく、メニューを最後に表示したときの項目で解決されること）
 - `WindowGeometryTest`（ダイアログウインドウのジオメトリ: オーナー中心配置と画面境界クランプ、自動フィットの計算 `fitWindowSize`/`sizeMatches`、`nextDialogFit` のドリフト補正ステートマシン——フィットが確定した**後**に Compose の関知しないところでサイズが適用される回帰ケースも依然として補正されること、拒否するウインドウマネージャがガードを無限に回さないための試行回数上限、フィットが着地するまでダイアログを不可視に保つ `presentable` フラグ——その上限を使い切った時点での解放を含め、ジオメトリを拒否するウインドウマネージャがダイアログを不可視のままにし続けることは決してない）
 - クラウドデータの破損／非互換からの復旧（`SyncRepositoryTest.kt`／`SyncMergerTest.kt`：制約違反するクラウドデータ——`feeds` の行集合が UNIQUE な `url` を重複させている、または NOT NULL 違反の NULL をクラウド DB 自身の（より緩い）スキーマだけが許していた——を、破損ファイルや外部スキーマと同様に `CloudDataIncompatibleException` として分類すること、`SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` がその逆（ローカル側の破損は誤分類しない）を担保すること、`SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` がマージ commit 後の `FtsManager.indexMissing()` の失敗——壊れたクラウドスキーマと同じ曖昧な SQLite エラーコードを共有する——を誤って分類しないことを担保すること。`core/SqliteFileTest.kt`＝アップロード側と対称なダウンロードバイト列の SQLite ヘッダ検証）
 - 削除ではなく退避するようになったクラウドデータのリセット（`core/CloudBackupPathTest.kt`＝決定的で UTC 整形された退避パス、`CloudStorage.rename` は `DropboxStorageTest.kt`／`GoogleDriveStorageTest.kt`／`OneDriveStorageTest.kt` でプロバイダごとに（退避先の衝突・退避元の不在ケースを含めて）検証、`SyncRepositoryTest.kt` の `resetCloudData*` 系がリネームしてから作り直すフローとその削除フォールバックを検証）
@@ -530,6 +530,11 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - タグ行を右クリックすると「編集」「色を変更」「削除」が表示され、「色を変更」を選ぶとドット自身を
   タップした時と同じ場所に色ピッカーのポップオーバーが開く（クリックした位置ではなくドットの位置）
   こと。スウォッチを選ぶと即座に反映されること。
+- フィード行のメニューで「フォルダーへ移動」（または「タグ」）サブメニューを開いたまま、別の端末で
+  フォルダー（またはタグ）を並べ替え・追加・削除した結果がクラウド同期で取り込まれるのを待ってから項目を
+  クリックすると、クリックしたラベルのフォルダーへ移動する（そのタグが切り替わる）こと。同期でその位置に
+  ずれてきた別のフォルダー（タグ）にはならないこと。クリックは常に、開いているメニューが表示していた
+  内容を実行する。
 - 記事リーダーの WebView が表示された状態でこれらのメニューを開くと、メニューが WebView の背後ではなく
   前面に表示されること。
 - （Linux）アプリ内テーマ（ライト↔ダーク）を再起動なしで切り替えた際、メニューバーと開いている
