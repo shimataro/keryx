@@ -880,9 +880,11 @@ identically — effect, enablement, feedback — whether it runs from a toolbar 
 application menu, a context menu, a keyboard shortcut, or a gesture. To keep that true:
 
 - Route every entry point through **one shared handler** rather than re-implementing the effect
-  (and forgetting the feedback) at each call site. Example: every non-button route to "copy
-  article URL" calls `HomeScreen`'s `copyArticleUrl`, which both writes the clipboard and bumps the
-  `copyPulse` that flashes the reader's copy button ✓; the button itself raises the same ✓ locally.
+  (and forgetting the feedback) at each call site. Example: every route to "copy article URL" —
+  the reader's button included — calls `ArticleUrlCopier.copy` (`ui/home/ArticleUrlCopier.kt`),
+  which writes the clipboard, bumps the pulse that flashes the reader's copy button ✓, and shows
+  Android's "URL copied" snackbar; the reader only watches the pulse. Keep feedback in the shared
+  handler rather than in one pane, or it goes missing whenever that pane isn't composed.
 - A context-menu item that shows a shortcut hint (`NativeMenuShortcut`) is promising the user it is
   the same command as that shortcut — check the two really share a handler.
 - A toggle item's label must match what its shortcut would do **right now**. Example: right-clicking
@@ -1470,9 +1472,9 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   - `Snackbar`/`SnackbarHost` (OPML import/export results) — weaker candidate than the
     others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
     banner view rather than a drop-in native replacement. (The URL-copied feedback is no longer purely
-    an inline-icon affair — see `LocalSnackbarHostState`'s own KDoc: Android now also reports it via a
-    real M3 `Snackbar`, below API 33 only, where the OS itself doesn't already show a clipboard-copy
-    confirmation. Android's second use is `HomeScreen`'s `ForegroundAlertSnackbar`, which announces a
+    an inline-icon affair — see `ArticleUrlCopier`'s own KDoc: Android now also reports it via a
+    real M3 `Snackbar`, from the shared copy handler on every route, below API 33 only, where the OS
+    itself doesn't already show a clipboard-copy confirmation. Android's second use is `HomeScreen`'s `ForegroundAlertSnackbar`, which announces a
     warning/error the moment it is raised — the bell's badge alone only reaches a user already looking
     at the pane hosting it, and these alerts are raised asynchronously by the startup tasks and the
     background worker with no OS notification behind them; see `docs/error-design.md`. Desktop still

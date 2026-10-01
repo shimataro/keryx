@@ -44,7 +44,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,7 +60,6 @@ import io.github.kdroidfilter.webview.web.WebView
 import io.github.kdroidfilter.webview.web.WebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.domain.ArticleListRow
@@ -72,10 +70,8 @@ import works.merc.keryx.app.domain.toReaderRow
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.isNativeWebViewSupported
-import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.isTouchPrimary
-import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
 import works.merc.keryx.app.platform.setNativeWebViewImportantForAccessibility
 import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
@@ -119,9 +115,11 @@ internal const val ARTICLE_READER_TEST_TAG = "article-reader"
  *
  * @param vm The view model supplying the selected article and handling article actions.
  * @param onActivated Invoked when the pane is activated.
- * @param copyPulse A counter bumped whenever the selected article's URL is copied from outside this
- *   pane (keyboard shortcut, menu bar, article-row context menu); each increment flashes the copy
+ * @param copyPulse A counter bumped whenever the displayed article's URL is copied, by any route
+ *   (this pane's own copy button included — see [ArticleUrlCopier]); each increment flashes the copy
  *   button's inline ✓. Only increments made while this pane is composed count.
+ * @param onCopyUrl The shared "copy article URL" handler ([ArticleUrlCopier.copy]) the toolbar's copy
+ *   button calls with the displayed article; the pane never writes the clipboard itself.
  */
 @Composable
 fun ArticleDetailPane(
@@ -129,6 +127,7 @@ fun ArticleDetailPane(
     modifier: Modifier = Modifier,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
+    onCopyUrl: (Articles) -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     // Overridable only so a desktopTest can exercise the touch-primary branch below without a real
@@ -173,6 +172,7 @@ fun ArticleDetailPane(
         modifier = modifier,
         onActivated = onActivated,
         copyPulse = copyPulse,
+        onCopyUrl = onCopyUrl,
         onToggleStar = { vm.toggleStarSelected() },
         onMarkUnread = { vm.markSelectedUnread() },
         onNavigateUp = onNavigateUp,
@@ -209,6 +209,7 @@ internal fun ArticleDetailPaneContent(
     modifier: Modifier = Modifier,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
+    onCopyUrl: (Articles) -> Unit = {},
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
@@ -226,19 +227,9 @@ internal fun ArticleDetailPaneContent(
             showCopied = false
         }
     }
-    // Android also reports the copy via a Snackbar (desktop has no in-app snackbar convention —
-    // see LocalSnackbarHostState's own KDoc, so this is a no-op there) — except on API 33+, where
-    // the system already shows its own clipboard-copy confirmation and this would just duplicate
-    // it (see platformShowsOwnCopyConfirmation's own KDoc). A second, independent effect so
-    // showSnackbar's own (much longer) suspend-until-dismissed duration never delays the ✓ icon
-    // reset above.
-    val snackbarHostState = LocalSnackbarHostState.current
-    val copiedMessage = stringResource(Res.string.article_url_copied)
-    LaunchedEffect(showCopied) {
-        if (showCopied && !platformShowsOwnCopyConfirmation) snackbarHostState?.showSnackbar(copiedMessage)
-    }
-    // A copy of the selected article (shown in this pane) made through another route — keyboard,
-    // menu bar, or the article row's context menu — mirrors the button's feedback here. Only pulses
+    // A copy of the article shown in this pane, made through any route — this pane's own button,
+    // keyboard, menu bar, or the article row's context menu — all go through the shared
+    // ArticleUrlCopier, which bumps copyPulse (and shows Android's snackbar itself). Only pulses
     // raised after this pane entered composition count: HomeScreen composes the pane in a different
     // branch per layout (and not at all while a phone-width screen shows the article list), so it
     // can re-enter with a copyPulse bumped long ago, which must not flash ✓ without a copy.
@@ -304,7 +295,7 @@ internal fun ArticleDetailPaneContent(
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
                 onMarkUnread = onMarkUnread,
-                onCopied = { showCopied = true },
+                onCopyUrl = { article?.let(onCopyUrl) },
                 onNavigateUp = onNavigateUp,
             )
         }
@@ -419,7 +410,7 @@ private fun ArticleDetailToolbar(
     showCopied: Boolean,
     onToggleStar: () -> Unit,
     onMarkUnread: () -> Unit,
-    onCopied: () -> Unit,
+    onCopyUrl: () -> Unit,
     onNavigateUp: (() -> Unit)? = null,
 ) {
     val hasArticle = article != null
@@ -473,20 +464,13 @@ private fun ArticleDetailToolbar(
             TooltipIconButton(tooltip = markUnreadTooltip, onClick = onMarkUnread, enabled = hasArticle) {
                 KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
             }
-            val clipboard = LocalClipboard.current
-            val scope = rememberCoroutineScope()
             val copyUrlTooltip = stringResource(
                 if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
             )
             TooltipIconButton(
                 tooltip = copyUrlTooltip,
                 enabled = copyOpenEnabled,
-                onClick = {
-                    scope.launch {
-                        clipboard.setClipEntry(ClipboardEntries.ofText(url))
-                        onCopied()
-                    }
-                },
+                onClick = onCopyUrl,
             ) {
                 KeryxIcon(
                     if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,

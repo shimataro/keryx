@@ -1166,6 +1166,19 @@ device/emulator:
   tooltip. While a reset is running, the spinner is visible against its container and the row's
   height doesn't change. Check in both light and dark themes.
 
+### (Android) The URL-copied Snackbar
+
+`ArticleUrlCopierTest.kt` covers when the shared copy handler shows the Snackbar; confirm on an
+emulator that it really appears from every route:
+
+- On API 26–32 at phone width, with the article list on screen (no reader), long-press a row →
+  "Copy URL": exactly one "URL copied" Snackbar appears. Long-press a row other than the selected
+  one at a tablet width and copy: again exactly one Snackbar, and the reader's copy button does not
+  turn ✓ (it shows a different article). Copying from the reader's own button also shows exactly
+  one, and its ✓ appears too. Copying twice quickly leaves one Snackbar on screen, not two in turn.
+- On API 33+, none of those routes shows a Snackbar from the app (only the OS's own clipboard
+  confirmation).
+
 ### (iOS) The sidebar
 
 The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));

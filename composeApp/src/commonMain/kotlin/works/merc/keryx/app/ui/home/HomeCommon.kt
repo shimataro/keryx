@@ -99,12 +99,14 @@ internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
  * site's own comment). `null` on desktop, which per the `ui-guidelines` skill has no in-app
  * snackbar convention (its previous transient toasts were replaced by inline expressions — see
  * that skill's "Native-feel restyle" section). `null` is also the value in any preview/test
- * composition that never provides one. A composable that wants to show a snackbar (e.g.
- * `ArticleDetailPane`'s URL-copied feedback) should treat a `null` value here as "do nothing"
- * rather than crash.
+ * composition that never provides one. A composable that wants to show a snackbar should treat a
+ * `null` value here as "do nothing" rather than crash.
  *
- * Note `HomeScreen`'s own foreground alert Snackbar does not go through this `CompositionLocal`:
- * it is composed outside the provider (alongside the host itself) and takes the state directly.
+ * Note neither of `HomeScreen`'s own snackbars goes through this `CompositionLocal`: the foreground
+ * alert Snackbar is composed outside the provider (alongside the host itself), and the URL-copied
+ * one is raised by [ArticleUrlCopier], the shared copy handler `HomeScreen` creates — both take the
+ * state directly, so the copied snackbar appears for every copy route, including when no pane
+ * reading this local (the reader, say) is on screen.
  */
 internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState?> { null }
 

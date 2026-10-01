@@ -78,8 +78,10 @@ from the `NotificationMessages` interface (just `newArticles(count)`), which eac
   [external-spec.md](external-spec.md#actions-with-more-than-one-route). Android is the one platform-specific
   exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the
   OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see
-  `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s
-  `LocalSnackbarHostState`). Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
+  `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation`). Like the ✓, it comes from the one shared copy
+  handler (`ui/home/ArticleUrlCopier.kt`), not from the reader, so every route shows it — including a copy made
+  while the reader isn't on screen (a phone-width article list) or for a row other than the one it shows — one
+  Snackbar per copy, at M3's default (short) duration. Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
   described below.
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.

@@ -120,10 +120,15 @@ fun HomeScreen() {
     // ArticleDetailPane/ArticleWebViewCarousel/the reader lambda — see KeyboardNav.kt's own KDoc
     // and FallbackReaderScrollHost's. A no-op wherever the native WebView is showing instead.
     val fallbackReaderScrollHost = remember { FallbackReaderScrollHost() }
-    // Bumped by copyArticleUrl whenever the selected article's URL is copied from outside the reader
-    // (keyboard shortcut, menu bar, article-row context menu); ArticleDetailPane watches it to flash
-    // its copy button's inline ✓, so every route gives the same feedback as the button itself.
-    var copyPulse by remember { mutableStateOf(0) }
+    // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
+    // host is only created — and provided — on a touch-primary platform.
+    val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
+    // The one handler behind every route to "copy article URL" — the reader's button, the keyboard
+    // shortcut, the menu bar and the article-row context menu — including its feedback: the pulse
+    // ArticleDetailPane watches to flash its copy button's inline ✓ (only for the article it shows:
+    // an Android long-press menu doesn't select its row first, so it can copy a different one), and
+    // Android's "URL copied" snackbar, which therefore appears even when the reader isn't on screen.
+    val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticle.value?.id }
     val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
     // down to the returned-to article's own row, which plays a one-shot ripple so the user can
@@ -278,19 +283,8 @@ fun HomeScreen() {
     fun openSelectedInBrowser() {
         vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let { BrowserOpener.open(it) }
     }
-    // The one handler behind every non-button route to "copy article URL". The ✓ is only flashed
-    // when the copied article is the one the reader shows: an Android long-press menu doesn't select
-    // its row first, so it can copy a different one. (A desktop right-click does select first;
-    // should that selection still be loading, the copy just goes without the ✓, never a wrong one.)
-    fun copyArticleUrl(url: String, articleId: String) {
-        if (!hasUsableUrl(url)) return
-        scope.launch {
-            clipboard.setClipEntry(ClipboardEntries.ofText(url))
-            if (articleId == vm.selectedArticle.value?.id) copyPulse++
-        }
-    }
     fun copySelectedUrl() {
-        vm.selectedArticle.value?.let { copyArticleUrl(it.url, it.id) }
+        vm.selectedArticle.value?.let { urlCopier.copy(it.url, it.id) }
     }
     fun focusSearch() {
         // Opens the bar at a narrow layout (a no-op at Triple, where HomeScreen's own
@@ -333,9 +327,6 @@ fun HomeScreen() {
         }
     }
 
-    // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
-    // host is only created — and provided — on a touch-primary platform.
-    val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
     // contentWindowInsets = WindowInsets(0): each pane applies its own inset instead of one
     // consumed here — see KeryxPaneTopBar's Android `actual` (top), FeedListPane's and
     // ArticleListPane's LazyColumn `contentPadding` (bottom), and the horizontal inset applied to
@@ -544,7 +535,7 @@ fun HomeScreen() {
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
                             onAddFeedClick = { showAddFeed = true },
-                            onCopyArticleUrl = { copyArticleUrl(it.url, it.id) },
+                            onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -553,7 +544,8 @@ fun HomeScreen() {
                             vm,
                             modifier = Modifier.weight(1f),
                             onActivated = { activatePane(HomePane.ArticleDetail) },
-                            copyPulse = copyPulse,
+                            copyPulse = urlCopier.pulse,
+                            onCopyUrl = { urlCopier.copy(it.url, it.id) },
                         )
                     }
                     }
@@ -666,13 +658,14 @@ fun HomeScreen() {
                                     },
                                     returnRipplePulse = articleReturnRipplePulse,
                                     onAddFeedClick = { showAddFeed = true },
-                                    onCopyArticleUrl = { copyArticleUrl(it.url, it.id) },
+                                    onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,
                                     modifier = paneModifier,
                                     onActivated = { activatePane(HomePane.ArticleDetail) },
-                                    copyPulse = copyPulse,
+                                    copyPulse = urlCopier.pulse,
+                            onCopyUrl = { urlCopier.copy(it.url, it.id) },
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
                                     // Dual the reader is a permanent neighbor of the article list,

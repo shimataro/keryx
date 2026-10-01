@@ -173,7 +173,29 @@ class ArticleDetailPaneTest {
     }
 
     @Test
-    fun copyingTheUrlShowsASnackbarWhenAHostIsProvided() = runDesktopComposeUiTest {
+    fun copyButtonInvokesTheSharedCopyHandlerWithTheDisplayedArticle() = runDesktopComposeUiTest {
+        val article = testArticle()
+        val copied = mutableListOf<Articles>()
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(400.dp, 500.dp),
+                onCopyUrl = { copied += it },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").performClick()
+        waitForIdle()
+
+        assertEquals(listOf(article), copied)
+    }
+
+    @Test
+    fun copyButtonDoesNotShowASnackbarItself() = runDesktopComposeUiTest {
+        // The snackbar belongs to the shared ArticleUrlCopier, so it appears for every copy route;
+        // the reader showing one too would double it for a copy made from its own button.
         val snackbarHostState = SnackbarHostState()
         setContent {
             CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
@@ -189,16 +211,20 @@ class ArticleDetailPaneTest {
         onNodeWithContentDescription("URL をコピー").performClick()
         waitForIdle()
 
-        assertEquals("URL をコピーしました", snackbarHostState.currentSnackbarData?.visuals?.message)
+        assertEquals(null, snackbarHostState.currentSnackbarData)
     }
 
     @Test
     fun copyingTheUrlDoesNotCrashWithNoHostProvided() = runDesktopComposeUiTest {
-        // LocalSnackbarHostState defaults to null (desktop's own steady state — see its KDoc).
+        // LocalSnackbarHostState defaults to null (desktop's own steady state — see its KDoc). The
+        // ✓ comes from the pulse the shared handler raises, wired here as HomeScreen wires it.
+        var copyPulse by mutableStateOf(0)
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
                 modifier = Modifier.size(400.dp, 500.dp),
+                copyPulse = copyPulse,
+                onCopyUrl = { copyPulse++ },
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }

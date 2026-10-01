@@ -122,9 +122,9 @@ final class HomeObservable: ObservableAssignment {
     /// Bumped by every copy of the displayed article's URL (`copyArticleUrl`, shared by the reader's
     /// own button, the menu bar's / keyboard's Copy URL command and the article row's context menu)
     /// so the reader can flash a "copied" confirmation, matching Compose's own copy pulse
-    /// (`HomeScreen.kt`). Copying a feed or site URL never bumps it. Not itself a
+    /// (`ArticleUrlCopier.kt`). Copying a feed or site URL never bumps it. Not itself a
     /// `HomeViewModel` `StateFlow` — this is UI-only feedback state, kept here alongside it for the
-    /// same reason `HomeScreen.kt`'s own `copyPulse` lives in the Compose screen, not the ViewModel.
+    /// same reason Compose's own pulse lives in the screen's `ArticleUrlCopier`, not the ViewModel.
     private(set) var copyPulse: Int = 0
 
     /// Whether a text field (the sidebar's search field, currently) holds keyboard focus — plain UI
