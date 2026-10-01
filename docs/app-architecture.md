@@ -1330,9 +1330,12 @@ view on iOS.
   macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
   drag. Opening a menu does not select its row (as in the system apps, and Android's long-press menu): the
   menu is built from the pressed row itself, so its actions land on that row whatever is selected.
-- **In-place rename** uses the same `InlineRenameField`, which on iOS tracks its own `@FocusState`: the
-  cell is a separate hosting tree that `HomeView`'s `focusedPane` cannot reach. Tapping another row ends
-  editing first, which commits the edit; the renaming row can be neither selected nor dragged.
+- **Renaming** a folder, tag or feed opens the same form sheet that creates one (`NamePromptSheet`, Cancel /
+  Save in the navigation bar, a Clear button at the end of the name field), not an in-row editor: an
+  Escape-driven editor inside a cell does not suit touch, and the HIG's cancel is the sheet's Cancel. It is
+  shown for as long as `SidebarDialogState.renamingRowKey` names a row that still exists (the menu, the
+  swipe action and the keyboard all go through `startRename`); `SidebarRenameTarget` resolves the row to what
+  the sheet edits, and the rules are the shared `inlineRenameValidation`'s. macOS keeps `InlineRenameField`.
 - **A tag's color** is changed from its long-press menu: "Change color ▸" opens the swatches as a palette
   (`UIMenu` with `.displayAsPalette`), each named by `TagColorNames` and the current one checked. There is
   no popover on iOS — it is a poor fit on an iPhone — so the tag's color dot is only decoration there

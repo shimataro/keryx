@@ -91,6 +91,9 @@ struct FeedListView: View {
             }
         }
         .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
+        #if os(iOS)
+        .modifier(SidebarRenameSheet(home: home, dialogs: dialogs))
+        #endif
         // The 3-pane desktop/macOS layout keeps this field permanently visible (mirrors Compose's
         // own `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
         // there is no narrower layout here to ever hide it again), so this only needs setting once.
@@ -203,6 +206,7 @@ struct FeedListView: View {
 
     // MARK: - In-place rename
 
+    #if os(macOS)
     /// The name editor for the row `instance`, or `nil` when that row isn't being renamed.
     private func renameEditor(
         for instance: FeedListRowSelection,
@@ -262,6 +266,7 @@ struct FeedListView: View {
             commit: { home.viewModel.renameFeed(id: feed.id, title: $0) }
         )
     }
+    #endif
 
     // MARK: - Sidebar structure
 
@@ -444,6 +449,75 @@ private struct SidebarDeleteAlerts: ViewModifier {
         Binding(get: { source.wrappedValue != nil }, set: { if !$0 { source.wrappedValue = nil } })
     }
 }
+
+#if os(iOS)
+/// iOS renames a folder, tag or feed in the form sheet that creates one (`NamePromptSheet`), not in
+/// the row itself — a row-sized keyboard editor with an Escape key does not suit touch. It is shown
+/// for as long as `dialogs.renamingRowKey` names a row that still exists; a row removed underneath it
+/// (see the auto-cancel in `FeedListView.body`) closes the sheet.
+private struct SidebarRenameSheet: ViewModifier {
+    let home: HomeObservable
+    @Bindable var dialogs: SidebarDialogState
+
+    private var target: SidebarRenameTarget? {
+        guard let key = dialogs.renamingRowKey, let instance = home.sidebar.orderedRowsByKey[key] else { return nil }
+        return SidebarRenameTarget.resolve(
+            SidebarItemID(instance), folders: home.folders, tags: home.tags, feedsById: home.feedsById
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: Binding(
+            get: { target != nil },
+            set: { if !$0 { dialogs.renamingRowKey = nil } }
+        )) {
+            if let target {
+                NamePromptSheet(
+                    titleKey: "home_rename_feed",
+                    placeholderKey: placeholderKey(for: target),
+                    placeholderText: target.placeholder,
+                    duplicateMessageKey: target.duplicateMessageKey ?? "",
+                    confirmTitleKey: "common_save",
+                    allowBlank: target.allowBlank,
+                    initialName: target.initialName,
+                    isDuplicate: { isDuplicate($0, for: target) },
+                    onConfirm: { name, _ in commit(name, for: target) },
+                    isPresented: Binding(get: { dialogs.renamingRowKey != nil }, set: { if !$0 { dialogs.renamingRowKey = nil } })
+                )
+            }
+        }
+    }
+
+    /// The hint shown in an empty folder or tag field; a feed shows its own title instead.
+    private func placeholderKey(for target: SidebarRenameTarget) -> String {
+        switch target.kind {
+        case .folder: return "home_new_folder_hint"
+        case .tag: return "home_new_tag_hint"
+        case .feed: return "home_rename_feed"
+        }
+    }
+
+    private func isDuplicate(_ name: String, for target: SidebarRenameTarget) -> Bool {
+        switch target.kind {
+        case .folder(let id): return NameValidationKt.isDuplicateFolderName(name: name, folders: home.folders, excludeId: id)
+        case .tag(let id): return NameValidationKt.isDuplicateTagName(name: name, tags: home.tags, excludeId: id)
+        case .feed: return false
+        }
+    }
+
+    private func commit(_ name: String, for target: SidebarRenameTarget) {
+        switch target.kind {
+        case .folder(let id):
+            home.viewModel.updateFolder(id: id, name: name)
+        case .tag(let id):
+            // The tag's color is kept as it is — it has its own menu palette.
+            home.viewModel.updateTag(id: id, name: name, color: home.tags.first { $0.id == id }?.color)
+        case .feed(let id):
+            home.viewModel.renameFeed(id: id, title: name)
+        }
+    }
+}
+#endif
 
 /// Binds the sidebar's `.searchable` field to `focusedPane`'s `.search` case where the system
 /// supports it (`.searchFocused(_:equals:)` is macOS 15 / iOS 18+); a no-op before that.

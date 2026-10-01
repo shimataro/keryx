@@ -1,3 +1,4 @@
+#if os(macOS)
 import KeryxShared
 import SwiftUI
 
@@ -11,9 +12,12 @@ import SwiftUI
 ///   cannot be committed unless `allowBlank`; `blockingError` (a duplicate name) paints the frame red.
 ///
 /// While it is open, `SidebarDialogState.isEditingInline` is what makes the window's bare-key
-/// shortcuts and the Feed menu's Return/Delete accelerators stand aside. Neither platform reports the
-/// field through `focusedPane`: on macOS the input is an AppKit field that takes focus itself (see
-/// `RenameTextField` for why), and on iOS it sits in a collection-view cell's own hosting tree.
+/// shortcuts and the Feed menu's Return/Delete accelerators stand aside. The field is not reported
+/// through `focusedPane`: the input is an AppKit field that takes focus itself (see `RenameTextField`
+/// for why).
+///
+/// macOS only: iOS renames in the same form sheet that creates a folder or tag (`NamePromptSheet`),
+/// since a keyboard-driven in-row editor with an Escape key does not suit touch.
 struct InlineRenameField: View {
     let initialName: String
     /// Shown while the field is empty — the title a blanked feed name falls back to.
@@ -30,14 +34,7 @@ struct InlineRenameField: View {
 
     @State private var text: String
     @State private var finished = false
-    #if os(macOS)
     @State private var fieldHandle = RenameTextFieldHandle()
-    #else
-    /// The field's own focus. The iOS sidebar hosts each row in a collection-view cell — a hosting
-    /// tree of its own, which `HomeView`'s `focusedPane` cannot reach — so the editor tracks its
-    /// focus itself there.
-    @FocusState private var fieldFocused: Bool
-    #endif
 
     init(
         initialName: String,
@@ -64,43 +61,23 @@ struct InlineRenameField: View {
 
     // Fixed colors rather than hierarchical styles: inside a selected sidebar row `.secondary` is
     // drawn for the row's emphasized background, which would vanish against the field's own fill.
-    #if os(macOS)
     private static let fieldBackground = Color(nsColor: .textBackgroundColor)
     private static let secondaryForeground = Color(nsColor: .secondaryLabelColor)
-    #else
-    private static let fieldBackground = Color(uiColor: .systemBackground)
-    private static let secondaryForeground = Color(uiColor: .secondaryLabel)
-    #endif
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         HStack(spacing: 4) {
-            Group {
-            #if os(macOS)
-                RenameTextField(
-                    text: $text,
-                    placeholder: placeholder,
-                    handle: fieldHandle,
-                    onSubmit: { finish(commit: true, restoreFocus: true) },
-                    onCancel: { finish(commit: false, restoreFocus: true) },
-                    onFocusLost: { finish(commit: true, restoreFocus: false) }
-                )
-            #else
-                TextField(placeholder, text: $text)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1)
-                    .focused($fieldFocused)
-                    .onSubmit { finish(commit: true, restoreFocus: true) }
-                    .onKeyPress(.escape) {
-                        finish(commit: false, restoreFocus: true)
-                        return .handled
-                    }
-            #endif
-            }
+            RenameTextField(
+                text: $text,
+                placeholder: placeholder,
+                handle: fieldHandle,
+                onSubmit: { finish(commit: true, restoreFocus: true) },
+                onCancel: { finish(commit: false, restoreFocus: true) },
+                onFocusLost: { finish(commit: true, restoreFocus: false) }
+            )
             .accessibilityHint(validation.error ?? "")
-            // Escape has no touch equivalent and is hard to discover, so the editor also carries an
-            // explicit cancel. Not focusable, so pressing it doesn't first take focus off the field
+            // Escape is hard to discover, so the editor also carries an explicit cancel. Not focusable, so pressing it doesn't first take focus off the field
             // and commit the edit.
             Button {
                 finish(commit: false, restoreFocus: true)
@@ -126,12 +103,10 @@ struct InlineRenameField: View {
                 .allowsHitTesting(false)
         }
         .help(validation.error ?? "")
-        // The red border and `.help` reach neither VoiceOver nor (for `.help`) iOS, so a new error
-        // is announced as it appears.
+        // The red border and `.help` do not reach VoiceOver, so a new error is announced as it appears.
         .onChange(of: validation.error) { _, error in
             if let error { AccessibilityNotification.Announcement(error).post() }
         }
-        #if os(macOS)
         // Another pane (or the search field) taking focus ends the edit; a click on another row is
         // reported by the field itself (`onFocusLost`). Any other value is not a focus loss: the
         // outline's own `.feedList` binding may read `nil` or stay `.feedList` once the AppKit field
@@ -142,14 +117,6 @@ struct InlineRenameField: View {
             case .feedList, nil: break
             }
         }
-        #else
-        .task { fieldFocused = true }
-        // Focus moving anywhere else (another row tapped — the sidebar ends editing first — or
-        // another pane) ends the edit.
-        .onChange(of: fieldFocused) { _, focused in
-            if !focused { finish(commit: true, restoreFocus: false) }
-        }
-        #endif
     }
 
     /// Ends the edit exactly once. A commit of an invalid value is refused when Return asked for it
@@ -173,11 +140,10 @@ struct InlineRenameField: View {
     private func end(restoreFocus: Bool, _ action: () -> Void) {
         finished = true
         if restoreFocus {
-            #if os(macOS)
             fieldHandle.returnFocusToList()
-            #endif
             focusedPane.wrappedValue = .feedList
         }
         action()
     }
 }
+#endif

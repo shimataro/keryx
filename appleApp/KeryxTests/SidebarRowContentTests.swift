@@ -10,16 +10,14 @@ struct SidebarRowContentTests {
         feeds: [Feeds] = F.feeds,
         selectionDisplayed: Bool = true,
         selectedRow: FeedListRowSelection = FeedListRowSelectionAll(),
-        filter: ArticleFilter = ArticleFilterAll(),
-        renamingRowKey: String? = nil
+        filter: ArticleFilter = ArticleFilterAll()
     ) -> [SidebarItemID: SidebarRowContent] {
         SidebarRowContent.build(
             outline: F.outline(feeds: feeds),
             model: F.model(feeds: feeds),
             selectionDisplayed: selectionDisplayed,
             selectedRow: selectedRow,
-            filter: filter,
-            renamingRowKey: renamingRowKey
+            filter: filter
         )
     }
 
@@ -80,16 +78,15 @@ struct SidebarRowContentTests {
     }
 
     @Test
-    func onlyTheRowBeingRenamedIsRenaming() {
-        let all = contents(renamingRowKey: "feed-in-tag:t1:a")
-        #expect(all.filter(\.value.isRenaming).map(\.key) == [.feedInTag(feedId: "a", tagId: "t1")])
-    }
-
-    @Test
     func changedItemsAreOnlyTheRowsWhoseContentDiffers() {
         let before = contents()
-        let after = contents(renamingRowKey: "feed-in-tag:t1:a")
-        #expect(SidebarRowContent.changedItems(from: before, to: after) == [.feedInTag(feedId: "a", tagId: "t1")])
+        // Feed `a` starts erroring: both of its rows (under its folder and under tag t1) change.
+        let erroring = F.feeds.map { $0.id == "a" ? F.feed("a", sortOrder: 1, folderId: "d1", errorCount: 1) : $0 }
+        let after = contents(feeds: erroring)
+        #expect(
+            SidebarRowContent.changedItems(from: before, to: after)
+                == [.feed("a"), .feedInTag(feedId: "a", tagId: "t1")]
+        )
         #expect(SidebarRowContent.changedItems(from: before, to: before).isEmpty)
     }
 

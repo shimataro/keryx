@@ -150,6 +150,7 @@ targets:
       - path: Keryx/Home/Sidebar/SidebarRowContent.swift
       - path: Keryx/Home/Sidebar/SidebarUnreadCounts.swift
       - path: Keryx/Home/Sidebar/TagColorNames.swift
+      - path: Keryx/Home/Sidebar/SidebarRenameTarget.swift
       - path: Keryx/Home/Sidebar/SidebarDropResolver.swift
       - path: Keryx/Home/Sidebar/SidebarDropPreview.swift
       - path: Keryx/Home/ArticleTableLayout.swift

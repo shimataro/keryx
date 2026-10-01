@@ -13,7 +13,6 @@ struct SidebarRenderState: Equatable {
     /// The row shown as selected — `nil` while the collapsed sidebar is the topmost column (see
     /// `CompactSidebarSelection.displayedKey`).
     let selectedItem: SidebarItemID?
-    let renamingKey: String?
 }
 
 /// What the collection view asks of `FeedListView` — the same operations the macOS source list
@@ -25,8 +24,6 @@ struct SidebarCollectionActions {
     /// A disclosure was toggled by the user.
     var setExpanded: (SidebarItemID, Bool) -> Void
     var menu: (SidebarItemID) -> UIMenu?
-    /// The row's in-place name editor, while it is being renamed.
-    var editor: (SidebarItemID) -> InlineRenameField?
     /// The shared lookup tables the drop rules resolve against.
     var dropIndex: () -> FeedListDropIndex
     /// Applies a drop the shared rules resolved (`applyFeedListDropAction`).
@@ -226,11 +223,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             break
         }
         cell.accessories = accessories
-        let editor = content.isRenaming ? actions.editor(item) : nil
         cell.contentConfiguration = UIHostingConfiguration {
             SidebarCellContent(
                 content: content,
-                editor: editor,
                 color: Color(uiColor: textColor)
             )
         }
@@ -271,10 +266,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         applyStructure(newState.outline, animated: old != nil)
         reconfigure(SidebarRowContent.changedItems(from: old?.contents ?? [:], to: newState.contents))
         applySelection(newState.selectedItem, scroll: newState.selectedItem != old?.selectedItem)
-        if newState.renamingKey != old?.renamingKey, let key = newState.renamingKey,
-           let item = newState.outline.allItems.first(where: { $0.selectionKey == key }) {
-            scrollIntoView(item)
-        }
         // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
         // here, on the forced apply at the drag's end.
         refreshUnreadCounts()
@@ -333,8 +324,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         state = SidebarRenderState(
             outline: outline,
             contents: current.contents,
-            selectedItem: current.selectedItem,
-            renamingKey: current.renamingKey
+            selectedItem: current.selectedItem
         )
         applyStructure(outline, animated: false)
     }
@@ -444,12 +434,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     // MARK: - Selection
 
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
-        switch item {
-        // Tapping a header toggles it (its disclosure is header-style) rather than selecting it.
-        case .sectionHeader, .noFolderHeader: return true
-        default: return state?.contents[item]?.isRenaming != true
-        }
+        // A tapped header is let through too: it toggles (its disclosure is header-style) and
+        // `didSelectItemAt` puts the shared selection back.
+        dataSource.itemIdentifier(for: indexPath) != nil
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -459,9 +446,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             applySelection(state?.selectedItem, scroll: false)
             return
         }
-        // Ends an in-place rename in another row, which commits it — as clicking another row does
-        // on macOS.
-        view.endEditing(true)
         actions.select(item)
     }
 
@@ -476,7 +460,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     ) -> UIContextMenuConfiguration? {
         guard indexPaths.count == 1,
               let item = dataSource.itemIdentifier(for: indexPaths[0]),
-              state?.contents[item]?.isRenaming != true,
               let key = item.selectionKey,
               let menu = actions.menu(item) else { return nil }
         return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: nil) { _ in menu }
@@ -486,7 +469,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 /// A row's hosted content — the shared `SidebarRowLabel` in the colors of the cell's current state.
 private struct SidebarCellContent: View {
     let content: SidebarRowContent
-    let editor: InlineRenameField?
     let color: Color
 
     var body: some View {
@@ -495,13 +477,12 @@ private struct SidebarCellContent: View {
             icon: content.icon ?? .symbol("circle"),
             isErroring: content.isErroring,
             isGone: content.isGone,
-            editor: editor,
             symbolTint: color
         )
         .foregroundStyle(color)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // One element per row for VoiceOver, except while the name editor needs its own.
-        .accessibilityElement(children: editor == nil ? .combine : .contain)
+        // One element per row for VoiceOver.
+        .accessibilityElement(children: .combine)
     }
 }
 #endif

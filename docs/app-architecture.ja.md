@@ -1318,9 +1318,12 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。
   メニューを開いてもその行は選択しない（システムアプリや Android の長押しメニューと同じ）。メニューは長押しした行そのものから
   組み立てるので、選択中の行が何であっても、操作は長押しした行に対して行われる。
-- **インラインの名前変更**は同じ `InlineRenameField` を使い、iOS では自前の `@FocusState` でフォーカスを管理する。
-  セルは別のホスティングツリーで、`HomeView` の `focusedPane` が届かないためである。別の行をタップすると先に編集を
-  終えて確定する。名前変更中の行は選択もドラッグもできない。
+- **名前変更**は、フォルダー・タグ・フィードのいずれも、作成と同じフォームシート（`NamePromptSheet`。ナビゲーション
+  バーに「キャンセル」と「保存」、名前欄の末尾にクリアボタン）で行い、行の中での編集にはしない。セル内の Esc 前提の
+  エディターはタッチに合わず、取り消しは HIG どおりシートの「キャンセル」とするためである。シートは
+  `SidebarDialogState.renamingRowKey` が実在する行を指している間表示される（メニュー・スワイプ・キーボードはすべて
+  `startRename` を通る）。`SidebarRenameTarget` が行をシートの編集対象に解決し、規則は共有の `inlineRenameValidation`
+  に従う。macOS は `InlineRenameField` のまま。
 - **タグの色**は長押しメニューから変える。「色を変更 ▸」を開くと色見本がパレット（`.displayAsPalette` の `UIMenu`）で
   並び、各色は `TagColorNames` の名前を持ち、現在の色にチェックが付く。iOS にポップオーバーはない（iPhone では
   向かないため）。タグの色の丸は飾りにすぎない（macOS は丸のポップオーバー `TagColorPicker` のまま）。新規タグ

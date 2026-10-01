@@ -23,7 +23,7 @@ final class SidebarDragContext {
 extension SidebarCollectionViewController: UICollectionViewDragDelegate, UICollectionViewDropDelegate {
     // MARK: - Drag
 
-    /// Only the lifted row is dragged: never a header, All/Starred, a tag, or the row being renamed.
+    /// Only the lifted row is dragged: never a header, All/Starred, or a tag.
     func collectionView(
         _ collectionView: UICollectionView,
         itemsForBeginning session: UIDragSession,
@@ -31,8 +31,7 @@ extension SidebarCollectionViewController: UICollectionViewDragDelegate, UIColle
     ) -> [UIDragItem] {
         guard session.localContext == nil,
               let item = dataSource.itemIdentifier(for: indexPath),
-              item.dragPayload != nil,
-              state?.contents[item]?.isRenaming != true else { return [] }
+              item.dragPayload != nil else { return [] }
         // Nothing leaves the app, so the provider carries no data; the item travels as the local
         // object.
         let dragItem = UIDragItem(itemProvider: NSItemProvider())

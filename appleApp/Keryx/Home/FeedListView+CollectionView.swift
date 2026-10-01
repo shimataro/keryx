@@ -22,11 +22,9 @@ extension FeedListView {
                 model: sidebar,
                 selectionDisplayed: displayedKey != nil,
                 selectedRow: home.selectedRowInstance,
-                filter: home.filter,
-                renamingRowKey: dialogs.renamingRowKey
+                filter: home.filter
             ),
-            selectedItem: displayedKey == nil ? nil : SidebarItemID(home.selectedRowInstance),
-            renamingKey: dialogs.renamingRowKey
+            selectedItem: displayedKey == nil ? nil : SidebarItemID(home.selectedRowInstance)
         )
     }
 
@@ -35,7 +33,6 @@ extension FeedListView {
             select: selectRow,
             setExpanded: setExpanded,
             menu: { SidebarContextMenus.menu(for: $0, home: home, dialogs: dialogs) },
-            editor: renameEditor(for:),
             dropIndex: { dropIndex },
             applyDrop: { applyFeedListDropAction($0, home: home) }
         )
@@ -67,20 +64,6 @@ extension FeedListView {
             home.viewModel.toggleTagExpanded(tagId: id)
         default:
             break
-        }
-    }
-
-    private func renameEditor(for item: SidebarItemID) -> InlineRenameField? {
-        switch item {
-        case .folder(let id):
-            return home.folders.first { $0.id == id }.flatMap(folderRenameEditor)
-        case .tag(let id):
-            return home.tags.first { $0.id == id }.flatMap(tagRenameEditor)
-        case .feed(let id), .feedInTag(let id, _):
-            guard let feed = home.feedsById[id], let instance = item.rowSelection else { return nil }
-            return feedRenameEditor(feed, instance: instance)
-        default:
-            return nil
         }
     }
 }

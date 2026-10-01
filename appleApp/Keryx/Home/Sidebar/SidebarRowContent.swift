@@ -12,7 +12,7 @@ enum SidebarRowIcon: Equatable, Sendable {
 
 /// The part of a sidebar row's display that only changes with the sidebar's structure — its title,
 /// icon and error state — derived once per `SidebarModel` rebuild. Both sidebars lay the per-change
-/// parts (unread count, highlight, rename state) over it, so an unread count ticking during a
+/// parts (unread count, highlight) over it, so an unread count ticking during a
 /// refresh no longer re-reads the Kotlin rows.
 struct SidebarRowStaticContent: Equatable, Sendable {
     let title: String
@@ -51,8 +51,6 @@ struct SidebarRowContent: Equatable, Sendable {
     let isGone: Bool
     /// `.none` or `.echo`; the drop highlight is the cell's own drop state, not content.
     let highlight: SidebarRowHighlight
-    /// Whether the row is showing its in-place name editor.
-    let isRenaming: Bool
 
     /// The contents of every item in `outline`, hidden ones included.
     ///
@@ -62,14 +60,12 @@ struct SidebarRowContent: Equatable, Sendable {
     ///     row on screen, echoing its other copies would single out a row nobody picked.
     ///   - selectedRow: The shared selection, for the echo highlight.
     ///   - filter: The article list's current filter, for the echo highlight.
-    ///   - renamingRowKey: `SidebarDialogState.renamingRowKey`.
     static func build(
         outline: SidebarOutline,
         model: SidebarModel,
         selectionDisplayed: Bool,
         selectedRow: FeedListRowSelection,
-        filter: ArticleFilter,
-        renamingRowKey: String?
+        filter: ArticleFilter
     ) -> [SidebarItemID: SidebarRowContent] {
         func row(_ item: SidebarItemID, _ base: SidebarRowStaticContent) -> SidebarRowContent {
             SidebarRowContent(
@@ -79,15 +75,14 @@ struct SidebarRowContent: Equatable, Sendable {
                 isGone: base.isGone,
                 highlight: selectionDisplayed
                     ? model.rowSelection(item).map { highlight(for: $0.instance, selectedRow: selectedRow, filter: filter) } ?? .none
-                    : .none,
-                isRenaming: renamingRowKey != nil && item.selectionKey == renamingRowKey
+                    : .none
             )
         }
 
         func header(_ key: String) -> SidebarRowContent {
             SidebarRowContent(
                 title: L(key), icon: nil, isErroring: false, isGone: false,
-                highlight: .none, isRenaming: false
+                highlight: .none
             )
         }
 

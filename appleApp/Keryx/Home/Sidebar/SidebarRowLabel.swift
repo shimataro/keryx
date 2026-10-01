@@ -8,8 +8,10 @@ struct SidebarRowLabel<IconPopover: View>: View {
     let icon: SidebarRowIcon
     var isErroring = false
     var isGone = false
-    /// Replaces the title while the row is being renamed in place.
+    #if os(macOS)
+    /// Replaces the title while the row is being renamed in place (macOS only: iOS renames in a sheet).
     var editor: InlineRenameField?
+    #endif
     /// Tapping a tag's color dot — opens its color picker directly, matching Compose's own dot
     /// (`FeedListPane.kt`'s `clickable(onClickLabel = colorLabel)`), without also changing the list
     /// selection. `nil` leaves the dot inert.
@@ -23,11 +25,15 @@ struct SidebarRowLabel<IconPopover: View>: View {
     var body: some View {
         Label {
             HStack(spacing: 4) {
+                #if os(macOS)
                 if let editor {
                     editor
                 } else {
                     Text(title).lineLimit(1)
                 }
+                #else
+                Text(title).lineLimit(1)
+                #endif
                 if isErroring {
                     Spacer(minLength: 0)
                     // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
@@ -85,7 +91,22 @@ extension SidebarRowLabel where IconPopover == EmptyView {
         icon: SidebarRowIcon,
         isErroring: Bool = false,
         isGone: Bool = false,
-        editor: InlineRenameField? = nil,
+        onIconTap: (() -> Void)? = nil,
+        symbolTint: Color? = nil
+    ) {
+        self.init(
+            title: title, icon: icon, isErroring: isErroring, isGone: isGone,
+            onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
+        )
+    }
+
+    #if os(macOS)
+    init(
+        title: String,
+        icon: SidebarRowIcon,
+        isErroring: Bool = false,
+        isGone: Bool = false,
+        editor: InlineRenameField?,
         onIconTap: (() -> Void)? = nil,
         symbolTint: Color? = nil
     ) {
@@ -94,4 +115,5 @@ extension SidebarRowLabel where IconPopover == EmptyView {
             onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
         )
     }
+    #endif
 }

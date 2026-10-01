@@ -391,4 +391,6 @@
     <string name="apple_tag_color_indigo">Indigo</string>
     <string name="apple_tag_color_purple">Purple</string>
     <string name="apple_tag_color_pink">Pink</string>
+    <!-- Apple (SwiftUI) app only — VoiceOver label of the Clear button at the end of the name field. -->
+    <string name="apple_clear_text">Clear text</string>
 </resources>
