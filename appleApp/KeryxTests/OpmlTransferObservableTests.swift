@@ -61,11 +61,11 @@ struct OpmlTransferObservableTests {
         let url = try writeTempOpmlFile()
         defer { try? FileManager.default.removeItem(at: url) }
 
-        observable.importOpml(from: url)
+        let task = try #require(observable.importOpml(from: url))
         #expect(observable.isBusy)
         #expect(observable.exportDocument() == nil)
 
-        try? await Task.sleep(nanoseconds: 150_000_000)
+        await task.value
         #expect(!observable.isBusy)
     }
 
@@ -76,9 +76,9 @@ struct OpmlTransferObservableTests {
         let url = try writeTempOpmlFile()
         defer { try? FileManager.default.removeItem(at: url) }
 
-        observable.importOpml(from: url)
-        observable.importOpml(from: url)
-        try? await Task.sleep(nanoseconds: 150_000_000)
+        let task = try #require(observable.importOpml(from: url))
+        #expect(observable.importOpml(from: url) == nil)
+        await task.value
 
         #expect(fake.importCallCount == 1)
     }
@@ -90,8 +90,8 @@ struct OpmlTransferObservableTests {
         let url = try writeTempOpmlFile()
         defer { try? FileManager.default.removeItem(at: url) }
 
-        observable.importOpml(from: url)
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        let task = try #require(observable.importOpml(from: url))
+        await task.value
 
         #expect(!observable.statusIsError)
         #expect(observable.statusMessage != nil)
@@ -104,8 +104,8 @@ struct OpmlTransferObservableTests {
         let url = try writeTempOpmlFile()
         defer { try? FileManager.default.removeItem(at: url) }
 
-        observable.importOpml(from: url)
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        let task = try #require(observable.importOpml(from: url))
+        await task.value
 
         #expect(observable.statusIsError)
     }
@@ -117,8 +117,8 @@ struct OpmlTransferObservableTests {
         let url = try writeTempOpmlFile()
         defer { try? FileManager.default.removeItem(at: url) }
 
-        observable.importOpml(from: url)
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        let task = try #require(observable.importOpml(from: url))
+        await task.value
 
         #expect(observable.statusIsError)
     }
