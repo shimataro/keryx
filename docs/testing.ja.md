@@ -1060,6 +1060,12 @@ kded モジュール、パネル側のコンシューマが必要なため）の
   クリックハンドラの `isEnabled()` ガード（`AppMenuBarHost.kt`）が、無効な項目に対してホストが
   それでも配信してくる `clicked` イベントを実際にブロックしていることの確認であり、
   `MenuShortcutDispatcher` がキーボードショートカット経路で既に強制していたのと同じ制約を反映する。
+- アプリ内バーを隠した状態（`MenuShortcutDispatcher` が有効）で: 検索欄に入力して Delete/Backspace を
+  押すと検索語が編集され、選択中のフィードは購読解除**されない**こと。F2 と Delete がフィード一覧の
+  選択項目に作用するのは、フィード一覧自体にフォーカスがあるときだけであること（先に記事をクリックすると
+  何も起きず、Global Menu の名前変更・削除の横にも F2/Delete のヒントが表示されない）。グレーアウトした
+  項目のキーは飲み込まれずに通過すること（例: 記事一覧で何も選択していない状態の Ctrl+Shift+C は何もせず、
+  フォーカスのある部品に届く）。ディスパッチャーの規則は `MenuBarVisibilityTest` がカバーしている。
 - `startMinimized`: 最小化した状態で起動し、復元する。Global Menu が正しく populate されること
   （遅延/リトライされる XID 検索の検証）と、準備が整い次第アプリ内バーが隠れることを確認する。
 - `systemctl --user restart plasma-plasmashell`: Keryx を再起動せずに Global Menu が動作し続けること

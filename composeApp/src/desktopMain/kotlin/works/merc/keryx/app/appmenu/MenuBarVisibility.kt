@@ -111,7 +111,9 @@ internal fun AppMenuNode.invokeAction() {
 /**
  * A global key dispatcher that fires menu accelerators while the in-window bar is hidden. Reads the
  * **latest** tree via [currentTree] (rebuilt on every recomposition), so enabled/checked state is
- * always current.
+ * always current — and so is the set of accelerators itself: the Feed menu's bare F2/Return and
+ * Delete are only in the tree while the feed list's keys are live (`renameOrDeleteShortcutActive`),
+ * so they otherwise reach text fields and Compose untouched. Only an *enabled* match is consumed.
  *
  * `KeyboardFocusManager` dispatchers see key events for every window in the process, but the native
  * accelerators this replaces only fire while the app's main frame itself has focus (not a `Dialog`).
@@ -133,9 +135,11 @@ internal class MenuShortcutDispatcher(
         val meta = modifiers and KeyEvent.META_DOWN_MASK != 0
         val shift = modifiers and KeyEvent.SHIFT_DOWN_MASK != 0
         val node = matchMenuShortcut(tree, event.keyCode, ctrl, meta, shift) ?: return false
-        // Consume the keystroke whether or not the item is enabled, so e.g. Ctrl+N never leaks as
-        // typed text; only invoke when enabled (matching native disabled-accelerator behaviour).
-        if (node.isEnabled()) node.invokeAction()
+        // A disabled item's accelerator is not consumed — matching the native accelerators this
+        // replaces (Swing's JMenuItem only claims a key binding while the item is enabled), so the
+        // key reaches the focused text field or Compose's own key handling instead of vanishing.
+        if (!node.isEnabled()) return false
+        node.invokeAction()
         return true
     }
 }

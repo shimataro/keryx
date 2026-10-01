@@ -976,6 +976,12 @@ in order of how likely each is to be wrong):
   nothing selected) never runs its action — confirms the D-Bus click handler's `isEnabled()` guard
   (`AppMenuBarHost.kt`) actually blocks a `clicked` event the host still delivers for a disabled item, mirroring
   what `MenuShortcutDispatcher` already enforced for the keyboard-shortcut path.
+- With the in-window bar hidden (`MenuShortcutDispatcher` active): type into the search field and press
+  Delete/Backspace — the query is edited and the selected feed is **not** unsubscribed. F2 and Delete act on
+  the selected feed-list item only while the feed list itself has focus (click an article first: they do
+  nothing, and the Global Menu shows no F2/Delete hint beside Rename/Delete). A key whose item is greyed out
+  passes through instead of being swallowed (e.g. with nothing selected in the article list, Ctrl+Shift+C does
+  nothing and reaches whatever has focus). `MenuBarVisibilityTest` covers the dispatcher's rules.
 - `startMinimized`: launch minimized, restore, confirm the Global Menu populates (validates the deferred/retried
   XID lookup) and the in-window bar still hides once ready.
 - `systemctl --user restart plasma-plasmashell`: the Global Menu keeps working without restarting Keryx (validates

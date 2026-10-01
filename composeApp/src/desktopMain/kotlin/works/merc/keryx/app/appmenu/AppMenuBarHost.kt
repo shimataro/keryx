@@ -126,8 +126,8 @@ internal fun FrameWindowScope.AppMenuBarHost(
     // Host-initiated clicks arrive on a dbus-java worker thread and are re-published on clickedIds;
     // dispatch them here on the UI thread via the *latest* table (nodeFor reads the current layout).
     // The enabled check guards against a host delivering a `clicked` event for a greyed-out item
-    // (e.g. a stale layout revision on the host side) — mirrors MenuShortcutDispatcher's own guard,
-    // which is the only reason a disabled item can otherwise still run its action on Linux.
+    // (e.g. a stale layout revision on the host side) — the same rule MenuShortcutDispatcher applies
+    // to the keyboard path, where a disabled item's accelerator is neither run nor consumed.
     LaunchedEffect(exporter) {
         exporter.clickedIds.collect { id -> exporter.nodeFor(id)?.let { if (it.isEnabled()) it.invokeAction() } }
     }
