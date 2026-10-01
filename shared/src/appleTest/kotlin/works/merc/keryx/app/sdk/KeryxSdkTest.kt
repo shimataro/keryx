@@ -16,6 +16,7 @@ import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.FileSystemExtras
 import works.merc.keryx.app.platform.RawSqliteConnection
 import works.merc.keryx.app.tempFilePath
+import works.merc.keryx.app.presentation.settings.OpmlRequest
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -267,12 +268,17 @@ class KeryxSdkTest {
     }
 
     @Test
-    fun importOpenedOpmlPostsAnInfoNotificationForAnEmptyDocument() = runTest {
+    fun importOpenedOpmlRequestsTheImportFromTheDataTabWithoutNotifying() = runTest {
         val sdk = start()
         try {
             sdk.importOpenedOpml("<opml><body></body></opml>")
 
-            assertEquals(1, sdk.notificationCenter.items.value.size)
+            assertEquals(OpmlRequest.ImportDocument("<opml><body></body></opml>"), sdk.opmlController.pendingRequest.value)
+            assertTrue(sdk.notificationCenter.items.value.isEmpty(), "the result is shown on the Data tab instead")
+
+            // An unreadable file is still requested, so the Data tab shows the failure.
+            sdk.importOpenedOpml(null)
+            assertEquals(OpmlRequest.ImportDocument(null), sdk.opmlController.pendingRequest.value)
         } finally {
             sdk.close()
         }

@@ -31,7 +31,6 @@ import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.backgroundUpdateLoop
-import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.domain.schemeOf
@@ -44,6 +43,7 @@ import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.presentation.settings.CloudSyncController
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
+import works.merc.keryx.app.presentation.settings.requestOpenedOpmlImport
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 import kotlin.coroutines.cancellation.CancellationException
@@ -172,14 +172,14 @@ class KeryxSdk private constructor(private val koin: Koin) {
     }
 
     /**
-     * Imports feeds from an OPML file the app was opened with (mirrors desktop's/Android's own
-     * ".opml file association" handling) and posts an INFO notification with the result. Errors are
-     * caught and logged internally — see [importOpmlAndNotify] — so this never throws for a
-     * malformed file; only cancellation propagates.
+     * Asks Settings ▸ Data to import an OPML file the app was opened with (mirrors desktop's/Android's
+     * own ".opml file association" handling — see [requestOpenedOpmlImport]); `null` [xml] means
+     * the file could not be read, which the Data tab then shows as an import failure. The SwiftUI
+     * app's Home shows Settings on the Data tab for the waiting request, so a file opened during
+     * Setup is imported once Setup is done.
      */
-    @Throws(CancellationException::class)
-    suspend fun importOpenedOpml(xml: String) {
-        koin.get<CoroutineScope>().async { importOpmlAndNotify(koin, xml) }.await()
+    fun importOpenedOpml(xml: String?) {
+        requestOpenedOpmlImport(koin, xml)
     }
 
     /**

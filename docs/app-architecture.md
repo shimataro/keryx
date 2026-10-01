@@ -39,7 +39,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
@@ -64,7 +64,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
                   tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
-                  leaving file picking to each UI; OpmlTransferController — the one OPML busy flag,
+                  leaving file picking to each UI; OpmlOpenHandler (requestOpenedOpmlImport — an `.opml`
+                  file the app was opened with, on every platform, only *requests* an import, which
+                  Settings ▸ Data carries out once Home is showing; nothing goes to the notification
+                  center); OpmlTransferController — the one OPML busy flag,
                   last result and pending request (`OpmlRequest`) every route and UI shares: the File
                   menu only `request`s, Settings ▸ Data carries the request out (`consumeRequest`,
                   handed out only while nothing runs), and a result is kept until the Data tab shows
@@ -182,7 +185,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     same `MainActivity` for an `.opml` "open with Keryx" `ACTION_VIEW` intent — the Android
     counterpart of desktop's `.opml` file association; reads the `content://` `Uri` via
     `platform/FilePicker.android.kt`'s `readTextFromUri`, then delegates to commonMain's
-    `domain/OpmlOpenHandler.kt`), nativeContextMenu (a real long-press `DropdownMenu`, added in
+    `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`, passing `null` for an
+    unreadable file so Settings ▸ Data shows the failure), nativeContextMenu (a real long-press `DropdownMenu`, added in
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
@@ -1498,8 +1502,10 @@ request out), `notificationAlerts`, and
 `domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s
 `backgroundUpdateLoop` on the SDK's own background scope — call once per foreground launch;
 idempotent, so a repeated call doesn't start a second overlapping loop.
-`importOpenedOpml(xml)` wraps `domain/OpmlOpenHandler.kt`'s `importOpmlAndNotify`, for a document the
-app was opened with (mirrors desktop's/Android's own ".opml file association" handling).
+`importOpenedOpml(xml)` wraps `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`,
+for a document the app was opened with (`null` when it could not be read; mirrors desktop's/Android's
+own ".opml file association" handling): it only requests the import, which Settings ▸ Data carries out
+once Home shows it.
 `completeConnect(type, tokens)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:

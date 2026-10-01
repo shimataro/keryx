@@ -37,7 +37,7 @@
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
@@ -58,7 +58,9 @@
                   Home のツールバーのボタンとフィードメニュー（`HomeViewModel.sync()`/`canSyncNow` 経由。
                   `runs` の各イベントで既読ピンを刈り込み直す）とクラウド同期タブが使う。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
-                  組み立て・解析。ファイルの選択は各 UI が担当。OpmlTransferController——全経路・全 UI が
+                  組み立て・解析。ファイルの選択は各 UI が担当。OpmlOpenHandler（requestOpenedOpmlImport——アプリで開かれた
+                  `.opml` ファイルは、どのプラットフォームでもインポートを*要求*するだけで、Home の表示中に
+                  設定 ▸ データが実行する。通知センターには何も出さない）。OpmlTransferController——全経路・全 UI が
                   共有する唯一の OPML の busy・直近の結果・保留中の要求（`OpmlRequest`）。ファイルメニューは
                   `request` するだけで、設定 ▸ データがその要求を実行し（`consumeRequest`。何も実行中でない
                   ときだけ渡す）、結果はデータタブが表示するまで保持される）、menu/（MenuUiState + computeMenuUiState——
@@ -176,7 +178,8 @@
     AndroidOpmlOpen.kt（`handleOpmlOpenIfPresent`。`.opml` の「Keryx で開く」`ACTION_VIEW` インテント用に
     同じ `MainActivity` から呼ばれる — デスクトップの `.opml` ファイル関連付けに相当。
     `platform/FilePicker.android.kt` の `readTextFromUri` で `content://` `Uri` を読み取り、
-    commonMain の `domain/OpmlOpenHandler.kt` に委譲する）,
+    commonMain の `presentation/settings/OpmlOpenHandler.kt` の `requestOpenedOpmlImport` に委譲する。
+    読めないファイルは `null` として渡し、設定 ▸ データに失敗を表示させる）,
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
@@ -1467,8 +1470,9 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 `domain/StartupMaintenanceTasks.kt` の `runStartupMaintenance` と `domain/BackgroundRefreshLoop.kt` の
 `backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——フォアグラウンド起動ごとに1回呼ぶ。
 冪等なので、繰り返し呼んでもループが二重に始まることはない。`importOpenedOpml(xml)` は、アプリがある文書を
-開いた状態で起動したとき用に `domain/OpmlOpenHandler.kt` の `importOpmlAndNotify` を包む（デスクトップ版・
-Android 版自身の「`.opml` ファイル関連付け」の扱いと同じ）。`completeConnect(type, tokens)` と
+開いた状態で起動したとき用に `presentation/settings/OpmlOpenHandler.kt` の `requestOpenedOpmlImport` を包む
+（読めなかった場合は `null`。デスクトップ版・Android 版自身の「`.opml` ファイル関連付け」の扱いと同じ）。
+インポートを要求するだけで、Home がそれを表示したときに設定 ▸ データが実行する。`completeConnect(type, tokens)` と
 `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
 `suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を

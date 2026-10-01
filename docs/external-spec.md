@@ -77,7 +77,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 - Subscribe to feeds by URL, categorize with tags, OPML import/export. An `.opml` file can also be
   imported by opening it directly from another app — file-association double-click on desktop,
-  "open with Keryx" from a file manager or mail attachment on Android
+  "open with Keryx" from a file manager or mail attachment on Android, opening it with Keryx on
+  macOS/iOS. However it is started (the Settings ▸ Data buttons, the File menu, or an opened file),
+  an import or export runs in Settings ▸ Data, which shows its progress and result inline; an
+  `.opml` opened during first-run Setup is imported once Setup is done
 - With no feeds subscribed yet, the article list shows an empty-state message with an "Add feed"
   button rather than the ordinary "no articles" message; on Android's narrower widths, the
   navigation drawer holding the feed list's own "+" button can auto-open here as well (§9's

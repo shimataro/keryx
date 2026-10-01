@@ -1052,8 +1052,10 @@ The `.opml` file association is the same kind of OS-integration behavior and nee
 confirmation, on all three desktop platforms (build with `createDistributable`/`packageDeb`/etc. —
 `./gradlew :composeApp:run` never registers it, exactly like the `keryx://` scheme):
 
-- **macOS**: launch `Keryx.app` once, then double-click an `.opml` file in Finder → Keryx activates
-  and the subscriptions appear; also confirm right-click → "Open With" → Keryx.
+- **macOS**: launch `Keryx.app` once, then double-click an `.opml` file in Finder → Keryx activates,
+  Settings opens on the Data tab with the import button's spinner, the result text appears there and
+  the subscriptions appear; also confirm right-click → "Open With" → Keryx. Nothing is added to the
+  notification bell.
 - **Windows**: launch the installed app once, then double-click an `.opml` file in Explorer.
 - **Linux**: launch the packaged app once (registers on startup), then confirm
   `xdg-mime query filetype some.opml` reports `application/x-opml+xml` and
@@ -1061,6 +1063,15 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
   double-click an `.opml` file in the file manager.
 - On all three: repeat while Keryx is already running (second launch) to confirm single-instance
   forwarding activates the existing window and imports without spawning a second process.
+- On all three: on a fresh profile, quit Keryx and double-click an `.opml` file (cold start) while
+  first-run Setup is showing → Setup stays on screen with no Settings window over it; finish Setup →
+  Settings opens on the Data tab and the file is imported there.
+- Open an unreadable file (e.g. one whose read permission was removed) → Settings ▸ Data shows the
+  import error inline.
+- Open a second `.opml` file while a large import is still running → it is imported right after the
+  first one finishes, with its own result text.
+- (Android) "Open with Keryx" on an `.opml` from a file manager behaves the same: Settings ▸ Data
+  opens and imports it (after Setup on a fresh install).
 
 ### (Android) The overlay scroll indicator
 

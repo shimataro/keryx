@@ -11,12 +11,12 @@ import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.backgroundUpdateLoop
-import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.runMaintenanceStep
 import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.InstallLocation
 import works.merc.keryx.app.platform.update.cleanUpStaleSelfReplaceArtifacts
+import works.merc.keryx.app.presentation.settings.requestOpenedOpmlImport
 
 private const val LOG_TAG = "StartupTasks"
 
@@ -33,16 +33,16 @@ internal suspend fun runStartupTasks(koin: Koin) {
 }
 
 /**
- * Imports feeds from an OPML file opened through a file association and notifies the user of the result.
+ * Reads an OPML file opened through a file association and asks Settings ▸ Data to import it (see
+ * [requestOpenedOpmlImport]) — `null` when it can't be read, so the failure is shown there too —
+ * then brings the window to front so the import is visible.
  *
  * @param path The path to the OPML file.
  */
 internal suspend fun handleOpenedOpmlFile(koin: Koin, path: String) {
-    val xml = FileIO.readText(path) ?: run {
-        Log.warn(LOG_TAG, "Could not read the opened OPML file")
-        return
-    }
-    importOpmlAndNotify(koin, xml)
+    val xml = FileIO.readText(path)
+    if (xml == null) Log.warn(LOG_TAG, "Could not read the opened OPML file")
+    requestOpenedOpmlImport(koin, xml)
     activationRequests.tryEmit(Unit)
 }
 

@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
-import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
@@ -30,28 +29,15 @@ import works.merc.keryx.app.resources.update_ready_notification
 
 /** [text] as a localized string, for rendering in composition. */
 @Composable
-fun notificationText(text: NotificationText): String = when (text) {
-    is NotificationText.OpmlImported -> {
-        val added = pluralStringResource(Res.plurals.settings_import_success, text.added, text.added)
-        if (text.failed > 0) {
-            "$added / ${pluralStringResource(Res.plurals.settings_import_failed, text.failed, text.failed)}"
-        } else {
-            added
-        }
-    }
-    else -> {
-        val (resource, args) = stringResourceOf(text)
-        stringResource(resource, *args)
-    }
+fun notificationText(text: NotificationText): String {
+    val (resource, args) = stringResourceOf(text)
+    return stringResource(resource, *args)
 }
 
 /** [text] as a localized string, for use outside composition. */
-suspend fun resolveNotificationText(text: NotificationText): String = when (text) {
-    is NotificationText.OpmlImported -> opmlImportedText(text.added, text.failed)
-    else -> {
-        val (resource, args) = stringResourceOf(text)
-        getString(resource, *args)
-    }
+suspend fun resolveNotificationText(text: NotificationText): String {
+    val (resource, args) = stringResourceOf(text)
+    return getString(resource, *args)
 }
 
 /** The explanatory dialog body [detail] names, localized. */
@@ -64,7 +50,10 @@ fun infoDialogText(detail: InfoDialogText): String = stringResource(
     },
 )
 
-/** The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero. */
+/**
+ * The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero — the
+ * settings Data tab's inline OPML import result (every import route lands there).
+ */
 internal suspend fun opmlImportedText(added: Int, failed: Int): String {
     val addedText = getPluralString(Res.plurals.settings_import_success, added, added)
     return if (failed > 0) {
@@ -74,7 +63,7 @@ internal suspend fun opmlImportedText(added: Int, failed: Int): String {
     }
 }
 
-/** The single-string resource (and its format arguments) for every [text] but the plural one. */
+/** The string resource (and its format arguments) for [text]. */
 private fun stringResourceOf(text: NotificationText): Pair<StringResource, Array<Any>> = when (text) {
     is NotificationText.FeedGone -> Res.string.feed_gone_message to arrayOf(text.feedTitle)
     is NotificationText.FeedUrlChanged -> Res.string.feed_url_changed to arrayOf(text.feedTitle)
@@ -84,5 +73,4 @@ private fun stringResourceOf(text: NotificationText): Pair<StringResource, Array
     NotificationText.TokenStorageFallback -> Res.string.notification_token_storage_fallback to emptyArray()
     NotificationText.TokenStorageNotPersisted -> Res.string.notification_token_storage_not_persisted to emptyArray()
     NotificationText.AppTranslocated -> Res.string.notification_app_translocated to emptyArray()
-    is NotificationText.OpmlImported -> error("OpmlImported is plural-formatted; handled by the callers")
 }

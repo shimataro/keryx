@@ -71,4 +71,18 @@ class SettingsOpenRequestsTest {
         assertTrue(router.requestIfReachable("general", Screen.Home))
         assertEquals(SettingsOpenRequest("general"), router.release(Screen.Home))
     }
+
+    /**
+     * An `.opml` file opened during first-run Setup asks for Settings ▸ Data (App.kt does so for any
+     * waiting OPML request); the dialog — and so the import — waits until Setup is done.
+     */
+    @Test
+    fun anOpenedOpmlFilesDataTabRequestDuringSetupIsHeldUntilHome() {
+        val router = SettingsOpenRequests()
+        router.request("data")
+
+        assertNull(router.release(Screen.Setup))
+        assertNull(router.release(Screen.Setup), "still held across recompositions on Setup")
+        assertEquals(SettingsOpenRequest("data"), router.release(Screen.Home))
+    }
 }

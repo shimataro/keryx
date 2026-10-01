@@ -744,9 +744,10 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
 
 ### `.opml` ファイル関連付け
 
-`.opml` ファイルをダブルクリック（または「Keryx で開く」）すると Keryx が起動し、購読を
-インポートする（`FeedRepository.importOpml`、結果は通知センターに表示 — 詳細は
-[app-architecture.ja.md](app-architecture.ja.md)）。登録の仕組みは上記の `keryx://` スキームと
+`.opml` ファイルをダブルクリック（または「Keryx で開く」）すると Keryx が起動して設定 ▸ データを開き、
+そこで購読をインポートする。タブ自身のスピナーとインライン結果が出る（`requestOpenedOpmlImport` →
+`OpmlTransferController` — 詳細は [app-architecture.ja.md](app-architecture.ja.md)）。初回セットアップ中に
+開いたファイルはセットアップ完了後に取り込まれ、読めないファイルはそのタブにインポートエラーを表示する。登録の仕組みは上記の `keryx://` スキームと
 同様で、プラットフォームごとに以下のとおり:
 
 - **macOS**: `CFBundleURLTypes` と同じ `infoPlist { extraKeysRawXml }` ブロック内の
@@ -817,7 +818,8 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   OAuth リダイレクトは除外する。`text/xml`/`application/xml` を受け入れることで、無関係な XML
   ファイルの「開く」候補にも Keryx が並んでしまうが、これは上記 Linux 節の `text/x-opml`
   フォールバックが既に受け入れているのと同じトレードオフである。不正な入力の扱いも他プラットフォーム
-  と同様: `OpmlImporter.import` の失敗は伝播させず、その場で握りつぶす。
+  と同様: 読み取りや `OpmlImporter.import` の失敗は伝播させず、データタブのインラインのインポート
+  エラーとして表示する。
 
 ## リリース（CD）
 
