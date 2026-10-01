@@ -8,7 +8,6 @@ import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuScope
-import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -83,6 +82,7 @@ import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.presentation.settings.OpmlRequest
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.ui.settings.PROJECT_URL
+import works.merc.keryx.app.ui.settings.SettingsViewModel
 
 /**
  * Desktop application menu bar. On macOS this renders in the system (screen) menu bar; on
@@ -119,9 +119,8 @@ internal fun FrameWindowScope.AppMenuBar(
     val opmlController = koinInject<OpmlTransferController>()
     val updateRepository = koinInject<UpdateRepository>()
     val settingsOpenRequests = koinInject<SettingsOpenRequests>()
-    // The same application-lifetime scope `main.kt` uses as `appScope` (a single Koin registration,
-    // so there is no ambiguity): an update check must outlive this menu's own composition.
-    val appScope = koinInject<CoroutineScope>()
+    // An application-lifetime single, so a check it starts outlives this menu's own composition.
+    val settingsVm = koinInject<SettingsViewModel>()
 
     val screen by menuController.currentScreen.collectAsState()
     val feedListKeysActive by menuController.feedListKeysActive.collectAsState()
@@ -260,7 +259,9 @@ internal fun FrameWindowScope.AppMenuBar(
         // state change between this composition and the click is honoured — the same wiring
         // `main.kt` gives the tray's own entry.
         updateAction = {
-            onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, settingsOpenRequests)
+            onUpdateMenuItemClicked(
+                updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
+            )
         },
         about = { menuController.send(MenuCommand.About) },
     )

@@ -143,6 +143,23 @@ private class CountingDispatcher : CoroutineDispatcher() {
     }
 }
 
+/**
+ * Holds every dispatched block until [runQueued], so a test can observe what was launched before
+ * any of it has run — e.g. that two back-to-back calls launched only one coroutine.
+ */
+private class QueueingDispatcher : CoroutineDispatcher() {
+    private val queue = java.util.concurrent.ConcurrentLinkedQueue<Runnable>()
+    val queuedCount: Int get() = queue.size
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        queue.add(block)
+    }
+
+    fun runQueued() {
+        while (true) (queue.poll() ?: return).run()
+    }
+}
+
 /** Throws [CancellationException] the moment work is dispatched to it — simulates the coroutine being cancelled mid-`withContext`. */
 private class CancellingDispatcher : CoroutineDispatcher() {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
@@ -389,6 +406,48 @@ class SettingsViewModelTest {
 
         awaitTrue { vm.updateState.value is UpdateState.Available }
         assertEquals(1, requestCount)
+    }
+
+    /**
+     * The tray/Help menu's update entry runs a check and opens the Updates tab, whose own
+     * check-on-open then calls [SettingsViewModel.checkForUpdate] again — before the first check has
+     * had a chance to reach [UpdateState.Checking]. The second call must still be a no-op.
+     */
+    @Test
+    fun checkForUpdateIgnoresASecondCallBeforeTheFirstHasStarted() {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount++
+                respond(
+                    """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+        val dispatcher = QueueingDispatcher()
+        val vm = newViewModel(
+            updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")),
+            dispatcher = dispatcher,
+        )
+
+        vm.checkForUpdate()
+        vm.checkForUpdate()
+
+        assertEquals(UpdateState.Idle, vm.updateState.value, "neither check has started running yet")
+        assertEquals(1, dispatcher.queuedCount, "only one check may be launched")
+        awaitTrue {
+            dispatcher.runQueued()
+            vm.updateState.value is UpdateState.Available
+        }
+        assertEquals(1, requestCount)
+
+        // Once it has finished, the guard is released: a later check runs again.
+        vm.checkForUpdate()
+        awaitTrue {
+            dispatcher.runQueued()
+            requestCount == 2
+        }
     }
 
     // --- OPML (file picking + busy state) ---

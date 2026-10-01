@@ -122,7 +122,7 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
-| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
+| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab, or the tray/Help menu update item, which opens the Updates tab) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
 \* `FeedFetcher` retries only on an actual timeout, for `FEED_TIMEOUT_RETRY_COUNT` extra attempts — a non-timeout
 `FeedFetchException` (e.g. a 5xx status) is not retried within the same fetch.

@@ -8,6 +8,7 @@ import works.merc.keryx.app.domain.UpdateAssetKind
 import works.merc.keryx.app.domain.UpdatePlan
 import works.merc.keryx.app.domain.UpdateState
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -99,32 +100,36 @@ class TrayActionPolicyTest {
         )
     }
 
-    // --- shouldOpenSettingsAfterUpdateCheck ---
+    // --- updateMenuAction ---
 
     @Test
-    fun `an installable update opens the settings dialog's updates tab`() {
-        assertTrue(shouldOpenSettingsAfterUpdateCheck(UpdateState.Available(installableUpdate())))
+    fun `idle and up to date run a check`() {
+        assertEquals(UpdateMenuAction.Check, updateMenuAction(UpdateState.Idle))
+        assertEquals(UpdateMenuAction.Check, updateMenuAction(UpdateState.UpToDate))
     }
 
-    /** Nothing on that tab to act on: the menu entry itself opens the release page instead. */
+    /** Nothing to download here: the check refreshes it, and the Updates tab links the release page. */
     @Test
-    fun `a non-installable update does not open the settings dialog`() {
-        assertFalse(shouldOpenSettingsAfterUpdateCheck(UpdateState.Available(manualOnlyUpdate())))
+    fun `a non-installable update runs a check rather than opening the browser`() {
+        assertEquals(UpdateMenuAction.Check, updateMenuAction(UpdateState.Available(manualOnlyUpdate())))
     }
 
     @Test
-    fun `every other state leaves the settings dialog closed`() {
+    fun `an installable update, a failure and a ready download run the primary action`() {
+        assertEquals(UpdateMenuAction.Primary, updateMenuAction(UpdateState.Available(installableUpdate())))
+        assertEquals(UpdateMenuAction.Primary, updateMenuAction(UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "no network"))))
+        assertEquals(UpdateMenuAction.Primary, updateMenuAction(UpdateState.Ready(installableUpdate(), "/tmp/x.zip")))
+    }
+
+    @Test
+    fun `in-flight states do nothing`() {
         listOf(
-            UpdateState.Idle,
             UpdateState.Checking,
-            UpdateState.UpToDate,
             UpdateState.Downloading(installableUpdate(), 1, 2),
             UpdateState.Verifying(installableUpdate()),
-            UpdateState.Ready(installableUpdate(), "/tmp/x.zip"),
             UpdateState.Installing(installableUpdate()),
-            UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "no network")),
         ).forEach { state ->
-            assertFalse(shouldOpenSettingsAfterUpdateCheck(state), state.toString())
+            assertEquals(UpdateMenuAction.None, updateMenuAction(state), state.toString())
         }
     }
 }

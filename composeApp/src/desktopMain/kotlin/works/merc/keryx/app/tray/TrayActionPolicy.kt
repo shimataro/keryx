@@ -27,14 +27,32 @@ internal fun shouldHideOnTrayAction(
     return windowVisible && windowFocused && !notifiedRecently
 }
 
+/** What a click on the single update menu entry (tray and Help menu) runs on the Updates tab. */
+internal enum class UpdateMenuAction {
+    /** Run an update check. */
+    Check,
+
+    /** Run [works.merc.keryx.app.domain.UpdateRepository.performPrimaryAction] (download, per-stage retry, or install). */
+    Primary,
+
+    /** An action is already in flight; the entry is disabled, and a click from a stale menu does nothing. */
+    None,
+}
+
 /**
- * Whether a user-initiated update check that has just finished should pull the settings dialog's
- * Updates tab to the front — i.e. whether it found something the user can actually act on here.
+ * Maps [state] to what the update menu entry does. Every action other than [UpdateMenuAction.None]
+ * also opens the settings dialog on its Updates tab, whose inline results are the entry's only
+ * feedback (see `main.kt`'s `onUpdateMenuItemClicked`).
  *
- * Only an *installable* [UpdateState.Available] qualifies. A check that came back up to date, or
- * failed, leaves the menu entry itself carrying the result, and a non-installable update has no
- * in-app action to offer on that tab (the menu entry opens the release page directly instead) —
- * see `main.kt`'s `onUpdateMenuItemClicked`.
+ * - `Idle`/`UpToDate`, and a non-installable `Available` (nothing to download here; the tab shows
+ *   the release page link and the check refreshes what it says) → [UpdateMenuAction.Check].
+ * - An installable `Available`, `Failed` (per-stage retry) and `Ready` → [UpdateMenuAction.Primary].
+ * - `Checking`/`Downloading`/`Verifying`/`Installing` → [UpdateMenuAction.None].
  */
-internal fun shouldOpenSettingsAfterUpdateCheck(state: UpdateState): Boolean =
-    state is UpdateState.Available && state.update.installable
+internal fun updateMenuAction(state: UpdateState): UpdateMenuAction = when (state) {
+    UpdateState.Idle, UpdateState.UpToDate -> UpdateMenuAction.Check
+    is UpdateState.Available -> if (state.update.installable) UpdateMenuAction.Primary else UpdateMenuAction.Check
+    is UpdateState.Failed, is UpdateState.Ready -> UpdateMenuAction.Primary
+    UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing ->
+        UpdateMenuAction.None
+}

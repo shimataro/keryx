@@ -93,7 +93,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   Android install (never through Google Play, which already updates the app itself). Presented from
   the moment an update is detected, via the notification-center bell, the desktop task tray, and
   the application menu's Help menu — the latter two showing one and the same entry, which is also
-  where a check can be asked for on demand ("Check for updates" whenever nothing is pending);
+  where a check can be asked for on demand ("Check for updates" whenever nothing is pending).
+  Clicking that entry always opens Settings ▸ Updates, which runs the check, download, retry or
+  install and shows its result there — the same feedback as the tab's own buttons, whether the
+  outcome is a find, "up to date", a failure, or an update this install can't apply itself;
   every download and every install remains a separate, explicit user action — nothing installs
   silently or automatically. The downloaded file is verified against the GitHub release's own
   SHA-256 digest before anything is installed. See [background-update.md](background-update.md)

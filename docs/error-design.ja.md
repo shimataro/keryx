@@ -147,7 +147,7 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
-| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
+| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブの「再試行」、またはトレイ／Help メニューのアップデート項目（Updates タブを開く）を押した時のみ再試行） | ❌（代わりに Updates タブ（とトレイ／Help メニュー項目のラベル）で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 \* `FeedFetcher` が自動リトライするのは実際のタイムアウト時のみで、`FEED_TIMEOUT_RETRY_COUNT` 回まで追加試行する。
 タイムアウト以外の `FeedFetchException`（5xx ステータス等）は同一フェッチ内では再試行しない。

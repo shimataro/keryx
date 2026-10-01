@@ -1340,9 +1340,17 @@ a rollback path has a bug that leaves it damaged.
   leaving nothing running.
 - **Windows / Linux (portable ZIP)**: same self-replace flow as macOS; confirm the relaunched app
   runs from the same directory and no `.new`/`.old` sibling directories are left behind.
-- **Linux (deb/rpm)**: confirm the Updates tab and tray both fall back to "open the release page"
-  rather than offering a download — `updatePlan` always returns `OpenReleasePage` for
-  `LINUX_PACKAGE`.
+- **Linux (deb/rpm)**: confirm the Updates tab falls back to its release-page link rather than
+  offering a download, and that the tray/Help item ("New version available") opens that tab and
+  re-checks rather than offering a download or opening the browser — `updatePlan` always returns
+  `OpenReleasePage` for `LINUX_PACKAGE`.
+- **Tray/Help update item, every desktop platform**: with the window hidden to the tray, click the
+  tray's update item in each outcome — up to date, a failed check (network off), an update this
+  install can't apply (deb/rpm, or a translocated macOS `.app`), and an installable one. Every time
+  the window comes to front with Settings ▸ Updates open, and the result (up to date / the error
+  with Retry / the release-page link / the download progress) is shown inline there, exactly as
+  after pressing "Check for updates" on the tab itself; nothing else (no dialog, no browser) appears.
+  Opening the tab this way must not start a second check (one "Checking…" only).
 - **Android**: sideload a `github`-flavor APK (see `build.md`'s flavor split), trigger a download
   and install, and confirm the OS's own install-confirmation dialog appears and the app updates in
   place. Separately, sideload a `play`-flavor APK and confirm the Updates tab never offers a

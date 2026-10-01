@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,12 +94,30 @@ class SettingsViewModel(
      * Manual "check for update" (Updates tab). Deliberately does not touch
      * [works.merc.keryx.app.data.local.LocalSettings.lastUpdateCheckAt] — that timestamp belongs to
      * the automatic startup/background schedule (see main.kt's `checkForUpdateAndNotify`), so a
-     * manual check never perturbs it. A no-op while [updateState] is already [UpdateState.Checking].
+     * manual check never perturbs it.
+     *
+     * Every user-initiated route goes through here — the tab's "check now" button, the tab's own
+     * check on open (`UpdatesTab.kt`'s `shouldAutoCheckOnOpen`), and the tray/Help menu's update
+     * entry (`main.kt`'s `onUpdateMenuItemClicked`). A no-op while one of those is still in flight:
+     * [checkInFlight] is claimed synchronously, before the launched check has had a chance to move
+     * [updateState] to [UpdateState.Checking], so the menu entry's check followed at once by the tab
+     * opening (and auto-checking) cannot start a second one. A check already running from the
+     * automatic schedule ([updateState] is [UpdateState.Checking]) is left alone too.
      */
     fun checkForUpdate() {
         if (updateState.value is UpdateState.Checking) return
-        viewModelScope.launch(dispatcher) { updateRepository.check() }
+        if (!checkInFlight.compareAndSet(expect = false, update = true)) return
+        viewModelScope.launch(dispatcher) {
+            try {
+                updateRepository.check()
+            } finally {
+                checkInFlight.value = false
+            }
+        }
     }
+
+    /** Set from the moment [checkForUpdate] starts a check until it finishes — see its KDoc. */
+    private val checkInFlight = MutableStateFlow(false)
 
     /** Starts downloading the update currently reported by [updateState], if one can be installed
      * here. See [UpdateRepository.startDownload]. */
