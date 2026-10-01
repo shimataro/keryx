@@ -183,7 +183,7 @@ struct FeedListView: View {
                 ToolbarActivityButton(
                     titleKey: "home_sync",
                     busyTitleKey: "home_syncing",
-                    systemImage: "cloud",
+                    systemImage: "arrow.triangle.2.circlepath",
                     busy: home.activity.syncing,
                     enabled: home.activity.idle,
                     action: { home.viewModel.sync() }
