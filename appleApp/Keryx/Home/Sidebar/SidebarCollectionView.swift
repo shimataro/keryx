@@ -26,8 +26,6 @@ struct SidebarCollectionActions {
     /// A disclosure was toggled by the user.
     var setExpanded: (SidebarItemID, Bool) -> Void
     var menu: (SidebarItemID) -> UIMenu?
-    /// A row's context menu is about to show.
-    var menuWillOpen: (SidebarItemID) -> Void
     /// The row's in-place name editor, while it is being renamed.
     var editor: (SidebarItemID) -> InlineRenameField?
     var showColorPicker: (_ tagId: String) -> Void
@@ -488,7 +486,8 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 
     // MARK: - Context menus
 
-    /// A long press opens the menu; moving the finger instead lifts the row for a drag.
+    /// A long press opens the menu; moving the finger instead lifts the row for a drag. Opening the
+    /// menu does not select the row, as in the system apps (and Android's own long-press menu).
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
@@ -500,20 +499,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
               let key = item.selectionKey,
               let menu = actions.menu(item) else { return nil }
         return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: nil) { _ in menu }
-    }
-
-    /// Opening the menu selects the row first, matching Compose's own
-    /// `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — only once the menu
-    /// really shows, not when UIKit merely asks for it at the start of a press that may turn into a
-    /// drag.
-    func collectionView(
-        _ collectionView: UICollectionView,
-        willDisplayContextMenu configuration: UIContextMenuConfiguration,
-        animator: (any UIContextMenuInteractionAnimating)?
-    ) {
-        guard let key = configuration.identifier as? String,
-              let item = state?.outline.allItems.first(where: { $0.selectionKey == key }) else { return }
-        actions.menuWillOpen(item)
     }
 
     // MARK: - Tag color popover

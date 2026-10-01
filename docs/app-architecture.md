@@ -1328,8 +1328,8 @@ view on iOS.
 - **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
   (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
   macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
-  drag. The row is selected when the menu actually appears (`willDisplayContextMenu`), not when UIKit
-  first asks for it, since a long press that turns into a drag asks too.
+  drag. Opening a menu does not select its row (as in the system apps, and Android's long-press menu): the
+  menu is built from the pressed row itself, so its actions land on that row whatever is selected.
 - **In-place rename** uses the same `InlineRenameField`, which on iOS tracks its own `@FocusState`: the
   cell is a separate hosting tree that `HomeView`'s `focusedPane` cannot reach. Tapping another row ends
   editing first, which commits the edit; the renaming row can be neither selected nor dragged.

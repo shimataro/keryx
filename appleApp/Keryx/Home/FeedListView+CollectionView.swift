@@ -36,11 +36,6 @@ extension FeedListView {
             select: selectRow,
             setExpanded: setExpanded,
             menu: { SidebarContextMenus.menu(for: $0, home: home, dialogs: dialogs) },
-            menuWillOpen: { item in
-                guard let instance = item.rowSelection,
-                      !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
-                home.selectFilter(instance.filter, instance: instance)
-            },
             editor: renameEditor(for:),
             showColorPicker: { dialogs.colorPickingTagId = $0 },
             pickColor: { tagId, hex in

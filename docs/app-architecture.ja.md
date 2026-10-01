@@ -1315,9 +1315,9 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
   （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
-  同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。行の選択は、
-  UIKit が最初にメニューを求めたときではなく、実際にメニューが出るとき（`willDisplayContextMenu`）に行う。
-  ドラッグに変わる長押しでもメニューは求められるからである。
+  同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。
+  メニューを開いてもその行は選択しない（システムアプリや Android の長押しメニューと同じ）。メニューは長押しした行そのものから
+  組み立てるので、選択中の行が何であっても、操作は長押しした行に対して行われる。
 - **インラインの名前変更**は同じ `InlineRenameField` を使い、iOS では自前の `@FocusState` でフォーカスを管理する。
   セルは別のホスティングツリーで、`HomeView` の `focusedPane` が届かないためである。別の行をタップすると先に編集を
   終えて確定する。名前変更中の行は選択もドラッグもできない。
