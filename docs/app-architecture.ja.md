@@ -1354,8 +1354,13 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
 iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectionView` のリストで描く
 （`Home/Sidebar/SidebarCollectionView.swift`、`UIViewControllerRepresentable` で包む）。サイドバー自身が
 コレクションビューのデリゲートを持つためで、理由はドラッグ＆ドロップにある（後述）。`FeedListView` は両プラット
-フォーム共通の外枠（ツールバー、`.searchable` の検索欄、シート、アラート、名前変更の自動キャンセル）を持ったまま、
-行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。
+フォーム共通の外枠（ツールバー、シート、アラート、名前変更の自動キャンセル）を持ったまま、
+行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。`.searchable` の
+検索欄はここでは macOS だけに付ける。iOS では `ArticleListView` に付ける——検索が絞り込む中身を表示するカラムで、
+HIG が「表示中のビューの検索」に勧める位置であり、メールも同じ配置である。compact 幅ではサイドバーの検索欄の
+結果が画面外のカラムに出てしまうためだ。iOS では `isPresented` を `HomeViewModel.searchBarVisible`（Android の
+狭いレイアウトで検索バーを開閉するフラグ）と双方向に結び、compact 幅で検索へのフォーカス要求があれば、まず
+記事一覧を前面に出す（`CompactSearchNavigation`）。
 
 - **データの流れ。** `FeedListView.body` が `SidebarRenderState` を作る。中身は `SidebarOutline`（セクションごとの
   木構造と展開状態）、各行の `SidebarRowContent`（タイトル、アイコン、エラー状態、エコーのハイライト、名前

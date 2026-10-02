@@ -1370,9 +1370,14 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
 The iOS sidebar is a UIKit `UICollectionView` list rather than SwiftUI's `List`
 (`Home/Sidebar/SidebarCollectionView.swift`, wrapped in a `UIViewControllerRepresentable`), so that the
 sidebar owns the collection view's delegates — the reason is drag and drop, see below.
-`FeedListView` keeps the frame both platforms share (toolbar, `.searchable` field, sheets, alerts,
-the rename auto-cancel) and only swaps the rows: the source list under `#if os(macOS)`, the collection
-view on iOS.
+`FeedListView` keeps the frame both platforms share (toolbar, sheets, alerts, the rename auto-cancel)
+and only swaps the rows: the source list under `#if os(macOS)`, the collection view on iOS. The
+`.searchable` field is macOS-only here: iOS attaches it to `ArticleListView` instead — the column
+whose contents it narrows, the HIG's placement for searching the current view and the one Mail uses —
+since at a compact width a sidebar field's results would land in a column not on screen. There its
+`isPresented` is two-way bound to `HomeViewModel.searchBarVisible` (Android's own open/close flag for
+its narrow-layout search bar), and a search-focus request at a compact width first brings the article
+list forward (`CompactSearchNavigation`).
 
 - **Data flow.** `FeedListView.body` builds a `SidebarRenderState` — the `SidebarOutline` (each
   section's tree and which items are expanded), every row's `SidebarRowContent` (title, icon, error
