@@ -109,6 +109,17 @@ struct HomeView: View {
             await applyInitialFocus()
         }
         #if os(iOS)
+        // A search-focus request (⌘F, from the menu bar or `handleKeyPress`) at a compact width
+        // first brings forward the article list, where iOS keeps the search field; the list then
+        // takes the focus itself (`ArticleListView`'s own `pendingSearchFocus` handler).
+        .onChange(of: home.pendingSearchFocus) { _, pending in
+            guard pending,
+                  let column = CompactSearchNavigation.column(
+                      isCompact: horizontalSizeClass == .compact,
+                      current: HomeView.compactSearchColumn(compactColumn)
+                  ) else { return }
+            compactColumn = HomeView.splitViewColumn(column)
+        }
         // The one place the URL-copy confirmation is drawn, over every column, so it shows whichever
         // route copied and whatever is on screen.
         .overlay(alignment: .bottom) {
@@ -134,7 +145,7 @@ struct HomeView: View {
         #endif
         // Restored on next launch by `applyInitialFocus` — matches Compose's own
         // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
-        // `HomePane` counterpart (the field lives in the sidebar, not a pane of its own here), so it
+        // `HomePane` counterpart (the field lives inside another pane, not a pane of its own here), so it
         // is never persisted — the previously saved real pane is simply left in place instead.
         .onChange(of: focusedPane) { _, pane in
             if let raw = HomeView.rawValue(for: pane) {
@@ -169,8 +180,8 @@ struct HomeView: View {
 
     /// Compose's own `HomePane` names (`FeedList`/`ArticleList`/`ArticleDetail`) — the raw values
     /// `lastFocusedPane` is stored as, shared with desktop's `HomeLayoutViewModel`. `.search` has no
-    /// counterpart, since Compose's search field lives inside the sidebar pane rather than being a
-    /// distinct pane of the 3-pane layout.
+    /// counterpart, since the search field lives inside another pane (the sidebar on macOS and in
+    /// Compose, the article list on iOS) rather than being a distinct pane of the 3-pane layout.
     private static func rawValue(for pane: HomeFocusedPane?) -> String? {
         switch pane {
         case .feedList: return "FeedList"
@@ -179,6 +190,25 @@ struct HomeView: View {
         case .search, nil: return nil
         }
     }
+
+    #if os(iOS)
+    /// `NavigationSplitViewColumn` → `CompactSearchNavigation.Column`, which the test bundle can use.
+    private static func compactSearchColumn(_ column: NavigationSplitViewColumn) -> CompactSearchNavigation.Column {
+        switch column {
+        case .sidebar: return .sidebar
+        case .content: return .content
+        default: return .detail
+        }
+    }
+
+    private static func splitViewColumn(_ column: CompactSearchNavigation.Column) -> NavigationSplitViewColumn {
+        switch column {
+        case .sidebar: return .sidebar
+        case .content: return .content
+        case .detail: return .detail
+        }
+    }
+    #endif
 
     private static func focusedPane(for pane: InitialHomePane) -> HomeFocusedPane {
         switch pane {
@@ -272,7 +302,7 @@ struct HomeView: View {
             modifiers: modifiers,
             // The sidebar's `.searchable` field reports its focus through this same `focusedPane`
             // via `.searchFocused` on macOS 15 / iOS 18+; before that its focus cannot be seen, so
-            // this stays false there — see `FeedListView`'s `SearchFocusModifier`.
+            // this stays false there — see `SearchFocusModifier`.
             textInputFocused: textInputFocused,
             // Ctrl+Shift+R belongs to the Feed menu's "Refresh selected feed" item on desktop
             // Compose (`AppMenuTree.kt`), not the sidebar-refresh key touch-only platforms bind it

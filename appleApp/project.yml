@@ -137,6 +137,7 @@ targets:
       - path: Keryx/Home/ReaderNavigationGate.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/CompactSidebarSelection.swift
+      - path: Keryx/Home/CompactSearchNavigation.swift
       - path: Keryx/Home/PullToRefreshAvailability.swift
       - path: Keryx/Home/FeedListDropPresentation.swift
       - path: Keryx/Home/SidebarDialogState.swift

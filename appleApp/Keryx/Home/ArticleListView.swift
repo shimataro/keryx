@@ -112,7 +112,49 @@ struct ArticleListView: View {
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
+        #if os(iOS)
+        // The system search field. iOS keeps it here, on the column whose contents it narrows (the
+        // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
+        // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
+        // `.automatic` gives a navigation-bar drawer on iOS 17/18 and the toolbar on iOS 26 (the
+        // bottom bar on iPhone). Its focus is reported into `focusedPane` only from iOS 18 — see
+        // `SearchFocusModifier`.
+        .searchable(
+            text: searchQueryBinding,
+            isPresented: searchPresentedBinding,
+            placement: .automatic,
+            prompt: L("home_search_placeholder")
+        )
+        .modifier(SearchFocusModifier(focusedPane: focusedPane))
+        // `initial: true`: at a compact width `HomeView` pushes this list in response to the same
+        // request, so it may only be mounted after the request was made.
+        .onChange(of: home.pendingSearchFocus, initial: true) { _, pending in
+            guard pending else { return }
+            focusedPane.wrappedValue = .search
+            home.viewModel.consumeSearchFocusRequest()
+        }
+        #endif
     }
+
+    #if os(iOS)
+    private var searchQueryBinding: Binding<String> {
+        Binding(
+            get: { home.searchQuery },
+            set: { home.viewModel.setSearchQuery(query: $0) }
+        )
+    }
+
+    /// Whether the field is presented, two-way bound to `searchBarVisible` — the same flag Android's
+    /// narrower layouts open and close their expanded search bar with. Cancelling the field closes it
+    /// (`searchActive` turns false and the selection's own list comes back), as does any dismissal
+    /// the system makes on its own; ⌘F opens it through `setSearchBarVisible(true)`.
+    private var searchPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { home.searchBarVisible },
+            set: { home.viewModel.setSearchBarVisible(visible: $0) }
+        )
+    }
+    #endif
 
     /// Overlays the new-articles pill on `list`; tapping it clears the count and runs `jump`.
     private func withNewArticlesPill(_ list: some View, jump: @escaping () -> Void) -> some View {
