@@ -252,21 +252,17 @@ struct ArticleRowModelTests {
         #expect(!ArticleRowMenuState.opensBySelecting(isSelected: true, pointerIsOver: true))
     }
 
-    /// The read label for each way of opening an unread row's menu: only a selecting open makes it
-    /// read ("Mark as unread"); otherwise it stays unread ("Mark as read").
+    /// The read label for each way of opening an unread row's menu, as `ArticleRowView` composes it
+    /// from `opensBySelecting` and the shared `articleReadAfterContextMenuOpen`: only a selecting open
+    /// makes it read ("Mark as unread"); otherwise it stays unread ("Mark as read").
     @Test(arguments: [(false, true), (false, false), (true, true), (true, false)])
     func anUnreadRowsReadStateAfterOpen(isSelected: Bool, pointerIsOver: Bool) {
         let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
-        let readAfterOpen = ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, selectedByOpen: selectedByOpen)
+        let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(isRead: false, selectedByOpen: selectedByOpen)
         #if os(macOS)
         #expect(readAfterOpen == (!isSelected && pointerIsOver))
         #else
         #expect(!readAfterOpen)
         #endif
-    }
-
-    @Test(arguments: [false, true])
-    func aReadRowStaysRead(selectedByOpen: Bool) {
-        #expect(ArticleRowMenuState.readAfterContextMenuOpen(isRead: true, selectedByOpen: selectedByOpen))
     }
 }

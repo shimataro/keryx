@@ -22,8 +22,10 @@ struct ArticleRowView: View, Equatable {
     /// confirmation — exactly like the menu bar's command and the reader's button.
     let onCopyUrl: () -> Void
     /// Whether the pointer is over this row (macOS) — what `ArticleRowMenuState.opensBySelecting`
-    /// predicts a right-click's selection from. Only this row re-renders when it changes; it is
-    /// deliberately not part of `==`, which a `@State` change bypasses anyway.
+    /// predicts a right-click's selection from. Written only by `.selectsOnContextMenu`, from the same
+    /// hover the right-click's selection runs on, so the prediction and the selection always concern
+    /// the same row (including a cell reused under a stationary pointer). Only this row re-renders
+    /// when it changes; it is deliberately not part of `==`, which a `@State` change bypasses anyway.
     @State private var pointerIsOver = false
 
     #if os(macOS)
@@ -125,8 +127,7 @@ struct ArticleRowView: View, Equatable {
         .accessibilityValue(stateAccessibilityValue)
         // The selection is otherwise only a background fill, which VoiceOver cannot see.
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .tracksPointerHover($pointerIsOver, resetOn: model.id)
-        .selectsOnContextMenu(id: model.id, perform: onContextMenuSelect)
+        .selectsOnContextMenu(id: model.id, pointerIsOver: $pointerIsOver, perform: onContextMenuSelect)
         .contextMenu {
             // A right-click on a hovered, unselected row selects it first, matching Compose's own
             // `onOpen = onClick` (`ArticleRowComponents.kt`) — the actual selection runs via
@@ -138,7 +139,7 @@ struct ArticleRowView: View, Equatable {
             // opened with the pointer elsewhere (keyboard, VoiceOver) selects nothing, so its label
             // is the row's current state.
             let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
-            let readAfterOpen = ArticleRowMenuState.readAfterContextMenuOpen(
+            let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(
                 isRead: model.isRead,
                 selectedByOpen: selectedByOpen
             )
@@ -181,24 +182,5 @@ struct ArticleRowView: View, Equatable {
         ]
         .compactMap { $0 }
         .joined(separator: ", ")
-    }
-}
-
-private extension View {
-    /// Keeps `isOver` equal to whether the pointer is over this view (macOS; a no-op on iOS, which
-    /// has no hover that selects anything). Cleared when the view disappears and when `resetOn`
-    /// changes — a hosted article cell is reused for another article (`ArticleTableView`) without
-    /// the pointer necessarily leaving it, and the new article was never hovered as far as
-    /// `ContextMenuSelectionTracker` knows.
-    @ViewBuilder
-    func tracksPointerHover(_ isOver: Binding<Bool>, resetOn id: String) -> some View {
-        #if os(macOS)
-        self
-            .onHover { isOver.wrappedValue = $0 }
-            .onDisappear { isOver.wrappedValue = false }
-            .onChange(of: id) { isOver.wrappedValue = false }
-        #else
-        self
-        #endif
     }
 }

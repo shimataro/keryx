@@ -95,7 +95,9 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
 }
 
 /// What an article row's context menu offers, decided from the state the row will be in once the
-/// menu is open rather than from the snapshot it was drawn with.
+/// menu is open rather than from the snapshot it was drawn with. The read state itself is the shared
+/// `articleReadAfterContextMenuOpen` (`ArticleListModel.kt`), which `ArticleRowView` calls directly;
+/// only how this UI's own open selects the row is Swift-specific.
 enum ArticleRowMenuState {
     /// Whether opening a row's context menu selects the row first. On macOS the only thing that
     /// selects a row on a right-click/Control-click is `ContextMenuSelectionTracker`, which holds a
@@ -107,24 +109,14 @@ enum ArticleRowMenuState {
     ///
     /// - Parameters:
     ///   - isSelected: whether the row was selected before the menu was opened.
-    ///   - pointerIsOver: whether the pointer is over the row (`ArticleRowView`'s hover state).
+    ///   - pointerIsOver: whether the pointer is over the row (`ArticleRowView`'s hover state, kept by
+    ///     `.selectsOnContextMenu`).
     static func opensBySelecting(isSelected: Bool, pointerIsOver: Bool) -> Bool {
         #if os(macOS)
         !isSelected && pointerIsOver
         #else
         false
         #endif
-    }
-
-    /// The read state the article has once its context menu is open — the state the menu's read item
-    /// is labelled from and inverts. Only calls the shared `articleReadAfterContextMenuOpen`
-    /// (`ArticleListModel.kt`), the same definition Compose's `articleRowMenuEntries` uses.
-    ///
-    /// - Parameters:
-    ///   - isRead: the row's read state as last drawn.
-    ///   - selectedByOpen: whether opening the menu selects the row (`opensBySelecting`).
-    static func readAfterContextMenuOpen(isRead: Bool, selectedByOpen: Bool) -> Bool {
-        ArticleListModelKt.articleReadAfterContextMenuOpen(isRead: isRead, selectedByOpen: selectedByOpen)
     }
 }
 

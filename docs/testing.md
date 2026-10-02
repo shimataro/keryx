@@ -1331,7 +1331,9 @@ The read item of the SwiftUI article row's context menu is labelled from the sta
 the menu is open (the shared `articleReadAfterContextMenuOpen`, covered by
 `ArticleReadAfterContextMenuOpenTest`), and each item sets that explicit state rather than toggling. On
 macOS whether the open selects the row is predicted from the pointer hover
-(`ArticleRowMenuState.opensBySelecting`, covered by `ArticleRowModelTests`). Whether SwiftUI rebuilds the
+(`ArticleRowMenuState.opensBySelecting`, covered by `ArticleRowModelTests`), using the same hover the
+right-click's selection runs on (`ContextMenuSelectionTracker`, covered by
+`ContextMenuSelectionTrackerTests`). Whether SwiftUI rebuilds the
 menu after the right-click's selection lands, and whether the hover prediction holds, can only be seen
 in the running app; confirm:
 
@@ -1344,6 +1346,9 @@ in the running app; confirm:
   (the row's current state), and the row does not become selected. Choosing it marks the article
   read. (Opening it with VO+Shift+M while the pointer happens to rest on that row is the known
   limitation: the menu then says "Mark as unread", and choosing it changes nothing.)
+- (macOS) Rest the pointer on a row and scroll the list with the keyboard or the scroll wheel so that a
+  different, unread and unselected row ends up under the pointer without moving it, then right-click:
+  the row now under the pointer is the one selected, and its menu says "Mark as unread".
 - (macOS) Right-click the selected row after marking it unread: the menu says "Mark as read" and the
   article stays unread until that is chosen (the row is not selected again).
 - (iOS) Long-press an unread row: nothing is selected, the menu says "Mark as read", and choosing it
