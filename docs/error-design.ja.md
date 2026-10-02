@@ -94,8 +94,10 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   クリップボードコピーの確認を OS 側で表示せず、リーダーの ✓ も画面に無いことが多い（長押しした行は選択されず、
   iPhone 幅ではリーダーが表示されない）ため、どの経路からのコピーでも、画面下部に一時的なトースト（「URL を
   コピーしました」）を約 2 秒表示し、VoiceOver で 1 回読み上げる（`HomeObservable.copyArticleUrl`。
-  `ArticleUrlCopy.perform` の `confirm` 経由）。macOS の SwiftUI アプリはデスクトップの規約どおり、リーダーの ✓
-  だけでトーストは出さない。
+  `ArticleUrlCopy.perform` の `confirm` 経由）。macOS の SwiftUI アプリはデスクトップの規約どおり、トーストは出さず
+  リーダーの ✓ で確認する。ただし、リーダーが表示していない記事のコピー（キーボードや VoiceOver から開いたコンテキストメニューは
+  行を選択しない）は、代わりに VoiceOver で読み上げる。どのコピーにアプリ内の確認が要るかは、両 UI とも共有の
+  `articleUrlCopyPlan` が決める。
   Android における Snackbar のもう一つの用途は `ui/home/HomeScreen.kt` の `ForegroundAlertSnackbar`（後述）。
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**

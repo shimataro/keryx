@@ -1,33 +1,46 @@
 import Testing
 
 /// Covers `ArticleUrlCopy`, which every article "Copy URL" route goes through, carrying out the shared
-/// `articleUrlCopyPlan`: what reaches the pasteboard, when the reader's ✓ pulses, and that every
-/// written copy is confirmed (the iOS toast), whether or not the reader shows that article.
+/// `articleUrlCopyPlan`: what reaches the pasteboard, when the reader's ✓ pulses, and when the copy is
+/// confirmed in-app — on iOS every copy (the toast), on macOS only one the reader's ✓ does not
+/// confirm (the VoiceOver announcement). The full truth table is `ArticleUrlCopyPlanTest` in
+/// `:shared`; these pin that the Swift side passes the right platform facts and honours the plan.
 @Suite
 struct ArticleUrlCopyTests {
-    /// Records what a `perform` call copied and how often it pulsed.
+    /// Records what a `perform` call copied, how often it pulsed and how often it confirmed.
     private final class Recorder {
         var copied: [String] = []
         var pulses = 0
         var confirmations = 0
     }
 
-    private func perform(url: String?, articleId: String, selectedId: String?) -> Recorder {
+    private enum Platform { case macOS, iOS, current }
+
+    private func perform(url: String?, articleId: String, selectedId: String?, on platform: Platform) -> Recorder {
         let recorder = Recorder()
-        ArticleUrlCopy.perform(
-            url: url,
-            articleId: articleId,
-            selectedId: selectedId,
-            copy: { recorder.copied.append($0) },
-            pulse: { recorder.pulses += 1 },
-            confirm: { recorder.confirmations += 1 }
-        )
+        let copy: (String) -> Void = { recorder.copied.append($0) }
+        let pulse = { recorder.pulses += 1 }
+        let confirm = { recorder.confirmations += 1 }
+        switch platform {
+        case .current:
+            ArticleUrlCopy.perform(
+                url: url, articleId: articleId, selectedId: selectedId,
+                copy: copy, pulse: pulse, confirm: confirm
+            )
+        case .macOS, .iOS:
+            ArticleUrlCopy.perform(
+                url: url, articleId: articleId, selectedId: selectedId,
+                platformShowsOwnConfirmation: false,
+                inlineCheckConfirms: platform == .macOS,
+                copy: copy, pulse: pulse, confirm: confirm
+            )
+        }
         return recorder
     }
 
     @Test(arguments: [nil, "", "   "] as [String?])
     func anUnusableUrlCopiesNothingAndDoesNotPulse(url: String?) {
-        let recorder = perform(url: url, articleId: "a1", selectedId: "a1")
+        let recorder = perform(url: url, articleId: "a1", selectedId: "a1", on: .iOS)
 
         #expect(recorder.copied.isEmpty)
         #expect(recorder.pulses == 0)
@@ -35,29 +48,49 @@ struct ArticleUrlCopyTests {
     }
 
     @Test
-    func copyingTheSelectedArticlePulses() {
-        let recorder = perform(url: "https://example.com/a1", articleId: "a1", selectedId: "a1")
+    func onMacOSCopyingTheSelectedArticlePulsesWithoutAnInAppConfirmation() {
+        let recorder = perform(url: "https://example.com/a1", articleId: "a1", selectedId: "a1", on: .macOS)
 
         #expect(recorder.copied == ["https://example.com/a1"])
         #expect(recorder.pulses == 1)
+        #expect(recorder.confirmations == 0, "the reader's ✓ is the confirmation")
+    }
+
+    @Test
+    func onMacOSCopyingAnArticleTheReaderDoesNotShowIsConfirmed() {
+        // A context menu opened from the keyboard or VoiceOver does not select its row.
+        let recorder = perform(url: "https://example.com/a2", articleId: "a2", selectedId: "a1", on: .macOS)
+
+        #expect(recorder.copied == ["https://example.com/a2"])
+        #expect(recorder.pulses == 0)
+        #expect(recorder.confirmations == 1, "the announcement stands in for the ✓ that does not flash")
+    }
+
+    @Test
+    func onIOSEveryCopyIsConfirmed() {
+        let selected = perform(url: "https://example.com/a1", articleId: "a1", selectedId: "a1", on: .iOS)
+        #expect(selected.pulses == 1)
+        #expect(selected.confirmations == 1)
+
+        let other = perform(url: "https://example.com/a2", articleId: "a2", selectedId: "a1", on: .iOS)
+        #expect(other.copied == ["https://example.com/a2"])
+        #expect(other.pulses == 0)
+        #expect(other.confirmations == 1, "confirmed even though the reader's ✓ does not flash")
+
+        let none = perform(url: "https://example.com/a2", articleId: "a2", selectedId: nil, on: .iOS)
+        #expect(none.pulses == 0)
+        #expect(none.confirmations == 1)
+    }
+
+    @Test
+    func theDefaultsAreThisPlatformsSharedFacts() {
+        let recorder = perform(url: "https://example.com/a1", articleId: "a1", selectedId: "a1", on: .current)
+
+        #if os(macOS)
+        #expect(recorder.confirmations == 0)
+        #else
         #expect(recorder.confirmations == 1)
-    }
-
-    @Test
-    func copyingAnotherArticleCopiesWithoutPulsing() {
-        let recorder = perform(url: "https://example.com/a2", articleId: "a2", selectedId: "a1")
-
-        #expect(recorder.copied == ["https://example.com/a2"])
-        #expect(recorder.pulses == 0)
-        #expect(recorder.confirmations == 1, "confirmed even though the reader's ✓ does not flash")
-    }
-
-    @Test
-    func copyingWithNothingSelectedCopiesWithoutPulsing() {
-        let recorder = perform(url: "https://example.com/a2", articleId: "a2", selectedId: nil)
-
-        #expect(recorder.copied == ["https://example.com/a2"])
-        #expect(recorder.pulses == 0)
-        #expect(recorder.confirmations == 1, "confirmed even though the reader's ✓ does not flash")
+        #endif
+        #expect(recorder.pulses == 1)
     }
 }

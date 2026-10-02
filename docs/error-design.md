@@ -89,8 +89,10 @@ from the `NotificationMessages` interface (just `newArticles(count)`), which eac
   confirmation of its own, and the reader's ✓ is often not on screen (a long-pressed row is not selected, and at
   iPhone width the reader is not shown), so every copy, from any route, shows a transient toast ("URL copied") at
   the bottom of the screen for about two seconds, and VoiceOver announces it once (`HomeObservable.copyArticleUrl`,
-  through `ArticleUrlCopy.perform`'s `confirm`). The SwiftUI app on macOS follows the desktop convention: the
-  reader's ✓ only, no toast. Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
+  through `ArticleUrlCopy.perform`'s `confirm`). The SwiftUI app on macOS follows the desktop convention: no
+  toast, and the reader's ✓ — except that a copy of an article the reader does not show (a context menu opened from
+  the keyboard or VoiceOver does not select its row) is announced by VoiceOver instead. Which copies need an in-app
+  confirmation is the shared `articleUrlCopyPlan`'s decision for both UIs. Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
   described below.
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.

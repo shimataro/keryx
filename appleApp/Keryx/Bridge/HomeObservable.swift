@@ -1,9 +1,7 @@
 import Foundation
 import KeryxShared
 import Observation
-#if os(iOS)
 import SwiftUI
-#endif
 
 /// Mirrors `HomeViewModel`'s `StateFlow`s as plain `@Observable` properties, so SwiftUI views read
 /// them like any other observable state instead of collecting a `SkieSwiftStateFlow` themselves.
@@ -133,11 +131,10 @@ final class HomeObservable: ObservableAssignment {
     private(set) var copyPulse: Int = 0
 
     #if os(iOS)
-    /// The iOS confirmation of every article URL copy (`copyArticleUrl`). iOS shows no confirmation
-    /// of its own, and the reader's ✓ is often not on screen (a long-pressed row is not selected, and
-    /// at iPhone width the reader is not shown), so — as Android below API 33 does with its snackbar —
-    /// every copy is confirmed here. macOS needs none: every route there copies the article the
-    /// always-visible reader shows, whose ✓ is the desktop confirmation.
+    /// The iOS toast that confirms an article URL copy (`confirmArticleUrlCopy`). Whether a copy is
+    /// confirmed at all is the shared plan's decision (`ArticleUrlCopy`); on iOS — no OS confirmation,
+    /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
+    /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast = TransientToastState()
     #endif
 
@@ -181,15 +178,18 @@ final class HomeObservable: ObservableAssignment {
         )
     }
 
-    /// The one copy confirmation per UI platform: on iOS the toast, plus a VoiceOver announcement —
-    /// made here for every copy, since the reader (which announces its ✓ on macOS) may not even be on
-    /// screen. Nothing on macOS (desktop convention: the reader's inline ✓, no in-app snackbar).
+    /// The one in-app copy confirmation, run whenever the shared plan's `confirmInApp` says so
+    /// (`ArticleUrlCopy`) — this only decides how. iOS: the toast plus a VoiceOver announcement,
+    /// since the reader (which announces its own ✓) may not even be on screen. macOS: the
+    /// announcement only (desktop convention: no in-app snackbar or toast) — the plan asks for it
+    /// only when the reader's ✓ does not flash, e.g. a context menu opened from the keyboard or
+    /// VoiceOver on a row it did not select, which would otherwise get no feedback at all.
     private func confirmArticleUrlCopy() {
-        #if os(iOS)
         let message = L("article_url_copied")
+        #if os(iOS)
         copyToast.show(message)
-        AccessibilityNotification.Announcement(message).post()
         #endif
+        AccessibilityNotification.Announcement(message).post()
     }
 
     /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including

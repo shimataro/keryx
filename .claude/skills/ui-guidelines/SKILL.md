@@ -890,8 +890,9 @@ action". In practice:
   the reader's button included — calls `ArticleUrlCopier.copy` (`ui/home/ArticleUrlCopier.kt`),
   which carries that plan out: it writes the clipboard when the URL is usable, flashes the reader's
   copy button ✓ only when the copied article is the one the reader displays, and shows the "URL
-  copied" snackbar only on Android below API 33. The reader only watches the pulse. (SwiftUI: iOS
-  shows a transient toast on every copy, macOS the ✓ only.) Keep feedback in the shared handler
+  copied" snackbar only when the plan's `confirmInApp` asks for it (Android below API 33). The reader
+  only watches the pulse. (SwiftUI: iOS shows a transient toast on every copy; macOS shows the ✓ and
+  announces, via VoiceOver, a copy of an article the reader does not show.) Keep feedback in the shared handler
   rather than in one pane, or it goes missing whenever that pane isn't composed.
 - **A decision both UIs need goes in `:shared` `presentation/`, and Swift calls it** — a pure
   function or a ViewModel method — rather than being re-derived in Compose and again in SwiftUI.

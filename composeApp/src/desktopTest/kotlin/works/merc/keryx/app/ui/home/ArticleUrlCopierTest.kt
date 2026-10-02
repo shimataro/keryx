@@ -30,14 +30,18 @@ class ArticleUrlCopierTest {
         scope: CoroutineScope,
         clipboard: Clipboard,
         host: SnackbarHostState?,
-        showsSnackbar: Boolean = true,
+        // Defaults model Android below API 33: no OS confirmation, and a touch platform's ✓ is
+        // not relied on as the confirmation.
+        platformShowsOwnConfirmation: Boolean = false,
+        inlineCheckConfirms: Boolean = false,
         displayedArticleId: () -> String? = { "a1" },
     ) = ArticleUrlCopier(
         scope = scope,
         clipboard = clipboard,
         snackbarHostState = host,
         copiedMessage = message,
-        showsSnackbar = showsSnackbar,
+        platformShowsOwnConfirmation = platformShowsOwnConfirmation,
+        inlineCheckConfirms = inlineCheckConfirms,
         displayedArticleId = displayedArticleId,
     )
 
@@ -107,7 +111,7 @@ class ArticleUrlCopierTest {
     fun noSnackbarWhereThePlatformShowsItsOwnConfirmation() = runTest {
         val clipboard = CopyRecordingClipboard()
         val host = SnackbarHostState()
-        val copier = copier(backgroundScope, clipboard, host, showsSnackbar = false)
+        val copier = copier(backgroundScope, clipboard, host, platformShowsOwnConfirmation = true)
 
         copier.copy("https://example.com/a1", "a1")
         settle()
@@ -115,6 +119,23 @@ class ArticleUrlCopierTest {
         assertEquals(listOf("https://example.com/a1"), clipboard.copied)
         assertEquals(1, copier.pulse)
         assertNull(host.currentSnackbarData)
+    }
+
+    @Test
+    fun whereTheCheckConfirmsOnlyACopyOfAnotherArticleShowsTheSnackbar() = runTest {
+        val clipboard = CopyRecordingClipboard()
+        val host = SnackbarHostState()
+        val copier = copier(backgroundScope, clipboard, host, inlineCheckConfirms = true)
+
+        copier.copy("https://example.com/a1", "a1")
+        settle()
+        assertEquals(1, copier.pulse)
+        assertNull(host.currentSnackbarData, "the displayed article's ✓ is the confirmation")
+
+        copier.copy("https://example.com/a2", "a2")
+        settle()
+        assertEquals(1, copier.pulse)
+        assertEquals(message, host.currentSnackbarData?.visuals?.message)
     }
 
     @Test

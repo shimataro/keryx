@@ -11,12 +11,14 @@ fun hasUsableUrl(url: String?): Boolean = !url.isNullOrBlank()
  * What one "copy article URL" does — the decision [articleUrlCopyPlan] makes for every route and both
  * UIs; each UI only carries it out.
  *
- * @property writeClipboard Whether the URL is written to the clipboard (and the platform's own
- *   copy feedback, e.g. Android's snackbar, follows it).
+ * @property writeClipboard Whether the URL is written to the clipboard.
  * @property flashCopied Whether the reader's copy button flashes its ✓ — only when the copied
  *   article is the one the reader shows. Never true without [writeClipboard].
+ * @property confirmInApp Whether the UI must confirm the copy itself (Android's snackbar below API
+ *   33, iOS's toast, a macOS VoiceOver announcement) — see [articleUrlCopyPlan] for the rule. Never
+ *   true without [writeClipboard].
  */
-data class ArticleUrlCopyPlan(val writeClipboard: Boolean, val flashCopied: Boolean)
+data class ArticleUrlCopyPlan(val writeClipboard: Boolean, val flashCopied: Boolean, val confirmInApp: Boolean)
 
 /**
  * The one decision behind every "copy article URL" route (reader button, keyboard shortcut, menu
@@ -24,10 +26,31 @@ data class ArticleUrlCopyPlan(val writeClipboard: Boolean, val flashCopied: Bool
  * unusable [url] ([hasUsableUrl]) copies nothing; a usable one is always copied; and the ✓ flashes
  * only when [articleId] is the [displayedArticleId], so it never confirms a URL other than the one
  * that button would copy.
+ *
+ * Whether a written copy also needs the UI's own confirmation ([ArticleUrlCopyPlan.confirmInApp]) is
+ * decided here too, so no UI re-derives it:
+ * - never when [platformShowsOwnConfirmation] (Android 13+ confirms every clipboard write itself —
+ *   `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation`);
+ * - otherwise, where [inlineCheckConfirms] (a desktop, whose reader is always on screen beside the
+ *   list), only when the ✓ does not flash: the ✓ on the displayed article is the confirmation, but a
+ *   copy of another article (a context menu opened from the keyboard or VoiceOver does not select
+ *   its row) would otherwise get none;
+ * - otherwise (a touch platform, where the reader and its ✓ are often off screen) on every copy.
  */
-fun articleUrlCopyPlan(url: String?, articleId: String, displayedArticleId: String?): ArticleUrlCopyPlan {
-    if (!hasUsableUrl(url)) return ArticleUrlCopyPlan(writeClipboard = false, flashCopied = false)
-    return ArticleUrlCopyPlan(writeClipboard = true, flashCopied = articleId == displayedArticleId)
+fun articleUrlCopyPlan(
+    url: String?,
+    articleId: String,
+    displayedArticleId: String?,
+    platformShowsOwnConfirmation: Boolean,
+    inlineCheckConfirms: Boolean,
+): ArticleUrlCopyPlan {
+    if (!hasUsableUrl(url)) return ArticleUrlCopyPlan(writeClipboard = false, flashCopied = false, confirmInApp = false)
+    val flashCopied = articleId == displayedArticleId
+    return ArticleUrlCopyPlan(
+        writeClipboard = true,
+        flashCopied = flashCopied,
+        confirmInApp = !platformShowsOwnConfirmation && !(inlineCheckConfirms && flashCopied),
+    )
 }
 
 /**

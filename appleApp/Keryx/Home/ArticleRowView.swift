@@ -18,7 +18,8 @@ struct ArticleRowView: View, Equatable {
     let onSelect: () -> Void
     let onContextMenuSelect: () -> Void
     /// The shared article-URL copy handler (`HomeObservable.copyArticleUrl`), so the context menu's
-    /// Copy URL flashes the reader's ✓ exactly like the menu bar's command and the reader's button.
+    /// Copy URL flashes the reader's ✓ — or, for a row the reader does not show, gets the in-app
+    /// confirmation — exactly like the menu bar's command and the reader's button.
     let onCopyUrl: () -> Void
     /// Whether the pointer is over this row (macOS) — what `ArticleRowMenuState.opensBySelecting`
     /// predicts a right-click's selection from. Only this row re-renders when it changes; it is
