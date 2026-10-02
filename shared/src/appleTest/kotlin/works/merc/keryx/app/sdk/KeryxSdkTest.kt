@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
@@ -75,9 +76,9 @@ class KeryxSdkTest {
     /** Runs inside the SDK's OS-notification sink, on whichever thread the cycle posted from. */
     private var onNotify: () -> Unit = {}
 
-    /** When set, the feed server signals [feedRequested] and then holds every response until it completes. */
+    /** When set, the feed server signals [feedRequests] once per request and then holds every response until it completes. */
     private var feedGate: CompletableDeferred<Unit>? = null
-    private val feedRequested = CompletableDeferred<Unit>()
+    private val feedRequests = Channel<Unit>(Channel.UNLIMITED)
 
     private fun rss(articleCount: Int) = buildString {
         append("""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title><link>https://example.com</link>""")
@@ -91,7 +92,7 @@ class KeryxSdkTest {
             MockEngine { request ->
                 check(request.url.toString() == url) { "unexpected request ${request.url}" }
                 feedGate?.let {
-                    feedRequested.complete(Unit)
+                    feedRequests.trySend(Unit)
                     it.await()
                 }
                 respond(rss(serverItems), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/rss+xml"))
@@ -292,13 +293,16 @@ class KeryxSdkTest {
             val gate = CompletableDeferred<Unit>()
             feedGate = gate
             sdk.startMaintenance()
-            feedRequested.await()
+            withTimeout(30_000) { feedRequests.receive() }
             assertTrue(sdk.isStartupMaintenanceActive)
 
             sdk.stopRefreshLoop()
             assertFalse(sdk.isStartupMaintenanceActive)
 
             sdk.startMaintenance()
+            // The replacement run's own request: it got past joining the interrupted run and into
+            // runStartupMaintenance, not merely launched.
+            withTimeout(30_000) { feedRequests.receive() }
             assertTrue(sdk.isStartupMaintenanceActive)
             gate.complete(Unit)
             Unit
