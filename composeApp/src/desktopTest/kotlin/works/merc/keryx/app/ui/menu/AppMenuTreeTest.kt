@@ -9,6 +9,7 @@ import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -37,7 +38,7 @@ class AppMenuTreeTest {
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
         feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
-        feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
+        feedNoFolder = "NoFolder", feedNewFolder = "NewFolder", feedNewTag = "NewTag", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
         feedCopyUrl = "FeedCopyUrl", feedCopySiteUrl = "FeedCopySiteUrl", feedOpenSite = "FeedOpenSite",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
@@ -46,6 +47,8 @@ class AppMenuTreeTest {
     private var toggledTagId: String? = null
     private var toggledTagAttached: Boolean? = null
     private var movedToFolderId: String? = null
+    private var newFolderInvoked = false
+    private var newTagInvoked = false
     private var updateActionInvoked = false
 
     private fun actions() = AppMenuActions(
@@ -56,38 +59,43 @@ class AppMenuTreeTest {
         refreshSelectedFeed = {},
         toggleFeedTag = { tagId, attached -> toggledTagId = tagId; toggledTagAttached = attached },
         moveFeedToFolder = { movedToFolderId = it },
+        newFolderForSelectedFeed = { newFolderInvoked = true }, newTagForSelectedFeed = { newTagInvoked = true },
         renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
         copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
         openWebsite = {}, openProjectPage = {}, updateAction = { updateActionInvoked = true }, about = {},
     )
 
-    private fun enabledUi() = computeMenuUiState(
-        onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true,
-        activity = ActivitySnapshot(), cloudConnected = true,
-        searchActive = false, unreadOnly = true,
-        hasSelectedFeed = true, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
+    private fun enabledUi(feedListKeysActive: Boolean = true) = computeMenuUiState(
+        onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
+        activity = ActivitySnapshot(), canSyncNow = true,
+        searchActive = false, unreadOnly = true, opmlBusy = false,
+        hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
+        selectedFeedHasSiteUrl = true, selectedFeedSiteCanOpenInBrowser = true,
     )
 
     private fun disabledUi() = computeMenuUiState(
-        onHome = false, hasSelectedArticle = false, selectedArticleHasUrl = false,
-        activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), cloudConnected = false,
-        searchActive = true, unreadOnly = false,
-        hasSelectedFeed = false, hasRenamableSelection = false,
+        onHome = false, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
+        activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), canSyncNow = false,
+        searchActive = true, unreadOnly = false, opmlBusy = false,
+        hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = false,
+        selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     /** A folder (or tag) selected: a rename/delete target, but no feed-specific selection. */
     private fun folderSelectedUi() = computeMenuUiState(
-        onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false,
-        activity = ActivitySnapshot(), cloudConnected = true,
-        searchActive = false, unreadOnly = false,
-        hasSelectedFeed = false, hasRenamableSelection = true,
+        onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
+        activity = ActivitySnapshot(), canSyncNow = true,
+        searchActive = false, unreadOnly = false, opmlBusy = false,
+        hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = true,
+        selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     private fun starredFilterUi() = computeMenuUiState(
-        onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true,
-        activity = ActivitySnapshot(), cloudConnected = true,
-        searchActive = false, unreadOnly = true,
-        hasSelectedFeed = true, hasRenamableSelection = true,
+        onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
+        activity = ActivitySnapshot(), canSyncNow = true,
+        searchActive = false, unreadOnly = true, opmlBusy = false,
+        hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true,
+        selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
 
     private fun selectedFeedMenu(
@@ -133,7 +141,8 @@ class AppMenuTreeTest {
         assertEquals(ui.toggleSortEnabled, root.menu("View").item("ToggleSort").enabled)
         assertEquals(ui.markAllReadEnabled, root.menu("View").item("MarkAllRead").enabled)
         assertEquals(ui.articleActionsEnabled, root.menu("Article").item("ToggleRead").enabled)
-        assertEquals(ui.urlActionsEnabled, root.menu("Article").item("OpenInBrowser").enabled)
+        assertEquals(ui.openInBrowserEnabled, root.menu("Article").item("OpenInBrowser").enabled)
+        assertEquals(ui.copyUrlEnabled, root.menu("Article").item("CopyUrl").enabled)
         assertEquals(ui.refreshAllEnabled, root.menu("Feed").item("RefreshAll").enabled)
         assertEquals(ui.syncEnabled, root.menu("Feed").item("SyncNow").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").item("FeedRefresh").enabled)
@@ -142,8 +151,27 @@ class AppMenuTreeTest {
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").submenu("AssignTags").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").submenu("MoveToFolder").enabled)
         assertEquals(ui.feedActionsEnabled, root.menu("Feed").item("FeedCopyUrl").enabled)
-        assertEquals(ui.feedSiteUrlActionsEnabled, root.menu("Feed").item("FeedCopySiteUrl").enabled)
-        assertEquals(ui.feedSiteUrlActionsEnabled, root.menu("Feed").item("FeedOpenSite").enabled)
+        assertEquals(ui.feedSiteCopyEnabled, root.menu("Feed").item("FeedCopySiteUrl").enabled)
+        assertEquals(ui.feedSiteOpenEnabled, root.menu("Feed").item("FeedOpenSite").enabled)
+    }
+
+    @Test
+    fun `open items follow the http(s) rule while copy items follow the non-blank rule`() {
+        // A selected article and feed whose URLs are non-blank but not http(s) (e.g. `file:` or a
+        // relative link): Copy stays enabled, Open is disabled — in the Article and Feed menus alike.
+        val ui = computeMenuUiState(
+            onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = false,
+            activity = ActivitySnapshot(), canSyncNow = true,
+            searchActive = false, unreadOnly = false, opmlBusy = false,
+            hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
+            selectedFeedSiteCanOpenInBrowser = false,
+        )
+        val root = tree(ui)
+
+        assertTrue(root.menu("Article").item("CopyUrl").enabled)
+        assertFalse(root.menu("Article").item("OpenInBrowser").enabled)
+        assertTrue(root.menu("Feed").item("FeedCopySiteUrl").enabled)
+        assertFalse(root.menu("Feed").item("FeedOpenSite").enabled)
     }
 
     @Test
@@ -228,6 +256,49 @@ class AppMenuTreeTest {
 
         moveToFolder.items.filterIsInstance<AppMenuNode.CheckboxItem>().first { it.label == "NoFolder" }.onCheckedChange(true)
         assertNull(movedToFolderId)
+    }
+
+    @Test
+    fun `the tags submenu ends with a new-tag item that invokes its action`() {
+        val tags = tree(enabledUi(), feedMenu = selectedFeedMenu(tags = listOf(tag("t1", "Kotlin")))).menu("Feed").submenu("AssignTags")
+        assertEquals(listOf("Kotlin", "NewTag"), tags.items.map { (it as? AppMenuNode.CheckboxItem)?.label ?: (it as AppMenuNode.Item).label })
+        val newTag = tags.items.last() as AppMenuNode.Item
+        assertTrue(newTag.enabled)
+        newTag.onClick()
+        assertTrue(newTagInvoked)
+    }
+
+    @Test
+    fun `the tags submenu is never empty, even with no tags`() {
+        val tags = tree(enabledUi(), feedMenu = selectedFeedMenu(tags = emptyList())).menu("Feed").submenu("AssignTags")
+        assertEquals(listOf("NewTag"), tags.items.filterIsInstance<AppMenuNode.Item>().map { it.label })
+        assertEquals(1, tags.items.size)
+    }
+
+    @Test
+    fun `the move-to-folder submenu ends with a new-folder item that invokes its action`() {
+        val moveToFolder = tree(
+            enabledUi(),
+            feedMenu = selectedFeedMenu(folders = listOf(folder("d1", "Tech"))),
+        ).menu("Feed").submenu("MoveToFolder")
+        assertEquals(3, moveToFolder.items.size)
+        val newFolder = moveToFolder.items.last() as AppMenuNode.Item
+        assertEquals("NewFolder", newFolder.label)
+        assertTrue(newFolder.enabled)
+        newFolder.onClick()
+        assertTrue(newFolderInvoked)
+    }
+
+    @Test
+    fun `the feed menu orders refresh then tags then move to folder`() {
+        val labels = tree(enabledUi()).menu("Feed").items.mapNotNull {
+            when (it) {
+                is AppMenuNode.Item -> it.label
+                is AppMenuNode.Menu -> it.label
+                else -> null
+            }
+        }
+        assertEquals(listOf("FeedRefresh", "AssignTags", "MoveToFolder"), labels.dropWhile { it != "FeedRefresh" }.take(3))
     }
 
     @Test
@@ -345,7 +416,9 @@ class AppMenuTreeTest {
 
     @Test
     fun `the selected-item accelerators are attached to their items`() {
-        val root = tree(enabledUi())
+        // feedListKeysActive = true: the feed list holds keyboard focus, so the bare rename/delete
+        // keys are live and attached too.
+        val root = tree(enabledUi(feedListKeysActive = true))
         assertEquals(AppMenuShortcut.ToggleRead, root.menu("Article").item("ToggleRead").shortcut)
         assertEquals(AppMenuShortcut.ToggleStar, root.menu("Article").item("ToggleStar").shortcut)
         assertEquals(AppMenuShortcut.OpenInBrowser, root.menu("Article").item("OpenInBrowser").shortcut)
@@ -353,5 +426,18 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.FeedRefresh, root.menu("Feed").item("FeedRefresh").shortcut)
         assertEquals(AppMenuShortcut.FeedRename, root.menu("Feed").item("FeedRename").shortcut)
         assertEquals(AppMenuShortcut.FeedUnsubscribe, root.menu("Feed").item("FeedUnsubscribe").shortcut)
+    }
+
+    @Test
+    fun `bare rename and delete accelerators are detached while the feed list keys are inactive`() {
+        // Another pane (or a text field) has keyboard focus: F2/Return and Delete would do nothing
+        // in-window, so the menu neither shows nor binds them, but the items stay clickable.
+        val feed = tree(enabledUi(feedListKeysActive = false)).menu("Feed")
+        assertNull(feed.item("FeedRename").shortcut)
+        assertNull(feed.item("FeedUnsubscribe").shortcut)
+        assertTrue(feed.item("FeedRename").enabled)
+        assertTrue(feed.item("FeedUnsubscribe").enabled)
+        // Modified (Ctrl/⌘+Shift) selected-item accelerators are unaffected.
+        assertEquals(AppMenuShortcut.FeedRefresh, feed.item("FeedRefresh").shortcut)
     }
 }

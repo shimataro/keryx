@@ -739,9 +739,11 @@ so `xdg-open` (or a browser resolving the scheme) can fail until the two are rem
 
 ### `.opml` file association
 
-Double-clicking (or "Open With Keryx" on) an `.opml` file launches Keryx and imports its
-subscriptions (`FeedRepository.importOpml`, surfaced via the notification center — see
-[app-architecture.md](app-architecture.md)). Registration mirrors the `keryx://` scheme above,
+Double-clicking (or "Open With Keryx" on) an `.opml` file launches Keryx, opens Settings ▸ Data
+and imports its subscriptions there, with the tab's own spinner and inline result
+(`requestOpenedOpmlImport` → `OpmlTransferController` — see [app-architecture.md](app-architecture.md));
+a file opened during first-run Setup is imported once Setup is done, and one that can't be read
+shows the import error on that tab. Registration mirrors the `keryx://` scheme above,
 per platform:
 
 - **macOS**: declared at build time via `CFBundleDocumentTypes` in the same
@@ -807,8 +809,8 @@ per platform:
   `MainActivity`/`ACTION_VIEW` handling through a separate intent-filter. Accepting `text/xml`/
   `application/xml` means Keryx also appears in the chooser for unrelated XML files — the same
   trade-off the Linux section's `text/x-opml` fallback already accepts — and malformed input is
-  handled the same way as the other platforms: `OpmlImporter.import`'s failure is caught rather than
-  propagated.
+  handled the same way as the other platforms: the read or `OpmlImporter.import` failure is shown
+  as the Data tab's inline import error rather than propagated.
 
 ## Release (CD)
 

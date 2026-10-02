@@ -141,6 +141,8 @@ targets:
       - path: Keryx/Platform/Localized.swift
       - path: Keryx/Platform/DockBadge.swift
       - path: Keryx/Bridge/ArticleRowModel.swift
+      - path: Keryx/Bridge/ArticleUrlCopy.swift
+      - path: Keryx/Bridge/TransientToastState.swift
       - path: Keryx/Bridge/ReaderPagerIndex.swift
       - path: Keryx/Bridge/SidebarModel.swift
       - path: Keryx/Bridge/ObservableAssignment.swift
@@ -158,6 +160,7 @@ targets:
       - path: Keryx/Home/ArticleTableLayout.swift
       - path: Keryx/Home/ArticleTableReload.swift
       - path: Keryx/Home/FaviconFailureCache.swift
+      - path: Keryx/Home/ContextMenuSelection.swift
     # KeryxShared statically linked (same as the Keryx target's own dependency) so
     # FeedListSelectionEqualityTests can build real Kotlin sealed-type values directly, rather than
     # faking their shape — the xcframework is already built by the time this runs, since the `Keryx`

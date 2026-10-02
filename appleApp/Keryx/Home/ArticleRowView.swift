@@ -17,6 +17,16 @@ struct ArticleRowView: View, Equatable {
     let viewModel: HomeViewModel
     let onSelect: () -> Void
     let onContextMenuSelect: () -> Void
+    /// The shared article-URL copy handler (`HomeObservable.copyArticleUrl`), so the context menu's
+    /// Copy URL flashes the reader's ✓ — or, for a row the reader does not show, gets the in-app
+    /// confirmation — exactly like the menu bar's command and the reader's button.
+    let onCopyUrl: () -> Void
+    /// Whether the pointer is over this row (macOS) — what `ArticleRowMenuState.opensBySelecting`
+    /// predicts a right-click's selection from. Written only by `.selectsOnContextMenu`, from the same
+    /// hover the right-click's selection runs on, so the prediction and the selection always concern
+    /// the same row (including a cell reused under a stationary pointer). Only this row re-renders
+    /// when it changes; it is deliberately not part of `==`, which a `@State` change bypasses anyway.
+    @State private var pointerIsOver = false
 
     #if os(macOS)
     private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
@@ -117,25 +127,35 @@ struct ArticleRowView: View, Equatable {
         .accessibilityValue(stateAccessibilityValue)
         // The selection is otherwise only a background fill, which VoiceOver cannot see.
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .selectsOnContextMenu(id: model.id, perform: onContextMenuSelect)
+        .selectsOnContextMenu(id: model.id, pointerIsOver: $pointerIsOver, perform: onContextMenuSelect)
         .contextMenu {
-            // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
-            // (`ArticleRowComponents.kt`) — the actual selection runs on a right-click/Control-
-            // click via `.selectsOnContextMenu` above, not as a side effect of this builder (see
-            // `ContextMenuSelectionTracker`'s own doc for why).
+            // A right-click on a hovered, unselected row selects it first, matching Compose's own
+            // `articleRowContextMenuOpen` (`ArticleRowComponents.kt`) — the actual selection runs via
+            // `.selectsOnContextMenu` above, not as a side effect of this builder (see
+            // `ContextMenuSelectionTracker`'s own doc for why). That selection marks an unread
+            // article read, so the read item is labelled from the state after it, and each item
+            // requests the explicit state its label promises rather than toggling — otherwise
+            // "Mark as read" on a row the right-click just marked read would mark it unread. A menu
+            // opened with the pointer elsewhere (keyboard, VoiceOver) selects nothing, so its label
+            // is the row's current state. The items follow the Article menu's order and separator
+            // (`HomeCommands.swift`), like Compose's `articleRowMenuEntries`.
+            let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
+            let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(
+                isRead: model.isRead,
+                selectedByOpen: selectedByOpen
+            )
+            Button(readAfterOpen ? Self.markUnreadLabel : Self.markReadLabel) {
+                viewModel.setRead(article: model.row, read: !readAfterOpen)
+            }
             Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
-                viewModel.toggleStar(article: model.row)
+                viewModel.setStarred(article: model.row, starred: !model.isStarred)
             }
-            Button(model.isRead ? Self.markUnreadLabel : Self.markReadLabel) {
-                viewModel.toggleRead(article: model.row)
-            }
-            Button(Self.copyUrlLabel) {
-                copyToPasteboard(model.url)
-            }
-            .disabled(!model.hasUsableUrl)
+            Divider()
             Button(Self.openInBrowserLabel) {
-                openInBrowser(model.url)
+                openInBrowserIfAllowed(model.url)
             }
+            .disabled(!model.canOpenInBrowser)
+            Button(Self.copyUrlLabel, action: onCopyUrl)
             .disabled(!model.hasUsableUrl)
         }
     }

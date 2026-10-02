@@ -134,7 +134,8 @@ internal fun trayMenuAnchor(pointerLocation: Point?, eventX: Int, eventY: Int): 
  * @param image The tray icon image, already badged with the unread count; when `null`, no tray UI
  * is displayed.
  * @param tooltip The tray icon tooltip.
- * @param toggleLabel The menu label for showing or hiding the window, per its current visibility.
+ * @param windowShown Whether the window is shown (visible and not minimized — see
+ * [trayWindowShown]); picks the toggle item's label.
  * @param quitLabel The menu label for quitting the application.
  * @param onToggle Called when the toggle menu item is activated.
  * @param onQuit Called when the quit menu item is activated.
@@ -148,7 +149,7 @@ internal fun trayMenuAnchor(pointerLocation: Point?, eventX: Int, eventY: Int): 
 internal fun WindowsTray(
     image: Image?,
     tooltip: String,
-    windowVisible: Boolean,
+    windowShown: Boolean,
     showLabel: String,
     hideLabel: String,
     quitLabel: String,
@@ -167,7 +168,7 @@ internal fun WindowsTray(
     val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
     val currentOnTrayAction by rememberUpdatedState(onTrayAction)
 
-    val toggleLabel = if (windowVisible) hideLabel else showLabel
+    val toggleLabel = if (windowShown) hideLabel else showLabel
 
     val menu = remember {
         WindowsTrayMenu(
@@ -217,7 +218,7 @@ internal fun WindowsTray(
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
-    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel) {
+    LaunchedEffect(menu, windowShown, showLabel, hideLabel, quitLabel) {
         menu.setLabels(toggle = toggleLabel, quit = quitLabel)
     }
     LaunchedEffect(menu, updateEntry) {

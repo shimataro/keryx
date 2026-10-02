@@ -37,11 +37,13 @@
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler（importOpmlAndNotify。デスクトップと Android の「`.opml` ファイル関連付け」で共有）, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
-                  NewArticleTracking。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
+                  NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。
+                  SelectionReadIntents——選択した記事の本文の読み込み中に行った、既読・未読の明示的な操作の記録（その選択の
+                  暗黙の既読より優先させるため）。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
                   ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
                   ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
                   サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
@@ -52,21 +54,36 @@
                   TAG_COLOR_PALETTE。タグの色選択が共有する 8 色のパレット）、article/（ArticleWebViewHtml——
                   リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
-                  接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。PreferencesController——
+                  接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。接続中のプロバイダは
+                  `cloudStorageType` が変わるたびに読み直すので、セットアップでの接続も反映される。これは
+                  すべての「今すぐ同期」経路が共有する唯一の ManualSync（`canSyncNow`/`connected`/`disabledByAuth`/`syncNow()`/`runs`）でもあり、
+                  Home のツールバーのボタンとフィードメニュー（`HomeViewModel.sync()`/`canSyncNow`/`cloudConnected`/`syncDisabledByAuth` 経由。
+                  `runs` の各イベントで既読ピンを刈り込み直す）とクラウド同期タブが使う。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
-                  組み立て・解析。ファイルの選択は各 UI が担当）、menu/（MenuUiState + computeMenuUiState——
+                  組み立て・解析。ファイルの選択は各 UI が担当。OpmlOpenHandler（requestOpenedOpmlImport——アプリで開かれた
+                  `.opml` ファイルは、どのプラットフォームでもインポートを*要求*するだけで、Home の表示中に
+                  設定 ▸ データが実行する。通知センターには何も出さない）。OpmlTransferController——全経路・全 UI が
+                  共有する唯一の OPML の busy・直近の結果・保留中の要求（`OpmlRequest`）。ファイルメニューは
+                  `request` するだけで、設定 ▸ データがその要求を実行し（`consumeRequest`。何も実行中でない
+                  ときだけ渡す）、結果はデータタブが表示するまで保持される。インポートはアプリのスコープで動くので、
+                  どの UI から始めたものも `KeryxSdk.close()` が待ち合わせ、キャンセルする。インポートの経路——`importDocument`、
+                  Compose のファイル選択、SwiftUI のパネルと開かれたファイルの経路——はすべて `importBegun` で終わる。
+                  これは `tryBegin` で確保済みのインポートを実行し、必ず `finish` する（キャンセル時は結果なし）唯一の処理）、menu/（MenuUiState + computeMenuUiState——
                   メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
                   `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
                   リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
                   リーダーが共有）、RelativeTime（relativeTimeOf——タイムスタンプの経過時間を
-                  now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）。
+                  now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）、
+                  ManualSync（Home と設定の両方が依存する「今すぐ同期」の契約。実装は
+                  `settings/CloudSyncController`）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
-    ui/           theme/, navigation/, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
+    ui/           theme/, navigation/（Navigator、SettingsOpenRequests——設定を開くすべての経路が通る唯一の
+                  窓口。Setup 中の要求は Home が表示されるまで保留する）, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
                   通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
                   KeryxIcons/FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual
                   分割された、全ペイン共通のプレーンな M3 見た目のコンポーネント）, menu/（MenuController）
@@ -85,7 +102,10 @@
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
-               StatusNotifierItem/dbusmenu の D-Bus オブジェクト
+               StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
+               メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
+               `@Composable` を含まない純粋なモデル）、UpdateMenuEntry（トレイと Help メニューが共有する
+               唯一の更新項目——ラベルと、TrayActionPolicy の updateMenuAction から導く有効/無効）
     appmenu/   KDE Global Menu / D-Bus アプリケーションメニュー連携（AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar）— external-spec.ja.md §9 参照
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
@@ -169,7 +189,8 @@
     AndroidOpmlOpen.kt（`handleOpmlOpenIfPresent`。`.opml` の「Keryx で開く」`ACTION_VIEW` インテント用に
     同じ `MainActivity` から呼ばれる — デスクトップの `.opml` ファイル関連付けに相当。
     `platform/FilePicker.android.kt` の `readTextFromUri` で `content://` `Uri` を読み取り、
-    commonMain の `domain/OpmlOpenHandler.kt` に委譲する）,
+    commonMain の `presentation/settings/OpmlOpenHandler.kt` の `requestOpenedOpmlImport` に委譲する。
+    読めないファイルは `null` として渡し、設定 ▸ データに失敗を表示させる）,
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
     へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
@@ -222,6 +243,39 @@
 | ViewModel | UI 状態保持・イベントを Repository に委譲 | androidx.lifecycle + Koin |
 | Repository | ビジネスロジック・同期・競合解決 | Kotlin クラス |
 | DataSource | DB / HTTP / ファイル IO | SQLDelight / Ktor / dart:io 相当（java.io） |
+
+### 1 つの操作には 1 つの実装
+
+複数の経路（ツールバーのボタン・メニューバー・コンテキストメニュー・キーボードショートカット・ジェスチャー・
+アクセシビリティ操作・トレイ）や複数の UI（Compose・SwiftUI）から実行できる操作は、効果・有効/無効の条件・
+フィードバックを、全経路が呼ぶ共通のコード 1 か所から得る。経路は入力（どの項目に対してか）を集めてそれを呼ぶ
+だけで、効果・有効条件・フィードバックを自前で再実装しない。これにより、`external-spec.md` §9（「複数の経路から
+実行できる操作」）が求めるとおり、どの経路も同じように振る舞う。
+
+役割は 2 つに分かれる。
+
+- **判断と有効条件の述語**は、両 UI が必要とする限り `:shared` の `presentation/`（純粋関数または ViewModel の
+  メソッド）に置く。Compose と SwiftUI はそれぞれ判断を導き直すのではなく、同じコードを呼ぶ。これは state holder が
+  すでに共有コードにあることからの帰結である（「Apple ネイティブアプリ（SwiftUI）」の「共有 Kotlin コード」を参照）。
+- **プラットフォーム側の実行**（クリップボードへの書き込み、スナックバーの表示、ウィンドウ操作）は UI ごとに持ち、
+  それも UI ごとに 1 つのハンドラにまとめる。経路ごとには持たない。
+
+現在のコードにある実例:
+
+| 操作 | 唯一の実装 | それを呼ぶ経路 |
+| --- | --- | --- |
+| 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`。加えて、操作を出すかどうかの `connected` と、ツールチップが示す無効の理由 `disabledByAuth`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
+| 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
+| メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
+| 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
+| OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |
+| 待っている OPML の要求で設定 ▸ データを開く | `presentation/settings/OpmlTransferController.kt` の `shouldPresentOpmlRequest`（要求が待っていて、何も実行中でない） | Compose の `App.kt` と SwiftUI の `OpmlRequestPresenter`（`OpmlTransferObservable.shouldPresentRequest` 経由） |
+| 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowView`（直接呼ぶ）。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、`.selectsOnContextMenu` が選択に使うのと同じポインタのホバーから求める） |
+| 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
+| 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
+
+**既存の操作に経路を足す**ときは、既存のハンドラ/述語を呼ぶ。共通のものがまだない（操作の処理が 1 つの経路の中に
+ある）場合は、先にそれを切り出して他の経路をそこへ移し、それから新しい経路を足す。
 
 ## 主要クラス
 
@@ -691,6 +745,13 @@ Compose 自身のセマンティクスツリーとは独立に、ネイティブ
 `newArticleNotifications` を自分で消費する（キューされた `TrayState` 通知を実際の OS 通知に変えるのは
 Compose の `Tray()` だけであるため）。
 
+4 つの実装はいずれも同じ表示判定 `tray/TrayActionPolicy.kt` の `trayWindowShown`（表示中**かつ**
+最小化されていない）を使い、表示/非表示ラベルと `main.kt` の唯一のメニュー項目ハンドラを決める。ハンドラは
+表示中なら隠し、それ以外は `activationRequests`（最小化解除・前面化・フォーカス）を通す。アイコンの
+クリックは、表示中*かつフォーカス中*のときだけ隠し（`shouldHideOnTrayAction`）、それ以外は前面に出す。
+どちらの判定も `TrayWindowAction` を返し（表示/非表示の項目は `trayMenuToggleAction`、アイコンのクリックは
+`trayIconAction`）、それを実行するのは `main.kt` の `applyTrayWindowAction` だけである。
+
 **Linux で SNI が必要な理由**: `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` はアイコン描画の *前* に
 24x24 のキャンバス全面をコンポーネント背景色で塗り潰し、さらに `sun.awt.X11.XSystemTrayPeer` は
 トレイマネージャーの `_NET_SYSTEM_TRAY_VISUAL` を読まないため XEmbed ウィンドウにアルファチャンネルが
@@ -890,6 +951,18 @@ feedListIsDrawer(paneLayout) && drawerState.isOpen`——開いている間は `
 開いている場合）ため、2つのペインに同時にキーボードフォーカス枠が描かれてしまっていた——
 `keyboardPaneFor` はこれを構造的に不可能にする。すべての消費側が、この関数が解決する
 ただ一つの値だけを読むようになったからである。
+
+F2/Delete のフィード一覧ショートカットは、同じファイルの
+**`feedListItemKeysActive(keyboardPane, textInputFocused)`** でさらに一段絞り込む: キーが効くのは
+`keyboardPane` がフィード一覧で、*かつ* テキスト欄（検索欄、行のインライン編集欄）がフォーカスを
+持っていないときだけである。`HomeScreen` はこれが成り立つ間だけ `homeKeyboardShortcuts` に名前変更・
+削除のハンドラーを渡し（ハンドラーが `null` ならキーは消費されない）、同じ値を
+`MenuController.feedListKeysActive` に反映する。`computeMenuUiState` はそこから
+`renameOrDeleteShortcutActive` を導き、アプリケーションメニューのフィード ▸ 名前変更・削除は
+そのときだけキー単体のアクセラレータを持つ（それ以外では `AppMenuTree.kt` が項目の `shortcut` を
+`null` にし、Swing ではアクセラレータ自体が付かない）。項目自体は行のコンテキストメニューと同じく、
+選択があれば常に有効。SwiftUI 版は自前の同等の判定（`HomeCommands.bareKeysActive`）を同じ
+`renameOrDeleteShortcutActive` に渡す。
 
 **`focusedPane` 自体が「進む」のは `PaneLayout.Single` のときだけである。**
 `HomePane.ordinal + 1` がそのままスタックの現在の深さを兼ねるため、`HomeScreen` は別途深さの
@@ -1106,7 +1179,8 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 `pinnedReadArticlesKeepingSelected()` は `_pinnedReadArticles` を、選択中の記事（それが対象条件を
 満たす場合のみ）だけに刈り込み直す。これを呼び出す箇所はどれも、既読ピンに削るだけの価値がある
 エントリが溜まっていることが見込まれる瞬間である——「未読のみ」を ON にした瞬間（`setUnreadOnly`）、
-リフレッシュ／同期が完了した瞬間（`HomeRefreshController.repinSelected`）、そして記事一覧ツールバーの
+リフレッシュの前後（`HomeRefreshController`）と手動同期の前後（`ManualSync.runs` の各イベント。設定画面から
+始めた同期も含む）、そして記事一覧ツールバーの
 明示的な「既読記事を非表示」操作（`HomeViewModel.hideRead`）——最後の 1 つだけがユーザーが直接引き金を引く
 呼び出し箇所で、「未読のみ」自体からは抜けずに、厳密な未読のみからずれてしまった一覧をその状態へ
 引き戻すためのものである。`hideRead` は `canHideRead`（`unreadOnly`・現在画面に出ている一覧——検索中
@@ -1440,13 +1514,16 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 クラウドプロバイダー。表示順。`CloudStorageAvailability.available`）・`newAddFeedController()`・`handleOAuthRedirect(url)`、
 そして Compose の設定・セットアップ画面が今では自前実装ではなく包んでいるのと同じ `presentation/` コントローラ
 ——`setupController`・`cloudSyncController`・`preferences`（`PreferencesController`）・`opml`
-（`OpmlTransfer`）・`notificationAlerts`・`menuState(…)`（`presentation/menu/computeMenuUiState` への直接
+（`OpmlTransfer`）・`opmlController`（`OpmlTransferController`。Swift の `OpmlTransferObservable` が
+ミラーする。SwiftUI のファイルメニューは要求を出すだけで、Home 専用の `OpmlRequestPresenter` が設定を
+データタブで開き、そのタブが要求を実行する）・`notificationAlerts`・`menuState(…)`（`presentation/menu/computeMenuUiState` への直接
 パススルーで、`Commands`／メニュー項目の有効・チェック状態を返す）——を提供する。`startMaintenance()` は、
 `domain/StartupMaintenanceTasks.kt` の `runStartupMaintenance` と `domain/BackgroundRefreshLoop.kt` の
 `backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——フォアグラウンド起動ごとに1回呼ぶ。
 冪等なので、繰り返し呼んでもループが二重に始まることはない。`importOpenedOpml(xml)` は、アプリがある文書を
-開いた状態で起動したとき用に `domain/OpmlOpenHandler.kt` の `importOpmlAndNotify` を包む（デスクトップ版・
-Android 版自身の「`.opml` ファイル関連付け」の扱いと同じ）。`completeConnect(type, tokens)` と
+開いた状態で起動したとき用に `presentation/settings/OpmlOpenHandler.kt` の `requestOpenedOpmlImport` を包む
+（読めなかった場合は `null`。デスクトップ版・Android 版自身の「`.opml` ファイル関連付け」の扱いと同じ）。
+インポートを要求するだけで、Home がそれを表示したときに設定 ▸ データが実行する。`completeConnect(type, tokens)` と
 `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
 `suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を

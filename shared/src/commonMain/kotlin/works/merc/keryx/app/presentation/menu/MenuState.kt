@@ -14,7 +14,8 @@ import works.merc.keryx.app.domain.ActivitySnapshot
 data class MenuUiState(
     /** Add feed/folder/tag — only meaningful on Home. */
     val addItemsEnabled: Boolean,
-    /** OPML import/export — available once past initial setup. */
+    /** OPML import/export — available once past initial setup, and not while an OPML operation
+     * is already running (whichever route started it — see `OpmlTransferController.busy`). */
     val opmlEnabled: Boolean,
     val searchEnabled: Boolean,
     val unreadOnlyEnabled: Boolean,
@@ -25,68 +26,103 @@ data class MenuUiState(
      * article-detail toolbar stays clickable for the selected article regardless of which pane
      * has keyboard focus, so the menu mirrors that. */
     val articleActionsEnabled: Boolean,
-    /** Open in browser / copy URL — require a selected article that has a URL. */
-    val urlActionsEnabled: Boolean,
+    /** Copy URL — requires a selected article with a non-blank URL (`hasUsableUrl`). */
+    val copyUrlEnabled: Boolean,
+    /** Open in browser — requires a selected article whose URL is http(s) (`canOpenInBrowser`), a
+     * stricter rule than [copyUrlEnabled]: any other scheme is never handed to the OS. */
+    val openInBrowserEnabled: Boolean,
     val refreshAllEnabled: Boolean,
     val syncEnabled: Boolean,
     val openSettingsEnabled: Boolean,
     /** Refresh/Tags/Move to folder for the selected feed — feed-specific operations, so they
-     * require a selected feed, and require the search field not to be the thing actually holding
-     * keyboard focus. Not gated on the feed list pane holding focus, matching the feed row's own
-     * context menu, which acts on the row regardless of pane focus. */
+     * require a selected feed, and nothing else: not the feed list pane holding focus, and not the
+     * absence of a focused text field — matching the feed row's own context menu, which acts on the
+     * row regardless of either. (None of these items has a bare-key accelerator that typing could
+     * trigger; see [renameOrDeleteShortcutActive] for the ones that do.) */
     val feedActionsEnabled: Boolean,
-    /** Copy site URL / open site for the selected feed — like [feedActionsEnabled] but
-     * additionally requires the feed to actually have a (non-blank) site URL, mirroring
-     * [urlActionsEnabled]'s relationship to [articleActionsEnabled]. "Copy feed URL" doesn't need
-     * this: a feed's own subscription URL is never blank, so it uses [feedActionsEnabled] directly. */
-    val feedSiteUrlActionsEnabled: Boolean,
+    /** Copy site URL for the selected feed — like [feedActionsEnabled] but additionally requires
+     * the feed to actually have a (non-blank) site URL, mirroring [copyUrlEnabled]'s relationship to
+     * [articleActionsEnabled]. "Copy feed URL" doesn't need this: a feed's own subscription URL is
+     * never blank, so it uses [feedActionsEnabled] directly. */
+    val feedSiteCopyEnabled: Boolean,
+    /** Open site for the selected feed — like [feedSiteCopyEnabled] but requires the site URL to be
+     * http(s) (`canOpenInBrowser`), the same rule as [openInBrowserEnabled]. */
+    val feedSiteOpenEnabled: Boolean,
     /** Rename/Delete — unlike [feedActionsEnabled] these act on whatever feed list item is
      * selected (feed, folder or tag: `resolveFeedListSelectionTarget` resolves it and
-     * `FeedListPane` opens the matching dialog), so they only require *some* renamable selection.
-     * The search-field guard is the same: Rename/Delete's F2/Delete accelerator would otherwise be
-     * live while the user is typing a search query. */
+     * `FeedListPane` starts the inline editor or opens the matching dialog), so they only require
+     * *some* renamable selection. Like the row's own context menu, the items stay enabled whichever
+     * pane has focus and while a text field is being typed into: only their bare-key accelerator is
+     * scoped, by [renameOrDeleteShortcutActive]. */
     val renameOrDeleteEnabled: Boolean,
+    /** Whether Rename/Delete carry their bare accelerator (F2 or Return, and Delete) right now —
+     * [renameOrDeleteEnabled] *and* the feed list's own item keys being live (the feed list holds
+     * keyboard focus and no text field does; Compose's `feedListItemKeysActive`). A menu shows
+     * a key beside an item only while pressing it would run that item: a bare accelerator can't
+     * defer to a focused text field or to another pane, so it is detached rather than left to fire
+     * where the in-window key handling would do nothing. The item itself stays clickable. */
+    val renameOrDeleteShortcutActive: Boolean,
 )
 
 /**
  * Computes [MenuUiState] from the current app/UI state. Pure so it can be tested directly.
  *
  * Most items are gated on [onHome] (their targets live in Home's composition). Article/URL actions
- * additionally require a selection (and a non-blank URL for the latter). Sort can't be toggled
- * while the Search scope is active (search order is fixed to relevance rank). Refresh/sync are
- * suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while either operation, or a
- * refresh-then-sync cycle (which also covers the gap between the two), is already in flight — and
- * sync additionally requires a connected cloud account.
+ * additionally require a selection; copying a URL requires it to be non-blank
+ * ([selectedArticleHasUrl] / [selectedFeedHasSiteUrl], `hasUsableUrl`), opening it in the browser
+ * requires it to be http(s) ([selectedArticleCanOpenInBrowser] / [selectedFeedSiteCanOpenInBrowser],
+ * `canOpenInBrowser`). Sort can't be toggled while the Search scope is active (search order is
+ * fixed to relevance rank). Refresh is suppressed unless [activity] is [ActivitySnapshot.idle] — i.e. while a refresh, a sync, or a
+ * refresh-then-sync cycle (which also covers the gap between the two), is already in flight. Sync
+ * follows [canSyncNow] — `ManualSync.canSyncNow`, the one predicate every "Sync now" route shares
+ * (it already covers the idle check, a connected account, connect/disconnect/reset in flight and
+ * an authorization failure).
+ *
+ * OPML import/export is disabled while [opmlBusy] (`OpmlTransferController.busy`), the same busy
+ * flag the settings Data tab's buttons follow.
  *
  * [hasSelectedFeed] gates the feed-specific actions, while [hasRenamableSelection] gates
  * rename/delete, which act on any selected feed list item (feed, folder or tag).
+ * [feedListKeysActive] — whether the feed list's bare item keys (F2/Return, Delete) would act
+ * right now — enables no item; it only decides whether rename/delete show and bind their bare
+ * accelerator ([MenuUiState.renameOrDeleteShortcutActive]).
+ *
+ * Every input is required (no defaults): an input a caller forgot would otherwise silently leave an
+ * item enabled or disabled against the app's actual state. Each menu (Compose's `AppMenuBar`, the
+ * SwiftUI app's `Commands` through `KeryxSdk.menuState`) passes all of them.
  */
 fun computeMenuUiState(
     onHome: Boolean,
     hasSelectedArticle: Boolean,
     selectedArticleHasUrl: Boolean,
+    selectedArticleCanOpenInBrowser: Boolean,
     activity: ActivitySnapshot,
-    cloudConnected: Boolean,
+    canSyncNow: Boolean,
     searchActive: Boolean,
     unreadOnly: Boolean,
-    hasSelectedFeed: Boolean = false,
-    textInputFocused: Boolean = false,
-    hasRenamableSelection: Boolean = false,
-    selectedFeedHasSiteUrl: Boolean = false,
+    opmlBusy: Boolean,
+    hasSelectedFeed: Boolean,
+    feedListKeysActive: Boolean,
+    hasRenamableSelection: Boolean,
+    selectedFeedHasSiteUrl: Boolean,
+    selectedFeedSiteCanOpenInBrowser: Boolean,
 ): MenuUiState = MenuUiState(
     addItemsEnabled = onHome,
-    opmlEnabled = onHome,
+    opmlEnabled = onHome && !opmlBusy,
     searchEnabled = onHome,
     unreadOnlyEnabled = onHome,
     unreadOnlyChecked = unreadOnly,
     toggleSortEnabled = onHome && !searchActive,
     markAllReadEnabled = onHome,
     articleActionsEnabled = onHome && hasSelectedArticle,
-    urlActionsEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
+    copyUrlEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,
+    openInBrowserEnabled = onHome && hasSelectedArticle && selectedArticleCanOpenInBrowser,
     refreshAllEnabled = onHome && activity.idle,
-    syncEnabled = onHome && cloudConnected && activity.idle,
+    syncEnabled = onHome && canSyncNow,
     openSettingsEnabled = onHome,
-    feedActionsEnabled = onHome && hasSelectedFeed && !textInputFocused,
-    renameOrDeleteEnabled = onHome && hasRenamableSelection && !textInputFocused,
-    feedSiteUrlActionsEnabled = onHome && hasSelectedFeed && !textInputFocused && selectedFeedHasSiteUrl,
+    feedActionsEnabled = onHome && hasSelectedFeed,
+    renameOrDeleteEnabled = onHome && hasRenamableSelection,
+    renameOrDeleteShortcutActive = onHome && hasRenamableSelection && feedListKeysActive,
+    feedSiteCopyEnabled = onHome && hasSelectedFeed && selectedFeedHasSiteUrl,
+    feedSiteOpenEnabled = onHome && hasSelectedFeed && selectedFeedSiteCanOpenInBrowser,
 )

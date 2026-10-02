@@ -6,20 +6,18 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
-import works.merc.keryx.app.core.AppNotificationAction
-import works.merc.keryx.app.data.remote.UpdateDownloader
+import works.merc.keryx.app.core.UpdateException
+import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.domain.AvailableUpdate
+import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.InstallLaunchResult
-import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.UpdateAsset
+import works.merc.keryx.app.domain.UpdateAssetKind
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateInstaller
 import works.merc.keryx.app.domain.UpdatePlan
@@ -27,10 +25,12 @@ import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
-import works.merc.keryx.app.ui.home.NotificationCenterViewModel
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequest
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -45,6 +45,9 @@ private val WRITABLE_MAC_LOCATION = InstallLocation(
     InstallKind.MAC_APP_BUNDLE, appRoot = "/Applications/Keryx.app", launcherPath = null, parentWritable = true, translocated = false,
 )
 
+/** A read-only install location: the policy then plans [UpdatePlan.OpenReleasePage] (nothing to self-replace). */
+private val READ_ONLY_MAC_LOCATION = WRITABLE_MAC_LOCATION.copy(parentWritable = false)
+
 private fun sha256Hex(bytes: ByteArray): String =
     MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { b -> "%02x".format(b.toInt() and 0xFF) }
 
@@ -53,11 +56,6 @@ private fun releaseJson(version: String, sizeBytes: Int, sha256: String) = """
         {"name":"Keryx-$version-macos-arm64.zip","browser_download_url":"https://release-assets.githubusercontent.com/x.zip",
          "size":$sizeBytes,"digest":"sha256:$sha256","state":"uploaded"}
     ]}
-""".trimIndent()
-
-/** A release whose tag matches the running version, so the checker reports "up to date". */
-private val UP_TO_DATE_RELEASE_JSON = """
-    {"tag_name":"v1.0.0","html_url":"https://ex.com/1.0.0","prerelease":false,"draft":false,"assets":[]}
 """.trimIndent()
 
 /** Records what [UpdateRepository.install] handed it, without ever launching anything. */
@@ -74,234 +72,210 @@ private class RecordingInstaller(private val canInstall: Boolean) : UpdateInstal
 
 /**
  * Covers `main.kt`'s [onUpdateMenuItemClicked] — the one click handler behind both the system
- * tray's and the Help menu's single update entry.
+ * tray's and the Help menu's single update entry. Every state with something to do must land on
+ * the Updates tab (via the [SettingsOpenRequests] router, raising the window through
+ * [activationRequests]) and run exactly one of the two actions; the in-flight states must do
+ * nothing at all. Which action a state maps to is `TrayActionPolicyTest`'s `updateMenuAction`
+ * coverage; this suite checks the handler wires that decision to navigation and the action.
  *
- * Built on the same fixture shape as `UpdateRepositoryTest`: a real [UpdateRepository] over a
- * MockEngine-backed [UpdateChecker]/[UpdateDownloader] and a real temp directory, so each branch is
- * exercised against the actual state machine rather than a stub of it, and — like that suite — with
- * [runBlocking] plus wall-clock polling rather than `runTest`, since the repository's own scope runs
- * on a real dispatcher. The release-page hand-off goes through the function's own `openUrl` seam
- * (`BrowserOpener` is an `actual object` with no seam of its own — `NotificationRowActionTest`
- * documents the same constraint).
+ * Two layers. The lambda-based tests inject counting lambdas and pin the handler's own dispatch.
+ * The "end to end" tests then click with a real [UpdateRepository] (MockEngine-backed
+ * [UpdateChecker]/[UpdateDownloader], a [RecordingInstaller], a temp directory), wired the way
+ * `main.kt` wires it — `checkForUpdate` runs the repository's [UpdateRepository.check] (what
+ * `SettingsViewModel.checkForUpdate` ultimately calls) and `performPrimaryAction` is
+ * `repo::performPrimaryAction` — so they prove the real wiring does the right thing: an installable
+ * find downloads, a non-installable one re-checks without downloading, and a ready download is
+ * handed to the installer. They use wall-clock polling since the repository runs on its own scope.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class UpdateMenuActionTest {
+    private var settingsOpenRequests = SettingsOpenRequests()
+    private var checks = 0
+    private var primaryActions = 0
+
     private val tempDirs = mutableListOf<File>()
     private val scopes = mutableListOf<CoroutineScope>()
-    private val openedUrls = CopyOnWriteArrayList<String>()
-
-    @BeforeTest
-    fun setUp() {
-        // NotificationCenterViewModel's `alertToSurface` starts an eager `stateIn(viewModelScope)`
-        // in its constructor, so Main must be installed before one is built.
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
 
     @AfterTest
     fun tearDown() {
         scopes.forEach { it.cancel() }
         tempDirs.forEach { it.deleteRecursively() }
-        Dispatchers.resetMain()
     }
 
-    private fun newTempDir(): String = createTempDirectory("update-menu-action-test").toFile().also { tempDirs.add(it) }.path
+    @BeforeTest
+    fun setUp() {
+        // activationRequests is a process-wide replay = 1 flow; start each test from an empty cache.
+        activationRequests.resetReplayCache()
+    }
 
-    private fun trackedScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes.add(it) }
+    private fun click(state: UpdateState) =
+        onUpdateMenuItemClicked(state, settingsOpenRequests, checkForUpdate = { checks++ }, performPrimaryAction = { primaryActions++ })
 
-    private fun await(timeoutMs: Long = 5_000, describe: () -> String, condition: () -> Boolean) = runBlocking {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!condition()) {
-            check(System.currentTimeMillis() < deadline, describe)
-            delay(5)
+    private fun assertOpenedUpdatesTab() {
+        assertEquals(SettingsOpenRequest("updates"), settingsOpenRequests.pending.value)
+        assertEquals(listOf(Unit), activationRequests.replayCache, "the window must be brought to front")
+    }
+
+    private fun update(installable: Boolean): AvailableUpdate {
+        val asset = UpdateAsset("Keryx-2.0.0-macos-arm64.zip", "https://x", 100L, "a".repeat(64), UpdateAssetKind.MAC_APP_ZIP)
+        return if (installable) {
+            AvailableUpdate("2.0.0", "https://ex.com/2.0.0", null, asset, UpdatePlan.SelfReplace(asset))
+        } else {
+            AvailableUpdate("2.0.0", "https://ex.com/2.0.0", null, null, UpdatePlan.OpenReleasePage)
         }
     }
 
-    private fun awaitState(repo: UpdateRepository, predicate: (UpdateState) -> Boolean) =
-        await(describe = { "Timed out; last state was ${repo.state.value}" }) { predicate(repo.state.value) }
-
-    /** Gives the launched work a moment to *not* do anything, for the no-op assertions. */
-    private fun settle() = runBlocking { delay(200) }
-
-    private class Fixture(
-        val repo: UpdateRepository,
-        val viewModel: NotificationCenterViewModel,
-        val installer: RecordingInstaller,
-        val downloadRequestCount: () -> Int,
-    )
-
-    /**
-     * @param releaseBody the GitHub "latest release" JSON the checker sees.
-     * @param canInstall what the fake [UpdateInstaller] reports, i.e. whether the found update
-     *   comes back [AvailableUpdate.installable].
-     * @param downloadSucceeds `false` makes the asset request fail, so a started download ends in
-     *   [UpdateState.Failed].
-     */
-    private fun fixture(
-        releaseBody: String,
-        payload: ByteArray = ByteArray(0),
-        canInstall: Boolean = true,
-        downloadSucceeds: Boolean = true,
-    ): Fixture {
-        var requestCount = 0
-        val checkerClient = HttpClient(MockEngine { respond(releaseBody, HttpStatusCode.OK) }) { expectSuccess = false }
-        val downloaderClient = HttpClient(
-            MockEngine {
-                requestCount++
-                if (downloadSucceeds) respond(payload, HttpStatusCode.OK) else respond("", HttpStatusCode.InternalServerError)
-            },
-        ) { expectSuccess = false }
-        val notificationCenter = NotificationCenter()
-        val installer = RecordingInstaller(canInstall)
-        val repo = UpdateRepository(
-            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
-            downloader = UpdateDownloader(downloaderClient),
-            installer = installer,
-            notificationCenter = notificationCenter,
-            scope = trackedScope(),
-            location = WRITABLE_MAC_LOCATION,
-            cacheDirOverride = newTempDir(),
-        )
-        return Fixture(repo, NotificationCenterViewModel(notificationCenter, NotificationAlerts(notificationCenter)), installer) { requestCount }
-    }
-
-    /** A fixture whose check finds version 2.0.0, with a downloadable, digest-matching asset. */
-    private fun availableFixture(canInstall: Boolean = true, downloadSucceeds: Boolean = true): Fixture {
-        val payload = Random(7).nextBytes(4 * 1024)
-        return fixture(
-            releaseBody = releaseJson("2.0.0", payload.size, sha256Hex(payload)),
-            payload = payload,
-            canInstall = canInstall,
-            downloadSucceeds = downloadSucceeds,
-        )
-    }
-
-    private fun click(f: Fixture, state: UpdateState = f.repo.state.value) =
-        onUpdateMenuItemClicked(state, trackedScope(), f.repo, f.viewModel, openedUrls::add)
-
-    // --- Available ---
-
     @Test
-    fun anInstallableAvailableUpdateStartsItsDownload() {
-        val f = availableFixture()
-        runBlocking { f.repo.check() }
-        assertIs<UpdateState.Available>(f.repo.state.value)
+    fun idleAndUpToDateOpenTheUpdatesTabAndRunACheck() {
+        listOf(UpdateState.Idle, UpdateState.UpToDate).forEach { state ->
+            settingsOpenRequests = SettingsOpenRequests()
+            activationRequests.resetReplayCache()
+            checks = 0
 
-        click(f)
+            click(state)
 
-        awaitState(f.repo) { it is UpdateState.Ready }
-        assertEquals(1, f.downloadRequestCount())
-        assertTrue(openedUrls.isEmpty(), "an installable update must never open the release page")
-        // Starting the download closes the tray/menu with no other feedback, so this also opens the
-        // Updates tab — see main.kt's startAndShowUpdatesTab.
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
+            assertOpenedUpdatesTab()
+            assertEquals(1, checks, state.toString())
+        }
+        assertEquals(0, primaryActions)
+    }
+
+    /** Nothing downloadable here: the tab links the release page, and the check refreshes it. */
+    @Test
+    fun aNonInstallableUpdateOpensTheUpdatesTabAndRunsACheckInsteadOfTheBrowser() {
+        click(UpdateState.Available(update(installable = false)))
+
+        assertOpenedUpdatesTab()
+        assertEquals(1, checks)
+        assertEquals(0, primaryActions)
     }
 
     @Test
-    fun aNonInstallableAvailableUpdateOpensTheReleasePageInsteadOfDownloading() {
-        val f = availableFixture(canInstall = false)
-        runBlocking { f.repo.check() }
-        val available = assertIs<UpdateState.Available>(f.repo.state.value)
+    fun anInstallableUpdateAFailureAndAReadyDownloadOpenTheUpdatesTabAndRunThePrimaryAction() {
+        listOf(
+            UpdateState.Available(update(installable = true)),
+            UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "no network")),
+            UpdateState.Ready(update(installable = true), "/tmp/x.zip"),
+        ).forEach { state ->
+            settingsOpenRequests = SettingsOpenRequests()
+            activationRequests.resetReplayCache()
+            primaryActions = 0
 
-        click(f)
-        settle()
+            click(state)
 
-        assertEquals(listOf(available.update.releaseUrl), openedUrls.toList())
-        assertEquals(0, f.downloadRequestCount(), "nothing is downloadable here")
-        assertIs<UpdateState.Available>(f.repo.state.value)
-        assertNull(f.viewModel.pendingAction.value, "the release page is the entire hand-off here")
+            assertOpenedUpdatesTab()
+            assertEquals(1, primaryActions, state.toString())
+        }
+        assertEquals(0, checks)
     }
-
-    // --- Ready / Failed ---
-
-    @Test
-    fun aReadyUpdateIsHandedToTheInstaller() {
-        val f = availableFixture()
-        runBlocking { f.repo.check() }
-        f.repo.startDownload()
-        awaitState(f.repo) { it is UpdateState.Ready }
-
-        click(f)
-
-        await(describe = { "the installer was never invoked" }) { f.installer.installedVersions.isNotEmpty() }
-        assertEquals(listOf("2.0.0"), f.installer.installedVersions.toList())
-        // Install is followed shortly by the app restarting, so there's nothing worth opening the
-        // Updates tab for here — unlike Available/Failed.
-        assertNull(f.viewModel.pendingAction.value)
-    }
-
-    @Test
-    fun aFailedUpdateRetriesTheDownload() {
-        val f = availableFixture(downloadSucceeds = false)
-        runBlocking { f.repo.check() }
-        f.repo.startDownload()
-        awaitState(f.repo) { it is UpdateState.Failed }
-        assertEquals(1, f.downloadRequestCount())
-
-        click(f)
-
-        await(describe = { "the retry never issued a second request" }) { f.downloadRequestCount() == 2 }
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
-    }
-
-    // --- states with an action already in flight ---
 
     @Test
     fun theInFlightStatesDoNothingAtAll() {
-        val f = availableFixture()
-        runBlocking { f.repo.check() }
-        val update = assertIs<UpdateState.Available>(f.repo.state.value).update
-
+        val update = update(installable = true)
         listOf(
             UpdateState.Checking,
             UpdateState.Downloading(update, 1, 2),
             UpdateState.Verifying(update),
             UpdateState.Installing(update),
-        ).forEach { click(f, it) }
-        settle()
+        ).forEach { click(it) }
 
-        assertEquals(0, f.downloadRequestCount())
-        assertTrue(openedUrls.isEmpty())
-        assertTrue(f.installer.installedVersions.isEmpty())
+        assertNull(settingsOpenRequests.pending.value, "no navigation for an action already in flight")
+        assertTrue(activationRequests.replayCache.isEmpty())
+        assertEquals(0, checks)
+        assertEquals(0, primaryActions)
     }
 
-    // --- Idle / UpToDate: the check path ---
+    // --- End to end: a real UpdateRepository behind the same wiring main.kt uses ---
 
-    @Test
-    fun idleRunsACheckAndSurfacesAnInstallableFindOnTheUpdatesTab() {
-        val f = availableFixture()
+    private class Fixture(
+        val repo: UpdateRepository,
+        val scope: CoroutineScope,
+        val installer: RecordingInstaller,
+        val checkRequests: AtomicInteger,
+        val downloadRequests: AtomicInteger,
+    )
 
-        click(f, UpdateState.Idle)
-
-        awaitState(f.repo) { it is UpdateState.Available }
-        await(describe = { "the updates tab was never requested" }) { f.viewModel.pendingAction.value != null }
-        assertEquals(AppNotificationAction.ShowSettingsTab("updates"), f.viewModel.pendingAction.value?.action)
+    private fun fixture(canInstall: Boolean): Fixture {
+        val payload = Random(7).nextBytes(4 * 1024)
+        val checkRequests = AtomicInteger()
+        val downloadRequests = AtomicInteger()
+        val checkerClient = HttpClient(
+            MockEngine {
+                checkRequests.incrementAndGet()
+                respond(releaseJson("2.0.0", payload.size, sha256Hex(payload)), HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val downloaderClient = HttpClient(
+            MockEngine {
+                downloadRequests.incrementAndGet()
+                respond(payload, HttpStatusCode.OK)
+            },
+        ) { expectSuccess = false }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes.add(it) }
+        val installer = RecordingInstaller(canInstall)
+        val location = if (canInstall) WRITABLE_MAC_LOCATION else READ_ONLY_MAC_LOCATION
+        val dir = createTempDirectory("update-menu-action-test").toFile().also { tempDirs.add(it) }
+        val repo = UpdateRepository(
+            checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = location),
+            downloader = UpdateDownloader(downloaderClient),
+            installer = installer,
+            notificationCenter = NotificationCenter(),
+            scope = scope,
+            location = location,
+            cacheDirOverride = dir.path,
+        )
+        return Fixture(repo, scope, installer, checkRequests, downloadRequests)
     }
 
+    private fun clickWithRealRepository(f: Fixture) =
+        onUpdateMenuItemClicked(
+            f.repo.state.value,
+            settingsOpenRequests,
+            checkForUpdate = { f.scope.launch { f.repo.check() } },
+            performPrimaryAction = f.repo::performPrimaryAction,
+        )
+
     @Test
-    fun upToDateRunsAnotherCheckAndLeavesTheSettingsDialogClosedWhenNothingIsFound() {
-        val f = fixture(releaseBody = UP_TO_DATE_RELEASE_JSON)
+    fun endToEndAnInstallableAvailableUpdateStartsItsDownload() {
+        val f = fixture(canInstall = true)
         runBlocking { f.repo.check() }
-        assertEquals(UpdateState.UpToDate, f.repo.state.value)
+        assertIs<UpdateState.Available>(f.repo.state.value)
+        assertEquals(1, f.checkRequests.get())
 
-        click(f, UpdateState.UpToDate)
-        settle()
+        clickWithRealRepository(f)
 
-        assertEquals(UpdateState.UpToDate, f.repo.state.value)
-        assertNull(f.viewModel.pendingAction.value)
+        awaitConditionBlocking { f.repo.state.value is UpdateState.Ready }
+        assertEquals(1, f.downloadRequests.get())
+        assertEquals(1, f.checkRequests.get(), "starting a download is not a re-check")
+        assertOpenedUpdatesTab()
     }
 
-    /**
-     * A non-installable find has no in-app action on the Updates tab — the entry itself opens the
-     * release page — so the check must not pull the settings dialog open for one.
-     */
     @Test
-    fun aCheckThatFindsANonInstallableUpdateDoesNotOpenTheSettingsDialog() {
-        val f = availableFixture(canInstall = false)
+    fun endToEndANonInstallableAvailableUpdateRechecksAndNeverDownloads() {
+        val f = fixture(canInstall = false)
+        runBlocking { f.repo.check() }
+        val available = assertIs<UpdateState.Available>(f.repo.state.value)
+        assertEquals(UpdatePlan.OpenReleasePage, available.update.plan)
+        assertEquals(1, f.checkRequests.get())
 
-        click(f, UpdateState.Idle)
+        clickWithRealRepository(f)
 
-        awaitState(f.repo) { it is UpdateState.Available }
-        settle()
-        assertNull(f.viewModel.pendingAction.value)
+        awaitConditionBlocking { f.checkRequests.get() == 2 }
+        awaitConditionBlocking { f.repo.state.value is UpdateState.Available }
+        assertEquals(0, f.downloadRequests.get(), "nothing is downloadable here")
+        assertOpenedUpdatesTab()
+    }
+
+    @Test
+    fun endToEndAReadyUpdateIsHandedToTheInstaller() {
+        val f = fixture(canInstall = true)
+        runBlocking { f.repo.check() }
+        f.repo.startDownload()
+        awaitConditionBlocking { f.repo.state.value is UpdateState.Ready }
+
+        clickWithRealRepository(f)
+
+        awaitConditionBlocking { f.installer.installedVersions.isNotEmpty() }
+        assertEquals(listOf("2.0.0"), f.installer.installedVersions.toList())
+        assertOpenedUpdatesTab()
     }
 }

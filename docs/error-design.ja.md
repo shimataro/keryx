@@ -78,11 +78,29 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 
 - 通知センター（履歴・手動で消す）を主とする。デスクトップには**アプリ内スナックバーが無い**——
   確認はインライン表現で行う（コピーは操作元の✓、OPML はボタン近くの結果テキスト、購読は一覧出現＋
-  ダイアログ内表示）。Android だけはプラットフォーム固有の例外で、URL コピーの確認を M3 の `Snackbar` で
-  表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が既にクリップボードコピーの確認を
-  表示するため、Snackbar を出すとそれと重複してしまう（`platform/PlatformOs.kt` の
-  `platformShowsOwnCopyConfirmation` と `ui/home/HomeCommon.kt` の `LocalSnackbarHostState` を参照）。
-  Android における Snackbar のもう一つの用途は `ui/home/HomeScreen.kt` の `ForegroundAlertSnackbar`（後述）。
+  ダイアログ内表示）。
+- OPML のインライン表示はどの経路にも適用される: ファイルメニューのインポート／エクスポートは設定 ▸ データを開いて
+  そこで実行され、タブ自身のボタンと同じスピナーと結果テキストが出る（`presentation/settings/OpmlTransferController` が
+  busy と結果を共有する）。設定を閉じた後に終わった結果は、次にデータタブを開いたとき 1 回だけ表示される。
+- **記事 URL のコピーの確認。** ボタン・キーボードショートカット・メニューバー・記事行のコンテキストメニューのどの経路から
+  コピーしても、コピーした記事がリーダーに表示中の記事であれば、リーダーのコピーボタンに ✓ を表示する。コピーにアプリ自身の
+  確認も要るかどうかは、両 UI とも共有の `articleUrlCopyPlan`（`confirmInApp`）が決め、各 UI はそれを 1 つのコピー処理
+  （Compose は `ui/home/ArticleUrlCopier.kt`、SwiftUI は `ArticleUrlCopy.perform` 経由の `HomeObservable.copyArticleUrl`）で
+  実行する。この判断と実行はリーダーではなくコピー処理が担うので、どの経路のコピーにも同じ判断が適用される——リーダーが画面に
+  無いときや、リーダーが表示しているのとは別の行をコピーしたときも含む。[external-spec.ja.md](external-spec.ja.md#複数の経路から実行できる操作) の「複数の経路から実行できる操作」を参照。
+  プラットフォームごとには次のとおり:
+  - **デスクトップ（Compose アプリ）:** ✓ が確認で、それ以外は何も出さない。コンテキストメニューは開くときに行を選択するので、
+    コピーした記事はリーダーに表示中の記事である。
+  - **Android:** API 33 未満では、どのコピーでも M3 の `Snackbar`（「URL をコピーしました」）も表示する。コピー 1 回につき 1 つで、
+    表示時間は M3 の標準（Short）。上記の「スナックバーが無い」に対するプラットフォーム固有の唯一の例外である。API 33 以降は
+    OS 側がクリップボードコピーの確認を表示するため、Snackbar を出すとそれと重複してしまう（`platform/PlatformOs.kt` の
+    `platformShowsOwnCopyConfirmation`）。Android における Snackbar のもう一つの用途は `ui/home/HomeScreen.kt` の
+    `ForegroundAlertSnackbar`（後述）。
+  - **iOS（SwiftUI アプリ）:** iOS はクリップボードコピーの確認を OS 側で表示せず、リーダーの ✓ も画面に無いことが多い
+    （長押しした行は選択されず、iPhone 幅ではリーダーが表示されない）ため、どのコピーでも画面下部に一時的なトースト
+    （「URL をコピーしました」）を約 2 秒表示し（下端に新着ピルが出ているときはその上に出す）、VoiceOver で 1 回読み上げる。
+  - **macOS（SwiftUI アプリ）:** デスクトップの規約どおり、トーストは出さず ✓ で確認する。リーダーが表示していない記事の
+    コピー（キーボードや VoiceOver から開いたコンテキストメニューは行を選択しない）は、代わりに VoiceOver で読み上げる。
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
@@ -139,7 +157,7 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException`（破損/非互換なクラウドDB／制約違反データ） | ❌（リセットまたは手動同期の成功まで**自動**同期そのものが抑制される — `SyncTrigger.AUTOMATIC` ゲート。[sync-architecture.ja.md](sync-architecture.ja.md)「自動同期の抑制」参照） | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
-| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブまたはトレイの項目で「再試行」を押した時のみ再試行） | ❌（代わりに Updates タブとトレイの項目で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
+| `UpdateException`（チェック/ダウンロード/検証/インストールの失敗） | ❌（ユーザーが Updates 設定タブの「再試行」、またはトレイ／Help メニューのアップデート項目（Updates タブを開く）を押した時のみ再試行） | ❌（代わりに Updates タブ（とトレイ／Help メニュー項目のラベル）で提示する——[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照。ベルに届くのは「更新があります」/「インストール準備完了」という情報通知のみで、上記の `ShowSettingsTab`/`OpenUrl` 経由） |
 
 \* `FeedFetcher` が自動リトライするのは実際のタイムアウト時のみで、`FEED_TIMEOUT_RETRY_COUNT` 回まで追加試行する。
 タイムアウト以外の `FeedFetchException`（5xx ステータス等）は同一フェッチ内では再試行しない。

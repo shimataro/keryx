@@ -72,12 +72,33 @@ from the `NotificationMessages` interface (just `newArticles(count)`), which eac
 
 - The notification center (history, manually dismissed) is the primary channel. Desktop has **no in-app snackbar** —
   confirmations use inline expressions instead (copy shows a ✓ near the action source, OPML shows result text near
-  the button, subscription shows the list appearance + in-dialog display). Android is the one platform-specific
-  exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the
-  OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see
-  `platform/PlatformOs.kt`'s `platformShowsOwnCopyConfirmation` and `ui/home/HomeCommon.kt`'s
-  `LocalSnackbarHostState`). Android's second Snackbar use is `ui/home/HomeScreen.kt`'s `ForegroundAlertSnackbar`,
-  described below.
+  the button, subscription shows the list appearance + in-dialog display).
+- OPML's inline feedback applies to every route: the File menu's Import/Export items open Settings ▸ Data and run
+  there, with the same spinner and result text as the tab's own buttons
+  (`presentation/settings/OpmlTransferController`'s shared busy/result state); a result that lands after Settings
+  was closed is shown once on the next visit to the Data tab.
+- **Article-URL copy confirmation.** The reader's copy button shows ✓ when the copied article is the one the reader
+  displays, whichever route the copy came from (the button, the keyboard shortcut, the menu bar, or the article
+  row's context menu). Whether a copy also needs a confirmation of the app's own is decided for both UIs by the
+  shared `articleUrlCopyPlan` (`confirmInApp`); each UI carries it out in its one copy handler (Compose's
+  `ui/home/ArticleUrlCopier.kt`, SwiftUI's `HomeObservable.copyArticleUrl` through `ArticleUrlCopy.perform`), not in
+  the reader, so every route gets it — including a copy made while the reader isn't on screen or for a row other
+  than the one it shows. See "Actions with more than one route" in
+  [external-spec.md](external-spec.md#actions-with-more-than-one-route). Per platform:
+  - **Desktop (the Compose app):** the ✓ is the confirmation, and nothing else is shown. Its context menu selects
+    its row as it opens, so the copied article is the one the reader displays.
+  - **Android:** below API 33, every copy also shows an M3 `Snackbar` ("URL copied"), one per copy at M3's default
+    (short) duration — the one platform-specific exception to the no-snackbar rule above. From API 33 onward the
+    OS shows its own clipboard-copy confirmation, which a Snackbar would just duplicate (`platform/PlatformOs.kt`'s
+    `platformShowsOwnCopyConfirmation`). Android's second Snackbar use is `ui/home/HomeScreen.kt`'s
+    `ForegroundAlertSnackbar`, described below.
+  - **iOS (the SwiftUI app):** iOS shows no clipboard confirmation of its own, and the reader's ✓ is often not on
+    screen (a long-pressed row is not selected, and at iPhone width the reader is not shown), so every copy shows a
+    transient toast ("URL copied") at the bottom of the screen for about two seconds — above the new-articles pill
+    when that pill is showing at the bottom — and VoiceOver announces it once.
+  - **macOS (the SwiftUI app):** the desktop convention — no toast, and the ✓ confirms. A copy of an article the
+    reader does not show (a context menu opened from the keyboard or VoiceOver does not select its row) is
+    announced by VoiceOver instead.
 - History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
 - Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: a badge alone only reaches a user already looking at the pane hosting the bell, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
@@ -114,7 +135,7 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
 | `CloudDataIncompatibleException` (corrupt / incompatible cloud DB / constraint-violating data) | ❌ (further **automatic** syncs are suspended entirely — `SyncTrigger.AUTOMATIC` gate, see "Automatic-Sync Suspension" in [sync-architecture.md](sync-architecture.md) — until a reset or a successful manual sync) | ✅ |
 | `FeedNotFoundException(isGone=true)` | ❌ | ✅ |
-| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab or the tray's own item) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
+| `UpdateException` (check/download/verify/install failure) | ❌ (retried only via the user clicking Retry — the Updates settings tab, or the tray/Help menu update item, which opens the Updates tab) | ❌ (surfaced there instead — see "In-App Update" in [background-update.md](background-update.md); only the informational "update available"/"ready to install" notices reach the bell, via `ShowSettingsTab`/`OpenUrl` above) |
 
 \* `FeedFetcher` retries only on an actual timeout, for `FEED_TIMEOUT_RETRY_COUNT` extra attempts — a non-timeout
 `FeedFetchException` (e.g. a 5xx status) is not retried within the same fetch.

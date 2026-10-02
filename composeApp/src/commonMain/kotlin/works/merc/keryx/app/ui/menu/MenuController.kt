@@ -23,6 +23,10 @@ enum class MenuCommand {
     CopyUrl,
     RenameFeed,
     UnsubscribeFeed,
+    /** Feed ▸ Move to folder ▸ New folder… — create a folder and move the selected feed into it. */
+    NewFolderForSelectedFeed,
+    /** Feed ▸ Tags ▸ New tag… — create a tag and attach it to the selected feed. */
+    NewTagForSelectedFeed,
     CopyFeedUrl,
     CopySiteUrl,
     About,
@@ -33,17 +37,18 @@ enum class MenuCommand {
  *
  * - [currentScreen] is kept in sync by `App` so the menu bar can gate item enabled-state on the
  *   active top-level destination.
- * - [textInputFocused] is kept in sync by `HomeScreen` (search field or inline row editor), so
- *   feed-list-scoped items can be
- *   disabled while the sidebar search field has real focus — needed because a native Swing
- *   accelerator (unlike `KeyboardNav.kt`) has no way to defer to a focused text field.
+ * - [feedListKeysActive] is kept in sync by `HomeScreen` (`feedListItemKeysActive`: the feed list
+ *   holds keyboard focus and no text field does), so the Feed menu attaches its bare F2/Return and
+ *   Delete accelerators only while those keys would really act — a native Swing accelerator
+ *   (unlike `KeyboardNav.kt`) has no way to defer to a focused text field or another pane. The
+ *   items stay enabled either way.
  * - [commands] carries one-shot menu clicks to whichever composable owns the target state.
  *
  * App-scoped Koin singleton.
  */
 class MenuController {
     val currentScreen = MutableStateFlow<Screen>(Screen.Setup)
-    val textInputFocused = MutableStateFlow(false)
+    val feedListKeysActive = MutableStateFlow(false)
 
     private val _commands = MutableSharedFlow<MenuCommand>(extraBufferCapacity = 8)
     val commands: SharedFlow<MenuCommand> = _commands.asSharedFlow()

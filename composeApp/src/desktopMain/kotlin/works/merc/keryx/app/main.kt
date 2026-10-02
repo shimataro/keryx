@@ -41,8 +41,9 @@ import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.painterResource
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
+import works.merc.keryx.app.appmenu.AppMenuBarHost
+import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.core.APP_NAME
-import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
@@ -56,34 +57,38 @@ import works.merc.keryx.app.di.configureImageLoader
 import works.merc.keryx.app.di.platformModule
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
-import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.OAuthCallbackParams
-import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
+import works.merc.keryx.app.domain.backgroundUpdateLoop
+import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.platform.AppDirs
-import works.merc.keryx.app.platform.BrowserOpener
-import works.merc.keryx.app.platform.isLinux
-import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
+import works.merc.keryx.app.platform.isLinux
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.database_too_new_message
 import works.merc.keryx.app.resources.database_too_new_title
 import works.merc.keryx.app.resources.tray_icon
-import works.merc.keryx.app.appmenu.AppMenuBarHost
-import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.tray.KeryxTray
-import works.merc.keryx.app.tray.shouldHideOnTrayAction
-import works.merc.keryx.app.tray.shouldOpenSettingsAfterUpdateCheck
+import works.merc.keryx.app.tray.NO_NOTIFICATION_MILLIS
 import works.merc.keryx.app.tray.SniConnection
-import works.merc.keryx.app.ui.home.NotificationCenterViewModel
+import works.merc.keryx.app.tray.TrayWindowAction
+import works.merc.keryx.app.tray.UpdateMenuAction
+import works.merc.keryx.app.tray.trayIconAction
+import works.merc.keryx.app.tray.trayMenuToggleAction
+import works.merc.keryx.app.tray.trayWindowShown
+import works.merc.keryx.app.tray.updateMenuAction
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
+import works.merc.keryx.app.ui.settings.SettingsViewModel
 import works.merc.keryx.app.ui.theme.installLookAndFeel
 import works.merc.keryx.app.ui.theme.keryxSurfaceColor
 import works.merc.keryx.app.ui.theme.resolveDarkTheme
@@ -309,7 +314,10 @@ fun main(args: Array<String>) {
     appScope.launch { backgroundUpdateLoop(koin) }
 
     val updateRepository = koin.get<UpdateRepository>()
-    val notificationCenterViewModel = koin.get<NotificationCenterViewModel>()
+    val settingsOpenRequests = koin.get<SettingsOpenRequests>()
+    // Resolved on first use (the tray update entry's click), not at startup: before this, nothing
+    // built the settings ViewModel until the settings dialog first opened.
+    val settingsVm by lazy { koin.get<SettingsViewModel>() }
 
     val menuController = koin.get<MenuController>()
 
@@ -386,15 +394,15 @@ fun main(args: Array<String>) {
         var windowVisible by remember { mutableStateOf(!saved.startMinimized) }
         // Mirrors windowVisible's role: mutated inside Window{}'s content (the only place
         // LocalWindowInfo.current is resolvable, see the LaunchedEffect further down) and read
-        // here, before Window{} is even composed, by the Windows/Linux tray-fallback's
-        // onTrayAction below - it needs to know whether a click should hide the window (visible
-        // and focused - a deliberate icon click) or bring it to front (everything else, which
-        // also covers a notification click landing while the window is merely backgrounded).
+        // here, before Window{} is even composed, by the tray's onIconClick/onTrayAction below -
+        // they need to know whether a click should hide the window (shown and focused - a
+        // deliberate icon click) or bring it to front (everything else, which also covers a
+        // minimized window and a notification click landing while it is merely backgrounded).
         var windowFocused by remember { mutableStateOf(false) }
-        // Read by onTrayAction below (see shouldHideOnTrayAction) so a notification-balloon click
+        // Read by onTrayAction below (see trayIconAction) so a notification-balloon click
         // landing while the window happens to already be visible and focused still activates
         // instead of hiding it, on the Windows/Linux fallback where the two clicks share one hook.
-        var lastNotificationSentAtMillis by remember { mutableStateOf(0L) }
+        var lastNotificationSentAtMillis by remember { mutableStateOf(NO_NOTIFICATION_MILLIS) }
         val windowState = remember {
             val restored = restoredWindowState(saved, screenBounds())
             WindowState(
@@ -431,7 +439,7 @@ fun main(args: Array<String>) {
         }
 
         // Tracks when a new-article notification was last sent, for onTrayAction's recency bias
-        // below (shouldHideOnTrayAction). A plain additional collector of the same SharedFlow
+        // below (trayIconAction). A plain additional collector of the same SharedFlow
         // KeryxTray itself collects - safe and already the established pattern for this flow.
         LaunchedEffect(Unit) {
             newArticleNotifications.collect { lastNotificationSentAtMillis = SystemClock.nowMillis() }
@@ -488,16 +496,42 @@ fun main(args: Array<String>) {
         val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
         val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
 
+        // The tray's update entry acts on the settings dialog's Updates tab, so it is disabled while
+        // Settings is unreachable (first-run Setup) — the same gate the Help menu's copy follows.
+        val currentScreen by menuController.currentScreen.collectAsState()
+
+        // Every tray route ends here: the decision is the route's own pure function in
+        // tray/TrayActionPolicy.kt, the effect is applied in this one place.
+        fun applyTrayWindowAction(action: TrayWindowAction) {
+            when (action) {
+                TrayWindowAction.Hide -> windowVisible = false
+                TrayWindowAction.Activate -> activationRequests.tryEmit(Unit)
+            }
+        }
+
         KeryxTray(
             sniConnection = sniConnection,
             notificationIcon = dockBaseImage,
             unreadCount = unreadCount,
-            windowVisible = windowVisible,
+            // trayWindowShown (tray/TrayActionPolicy.kt): a minimized window is not "shown", so
+            // every tray offers "Show" for it and showing goes through activationRequests, which
+            // un-minimizes, raises and focuses it — the one path every "show" route takes.
+            windowShown = trayWindowShown(windowVisible, windowState.isMinimized),
             updateStateFlow = updateRepository.state,
-            onToggle = { windowVisible = !windowVisible },
+            settingsReachable = currentScreen == Screen.Home,
+            onToggle = { applyTrayWindowAction(trayMenuToggleAction(windowVisible, windowState.isMinimized)) },
+            // macOS's left click and Linux SNI's Activate cannot be a notification click (see
+            // onNotificationClicked below), so no notification timestamp is passed for them.
+            onIconClick = {
+                applyTrayWindowAction(
+                    trayIconAction(windowVisible, windowState.isMinimized, windowFocused, SystemClock.nowMillis()),
+                )
+            },
             onQuit = exitApp,
             onUpdateAction = {
-                onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterViewModel)
+                onUpdateMenuItemClicked(
+                    updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
+                )
             },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
@@ -506,16 +540,16 @@ fun main(args: Array<String>) {
             // Windows/Linux-fallback's Compose Tray() has only one click hook shared between the
             // icon and a notification balloon (unlike onNotificationClicked above, which Linux SNI
             // can wire separately - see KeryxTray's KDoc; macOS has no equivalent, see
-            // known-issues.md), with no platform way to tell them apart. shouldHideOnTrayAction
-            // (tray/TrayActionPolicy.kt) decides: hide only what looks like a deliberate icon
+            // known-issues.md), with no platform way to tell them apart. trayIconAction
+            // (tray/TrayActionPolicy.kt) decides with the notification timestamp: hide only what looks like a deliberate icon
             // click, otherwise activate - see its KDoc for the exact heuristic and its documented
             // residual gap.
             onTrayAction = {
-                if (shouldHideOnTrayAction(windowVisible, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis)) {
-                    windowVisible = false
-                } else {
-                    activationRequests.tryEmit(Unit)
-                }
+                applyTrayWindowAction(
+                    trayIconAction(
+                        windowVisible, windowState.isMinimized, windowFocused, SystemClock.nowMillis(), lastNotificationSentAtMillis,
+                    ),
+                )
             },
             newArticleNotifications = newArticleNotifications,
         )
@@ -718,97 +752,34 @@ fun main(args: Array<String>) {
  * tray and, identically, in the application menu bar's Help menu (see `tray/UpdateMenuEntry.kt`'s
  * `updateMenuEntry`, which resolves the matching label and enabled flag from the same [state]).
  *
- * - [UpdateState.Idle]/[UpdateState.UpToDate]: run a check, and surface the result where the user
- *   can act on it (see [checkForUpdateAndShowIfAvailable]).
- * - [UpdateState.Available]: start the download when this install form can actually apply it (and
- *   show the Updates tab so the user sees it actually happened — see [startAndShowUpdatesTab]),
- *   otherwise hand the release page to the browser — the same URL the notification center's own
- *   `OpenUrl` action uses for a non-installable update.
- * - [UpdateState.Failed]: retry (per-stage — see [UpdateRepository.performPrimaryAction]'s own KDoc),
- *   also via [startAndShowUpdatesTab].
- * - [UpdateState.Ready]: install, via [UpdateRepository.performPrimaryAction] alone — no Updates tab,
- *   since install is followed shortly by the app restarting and there is nothing worth showing it for.
- * - Everything else is an action already in flight, and the menu entry is disabled in those states
- *   anyway; a click from a stale menu is a deliberate no-op.
+ * Whatever [updateMenuAction] maps [state] to — other than [UpdateMenuAction.None], an action
+ * already in flight (the entry is disabled then; a click from a stale menu is a deliberate no-op) —
+ * the window is brought to front and the settings dialog opened on its Updates tab through the
+ * [SettingsOpenRequests] router every Settings route uses, and then the action runs:
+ * [checkForUpdate] (meant to be `SettingsViewModel.checkForUpdate`, the same in-flight-guarded check
+ * the tab's own "check now" button and auto-check-on-open use) or [performPrimaryAction]
+ * (`UpdateRepository.performPrimaryAction`: download, per-stage retry, or install). The tab's inline
+ * status is the entry's only feedback, so an up-to-date, failed or non-installable result reads the
+ * same as it does after pressing "check now" there.
  *
- * [state] is passed in rather than read from [updateRepository] here so each call site can decide
- * how fresh a value it wants; both existing ones read `updateRepository.state.value` at click time.
- *
- * @param openUrl Seam for the release-page hand-off, so tests can exercise the non-installable
- * branch without launching a real browser ([BrowserOpener] is an `actual object` with no seam of
- * its own).
+ * [state] is passed in rather than read here so each call site can decide how fresh a value it
+ * wants; both existing ones read `updateRepository.state.value` at click time.
  */
 internal fun onUpdateMenuItemClicked(
     state: UpdateState,
-    scope: CoroutineScope,
-    updateRepository: UpdateRepository,
-    notificationCenterViewModel: NotificationCenterViewModel,
-    openUrl: (String) -> Unit = BrowserOpener::open,
+    settingsOpenRequests: SettingsOpenRequests,
+    checkForUpdate: () -> Unit,
+    performPrimaryAction: () -> Unit,
 ) {
-    when (state) {
-        UpdateState.Idle, UpdateState.UpToDate ->
-            checkForUpdateAndShowIfAvailable(scope, updateRepository, notificationCenterViewModel)
-        is UpdateState.Available ->
-            if (state.update.installable) {
-                startAndShowUpdatesTab(updateRepository, notificationCenterViewModel)
-            } else {
-                openUrl(state.update.releaseUrl)
-            }
-        is UpdateState.Failed -> startAndShowUpdatesTab(updateRepository, notificationCenterViewModel)
-        is UpdateState.Ready -> updateRepository.performPrimaryAction()
-        UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Installing -> Unit
-    }
-}
-
-/**
- * Starts whatever [UpdateRepository.performPrimaryAction] currently represents — a fresh download
- * ([UpdateState.Available]) or a per-stage retry ([UpdateState.Failed]) — and immediately raises the
- * window and opens the settings dialog on the Updates tab, so a user who clicked this from the
- * tray/app-menu (which closes right away) isn't left wondering whether anything happened until they
- * reopen it. [UpdateState.Ready] deliberately does NOT go through this — see [onUpdateMenuItemClicked].
- */
-private fun startAndShowUpdatesTab(updateRepository: UpdateRepository, notificationCenterViewModel: NotificationCenterViewModel) {
-    updateRepository.performPrimaryAction()
-    bringToFrontAndShowUpdatesTab(notificationCenterViewModel)
-}
-
-/**
- * Checks for an update and, if an installable one turns up, brings the window to front and opens
- * the settings dialog on its Updates tab.
- *
- * [UpdateRepository.check] is the only check implementation, and it already posts its own
- * `ShowSettingsTab("updates")` notification for an installable find, but navigation here goes
- * through [bringToFrontAndShowUpdatesTab] instead of that posted notification — see its own KDoc.
- *
- * Re-entrancy guard: a check already in flight is left alone, so a double click can't stack two.
- */
-private fun checkForUpdateAndShowIfAvailable(
-    scope: CoroutineScope,
-    updateRepository: UpdateRepository,
-    notificationCenterViewModel: NotificationCenterViewModel,
-) {
-    if (updateRepository.state.value is UpdateState.Checking) return
-    scope.launch {
-        updateRepository.check()
-        if (shouldOpenSettingsAfterUpdateCheck(updateRepository.state.value)) {
-            bringToFrontAndShowUpdatesTab(notificationCenterViewModel)
-        }
-    }
-}
-
-/**
- * Brings the window to front (the click may well have come from the tray while it was hidden) and
- * opens the settings dialog on the Updates tab — the same effect as clicking a `ShowSettingsTab` row
- * in the notification center (`NotificationCenterViewModel.requestAction` ->
- * [NotificationCenterViewModel.pendingAction] -> `App.kt`'s `LaunchedEffect(pendingAction)`), but
- * requested as a bare action with no notification behind it. This is deliberately independent of whatever [UpdateRepository.check] itself posts to the notification
- * center (that's for the bell's history), since [startAndShowUpdatesTab]'s callers never call
- * `check()` at all. Shared by both call sites so the two effects (raise window, navigate) can never
- * come apart.
- */
-private fun bringToFrontAndShowUpdatesTab(notificationCenterViewModel: NotificationCenterViewModel) {
+    val action = updateMenuAction(state)
+    if (action == UpdateMenuAction.None) return
     activationRequests.tryEmit(Unit)
-    notificationCenterViewModel.requestAction(AppNotificationAction.ShowSettingsTab("updates"))
+    settingsOpenRequests.request("updates")
+    when (action) {
+        UpdateMenuAction.Check -> checkForUpdate()
+        UpdateMenuAction.Primary -> performPrimaryAction()
+        UpdateMenuAction.None -> Unit
+    }
 }
 
 /**

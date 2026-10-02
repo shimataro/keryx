@@ -80,7 +80,6 @@ import works.merc.keryx.app.presentation.home.reorderTargetWithinScope
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
-import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
@@ -109,6 +108,7 @@ import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred
 import works.merc.keryx.app.resources.home_sync
+import works.merc.keryx.app.resources.home_sync_auth_failed
 import works.merc.keryx.app.resources.home_syncing
 import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
@@ -226,8 +226,8 @@ internal fun FeedListPane(
     DisposableEffect(Unit) {
         onDispose { onTextInputFocusChange(null) }
     }
-    // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item, mirroring
-    // ArticleListPane's rememberCopyUrlAction() for article rows.
+    // Shared by every feed row's "copy feed URL"/"copy site URL" context-menu item. Plain copy with
+    // no feedback: unlike an article's URL, there is no on-screen copy control to flash.
     val copyUrl = rememberCopyUrlAction()
 
     var showAddTag by remember { mutableStateOf(false) }
@@ -275,12 +275,25 @@ internal fun FeedListPane(
     // items (via MenuCommand.RenameFeed/UnsubscribeFeed): resolve the currently selected filter
     // against this pane's own already-collected rows and start the same inline edit (or open the
     // same confirmation dialog) the context menu's Rename/Edit and Unsubscribe/Delete items do.
-    fun startInlineRenameForSelection() {
-        inlineEdit = resolveFeedListSelectionTarget(filter, feeds, folders, tags)
-            ?.toInlineEditTarget(selectedRowInstance)
+    // A selection can be hidden inside a collapsed folder (a feed selected before its folder was
+    // collapsed), and an editor needs a rendered row to live in, so the row's own container is
+    // expanded first (vm.revealFeedListRow — only that exact instance's folder or tag, never another
+    // copy's).
+    //
+    // The selection is resolved once per change of its inputs rather than by each caller. A State
+    // (not a plain remembered val), because the callers run from effects launched once
+    // (LaunchedEffect(Unit) below) and must read the current target, not the first composition's.
+    val selectionTarget by remember {
+        derivedStateOf { resolveFeedListSelectionTarget(filter, feeds, folders, tags) }
     }
+    fun startInlineRenameForSelection() {
+        val target = selectionTarget?.toInlineEditTarget(selectedRowInstance)
+        if (target != null) vm.revealFeedListRow(target.rowInstance)
+        inlineEdit = target
+    }
+    fun selectedFeedId(): String? = (selectionTarget as? FeedListSelectionTarget.Feed)?.feed?.id
     fun openDeleteDialogForSelection() {
-        when (val target = resolveFeedListSelectionTarget(filter, feeds, folders, tags)) {
+        when (val target = selectionTarget) {
             is FeedListSelectionTarget.Feed -> confirmingUnsubscribeFeed = target.feed
             is FeedListSelectionTarget.Folder -> confirmingDeleteFolder = target.folder
             is FeedListSelectionTarget.Tag -> confirmingDeleteTag = target.tag
@@ -306,6 +319,10 @@ internal fun FeedListPane(
                 MenuCommand.AddTag -> showAddTag = true
                 MenuCommand.RenameFeed -> startInlineRenameForSelection()
                 MenuCommand.UnsubscribeFeed -> openDeleteDialogForSelection()
+                // Same create dialogs as a feed row's "New folder…"/"New tag…" items: on confirm,
+                // they file the feed into the new folder / attach the new tag.
+                MenuCommand.NewFolderForSelectedFeed -> selectedFeedId()?.let { creatingFolderForFeedId = it }
+                MenuCommand.NewTagForSelectedFeed -> selectedFeedId()?.let { creatingTagForFeedId = it }
                 else -> {}
             }
         }
@@ -374,23 +391,30 @@ internal fun FeedListPane(
         if (index != null) listState.scrollToIndexIfNeeded(index)
     }
 
+    // Reordering — the drag gesture and its screen-reader "move up/down" actions alike — stands
+    // aside while any row is being renamed: the drag would steal a text-selection sweep from the
+    // field, and every route to an action must agree on when it is available.
+    val reorderAllowed = inlineEdit == null
+    // A row's screen-reader "move up/down" target, or null (no action offered) at the edge of its
+    // scope or while reordering stands aside.
+    fun reorderTarget(orderedIds: List<String>, index: Int, delta: Int) =
+        if (reorderAllowed) reorderTargetWithinScope(orderedIds, index, delta) else null
+
+    // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
+    // the list — computed once per composition from the same collected state the rows render from.
+    val editRowIndex = inlineEdit?.let { target ->
+        feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+    }
+
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
     // view, and an editor the user cannot see would swallow every keystroke with nothing to show.
     // target.rowInstance is the exact rendered row the edit is on (a feed's folder-group row, or the
     // specific tag-nested copy it was selected through — see InlineEditTarget), so this never scrolls
-    // to (or expands the folder behind) the wrong copy of the same feed.
-    LaunchedEffect(inlineEdit) {
-        val target = inlineEdit ?: return@LaunchedEffect
-        val index = feedListRowIndex(
-            target.rowInstance,
-            feeds,
-            folders,
-            tags,
-            collapsedFolderIds,
-            feedTagMap,
-            expandedTagIds,
-        ) ?: return@LaunchedEffect
-        listState.scrollToIndexIfNeeded(index)
+    // to the wrong copy of the same feed. Keyed on the row's appearance too: a row revealed by
+    // startInlineRenameForSelection's folder expansion only renders once the collected collapse
+    // state catches up, a frame after the edit started.
+    LaunchedEffect(inlineEdit, editRowIndex != null) {
+        if (editRowIndex != null) listState.scrollToIndexIfNeeded(editRowIndex)
     }
 
     // An in-progress edit's row can vanish out from under it — its tag collapses, the feed is
@@ -399,18 +423,29 @@ internal fun FeedListPane(
     // stay stuck, permanently suppressing bare-key shortcuts and drag-reordering. Deliberately does
     // not scroll — only clears the stranded state — so it never fights a user who scrolled away for
     // unrelated reasons.
-    LaunchedEffect(inlineEdit, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+    //
+    // "Vanished" means the row was rendered for this edit and no longer is (editRowSeen). A row not
+    // rendered *yet* is not stranded: revealing a collapsed folder updates the ViewModel at once but
+    // reaches collapsedFolderIds above only on a later frame, so clearing on that first frame would
+    // cancel every rename that needed the reveal. A row the ViewModel's live state can't render
+    // either is cleared at once, so an edit can never wait forever on a row that will never come.
+    var editRowSeen by remember(inlineEdit) { mutableStateOf(false) }
+    LaunchedEffect(inlineEdit, editRowIndex) {
         val target = inlineEdit ?: return@LaunchedEffect
-        val stillRendered = feedListRowIndex(
+        if (editRowIndex != null) {
+            editRowSeen = true
+            return@LaunchedEffect
+        }
+        val renderableNow = feedListRowIndex(
             target.rowInstance,
             feeds,
             folders,
             tags,
-            collapsedFolderIds,
+            vm.collapsedFolderIds.value,
             feedTagMap,
-            expandedTagIds,
+            vm.expandedTagIds.value,
         ) != null
-        if (!stillRendered) inlineEdit = null
+        if (editRowSeen || !renderableNow) inlineEdit = null
     }
 
     FeedListAutoScrollEffect(dragPointerYState, hostBoundsState, listState, dragController)
@@ -511,7 +546,7 @@ internal fun FeedListPane(
                     // The drag gesture watches the *Initial* pointer pass on this ancestor Box, so
                     // without this gate a press-and-sweep to select text inside an open inline
                     // editor would be stolen from the field and turned into a row drag.
-                    .feedListReorderDrag(dragController, enabled = inlineEdit == null, isTouchPrimary = isTouchPrimary),
+                    .feedListReorderDrag(dragController, enabled = reorderAllowed, isTouchPrimary = isTouchPrimary),
             ) {
                 // Every slot below carries an explicit key and contentType. This list interleaves
                 // several structurally different row kinds, and an unkeyed `item {}` falls back to an
@@ -588,17 +623,17 @@ internal fun FeedListPane(
                                 onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                                 onCopyFeedUrl = { copyUrl(feed.url) },
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
-                                onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
+                                onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                 isTouchPrimary = isTouchPrimary,
                                 onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
                                 onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
-                                onMoveUp = reorderTargetWithinScope(feedIdsInGroup, index, -1)?.let { target ->
+                                onMoveUp = reorderTarget(feedIdsInGroup, index, -1)?.let { target ->
                                     { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
                                 },
-                                onMoveDown = reorderTargetWithinScope(feedIdsInGroup, index, 1)?.let { target ->
+                                onMoveDown = reorderTarget(feedIdsInGroup, index, 1)?.let { target ->
                                     { vm.moveFeed(feed.id, folderId, target.insertBeforeId) }
                                 },
                             )
@@ -665,10 +700,10 @@ internal fun FeedListPane(
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.
-                                    onMoveUp = reorderTargetWithinScope(folderIds, folderIndex, -1)?.let { target ->
+                                    onMoveUp = reorderTarget(folderIds, folderIndex, -1)?.let { target ->
                                         { vm.reorderFolders(folder.id, target.insertBeforeId) }
                                     },
-                                    onMoveDown = reorderTargetWithinScope(folderIds, folderIndex, 1)?.let { target ->
+                                    onMoveDown = reorderTarget(folderIds, folderIndex, 1)?.let { target ->
                                         { vm.reorderFolders(folder.id, target.insertBeforeId) }
                                     },
                                 )
@@ -757,7 +792,7 @@ internal fun FeedListPane(
                                     onUnsubscribe = { confirmingUnsubscribeFeed = feed },
                                     onCopyFeedUrl = { copyUrl(feed.url) },
                                     onCopySiteUrl = { feed.site_url?.let(copyUrl) },
-                                    onOpenSite = { feed.site_url?.let(BrowserOpener::open) },
+                                    onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                     isTouchPrimary = isTouchPrimary,
                                     onMoveUp = null,
                                     onMoveDown = null,
@@ -865,7 +900,9 @@ private fun FeedListAutoScrollEffect(
 /**
  * [FeedListPane]'s top toolbar row: an `app_name` title on a platform with no native application
  * menu bar (see [hasNativeAppMenu] below — desktop's own window title bar already names the app,
- * so this stays untitled there), then add feed / refresh all / cloud sync (when [cloudConnected]).
+ * so this stays untitled there), then add feed / refresh all / cloud sync (shown when
+ * [cloudConnected], enabled by `HomeViewModel.canSyncNow` — the predicate every "Sync now" route
+ * shares).
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
  *
@@ -926,10 +963,19 @@ private fun FeedListToolbarRow(
                     }
                 }
                 if (cloudConnected) {
+                    // Enabled exactly when every other "Sync now" route is (ManualSync.canSyncNow).
+                    // The one disabled state the user must act on — an expired sign-in — says so;
+                    // that decision is the shared ManualSync.disabledByAuth, not combined here.
+                    val canSyncNow by vm.canSyncNow.collectAsState()
+                    val syncDisabledByAuth by vm.syncDisabledByAuth.collectAsState()
                     val syncTooltip = stringResource(
-                        if (syncing) Res.string.home_syncing else Res.string.home_sync,
+                        when {
+                            syncing -> Res.string.home_syncing
+                            syncDisabledByAuth -> Res.string.home_sync_auth_failed
+                            else -> Res.string.home_sync
+                        },
                     )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = activity.idle) {
+                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = canSyncNow) {
                         if (syncing) {
                             SmallSpinner()
                         } else {

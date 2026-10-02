@@ -1,9 +1,5 @@
 import KeryxShared
 import SwiftUI
-#if os(macOS)
-import AppKit
-import UniformTypeIdentifiers
-#endif
 
 /// The application menu bar's dynamic items (File/View/Article/Feed/Help) — see
 /// `presentation/menu/MenuState.kt`'s `computeMenuUiState` for the enabled/checked rules this
@@ -26,7 +22,9 @@ struct HomeCommands: Commands {
     /// Return/Delete against the menu before any view's own `.onKeyPress`/text field ever sees it —
     /// so Backspace inside `NamePromptSheet`'s text field, or Return/Delete while the article list or
     /// reader holds focus, would trigger the sidebar's rename/delete instead of editing text or doing
-    /// nothing, acting on whatever the sidebar happens to have selected underneath.
+    /// nothing, acting on whatever the sidebar happens to have selected underneath. Fed to
+    /// `sdk.menuState` as `feedListKeysActive`; the items read the resulting
+    /// `renameOrDeleteShortcutActive` and are otherwise left clickable (detach, don't disable).
     private var bareKeysActive: Bool {
         focusedPane.flatMap { $0 } == .feedList
             && !model.sidebarDialogs.isPresenting && !model.sidebarDialogs.isEditingInline
@@ -52,10 +50,12 @@ struct HomeCommands: Commands {
                     .disabled(!state.addItemsEnabled)
                 #if os(macOS)
                 Divider()
-                Button(L("menu_file_import_opml")) { importOpml() }
+                // Both only ask; `OpmlRequestPresenter` (Home) then shows Settings ▸ Data, which
+                // carries the request out with its own panel, spinner and result.
+                Button(L("menu_file_import_opml")) { model.opmlTransfer?.request(OpmlRequestImportFile.shared) }
                     .keyboardShortcut("i", modifiers: .command)
                     .disabled(!state.opmlEnabled)
-                Button(L("menu_file_export_opml")) { exportOpml() }
+                Button(L("menu_file_export_opml")) { model.opmlTransfer?.request(OpmlRequestExportFile.shared) }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(!state.opmlEnabled)
                 #endif
@@ -98,19 +98,21 @@ struct HomeCommands: Commands {
                 Button(L("menu_article_toggle_star")) { home.viewModel.toggleStarSelected() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(!state.articleActionsEnabled)
+                // Same grouping as the Compose menu bar's Article menu (`AppMenuTree.kt`) and the
+                // article row's context menu (`ArticleRowView`).
+                Divider()
                 Button(L("menu_article_open_in_browser")) {
-                    if let url = home.selectedArticle?.url { openInBrowser(url) }
+                    openInBrowserIfAllowed(home.selectedArticle?.url)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
-                .disabled(!state.urlActionsEnabled)
+                .disabled(!state.openInBrowserEnabled)
                 Button(L("menu_article_copy_url")) {
-                    if let url = home.selectedArticle?.url {
-                        copyToPasteboard(url)
-                        home.pulseCopy()
+                    if let article = home.selectedArticle {
+                        home.copyArticleUrl(url: article.url, articleId: article.id)
                     }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(!state.urlActionsEnabled)
+                .disabled(!state.copyUrlEnabled)
             }
         }
 
@@ -123,8 +125,8 @@ struct HomeCommands: Commands {
                     .disabled(!state.syncEnabled)
                 Divider()
                 // The rest all act on the currently selected feed-list item, matching Compose's own
-                // Feed menu (`AppMenuTree.kt:275-324`) exactly: Refresh, Tags ▸, Move to folder ▸, a
-                // separator, the URL/site actions, a separator, Rename, a separator, Unsubscribe —
+                // Feed menu (`AppMenuTree.kt`) exactly: Refresh, Tags ▸, Move to folder ▸ (each closing
+                // with its "New …" item), a separator, the URL/site actions, a separator, Rename, a separator, Unsubscribe —
                 // Rename/Unsubscribe alone use `renameOrDeleteEnabled` (they act on whatever's
                 // selected — feed, folder or tag — not only a feed).
                 Button(L("home_refresh")) {
@@ -142,6 +144,11 @@ struct HomeCommands: Commands {
                             ))
                         }
                     }
+                    // Closes the submenu like the sidebar row's own menu (`FeedListView+SourceList`)
+                    // and Compose's `AppMenuTree.kt`, so Tags is never empty.
+                    Button(L("home_new_tag")) {
+                        if let feed = selectedFeed(home) { model.sidebarDialogs.creatingTagForFeed = feed }
+                    }
                 }
                 .disabled(!state.feedActionsEnabled)
 
@@ -157,6 +164,7 @@ struct HomeCommands: Commands {
                                 set: { _ in home.viewModel.moveFeed(feedId: feed.id, folderId: folder.id, targetFeedId: nil) }
                             ))
                         }
+                        Button(L("home_new_folder")) { model.sidebarDialogs.creatingFolderForFeed = feed }
                     }
                 }
                 .disabled(!state.feedActionsEnabled)
@@ -165,29 +173,27 @@ struct HomeCommands: Commands {
                 Button(L("home_copy_feed_url")) {
                     if let feed = selectedFeed(home) {
                         copyToPasteboard(feed.url)
-                        home.pulseCopy()
                     }
                 }
                 .disabled(!state.feedActionsEnabled)
                 Button(L("home_copy_site_url")) {
                     if let site = selectedFeed(home)?.site_url {
                         copyToPasteboard(site)
-                        home.pulseCopy()
                     }
                 }
-                .disabled(!state.feedSiteUrlActionsEnabled)
+                .disabled(!state.feedSiteCopyEnabled)
                 Button(L("home_open_site")) {
-                    if let site = selectedFeed(home)?.site_url { openInBrowser(site) }
+                    openInBrowserIfAllowed(selectedFeed(home)?.site_url)
                 }
-                .disabled(!state.feedSiteUrlActionsEnabled)
+                .disabled(!state.feedSiteOpenEnabled)
 
                 Divider()
                 Button(renameLabel(home)) { performRename(home) }
-                    .keyboardShortcut(bareKeysActive ? KeyboardShortcut(.return, modifiers: []) : nil)
+                    .keyboardShortcut(state.renameOrDeleteShortcutActive ? KeyboardShortcut(.return, modifiers: []) : nil)
                     .disabled(!state.renameOrDeleteEnabled)
                 Divider()
                 Button(deleteLabel(home), role: .destructive) { performDelete(home) }
-                    .keyboardShortcut(bareKeysActive ? KeyboardShortcut(.delete, modifiers: []) : nil)
+                    .keyboardShortcut(state.renameOrDeleteShortcutActive ? KeyboardShortcut(.delete, modifiers: []) : nil)
                     .disabled(!state.renameOrDeleteEnabled)
             }
         }
@@ -199,41 +205,51 @@ struct HomeCommands: Commands {
     }
 
     /// `sdk.menuState(...)` needs several booleans this app doesn't track anywhere else yet
-    /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`hasRenamableSelection`); resolved the same way
+    /// (`hasSelectedFeed`/`selectedFeedHasSiteUrl`/`selectedFeedSiteCanOpenInBrowser`/
+    /// `hasRenamableSelection`); resolved the same way
     /// `HomeView`'s own rename/delete keyboard handling does, via `resolveFeedListSelectionTarget`
     /// (kept by `HomeObservable.feedListSelectionTarget`). Everything read here is a narrow value
     /// `HomeObservable` only reassigns when it changes, so an article selection alone does not
     /// rebuild the menu bar.
-    /// `textInputFocused` reads `HomeObservable`'s own mirror of `HomeView`'s `focusedPane`, so
-    /// this reacts to the search field the same way `HomeShortcutsKt.homeShortcutFor` does.
+    /// `feedListKeysActive` is `bareKeysActive` (the sidebar holds keyboard focus, no sheet or inline
+    /// editor is up), so `state.renameOrDeleteShortcutActive` — not a second copy of the rule here —
+    /// decides whether Rename/Delete carry their bare Return/Delete accelerator; the items
+    /// themselves stay enabled with any selection, matching Compose's `AppMenuTree.kt`.
     private func menuState(_ home: HomeObservable) -> MenuUiState {
         let target = selectionTarget(home)
         var hasSelectedFeed = false
         var selectedFeedHasSiteUrl = false
+        var selectedFeedSiteCanOpenInBrowser = false
         if let target, case .feed(let f) = onEnum(of: target) {
             hasSelectedFeed = true
             selectedFeedHasSiteUrl = ArticleListModelKt.hasUsableUrl(url: f.feed.site_url)
+            selectedFeedSiteCanOpenInBrowser = ArticleListModelKt.canOpenInBrowser(url: f.feed.site_url)
         }
         guard let sdk = model.sdk else {
             return MenuUiState(
                 addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, unreadOnlyEnabled: false,
                 unreadOnlyChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
-                articleActionsEnabled: false, urlActionsEnabled: false, refreshAllEnabled: false,
+                articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
+                refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,
-                feedSiteUrlActionsEnabled: false, renameOrDeleteEnabled: false
+                feedSiteCopyEnabled: false, feedSiteOpenEnabled: false, renameOrDeleteEnabled: false,
+                renameOrDeleteShortcutActive: false
             )
         }
         return sdk.menuState(
             onHome: !model.needsSetup,
             hasSelectedArticle: home.hasSelectedArticle,
             selectedArticleHasUrl: home.selectedArticleHasUsableUrl,
-            cloudConnected: home.cloudConnected,
+            selectedArticleCanOpenInBrowser: home.selectedArticleCanOpenInBrowser,
+            canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
             unreadOnly: home.unreadOnly,
+            opmlBusy: model.opmlTransfer?.isBusy ?? false,
             hasSelectedFeed: hasSelectedFeed,
-            textInputFocused: home.textInputFocused,
+            feedListKeysActive: bareKeysActive,
             hasRenamableSelection: target != nil,
-            selectedFeedHasSiteUrl: selectedFeedHasSiteUrl
+            selectedFeedHasSiteUrl: selectedFeedHasSiteUrl,
+            selectedFeedSiteCanOpenInBrowser: selectedFeedSiteCanOpenInBrowser
         )
     }
 
@@ -290,33 +306,4 @@ struct HomeCommands: Commands {
         case .tag(let t): model.sidebarDialogs.deletingTag = t.tag
         }
     }
-
-    #if os(macOS)
-    /// Shares `AppModel.opmlTransfer`'s busy-guard and result state with the Data settings tab
-    /// (`DataSettingsTab.swift`), so triggering this from the menu can't race a run already started
-    /// from there, matching Compose's own `SettingsViewModel` routing both entry points through one
-    /// state (`AppMenuBar.kt`).
-    private func importOpml() {
-        guard let opmlTransfer = model.opmlTransfer, !opmlTransfer.isBusy else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml, .xml]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        opmlTransfer.importOpml(from: url)
-    }
-
-    private func exportOpml() {
-        guard let opmlTransfer = model.opmlTransfer, let document = opmlTransfer.exportDocument() else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml]
-        panel.nameFieldStringValue = "keryx.opml"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try document.text.write(to: url, atomically: true, encoding: .utf8)
-            opmlTransfer.reportExportResult(.success(url))
-        } catch {
-            opmlTransfer.reportExportResult(.failure(error))
-        }
-    }
-    #endif
 }

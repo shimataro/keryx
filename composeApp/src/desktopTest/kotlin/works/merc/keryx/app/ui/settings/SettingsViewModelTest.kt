@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
@@ -23,9 +24,12 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.withTimeout
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
+import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
@@ -68,7 +72,13 @@ import works.merc.keryx.app.platform.PathPickedFile
 import works.merc.keryx.app.platform.PickedFile
 import works.merc.keryx.app.platform.SaveFileRequest
 import works.merc.keryx.app.presentation.settings.CloudSyncController
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import works.merc.keryx.app.presentation.settings.OpmlOperation
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlResult
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.settings_export_opml
@@ -99,8 +109,12 @@ private class FakeFileSelector(
     var lastSaveRequest: SaveFileRequest? = null
         private set
 
+    var openCount = 0
+        private set
+
     override suspend fun pickOpenFile(request: OpenFileRequest): PickedFile? {
         lastOpenRequest = request
+        openCount++
         return openPath?.let(::PathPickedFile)
     }
 
@@ -133,12 +147,33 @@ private class CountingDispatcher : CoroutineDispatcher() {
     }
 }
 
+/**
+ * Holds every dispatched block until [runQueued], so a test can observe what was launched before
+ * any of it has run — e.g. that two back-to-back calls launched only one coroutine.
+ */
+private class QueueingDispatcher : CoroutineDispatcher() {
+    private val queue = java.util.concurrent.ConcurrentLinkedQueue<Runnable>()
+    val queuedCount: Int get() = queue.size
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        queue.add(block)
+    }
+
+    fun runQueued() {
+        while (true) (queue.poll() ?: return).run()
+    }
+}
+
 /** Throws [CancellationException] the moment work is dispatched to it — simulates the coroutine being cancelled mid-`withContext`. */
 private class CancellingDispatcher : CoroutineDispatcher() {
     override fun dispatch(context: CoroutineContext, block: Runnable) {
         throw CancellationException("cancelled for test")
     }
 }
+
+private const val ONE_FEED_OPML = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
+private const val TWO_FEED_OPML =
+    """<opml><body><outline text="A" xmlUrl="https://ex.com/a"/><outline text="B" xmlUrl="https://ex.com/b"/></body></opml>"""
 
 /**
  * [SettingsViewModel] is now a thin wrapper around [CloudSyncController] / [PreferencesController]
@@ -162,6 +197,12 @@ class SettingsViewModelTest {
     private val createdViewModels = mutableListOf<SettingsViewModel>()
     private val createdCloudSyncControllers = mutableListOf<CloudSyncController>()
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
+
+    /** The [OpmlTransferController] behind the last [newViewModel] — what the File menu would call. */
+    private lateinit var lastOpmlController: OpmlTransferController
+
+    /** The app scope behind [lastOpmlController], where its imports run. */
+    private lateinit var lastOpmlScope: CoroutineScope
 
     @BeforeTest
     fun setUp() {
@@ -202,6 +243,28 @@ class SettingsViewModelTest {
             <item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
             </channel></rss>"""
         val client = HttpClient(MockEngine { respond(rss, HttpStatusCode.OK) }) {
+            followRedirects = false
+            expectSuccess = false
+            install(HttpTimeout)
+        }
+        return FeedFetcher(client)
+    }
+
+    /**
+     * [succeedingFetcher], with every response held until [gate] completes; [started] completes once
+     * a request has reached it.
+     */
+    private fun gatedSucceedingFetcher(gate: CompletableDeferred<Unit>, started: CompletableDeferred<Unit>? = null): FeedFetcher {
+        val rss = """<?xml version="1.0"?><rss version="2.0"><channel>
+            <title>Feed</title><link>https://ex.com</link>
+            </channel></rss>"""
+        val client = HttpClient(
+            MockEngine {
+                started?.complete(Unit)
+                gate.await()
+                respond(rss, HttpStatusCode.OK)
+            },
+        ) {
             followRedirects = false
             expectSuccess = false
             install(HttpTimeout)
@@ -257,6 +320,9 @@ class SettingsViewModelTest {
         // matches the rest of newViewModel's Unconfined setup; a test can supply a CountingDispatcher
         // to assert it was actually used.
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // Where the OpmlTransferController runs an import; a test can supply a HoldingDispatcher to
+        // keep a cancelled import from stopping until it says so.
+        opmlImportDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): SettingsViewModel {
         val clock = Clock { 0L }
         val syncScheduler = SyncScheduler {}
@@ -271,6 +337,12 @@ class SettingsViewModelTest {
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
         val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
         val opmlTransfer = OpmlTransfer(feedRepository, folderRepository, tagRepository, opmlImporter)
+        // Stands in for the app scope the controller runs imports on.
+        val opmlScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also {
+            createdSyncScopes += it
+            lastOpmlScope = it
+        }
+        val opmlController = OpmlTransferController(opmlTransfer, opmlScope, opmlImportDispatcher).also { lastOpmlController = it }
         // Unconfined write dispatcher so saveLocalSettings persists inline.
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
@@ -300,12 +372,13 @@ class SettingsViewModelTest {
         )
         val cloudSyncController = CloudSyncController(
             cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository), ActivityCenter(),
+            settingsRepository,
             // Unconfined so connectDelegatesToCloudSyncController's testScheduler.advanceUntilIdle()
             // actually observes the token-save/sync hop, rather than it landing on a real thread.
             Dispatchers.Unconfined,
         ).also { createdCloudSyncControllers += it }
         return SettingsViewModel(
-            cloudSyncController, preferencesController, opmlTransfer, updateRepository, dispatcher, fileSelector,
+            cloudSyncController, preferencesController, opmlController, updateRepository, dispatcher, fileSelector,
         ).also { createdViewModels += it }
     }
 
@@ -344,7 +417,7 @@ class SettingsViewModelTest {
         assertEquals(UpdateState.Idle, vm.updateState.value)
 
         vm.checkForUpdate()
-        awaitTrue { vm.updateState.value is UpdateState.Available }
+        awaitConditionBlocking { vm.updateState.value is UpdateState.Available }
 
         val result = vm.updateState.value
         assertIs<UpdateState.Available>(result)
@@ -369,11 +442,53 @@ class SettingsViewModelTest {
         val vm = newViewModel(updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")))
 
         vm.checkForUpdate()
-        awaitTrue { vm.updateState.value is UpdateState.Checking }
+        awaitConditionBlocking { vm.updateState.value is UpdateState.Checking }
         vm.checkForUpdate() // ignored: a check is already in flight
 
-        awaitTrue { vm.updateState.value is UpdateState.Available }
+        awaitConditionBlocking { vm.updateState.value is UpdateState.Available }
         assertEquals(1, requestCount)
+    }
+
+    /**
+     * The tray/Help menu's update entry runs a check and opens the Updates tab, whose own
+     * check-on-open then calls [SettingsViewModel.checkForUpdate] again — before the first check has
+     * had a chance to reach [UpdateState.Checking]. The second call must still be a no-op.
+     */
+    @Test
+    fun checkForUpdateIgnoresASecondCallBeforeTheFirstHasStarted() {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount++
+                respond(
+                    """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
+                    HttpStatusCode.OK,
+                )
+            },
+        ) { expectSuccess = false }
+        val dispatcher = QueueingDispatcher()
+        val vm = newViewModel(
+            updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")),
+            dispatcher = dispatcher,
+        )
+
+        vm.checkForUpdate()
+        vm.checkForUpdate()
+
+        assertEquals(UpdateState.Idle, vm.updateState.value, "neither check has started running yet")
+        assertEquals(1, dispatcher.queuedCount, "only one check may be launched")
+        awaitConditionBlocking {
+            dispatcher.runQueued()
+            vm.updateState.value is UpdateState.Available
+        }
+        assertEquals(1, requestCount)
+
+        // Once it has finished, the guard is released: a later check runs again.
+        vm.checkForUpdate()
+        awaitConditionBlocking {
+            dispatcher.runQueued()
+            requestCount == 2
+        }
     }
 
     // --- OPML (file picking + busy state) ---
@@ -387,7 +502,7 @@ class SettingsViewModelTest {
         vm.exportOpml()
 
         // The write runs on the injected (non-test) dispatcher, so it's a real, non-virtual hop.
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Exported, vm.opmlResult.value)
         val written = FileIO.readText(path)
         assertNotNull(written)
@@ -429,7 +544,7 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Exported, vm.opmlResult.value)
         assertTrue(counting.dispatchCount > 0)
     }
@@ -443,7 +558,7 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.ExportFailed, vm.opmlResult.value)
     }
 
@@ -455,7 +570,7 @@ class SettingsViewModelTest {
         vm.exportOpml()
 
         assertNull(vm.opmlResult.value)
-        assertFalse(vm.exportingOpml.value)
+        assertFalse(vm.opmlBusy.value)
     }
 
     @Test
@@ -468,7 +583,7 @@ class SettingsViewModelTest {
         vm.importOpml()
 
         // The read + import (network fetch, DB writes) run on the injected (non-test) dispatcher.
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         val result = vm.opmlResult.value
         assertIs<OpmlResult.Imported>(result)
         assertEquals(1, result.added)
@@ -503,11 +618,51 @@ class SettingsViewModelTest {
         vm.importOpml()
 
         assertNull(vm.opmlResult.value)
-        assertFalse(vm.importingOpml.value)
+        assertFalse(vm.opmlBusy.value)
     }
 
     @Test
-    fun importOpmlRunsTheReadAndImportOnTheInjectedDispatcher() = runTest {
+    fun cancellingTheViewModelKeepsOpmlBusyUntilTheImportHasStopped() {
+        val path = FileIO.join(dir, "import-vm-cancel.opml")
+        FileIO.writeText(path, ONE_FEED_OPML)
+        val started = CompletableDeferred<Unit>()
+        val importDispatcher = HoldingDispatcher()
+        val vm = newViewModel(
+            feedFetcher = gatedSucceedingFetcher(gate = CompletableDeferred(), started = started),
+            fileSelector = FakeFileSelector(openPath = path),
+            opmlImportDispatcher = importDispatcher,
+        )
+
+        vm.importOpml()
+        runBlocking { withTimeout(5_000) { started.await() } }
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+        val import = lastOpmlScope.coroutineContext.job.children.single()
+
+        // From here on, the import cannot finish (not even its own cancellation) until released.
+        importDispatcher.hold()
+        // Released in finally too, so a failing assertion cannot strand the import and hang the teardown.
+        try {
+            vm.viewModelScope.cancel()
+            // Only importOpml's own cancellation cancels the import (it runs on the app scope); once that
+            // has happened and a step of the import is held, the import is still running.
+            awaitConditionBlocking { import.isCancelled && importDispatcher.queuedCount > 0 }
+            assertEquals(OpmlOperation.Importing, vm.opmlRunning.value, "busy until the import has actually stopped")
+            assertTrue(vm.opmlBusy.value)
+            assertFalse(import.isCompleted, "the import is still running")
+
+            importDispatcher.release()
+            awaitConditionBlocking { vm.opmlRunning.value == null }
+
+            assertTrue(import.isCompleted, "busy was released only after the import stopped")
+            assertFalse(vm.opmlBusy.value)
+            assertNull(vm.opmlResult.value, "a cancelled import records no result")
+        } finally {
+            importDispatcher.release()
+        }
+    }
+
+    @Test
+    fun importOpmlRunsTheFileReadOnTheInjectedDispatcher() = runTest {
         val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
         val path = FileIO.join(dir, "import-dispatcher.opml")
         FileIO.writeText(path, xml)
@@ -520,7 +675,7 @@ class SettingsViewModelTest {
 
         vm.importOpml()
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertIs<OpmlResult.Imported>(vm.opmlResult.value)
         assertTrue(counting.dispatchCount > 0)
     }
@@ -531,23 +686,122 @@ class SettingsViewModelTest {
         val vm = newViewModel(fileSelector = selector)
 
         vm.importOpml()
-        assertTrue(vm.importingOpml.value)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+        assertTrue(vm.opmlBusy.value, "busy from the moment the file dialog opens")
 
-        // Guarded no-op: importingOpml is still true, so this must not touch exportingOpml at all.
+        // Guarded no-op: the import is still running, so this must not start an export.
         vm.exportOpml()
-        assertFalse(vm.exportingOpml.value)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
 
         selector.openDeferred.complete(null)
         assertNull(vm.opmlResult.value)
-        assertFalse(vm.importingOpml.value)
+        assertFalse(vm.opmlBusy.value)
     }
 
-    /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */
-    private fun awaitTrue(timeoutMs: Long = 2_000, condition: () -> Boolean) = runBlocking {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!condition()) {
-            check(System.currentTimeMillis() < deadline) { "Timed out waiting for condition" }
-            delay(5)
-        }
+    @Test
+    fun importDocumentImportsAnAlreadyReadDocument() = runTest {
+        val xml = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
+        val vm = newViewModel(feedFetcher = succeedingFetcher())
+
+        vm.importDocument(xml)
+
+        awaitConditionBlocking { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
+        assertFalse(vm.opmlBusy.value)
     }
+
+    @Test
+    fun importDocumentRunsThroughTheSharedControllerAndRefusesASecondConcurrentRun() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val vm = newViewModel(feedFetcher = gatedSucceedingFetcher(gate))
+
+        vm.importDocument(ONE_FEED_OPML)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+        assertTrue(vm.opmlBusy.value, "busy while the import runs")
+
+        // Refused while the first one still runs: nothing changes, and only one import happens.
+        vm.importDocument(TWO_FEED_OPML)
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+
+        gate.complete(Unit)
+        awaitConditionBlocking { vm.opmlResult.value != null }
+        assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
+        assertFalse(vm.opmlBusy.value)
+        assertEquals(1, db.feedsQueries.getAllIncludingDeleted().executeAsList().size)
+    }
+
+    @Test
+    fun importDocumentReportsFailedForAnUnreadableFile() = runTest {
+        val vm = newViewModel()
+
+        vm.importDocument(null)
+
+        assertEquals(OpmlResult.ImportFailed, vm.opmlResult.value)
+        assertFalse(vm.opmlBusy.value)
+    }
+
+    @Test
+    fun startingANewOperationClearsThePreviousResult() = runTest {
+        val selector = SuspendingFileSelector()
+        val vm = newViewModel(fileSelector = selector)
+        vm.importDocument(null)
+        assertEquals(OpmlResult.ImportFailed, vm.opmlResult.value)
+
+        vm.importOpml()
+
+        assertNull(vm.opmlResult.value, "a stale result must not outlive the next operation's start")
+        selector.openDeferred.complete(null)
+    }
+
+    @Test
+    fun aPendingRequestIsHandedOutOnlyWhileNothingRuns() = runTest {
+        val selector = SuspendingFileSelector()
+        val vm = newViewModel(fileSelector = selector)
+        vm.importOpml()
+
+        lastOpmlController.request(OpmlRequest.ExportFile)
+        assertNull(vm.consumeOpmlRequest(), "not consumable while the import runs")
+        assertEquals(OpmlRequest.ExportFile, vm.pendingOpmlRequest.value)
+
+        selector.openDeferred.complete(null)
+        assertEquals(OpmlRequest.ExportFile, vm.consumeOpmlRequest())
+        assertNull(vm.pendingOpmlRequest.value)
+    }
+
+    // --- DataTab carrying out a request from outside the tab (File menu, opened .opml file) ---
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun dataTabCarriesOutAPendingMenuImportExactlyOnce() {
+        val selector = FakeFileSelector(openPath = null)
+        val vm = newViewModel(fileSelector = selector)
+        lastOpmlController.request(OpmlRequest.ImportFile)
+
+        runDesktopComposeUiTest {
+            setContent { DataTabContent(vm) }
+            waitForIdle()
+        }
+
+        assertEquals(1, selector.openCount, "the file dialog opens from inside Settings ▸ Data, once")
+        assertNull(vm.pendingOpmlRequest.value)
+        assertFalse(vm.opmlBusy.value)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun dataTabLeavesAPendingRequestAloneWhileAnOperationRuns() {
+        val selector = FakeFileSelector(openPath = null)
+        val vm = newViewModel(fileSelector = selector)
+        lastOpmlController.tryBegin(OpmlOperation.Exporting)
+        lastOpmlController.request(OpmlRequest.ImportFile)
+
+        runDesktopComposeUiTest {
+            setContent { DataTabContent(vm) }
+            waitForIdle()
+        }
+
+        assertEquals(0, selector.openCount)
+        assertEquals(OpmlRequest.ImportFile, vm.pendingOpmlRequest.value)
+    }
+
 }

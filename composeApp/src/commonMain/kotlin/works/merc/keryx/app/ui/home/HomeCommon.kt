@@ -35,10 +35,12 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
+import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.feedsForTag
 import works.merc.keryx.app.presentation.home.groupFeedsByFolder
 import works.merc.keryx.app.presentation.home.renameHomeKey
@@ -99,14 +101,27 @@ internal val LocalKeyboardEngaged = staticCompositionLocalOf { false }
  * site's own comment). `null` on desktop, which per the `ui-guidelines` skill has no in-app
  * snackbar convention (its previous transient toasts were replaced by inline expressions — see
  * that skill's "Native-feel restyle" section). `null` is also the value in any preview/test
- * composition that never provides one. A composable that wants to show a snackbar (e.g.
- * `ArticleDetailPane`'s URL-copied feedback) should treat a `null` value here as "do nothing"
- * rather than crash.
+ * composition that never provides one. A composable that wants to show a snackbar should treat a
+ * `null` value here as "do nothing" rather than crash.
  *
- * Note `HomeScreen`'s own foreground alert Snackbar does not go through this `CompositionLocal`:
- * it is composed outside the provider (alongside the host itself) and takes the state directly.
+ * Note neither of `HomeScreen`'s own snackbars goes through this `CompositionLocal`: the foreground
+ * alert Snackbar is composed outside the provider (alongside the host itself), and the URL-copied
+ * one is raised by [ArticleUrlCopier], the shared copy handler `HomeScreen` creates — both take the
+ * state directly, so the copied snackbar appears for every copy route, including when no pane
+ * reading this local (the reader, say) is on screen.
  */
 internal val LocalSnackbarHostState = staticCompositionLocalOf<SnackbarHostState?> { null }
+
+/**
+ * The one handler behind every route to "Open in browser" (an article's URL: the reader's button,
+ * the menu bar, the keyboard shortcut, the article row's context menu) and "Open site" (a feed's
+ * site URL: the feed row's context menu, the menu bar): opens [url] only when [canOpenInBrowser]
+ * allows it, so a non-http(s) link from the feed is never handed to the OS, whichever route asked.
+ * The routes' enablement uses the same predicate.
+ */
+internal fun openInBrowserIfAllowed(url: String?) {
+    url?.takeIf(::canOpenInBrowser)?.let(BrowserOpener::open)
+}
 
 /**
  * Click-to-focus for a pane's background — on a mouse+keyboard platform there is no OS-level
@@ -415,7 +430,10 @@ val SearchHighlightSpanStyle = SpanStyle(
  * platform (a mouse has no pull gesture, and desktop's own app menu already owns the same
  * shortcut), never over search results (refreshing the feeds behind a result list isn't what the
  * gesture means there), and never with no feeds at all (nothing to refresh). The single rule both
- * `ArticleListPane` and `HomeScreen`'s keyboard handling read, so the two can never disagree.
+ * `ArticleListPane` and `HomeScreen`'s keyboard handling read, so the two can never disagree. The
+ * keyboard shortcut additionally requires the list to be on screen (`articleListOnScreen`): the
+ * gesture and the accessibility action live on the list itself and so can't be reached while it is
+ * hidden, but a key press reaches `HomeScreen` regardless.
  */
 internal fun pullRefreshAvailable(isTouchPrimary: Boolean, searchActive: Boolean, hasNoFeeds: Boolean): Boolean =
     isTouchPrimary && !searchActive && !hasNoFeeds

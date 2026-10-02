@@ -68,6 +68,8 @@ class FeedListInlineRenameTest {
         var renameSelectedRequestId by remember { mutableStateOf(0) }
         var deleteSelectedRequestId by remember { mutableStateOf(0) }
         var textInput by remember { mutableStateOf<HomeTextInput?>(null) }
+        // The feed list is the only pane here, so it is always the keyboard target.
+        val feedListKeysActive = feedListItemKeysActive(HomePane.FeedList, textInputFocused = textInput != null)
         Box(
             Modifier.testTag(ROOT_TEST_TAG).size(320.dp, 700.dp).focusable().homeKeyboardShortcuts(
                 textInputFocused = textInput != null,
@@ -78,8 +80,8 @@ class FeedListInlineRenameTest {
                 onRight = {},
                 onNextArticle = {},
                 onPreviousArticle = {},
-                onFeedListRename = { renameSelectedRequestId++ },
-                onFeedListDelete = { deleteSelectedRequestId++ },
+                onFeedListRename = if (feedListKeysActive) ({ renameSelectedRequestId++ }) else null,
+                onFeedListDelete = if (feedListKeysActive) ({ deleteSelectedRequestId++ }) else null,
                 onSearch = {},
                 isMacOs = false,
             ),
@@ -430,6 +432,58 @@ class FeedListInlineRenameTest {
             typeName("From the menu via tag row")
             pressEnter()
             assertEquals("From the menu via tag row", db.customTitleOf("a"))
+        }
+    }
+
+    @Test
+    fun f2OnAFeedHiddenInACollapsedFolderExpandsThatFolderAndStartsEditing() = runDesktopComposeUiTest {
+        // The feed was selected, then its folder collapsed over it: the selection stays on the
+        // feed's (now unrendered) folder-group row. F2 must reveal it rather than silently do nothing.
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            setInlineRenameContent(vm)
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            vm.toggleFolderCollapsed("d1")
+            waitForIdle()
+            onNodeWithTag(ROOT_TEST_TAG).requestFocus()
+            onNodeWithTag(ROOT_TEST_TAG).performKeyInput { pressKey(Key.F2) }
+            waitForIdle()
+            waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+
+            assertTrue("d1" !in vm.collapsedFolderIds.value)
+            editor().assertIsDisplayed()
+            typeName("Revealed and renamed")
+            pressEnter()
+            assertEquals("Revealed and renamed", db.customTitleOf("a"))
+        }
+    }
+
+    @Test
+    fun theRenameFeedMenuCommandRevealsAFeedHiddenInACollapsedFolder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFolder("d1", "Folder One", sortOrder = 0L)
+        db.insertFeed("a", folderId = "d1", sortOrder = 0L)
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            val menuController = testMenuController
+            setInlineRenameContent(vm, menuController)
+            vm.selectFilter(ArticleFilter.Feed("a"))
+            vm.toggleFolderCollapsed("d1")
+            onNodeWithTag(ROOT_TEST_TAG).requestFocus()
+            waitForIdle()
+
+            menuController.send(MenuCommand.RenameFeed)
+            waitForIdle()
+            waitUntil { onAllNodesWithTag(INLINE_RENAME_FIELD_TEST_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+
+            assertTrue("d1" !in vm.collapsedFolderIds.value)
+            editor().assertIsDisplayed()
+            typeName("From the menu, revealed")
+            pressEnter()
+            assertEquals("From the menu, revealed", db.customTitleOf("a"))
         }
     }
 

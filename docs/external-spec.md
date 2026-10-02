@@ -77,7 +77,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
 
 - Subscribe to feeds by URL, categorize with tags, OPML import/export. An `.opml` file can also be
   imported by opening it directly from another app — file-association double-click on desktop,
-  "open with Keryx" from a file manager or mail attachment on Android
+  "open with Keryx" from a file manager or mail attachment on Android, opening it with Keryx on
+  macOS/iOS. However it is started (the Settings ▸ Data buttons, the File menu, or an opened file),
+  an import or export runs in Settings ▸ Data, which shows its progress and result inline; an
+  `.opml` opened during first-run Setup is imported once Setup is done
 - With no feeds subscribed yet, the article list shows an empty-state message with an "Add feed"
   button rather than the ordinary "no articles" message; on Android's narrower widths, the
   navigation drawer holding the feed list's own "+" button can auto-open here as well (§9's
@@ -90,7 +93,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   Android install (never through Google Play, which already updates the app itself). Presented from
   the moment an update is detected, via the notification-center bell, the desktop task tray, and
   the application menu's Help menu — the latter two showing one and the same entry, which is also
-  where a check can be asked for on demand ("Check for updates" whenever nothing is pending);
+  where a check can be asked for on demand ("Check for updates" whenever nothing is pending).
+  Clicking that entry always opens Settings ▸ Updates, which runs the check, download, retry or
+  install and shows its result there — the same feedback as the tab's own buttons, whether the
+  outcome is a find, "up to date", a failure, or an update this install can't apply itself;
   every download and every install remains a separate, explicit user action — nothing installs
   silently or automatically. The downloaded file is verified against the GitHub release's own
   SHA-256 digest before anything is installed. See [background-update.md](background-update.md)
@@ -115,7 +121,11 @@ data exists in the cloud it is automatically merged (imported) during the initia
   already right there in front of the person who just added it. Nor does an existing article that merely
   re-enters a list (starred again after being unstarred, or its feed moved into the folder/tag being
   viewed) count as new — only an article that has actually just arrived does.
-- Stars (persistent), open in external browser
+- Stars (persistent), open in external browser. "Open in browser" (and a feed's "Open site") applies to
+  `http`/`https` links only: a link of any other scheme, or a relative one, is never handed to the OS — the
+  action stays visible but disabled on every route (toolbar, menu bar, shortcut, context menu), while "Copy URL"
+  still works for any non-empty link. An article's link comes from the feed unvalidated, so this keeps a
+  `file:`, `javascript:` or custom-scheme link from launching another application.
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
@@ -164,6 +174,32 @@ on Android 12+ (API 31+) the app uses Material You dynamic color, derived from t
 versions. Light / dark / system support. 3-pane layout (feed list / article list /
 article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
 (see below).
+
+### Actions with more than one route
+
+**An action reachable by more than one route — a toolbar button, the application menu, a context
+menu, a keyboard shortcut, a gesture — behaves identically whichever route invokes it**: the same
+effect, the same enabled/disabled state, and the same feedback. For example, the ✓ the reader's
+copy button shows after a URL copy appears whether the copy came from that button,
+⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu; likewise "Sync now" is enabled
+in the feed list toolbar, the Feed menu and Settings ▸ Cloud sync at exactly the same moments
+(disabled during a connect, disconnect, reset or initial sync, while anything else is running, and
+after a sign-in expires).
+
+Routes may differ only in *which item* they act on — a context menu acts on the row it was opened
+on — never in what happens to it; feedback tied to a particular on-screen control appears whenever
+that control is showing the item acted on. For a URL copy that means the reader's ✓ shows only when the copied article is the one the
+reader displays. A platform whose OS does not confirm a copy itself and whose reader is often off
+screen (Android below 13, iOS) also confirms every copy in the app, with a snackbar or a toast; on
+desktop the ✓ is the confirmation, and only a copy of an article the reader does not display — which
+the native macOS app allows from a context menu opened with the keyboard or VoiceOver — is confirmed
+in the app instead, by a VoiceOver announcement (details: "Notification Center" in
+[error-design.md](error-design.md)).
+
+A key that works only in one pane is shown beside a menu item only while it would work:
+Feed ▸ Rename and Delete stay clickable whenever a feed-list item is selected, but the list
+shortcuts F2 (Return on macOS) and Delete are shown, and respond, only while the feed list has
+keyboard focus and no text field is being typed into.
 
 ### Adaptive layout (width) and touch input (Android)
 
@@ -214,7 +250,12 @@ other tappable way out. List rows (feeds, folders, tags, articles) grow to a tal
 touch density on Android. Keyboard navigation (arrow keys between panes, J/K between articles,
 F2/Delete on the selected feed-list item) is not desktop-exclusive: an Android tablet can have a
 physical keyboard attached, and the same shortcuts work there too, including reaching into the
-feed-list drawer at a narrower layout. The selected row in whichever pane holds keyboard focus
+feed-list drawer at a narrower layout. Renaming a feed whose row is hidden inside a collapsed folder
+(selected before the folder was collapsed) — with F2/Return or Feed ▸ Rename — first expands that
+folder so the name can be edited in its row; like any expand/collapse, that state is kept on this
+device only and is not synced. At the first or last article, J/K (and ↑/↓ in the article list)
+do nothing — exactly like the reader's swipe and its screen-reader actions — rather than re-selecting the
+same article, which would mark it read again. The selected row in whichever pane holds keyboard focus
 gets a `secondary` outline to show where a keypress will land — Android's own M3 selection color
 does not change with pane focus the way desktop's dimming does, so the outline is the only
 on-screen difference between the focused and unfocused pane's own selection there. This outline
@@ -286,7 +327,11 @@ has finished too, not just the feed fetches. A pull made while a refresh or sync
 background refresh, say) starts nothing new; the indicator simply stays up until the running one
 finishes. The same refresh is also reachable without the gesture, wherever the gesture itself is
 available: as a TalkBack custom action on the list ("Refresh this list"), and from a physical
-keyboard with Ctrl+Shift+R.
+keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width screen
+shows the reader alone, and not while the feed-list drawer covers the list. On desktop the same
+chord is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a different
+platform (desktop has no pull gesture to mirror, and its menu bar already owns the chord), not two
+routes to one action.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

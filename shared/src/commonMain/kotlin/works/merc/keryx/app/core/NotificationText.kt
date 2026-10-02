@@ -19,9 +19,6 @@ sealed interface NotificationText {
     /** A cloud sync failed for [reason] (only the sync-related [ErrorKind]s, else [ErrorKind.GENERIC]). */
     data class SyncFailed(val reason: ErrorKind) : NotificationText
 
-    /** An OPML import finished (e.g. opened via a file association). */
-    data class OpmlImported(val added: Int, val failed: Int) : NotificationText
-
     /** A newer release [version] is available. */
     data class UpdateAvailable(val version: String) : NotificationText
 

@@ -138,7 +138,7 @@ skill hands its performance findings off to.
 
 ## Do NOT touch (invariants)
 
-These are hard stops — see `.claude/CLAUDE.md` "Critical constraints" #1–#9 and
+These are hard stops — see `.claude/CLAUDE.md` "Critical constraints" #1–#10 and
 `docs/*.md`. A refactor that crosses one of these is a redesign; stop and ask.
 
 1. **No behavior / API / feature change** (#5). Don't alter the sync algorithm,

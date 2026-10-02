@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.domain.ArticleListRow
@@ -26,6 +27,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertContains
 import kotlin.test.assertTrue
+
+/** The size every case lays the pane out at. */
+private val PANE_TEST_SIZE = DpSize(400.dp, 500.dp)
 
 /**
  * `ArticleDetailPaneContent` composes its native reader unconditionally, regardless of whether an
@@ -44,7 +48,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -63,7 +67,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -79,7 +83,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -98,7 +102,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(url = ""),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -109,11 +113,46 @@ class ArticleDetailPaneTest {
     }
 
     @Test
+    fun openInBrowserButtonIsDisabledForANonHttpUrlWhileCopyStaysEnabled() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(url = "file:///etc/passwd"),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").assertIsEnabled()
+        onNodeWithContentDescription("ブラウザーで開く").assertIsNotEnabled()
+    }
+
+    @Test
+    fun openInBrowserButtonInvokesTheSharedHandlerWithTheDisplayedArticle() = runDesktopComposeUiTest {
+        val article = testArticle()
+        val opened = mutableListOf<Articles>()
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                onOpenInBrowser = { opened += it },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("ブラウザーで開く").performClick()
+        waitForIdle()
+
+        assertEquals(listOf(article), opened)
+    }
+
+    @Test
     fun copyAndOpenAreVisibleButDisabledWithNoSelection() = runDesktopComposeUiTest {
         setContent {
             ArticleDetailPaneContent(
                 article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -130,7 +169,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(content = "   ", summary = "fallback summary"),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, body, _, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -147,7 +186,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, articleUrl, _ -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -163,7 +202,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, articleUrl, _ -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -173,13 +212,35 @@ class ArticleDetailPaneTest {
     }
 
     @Test
-    fun copyingTheUrlShowsASnackbarWhenAHostIsProvided() = runDesktopComposeUiTest {
+    fun copyButtonInvokesTheSharedCopyHandlerWithTheDisplayedArticle() = runDesktopComposeUiTest {
+        val article = testArticle()
+        val copied = mutableListOf<Articles>()
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                onCopyUrl = { copied += it },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").performClick()
+        waitForIdle()
+
+        assertEquals(listOf(article), copied)
+    }
+
+    @Test
+    fun copyButtonDoesNotShowASnackbarItself() = runDesktopComposeUiTest {
+        // The snackbar belongs to the shared ArticleUrlCopier, so it appears for every copy route;
+        // the reader showing one too would double it for a copy made from its own button.
         val snackbarHostState = SnackbarHostState()
         setContent {
             CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
                 ArticleDetailPaneContent(
                     article = testArticle(),
-                    modifier = Modifier.size(400.dp, 500.dp),
+                    modifier = Modifier.size(PANE_TEST_SIZE),
                     reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
                 )
             }
@@ -189,16 +250,20 @@ class ArticleDetailPaneTest {
         onNodeWithContentDescription("URL をコピー").performClick()
         waitForIdle()
 
-        assertEquals("URL をコピーしました", snackbarHostState.currentSnackbarData?.visuals?.message)
+        assertEquals(null, snackbarHostState.currentSnackbarData)
     }
 
     @Test
     fun copyingTheUrlDoesNotCrashWithNoHostProvided() = runDesktopComposeUiTest {
-        // LocalSnackbarHostState defaults to null (desktop's own steady state — see its KDoc).
+        // LocalSnackbarHostState defaults to null (desktop's own steady state — see its KDoc). The
+        // ✓ comes from the pulse the shared handler raises, wired here as HomeScreen wires it.
+        var copyPulse by mutableStateOf(0)
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                copyPulse = copyPulse,
+                onCopyUrl = { copyPulse++ },
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -208,6 +273,76 @@ class ArticleDetailPaneTest {
         waitForIdle()
 
         onNodeWithContentDescription("URL をコピーしました").assertExists()
+    }
+
+    // --- Copy pulses from other routes (keyboard, menu bar, article-row context menu) ---
+
+    @Test
+    fun aPulseRaisedBeforeCompositionDoesNotFlashTheCopiedState() = runDesktopComposeUiTest {
+        val snackbarHostState = SnackbarHostState()
+        setContent {
+            CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+                ArticleDetailPaneContent(
+                    article = testArticle(),
+                    modifier = Modifier.size(PANE_TEST_SIZE),
+                    copyPulse = 5,
+                    reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                )
+            }
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").assertExists()
+        assertEquals(null, snackbarHostState.currentSnackbarData)
+    }
+
+    @Test
+    fun aPulseRaisedWhileComposedFlashesTheCopiedState() = runDesktopComposeUiTest {
+        var copyPulse by mutableStateOf(5)
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                copyPulse = copyPulse,
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        copyPulse = 6
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピーしました").assertExists()
+    }
+
+    @Test
+    fun aPulseRaisedWhileThePaneWasAbsentDoesNotFlashOnReEntry() = runDesktopComposeUiTest {
+        val snackbarHostState = SnackbarHostState()
+        var copyPulse by mutableStateOf(0)
+        var shown by mutableStateOf(true)
+        setContent {
+            CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+                if (shown) {
+                    ArticleDetailPaneContent(
+                        article = testArticle(),
+                        modifier = Modifier.size(PANE_TEST_SIZE),
+                        copyPulse = copyPulse,
+                        reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+
+        shown = false
+        waitForIdle()
+        copyPulse = 1
+        waitForIdle()
+        shown = true
+        waitForIdle()
+
+        onNodeWithContentDescription("URL をコピー").assertExists()
+        assertEquals(null, snackbarHostState.currentSnackbarData)
     }
 
     // --- Swipe-to-navigate accessibility actions (the reader's screen-reader counterpart for
@@ -225,7 +360,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
@@ -242,7 +377,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = false,
@@ -263,7 +398,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = null,
                 isTouchPrimary = true,
@@ -285,7 +420,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = null,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
@@ -302,7 +437,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { false }, { true }),
                 isTouchPrimary = true,
@@ -320,7 +455,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({ invoked = true }, {}, { true }, { true }),
                 isTouchPrimary = true,
@@ -351,7 +486,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = articles[1],
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 isTouchPrimary = true,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 readerPaging = pagingFor(articles, selected = articles[1]),
@@ -377,7 +512,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = selected,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 isTouchPrimary = true,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 // Only the selected article's own body is supplied, mirroring the moment a page
@@ -405,7 +540,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle("a1"),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> readerCalls++; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -429,7 +564,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = articles[0],
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 isTouchPrimary = false,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 readerPaging = pagingFor(articles, selected = articles[0]),

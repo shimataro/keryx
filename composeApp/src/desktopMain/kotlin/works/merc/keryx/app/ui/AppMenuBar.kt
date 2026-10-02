@@ -8,19 +8,21 @@ import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.MenuScope
-import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.onUpdateMenuItemClicked
-import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.HomeViewModel
-import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
+import works.merc.keryx.app.presentation.menu.computeMenuUiState
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_assign_tags
 import works.merc.keryx.app.resources.home_copy_feed_url
@@ -30,6 +32,8 @@ import works.merc.keryx.app.resources.home_menu_delete_tag
 import works.merc.keryx.app.resources.home_menu_rename_folder
 import works.merc.keryx.app.resources.home_menu_rename_tag
 import works.merc.keryx.app.resources.home_move_to_folder
+import works.merc.keryx.app.resources.home_new_folder
+import works.merc.keryx.app.resources.home_new_tag
 import works.merc.keryx.app.resources.home_no_folder
 import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
@@ -55,7 +59,6 @@ import works.merc.keryx.app.resources.menu_help
 import works.merc.keryx.app.resources.menu_help_about
 import works.merc.keryx.app.resources.menu_help_project_page
 import works.merc.keryx.app.resources.menu_help_website
-import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.resources.menu_view
 import works.merc.keryx.app.resources.menu_view_mark_all_read
@@ -63,8 +66,9 @@ import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
 import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.tray.updateMenuEntry
-import works.merc.keryx.app.ui.home.NotificationCenterViewModel
+import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
 import works.merc.keryx.app.ui.menu.AppMenuNode
@@ -75,7 +79,8 @@ import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.menu.SelectedFeedMenuData
 import works.merc.keryx.app.ui.menu.buildAppMenuTree
-import works.merc.keryx.app.presentation.menu.computeMenuUiState
+import works.merc.keryx.app.ui.navigation.Screen
+import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.ui.settings.PROJECT_URL
 import works.merc.keryx.app.ui.settings.SettingsViewModel
 
@@ -111,21 +116,23 @@ internal fun FrameWindowScope.AppMenuBar(
 ) {
     val menuController = koinInject<MenuController>()
     val homeVm = koinInject<HomeViewModel>()
-    val settingsVm = koinInject<SettingsViewModel>()
+    val opmlController = koinInject<OpmlTransferController>()
     val updateRepository = koinInject<UpdateRepository>()
-    val notificationCenterVm = koinInject<NotificationCenterViewModel>()
-    // The same application-lifetime scope `main.kt` uses as `appScope` (a single Koin registration,
-    // so there is no ambiguity): an update check must outlive this menu's own composition.
-    val appScope = koinInject<CoroutineScope>()
+    val settingsOpenRequests = koinInject<SettingsOpenRequests>()
+    // A Koin `single` (AppModule), never held by a ViewModelStore and so never cleared: an update
+    // check it starts runs on its own viewModelScope, which this menu recomposing or leaving
+    // composition does not cancel.
+    val settingsVm = koinInject<SettingsViewModel>()
 
     val screen by menuController.currentScreen.collectAsState()
-    val textInputFocused by menuController.textInputFocused.collectAsState()
+    val feedListKeysActive by menuController.feedListKeysActive.collectAsState()
     val selected by homeVm.selectedArticle.collectAsState()
     val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()
     val unreadOnly by homeVm.unreadOnly.collectAsState()
-    val cloudConnected by homeVm.cloudConnected.collectAsState()
+    val canSyncNow by homeVm.canSyncNow.collectAsState()
+    val opmlBusy by opmlController.busy.collectAsState()
     val feeds by homeVm.feeds.collectAsState()
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
@@ -135,7 +142,6 @@ internal fun FrameWindowScope.AppMenuBar(
     // already rounded to 5% steps by `updateMenuEntry` → `roundedTrayProgressPercent`, so the D-Bus
     // `LayoutUpdated` traffic on Linux stays at exactly the tray's own existing rate.
     val updateState by updateRepository.state.collectAsState()
-    val updateEntry = updateMenuEntry(updateState)
 
     val selectedFeed = (filter as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
     // Rename/delete act on any selected feed list item, so they resolve the same feed/folder/tag
@@ -146,15 +152,22 @@ internal fun FrameWindowScope.AppMenuBar(
         onHome = screen == Screen.Home,
         hasSelectedArticle = selected != null,
         selectedArticleHasUrl = hasUsableUrl(selected?.url),
+        selectedArticleCanOpenInBrowser = canOpenInBrowser(selected?.url),
         activity = activity,
-        cloudConnected = cloudConnected,
+        canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
+        opmlBusy = opmlBusy,
         hasSelectedFeed = selectedFeed != null,
-        textInputFocused = textInputFocused,
+        feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = selectionTarget != null,
         selectedFeedHasSiteUrl = hasUsableUrl(selectedFeed?.site_url),
+        selectedFeedSiteCanOpenInBrowser = canOpenInBrowser(selectedFeed?.site_url),
     )
+
+    // Disabled wherever Settings can't open (the entry acts on its Updates tab) — the same gate as
+    // the Settings… item itself.
+    val updateEntry = updateMenuEntry(updateState, settingsReachable = ui.openSettingsEnabled)
 
     // Rename/delete wording follows the selected item's type. A `null` target falls back to the
     // feed wording; the two items are disabled in that case, so the text is never acted on.
@@ -198,6 +211,8 @@ internal fun FrameWindowScope.AppMenuBar(
         feedAssignTags = stringResource(Res.string.home_assign_tags),
         feedMoveToFolder = stringResource(Res.string.home_move_to_folder),
         feedNoFolder = stringResource(Res.string.home_no_folder),
+        feedNewFolder = stringResource(Res.string.home_new_folder),
+        feedNewTag = stringResource(Res.string.home_new_tag),
         feedRename = renameLabel,
         feedUnsubscribe = deleteLabel,
         feedCopyUrl = stringResource(Res.string.home_copy_feed_url),
@@ -213,8 +228,10 @@ internal fun FrameWindowScope.AppMenuBar(
         addFeed = { menuController.send(MenuCommand.AddFeed) },
         addFolder = { menuController.send(MenuCommand.AddFolder) },
         addTag = { menuController.send(MenuCommand.AddTag) },
-        importOpml = { settingsVm.importOpml() },
-        exportOpml = { settingsVm.exportOpml() },
+        // Carried out by Settings ▸ Data (App.kt opens it for a pending request), so the file
+        // dialog, spinner and result appear in the same place as for the tab's own buttons.
+        importOpml = { opmlController.request(OpmlRequest.ImportFile) },
+        exportOpml = { opmlController.request(OpmlRequest.ExportFile) },
         closeWindow = onCloseWindow,
         openSettings = { menuController.send(MenuCommand.OpenSettings) },
         quit = onQuit,
@@ -231,18 +248,22 @@ internal fun FrameWindowScope.AppMenuBar(
         refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it) } },
         toggleFeedTag = { tagId, attached -> selectedFeed?.let { homeVm.setFeedTag(it.id, tagId, attached) } },
         moveFeedToFolder = { folderId -> selectedFeed?.let { homeVm.moveFeed(it.id, folderId) } },
+        newFolderForSelectedFeed = { menuController.send(MenuCommand.NewFolderForSelectedFeed) },
+        newTagForSelectedFeed = { menuController.send(MenuCommand.NewTagForSelectedFeed) },
         renameSelectedFeed = { menuController.send(MenuCommand.RenameFeed) },
         unsubscribeSelectedFeed = { menuController.send(MenuCommand.UnsubscribeFeed) },
         copyFeedUrl = { menuController.send(MenuCommand.CopyFeedUrl) },
         copyFeedSiteUrl = { menuController.send(MenuCommand.CopySiteUrl) },
-        openFeedSite = { selectedFeed?.site_url?.takeIf { hasUsableUrl(it) }?.let(BrowserOpener::open) },
+        openFeedSite = { openInBrowserIfAllowed(selectedFeed?.site_url) },
         openWebsite = { BrowserOpener.open(websiteUrl) },
         openProjectPage = { BrowserOpener.open(PROJECT_URL) },
         // Reads `state.value` fresh rather than closing over the `updateState` snapshot above, so a
         // state change between this composition and the click is honoured — the same wiring
         // `main.kt` gives the tray's own entry.
         updateAction = {
-            onUpdateMenuItemClicked(updateRepository.state.value, appScope, updateRepository, notificationCenterVm)
+            onUpdateMenuItemClicked(
+                updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
+            )
         },
         about = { menuController.send(MenuCommand.About) },
     )

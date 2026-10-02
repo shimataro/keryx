@@ -50,7 +50,11 @@ final class AppModel {
             // `PreferencesObservable.startObserving`).
             Task { await preferences.startObserving() }
             self.cloudSync = CloudSyncObservable(controller: sdk.cloudSyncController)
-            self.opmlTransfer = OpmlTransferObservable(opml: sdk.opml)
+            let opmlTransfer = OpmlTransferObservable(controller: sdk.opmlController)
+            self.opmlTransfer = opmlTransfer
+            // The one observation of the shared OPML state, for the app's lifetime: the File menu,
+            // the Settings window and Home's request presenter all read it.
+            Task { await opmlTransfer.startObserving(sdk.opmlController) }
             self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
             // Requesting authorization is `KeryxApp`'s job now, gated on `notificationEnabled`
@@ -93,8 +97,11 @@ final class AppModel {
         needsSetup = false
     }
 
-    /// Imports an `.opml` document the app was opened with (`onOpenURL`) — see
-    /// `KeryxSdk.importOpenedOpml`'s own doc.
+    /// Asks Settings ▸ Data to import an `.opml` document the app was opened with (`onOpenURL`) —
+    /// see `KeryxSdk.importOpenedOpml`'s own doc. A file that can't be read is still requested (as
+    /// `nil`), so the failure is shown on the Data tab rather than silently dropped. Home's
+    /// `OpmlRequestPresenter` then shows Settings, so a file opened during Setup waits until Setup is
+    /// done.
     func importOpenedOpml(url: URL) {
         guard let sdk else { return }
         // Ignores the boolean result: LaunchServices delivering a document this way already grants
@@ -102,9 +109,6 @@ final class AppModel {
         // requiring it to return `true` here silently dropped every normal file-association open.
         let didStartAccessing = url.startAccessingSecurityScopedResource()
         defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
-        guard let xml = try? String(contentsOf: url, encoding: .utf8) else { return }
-        Task {
-            try? await sdk.importOpenedOpml(xml: xml)
-        }
+        sdk.importOpenedOpml(xml: try? String(contentsOf: url, encoding: .utf8))
     }
 }

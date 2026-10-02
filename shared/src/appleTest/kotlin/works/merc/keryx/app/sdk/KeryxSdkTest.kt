@@ -1,7 +1,10 @@
 package works.merc.keryx.app.sdk
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -16,6 +19,8 @@ import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.FileSystemExtras
 import works.merc.keryx.app.platform.RawSqliteConnection
 import works.merc.keryx.app.tempFilePath
+import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlResult
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -172,9 +177,16 @@ class KeryxSdkTest {
                 onHome = true,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
-                cloudConnected = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                opmlBusy = false,
+                hasSelectedFeed = false,
+                feedListKeysActive = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
             )
             assertTrue(onHome.addItemsEnabled)
 
@@ -182,26 +194,135 @@ class KeryxSdkTest {
                 onHome = false,
                 hasSelectedArticle = false,
                 selectedArticleHasUrl = false,
-                cloudConnected = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = false,
                 searchActive = false,
                 unreadOnly = false,
+                opmlBusy = false,
+                hasSelectedFeed = false,
+                feedListKeysActive = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
             )
             assertFalse(awayFromHome.addItemsEnabled)
+
+            // "Sync now" follows the shared ManualSync predicate it is handed, on Home only.
+            fun syncEnabled(onHome: Boolean, canSyncNow: Boolean) = sdk.menuState(
+                onHome = onHome,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = canSyncNow,
+                searchActive = false,
+                unreadOnly = false,
+                opmlBusy = false,
+                hasSelectedFeed = false,
+                feedListKeysActive = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
+            ).syncEnabled
+            assertTrue(syncEnabled(onHome = true, canSyncNow = true))
+            assertFalse(syncEnabled(onHome = true, canSyncNow = false))
+            assertFalse(syncEnabled(onHome = false, canSyncNow = true))
+
+            // Rename/Delete stay clickable with a selection; only their bare accelerator follows
+            // whether the sidebar's own item keys are live (HomeCommands' `.keyboardShortcut`).
+            fun renameState(feedListKeysActive: Boolean) = sdk.menuState(
+                onHome = true,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = false,
+                searchActive = false,
+                unreadOnly = false,
+                opmlBusy = false,
+                hasSelectedFeed = true,
+                feedListKeysActive = feedListKeysActive,
+                hasRenamableSelection = true,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
+            )
+            assertTrue(renameState(feedListKeysActive = false).renameOrDeleteEnabled)
+            assertFalse(renameState(feedListKeysActive = false).renameOrDeleteShortcutActive)
+            assertTrue(renameState(feedListKeysActive = true).renameOrDeleteShortcutActive)
+
+            // Import/Export follow the shared OPML busy flag the SwiftUI menu passes in.
+            fun opmlEnabled(opmlBusy: Boolean) = sdk.menuState(
+                onHome = true,
+                hasSelectedArticle = false,
+                selectedArticleHasUrl = false,
+                selectedArticleCanOpenInBrowser = false,
+                canSyncNow = false,
+                searchActive = false,
+                unreadOnly = false,
+                opmlBusy = opmlBusy,
+                hasSelectedFeed = false,
+                feedListKeysActive = false,
+                hasRenamableSelection = false,
+                selectedFeedHasSiteUrl = false,
+                selectedFeedSiteCanOpenInBrowser = false,
+            ).opmlEnabled
+            assertTrue(opmlEnabled(opmlBusy = false))
+            assertFalse(opmlEnabled(opmlBusy = true))
         } finally {
             sdk.close()
         }
     }
 
     @Test
-    fun importOpenedOpmlPostsAnInfoNotificationForAnEmptyDocument() = runTest {
+    fun importOpenedOpmlRequestsTheImportFromTheDataTabWithoutNotifying() = runTest {
         val sdk = start()
         try {
             sdk.importOpenedOpml("<opml><body></body></opml>")
 
-            assertEquals(1, sdk.notificationCenter.items.value.size)
+            assertEquals(OpmlRequest.ImportDocument("<opml><body></body></opml>"), sdk.opmlController.pendingRequest.value)
+            assertTrue(sdk.notificationCenter.items.value.isEmpty(), "the result is shown on the Data tab instead")
+
+            // An unreadable file is still requested, so the Data tab shows the failure.
+            sdk.importOpenedOpml(null)
+            assertEquals(OpmlRequest.ImportDocument(null), sdk.opmlController.pendingRequest.value)
         } finally {
             sdk.close()
         }
+    }
+
+    @Test
+    fun theRealOpmlControllerHoldsAnImportedDocumentUntilItFinishesAndRefusesASecondRun() = runTest {
+        val sdk = start()
+        try {
+            val controller = sdk.opmlController
+            // No feeds, so the import needs no network.
+            val document = "<opml><body></body></opml>"
+
+            // UNDISPATCHED: runs up to the import's first suspension (awaiting the import on the app
+            // scope), so the controller is held when this returns and the run cannot finish before
+            // the test body suspends.
+            val first = async(start = CoroutineStart.UNDISPATCHED) { controller.importDocument(document) }
+            assertTrue(controller.busy.value, "busy from the moment the import begins")
+            assertFalse(controller.importDocument(document), "a second run is refused while the first holds it")
+
+            assertTrue(first.await())
+            assertFalse(controller.busy.value)
+            assertEquals(OpmlResult.Imported(added = 0, failed = 0), controller.result.value)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun theOpmlControllerRunsItsImportsOnTheScopeCloseStops() = runTest {
+        val sdk = start()
+        // Taken before close(), which closes the Koin graph it comes from.
+        val controller = sdk.opmlController
+
+        sdk.close()
+
+        // Had the graph wired the controller to any scope other than the one close() cancels, this
+        // import would start (against the closed database) instead of being refused as cancelled.
+        // (A null document returns ImportFailed before reaching the scope, so this passes a real one.)
+        assertFailsWith<CancellationException> { controller.importResult("<opml><body></body></opml>") }
     }
 
     @Test

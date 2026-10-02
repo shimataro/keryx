@@ -109,6 +109,11 @@ struct HomeView: View {
             await applyInitialFocus()
         }
         #if os(iOS)
+        // The one place the URL-copy confirmation is drawn, over every column, so it shows whichever
+        // route copied and whatever is on screen.
+        .overlay(alignment: .bottom) {
+            TransientToast(state: home.copyToast, liftedAbovePill: home.newArticlesPillAtBottom)
+        }
         // Mounted on every layout (the detail column is not, at a compact width until an article is
         // opened), so WebKit can start while the app is idle rather than on the first article.
         .task { await ReaderWebViewWarmUp.scheduleOnce() }
@@ -127,15 +132,6 @@ struct HomeView: View {
             contextMenuSelectionTracker.stopMonitoring()
         }
         #endif
-        // Mirrors into `HomeObservable` so `HomeCommands.menuState` (a different `View` entirely,
-        // with no `@FocusState` of its own) can gate the Feed/Article menu's bare-key accelerators
-        // and `feedActionsEnabled`-style items the same way `HomeShortcutsKt.homeShortcutFor` does.
-        .onChange(of: focusedPane, initial: true) { _, _ in
-            home.textInputFocused = textInputFocused
-        }
-        .onChange(of: sidebarDialogs.isEditingInline) { _, _ in
-            home.textInputFocused = textInputFocused
-        }
         // Restored on next launch by `applyInitialFocus` — matches Compose's own
         // `HomeLayoutViewModel.getInitialFocusedPane`/`setFocusedPane`. `.search` has no Compose
         // `HomePane` counterpart (the field lives in the sidebar, not a pane of its own here), so it

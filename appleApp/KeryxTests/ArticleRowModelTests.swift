@@ -37,6 +37,7 @@ struct ArticleRowModelTests {
         #expect(m.url == "https://example.com/a1")
         #expect(m.highlightedTitle == nil)
         #expect(m.hasUsableUrl)
+        #expect(m.canOpenInBrowser)
     }
 
     @Test
@@ -45,6 +46,18 @@ struct ArticleRowModelTests {
             id: "a1", feed_id: "f1", title: "Title", url: "", published_at: nil, created_at: 0, is_read: 0, is_starred: 0
         )
         #expect(!model(blank).hasUsableUrl)
+        #expect(!model(blank).canOpenInBrowser)
+    }
+
+    /// Open in Browser's http(s) rule is stricter than Copy URL's non-blank one: a `file:` or
+    /// relative link can be copied but is never opened.
+    @Test(arguments: ["file:///etc/passwd", "javascript:alert(1)", "/relative/path"])
+    func nonHttpUrlIsCopyableButNotOpenable(url: String) {
+        let row = ArticleListRow(
+            id: "a1", feed_id: "f1", title: "Title", url: url, published_at: nil, created_at: 0, is_read: 0, is_starred: 0
+        )
+        #expect(model(row).hasUsableUrl)
+        #expect(!model(row).canOpenInBrowser)
     }
 
     @Test
@@ -213,5 +226,43 @@ struct ArticleRowModelTests {
             makeZone: { resolved += 1; return utc }
         )
         #expect(resolved == 0)
+    }
+
+    // MARK: - ArticleRowMenuState
+
+    /// A macOS right-click on a hovered, unselected row selects it (`ContextMenuSelectionTracker`).
+    @Test
+    func aRightClickOnAHoveredUnselectedRowSelectsIt() {
+        #if os(macOS)
+        #expect(ArticleRowMenuState.opensBySelecting(isSelected: false, pointerIsOver: true))
+        #else
+        #expect(!ArticleRowMenuState.opensBySelecting(isSelected: false, pointerIsOver: true), "an iOS long-press never selects")
+        #endif
+    }
+
+    /// A menu opened from the keyboard or VoiceOver with the pointer elsewhere selects nothing.
+    @Test(arguments: [false, true])
+    func aMenuOpenedWithThePointerElsewhereSelectsNothing(isSelected: Bool) {
+        #expect(!ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: false))
+    }
+
+    /// An already-selected row is not selected again.
+    @Test
+    func aSelectedRowIsNotSelectedAgain() {
+        #expect(!ArticleRowMenuState.opensBySelecting(isSelected: true, pointerIsOver: true))
+    }
+
+    /// The read label for each way of opening an unread row's menu, as `ArticleRowView` composes it
+    /// from `opensBySelecting` and the shared `articleReadAfterContextMenuOpen`: only a selecting open
+    /// makes it read ("Mark as unread"); otherwise it stays unread ("Mark as read").
+    @Test(arguments: [(false, true), (false, false), (true, true), (true, false)])
+    func anUnreadRowsReadStateAfterOpen(isSelected: Bool, pointerIsOver: Bool) {
+        let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
+        let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(isRead: false, selectedByOpen: selectedByOpen)
+        #if os(macOS)
+        #expect(readAfterOpen == (!isSelected && pointerIsOver))
+        #else
+        #expect(!readAfterOpen)
+        #endif
     }
 }

@@ -15,7 +15,10 @@ import kotlin.test.assertTrue
  */
 class LazyNativePopupTest {
 
-    private class FakeHandle(val builtFrom: List<NativeMenuEntry>) : NativePopupHandle {
+    private class FakeHandle(
+        val builtFrom: List<NativeMenuEntry>,
+        val shownItems: () -> List<NativeMenuEntry>,
+    ) : NativePopupHandle {
         val synced = mutableListOf<List<NativeMenuEntry>>()
         var attachCount = 0
         var detachCount = 0
@@ -41,7 +44,7 @@ class LazyNativePopupTest {
     private class Recorder {
         val built = mutableListOf<FakeHandle>()
         val factory: (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle =
-            { entries, _ -> FakeHandle(entries).also { built += it } }
+            { entries, shown -> FakeHandle(entries, shown).also { built += it } }
     }
 
     // A peer-free Component rather than e.g. java.awt.Label: Label's constructor calls
@@ -51,13 +54,18 @@ class LazyNativePopupTest {
 
     private fun item(label: String): NativeMenuEntry = NativeMenuItem(label) {}
 
+    /** What a backend's click on the top-level widget at [index] runs — mirrors `leafAt`. */
+    private fun FakeHandle.click(index: Int) {
+        (shownItems()[index] as NativeMenuLeaf).onClick()
+    }
+
     private fun check(label: String, checked: Boolean): NativeMenuEntry =
         NativeCheckMenuItem(label, checked) {}
 
     @Test
     fun buildsNothingUntilTheFirstShow() {
         val recorder = Recorder()
-        LazyNativePopup(window = null, currentItems = { listOf(item("A")) }, factory = recorder.factory)
+        LazyNativePopup(window = null, factory = recorder.factory)
 
         assertEquals(0, recorder.built.size)
     }
@@ -66,7 +74,7 @@ class LazyNativePopupTest {
     fun buildsAndAttachesExactlyOnceOnTheFirstShow() {
         val recorder = Recorder()
         val entries = listOf(item("A"), item("B"))
-        val popup = LazyNativePopup(null, { entries }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(entries, invoker, 1, 2)
 
@@ -79,7 +87,7 @@ class LazyNativePopupTest {
     fun reusesTheWidgetsWhenTheShapeIsUnchanged() {
         val recorder = Recorder()
         val first = listOf(item("A"), item("B"))
-        val popup = LazyNativePopup(null, { first }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(first, invoker, 1, 2)
         // Same kinds in the same order: a relabel, not a rebuild.
@@ -92,7 +100,7 @@ class LazyNativePopupTest {
     fun rebuildsAndDetachesTheOldWidgetsWhenTheShapeChanges() {
         val recorder = Recorder()
         val first = listOf(item("A"))
-        val popup = LazyNativePopup(null, { first }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(first, invoker, 1, 2)
         popup.showFor(listOf(item("A"), check("B", checked = true)), invoker, 1, 2)
@@ -106,7 +114,7 @@ class LazyNativePopupTest {
     fun syncsWithTheEntriesPassedToShowAndBeforeShowing() {
         val recorder = Recorder()
         val built = listOf(item("A"))
-        val popup = LazyNativePopup(null, { built }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
         val fresh = listOf(item("A renamed"))
 
         popup.showFor(fresh, invoker, 1, 2)
@@ -121,7 +129,7 @@ class LazyNativePopupTest {
     fun doesNotRelabelWhenTheRenderedContentIsUnchanged() {
         val recorder = Recorder()
         val entries = listOf(item("A"))
-        val popup = LazyNativePopup(null, { entries }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(entries, invoker, 1, 2)
         popup.showFor(listOf(item("A")), invoker, 1, 2)
@@ -133,7 +141,7 @@ class LazyNativePopupTest {
     fun relabelsWhenOnlyACheckStateChanged() {
         val recorder = Recorder()
         val off = listOf(check("A", checked = false))
-        val popup = LazyNativePopup(null, { off }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(off, invoker, 1, 2)
         popup.showFor(listOf(check("A", checked = true)), invoker, 1, 2)
@@ -146,7 +154,7 @@ class LazyNativePopupTest {
     fun disposeDetachesWhateverWasBuilt() {
         val recorder = Recorder()
         val entries = listOf(item("A"))
-        val popup = LazyNativePopup(null, { entries }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(entries, invoker, 1, 2)
         popup.dispose()
@@ -157,7 +165,7 @@ class LazyNativePopupTest {
     @Test
     fun disposeIsHarmlessWhenNothingWasEverBuilt() {
         val recorder = Recorder()
-        val popup = LazyNativePopup(null, { listOf(item("A")) }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.dispose()
 
@@ -168,7 +176,7 @@ class LazyNativePopupTest {
     fun rebuildsAfterDisposeSoAReattachedCallSiteStillWorks() {
         val recorder = Recorder()
         val entries = listOf(item("A"))
-        val popup = LazyNativePopup(null, { entries }, recorder.factory)
+        val popup = LazyNativePopup(null, recorder.factory)
 
         popup.showFor(entries, invoker, 1, 2)
         popup.dispose()
@@ -176,5 +184,40 @@ class LazyNativePopupTest {
 
         assertEquals(2, recorder.built.size)
         assertEquals(1, recorder.built[1].attachCount)
+    }
+
+    /**
+     * The call site recomposes while the menu is open — an article row's `onOpen` marks it read
+     * and relabels "Mark as read" to "Mark as unread" — so a click must run the entry that was
+     * displayed, not whatever the call site would build now.
+     */
+    @Test
+    fun clicksResolveAgainstTheEntriesLastShownNotTheCallSitesLatest() {
+        val recorder = Recorder()
+        var clicked: String? = null
+        val popup = LazyNativePopup(null, recorder.factory)
+        val shown = listOf<NativeMenuEntry>(NativeMenuItem("Mark as read") { clicked = "read" })
+
+        popup.showFor(shown, invoker, 1, 2)
+        // LazyNativePopup has no access to the call site's live entries at all (it no longer takes
+        // a provider for them), so the click can only resolve against what was shown.
+        recorder.built.single().click(0)
+
+        assertEquals("read", clicked)
+    }
+
+    @Test
+    fun aLaterShowRebindsClicksToTheNewlyShownEntries() {
+        val recorder = Recorder()
+        var clicked: String? = null
+        val popup = LazyNativePopup(null, recorder.factory)
+
+        popup.showFor(listOf(NativeMenuItem("News") { clicked = "news" }), invoker, 1, 2)
+        popup.showFor(listOf(NativeMenuItem("Tech") { clicked = "tech" }), invoker, 1, 2)
+        // Same shape, so the widgets were reused rather than rebuilt with the new entries.
+        val handle = recorder.built.single()
+        handle.click(0)
+
+        assertEquals("tech", clicked)
     }
 }

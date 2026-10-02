@@ -94,8 +94,8 @@ struct ReaderPageView: View {
             title: title,
             meta: meta,
             url: row.url,
-            // Only an http(s) article URL counts as an outbound link — matches Compose's own
-            // `hasUsableUrl`-gated set (`ArticleDetailPane.kt`); a `keryx://`-scheme or empty URL
+            // Only an http(s) article URL counts as an outbound link — the same rule as Open in
+            // Browser (`canOpenInBrowser`); a `keryx://`-scheme or empty URL
             // must not be added, since WebKit would then treat a click that happens to normalize
             // to the same string as "open externally" instead of loading it in the reader.
             urlIsOutbound: ArticleListModelKt.isHttpOrHttpsUrl(url: row.url),

@@ -26,9 +26,12 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
     let isRead: Bool
     let isStarred: Bool
     let url: String
-    /// `hasUsableUrl(url)`, resolved once here rather than through the bridge on every body
-    /// evaluation (the row's context menu reads it twice). Derived from `url`, so not compared.
+    /// `hasUsableUrl(url)` (Copy URL's rule), resolved once here rather than through the bridge on
+    /// every body evaluation. Derived from `url`, so not compared.
     let hasUsableUrl: Bool
+    /// `canOpenInBrowser(url)` (Open in Browser's stricter http(s) rule), resolved once for the same
+    /// reason. Derived from `url`, so not compared.
+    let canOpenInBrowser: Bool
 
     static func == (lhs: ArticleRowModel, rhs: ArticleRowModel) -> Bool {
         lhs.id == rhs.id
@@ -64,6 +67,7 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
         let url = row.url
         self.url = url
         hasUsableUrl = ArticleListModelKt.hasUsableUrl(url: url)
+        canOpenInBrowser = ArticleListModelKt.canOpenInBrowser(url: url)
     }
 
     /// Splits `marked` at its `\u{0002}`/`\u{0003}` markers into an `AttributedString` whose matched
@@ -88,6 +92,32 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
     }
 
     static let highlightColor = Color.yellow.opacity(0.4)
+}
+
+/// What an article row's context menu offers, decided from the state the row will be in once the
+/// menu is open rather than from the snapshot it was drawn with. The read state itself is the shared
+/// `articleReadAfterContextMenuOpen` (`ArticleListModel.kt`), which `ArticleRowView` calls directly;
+/// only how this UI's own open selects the row is Swift-specific.
+enum ArticleRowMenuState {
+    /// Whether opening a row's context menu selects the row first. On macOS the only thing that
+    /// selects a row on a right-click/Control-click is `ContextMenuSelectionTracker`, which holds a
+    /// row's select closure only while the pointer hovers that row (`.selectsOnContextMenu`'s
+    /// `onHover`), and `ArticleListView.selectForContextMenu` selects only a row that isn't already
+    /// selected — so the open selects this row exactly when the pointer is over it and it isn't
+    /// selected. A menu opened from the keyboard or VoiceOver (VO+Shift+M) with the pointer elsewhere
+    /// selects nothing. An iOS long-press never selects.
+    ///
+    /// - Parameters:
+    ///   - isSelected: whether the row was selected before the menu was opened.
+    ///   - pointerIsOver: whether the pointer is over the row (`ArticleRowView`'s hover state, kept by
+    ///     `.selectsOnContextMenu`).
+    static func opensBySelecting(isSelected: Bool, pointerIsOver: Bool) -> Bool {
+        #if os(macOS)
+        !isSelected && pointerIsOver
+        #else
+        false
+        #endif
+    }
 }
 
 /// What an article row shows of its feed.

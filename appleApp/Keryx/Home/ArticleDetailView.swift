@@ -51,10 +51,15 @@ struct ArticleDetailView: View {
         .toolbar { toolbarContent }
         .onChange(of: home.copyPulse) { _, _ in
             copyConfirmed = true
-            // The checkmark is the only other confirmation, and VoiceOver does not see it change.
-            AccessibilityNotification.Announcement(L("article_url_copied")).post()
+            #if os(macOS)
+            // On macOS the checkmark is the copy's confirmation (the shared plan then asks for no
+            // in-app one), and VoiceOver does not see it change. iOS confirms every copy itself
+            // (`HomeObservable.copyArticleUrl`), whether or not this reader is on screen, so
+            // announcing here too would say it twice.
+            VoiceOverAnnouncement.post(L("article_url_copied"))
+            #endif
             Task {
-                try? await Task.sleep(for: .seconds(1.5))
+                try? await Task.sleep(for: CopyConfirmationTiming.copiedCheck)
                 copyConfirmed = false
             }
         }
@@ -90,7 +95,10 @@ struct ArticleDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         let article = home.selectedArticle
-        let hasUsableUrl = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+        // Separate rules, shared with every other route: any non-blank URL can be copied, but only
+        // an http(s) one is opened.
+        let copyEnabled = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false
+        let openEnabled = article.map { ArticleListModelKt.canOpenInBrowser(url: $0.url) } ?? false
 
         // Default placement: `.navigation` items of this column land at the end of the *previous*
         // column's toolbar section instead of at the start of this one.
@@ -137,20 +145,19 @@ struct ArticleDetailView: View {
 
             Button {
                 guard let article else { return }
-                copyToPasteboard(article.url)
-                home.pulseCopy()
+                home.copyArticleUrl(url: article.url, articleId: article.id)
             } label: {
                 Label(L("article_copy_url"), systemImage: copyConfirmed ? "checkmark" : "doc.on.doc")
             }
-            .disabled(!hasUsableUrl)
+            .disabled(!copyEnabled)
             .help(L("article_copy_url"))
 
             Button {
-                if let article { openInBrowser(article.url) }
+                if let article { openInBrowserIfAllowed(article.url) }
             } label: {
                 Label(L("article_open_in_browser"), systemImage: "globe")
             }
-            .disabled(!hasUsableUrl)
+            .disabled(!openEnabled)
             .help(L("article_open_in_browser"))
         }
     }

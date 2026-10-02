@@ -34,10 +34,10 @@ private fun manualOnlyUpdate() =
 @OptIn(ExperimentalTestApi::class)
 class UpdateMenuEntryTest {
 
-    private fun entryFor(state: UpdateState): TrayUpdateEntry {
+    private fun entryFor(state: UpdateState, settingsReachable: Boolean = true): TrayUpdateEntry {
         lateinit var entry: TrayUpdateEntry
         runDesktopComposeUiTest {
-            setContent { entry = updateMenuEntry(state) }
+            setContent { entry = updateMenuEntry(state, settingsReachable) }
             waitForIdle()
         }
         return entry
@@ -74,8 +74,8 @@ class UpdateMenuEntryTest {
 
     /**
      * A deb/rpm install (or any form the app can't apply itself) has no in-app download to offer,
-     * but the entry stays enabled — clicking it opens the release page instead (see `main.kt`'s
-     * `onUpdateMenuItemClicked`).
+     * but the entry stays enabled — clicking it opens the Updates tab, which links the release page
+     * and re-checks (see `main.kt`'s `onUpdateMenuItemClicked`).
      */
     @Test
     fun aNonInstallableUpdateAnnouncesItselfWithoutPromisingADownload() {
@@ -131,5 +131,32 @@ class UpdateMenuEntryTest {
         val entry = entryFor(UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "no network")))
         assertEquals("アップデートに失敗しました", entry.label)
         assertTrue(entry.enabled)
+    }
+
+    /**
+     * The entry acts on the settings dialog's Updates tab, which can't open over first-run Setup —
+     * so while Settings is unreachable every state is disabled, and the label still follows the
+     * state.
+     */
+    @Test
+    fun everyStateIsDisabledWhileSettingsIsUnreachable() {
+        val update = installableUpdate()
+        listOf(
+            UpdateState.Idle,
+            UpdateState.Checking,
+            UpdateState.UpToDate,
+            UpdateState.Available(update),
+            UpdateState.Available(manualOnlyUpdate()),
+            UpdateState.Downloading(update, bytesDone = 1, bytesTotal = 2),
+            UpdateState.Verifying(update),
+            UpdateState.Installing(update),
+            UpdateState.Ready(update, filePath = "/tmp/x.zip"),
+            UpdateState.Failed(update, UpdateException(UpdateStage.DOWNLOAD, "boom")),
+        ).forEach { state ->
+            val reachable = entryFor(state, settingsReachable = true)
+            val unreachable = entryFor(state, settingsReachable = false)
+            assertFalse(unreachable.enabled, "$state must be disabled while Settings is unreachable")
+            assertEquals(reachable.label, unreachable.label, "$state keeps its label")
+        }
     }
 }

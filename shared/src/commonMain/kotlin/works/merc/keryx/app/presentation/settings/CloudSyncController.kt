@@ -5,13 +5,13 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -27,16 +27,20 @@ import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
+import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.awaitCancellableConnect
+import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
 
 /**
  * The settings screen's cloud-sync state and actions: connecting/disconnecting/switching/
  * reconnecting a provider, resetting cloud data, and running a manual sync — shared with the
  * SwiftUI app (via `KeryxSdk.cloudSyncController`) so both UIs follow the same connect →
- * complete-connect → initial-sync ordering, and the same `canSyncNow` gating Home's own cloud
- * button follows. Split out of what was `SettingsViewModel` (see `.claude/CLAUDE.md`'s "Apple
+ * complete-connect → initial-sync ordering. Also the one [ManualSync]: Home's toolbar button and
+ * the Feed menu's "Sync now" run [syncNow] and follow [canSyncNow] exactly like this tab's own
+ * button does. Split out of what was `SettingsViewModel` (see `.claude/CLAUDE.md`'s "Apple
  * Native Apps (SwiftUI)" in `docs/app-architecture.md`); [SettingsViewModel] in `:composeApp` now
  * wraps this rather than owning the logic itself.
  */
@@ -45,15 +49,33 @@ class CloudSyncController(
     private val syncRepository: SyncRepository,
     private val cloudConnectionService: CloudConnectionService,
     private val activityCenter: ActivityCenter,
+    // Watched for provider changes made outside this controller (see [connectedType]).
+    private val settingsRepository: SettingsRepository,
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-) : ViewModel() {
+) : ViewModel(), ManualSync {
 
     /** Cloud providers configured in this build, in display order. */
     val availableCloudTypes: List<CloudStorageType> = CloudStorageAvailability.available
 
-    /** The currently-connected provider, or null (local-only). At most one at a time. */
+    /** The provider selection [connectedType]'s initial value was read against. */
+    private val initialCloudStorageTypeId = settingsRepository.localSettings.value.cloudStorageType
+
+    /**
+     * The currently-connected provider, or null (local-only). At most one at a time.
+     *
+     * This controller's own connect / disconnect / switch paths write it directly, so the row
+     * updates the instant they finish; it is also re-derived from [CloudSession.connectedType]
+     * whenever the persisted provider selection (`cloudStorageType`) changes, because a provider
+     * can be connected or disconnected by code that never goes through this controller — the
+     * first-run setup screen's own connect (`SetupController`), most importantly, which on desktop
+     * runs while this controller already exists. Without that, [canSyncNow] would stay false and
+     * the cloud-sync tab would show "not connected" until the app restarted.
+     *
+     * Seeded synchronously, once, at construction (one secure-store read), so the first frame
+     * already shows the real connection state; every later re-read runs on [dispatcher].
+     */
     private val _connectedType = MutableStateFlow(cloudSession.connectedType())
     val connectedType = _connectedType.asStateFlow()
 
@@ -99,6 +121,21 @@ class CloudSyncController(
     val lastSyncAuthFailed = _lastSyncAuthFailed.asStateFlow()
 
     /**
+     * [ManualSync.connected]: [connectedType] is non-null. Derived on read (see [canSyncNow]'s
+     * init), so it can never disagree with [connectedType] or [canSyncNow].
+     */
+    override val connected: StateFlow<Boolean> = DerivedStateFlow(
+        compute = { _connectedType.value != null },
+        changes = _connectedType.map { it != null },
+    )
+
+    /**
+     * [ManualSync.disabledByAuth]: the same flag as [lastSyncAuthFailed]. [canSyncNowNow] is false
+     * whenever it is true, so "disabled because of authorization" never shows on an enabled action.
+     */
+    override val disabledByAuth: StateFlow<Boolean> = _lastSyncAuthFailed.asStateFlow()
+
+    /**
      * Mirrors [ActivityCenter.activity]'s [works.merc.keryx.app.domain.ActivitySnapshot.syncing] —
      * true for every sync in progress (manual "sync now" on Home, a debounced sync, the background
      * loop, and the connect-time initial sync this controller itself starts), not only the ones
@@ -124,12 +161,12 @@ class CloudSyncController(
     val idle = _idle.asStateFlow()
 
     /**
-     * Whether the cloud-sync tab's "sync now" button is enabled: a provider is connected, nothing
-     * else is running (see [idle]), no connect / switch / disconnect / reset is in flight (each
-     * would race the sync), and the last sync did not fail on authorization — a sync then would
-     * only repeat that failure, and the row's own "reconnect" is the action that fixes it.
+     * Whether "sync now" is enabled — on every route (see [ManualSync]): a provider is connected,
+     * nothing else is running (see [idle]), no connect / switch / disconnect / reset is in flight
+     * (each would race the sync), and the last sync did not fail on authorization — a sync then
+     * would only repeat that failure, and the row's own "reconnect" is the action that fixes it.
      */
-    val canSyncNow: StateFlow<Boolean>
+    override val canSyncNow: StateFlow<Boolean>
 
     /** [canSyncNow]'s condition, read synchronously — what [syncNow]'s own guard checks. */
     private fun canSyncNowNow(): Boolean =
@@ -144,6 +181,10 @@ class CloudSyncController(
      */
     private val _manualSyncInFlight = MutableStateFlow(false)
 
+    // Buffered so tryEmit never drops an edge for a collector that is merely slow; a run emits two.
+    private val _runs = MutableSharedFlow<ManualSyncEdge>(extraBufferCapacity = 4)
+    override val runs: SharedFlow<ManualSyncEdge> = _runs.asSharedFlow()
+
     init {
         // Derived, not stateIn'd: its value is recomputed from the inputs on every read, so it can
         // never lag them (a stateIn copy would briefly show a stale answer right after an input
@@ -156,7 +197,19 @@ class CloudSyncController(
     }
 
     init {
-        refreshLastSyncedAt()
+        viewModelScope.launch {
+            // Skips the subscription-time replay while it still matches what the initializer above
+            // already read, so construction does not pay a second secure-store round trip; any
+            // later (or already-different) selection re-reads it. collectLatest: a newer selection
+            // supersedes a read still in flight, so a slow read can never land after a newer one.
+            var skipUnchanged = true
+            settingsRepository.localSettings.map { it.cloudStorageType }.distinctUntilChanged().collectLatest { id ->
+                val unchanged = skipUnchanged && id == initialCloudStorageTypeId
+                skipUnchanged = false
+                if (unchanged) return@collectLatest
+                _connectedType.value = withContext(dispatcher) { cloudSession.connectedType() }
+            }
+        }
         viewModelScope.launch {
             syncRepository.lastSyncError.collect { _lastSyncError.value = it }
         }
@@ -172,16 +225,22 @@ class CloudSyncController(
             // but this launch only starts collecting once viewModelScope actually dispatches it,
             // so the StateFlow's value can have moved on in between. Dropping that replay (as a
             // once-tried `drop(1)` did) would silently swallow a real transition happening in that
-            // window; collecting it is safe since it just repeats work this controller already does
-            // at startup (refreshLastSyncedAt() is a pure, idempotent read).
+            // window. The replay is also what first fills [lastSyncedAtText]: construction does no
+            // synchronous DB read of its own, so when no sync is running at subscription time the
+            // replayed `false` triggers the initial (off-UI-thread) read.
             activityCenter.activity.map { it.syncing }.distinctUntilChanged().collect { isSyncing ->
                 _syncing.value = isSyncing
                 // Guarded: a transient read failure must not kill this long-lived collector (which
                 // would silently stop all future last-synced refreshes) or leak as an uncaught
-                // exception. Best-effort UI state — log and carry on.
+                // exception. Best-effort UI state — log and carry on. Cancellation still propagates.
                 if (!isSyncing) {
-                    runCatching { refreshLastSyncedAt() }
-                        .onFailure { Log.warn(TAG, "Failed to refresh last-synced time", it) }
+                    try {
+                        refreshLastSyncedAt()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        Log.warn(TAG, "Failed to refresh last-synced time", e)
+                    }
                 }
             }
         }
@@ -191,15 +250,17 @@ class CloudSyncController(
     }
 
     /**
-     * Runs a manual sync — the same [SyncRepository.sync] Home's cloud button triggers. Progress,
+     * Runs a manual sync ([SyncRepository.sync]) — for every route, see [ManualSync]. Progress,
      * the new last-synced time and any failure all surface through the state this controller
-     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncError]).
+     * already mirrors ([syncing], [syncPhase], [lastSyncedAtText], [lastSyncError]); [runs] brackets
+     * it with a started/finished pair.
      */
-    fun syncNow() {
+    override fun syncNow() {
         if (!canSyncNowNow()) return
         _manualSyncInFlight.value = true
         viewModelScope.launch {
             try {
+                _runs.tryEmit(ManualSyncEdge.Started)
                 withContext(dispatcher) { syncRepository.sync() }
             } catch (e: CancellationException) {
                 throw e
@@ -207,6 +268,7 @@ class CloudSyncController(
                 Log.error(TAG, "Manual sync failed", e)
             } finally {
                 _manualSyncInFlight.value = false
+                _runs.tryEmit(ManualSyncEdge.Finished)
             }
         }
     }
@@ -373,30 +435,12 @@ class CloudSyncController(
         }
     }
 
-    private fun refreshLastSyncedAt() {
-        _lastSyncedAtText.value = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
+    /** Re-reads the last successful sync time (a DB read, so on [dispatcher]) into [lastSyncedAtText]. */
+    private suspend fun refreshLastSyncedAt() {
+        _lastSyncedAtText.value = withContext(dispatcher) { syncRepository.lastSyncedAt() }?.let { formatTimestamp(it) }
     }
 
     private companion object {
         const val TAG = "CloudSyncController"
-    }
-}
-
-/**
- * A read-only [StateFlow] whose [value] is [compute]d from other state flows on every read, and
- * whose collectors receive [changes] (deduplicated) — a derived value that, unlike one produced by
- * `stateIn`, can never be observed out of step with its inputs.
- */
-@OptIn(ExperimentalForInheritanceCoroutinesApi::class)
-private class DerivedStateFlow<T>(
-    private val compute: () -> T,
-    private val changes: Flow<T>,
-) : StateFlow<T> {
-    override val value: T get() = compute()
-    override val replayCache: List<T> get() = listOf(value)
-
-    override suspend fun collect(collector: FlowCollector<T>): Nothing {
-        changes.distinctUntilChanged().collect(collector)
-        awaitCancellation()
     }
 }

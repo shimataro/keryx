@@ -66,8 +66,8 @@ private fun MetadataTestRow(article: ArticleListRow, feedTitle: String) {
         rowHeight = 48.dp,
         faviconSize = 20.dp,
         onClick = {},
-        onToggleRead = {},
-        onToggleStar = {},
+        onSetRead = {},
+        onSetStarred = {},
         onCopyUrl = {},
         onOpenInBrowser = {},
     )

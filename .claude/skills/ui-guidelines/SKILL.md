@@ -873,6 +873,57 @@ the way an inline style outranks a plain element selector in a real CSS cascade.
 feed's own color winning even against the app's dark theme — see `InlineStyle`'s KDoc for why that
 is the faithful behavior, not a bug to "fix" by forcing every span through the theme's own colors.
 
+## Actions with more than one route
+
+**One action, one implementation** (`.claude/CLAUDE.md` constraint #10): an action with more than
+one route (toolbar button, menu bar, context menu, keyboard shortcut, gesture, accessibility action,
+tray) or more than one UI (Compose, SwiftUI) gets its effect, its enabled/disabled condition and its
+feedback from a single shared piece of code that every route calls. A route only collects its input
+(which item) and calls it. That is how `docs/external-spec.md`'s "Actions with more than one route"
+(§9) — the same effect, enablement and feedback whichever route runs it — stays true. Where each
+part lives, with the current examples, is `docs/app-architecture.md`'s "One implementation per
+action". In practice:
+
+- Route every entry point through **one shared handler** rather than re-implementing the effect
+  (and forgetting the feedback) at each call site. Example: what one "copy article URL" does is
+  decided by the shared `articleUrlCopyPlan` (`:shared`, used by both UIs); in Compose every route —
+  the reader's button included — calls `ArticleUrlCopier.copy` (`ui/home/ArticleUrlCopier.kt`),
+  which carries that plan out: it writes the clipboard when the URL is usable, flashes the reader's
+  copy button ✓ only when the copied article is the one the reader displays, and shows the "URL
+  copied" snackbar only when the plan's `confirmInApp` asks for it (Android below API 33). The reader
+  only watches the pulse. (SwiftUI: iOS shows a transient toast on every copy; macOS shows the ✓ and
+  announces, via VoiceOver, a copy of an article the reader does not show.) Keep feedback in the shared handler
+  rather than in one pane, or it goes missing whenever that pane isn't composed.
+- **A decision both UIs need goes in `:shared` `presentation/`, and Swift calls it** — a pure
+  function or a ViewModel method — rather than being re-derived in Compose and again in SwiftUI.
+  Examples: "Sync now"'s `ManualSync.canSyncNow`/`syncNow`, and the menu's enabled/checked flags
+  from `computeMenuUiState` (the desktop menu bar and SwiftUI's `Commands` read the same
+  `MenuUiState`). Only the platform-side execution (clipboard, snackbar, window) stays per UI, as
+  one handler per UI.
+- A context-menu item that shows a shortcut hint (`NativeMenuShortcut`) is promising the user it is
+  the same command as that shortcut — check the two really share a handler.
+- A toggle item's label must match what its shortcut would do **right now**. Example: right-clicking
+  an unread article row selects it and so marks it read, which means ⌘/Ctrl+Shift+U would now mark it
+  *unread* — so the row's menu must say "Mark as unread", not the "Mark as read" the pre-click
+  snapshot suggests (`articleRowMenuEntries`). Have the item request the explicit state its label
+  promises (`HomeViewModel.setRead`/`setStarred`) rather than a blind toggle.
+- **A bare-key accelerator is attached only while its key route is live — detach it, don't disable
+  the item.** A menu item's enablement follows the selection, like the matching context-menu item;
+  a key that only works in one pane (Feed ▸ Rename's F2/Return, Delete's Delete — they act only
+  while the feed list has keyboard focus and no text field does) is shown and bound beside the item
+  only while pressing it would run it. Read the same predicate the key handler reads
+  (`feedListItemKeysActive` → `MenuUiState.renameOrDeleteShortcutActive` → `shortcut = null` in
+  `AppMenuTree.kt`; SwiftUI's `.keyboardShortcut(… ? … : nil)`), and have the key handler leave the
+  key unconsumed (`null` handler) whenever it doesn't hold. Disabling the item instead would make it
+  unclickable for a reason unrelated to clicking; leaving the accelerator attached would let a
+  native menu fire it from another pane or from inside a text field.
+- **Adding a route to an existing action means calling its existing handler/predicate.** If there
+  isn't a shared one yet — the logic still lives inside one route — extract it first, move the
+  existing routes onto it, then add the new route. Never copy the logic of the route you started
+  from.
+- When adding or changing a route, compare it against every existing route for the same action,
+  not just the one it was copied from.
+
 ## Context menus
 
 Right-click menus use a real OS-native menu, not Material3's
@@ -907,7 +958,12 @@ Modifier.nativeContextMenu(
   exists (see `AppMenuTree.kt`'s Feed menu), separators included, so the two
   surfaces read as the same menu.
 - `onOpen` fires just before the menu shows; call sites typically use it to
-  select the right-clicked row. On Android, `onOpen` is intentionally ignored:
+  select the right-clicked row. `items` is read immediately after it, **before
+  any recomposition**, so the row's captured state is still the pre-`onOpen`
+  snapshot: labels must describe the state *after* `onOpen`'s side effects
+  (selecting an article marks it read — see `ArticleRow`'s `selectedByOpen`).
+  Select only when not already selected, so a right-click never re-applies a
+  side effect the user just undid. On Android, `onOpen` is intentionally ignored:
   a long-press only opens the menu and never selects the row. Keep any side
   effects inside `onOpen` desktop-only (e.g. row selection), not required for
   the action to work on Android. An **empty** `items` list shows no menu and
@@ -918,7 +974,15 @@ Modifier.nativeContextMenu(
   count) is expected to be stable per call site across ordinary
   recompositions. It may still change when the underlying data does (a folder
   is added), which rebuilds the native widgets; labels and checked states are
-  synced on every change without a rebuild.
+  re-synced on every right-click without a rebuild.
+- **A click performs exactly what the open menu displayed.** `items` is read
+  once per right-click (after `onOpen`), and a click resolves against that
+  shown list (`LazyNativePopup`'s `shownEntries`), never against what the call
+  site would build by the time the user clicks — the row may have recomposed
+  in between (`onOpen`'s own side effects, a sync reordering folders/tags).
+  So the action captured in each entry must be the one its label and
+  checkmark promise; don't write an `onClick` that re-reads live state to
+  decide what to do.
 - Do not reach for `androidx.compose.material3.DropdownMenu` for this kind of
   menu going forward.
 - **A `clickable` nested inside a row that also carries `nativeContextMenu`
@@ -1069,9 +1133,12 @@ should follow the same rules:
 - **Nothing else may claim the row's pointers or keys while an editor is open.** The feed pane's
   reorder drag watches the `Initial` pointer pass on an ancestor, so it is switched off
   (`feedListReorderDrag(enabled = …)`) while editing, or a press-and-sweep to select text would
-  become a row drag. Likewise the pane reports editing focus through `onTextInputFocusChange`, the
-  same channel as the search field, which is what makes the root's bare-key shortcuts and the menu
-  bar's F2/Delete accelerators stand aside.
+  become a row drag. The drag and its accessibility actions ("Move up"/"Move down",
+  `reorderAccessibilityActions`) share one gate, `FeedListPane`'s `reorderAllowed`, so a screen
+  reader can't reorder rows under an open editor either. Likewise the pane reports editing focus through `onTextInputFocusChange`, the
+  same channel as the search field, which is what makes the root's bare-key shortcuts stand aside
+  and detaches the menu bar's F2/Delete accelerators (`feedListItemKeysActive`) — the Feed menu's
+  items themselves stay enabled.
 
 The SwiftUI macOS app follows the same rules with `appleApp/Keryx/Home/InlineRenameField.swift` (iOS renames
 in `NamePromptSheet` instead — see "Sidebar (iOS)" in `docs/app-architecture.md`), driven by
@@ -1413,7 +1480,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     `.searchable(text:placement: .sidebar, …)`, and its `SearchFocusModifier` binds the field to
     `focusedPane`'s `.search` case through `.searchFocused(_:equals:)` only where that exists
     (macOS 15 / iOS 18+). On macOS 14 / iOS 17 the field cannot report its focus, so
-    `HomeObservable.textInputFocused` stays false there and the shortcut/focus-handoff logic
+    `HomeView`'s own `textInputFocused` stays false there and the shortcut/focus-handoff logic
     (`HomeShortcutsKt.homeShortcutFor`'s `textInputFocused`, moving into the results with ↓/↑) does
     not see it.
   - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
@@ -1434,16 +1501,18 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     shortcuts (⌘/Ctrl+F, J/K, U, S, arrow-key pane nav) that's invisible from outside the app → SwiftUI's
     menu-bar `Commands`/`.keyboardShortcut()`, which register real, discoverable menu items with standard
     key-equivalent conflict resolution.
-  - `Snackbar`/`SnackbarHost` (OPML import/export results) — weaker candidate than the
+  - `Snackbar`/`SnackbarHost` (Android only) — weaker candidate than the
     others since SwiftUI has no 1:1 Snackbar equivalent; a SwiftUI port would need a bespoke transient
-    banner view rather than a drop-in native replacement. (The URL-copied feedback is no longer purely
-    an inline-icon affair — see `LocalSnackbarHostState`'s own KDoc: Android now also reports it via a
-    real M3 `Snackbar`, below API 33 only, where the OS itself doesn't already show a clipboard-copy
-    confirmation. Android's second use is `HomeScreen`'s `ForegroundAlertSnackbar`, which announces a
-    warning/error the moment it is raised — the bell's badge alone only reaches a user already looking
-    at the pane hosting it, and these alerts are raised asynchronously by the startup tasks and the
-    background worker with no OS notification behind them; see `docs/error-design.md`. Desktop still
-    has none of either, per this app's no-in-app-snackbar convention.)
+    banner view rather than a drop-in native replacement. It has exactly two uses. The first is the
+    URL-copied confirmation — see `ArticleUrlCopier`'s own KDoc: reported via a real M3 `Snackbar`,
+    from the shared copy handler on every route, below API 33 only, where the OS itself doesn't
+    already show a clipboard-copy confirmation. The second is `HomeScreen`'s `ForegroundAlertSnackbar`,
+    which announces a warning/error the moment it is raised — the bell's badge alone only reaches a
+    user already looking at the pane hosting it, and these alerts are raised asynchronously by the
+    startup tasks and the background worker with no OS notification behind them; see
+    `docs/error-design.md`. OPML import/export results are not among them: they are shown inline in
+    Settings ▸ Data on every route. Desktop has no snackbar at all, per this app's
+    no-in-app-snackbar convention.
   - **Desktop only.** The Settings dialog's tab switcher (desktop's `KeryxTabDialog`
     actual in `KeryxDialogs.desktop.kt`) now uses Material3's
     `SecondaryScrollableTabRow`/`Tab` via the shared `KeryxDialogTabs` helper, making

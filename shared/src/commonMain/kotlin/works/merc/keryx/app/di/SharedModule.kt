@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.koin.core.module.Module
+import org.koin.dsl.bind
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppInfo
 import works.merc.keryx.app.core.Clock
@@ -41,7 +42,9 @@ import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.presentation.settings.CloudSyncController
+import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 
@@ -139,7 +142,11 @@ fun presentationModule(): Module = module {
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SetupController(get(), get(), get(), get()) }
     single { NotificationAlerts(get()) }
-    single { CloudSyncController(get(), get(), get(), get()) }
+    // Also Home's "Sync now" (HomeViewModel takes it as ManualSync), so every route shares one sync.
+    single { CloudSyncController(get(), get(), get(), get(), get()) } bind ManualSync::class
     single { PreferencesController(get()) }
     single { OpmlTransfer(get(), get(), get(), get()) }
+    // Every OPML route (Data tab, File menu, opened .opml file) shares this one busy/result state.
+    // Imports run on the app scope (above), so KeryxSdk.close() waits for/cancels one from any UI.
+    single { OpmlTransferController(get(), get()) }
 }

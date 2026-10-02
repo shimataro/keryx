@@ -5,7 +5,7 @@
 ## Structure
 
 - `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io).
-- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. The same module also holds `HoldingDispatcher.kt`, a coroutine dispatcher that can hold dispatched blocks and release them on demand, used by controller and ViewModel cancellation tests (`OpmlTransferControllerTest`, `CloudSyncControllerTest`, `SettingsViewModelTest`) to keep a cancelled coroutine from making progress while they observe who waits for it, and `AwaitCondition.kt` (`awaitCondition` / `awaitConditionBlocking`, timing out after `AWAIT_CONDITION_TIMEOUT_MS`), which polls a condition in real time on `Dispatchers.Default` — so it can wait for work on a real dispatcher (an HTTP engine's threads, `Dispatchers.Default`) that `runTest`'s virtual-time scheduler cannot advance; use it instead of an ad-hoc `delay`/`Thread.sleep` loop. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
 - **Apple targets (`:shared` only).** `commonTest` also runs natively as `:shared:macosArm64Test` and
   `:shared:iosSimulatorArm64Test` (both part of `./gradlew build` on a Mac with Xcode; skipped on
   Linux/Windows), so a common test must not use JVM APIs — temp files go through `:testing`'s
@@ -194,7 +194,7 @@ source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A de
 
 Project-wide, this is on top of the two Android suites above:
 
-- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, the shared `presentation/` state holders every UI (including the SwiftUI app) can reuse — `HomeViewModel`, `SetupController`, `CloudSyncController`, `PreferencesController`, `OpmlTransfer`, `NotificationAlerts`, `computeMenuUiState`, `isDuplicateFolderName`/`isDuplicateTagName` — each tested directly in `:shared`'s own `commonTest`/`desktopTest`, right next to the production code (e.g. `CloudSyncControllerTest.kt` beside `presentation/settings/CloudSyncController.kt`), plus each UI's own thin wrapper where one exists (composeApp's `SettingsViewModel`/`NotificationCenterViewModel` delegate to the shared controllers and are tested only for that delegation plus what stays Compose-only — the in-app updater and OPML's file-picking/busy-state, e.g. `SettingsViewModel`'s OPML import/export paths: the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
+- `commonTest`/`desktopTest` (run via `./gradlew :shared:desktopTest :composeApp:desktopTest` above) covers parser, fetcher redirect/304/404/410/timeout/discovery, OPML, Dropbox storage/auth, PKCE, OAuth loopback server, merge (last-write-wins / OR merge / collision guard / FK guard), schema, local settings, article upsert, URL resolver, datetime parser, Result, Repository layer (Article/Feed/Tag/Settings), CloudSession, NotificationCenter, IdGenerator, SyncRepository, the shared `presentation/` state holders every UI (including the SwiftUI app) can reuse — `HomeViewModel`, `SetupController`, `CloudSyncController`, `PreferencesController`, `OpmlTransfer`, `OpmlTransferController`, `NotificationAlerts`, `FeedListExpansion`, `SelectionReadIntents`, `DerivedStateFlow`, `computeMenuUiState`, `isDuplicateFolderName`/`isDuplicateTagName` — each tested directly in `:shared`'s own `commonTest`/`desktopTest`, right next to the production code (e.g. `CloudSyncControllerTest.kt` beside `presentation/settings/CloudSyncController.kt`), plus each UI's own thin wrapper where one exists (composeApp's `SettingsViewModel`/`NotificationCenterViewModel` delegate to the shared controllers and are tested only for that delegation plus what stays Compose-only — the in-app updater and OPML's file-picking/busy-state, e.g. `SettingsViewModel`'s OPML import/export paths: the built document/read file round-tripping through the picked path, the localized request fields reaching a `FakeFileSelector`, cancellation, and the document build/write/import work actually running on the injected dispatcher rather than the EDT)
 - the Linux/macOS/Windows file-dialog backend split (`FilePickerTest` for `defaultFilePickerBackend`'s OS selection, the extension predicate agreeing with `FileNameExtensionFilter` including accepting directories, the overwrite-confirmation resolution, and dialog-owner selection)
 - the feed-list drag-and-drop rewrite (`parseFeedListDragSourceKey` in `HomeCommonTest.kt` for the pure key-parsing logic; `FeedListDragTest.kt` for the real end-to-end gesture via `performMouseInput`/`performKeyInput` against actual rendered composables — dragging a feed above another and asserting the persisted order, the sub-threshold-move-still-selects case, dropping onto a folder header / a tag row, a right-click landing mid-drag not opening the context menu or aborting the drag, the ghost overlay's appear/disappear lifecycle, Escape-cancel, folder-onto-folder reordering, and a drag pushed out past the pane's horizontal bounds never resolving to a valid target or applying a drop even when it lines up with a row's height)
 - the feed list's in-row rename editor (`InlineRenameValidationTest` in `commonTest` for the shared blank-is-not-an-error validation rule and `toInlineEditTarget` in `HomeCommonTest.kt`; `FeedListInlineRenameTest.kt` for the real end-to-end flow against rendered composables — F2 opening the editor and Enter committing, Escape and the "×" icon cancelling, blur committing a valid name, a duplicate folder name blocking Enter and reverting silently on blur, a blank folder name simply not committing, a blank feed title resetting `custom_title` with the feed's own title shown as the placeholder, renaming a tag leaving its color alone, the tag color dot's popover applying a color immediately both outside and during a rename, and the Feed-menu `RenameFeed` command opening the editor for the current selection)
@@ -210,7 +210,7 @@ Project-wide, this is on top of the two Android suites above:
 - the KDE Global Menu / AppMenu (`AppMenuTreeTest` for the shared menu-tree model shape / `isMacOs` omissions / enabled-checked mirroring / the optional "Show Menu Bar" item, `AppMenuLayoutBuilderTest` for the recursive `com.canonical.dbusmenu` layout / property filtering / checkbox mapping / pre-order id stability, `AppMenuRevisionTest` for revision bump / `AboutToShow` / click dispatch / no-dedup, `AppMenuSignatureTest` for the `com.canonical.AppMenu.Registrar` wire signatures, `MenuBarVisibilityTest` for the AWT key-code map / shortcut→node matcher / visibility persistence)
 - `SqliteConnectionPropertiesTest` (the production connection properties really reach every connection — foreign keys enforced, `busy_timeout` applied — which a one-off `PRAGMA` does not, since the JVM driver opens a connection per statement)
 - `FormatTimestampTest` (pins `formatTimestamp`'s exact output, which the other timestamp assertions cannot because they derive their expected value from the function itself)
-- `LazyNativePopupTest` (nothing native is built until the first right-click; not observable through a Compose UI test, where `LocalNativeWindow` is null)
+- `LazyNativePopupTest` (nothing native is built until the first right-click; not observable through a Compose UI test, where `LocalNativeWindow` is null — plus a click resolving against the entries the menu was last shown with, never the call site's later ones)
 - `WindowGeometryTest` (dialog window geometry: owner-centering and the screen-bounds clamp, the auto-fit arithmetic `fitWindowSize`/`sizeMatches`, and `nextDialogFit`'s drift-correction state machine — including the regression case where a size applied behind Compose's back *after* the fit had settled must still be corrected, plus the per-target attempt cap that keeps a window manager that refuses the geometry from spinning the guard forever, and the `presentable` flag that keeps a dialog invisible until its fit has landed — including its release once that cap is spent, so a window manager refusing the geometry can never leave a dialog invisible)
 - cloud-data corruption/incompatibility recovery (`SyncRepositoryTest.kt`/`SyncMergerTest.kt`: constraint-violating cloud data — a `feeds` row set with a UNIQUE-`url` duplicate or a NOT-NULL-violating NULL only the cloud DB's own laxer schema allowed — classified as `CloudDataIncompatibleException` alongside corrupt-file and foreign-schema cases, `SyncMergerTest.mergeDoesNotClassifyABrokenLocalSchemaAsCloudDataIncompatible` guarding the inverse, and `SyncRepositoryTest.postMergeIndexFailureIsNotClassifiedAsCloudDataIncompatible` guarding that a post-commit `FtsManager.indexMissing()` failure — which shares the same ambiguous SQLite error code as a broken cloud schema — is never misclassified as the cloud's fault; `core/SqliteFileTest.kt` for the downloaded-bytes SQLite-header rejection symmetric with the upload-side check)
 - the cloud-data reset now archiving rather than deleting (`core/CloudBackupPathTest.kt` for the deterministic UTC-formatted backup path; `CloudStorage.rename` exercised per provider in `DropboxStorageTest.kt`/`GoogleDriveStorageTest.kt`/`OneDriveStorageTest.kt` including the destination-conflict and absent-source cases; `SyncRepositoryTest.kt`'s `resetCloudData*` tests for the rename-then-recreate flow and its delete fallback)
@@ -416,6 +416,61 @@ Cloud-data corruption recovery needs a real cloud connection end to end, so conf
 - With the cloud DB still unusable, trigger several automatic syncs (toggle read/star repeatedly, or wait for the background interval) and confirm no further download happens (no network activity, no repeated/duplicate notification) until the data is reset — then confirm a manual "sync now" *does* still attempt a real sync (and fails again) even while automatic syncs are suppressed.
 - After a successful reset, confirm automatic syncing resumes (a read/star toggle triggers a real sync again).
 
+"Sync now" has three routes — the feed list toolbar's cloud button, Feed ▸ Sync now in the menu bar
+(the SwiftUI app's `Commands` too), and the button in Settings ▸ Cloud sync — which all run
+`ManualSync.syncNow()` and follow `ManualSync.canSyncNow` (`presentation/ManualSync.kt`).
+`MenuStateTest`/`HomeViewModelTest`/`CloudSyncControllerTest` cover the predicate and delegation;
+confirm the routes really agree on screen, with a provider connected:
+
+- While a provider is connecting, disconnecting, resetting its cloud data, or running its
+  connect-time initial sync, and while any refresh or sync is running, the toolbar button, the Feed
+  menu item and the Settings button are all disabled; once it ends all three are enabled again
+  together. (Keep Settings open while checking the menu bar.)
+- Make the provider reject the token (e.g. revoke the app's access in the provider's account
+  settings), then sync: once the authorization failure is recorded, all three are disabled, and
+  hovering (long-pressing, on Android) the toolbar button shows "Sign-in expired — reconnect in
+  Settings". Reconnecting from Settings ▸ Cloud sync enables all three again.
+- Under "unread only", read a few articles on Home, then press Sync now in Settings ▸ Cloud sync:
+  back on Home the read rows other than the selected one are gone, exactly as after pressing the
+  toolbar button.
+- On a fresh profile, finish first-run Setup by connecting a provider: Home's sync button, Feed ▸
+  Sync now and the Settings button are enabled straight away (once the initial sync finishes), and
+  Settings ▸ Cloud sync shows the provider as connected — no restart needed.
+
+Every route that opens Settings goes through one router, `SettingsOpenRequests`
+(`ui/navigation/`), which never lets the dialog open over first-run Setup
+(`SettingsOpenRequestsTest`). Confirm on a fresh profile, with Setup on screen:
+
+- The tray's update item and Help ▸ the update item are disabled (their label still follows the
+  update state), and ⌘, / Settings… (macOS app menu) does nothing — no Settings window appears, and
+  none appears later once Setup is finished either.
+- After finishing Setup, the tray/Help update item is enabled again and opens Settings on Updates.
+
+The Feed menu's Rename/Delete items and their bare keys (F2 — Return on macOS — and Delete) share one
+rule, `feedListItemKeysActive` (`ui/home/HomePaneLayout.kt`): the keys act, and the menu shows them,
+only while the feed list has keyboard focus and no text field does; the items stay enabled whenever
+something renamable is selected. `MenuStateTest`/`AppMenuTreeTest`/`KeyboardNavTest` cover the rule;
+confirm on screen that the native menu really follows it:
+
+- Select a feed, then click an article so the article list has focus: Feed ▸ Rename and Delete are
+  enabled but show no F2/Delete hint, F2 and Delete do nothing, and clicking Rename starts the feed
+  row's inline editor. Click back into the feed list: the hints reappear and F2/Delete act again.
+- (macOS) With the article list focused, Return never starts a rename; with the feed list focused it
+  does.
+- Type into the search field: the Feed menu's items (Refresh Feed, Tags, Move to Folder, Copy Feed URL,
+  …, Rename, Delete) stay enabled, Delete/Backspace edit the query rather than deleting the feed, and
+  Feed ▸ Rename starts the inline editor. Check the SwiftUI app's Feed menu the same way.
+- Select a feed inside a folder, then collapse that folder (the selection stays on the hidden feed). Press F2
+  (Return on macOS) with the feed list focused: the folder expands and the feed's row opens in the inline
+  editor. Collapse it again and use Feed ▸ Rename: same result. Restart the app — the folder stays expanded
+  (collapse state is saved locally like any manual expand). A feed selected through an expanded tag's nested
+  row never expands its collapsed folder.
+- With a feed selected, Feed ▸ Tags ▸ New tag… and Feed ▸ Move to Folder ▸ New folder… (the last item of each
+  submenu, also present when there are no tags yet) open the same dialog as the feed row's own context-menu
+  items, and confirming it attaches the new tag to / moves the feed into the new folder. The feed row's
+  context menu lists Refresh, Tags, Move to Folder in that order — the Feed menu's order — on every platform;
+  check the SwiftUI app's Feed menu (both "New …" items) and sidebar row menu (macOS and iOS) the same way.
+
 The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/
 enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmation:
@@ -428,6 +483,15 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   browser) is visible but disabled; selecting an article with a URL enables all four, while an
   article with a blank URL leaves the copy/open-in-browser pair visible but disabled rather than
   hiding them. The toolbar's position and height never change between any of these states.
+- Subscribe to a local test feed whose item `<link>` is not http(s) (e.g. `file:///etc/hosts`), and whose
+  channel `<link>` (the site URL) is too, then select that article: "Open in Browser" is greyed out in the
+  article row's context menu, the reader toolbar, and the menu bar's Article menu (⌘/Ctrl+Shift+O does
+  nothing), while "Copy URL" stays enabled in all three. With the feed selected, Feed ▸ Open Site and the feed
+  row's "Open site" are greyed out while "Copy site URL" stays enabled. Check the SwiftUI app's row menu,
+  reader toolbar, Article/Feed menus and sidebar menu the same way.
+- Select the last article in the list, mark it unread (⌘/Ctrl+Shift+U or the reader's button), then press J
+  (and ↓ with the article list focused): nothing happens and the article stays unread. Likewise select the
+  first article, mark it unread and press K / ↑: it stays unread. (`HomeViewModelTest` covers the rule.)
 - Toggling light/dark theme (and the font-size setting) while an article is open re-renders the
   reader in the new theme/scale immediately (scroll resets to the top — expected).
 - (Windows) On startup, the reader renders in its correct pane position (no stray blank/misplaced
@@ -457,11 +521,24 @@ peer creation still works from inside the click's own call stack:
 - The separators in a feed row's menu render as real native dividers on every platform (a
   dash-labelled item on macOS, a `JPopupMenu.Separator` on Windows/Linux) — not as a visible menu
   item — and stay in place across a resync (e.g. toggling a tag) without the menu rebuilding.
+- Right-clicking an unread, unselected article row selects it (marking it read) and its menu
+  offers "Mark as unread" — matching what ⌘/Ctrl+Shift+U would do. Choosing it leaves the
+  article unread (the dot comes back and stays). Right-clicking that same, still-selected row again
+  offers "Mark as read" and does not mark it read on its own.
 - Right-clicking an article row with no usable URL still shows "Copy URL" and "Open in Browser"
   grayed out (disabled) rather than omitting them; an article with a URL shows both enabled.
+- Copying an article's URL from its row's right-click menu flashes the reader's copy button to ✓
+  for about 1.5 seconds, exactly as ⌘/Ctrl+Shift+C, the menu bar, and the button itself do — also
+  when the row wasn't selected before the right-click (it becomes selected, then shows ✓).
+- After copying an article's URL and letting the ✓ revert, narrowing the window from three panes
+  to two (or widening it back) does not flash the ✓ again.
 - Right-clicking a tag row shows "Edit", "Change color", and "Delete"; choosing "Change color"
   opens the same anchored popover the color dot itself opens (positioned at the dot, not at the
   click), and picking a swatch there applies immediately.
+- With a feed row's menu open on its "Move to folder" (or "Tags") submenu, let a cloud sync that
+  reorders, adds, or removes folders (or tags) land from another device, then click an entry: the
+  feed moves to (or toggles) exactly the folder (or tag) whose label was clicked, never whichever
+  one the sync shifted into that slot. A click always performs what the open menu displayed.
 - Opening any of these menus while the article reader's WebView is visible renders the menu above
   the WebView, not behind it.
 - (Linux) After switching the in-app theme (light ↔ dark) with no restart: the menu bar and an
@@ -684,9 +761,14 @@ session, and on GNOME:
 - All chooser chrome ("開く"/"キャンセル"/"ファイル名"/…) renders in **Japanese** on a packaged build —
   this is what the `jdk.localedata` module addition in `composeApp/build.gradle.kts` is for; if it
   reads in English, that module list is the first thing to check.
-- Invoke import/export from all three places and confirm the chooser is owned by the right window:
-  (1) the Settings dialog's buttons — the chooser appears **above** Settings, never behind it; (2) the
-  in-window menu bar File ▸; (3) the KDE Global Menu File ▸ with the in-window bar hidden.
+- Invoke import/export from all three places — (1) the Settings dialog's buttons; (2) the in-window
+  menu bar File ▸; (3) the KDE Global Menu File ▸ with the in-window bar hidden. (2) and (3) first
+  open Settings ▸ Data (`OpmlTransferController`'s pending request); in every case the chooser
+  appears **above** Settings, never behind it, and the spinner and the result text appear on the Data
+  tab's buttons. While one runs, File ▸ Import/Export are disabled.
+- Start an import from File ▸, close Settings while it is still running, then reopen Settings ▸ Data
+  after it finishes: the result text is shown once; switching tabs and back (or reopening Settings
+  later) shows no stale result.
 - Switch the in-app theme light ↔ dark without restarting, then reopen the chooser: it renders in the
   new FlatLaf theme.
 - While a large OPML import runs, the app stays responsive — the import button's spinner keeps
@@ -794,7 +876,9 @@ unread articles) and click it while the window is in each of these states:
   instead.
 - On a different Space → macOS switches to that Space and brings the window to front (OS default;
   confirm it still holds on the OS version under test).
-- Also confirm a plain click on the tray icon itself still toggles show/hide as before.
+- Also confirm a plain click on the tray icon itself hides the window only while it is shown and
+  focused, and brings it to front otherwise (shown but another app active, minimized, or hidden to
+  the tray) — the same `shouldHideOnTrayAction` rule as Windows, without the notification bias.
 
 (Linux, SNI host present — KDE/GNOME) Clicking a notification's body (`LinuxNotifier`'s `"default"`
 action, routed through `SniConnection.notificationActionInvoked` and filtered by
@@ -807,9 +891,10 @@ workspace), plus:
   come to front. This is the check for the id-filtering in `PendingNotificationIds`/
   `consumeIfOwn` — the `ActionInvoked` D-Bus signal is unscoped by sender, so without correct
   filtering, any application's notification click would wrongly activate Keryx.
-- Also confirm a plain click on the tray icon itself still toggles show/hide as before (the SNI
-  icon's `Activate`/`SecondaryActivate` path is unrelated to `ActionInvoked`, but worth
-  reconfirming alongside the above).
+- Also confirm a plain click on the tray icon itself hides the window only while it is shown and
+  focused, and brings it to front otherwise, as on macOS (the SNI icon's
+  `Activate`/`SecondaryActivate` path is unrelated to `ActionInvoked`, but worth reconfirming
+  alongside the above).
 - If no notification daemon is present, or the daemon doesn't honor the `"default"` action key,
   notifications should still display (best-effort) with no crash — clicking them just does
   nothing, same as before this change.
@@ -834,8 +919,19 @@ see the KDoc on `shouldHideOnTrayAction` and the wiring in `main.kt`), confirm b
   unfocused) → the window comes to front and gets focus, rather than being hidden.
 - With the window minimized to the tray (hidden), click the tray icon or a notification → the
   window restores and comes to front.
-- The "表示"/"非表示" tray menu item still toggles deterministically regardless of focus state
-  (it uses the unchanged `onToggle`, not `onTrayAction`).
+- The Show/Hide tray menu item does not look at focus (opening the tray menu itself takes focus from
+  the window on Windows): it reads "Hide" and hides whenever the window is shown, and reads "Show"
+  otherwise (`trayWindowShown`).
+
+**Minimized windows, every tray (macOS, Windows, Linux SNI, and the AWT fallback).** Minimize the
+window (not hide it to the tray), then:
+
+- Open the tray menu → the item reads "Show" (not "Hide"). Choose it → the window is un-minimized,
+  brought to front and focused — the same `activationRequests` path a second launch uses — rather
+  than staying minimized or being hidden.
+- Minimize again and click the tray icon (left-click on macOS/SNI, double-click on Windows) → the
+  window is likewise restored and focused, never hidden.
+- Restore the window, then open the tray menu → it reads "Hide" again.
 
 - The tray icon asset depends on how the platform draws it. macOS and Linux-with-an-SNI-host get the white glyph +
   black outline (`tray_icon_outlined.png`), which needs real alpha and at least ~22px. The Windows notification area
@@ -854,7 +950,7 @@ likely each is to be wrong):
   If a bad entry is picked, trim `SNI_ICON_SIZES`.
 - Package with `./gradlew :composeApp:createDistributable` and launch `build/compose/binaries/main/app/Keryx/bin/Keryx`
   — a missing jlink module (`jdk.security.auth`) only shows up there, never under `run`.
-- Left-click toggles the window (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
+- Left-click hides a shown, focused window and brings it to front otherwise (this depends on `ItemIsMenu = false`; if the menu opens instead, that property is wrong).
 - Right-click shows the menu with the correct labels, and the Show/Hide label flips after toggling the window
   *without* reopening the menu (exercises `AboutToShow` + `ItemsPropertiesUpdated`).
 - The unread dot appears/disappears live (`NewIcon` reaches the host).
@@ -918,6 +1014,12 @@ in order of how likely each is to be wrong):
   nothing selected) never runs its action — confirms the D-Bus click handler's `isEnabled()` guard
   (`AppMenuBarHost.kt`) actually blocks a `clicked` event the host still delivers for a disabled item, mirroring
   what `MenuShortcutDispatcher` already enforced for the keyboard-shortcut path.
+- With the in-window bar hidden (`MenuShortcutDispatcher` active): type into the search field and press
+  Delete/Backspace — the query is edited and the selected feed is **not** unsubscribed. F2 and Delete act on
+  the selected feed-list item only while the feed list itself has focus (click an article first: they do
+  nothing, and the Global Menu shows no F2/Delete hint beside Rename/Delete). A key whose item is greyed out
+  passes through instead of being swallowed (e.g. with nothing selected in the article list, Ctrl+Shift+C does
+  nothing and reaches whatever has focus). `MenuBarVisibilityTest` covers the dispatcher's rules.
 - `startMinimized`: launch minimized, restore, confirm the Global Menu populates (validates the deferred/retried
   XID lookup) and the in-window bar still hides once ready.
 - `systemctl --user restart plasma-plasmashell`: the Global Menu keeps working without restarting Keryx (validates
@@ -964,8 +1066,10 @@ The `.opml` file association is the same kind of OS-integration behavior and nee
 confirmation, on all three desktop platforms (build with `createDistributable`/`packageDeb`/etc. —
 `./gradlew :composeApp:run` never registers it, exactly like the `keryx://` scheme):
 
-- **macOS**: launch `Keryx.app` once, then double-click an `.opml` file in Finder → Keryx activates
-  and the subscriptions appear; also confirm right-click → "Open With" → Keryx.
+- **macOS**: launch `Keryx.app` once, then double-click an `.opml` file in Finder → Keryx activates,
+  Settings opens on the Data tab with the import button's spinner, the result text appears there and
+  the subscriptions appear; also confirm right-click → "Open With" → Keryx. Nothing is added to the
+  notification bell.
 - **Windows**: launch the installed app once, then double-click an `.opml` file in Explorer.
 - **Linux**: launch the packaged app once (registers on startup), then confirm
   `xdg-mime query filetype some.opml` reports `application/x-opml+xml` and
@@ -973,6 +1077,15 @@ confirmation, on all three desktop platforms (build with `createDistributable`/`
   double-click an `.opml` file in the file manager.
 - On all three: repeat while Keryx is already running (second launch) to confirm single-instance
   forwarding activates the existing window and imports without spawning a second process.
+- On all three: on a fresh profile, quit Keryx and double-click an `.opml` file (cold start) while
+  first-run Setup is showing → Setup stays on screen with no Settings window over it; finish Setup →
+  Settings opens on the Data tab and the file is imported there.
+- Open an unreadable file (e.g. one whose read permission was removed) → Settings ▸ Data shows the
+  import error inline.
+- Open a second `.opml` file while a large import is still running → it is imported right after the
+  first one finishes, with its own result text.
+- (Android) "Open with Keryx" on an `.opml` from a file manager behaves the same: Settings ▸ Data
+  opens and imports it (after Setup on a fresh install).
 
 ### (Android) The overlay scroll indicator
 
@@ -1132,6 +1245,39 @@ device/emulator:
   tooltip. While a reset is running, the spinner is visible against its container and the row's
   height doesn't change. Check in both light and dark themes.
 
+### (Android) The URL-copied Snackbar
+
+`ArticleUrlCopierTest.kt` covers when the shared copy handler shows the Snackbar; confirm on an
+emulator that it really appears from every route:
+
+- On API 26–32 at phone width, with the article list on screen (no reader), long-press a row →
+  "Copy URL": exactly one "URL copied" Snackbar appears. Long-press a row other than the selected
+  one at a tablet width and copy: again exactly one Snackbar, and the reader's copy button does not
+  turn ✓ (it shows a different article). Copying from the reader's own button also shows exactly
+  one, and its ✓ appears too. Copying twice quickly leaves one Snackbar on screen, not two in turn.
+- On API 33+, none of those routes shows a Snackbar from the app (only the OS's own clipboard
+  confirmation).
+
+### (Android) Ctrl+Shift+R refresh-list shortcut
+
+`HomePaneLayoutTest` covers `articleListOnScreen`; confirm on an emulator with a hardware keyboard:
+
+- With the article list on screen (phone or tablet width, and a large tablet's 3-pane layout), Ctrl+Shift+R
+  shows the pull-to-refresh indicator and refreshes the selected list's feeds, as a pull does.
+- At phone width with an article open (the reader alone), Ctrl+Shift+R does nothing. Open the feed-list
+  drawer at phone or tablet width: Ctrl+Shift+R does nothing until the drawer is closed again.
+- While search results are showing, Ctrl+Shift+R does nothing.
+
+### (Android) Reordering with TalkBack while renaming
+
+`FeedListDragTest.kt` covers that no reorder action is exposed while a row is being renamed; confirm with
+TalkBack on an emulator:
+
+- Without an open editor, a feed or folder row's TalkBack actions menu offers "Move up"/"Move down"
+  where a move is possible. Start renaming that row (long-press → Rename, or F2 on a hardware keyboard):
+  while the editor is open, neither that row nor any other offers the move actions, and the drag handle
+  does not start a drag. Close the editor (× or Enter): the actions come back.
+
 ### (iOS) The sidebar
 
 The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));
@@ -1153,6 +1299,73 @@ device. On an iPhone and an iPad (both orientations), with folders, unfoldered f
   lifts the row instead. The row being renamed cannot be dragged.
 - Tapping still selects (and on iPhone opens the article list); folder, tag and section disclosure states
   survive a relaunch.
+
+### (SwiftUI) Copy URL feedback
+
+Every article "Copy URL" route in the SwiftUI app goes through `HomeObservable.copyArticleUrl`
+(the decision itself is `ArticleUrlCopy`, covered by `ArticleUrlCopyTests`); confirm on screen, on
+macOS (and on iPad, where the reader shares the screen with the list):
+
+- Right-click (long-press, on iPad) an article row and choose "Copy URL": the reader's copy button
+  flashes ✓, exactly as Article ▸ Copy URL (⌘⇧C) and the button itself do, and the pasteboard holds
+  that article's URL.
+- Feed ▸ Copy feed URL and Feed ▸ Copy site URL copy their URL but do **not** flash the reader's ✓
+  (the reader shows an article, not that feed).
+- (macOS) No toast appears for any of these: the reader's ✓ is the on-screen confirmation.
+- (macOS) With VoiceOver on, open the context menu of a row the reader does not show from the keyboard
+  (VO-Shift-M, which does not select the row) and choose "Copy URL": "URL copied" is announced once and
+  the reader's ✓ does not flash.
+- (iOS, iPhone and iPad) Long-press an article row that is not the one the reader shows and choose
+  "Copy URL": a "URL copied" toast appears at the bottom of the screen and fades out after about two
+  seconds, and the reader's ✓ does not flash. Copying again before it fades keeps it up for another two
+  seconds rather than hiding it early.
+- (iOS, iPhone width) Go back from the reader to the article list (the reader is no longer on screen),
+  long-press a row (including the one just read) and choose "Copy URL": the toast appears. Copying from
+  the reader's own button (and, with a hardware keyboard, ⌘⇧C) shows the toast as well as the ✓.
+- (iOS) With VoiceOver on, copy a URL from a row's menu, and again from the reader's button: each copy
+  is announced as "URL copied" exactly once, even if the menu is still closing as it is spoken, and the
+  VoiceOver focus does not move to the toast. While it is up, swiping to it reads "URL copied".
+- (iOS) With the article list sorted oldest first and the new-articles pill showing at its bottom, copy a
+  URL: the toast appears above the pill rather than covering it, and both stay readable.
+
+### (SwiftUI) Article row menu read state
+
+The read item of the SwiftUI article row's context menu is labelled from the state the row is in once
+the menu is open (the shared `articleReadAfterContextMenuOpen`, covered by
+`ArticleReadAfterContextMenuOpenTest`), and each item sets that explicit state rather than toggling. On
+macOS whether the open selects the row is predicted from the pointer hover
+(`ArticleRowMenuState.opensBySelecting`, covered by `ArticleRowModelTests`), using the same hover the
+right-click's selection runs on (`ContextMenuSelectionTracker`, covered by
+`ContextMenuSelectionTrackerTests`). Whether SwiftUI rebuilds the
+menu after the right-click's selection lands, and whether the hover prediction holds, can only be seen
+in the running app; confirm:
+
+- (macOS) With the pointer on an unread, unselected article row, right-click it: the row becomes
+  selected (and read) and the menu says "Mark as unread". Choosing it leaves the article unread — as
+  ⌘⇧U would right now. The star item still matches the article's current star state, and choosing it
+  sets the opposite.
+- (macOS) With the pointer away from the row (e.g. over the reader), move the VoiceOver cursor to an
+  unread, unselected article row and open its menu with VO+Shift+M: the menu says "Mark as read"
+  (the row's current state), and the row does not become selected. Choosing it marks the article
+  read. (Opening it with VO+Shift+M while the pointer happens to rest on that row is the known
+  limitation: the menu then says "Mark as unread", and choosing it changes nothing.)
+- (macOS) Rest the pointer on a row and scroll the list with the keyboard or the scroll wheel so that a
+  different, unread and unselected row ends up under the pointer without moving it, then right-click:
+  the row now under the pointer is the one selected, and its menu says "Mark as unread".
+- (macOS) Right-click the selected row after marking it unread: the menu says "Mark as read" and the
+  article stays unread until that is chosen (the row is not selected again).
+- (iOS) Long-press an unread row: nothing is selected, the menu says "Mark as read", and choosing it
+  marks the article read.
+
+### (SwiftUI) OPML from the File menu
+
+The SwiftUI File menu's Import/Export only request the operation (`OpmlTransferObservable`, covered
+by `OpmlTransferObservableTests`); confirm on macOS:
+
+- File ▸ Import OPML… (⌘I) opens Settings on the Data tab and the open panel appears from there; the
+  spinner and the result text (both counts when some feeds failed) appear on the Data tab. Export
+  (⌘E) likewise ends with the result text on the Data tab.
+- While an import runs, File ▸ Import/Export are disabled.
 
 ### In-App Update
 
@@ -1186,9 +1399,17 @@ a rollback path has a bug that leaves it damaged.
   leaving nothing running.
 - **Windows / Linux (portable ZIP)**: same self-replace flow as macOS; confirm the relaunched app
   runs from the same directory and no `.new`/`.old` sibling directories are left behind.
-- **Linux (deb/rpm)**: confirm the Updates tab and tray both fall back to "open the release page"
-  rather than offering a download — `updatePlan` always returns `OpenReleasePage` for
-  `LINUX_PACKAGE`.
+- **Linux (deb/rpm)**: confirm the Updates tab falls back to its release-page link rather than
+  offering a download, and that the tray/Help item ("New version available") opens that tab and
+  re-checks rather than offering a download or opening the browser — `updatePlan` always returns
+  `OpenReleasePage` for `LINUX_PACKAGE`.
+- **Tray/Help update item, every desktop platform**: with the window hidden to the tray, click the
+  tray's update item in each outcome — up to date, a failed check (network off), an update this
+  install can't apply (deb/rpm, or a translocated macOS `.app`), and an installable one. Every time
+  the window comes to front with Settings ▸ Updates open, and the result (up to date / the error
+  with Retry / the release-page link / the download progress) is shown inline there, exactly as
+  after pressing "Check for updates" on the tab itself; nothing else (no dialog, no browser) appears.
+  Opening the tab this way must not start a second check (one "Checking…" only).
 - **Android**: sideload a `github`-flavor APK (see `build.md`'s flavor split), trigger a download
   and install, and confirm the OS's own install-confirmation dialog appears and the app updates in
   place. Separately, sideload a `play`-flavor APK and confirm the Updates tab never offers a

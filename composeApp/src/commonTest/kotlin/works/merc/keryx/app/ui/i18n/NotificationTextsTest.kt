@@ -52,16 +52,16 @@ class NotificationTextsTest {
     }
 
     @Test
-    fun opmlImportedReportsOnlyTheAddedCountWhenNothingFailed() = runTest {
+    fun opmlImportedTextReportsOnlyTheAddedCountWhenNothingFailed() = runTest {
         val expected = getPluralString(Res.plurals.settings_import_success, 5, 5)
-        assertEquals(expected, resolveNotificationText(NotificationText.OpmlImported(added = 5, failed = 0)))
+        assertEquals(expected, opmlImportedText(added = 5, failed = 0))
     }
 
     @Test
-    fun opmlImportedAppendsTheFailedCountWhenSomeImportsFailed() = runTest {
+    fun opmlImportedTextAppendsTheFailedCountWhenSomeImportsFailed() = runTest {
         val addedText = getPluralString(Res.plurals.settings_import_success, 2, 2)
         val failedText = getPluralString(Res.plurals.settings_import_failed, 1, 1)
-        assertEquals("$addedText / $failedText", resolveNotificationText(NotificationText.OpmlImported(added = 2, failed = 1)))
+        assertEquals("$addedText / $failedText", opmlImportedText(added = 2, failed = 1))
     }
 
     @Test

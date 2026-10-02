@@ -27,6 +27,7 @@ import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleRepository
+import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
@@ -40,6 +41,8 @@ import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.presentation.settings.CloudSyncController
+import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.random.Random
 
@@ -81,6 +84,9 @@ class HomeViewModelFixture(
     private val driver: SqlDriver,
     private val syncScope: CoroutineScope,
     private val httpClients: List<HttpClient>,
+    // The CloudSyncController [newHomeViewModel] built as the ViewModel's ManualSync, when it built
+    // one (null when the caller supplied its own ManualSync).
+    private val ownedManualSync: CloudSyncController? = null,
 ) {
     /**
      * Cancels every scope this fixture owns and *joins* it before [driver] is closed.
@@ -98,6 +104,7 @@ class HomeViewModelFixture(
      */
     suspend fun close() {
         vm.viewModelScope.coroutineContext.job.cancelAndJoin()
+        ownedManualSync?.viewModelScope?.coroutineContext?.job?.cancelAndJoin()
         syncScope.coroutineContext.job.cancelAndJoin()
         httpClients.forEach { it.close() }
         driver.close()
@@ -142,6 +149,11 @@ fun newHomeViewModel(
     // throwing, to verify the failure-cleanup below actually runs. A no-op default keeps every
     // other caller unaffected.
     injectFailureAfterActivityCenter: () -> Unit = {},
+    // Home's "Sync now" delegate. Null (the default) builds the real one — a CloudSyncController
+    // over this fixture's own session, settings, sync repository and [activityCenter], so the sync
+    // button's enabled state behaves as in production — which [HomeViewModelFixture.close] tears
+    // down. A test that wants to drive it directly passes a FakeManualSync instead.
+    manualSync: ManualSync? = null,
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -192,13 +204,22 @@ fun newHomeViewModel(
             activityCenter, feedRepository, syncRepository, cloudSession, NewArticleNotifier(),
             settingsRepository, FakeNotificationMessages(),
         )
+        // The controller this fixture creates (and so must tear down) when the caller passed none.
+        var ownedManualSync: CloudSyncController? = null
+        val effectiveManualSync: ManualSync = manualSync ?: CloudSyncController(
+            cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository),
+            activityCenter, settingsRepository, Dispatchers.Unconfined,
+        ).also { controller ->
+            ownedManualSync = controller
+            cleanupOnFailure += { controller.viewModelScope.cancel() }
+        }
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner,
+            syncRepository, activityCenter, clock, refreshCycleRunner, effectiveManualSync,
             Dispatchers.Unconfined, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(
-            vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient),
+            vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedManualSync,
         )
     } catch (e: Throwable) {
         cleanupOnFailure.asReversed().forEach { it() }

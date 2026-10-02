@@ -1,5 +1,6 @@
 package works.merc.keryx.app.tray
 
+import works.merc.keryx.app.core.TRAY_ACTION_NOTIFICATION_RECENCY_MS
 import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.domain.AvailableUpdate
@@ -8,8 +9,12 @@ import works.merc.keryx.app.domain.UpdateAssetKind
 import works.merc.keryx.app.domain.UpdatePlan
 import works.merc.keryx.app.domain.UpdateState
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+
+/** The fixed "now" every tray-click case evaluates at; recency boundaries are offsets from it. */
+private const val NOW_MS = 100_000L
 
 private val SOME_ASSET =
     UpdateAsset("Keryx-2.0.0-macos-arm64.zip", "https://x", 100L, "a".repeat(64), UpdateAssetKind.MAC_APP_ZIP)
@@ -26,8 +31,9 @@ class TrayActionPolicyTest {
         assertTrue(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
@@ -39,8 +45,9 @@ class TrayActionPolicyTest {
         assertFalse(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 99_000L,
                 recencyWindowMs = 5_000L,
             ),
@@ -52,8 +59,9 @@ class TrayActionPolicyTest {
         assertTrue(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 95_000L,
                 recencyWindowMs = 5_000L,
             ),
@@ -65,6 +73,7 @@ class TrayActionPolicyTest {
         assertTrue(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = true,
                 nowMillis = 1_000L,
                 lastNotificationSentAtMillis = 0L,
@@ -78,8 +87,9 @@ class TrayActionPolicyTest {
         assertFalse(
             shouldHideOnTrayAction(
                 windowVisible = false,
+                windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
@@ -91,40 +101,170 @@ class TrayActionPolicyTest {
         assertFalse(
             shouldHideOnTrayAction(
                 windowVisible = true,
+                windowMinimized = false,
                 windowFocused = false,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
         )
     }
 
-    // --- shouldOpenSettingsAfterUpdateCheck ---
+    // --- trayWindowShown / minimized windows ---
 
     @Test
-    fun `an installable update opens the settings dialog's updates tab`() {
-        assertTrue(shouldOpenSettingsAfterUpdateCheck(UpdateState.Available(installableUpdate())))
+    fun `a minimized window is not shown, so the tray offers Show for it`() {
+        assertTrue(trayWindowShown(windowVisible = true, windowMinimized = false))
+        assertFalse(trayWindowShown(windowVisible = true, windowMinimized = true))
+        assertFalse(trayWindowShown(windowVisible = false, windowMinimized = false))
+        assertFalse(trayWindowShown(windowVisible = false, windowMinimized = true))
     }
 
-    /** Nothing on that tab to act on: the menu entry itself opens the release page instead. */
+    /** Only a visible, un-minimized, focused window is hidden by an icon click; all else activates. */
     @Test
-    fun `a non-installable update does not open the settings dialog`() {
-        assertFalse(shouldOpenSettingsAfterUpdateCheck(UpdateState.Available(manualOnlyUpdate())))
+    fun `an icon click hides only a shown and focused window, across the whole matrix`() {
+        for (visible in listOf(true, false)) for (minimized in listOf(true, false)) for (focused in listOf(true, false)) {
+            val hides = shouldHideOnTrayAction(
+                windowVisible = visible,
+                windowMinimized = minimized,
+                windowFocused = focused,
+                nowMillis = NOW_MS,
+                lastNotificationSentAtMillis = 0L,
+                recencyWindowMs = 5_000L,
+            )
+            assertEquals(visible && !minimized && focused, hides, "visible=$visible minimized=$minimized focused=$focused")
+        }
     }
 
     @Test
-    fun `every other state leaves the settings dialog closed`() {
+    fun `a minimized window that still reports focus is activated, not hidden`() {
+        assertFalse(
+            shouldHideOnTrayAction(
+                windowVisible = true,
+                windowMinimized = true,
+                windowFocused = true,
+                nowMillis = NOW_MS,
+                lastNotificationSentAtMillis = 0L,
+                recencyWindowMs = 5_000L,
+            ),
+        )
+    }
+
+    // --- updateMenuAction ---
+
+    @Test
+    fun `idle and up to date run a check`() {
+        assertEquals(UpdateMenuAction.Check, updateMenuAction(UpdateState.Idle))
+        assertEquals(UpdateMenuAction.Check, updateMenuAction(UpdateState.UpToDate))
+    }
+
+    /** Nothing to download here: the check refreshes it, and the Updates tab links the release page. */
+    @Test
+    fun `a non-installable update runs a check rather than opening the browser`() {
+        assertEquals(UpdateMenuAction.Check, updateMenuAction(UpdateState.Available(manualOnlyUpdate())))
+    }
+
+    @Test
+    fun `an installable update, a failure and a ready download run the primary action`() {
+        assertEquals(UpdateMenuAction.Primary, updateMenuAction(UpdateState.Available(installableUpdate())))
+        assertEquals(UpdateMenuAction.Primary, updateMenuAction(UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "no network"))))
+        assertEquals(UpdateMenuAction.Primary, updateMenuAction(UpdateState.Ready(installableUpdate(), "/tmp/x.zip")))
+    }
+
+    @Test
+    fun `in-flight states do nothing`() {
         listOf(
-            UpdateState.Idle,
             UpdateState.Checking,
-            UpdateState.UpToDate,
             UpdateState.Downloading(installableUpdate(), 1, 2),
             UpdateState.Verifying(installableUpdate()),
-            UpdateState.Ready(installableUpdate(), "/tmp/x.zip"),
             UpdateState.Installing(installableUpdate()),
-            UpdateState.Failed(null, UpdateException(UpdateStage.CHECK, "no network")),
         ).forEach { state ->
-            assertFalse(shouldOpenSettingsAfterUpdateCheck(state), state.toString())
+            assertEquals(UpdateMenuAction.None, updateMenuAction(state), state.toString())
         }
+    }
+
+    // trayMenuToggleAction / trayIconAction: what main.kt's onToggle, onIconClick and onTrayAction
+    // apply through their one shared effect handler.
+
+    @Test
+    fun `menu toggle hides a shown window`() {
+        assertEquals(TrayWindowAction.Hide, trayMenuToggleAction(windowVisible = true, windowMinimized = false))
+    }
+
+    @Test
+    fun `menu toggle activates a window hidden to the tray`() {
+        assertEquals(TrayWindowAction.Activate, trayMenuToggleAction(windowVisible = false, windowMinimized = false))
+    }
+
+    @Test
+    fun `menu toggle activates a minimized window`() {
+        assertEquals(TrayWindowAction.Activate, trayMenuToggleAction(windowVisible = true, windowMinimized = true))
+    }
+
+    @Test
+    fun `icon click hides only a shown and focused window`() {
+        for (visible in listOf(true, false)) {
+            for (minimized in listOf(true, false)) {
+                for (focused in listOf(true, false)) {
+                    val expected = if (visible && !minimized && focused) TrayWindowAction.Hide else TrayWindowAction.Activate
+                    assertEquals(
+                        expected,
+                        trayIconAction(visible, minimized, focused, nowMillis = NOW_MS),
+                        "visible=$visible minimized=$minimized focused=$focused",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `icon click activates a minimized window even while it is focused`() {
+        assertEquals(
+            TrayWindowAction.Activate,
+            trayIconAction(windowVisible = true, windowMinimized = true, windowFocused = true, nowMillis = NOW_MS),
+        )
+    }
+
+    @Test
+    fun `icon click without a notification timestamp equals the notification-aware call with none sent`() {
+        for (visible in listOf(true, false)) {
+            for (minimized in listOf(true, false)) {
+                for (focused in listOf(true, false)) {
+                    assertEquals(
+                        trayIconAction(visible, minimized, focused, nowMillis = NOW_MS, lastNotificationSentAtMillis = NO_NOTIFICATION_MILLIS),
+                        trayIconAction(visible, minimized, focused, nowMillis = NOW_MS),
+                        "visible=$visible minimized=$minimized focused=$focused",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `icon click activates instead of hiding right after a notification`() {
+        assertEquals(
+            TrayWindowAction.Activate,
+            trayIconAction(
+                windowVisible = true,
+                windowMinimized = false,
+                windowFocused = true,
+                nowMillis = NOW_MS,
+                lastNotificationSentAtMillis = NOW_MS - TRAY_ACTION_NOTIFICATION_RECENCY_MS + 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `icon click hides again once the notification has left the recency window`() {
+        assertEquals(
+            TrayWindowAction.Hide,
+            trayIconAction(
+                windowVisible = true,
+                windowMinimized = false,
+                windowFocused = true,
+                nowMillis = NOW_MS,
+                lastNotificationSentAtMillis = NOW_MS - TRAY_ACTION_NOTIFICATION_RECENCY_MS,
+            ),
+        )
     }
 }

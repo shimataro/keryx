@@ -5,8 +5,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.koin.core.Koin
 import works.merc.keryx.app.core.Log
-import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.platform.readTextFromUri
+import works.merc.keryx.app.presentation.settings.requestOpenedOpmlImport
 
 private const val LOG_TAG = "AndroidOpmlOpen"
 
@@ -16,15 +16,16 @@ private const val LOG_TAG = "AndroidOpmlOpen"
  * `MainActivity`), the Android counterpart of desktop's `.opml` file association
  * (`handleOpenedOpmlFile` in `StartupTasks.kt`). Reads the incoming `content://` `Uri` via
  * [readTextFromUri] (the same helper `FilePicker.android.kt`'s SAF picker uses) rather than a
- * filesystem path, then delegates to the platform-independent [importOpmlAndNotify]. Unlike
- * desktop, there is no window to re-activate afterward — the incoming intent already brought this
- * Activity to the foreground.
+ * filesystem path, then hands it to the platform-independent [requestOpenedOpmlImport], which has
+ * Settings ▸ Data import it (once Home is showing) — `null` when the read fails, so the failure is
+ * shown there too. Unlike desktop, there is no window to re-activate afterward — the incoming intent
+ * already brought this Activity to the foreground.
  *
  * Public rather than `internal`: `MainActivity` lives in the separate `:androidApp` Gradle module,
  * which `internal`'s module-scoped visibility would put out of reach (same reason
  * `dispatchOAuthCallbackIfPresent` is public).
  *
- * @return `true` if [intent] looked like an OPML-open request and a read+import was launched
+ * @return `true` if [intent] looked like an OPML-open request and a read+import request was launched
  * (regardless of whether it later succeeds), so the caller can decide whether to clear the
  * intent's data (avoiding reprocessing it on a later recreation, e.g. a screen rotation replaying
  * the same `Intent` — unlike a re-dispatched OAuth callback, a re-imported OPML file would
@@ -39,11 +40,9 @@ fun handleOpmlOpenIfPresent(koin: Koin, intent: Intent?): Boolean {
     if (uri.scheme == "keryx") return false
 
     koin.get<CoroutineScope>().launch {
-        val xml = readTextFromUri(uri) ?: run {
-            Log.warn(LOG_TAG, "Could not read the opened OPML file")
-            return@launch
-        }
-        importOpmlAndNotify(koin, xml)
+        val xml = readTextFromUri(uri)
+        if (xml == null) Log.warn(LOG_TAG, "Could not read the opened OPML file")
+        requestOpenedOpmlImport(koin, xml)
     }
     return true
 }

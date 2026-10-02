@@ -68,7 +68,6 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
-import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
@@ -150,6 +149,12 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onAddFeedClick Invoked from the empty state's "Add feed" button, shown instead of the
  *   usual "no articles" message when there are no feeds at all — see [ArticleListPaneContent]'s own
  *   KDoc. `null` hides the button (leaving the message on its own); every real caller supplies it.
+ * @param onCopyArticleUrl An article row's "Copy URL" context-menu item. `HomeScreen` routes it
+ *   through the same handler as the keyboard shortcut and menu bar so the reader shows the same
+ *   copied feedback; the default copies with no feedback.
+ * @param onOpenArticleInBrowser An article row's "Open in Browser" context-menu item — the same
+ *   guarded handler ([openInBrowserIfAllowed]) as the reader's button, the keyboard shortcut and the
+ *   menu bar, so only an http(s) URL is ever opened.
  */
 @Composable
 fun ArticleListPane(
@@ -165,6 +170,8 @@ fun ArticleListPane(
     onTextInputFocusChange: (HomeTextInput?) -> Unit = {},
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
+    onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
+    onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
     // a real touch-primary platform to run on; every real call site relies on the default.
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
@@ -369,8 +376,10 @@ fun ArticleListPane(
         onToggleSort = { vm.toggleSort() },
         onMarkAllRead = { vm.markAllRead() },
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
-        onToggleRead = { vm.toggleRead(it) },
-        onToggleStar = { vm.toggleStar(it) },
+        onSetRead = { article, read -> vm.setRead(article, read) },
+        onSetStarred = { article, starred -> vm.setStarred(article, starred) },
+        onCopyArticleUrl = onCopyArticleUrl,
+        onOpenArticleInBrowser = onOpenArticleInBrowser,
         modifier = modifier,
         listState = listState,
         returnRipplePulse = branchReturnRipplePulse,
@@ -423,8 +432,8 @@ private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
 }
 
 /**
- * Remembers a "copy URL to clipboard" action, shared by [ArticleListPaneContent]'s article rows
- * (both the current filter's own list and search results), and by [FeedListPane]'s feed rows.
+ * Remembers a plain "copy URL to clipboard" action with no feedback of its own, used by
+ * [FeedListPane]'s feed rows and by [rememberPlainArticleUrlCopy].
  */
 @Composable
 internal fun rememberCopyUrlAction(): (String) -> Unit {
@@ -433,6 +442,16 @@ internal fun rememberCopyUrlAction(): (String) -> Unit {
     return remember(clipboard, scope) {
         { url: String -> scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(url)) } }
     }
+}
+
+/**
+ * The default for [ArticleListPane]'s and [ArticleListPaneContent]'s `onCopyArticleUrl`: copies the
+ * row's URL without the reader's copied feedback. `HomeScreen` passes its own handler instead.
+ */
+@Composable
+internal fun rememberPlainArticleUrlCopy(): (ArticleListRow) -> Unit {
+    val copyUrl = rememberCopyUrlAction()
+    return remember(copyUrl) { { row: ArticleListRow -> copyUrl(row.url) } }
 }
 
 /**
@@ -631,8 +650,10 @@ internal fun ArticleListPaneContent(
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
     onSelectArticle: (ArticleListRow) -> Unit,
-    onToggleRead: (ArticleListRow) -> Unit = {},
-    onToggleStar: (ArticleListRow) -> Unit = {},
+    onSetRead: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
+    onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
+    onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
+    onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
@@ -752,7 +773,6 @@ internal fun ArticleListPaneContent(
             } else {
                 val rowMetrics = rememberArticleRowMetrics()
                 val rowStrings = rememberArticleRowStrings()
-                val copyUrl = rememberCopyUrlAction()
                 // contentPadding's bottom clears the navigation bar on Android's edge-to-edge
                 // layout (see HomeScreen's Scaffold); zero on desktop (WindowInsets.safeDrawing).
                 LazyColumn(
@@ -770,10 +790,11 @@ internal fun ArticleListPaneContent(
                             rowHeight = rowMetrics.rowHeight,
                             faviconSize = rowMetrics.faviconSize,
                             onClick = { onSelectArticle(article) },
-                            onToggleRead = { onToggleRead(article) },
-                            onToggleStar = { onToggleStar(article) },
-                            onCopyUrl = { copyUrl(article.url) },
-                            onOpenInBrowser = { BrowserOpener.open(article.url) },
+                            onSetRead = { read -> onSetRead(article, read) },
+                            onSetStarred = { starred -> onSetStarred(article, starred) },
+                            onCopyUrl = { onCopyArticleUrl(article) },
+                            onOpenInBrowser = { onOpenArticleInBrowser(article) },
+                            onActivate = onActivated,
                             titleOverride = titleMarkedById?.get(article.id)?.let {
                                 markedToAnnotatedString(it.ifBlank { article.title })
                             },

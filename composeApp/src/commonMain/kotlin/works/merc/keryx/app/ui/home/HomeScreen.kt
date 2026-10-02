@@ -59,7 +59,6 @@ import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.platform.BackHandler
-import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -120,9 +119,15 @@ fun HomeScreen() {
     // ArticleDetailPane/ArticleWebViewCarousel/the reader lambda — see KeyboardNav.kt's own KDoc
     // and FallbackReaderScrollHost's. A no-op wherever the native WebView is showing instead.
     val fallbackReaderScrollHost = remember { FallbackReaderScrollHost() }
-    // Bumped on each keyboard-shortcut copy; ArticleDetailPane watches it to flash its copy button's
-    // inline ✓ (the keyboard copies the selected article, which that pane already shows).
-    var copyPulse by remember { mutableStateOf(0) }
+    // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
+    // host is only created — and provided — on a touch-primary platform.
+    val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
+    // The one handler behind every route to "copy article URL" — the reader's button, the keyboard
+    // shortcut, the menu bar and the article-row context menu — including its feedback: the pulse
+    // ArticleDetailPane watches to flash its copy button's inline ✓ (only for the article it shows:
+    // an Android long-press menu doesn't select its row first, so it can copy a different one), and
+    // Android's "URL copied" snackbar, which therefore appears even when the reader isn't on screen.
+    val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticle.value?.id }
     val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
     // down to the returned-to article's own row, which plays a one-shot ripple so the user can
@@ -204,6 +209,10 @@ fun HomeScreen() {
     // HomePaneLayout.kt's keyboardPaneFor for why this, and not focusedPane or feedDrawerOpen
     // alone, is the one value every one of those call sites should read.
     val keyboardPane = keyboardPaneFor(focusedPane, feedDrawerOpen)
+    // Whether F2/Return and Delete/Backspace act on the selected feed-list row right now — the one
+    // rule both the key handler below and the menu bar's bare accelerators read (see
+    // HomePaneLayout.kt's feedListItemKeysActive).
+    val feedListKeysActive = feedListItemKeysActive(keyboardPane, textInputFocused)
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val density = LocalDensity.current
@@ -259,11 +268,12 @@ fun HomeScreen() {
         }
     }
 
-    // Mirrors that focus state into MenuController (composition-local state -> StateFlow, same
-    // pattern App.kt already uses for currentScreen): a native Swing accelerator has no equivalent
-    // to KeyboardNav.kt's textInputFocused suppression, so AppMenuBar needs this to disable the
-    // Feed menu's bare-key items (F2/Delete) while the user is actually typing.
-    LaunchedEffect(textInputFocused) { menuController.textInputFocused.value = textInputFocused }
+    // Mirrors feedListKeysActive into MenuController (composition-local state -> StateFlow, same
+    // pattern App.kt already uses for currentScreen): a native Swing accelerator can't defer to a
+    // focused text field or another pane the way homeKeyboardShortcuts does, so AppMenuBar attaches
+    // the Feed menu's bare F2/Return and Delete accelerators only while this holds — the items
+    // themselves stay clickable either way.
+    LaunchedEffect(feedListKeysActive) { menuController.feedListKeysActive.value = feedListKeysActive }
 
     val orderedRows = remember(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap) {
         buildOrderedFeedListRows(tags, folders, feeds, collapsedFolderIds, expandedTagIds, feedTagMap)
@@ -275,15 +285,10 @@ fun HomeScreen() {
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
     // selection at call time (vm.selectedArticle.value) so a command collected once stays correct.
     fun openSelectedInBrowser() {
-        vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let { BrowserOpener.open(it) }
+        openInBrowserIfAllowed(vm.selectedArticle.value?.url)
     }
     fun copySelectedUrl() {
-        vm.selectedArticle.value?.url?.takeIf { hasUsableUrl(it) }?.let {
-            scope.launch {
-                clipboard.setClipEntry(ClipboardEntries.ofText(it))
-                copyPulse++
-            }
-        }
+        vm.selectedArticle.value?.let { urlCopier.copy(it.url, it.id) }
     }
     fun focusSearch() {
         // Opens the bar at a narrow layout (a no-op at Triple, where HomeScreen's own
@@ -326,9 +331,6 @@ fun HomeScreen() {
         }
     }
 
-    // Desktop has no in-app snackbar convention (see LocalSnackbarHostState's own KDoc), so the
-    // host is only created — and provided — on a touch-primary platform.
-    val snackbarHostState = if (isTouchPrimary) remember { SnackbarHostState() } else null
     // contentWindowInsets = WindowInsets(0): each pane applies its own inset instead of one
     // consumed here — see KeryxPaneTopBar's Android `actual` (top), FeedListPane's and
     // ArticleListPane's LazyColumn `contentPadding` (bottom), and the horizontal inset applied to
@@ -436,13 +438,19 @@ fun HomeScreen() {
                     },
                     onNextArticle = { vm.selectNext() },
                     onPreviousArticle = { vm.selectPrevious() },
-                    onFeedListRename = { if (keyboardPane == HomePane.FeedList) feedListRenameRequestId++ },
-                    onFeedListDelete = { if (keyboardPane == HomePane.FeedList) feedListDeleteRequestId++ },
+                    // Null (key left unconsumed) whenever the feed list isn't the keyboard target —
+                    // the same rule that decides whether the menu bar shows these keys.
+                    onFeedListRename = if (feedListKeysActive) ({ feedListRenameRequestId++ }) else null,
+                    onFeedListDelete = if (feedListKeysActive) ({ feedListDeleteRequestId++ }) else null,
                     onSearch = { focusSearch() },
                     onKeyboardEngaged = { keyboardEngaged = true },
-                    // Same rule the article list's own pull gesture uses, so the shortcut exists
-                    // exactly where the gesture does.
-                    onRefreshList = if (pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty())) {
+                    // Same rule the article list's own pull gesture uses, plus the list actually
+                    // being on screen (not the reader alone, not behind the open drawer), so the
+                    // shortcut exists exactly where the gesture can be made.
+                    onRefreshList = if (
+                        pullRefreshAvailable(isTouchPrimary, searchActive, hasNoFeeds = feeds.isEmpty()) &&
+                        articleListOnScreen(paneLayout, focusedPane, feedDrawerOpen)
+                    ) {
                         vm::pullToRefresh
                     } else {
                         null
@@ -537,6 +545,8 @@ fun HomeScreen() {
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
                             onAddFeedClick = { showAddFeed = true },
+                            onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
+                            onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -545,7 +555,9 @@ fun HomeScreen() {
                             vm,
                             modifier = Modifier.weight(1f),
                             onActivated = { activatePane(HomePane.ArticleDetail) },
-                            copyPulse = copyPulse,
+                            copyPulse = urlCopier.pulse,
+                            onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                            onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
                         )
                     }
                     }
@@ -658,12 +670,16 @@ fun HomeScreen() {
                                     },
                                     returnRipplePulse = articleReturnRipplePulse,
                                     onAddFeedClick = { showAddFeed = true },
+                                    onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
+                                    onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,
                                     modifier = paneModifier,
                                     onActivated = { activatePane(HomePane.ArticleDetail) },
-                                    copyPulse = copyPulse,
+                                    copyPulse = urlCopier.pulse,
+                                    onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                                    onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
                                     // Dual the reader is a permanent neighbor of the article list,

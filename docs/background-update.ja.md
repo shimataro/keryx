@@ -394,13 +394,23 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
   「再起動して %1$s にアップデート」、「アップデートに失敗しました」と切り替わる（`%1$s` は対象
   バージョン——`strings.xml` の `tray_update_download`／`tray_update_restart` 参照）。
   この項目は状態によらず**常に存在する**: `Idle`／`UpToDate` では「更新をチェック」／
-  「最新版です」となり、ユーザーが任意のタイミングで確認を要求する手段になる（クリックすると
-  `check()` を実行し、インストール可能なアップデートが見つかれば Updates タブを開く——`main.kt` の
-  `onUpdateMenuItemClicked` と `tray/TrayActionPolicy.kt` の
-  `shouldOpenSettingsAfterUpdateCheck` を参照）。インストール不可なものが見つかった場合は
-  「新しいバージョンがあります」となり、代わりにブラウザでリリースページを開く。すでに動作が
+  「最新版です」となり、ユーザーが任意のタイミングで確認を要求する手段になる。インストール不可なものが
+  見つかった場合は「新しいバージョンがあります」となる。すでに動作が
   進行中の状態（`Checking`／`Downloading`／`Verifying`／`Installing`）では、項目を消すのではなく
   無効化して表示するので、メニューの形がユーザーの目の前で変わることはない。
+  初回セットアップの表示中は、トレイでも Help メニューでも、この項目はどの状態でも無効になる
+  （ラベルはそのまま）。項目の動作はすべて設定ダイアログの Updates タブで行われ、設定はセットアップの
+  上には決して開かないため——設定…項目自身と同じ条件である（`updateMenuEntry` の
+  `settingsReachable`。設定を開く経路はすべて `ui/navigation/SettingsOpenRequests.kt` を通る）。
+  **項目をクリックすると、表示内容に関わらず常に Updates タブが開き**、そこで確認または主操作を実行して
+  結果をタブ内に表示する——タブ自身のボタンと同じ場所・同じフィードバックであり、最新版・失敗・
+  インストール不可のいずれの結果も、タブの「アップデートを確認」を押した後と全く同じに見える（メニュー
+  項目にはラベル以外何も出さない）。`Idle`／`UpToDate` とインストール不可の `Available` は確認を実行する
+  （`SettingsViewModel.checkForUpdate` 経由。タブのボタンや開いた時の自動確認と同じ、実行中ガード付きの
+  呼び出しなので、両者の間で 2 本目の確認が始まることはない）。インストール可能な `Available`、`Failed`
+  （段階ごとの再試行）、`Ready` は `UpdateRepository.performPrimaryAction` を実行する——`main.kt` の
+  `onUpdateMenuItemClicked` と `tray/TrayActionPolicy.kt` の `updateMenuAction` を参照。ウィンドウが
+  隠れている状態からのクリックでは、先にウィンドウを前面に出す。
   Updates タブ自身の見出し行も同じ
   規則に従う——そのプランでは無効化されたボタンではなく、「ダウンロード」ボタンそのものが
   一切描画されない（`ui-guidelines` の「非表示より無効化を優先する」の例外に当たる: アプリ内

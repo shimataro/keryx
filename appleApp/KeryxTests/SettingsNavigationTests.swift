@@ -86,4 +86,17 @@ struct SettingsNavigationTests {
                 == [SettingsNavigation.Tab.cloudSync]
         )
     }
+
+    /// The File menu and an opened `.opml` file both land on the Data tab
+    /// (`OpmlRequestPresenter`), on macOS and in the iOS sheet alike.
+    @Test
+    func anOpmlRequestLandsOnTheDataTab() {
+        let navigation = SettingsNavigation()
+        navigation.show(tabId: SettingsNavigation.Tab.data)
+        #expect(navigation.selectedTab == SettingsNavigation.Tab.data)
+        #expect(
+            SettingsNavigation.initialPath(navigation.selectedTab, cloudSyncAvailable: false)
+                == [SettingsNavigation.Tab.data]
+        )
+    }
 }

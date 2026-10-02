@@ -39,11 +39,14 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, OpmlOpenHandler (importOpmlAndNotify, shared by desktop's and Android's ".opml file association"), CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
-                  actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
+                  actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListExpansion —
+                  which folders/tags are collapsed/expanded, persisted device-locally; SelectionReadIntents —
+                  the explicit read/unread actions taken while a selection's body is still loading, so they win
+                  over that selection's implicit read; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
                   the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
@@ -57,22 +60,40 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
-                  sync-now and `canSyncNow`; PreferencesController — typed setters over `LocalSettings`
+                  sync-now and `canSyncNow`, re-reading the connected provider whenever
+                  `cloudStorageType` changes so a connect made in Setup reaches it; it is also the one
+                  ManualSync — `canSyncNow`/`connected`/`disabledByAuth`/`syncNow()`/`runs` — that every "Sync now" route shares:
+                  Home's toolbar button and the Feed menu (via `HomeViewModel.sync()`/`canSyncNow`/`cloudConnected`/`syncDisabledByAuth`,
+                  which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
+                  tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
-                  leaving file picking to each UI), menu/ (MenuUiState + computeMenuUiState — enabled/
+                  leaving file picking to each UI; OpmlOpenHandler (requestOpenedOpmlImport — an `.opml`
+                  file the app was opened with, on every platform, only *requests* an import, which
+                  Settings ▸ Data carries out once Home is showing; nothing goes to the notification
+                  center); OpmlTransferController — the one OPML busy flag,
+                  last result and pending request (`OpmlRequest`) every route and UI shares: the File
+                  menu only `request`s, Settings ▸ Data carries the request out (`consumeRequest`,
+                  handed out only while nothing runs), a result is kept until the Data tab shows
+                  it, an import runs on the app scope, so `KeryxSdk.close()` waits for — and
+                  cancels — one started from any UI, and every import path — `importDocument`,
+                  Compose's file picker, the SwiftUI panel and opened-file paths — ends in
+                  `importBegun`, the one step that runs an import already held by `tryBegin` and
+                  always `finish`es it, with no result when cancelled), menu/ (MenuUiState + computeMenuUiState — enabled/
                   checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
                   than Compose's own `Screen` type), Formatting (formatTimestamp, articleMetaText —
                   the reader's "author · date" meta line, shared by Compose's 3-pane reader and the
                   Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
                   into now/minutes/hours/days/absolute, shared by both apps' notification center
-                  rows). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  rows), ManualSync (the "Sync now" contract Home and Settings both depend on,
+                  implemented by `settings/CloudSyncController`). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
                   one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
                   wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
-    ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
+    ui/           theme/, navigation/ (Navigator; SettingsOpenRequests — the one router every "open Settings"
+                  route goes through, holding a request made during Setup until Home shows), setup/, home/ (adaptive 1/2/3-pane layout + search + notification
                   center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
                   FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
                   feel components shared by every pane), menu/ (MenuController)
@@ -90,7 +111,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
-               StatusNotifierItem/dbusmenu D-Bus objects
+               StatusNotifierItem/dbusmenu D-Bus objects; TrayActionPolicy (what a tray icon/menu
+               click and the update entry do — pure), TrayMenuModel (the tray menu's pure,
+               `@Composable`-free model), UpdateMenuEntry (the one update entry the tray and the
+               Help menu share — label, and enablement derived from TrayActionPolicy's
+               updateMenuAction)
     appmenu/   KDE Global Menu / D-Bus application-menu integration (AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar) — see external-spec.md §9
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
@@ -173,7 +198,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     same `MainActivity` for an `.opml` "open with Keryx" `ACTION_VIEW` intent — the Android
     counterpart of desktop's `.opml` file association; reads the `content://` `Uri` via
     `platform/FilePicker.android.kt`'s `readTextFromUri`, then delegates to commonMain's
-    `domain/OpmlOpenHandler.kt`), nativeContextMenu (a real long-press `DropdownMenu`, added in
+    `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`, passing `null` for an
+    unreadable file so Settings ▸ Data shows the failure), nativeContextMenu (a real long-press `DropdownMenu`, added in
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
@@ -225,6 +251,42 @@ and `androidApp` depends on it to produce the installable APK.
 | ViewModel | UI state retention, delegates events to Repository | androidx.lifecycle + Koin |
 | Repository | Business logic, sync, conflict resolution | Kotlin classes |
 | DataSource | DB / HTTP / file IO | SQLDelight / Ktor / java.io equivalent |
+
+### One implementation per action
+
+An action with more than one route (toolbar button, menu bar, context menu, keyboard shortcut,
+gesture, accessibility action, tray) or more than one UI (Compose, SwiftUI) gets its effect, its
+enabled/disabled condition and its feedback from a single shared piece of code that every route
+calls. A route only collects its input (which item) and calls it; it never re-implements the
+effect, the enablement or the feedback. This is what keeps the routes behaving identically, as
+`external-spec.md` §9 ("Actions with more than one route") requires.
+
+The work is split in two:
+
+- **The decision and the enablement predicate** live in `:shared` `presentation/` — a pure function
+  or a ViewModel method — whenever both UIs need them, so Compose and SwiftUI call the same code
+  rather than each re-deriving it. This follows from the state holders already living in shared
+  code (see "Shared Kotlin code" under "Apple Native Apps (SwiftUI)").
+- **The platform-side execution** (writing the clipboard, showing a snackbar, moving a window)
+  stays per UI, and is one handler per UI — not one per route.
+
+Examples in the code today:
+
+| Action | The one implementation | Routes that call it |
+| --- | --- | --- |
+| Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`, plus `connected` — whether the action is offered — and `disabledByAuth` — the disabled reason a tooltip names), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
+| Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
+| Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
+| Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
+| Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |
+| Open Settings ▸ Data for a waiting OPML request | `presentation/settings/OpmlTransferController.kt`'s `shouldPresentOpmlRequest` (a request is waiting and nothing runs) | Compose's `App.kt` and SwiftUI's `OpmlRequestPresenter` (through `OpmlTransferObservable.shouldPresentRequest`) |
+| Article row menu's read label | `presentation/home/ArticleListModel.kt`'s `articleReadAfterContextMenuOpen` (read once the menu is open: already read, or the open selected the row) | Compose's `articleRowMenuEntries` and SwiftUI's `ArticleRowView` (calling it directly); each UI only works out whether its own open selected the row (SwiftUI on macOS: `ArticleRowMenuState.opensBySelecting`, from the same pointer hover `.selectsOnContextMenu` selects on) |
+| Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓? confirm in-app? — the last from the shared `platformShowsOwnCopyConfirmation` and whether the ✓ confirms on this platform: never where the OS confirms, on a desktop only when the ✓ does not flash, on a touch platform every copy) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |
+| Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
+
+**Adding a route to an existing action** means calling its existing handler/predicate. If no shared
+one exists yet — the action's logic still sits inside one route — extract it first, move the other
+routes onto it, and only then add the new route.
 
 ## Key Classes
 
@@ -683,6 +745,14 @@ a `TrayIcon` MouseEvent carries *device* pixels on Windows but *points* on macOS
 `Window.setLocation` wants user space on both. Both consume `newArticleNotifications` themselves,
 since only Compose's `Tray()` turns a queued `TrayState` notification into a real OS one.
 
+All four share one visibility check, `tray/TrayActionPolicy.kt`'s `trayWindowShown` (visible **and**
+not minimized), for the Show/Hide label and for `main.kt`'s single menu-item handler, which hides a
+shown window and otherwise goes through `activationRequests` (un-minimize, raise, focus); an icon
+click hides only a shown *and focused* window (`shouldHideOnTrayAction`) and activates otherwise.
+Both decisions resolve to a `TrayWindowAction` (`trayMenuToggleAction` for the Show/Hide item,
+`trayIconAction` for an icon click), and `main.kt`'s `applyTrayWindowAction` is the only place that
+carries one out.
+
 **Why Linux needs SNI.** `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` fills the whole 24x24 canvas
 with the component background *before* drawing the icon, and `sun.awt.X11.XSystemTrayPeer` never reads
 the tray manager's `_NET_SYSTEM_TRAY_VISUAL`, so the XEmbed window has no alpha channel at all. An AWT
@@ -884,6 +954,17 @@ precedence by hand every time, and disagreeing about it once was a real bug: `Ho
 which could both resolve `true` at once (`PaneLayout.Dual` with the drawer open) and paint a
 keyboard-focus ring on two panes simultaneously — `keyboardPaneFor` makes that structurally
 impossible, since every consumer now reads the one value it resolves to at most once.
+
+The F2/Delete feed-list shortcuts narrow that one step further through
+**`feedListItemKeysActive(keyboardPane, textInputFocused)`** (same file): the keys act only while
+`keyboardPane` is the feed list *and* no text field (the search field, a row's inline editor) holds
+focus. `HomeScreen` passes `homeKeyboardShortcuts` its rename/delete handlers only while it holds —
+a `null` handler leaves the key unconsumed — and mirrors it into `MenuController.feedListKeysActive`,
+from which `computeMenuUiState` derives `renameOrDeleteShortcutActive`: the application menu's
+Feed ▸ Rename/Delete carry their bare accelerator only then (`AppMenuTree.kt` sets the item's
+`shortcut` to `null` otherwise, which Swing renders as no accelerator at all), while the items
+themselves stay enabled for any selection, like the row's context menu. The SwiftUI app feeds its
+own equivalent (`HomeCommands.bareKeysActive`) into the same `renameOrDeleteShortcutActive`.
 
 **`focusedPane` itself only ever *advances* at `PaneLayout.Single`.** `HomePane.ordinal + 1`
 doubles as the navigation stack's current depth, so `HomeScreen` needs no separate depth state —
@@ -1094,8 +1175,9 @@ next time the user toggles unread-only back on, defeating the reset entirely.
 
 `pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
 selection (if it qualifies), and every call site that runs it is a moment the read pin is expected
-to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), a completed
-refresh/sync (`HomeRefreshController.repinSelected`), and the article list toolbar's explicit "hide
+to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), either side
+of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
+started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
@@ -1468,14 +1550,19 @@ that found some, also passed to the OS notification sink), `syncRepository`, `se
 order — `CloudStorageAvailability.available`), `newAddFeedController()`,
 `handleOAuthRedirect(url)`, and the same `presentation/` controllers the Compose settings/setup
 screens now wrap rather than reimplement — `setupController`, `cloudSyncController`,
-`preferences` (`PreferencesController`), `opml` (`OpmlTransfer`), `notificationAlerts`, and
+`preferences` (`PreferencesController`), `opml` (`OpmlTransfer`), `opmlController`
+(`OpmlTransferController`, mirrored by Swift's `OpmlTransferObservable`; the SwiftUI File menu only
+requests, and a Home-only `OpmlRequestPresenter` shows Settings on the Data tab, which carries the
+request out), `notificationAlerts`, and
 `menuState(…)` (a direct passthrough to `presentation/menu/computeMenuUiState` for a
 `Commands`/menu item's enabled/checked state). `startMaintenance()` starts
 `domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s
 `backgroundUpdateLoop` on the SDK's own background scope — call once per foreground launch;
 idempotent, so a repeated call doesn't start a second overlapping loop.
-`importOpenedOpml(xml)` wraps `domain/OpmlOpenHandler.kt`'s `importOpmlAndNotify`, for a document the
-app was opened with (mirrors desktop's/Android's own ".opml file association" handling).
+`importOpenedOpml(xml)` wraps `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`,
+for a document the app was opened with (`null` when it could not be read; mirrors desktop's/Android's
+own ".opml file association" handling): it only requests the import, which Settings ▸ Data carries out
+once Home shows it.
 `completeConnect(type, tokens)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:

@@ -8,7 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
@@ -24,10 +23,14 @@ private const val LOG_TAG = "LinuxTray"
  * tray actions and new article notifications to the supplied callbacks and notification flow.
  *
  * @param connection The D-Bus connection used to export and announce the tray objects.
+ * @param windowShown Whether the window is shown (visible and not minimized — see
+ * [trayWindowShown]); picks the toggle item's label.
+ * @param onToggle Called for the menu's Show/Hide item.
+ * @param onIconClick Called for the host's `Activate`/`SecondaryActivate` (a click on the icon).
  * @param onNotificationClicked Called when the user clicks a displayed notification's body.
- * Unlike [onToggle] this always brings the window to front rather than toggling it, since the
- * window may already be visible (just backgrounded or on another workspace) when the click
- * arrives.
+ * Unlike [onToggle]/[onIconClick] this always brings the window to front rather than possibly
+ * hiding it, since the window may already be visible (just backgrounded or on another workspace)
+ * when the click arrives.
  */
 @Composable
 internal fun LinuxTray(
@@ -36,23 +39,25 @@ internal fun LinuxTray(
     notificationIcon: BufferedImage?,
     unreadCount: Long,
     tooltip: String,
-    windowVisible: Boolean,
+    windowShown: Boolean,
     showLabel: String,
     hideLabel: String,
     quitLabel: String,
     updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
+    onIconClick: () -> Unit,
     onQuit: () -> Unit,
     onUpdateAction: () -> Unit,
     onNotificationClicked: () -> Unit,
     newArticleNotifications: SharedFlow<String>,
 ) {
     val currentOnToggle by rememberUpdatedState(onToggle)
+    val currentOnIconClick by rememberUpdatedState(onIconClick)
     val currentOnQuit by rememberUpdatedState(onQuit)
     val currentOnUpdateAction by rememberUpdatedState(onUpdateAction)
     val currentOnNotificationClicked by rememberUpdatedState(onNotificationClicked)
 
-    val toggleLabel = if (windowVisible) hideLabel else showLabel
+    val toggleLabel = if (windowShown) hideLabel else showLabel
 
     val item = remember(connection) {
         SniStatusNotifierItem(
@@ -98,7 +103,7 @@ internal fun LinuxTray(
     LaunchedEffect(item, tooltip) {
         item.updateToolTip(tooltip)
     }
-    LaunchedEffect(menu, windowVisible, showLabel, hideLabel, quitLabel, updateEntry) {
+    LaunchedEffect(menu, windowShown, showLabel, hideLabel, quitLabel, updateEntry) {
         menu.updateState(TrayMenuState(toggleLabel, quitLabel, updateEntry))
     }
 
@@ -110,8 +115,11 @@ internal fun LinuxTray(
 
     // Host-initiated actions arrive on dbus-java worker threads; collecting them here moves
     // them onto the UI thread before they touch Compose state.
-    LaunchedEffect(item, menu) {
-        merge(item.activations, menu.toggleRequests).collect { currentOnToggle() }
+    LaunchedEffect(item) {
+        item.activations.collect { currentOnIconClick() }
+    }
+    LaunchedEffect(menu) {
+        menu.toggleRequests.collect { currentOnToggle() }
     }
     LaunchedEffect(menu) {
         menu.quitRequests.collect { currentOnQuit() }

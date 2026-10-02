@@ -34,6 +34,7 @@ class MenuBarVisibilityTest {
 
     private var addFeedCalled = false
     private var refreshCalled = false
+    private var unsubscribeCalled = false
     private var toggledTo: Boolean? = null
 
     private fun labels() = AppMenuLabels(
@@ -45,7 +46,7 @@ class MenuBarVisibilityTest {
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
         feedMenu = "Feed", refreshAll = "RefreshAll", syncNow = "SyncNow",
         feedRefresh = "FeedRefresh", feedAssignTags = "AssignTags", feedMoveToFolder = "MoveToFolder",
-        feedNoFolder = "NoFolder", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
+        feedNoFolder = "NoFolder", feedNewFolder = "NewFolder", feedNewTag = "NewTag", feedRename = "FeedRename", feedUnsubscribe = "FeedUnsubscribe",
         feedCopyUrl = "FeedCopyUrl", feedCopySiteUrl = "FeedCopySiteUrl", feedOpenSite = "FeedOpenSite",
         helpMenu = "Help", website = "Website", projectPage = "ProjectPage", about = "About",
     )
@@ -56,17 +57,26 @@ class MenuBarVisibilityTest {
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
-        renameSelectedFeed = {}, unsubscribeSelectedFeed = {},
+        newFolderForSelectedFeed = {}, newTagForSelectedFeed = {},
+        renameSelectedFeed = {}, unsubscribeSelectedFeed = { unsubscribeCalled = true },
         copyFeedUrl = {}, copyFeedSiteUrl = {}, openFeedSite = {},
         openWebsite = {}, openProjectPage = {}, updateAction = {}, about = {},
     )
 
-    private fun tree(menuBarVisible: Boolean = false) = buildAppMenuTree(
+    /** [feedListKeysActive] defaults to true (the feed list holds keyboard focus), so the bare
+     * rename/delete accelerators are part of the tree. */
+    private fun tree(
+        menuBarVisible: Boolean = false,
+        feedListKeysActive: Boolean = true,
+        onHome: Boolean = true,
+    ) = buildAppMenuTree(
         ui = computeMenuUiState(
-            onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true,
-            activity = ActivitySnapshot(), cloudConnected = true,
-            searchActive = false, unreadOnly = false,
-            hasSelectedFeed = true, hasRenamableSelection = true,
+            onHome = onHome, hasSelectedArticle = true, selectedArticleHasUrl = true,
+            selectedArticleCanOpenInBrowser = true,
+            activity = ActivitySnapshot(), canSyncNow = true,
+            searchActive = false, unreadOnly = false, opmlBusy = false,
+            hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
+            selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
         ),
         labels = labels(),
         actions = actions(),
@@ -224,6 +234,65 @@ class MenuBarVisibilityTest {
 
         assertTrue(handled)
         assertTrue(addFeedCalled)
+    }
+
+    private fun bareKeyEvent(source: java.awt.Component, keyCode: Int) = KeyEvent(
+        source,
+        KeyEvent.KEY_PRESSED,
+        System.currentTimeMillis(),
+        0,
+        keyCode,
+        KeyEvent.CHAR_UNDEFINED,
+    )
+
+    // --- dispatcher enabled-state handling ---
+
+    @Test
+    fun `dispatchKeyEvent does not consume a shortcut whose item is disabled`() {
+        // Away from Home, Add Feed is greyed out: like a native Swing accelerator, its Ctrl+N must
+        // pass through to the focused component rather than vanish.
+        val component = Panel().also { Frame().add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree(onHome = false) })
+
+        val handled = dispatcher.dispatchKeyEvent(ctrlKeyEvent(component, KeyEvent.VK_N))
+
+        assertFalse(handled)
+        assertFalse(addFeedCalled)
+    }
+
+    @Test
+    fun `dispatchKeyEvent consumes and invokes an enabled match`() {
+        val component = Panel().also { Frame().add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree() })
+
+        val handled = dispatcher.dispatchKeyEvent(ctrlKeyEvent(component, KeyEvent.VK_R))
+
+        assertTrue(handled)
+        assertTrue(refreshCalled)
+    }
+
+    @Test
+    fun `bare Delete is not matched when the tree was built with the feed list keys inactive`() {
+        // The search field (or another pane) has focus: the tree carries no bare Delete, so
+        // Delete/Backspace edit text instead of unsubscribing the selected feed.
+        val component = Panel().also { Frame().add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree(feedListKeysActive = false) })
+
+        val handled = dispatcher.dispatchKeyEvent(bareKeyEvent(component, KeyEvent.VK_DELETE))
+
+        assertFalse(handled)
+        assertFalse(unsubscribeCalled)
+    }
+
+    @Test
+    fun `bare Delete unsubscribes when the feed list keys are live`() {
+        val component = Panel().also { Frame().add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree(feedListKeysActive = true) })
+
+        val handled = dispatcher.dispatchKeyEvent(bareKeyEvent(component, KeyEvent.VK_DELETE))
+
+        assertTrue(handled)
+        assertTrue(unsubscribeCalled)
     }
 
     // --- persistence round-trip ---

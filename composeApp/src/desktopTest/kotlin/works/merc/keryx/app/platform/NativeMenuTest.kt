@@ -113,11 +113,11 @@ class NativeMenuTest {
     }
 
     @Test
-    fun clickingAnItemInvokesTheLatestEntryForThatSlot() {
+    fun clickingAnItemInvokesTheShownEntryForThatSlot() {
         var clicked: String? = null
-        // The widgets are built once from the first list; later lists only relabel them, so a
-        // click has to resolve against whatever the call site currently exposes, not the
-        // snapshot the widgets were created from.
+        // The widgets are built once from the first list; later shows only relabel them, so a
+        // click has to resolve against the entries the menu was last shown with (what
+        // LazyNativePopup hands over as `shownItems`), not the snapshot the widgets were built from.
         var entries = listOf<NativeMenuEntry>(NativeMenuItem("stale") { clicked = "stale" })
         val handle = SwingPopupHandle(entries) { entries }
         entries = listOf(NativeMenuItem("fresh") { clicked = "fresh" })
@@ -128,7 +128,7 @@ class NativeMenuTest {
     }
 
     @Test
-    fun clickingASubMenuChildInvokesTheLatestEntryForThatSlot() {
+    fun clickingASubMenuChildInvokesTheShownEntryForThatSlot() {
         var clicked: String? = null
         var entries = listOf<NativeMenuEntry>(
             NativeSubMenu("Move to folder", listOf(NativeMenuItem("stale") { clicked = "stale" })),

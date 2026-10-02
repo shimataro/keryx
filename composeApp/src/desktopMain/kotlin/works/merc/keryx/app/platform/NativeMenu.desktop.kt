@@ -81,7 +81,16 @@ internal interface NativePopupHandle {
 
 /**
  * Resolves the leaf that a click on the widget at [index] (and [childIndex], for a submenu child)
- * should invoke, against the *latest* items rather than the ones the widgets were built from.
+ * should invoke, against the entries the menu was **last shown with** rather than the ones the
+ * widgets were first built from.
+ *
+ * The widgets are built once and only relabelled on later shows (see [LazyNativePopup]), so the
+ * entries they were built from go stale. But resolving against the call site's *latest* entries
+ * is wrong too: the call site recomposes while the menu is open — the row's own `onOpen` side
+ * effect (selecting an article marks it read), or a background sync reordering folders/tags — and
+ * a click would then run whatever now occupies that slot rather than what the menu displayed.
+ * Resolving against the shown entries means a click always performs exactly what its label and
+ * checkmark displayed.
  */
 private fun leafAt(items: List<NativeMenuEntry>, index: Int, childIndex: Int?): NativeMenuLeaf? {
     val entry = items.getOrNull(index) ?: return null
@@ -104,7 +113,7 @@ private fun leafAt(items: List<NativeMenuEntry>, index: Int, childIndex: Int?): 
  */
 internal class AwtPopupHandle(
     items: List<NativeMenuEntry>,
-    currentItems: () -> List<NativeMenuEntry>,
+    shownItems: () -> List<NativeMenuEntry>,
 ) : NativePopupHandle {
     // Not named `components`: see the note on SwingPopupHandle.menuItems. AWT's PopupMenu is not
     // a Container so it wouldn't actually collide here, but keeping the two backends symmetric
@@ -112,11 +121,11 @@ internal class AwtPopupHandle(
     private val menuItems: List<java.awt.MenuItem> = items.mapIndexed { index, entry ->
         when (entry) {
             is NativeMenuLeaf ->
-                awtLeaf(entry) { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
+                awtLeaf(entry) { leafAt(shownItems(), index, childIndex = null)?.onClick?.invoke() }
             is NativeSubMenu ->
                 java.awt.Menu().apply {
                     entry.items.forEachIndexed { childIndex, child ->
-                        add(awtLeaf(child) { leafAt(currentItems(), index, childIndex)?.onClick?.invoke() })
+                        add(awtLeaf(child) { leafAt(shownItems(), index, childIndex)?.onClick?.invoke() })
                     }
                 }
             // A MenuItem labelled "-" is the exact idiom java.awt.Menu.addSeparator() itself uses
@@ -215,7 +224,7 @@ internal class AwtPopupHandle(
  */
 internal class SwingPopupHandle(
     items: List<NativeMenuEntry>,
-    currentItems: () -> List<NativeMenuEntry>,
+    shownItems: () -> List<NativeMenuEntry>,
 ) : NativePopupHandle {
     // Deliberately NOT named `components`. Inside the `apply` below the implicit receiver is the
     // JPopupMenu, which extends Container and therefore exposes a synthetic `components` property
@@ -228,7 +237,7 @@ internal class SwingPopupHandle(
     private val menuItems: List<JComponent> = items.mapIndexed { index, entry ->
         when (entry) {
             is NativeMenuLeaf ->
-                swingLeaf(entry) { leafAt(currentItems(), index, childIndex = null)?.onClick?.invoke() }
+                swingLeaf(entry) { leafAt(shownItems(), index, childIndex = null)?.onClick?.invoke() }
             is NativeSubMenu ->
                 JMenu().apply {
                     // A submenu opens through its own popup, which needs the same treatment as
@@ -236,7 +245,7 @@ internal class SwingPopupHandle(
                     // is the JMenu's popup, not this class's `popupMenu` field.
                     forceHeavyweight(getPopupMenu())
                     entry.items.forEachIndexed { childIndex, child ->
-                        add(swingLeaf(child) { leafAt(currentItems(), index, childIndex)?.onClick?.invoke() })
+                        add(swingLeaf(child) { leafAt(shownItems(), index, childIndex)?.onClick?.invoke() })
                     }
                 }
             is NativeMenuSeparator -> JPopupMenu.Separator()
@@ -397,17 +406,18 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
  * unthemed (Linux) or outright broken above 100% display scaling (Windows). See both KDocs.
  *
  * @param items The menu entries the widgets are built from.
- * @param currentItems Provides the latest entries when a click has to be resolved to an action.
+ * @param shownItems Provides the entries the menu was last shown with, which a click is resolved
+ * against (see [leafAt]).
  * @param macOs Whether this is macOS. A parameter, defaulting to the process constant, purely so
  * a test can pin the mapping on any host — no production call site passes it.
  * @return The popup backend for this platform.
  */
 internal fun defaultPopupHandle(
     items: List<NativeMenuEntry>,
-    currentItems: () -> List<NativeMenuEntry>,
+    shownItems: () -> List<NativeMenuEntry>,
     macOs: Boolean = isMacOs,
 ): NativePopupHandle =
-    if (macOs) AwtPopupHandle(items, currentItems) else SwingPopupHandle(items, currentItems)
+    if (macOs) AwtPopupHandle(items, shownItems) else SwingPopupHandle(items, shownItems)
 
 /**
  * Owns one call site's native menu and builds it **on the first right-click**, not on composition.
@@ -421,10 +431,12 @@ internal fun defaultPopupHandle(
  *
  * Rebuild/relabel decisions still go through [menuShape] and [menuSignature]; they simply run once
  * per right-click now instead of once per row per composition.
+ *
+ * A click is resolved against the entries most recently passed to [showFor] — never the call
+ * site's live ones — so it performs exactly what the menu displayed; see [leafAt].
  */
 internal class LazyNativePopup(
     private val window: NativeWindowHandle?,
-    private val currentItems: () -> List<NativeMenuEntry>,
     // A lambda rather than `::defaultPopupHandle`: that function's third parameter is defaulted,
     // and spelling the adaptation out keeps the platform constant out of this type.
     private val factory: (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle =
@@ -433,6 +445,9 @@ internal class LazyNativePopup(
     private var handle: NativePopupHandle? = null
     private var builtShape: List<String>? = null
     private var syncedSignature: List<MenuEntrySignature>? = null
+
+    /** The entries of the most recent [showFor]; every click on the widgets resolves against these. */
+    private var shownEntries: List<NativeMenuEntry> = emptyList()
 
     /**
      * Displays the native menu for [entries], rebuilding or synchronizing its widgets when needed.
@@ -443,11 +458,14 @@ internal class LazyNativePopup(
      * @param y The vertical display coordinate.
      */
     fun showFor(entries: List<NativeMenuEntry>, invoker: Component, x: Int, y: Int) {
+        // Bound before the widgets are synced or shown, so no click can ever observe the previous
+        // show's entries against this show's labels.
+        shownEntries = entries
         val shape = menuShape(entries)
         var current = handle
         if (current == null || builtShape != shape) {
             current?.detach(window)
-            current = factory(entries, currentItems)
+            current = factory(entries) { shownEntries }
             current.attach(window)
             handle = current
             builtShape = shape
@@ -468,6 +486,7 @@ internal class LazyNativePopup(
         handle = null
         builtShape = null
         syncedSignature = null
+        shownEntries = emptyList()
     }
 }
 
@@ -496,7 +515,7 @@ actual fun Modifier.nativeContextMenu(
 
     // Nothing native is built until the first right-click — see LazyNativePopup.
     val popup = remember(window) {
-        LazyNativePopup(window = window, currentItems = { currentItems() })
+        LazyNativePopup(window = window)
     }
     DisposableEffect(popup) { onDispose { popup.dispose() } }
 
@@ -609,7 +628,7 @@ internal class NativeTextSelectionMenuRepresentation(
     // — and nothing here can tell when that menu has been dismissed (see Representation). One menu
     // per call site, relabelled from the current selection before each show, sidesteps that
     // entirely; [dispose] is what finally releases it.
-    private val popup = LazyNativePopup(window = window, currentItems = entries, factory = factory)
+    private val popup = LazyNativePopup(window = window, factory = factory)
 
     /**
      * Shows the native menu whenever [state] says the selection's menu has been opened.

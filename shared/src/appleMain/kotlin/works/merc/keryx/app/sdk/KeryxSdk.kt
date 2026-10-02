@@ -31,7 +31,6 @@ import works.merc.keryx.app.domain.OsNotificationSink
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.backgroundUpdateLoop
-import works.merc.keryx.app.domain.importOpmlAndNotify
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.domain.schemeOf
@@ -43,6 +42,8 @@ import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.presentation.settings.CloudSyncController
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
+import works.merc.keryx.app.presentation.settings.OpmlTransferController
+import works.merc.keryx.app.presentation.settings.requestOpenedOpmlImport
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 import kotlin.coroutines.cancellation.CancellationException
@@ -93,6 +94,13 @@ class KeryxSdk private constructor(private val koin: Koin) {
     /** Builds/parses the OPML document itself; picking a file to write/read stays with Swift. */
     val opml: OpmlTransfer get() = koin.get()
 
+    /**
+     * The one OPML busy/result/request state every route shares — the Data settings tab, the File
+     * menu (which only [OpmlTransferController.request]s, then shows Settings ▸ Data), and an opened
+     * `.opml` file — mirrored in Swift by `OpmlTransferObservable`.
+     */
+    val opmlController: OpmlTransferController get() = koin.get()
+
     private var notificationAlertsCreated = false
 
     /** Which warning/error still needs announcing in a transient surface with no queue of its own
@@ -104,31 +112,38 @@ class KeryxSdk private constructor(private val koin: Koin) {
     /**
      * Enabled/checked state for a menu/`Commands` item — see
      * [works.merc.keryx.app.presentation.menu.computeMenuUiState]'s own doc for what each
-     * parameter gates.
+     * parameter gates. Every parameter is explicit (no defaults), so a Swift caller can't silently
+     * leave one at a value that enables an item it shouldn't.
      */
     fun menuState(
         onHome: Boolean,
         hasSelectedArticle: Boolean,
         selectedArticleHasUrl: Boolean,
-        cloudConnected: Boolean,
+        selectedArticleCanOpenInBrowser: Boolean,
+        canSyncNow: Boolean,
         searchActive: Boolean,
         unreadOnly: Boolean,
-        hasSelectedFeed: Boolean = false,
-        textInputFocused: Boolean = false,
-        hasRenamableSelection: Boolean = false,
-        selectedFeedHasSiteUrl: Boolean = false,
+        opmlBusy: Boolean,
+        hasSelectedFeed: Boolean,
+        feedListKeysActive: Boolean,
+        hasRenamableSelection: Boolean,
+        selectedFeedHasSiteUrl: Boolean,
+        selectedFeedSiteCanOpenInBrowser: Boolean,
     ): MenuUiState = computeMenuUiState(
         onHome = onHome,
         hasSelectedArticle = hasSelectedArticle,
         selectedArticleHasUrl = selectedArticleHasUrl,
+        selectedArticleCanOpenInBrowser = selectedArticleCanOpenInBrowser,
         activity = homeViewModel.activity.value,
-        cloudConnected = cloudConnected,
+        canSyncNow = canSyncNow,
         searchActive = searchActive,
         unreadOnly = unreadOnly,
+        opmlBusy = opmlBusy,
         hasSelectedFeed = hasSelectedFeed,
-        textInputFocused = textInputFocused,
+        feedListKeysActive = feedListKeysActive,
         hasRenamableSelection = hasRenamableSelection,
         selectedFeedHasSiteUrl = selectedFeedHasSiteUrl,
+        selectedFeedSiteCanOpenInBrowser = selectedFeedSiteCanOpenInBrowser,
     )
 
     /** A fresh add-feed state machine, one per add-feed sheet. */
@@ -157,14 +172,14 @@ class KeryxSdk private constructor(private val koin: Koin) {
     }
 
     /**
-     * Imports feeds from an OPML file the app was opened with (mirrors desktop's/Android's own
-     * ".opml file association" handling) and posts an INFO notification with the result. Errors are
-     * caught and logged internally — see [importOpmlAndNotify] — so this never throws for a
-     * malformed file; only cancellation propagates.
+     * Asks Settings ▸ Data to import an OPML file the app was opened with (mirrors desktop's/Android's
+     * own ".opml file association" handling — see [requestOpenedOpmlImport]); `null` [xml] means
+     * the file could not be read, which the Data tab then shows as an import failure. The SwiftUI
+     * app's Home shows Settings on the Data tab for the waiting request, so a file opened during
+     * Setup is imported once Setup is done.
      */
-    @Throws(CancellationException::class)
-    suspend fun importOpenedOpml(xml: String) {
-        koin.get<CoroutineScope>().async { importOpmlAndNotify(koin, xml) }.await()
+    fun importOpenedOpml(xml: String?) {
+        requestOpenedOpmlImport(koin, xml)
     }
 
     /**
@@ -198,7 +213,11 @@ class KeryxSdk private constructor(private val koin: Koin) {
         // that too.
         if (homeViewModelCreated) homeViewModel.viewModelScope.coroutineContext.job.cancelAndJoin()
         if (setupControllerCreated) setupController.viewModelScope.coroutineContext.job.cancelAndJoin()
-        if (cloudSyncControllerCreated) cloudSyncController.viewModelScope.coroutineContext.job.cancelAndJoin()
+        // HomeViewModel resolves CloudSyncController itself (as its ManualSync), so creating either
+        // one creates the controller.
+        if (cloudSyncControllerCreated || homeViewModelCreated) {
+            cloudSyncController.viewModelScope.coroutineContext.job.cancelAndJoin()
+        }
         if (notificationAlertsCreated) notificationAlerts.viewModelScope.coroutineContext.job.cancelAndJoin()
         koin.get<CoroutineScope>().coroutineContext.job.cancelAndJoin()
         // SettingsRepository keeps its own writer scope; flush it and stop it before AppDirs is

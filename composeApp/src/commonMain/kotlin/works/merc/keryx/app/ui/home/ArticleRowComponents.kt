@@ -41,10 +41,14 @@ import kotlinx.datetime.TimeZone
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.platform.NativeMenuEntry
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.articleReadAfterContextMenuOpen
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -155,6 +159,87 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
 }
 
 /**
+ * The article row's context-menu entries, labelled from the read state the article has **once the
+ * right-click's own `onOpen` has run** — not from [article]'s snapshot alone.
+ *
+ * On desktop, right-clicking an unselected row selects it, which marks it read (external-spec §7),
+ * but [article] is still the pre-selection snapshot when the menu is built (no recomposition happens
+ * in between). Labelling from it would offer "Mark as read" for an article that is already read by
+ * the time the menu appears, disagreeing with what ⌘⇧U would do right now. [selectedByOpen] carries
+ * that side effect into the label. Each item then requests the explicit state its label promises
+ * rather than toggling, so the click does exactly what was displayed.
+ *
+ * @param article The row's article as last composed.
+ * @param selectedByOpen Whether this right-click selected the row (and so marked it read).
+ * @param strings The per-list labels.
+ * @param onSetRead Called with the read state the read item promises.
+ * @param onSetStarred Called with the starred state the star item promises.
+ * @param onCopyUrl Called to copy the article URL.
+ * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @return The menu entries, in the app menu bar's Article-menu order.
+ */
+internal fun articleRowMenuEntries(
+    article: ArticleListRow,
+    selectedByOpen: Boolean,
+    strings: ArticleRowStrings,
+    onSetRead: (Boolean) -> Unit,
+    onSetStarred: (Boolean) -> Unit,
+    onCopyUrl: () -> Unit,
+    onOpenInBrowser: () -> Unit,
+): List<NativeMenuEntry> {
+    val read = articleReadAfterContextMenuOpen(isRead = article.is_read == 1L, selectedByOpen = selectedByOpen)
+    val starred = article.is_starred == 1L
+    // Copy and open have their own rules, shared with every other route to each: any non-blank
+    // URL can be copied, but only an http(s) one is opened.
+    val copyEnabled = hasUsableUrl(article.url)
+    val openEnabled = canOpenInBrowser(article.url)
+    return listOf(
+        NativeMenuItem(
+            if (read) strings.markAsUnread else strings.markAsRead,
+            NativeMenuShortcut(Key.U, ctrl = true, shift = true),
+        ) { onSetRead(!read) },
+        NativeMenuItem(
+            if (starred) strings.unstar else strings.star,
+            NativeMenuShortcut(Key.S, ctrl = true, shift = true),
+        ) { onSetStarred(!starred) },
+        NativeMenuSeparator,
+        NativeMenuItem(strings.openInBrowser, NativeMenuShortcut(Key.O, ctrl = true, shift = true), enabled = openEnabled) {
+            onOpenInBrowser()
+        },
+        NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = copyEnabled) {
+            onCopyUrl()
+        },
+    )
+}
+
+/**
+ * What opening an [ArticleRow]'s context menu does before the menu appears: an unselected row is
+ * [select]ed (which marks it read and activates the article list pane, like a click), while an
+ * already-selected row only [activate]s the pane — re-selecting it would mark read again an article
+ * the user just marked unread from this very menu or ⌘⇧U, but keyboard focus must still follow the
+ * right-click into this pane.
+ *
+ * @param selected Whether the row was selected when the menu was opened.
+ * @param select Selects the row (and activates the pane).
+ * @param activate Activates the article list pane without changing the selection.
+ * @return Whether this open selected the row — [articleRowMenuEntries]'s `selectedByOpen`.
+ */
+internal fun articleRowContextMenuOpen(selected: Boolean, select: () -> Unit, activate: () -> Unit): Boolean {
+    if (selected) activate() else select()
+    return !selected
+}
+
+/**
+ * What the most recent context-menu open did to an [ArticleRow]'s selection, carried from the menu's
+ * `onOpen` to its `items()`. A plain mutable holder, deliberately not snapshot state — see its use
+ * in [ArticleRow].
+ */
+private class ContextMenuOpenSelection {
+    /** Whether that open selected the row (and so marked its article read). */
+    var selectedByOpen = false
+}
+
+/**
  * Renders an article row with selection styling, read and starred indicators, metadata, and context-menu actions.
  *
  * @param article The article to display.
@@ -164,11 +249,13 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
  * @param focused Whether the row has focus.
  * @param rowHeight The minimum height of the row.
  * @param faviconSize The display size of the feed favicon.
- * @param onClick Called when the row is clicked or its context menu is opened.
- * @param onToggleRead Called to toggle the article's read state.
- * @param onToggleStar Called to toggle the article's starred state.
+ * @param onClick Called when the row is clicked, or its context menu is opened while it is unselected.
+ * @param onSetRead Called with the read state the context menu's read item promises.
+ * @param onSetStarred Called with the starred state the context menu's star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @param onActivate Called when the context menu is opened on the already-selected row, to move
+ *   keyboard focus to this pane without re-selecting it (see [articleRowContextMenuOpen]).
  * @param titleOverride An optional title to display instead of the article title.
  * @param strings The per-list strings and time zone, hoisted above `items {}` by the caller.
  * @param ripplePulse A nonzero value plays a one-shot [playPulseRipple] on [interactionSource] —
@@ -186,20 +273,22 @@ internal fun ArticleRow(
     rowHeight: Dp,
     faviconSize: Dp,
     onClick: () -> Unit,
-    onToggleRead: () -> Unit,
-    onToggleStar: () -> Unit,
+    onSetRead: (Boolean) -> Unit,
+    onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
     strings: ArticleRowStrings = rememberArticleRowStrings(),
     ripplePulse: Int = 0,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 ) {
     val unread = article.is_read == 0L
-    val toggleReadLabel = if (article.is_read == 1L) strings.markAsUnread else strings.markAsRead
-    val toggleStarLabel = if (article.is_starred == 1L) strings.unstar else strings.star
-    val copyUrlLabel = strings.copyUrl
-    val openInBrowserLabel = strings.openInBrowser
+    // Whether the most recent right-click selected this row (desktop only — Android never calls
+    // onOpen). A plain holder rather than snapshot state: it is written by onOpen and read by the
+    // menu's items() immediately afterwards, in the same pointer handler and before any
+    // recomposition, so nothing in composition ever reads it.
+    val openSelection = remember { ContextMenuOpenSelection() }
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
     PulseRippleEffect(ripplePulse, interactionSource)
@@ -209,19 +298,20 @@ internal fun ArticleRow(
             .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(
                 items = {
-                    val urlUsable = hasUsableUrl(article.url)
-                    listOf(
-                        NativeMenuItem(toggleStarLabel, NativeMenuShortcut(Key.S, ctrl = true, shift = true)) { onToggleStar() },
-                        NativeMenuItem(toggleReadLabel, NativeMenuShortcut(Key.U, ctrl = true, shift = true)) { onToggleRead() },
-                        NativeMenuItem(copyUrlLabel, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = urlUsable) { onCopyUrl() },
-                        NativeMenuItem(
-                            openInBrowserLabel,
-                            NativeMenuShortcut(Key.O, ctrl = true, shift = true),
-                            enabled = urlUsable,
-                        ) { onOpenInBrowser() },
+                    articleRowMenuEntries(
+                        article = article,
+                        selectedByOpen = openSelection.selectedByOpen,
+                        strings = strings,
+                        onSetRead = onSetRead,
+                        onSetStarred = onSetStarred,
+                        onCopyUrl = onCopyUrl,
+                        onOpenInBrowser = onOpenInBrowser,
                     )
                 },
-                onOpen = onClick,
+                // Reset on every open, so it only ever describes this right-click.
+                onOpen = {
+                    openSelection.selectedByOpen = articleRowContextMenuOpen(selected, select = onClick, activate = onActivate)
+                },
             )
             .listRowSurface(
                 selectionBackground(selected, focused),

@@ -33,8 +33,10 @@ import works.merc.keryx.app.ui.home.renameKey
  * keys `KeyboardNav.kt` and the context menus use). `Rename`/`Unsubscribe` are the deliberate
  * exception — [ctrl] is `false`, so they keep their original bare accelerator (F2/Return, Delete),
  * since a bare "act on the focused/selected item" key is itself an established convention
- * (file-manager rename/delete); see [MenuUiState.renameOrDeleteEnabled]'s `textInputFocused`
- * guard for how that stays safe.
+ * (file-manager rename/delete). A bare key would otherwise fire from any pane and from inside a
+ * text field, so [buildAppMenuTree] attaches these two only while the feed list's own keys are
+ * live ([MenuUiState.renameOrDeleteShortcutActive]) and detaches them — rather than disabling the
+ * item — otherwise: the items stay clickable, and no hint promises a key that would do nothing.
  *
  * [dbusmenuKeyName] is the AWT virtual-key *name* the `com.canonical.dbusmenu` host expects for
  * this key — plain strings, so it lives here alongside [key] rather than in `appmenu/`. The AWT
@@ -127,6 +129,9 @@ internal data class AppMenuLabels(
     val feedAssignTags: String,
     val feedMoveToFolder: String,
     val feedNoFolder: String,
+    /** The "New folder…" / "New tag…" items closing the Move-to-folder / Tags submenus. */
+    val feedNewFolder: String,
+    val feedNewTag: String,
     /** Rename/delete wording for the *currently selected* item — a feed, folder or tag, not always
      * a feed (`AppMenuBar` picks the matching string per selection type). */
     val feedRename: String,
@@ -163,6 +168,10 @@ internal data class AppMenuActions(
     val refreshSelectedFeed: () -> Unit,
     val toggleFeedTag: (tagId: String, attached: Boolean) -> Unit,
     val moveFeedToFolder: (folderId: String?) -> Unit,
+    /** Opens the create-folder dialog that files the selected feed into the new folder. */
+    val newFolderForSelectedFeed: () -> Unit,
+    /** Opens the create-tag dialog that attaches the new tag to the selected feed. */
+    val newTagForSelectedFeed: () -> Unit,
     val renameSelectedFeed: () -> Unit,
     val unsubscribeSelectedFeed: () -> Unit,
     val copyFeedUrl: () -> Unit,
@@ -192,8 +201,9 @@ internal data class SelectedFeedMenuData(
  * Builds the application menu tree from the current [ui] state, resolved [labels] and [actions].
  *
  * The menu shape is fixed at startup **except** for the Feed menu's Tags/Move-to-folder submenus,
- * whose item count follows [selectedFeedMenu]'s tag/folder lists and can therefore change while the
- * app is running: [isMacOs] is a process constant, and [menuBarToggle] only ever adds/removes the
+ * whose item count follows [selectedFeedMenu]'s tag/folder lists (one checkbox per tag/folder, plus
+ * "No folder" in Move to folder, plus a trailing "New tag…"/"New folder…" item in each — so neither
+ * submenu is ever empty) and can therefore change while the app is running: [isMacOs] is a process constant, and [menuBarToggle] only ever adds/removes the
  * trailing "Show Menu Bar" item. Everything else (including the rest of this tree) varies only by
  * label / enabled / checked, which is what keeps the D-Bus node ids stable across rebuilds for that
  * fixed portion (see `AppMenuLayoutBuilder`, which documents why the variable-length region is
@@ -267,8 +277,8 @@ internal fun buildAppMenuTree(
         AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, AppMenuShortcut.ToggleRead, actions.toggleRead),
         AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, AppMenuShortcut.ToggleStar, actions.toggleStar),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.openInBrowser, ui.urlActionsEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
-        AppMenuNode.Item(labels.copyUrl, ui.urlActionsEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),
+        AppMenuNode.Item(labels.openInBrowser, ui.openInBrowserEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
+        AppMenuNode.Item(labels.copyUrl, ui.copyUrlEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),
     )
 
     val feedItems = listOf(
@@ -276,6 +286,8 @@ internal fun buildAppMenuTree(
         AppMenuNode.Item(labels.syncNow, ui.syncEnabled, onClick = actions.sync),
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, AppMenuShortcut.FeedRefresh, actions.refreshSelectedFeed),
+        // Both submenus end with a "New …" item, like the feed row's context menu
+        // (FeedListDragAndDrop.kt), so Tags always has at least that one entry.
         AppMenuNode.Menu(
             label = labels.feedAssignTags,
             enabled = ui.feedActionsEnabled,
@@ -286,7 +298,7 @@ internal fun buildAppMenuTree(
                     checked = tag.id in selectedFeedMenu.attachedTagIds,
                     onCheckedChange = { attached -> actions.toggleFeedTag(tag.id, attached) },
                 )
-            },
+            } + AppMenuNode.Item(labels.feedNewTag, enabled = true, onClick = actions.newTagForSelectedFeed),
         ),
         AppMenuNode.Menu(
             label = labels.feedMoveToFolder,
@@ -310,18 +322,31 @@ internal fun buildAppMenuTree(
                         ),
                     )
                 }
+                add(AppMenuNode.Item(labels.feedNewFolder, enabled = true, onClick = actions.newFolderForSelectedFeed))
             },
         ),
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedCopyUrl, ui.feedActionsEnabled, onClick = actions.copyFeedUrl),
-        AppMenuNode.Item(labels.feedCopySiteUrl, ui.feedSiteUrlActionsEnabled, onClick = actions.copyFeedSiteUrl),
-        AppMenuNode.Item(labels.feedOpenSite, ui.feedSiteUrlActionsEnabled, onClick = actions.openFeedSite),
+        AppMenuNode.Item(labels.feedCopySiteUrl, ui.feedSiteCopyEnabled, onClick = actions.copyFeedSiteUrl),
+        AppMenuNode.Item(labels.feedOpenSite, ui.feedSiteOpenEnabled, onClick = actions.openFeedSite),
         // Rename/Unsubscribe act on whatever feed list item is selected (feed, folder or tag), so
         // unlike the items above they use renameOrDeleteEnabled, not feedActionsEnabled.
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedRename, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedRename, actions.renameSelectedFeed),
+        // Their bare accelerators are attached only while the feed list's keys are live (see
+        // AppMenuShortcut's KDoc); the items themselves follow the selection alone.
+        AppMenuNode.Item(
+            labels.feedRename,
+            ui.renameOrDeleteEnabled,
+            AppMenuShortcut.FeedRename.takeIf { ui.renameOrDeleteShortcutActive },
+            actions.renameSelectedFeed,
+        ),
         AppMenuNode.Separator,
-        AppMenuNode.Item(labels.feedUnsubscribe, ui.renameOrDeleteEnabled, AppMenuShortcut.FeedUnsubscribe, actions.unsubscribeSelectedFeed),
+        AppMenuNode.Item(
+            labels.feedUnsubscribe,
+            ui.renameOrDeleteEnabled,
+            AppMenuShortcut.FeedUnsubscribe.takeIf { ui.renameOrDeleteShortcutActive },
+            actions.unsubscribeSelectedFeed,
+        ),
     )
 
     val helpItems = buildList {

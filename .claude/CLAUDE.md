@@ -258,6 +258,21 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    `onNodeWithText("...")` against a real `strings.xml` string) legitimately
    contain the Japanese string being asserted against — that's not a
    violation.
+10. **One action, one implementation — never a separate implementation per
+    route or per UI.** An action with more than one route (toolbar button, menu
+    bar, context menu, keyboard shortcut, gesture, accessibility action, tray)
+    or more than one UI (Compose, SwiftUI) gets its effect, its enabled/disabled
+    condition and its feedback from a single shared piece of code that every
+    route calls. A route only collects its input (which item) and calls it; it
+    never re-implements the effect, the enablement or the feedback. A decision
+    both UIs need lives in `:shared` `presentation/` (a pure function or a
+    ViewModel method); what stays per UI is the platform-side execution
+    (clipboard, snackbar, window), and that is one handler per UI, not one per
+    route. Adding a route to an existing action means calling its
+    handler/predicate; if no shared one exists yet, extract it first, then add
+    the route. Behavior → `docs/external-spec.md` §9; conventions → the
+    `ui-guidelines` skill ("Actions with more than one route"); placement and
+    examples → `docs/app-architecture.md` ("One implementation per action").
 
 ## Environment
 

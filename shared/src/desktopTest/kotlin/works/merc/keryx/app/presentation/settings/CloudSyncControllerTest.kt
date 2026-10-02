@@ -27,6 +27,7 @@ import kotlinx.coroutines.test.setMain
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.SuspendingCloudConnectFlow
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageType
@@ -39,6 +40,7 @@ import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.FtsManager
+import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
@@ -54,6 +56,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.random.Random
@@ -62,7 +65,6 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -146,6 +148,9 @@ class CloudSyncControllerTest {
     /** The SyncRepository handed to the most recently built controller, so a test can drive it. */
     private lateinit var createdSyncRepository: SyncRepository
 
+    /** The SettingsRepository handed to the most recently built controller. */
+    private lateinit var createdSettingsRepository: SettingsRepository
+
     // Every SyncRepository built by newController() gets its own scope for scheduleSync(); track
     // them all (not just the latest) so tearDown() can cancel every one, same as createdControllers.
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
@@ -173,6 +178,18 @@ class CloudSyncControllerTest {
         Dispatchers.resetMain()
         driver.close()
         File(dir).deleteRecursively()
+    }
+
+    /**
+     * A [CloudSession] `selectedType` that reads the provider from the settings the next
+     * [newController] builds, the way production's does (`CloudPlatformModule`), seeded with
+     * [initial]. Needed wherever a test switches providers: the controller re-derives
+     * `connectedType` from the session whenever `cloudStorageType` changes, so a selection pinned to
+     * one provider would report the new one as disconnected.
+     */
+    private fun settingsBackedSelection(initial: CloudStorageType): () -> CloudStorageType? {
+        LocalSettingsStore(dirOverride = dir).save(LocalSettings(cloudStorageType = initial.id))
+        return { CloudStorageType.fromId(createdSettingsRepository.getLocalSettings().cloudStorageType) }
     }
 
     private fun okAuthClient(): HttpClient =
@@ -227,9 +244,10 @@ class CloudSyncControllerTest {
             )
         }
         createdSyncRepository = syncRepository
+        createdSettingsRepository = settingsRepository
         return CloudSyncController(
             session, syncRepository, CloudConnectionService(session, settingsRepository, syncRepository),
-            activityCenter, dispatcher,
+            activityCenter, settingsRepository, dispatcher,
         ).also { createdControllers += it }
     }
 
@@ -367,8 +385,8 @@ class CloudSyncControllerTest {
             activityCenter.trackSync { delay(200) }
         }
 
-        awaitTrue { controller.syncing.value }
-        awaitTrue { !controller.syncing.value }
+        awaitConditionBlocking { controller.syncing.value }
+        awaitConditionBlocking { !controller.syncing.value }
         runBlocking { job.join() }
     }
 
@@ -387,13 +405,13 @@ class CloudSyncControllerTest {
         val job = CoroutineScope(Dispatchers.Default).launch {
             activityCenter.trackSync { gate.await() }
         }
-        awaitTrue { activityCenter.activity.value.syncing }
+        awaitConditionBlocking { activityCenter.activity.value.syncing }
 
         val controller = newController(activityCenter = activityCenter)
         assertTrue(controller.syncing.value)
 
         gate.complete(Unit)
-        awaitTrue { !controller.syncing.value }
+        awaitConditionBlocking { !controller.syncing.value }
         runBlocking { job.join() }
     }
 
@@ -424,7 +442,7 @@ class CloudSyncControllerTest {
             assertTrue(controller.disconnecting.value)
 
             revokeGate.complete(Unit)
-            awaitTrue { controller.connectedType.value == null && !controller.disconnecting.value }
+            awaitConditionBlocking { controller.connectedType.value == null && !controller.disconnecting.value }
             assertFalse(controller.disconnecting.value)
         } finally {
             revokeGate.complete(Unit)
@@ -464,7 +482,7 @@ class CloudSyncControllerTest {
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
 
         controller.disconnect()
-        awaitTrue { controller.connectedType.value == null }
+        awaitConditionBlocking { controller.connectedType.value == null }
 
         assertNull(controller.connectedType.value)
         assertNull(tokenStorage.load())
@@ -482,13 +500,14 @@ class CloudSyncControllerTest {
             client = okAuthClient(),
             dropboxTokenStorage = dropboxTokenStorage,
             googleDriveTokenStorage = googleDriveTokenStorage,
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
             googleDriveConnectFlow = FakeCloudConnectFlow(Result.Ok(OAuthTokens("AT2"))),
         )
         val controller = newController(cloudSession = session)
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
 
         controller.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { controller.connectingType.value == null }
+        awaitConditionBlocking { controller.connectingType.value == null }
 
         assertEquals(CloudStorageType.GOOGLE_DRIVE, controller.connectedType.value)
         assertNull(controller.connectingType.value)
@@ -504,13 +523,14 @@ class CloudSyncControllerTest {
             client = okAuthClient(),
             dropboxTokenStorage = dropboxTokenStorage,
             googleDriveTokenStorage = googleDriveTokenStorage,
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
             googleDriveConnectFlow = FakeCloudConnectFlow(Result.Err(CloudAuthException("connect failed"))),
         )
         val controller = newController(cloudSession = session)
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
 
         controller.switchTo(CloudStorageType.GOOGLE_DRIVE)
-        awaitTrue { controller.connectFailedType.value == CloudStorageType.GOOGLE_DRIVE }
+        awaitConditionBlocking { controller.connectFailedType.value == CloudStorageType.GOOGLE_DRIVE }
 
         assertNull(controller.connectedType.value)
         assertEquals(CloudStorageType.GOOGLE_DRIVE, controller.connectFailedType.value)
@@ -528,7 +548,31 @@ class CloudSyncControllerTest {
 
         val controller = newController()
 
-        assertEquals(formatTimestamp(expectedMillis), controller.lastSyncedAtText.value)
+        awaitConditionBlocking { controller.lastSyncedAtText.value == formatTimestamp(expectedMillis) }
+    }
+
+    /**
+     * Constructing the controller (which Home's ViewModel depends on, on the UI thread) must not
+     * read the last-synced time synchronously: the initial read runs on the controller's
+     * `dispatcher`, from the activity collector's subscription replay, and fills
+     * [CloudSyncController.lastSyncedAtText] once it gets there.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun lastSyncedAtTextIsFilledAfterConstructionOffTheConstructingThread() {
+        val expectedMillis = 1_234_567_890_123L
+        db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, expectedMillis.toString())
+        val dispatcher = HoldingDispatcher()
+
+        val controller = newController(dispatcher = dispatcher)
+        // The read is queued on the (held) dispatcher, not done inline during construction.
+        assertNull(controller.lastSyncedAtText.value)
+
+        dispatcher.release()
+
+        awaitConditionBlocking { controller.lastSyncedAtText.value == formatTimestamp(expectedMillis) }
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -550,7 +594,7 @@ class CloudSyncControllerTest {
         db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, newMillis.toString())
         runBlocking { activityCenter.trackSync { delay(50) } }
 
-        awaitTrue { controller.lastSyncedAtText.value == formatTimestamp(newMillis) }
+        awaitConditionBlocking { controller.lastSyncedAtText.value == formatTimestamp(newMillis) }
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
@@ -562,10 +606,10 @@ class CloudSyncControllerTest {
         db.sync_stateQueries.upsert(SYNC_STATE_LAST_SYNCED_AT, "1234567890123")
         val controller = newController(tokenStorage = tokenStorage)
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
-        assertNotNull(controller.lastSyncedAtText.value)
+        awaitConditionBlocking { controller.lastSyncedAtText.value != null }
 
         controller.disconnect()
-        awaitTrue { controller.connectedType.value == null }
+        awaitConditionBlocking { controller.connectedType.value == null }
 
         assertNull(controller.lastSyncedAtText.value)
     }
@@ -587,8 +631,52 @@ class CloudSyncControllerTest {
 
         runBlocking { createdSyncRepository.sync() }
 
-        awaitTrue { controller.lastSyncAuthFailed.value }
+        awaitConditionBlocking { controller.lastSyncAuthFailed.value }
         assertTrue(controller.lastSyncAuthFailed.value)
+    }
+
+    /**
+     * [CloudSyncController.connected] — the shared [works.merc.keryx.app.presentation.ManualSync.connected]
+     * that decides whether every UI shows "Sync now" at all — follows this controller's own connect
+     * and disconnect.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun connectedFollowsConnectAndDisconnect() {
+        val controller = newController(connectResult = Result.Ok(OAuthTokens("AT")))
+        assertFalse(controller.connected.value)
+
+        controller.connect(CloudStorageType.DROPBOX)
+        awaitConditionBlocking { controller.connected.value }
+        assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
+
+        controller.disconnect()
+        awaitConditionBlocking { !controller.connected.value }
+        assertNull(controller.connectedType.value)
+    }
+
+    /**
+     * [CloudSyncController.disabledByAuth] is the one "why is Sync now disabled" decision every UI
+     * reads; it turns on after a sync fails on authorization, and "sync now" is then disabled too.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as
+     * disconnectClearsConnectedTypeAndCloudStorageType above.
+     */
+    @Test
+    fun disabledByAuthIsTrueAfterAnAuthFailedSyncAndCanSyncNowIsFalse() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        assertFalse(controller.disabledByAuth.value)
+        assertTrue(controller.canSyncNow.value)
+
+        runBlocking { createdSyncRepository.sync() }
+
+        awaitConditionBlocking { controller.disabledByAuth.value }
+        assertFalse(controller.canSyncNow.value)
     }
 
     @Test
@@ -596,6 +684,40 @@ class CloudSyncControllerTest {
         val controller = newController()
         assertNull(controller.connectedType.value)
 
+        assertFalse(controller.canSyncNow.value)
+    }
+
+    /**
+     * A provider connected by code other than this controller — the first-run setup screen's
+     * `SetupController`, which on desktop runs while this controller already exists — must still
+     * reach [CloudSyncController.connectedType] and [CloudSyncController.canSyncNow] without a
+     * restart, and so must a disconnect made the same way.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun providerChangeMadeOutsideTheControllerUpdatesConnectedTypeAndCanSyncNow() {
+        val tokenStorage = FakeTokenStorage()
+        val authClient = okAuthClient()
+        val session = singleProviderCloudSession(
+            client = authClient,
+            tokenStorage = tokenStorage,
+            authManager = DropboxAuthManager(authClient, clock = { 0L }),
+        )
+        val controller = newController(cloudSession = session)
+        assertNull(controller.connectedType.value)
+        assertFalse(controller.canSyncNow.value)
+
+        // What SetupController.connect does once OAuth succeeds, through its own service instance.
+        val outside = CloudConnectionService(session, createdSettingsRepository, createdSyncRepository)
+        runBlocking { outside.completeConnect(CloudStorageType.DROPBOX, OAuthTokens("AT")) }
+
+        awaitConditionBlocking { controller.connectedType.value == CloudStorageType.DROPBOX }
+        assertTrue(controller.canSyncNow.value)
+
+        runBlocking { outside.tearDown(CloudStorageType.DROPBOX) }
+
+        awaitConditionBlocking { controller.connectedType.value == null }
         assertFalse(controller.canSyncNow.value)
     }
 
@@ -617,11 +739,11 @@ class CloudSyncControllerTest {
         val job = CoroutineScope(Dispatchers.Default).launch {
             activityCenter.trackSync { gate.await() }
         }
-        awaitTrue { !controller.idle.value }
+        awaitConditionBlocking { !controller.idle.value }
         assertFalse(controller.canSyncNow.value)
 
         gate.complete(Unit)
-        awaitTrue { controller.idle.value }
+        awaitConditionBlocking { controller.idle.value }
         assertTrue(controller.canSyncNow.value)
         runBlocking { job.join() }
     }
@@ -643,7 +765,7 @@ class CloudSyncControllerTest {
 
         runBlocking { createdSyncRepository.sync() }
 
-        awaitTrue { controller.lastSyncAuthFailed.value }
+        awaitConditionBlocking { controller.lastSyncAuthFailed.value }
         assertFalse(controller.canSyncNow.value)
     }
 
@@ -668,13 +790,72 @@ class CloudSyncControllerTest {
         controller.syncNow()
 
         // Two separate collectors carry these, so wait on each rather than assume their order.
-        awaitTrue { controller.syncing.value }
-        awaitTrue { controller.syncPhase.value == SyncPhase.CHECKING }
+        awaitConditionBlocking { controller.syncing.value }
+        awaitConditionBlocking { controller.syncPhase.value == SyncPhase.CHECKING }
         assertFalse(controller.canSyncNow.value)
 
         gate.complete(Unit)
-        awaitTrue { !controller.syncing.value }
+        awaitConditionBlocking { !controller.syncing.value }
         assertFalse(controller.syncing.value)
+    }
+
+    /**
+     * [CloudSyncController.runs] brackets every `syncNow()` with Started then Finished — what Home
+     * re-trims its pinned rows on, whichever route started the sync.
+     *
+     * Note: avoids `runTest`'s virtual scheduler for the same reason as syncingMirrorsActivityCenter.
+     */
+    @Test
+    fun syncNowEmitsStartedThenFinished() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val controller = newController(tokenStorage = tokenStorage)
+        val edges = java.util.concurrent.CopyOnWriteArrayList<ManualSyncEdge>()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch { controller.runs.collect { edges += it } }
+        try {
+            controller.syncNow()
+
+            awaitConditionBlocking { edges.size == 2 }
+            assertEquals(listOf(ManualSyncEdge.Started, ManualSyncEdge.Finished), edges.toList())
+        } finally {
+            runBlocking { collector.cancelAndJoin() }
+        }
+    }
+
+    /** A failing sync still ends with Finished, so a collector is never left mid-run. */
+    @Test
+    fun syncNowEmitsFinishedEvenWhenTheSyncFails() {
+        val tokenStorage = FakeTokenStorage()
+        tokenStorage.save(OAuthTokens("AT"))
+        val cloud = AlwaysFailingCloudStorage()
+        val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        val edges = java.util.concurrent.CopyOnWriteArrayList<ManualSyncEdge>()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch { controller.runs.collect { edges += it } }
+        try {
+            controller.syncNow()
+
+            awaitConditionBlocking { edges.size == 2 }
+            assertEquals(listOf(ManualSyncEdge.Started, ManualSyncEdge.Finished), edges.toList())
+            awaitConditionBlocking { controller.lastSyncAuthFailed.value }
+        } finally {
+            runBlocking { collector.cancelAndJoin() }
+        }
+    }
+
+    /** A `syncNow()` that its guard turns away starts nothing, so it emits no edge either. */
+    @Test
+    fun syncNowEmitsNothingWhenItCannotSync() {
+        val controller = newController()
+        assertFalse(controller.canSyncNow.value)
+        val edges = java.util.concurrent.CopyOnWriteArrayList<ManualSyncEdge>()
+        val collector = CoroutineScope(Dispatchers.Unconfined).launch { controller.runs.collect { edges += it } }
+        try {
+            controller.syncNow()
+
+            assertTrue(edges.isEmpty())
+        } finally {
+            runBlocking { collector.cancelAndJoin() }
+        }
     }
 
     /**
@@ -715,7 +896,7 @@ class CloudSyncControllerTest {
             held.release()
             gate.complete(Unit)
         }
-        awaitTrue { controller.canSyncNow.value }
+        awaitConditionBlocking { controller.canSyncNow.value }
         // One sync's worth; a second sync queued behind the mutex would double this.
         assertEquals(2, metadataCalls.get())
     }
@@ -736,12 +917,12 @@ class CloudSyncControllerTest {
         val cloud = AlwaysFailingCloudStorage()
         val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { controller.lastSyncAuthFailed.value }
+        awaitConditionBlocking { controller.lastSyncAuthFailed.value }
 
         controller.reconnect()
 
         // Back on the same provider — the teardown cleared it, then connect re-set it.
-        awaitTrue { controller.connectedType.value == CloudStorageType.DROPBOX }
+        awaitConditionBlocking { controller.connectedType.value == CloudStorageType.DROPBOX }
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
     }
 
@@ -754,14 +935,14 @@ class CloudSyncControllerTest {
         val cloud = AlwaysFailingCloudStorage()
         val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { controller.lastSyncError.value == ErrorKind.CLOUD_AUTH }
+        awaitConditionBlocking { controller.lastSyncError.value == ErrorKind.CLOUD_AUTH }
 
         controller.disconnect()
         // Await the actual condition being asserted, not just connectedType: lastSyncError is
         // updated by an independent collector coroutine (init block) reacting to
         // clearSyncFailureState()'s StateFlow write, so polling connectedType alone gives no
         // happens-before guarantee for it.
-        awaitTrue { controller.connectedType.value == null && controller.lastSyncError.value == null }
+        awaitConditionBlocking { controller.connectedType.value == null && controller.lastSyncError.value == null }
 
         assertNull(controller.lastSyncError.value)
     }
@@ -778,6 +959,7 @@ class CloudSyncControllerTest {
             client = okAuthClient(),
             dropboxTokenStorage = dropboxTokenStorage,
             googleDriveTokenStorage = googleDriveTokenStorage,
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
             // Blocks indefinitely on OAuth, so the new provider's own connect/sync never runs —
             // isolating the fix (clearing on disconnect) from a later successful sync also clearing it.
             googleDriveConnectFlow = SuspendingCloudConnectFlow(),
@@ -785,7 +967,7 @@ class CloudSyncControllerTest {
         val cloud = AlwaysFailingCloudStorage()
         val controller = newController(cloudSession = session, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { controller.lastSyncError.value == ErrorKind.CLOUD_AUTH }
+        awaitConditionBlocking { controller.lastSyncError.value == ErrorKind.CLOUD_AUTH }
 
         controller.switchTo(CloudStorageType.GOOGLE_DRIVE)
         // connectingType flips to GOOGLE_DRIVE synchronously at the top of switchTo(), before the old
@@ -794,7 +976,7 @@ class CloudSyncControllerTest {
         // await lastSyncError directly: it's updated by an independent collector coroutine
         // reacting to clearSyncFailureState()'s StateFlow write, so canCancelConnect alone gives no
         // happens-before guarantee for it (see disconnectClearsLastSyncErrorText for the same race).
-        awaitTrue { controller.canCancelConnect.value && controller.lastSyncError.value == null }
+        awaitConditionBlocking { controller.canCancelConnect.value && controller.lastSyncError.value == null }
 
         assertNull(controller.lastSyncError.value)
     }
@@ -813,20 +995,12 @@ class CloudSyncControllerTest {
         assertNull(controller.lastSyncError.value)
 
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { controller.lastSyncError.value == ErrorKind.CLOUD_AUTH }
+        awaitConditionBlocking { controller.lastSyncError.value == ErrorKind.CLOUD_AUTH }
 
         // Local-only from here on, so the next sync is a success and must clear the reason.
         failing = false
         runBlocking { createdSyncRepository.sync() }
-        awaitTrue { controller.lastSyncError.value == null }
+        awaitConditionBlocking { controller.lastSyncError.value == null }
     }
 
-    /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */
-    private fun awaitTrue(timeoutMs: Long = 2_000, condition: () -> Boolean) = runBlocking {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!condition()) {
-            check(System.currentTimeMillis() < deadline) { "Timed out waiting for condition" }
-            delay(5)
-        }
-    }
 }

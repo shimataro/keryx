@@ -3,6 +3,7 @@ package works.merc.keryx.app.presentation.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -48,7 +49,6 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.toListRow
-import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
@@ -56,6 +56,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.presentation.ManualSync
 
 /**
  * How long the article-change signal must stay quiet before an active search re-runs — short
@@ -82,10 +83,11 @@ class HomeViewModel(
     private val folderRepository: FolderRepository,
     private val settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
-    private val cloudSession: CloudSession,
     private val activityCenter: ActivityCenter,
     private val clock: Clock,
     private val refreshCycleRunner: RefreshCycleRunner,
+    // The one "Sync now" every route shares (CloudSyncController in production) — see [sync].
+    private val manualSync: ManualSync,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     // Imperative read/star DB writes run here instead of the UI thread. Single-threaded so writes
     // stay serialized (one writer, as they were on the UI thread) — the JVM SQLite driver opens a
@@ -454,12 +456,14 @@ class HomeViewModel(
     }.stateIn(viewModelScope, started, null)
 
     /**
-     * The list cursor for keyboard navigation, and the identity of the newest selection request.
+     * The list cursor for keyboard navigation.
      *
      * [selectArticle] loads the article body asynchronously, so [_selectedArticle] lags the user's
      * intent; this is updated synchronously instead, which keeps a held arrow key advancing at
-     * key-repeat speed and lets a superseded hydration recognise that it lost. Only ever touched on
-     * the ViewModel's (main) context, so it needs no synchronization.
+     * key-repeat speed and lets a hydration whose selection was cleared (a filter switch) or moved
+     * elsewhere recognise it. Which of several selections is the newest is told by
+     * [latestSelectionToken]. Only ever touched on the ViewModel's (main) context, so it needs no
+     * synchronization.
      */
     private var selectionCursorId: String? = null
 
@@ -469,7 +473,7 @@ class HomeViewModel(
      *
      * [selectionCursorId] cannot stand in for this: it carries no scope identity, so a selection
      * made under the new scope puts a non-null id back, and a hydration still in flight from the old
-     * one passes its null check and re-adds a pin that was just cleared. Only ever touched on the
+     * one would pass its null check and take back a pin made under the new one. Only ever touched on the
      * ViewModel's (main) context, so it needs no synchronization.
      */
     private var browsingEpoch = 0
@@ -602,27 +606,20 @@ class HomeViewModel(
         _pendingSearchFocus.value = false
     }
 
-    private val _collapsedFolderIds = MutableStateFlow(
-        settingsRepository.getLocalSettings().collapsedFolderIds,
-    )
-    val collapsedFolderIds: StateFlow<Set<String>> = _collapsedFolderIds.asStateFlow()
+    private val expansion = FeedListExpansion(settingsRepository)
+
+    /** The feed list's collapsed folders — see [FeedListExpansion.collapsedFolderIds]. */
+    val collapsedFolderIds: StateFlow<Set<String>> get() = expansion.collapsedFolderIds
+
+    /** The feed list's expanded tags — see [FeedListExpansion.expandedTagIds]. */
+    val expandedTagIds: StateFlow<Set<String>> get() = expansion.expandedTagIds
 
     /**
      * Toggles whether a folder is collapsed and persists the updated state.
      *
      * @param folderId The identifier of the folder to toggle.
      */
-    fun toggleFolderCollapsed(folderId: String) {
-        _collapsedFolderIds.value = _collapsedFolderIds.value.let {
-            if (folderId in it) it - folderId else it + folderId
-        }
-        settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
-    }
-
-    private val _expandedTagIds = MutableStateFlow(
-        settingsRepository.getLocalSettings().expandedTagIds,
-    )
-    val expandedTagIds: StateFlow<Set<String>> = _expandedTagIds.asStateFlow()
+    fun toggleFolderCollapsed(folderId: String) = expansion.toggleFolder(folderId)
 
     /**
      * Toggles whether a tag's attached-feed list is expanded and persists the updated state.
@@ -630,17 +627,22 @@ class HomeViewModel(
      * @param tagId The identifier of the tag to toggle.
      */
     fun toggleTagExpanded(tagId: String) {
-        _expandedTagIds.value = _expandedTagIds.value.let {
-            if (tagId in it) it - tagId else it + tagId
-        }
+        val expanded = expansion.toggleTag(tagId)
         // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row.
         val instance = _selectedRowInstance.value
-        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId && tagId !in _expandedTagIds.value) {
+        if (!expanded && instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
             _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
         }
-        settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
     }
+
+    /**
+     * Expands whatever collapsed folder or tag hides the exact row [instance] (see
+     * [FeedListExpansion.reveal]) — collapse state is device-local and never synced. Called before an
+     * inline rename starts on the selection (F2/Return, the Feed menu), whose editor needs a
+     * rendered row.
+     */
+    fun revealFeedListRow(instance: FeedListRowSelection) = expansion.reveal(instance, feeds.value)
 
     /** Whether the previous session's selected article was restored at launch — see [initialHomePane]. */
     val articleRestoredOnLaunch: Boolean
@@ -714,7 +716,8 @@ class HomeViewModel(
         _pinnedReadArticles.value = emptyMap()
         _pinnedUnstarredArticles.value = emptyMap()
         // Cancels any selection whose body is still loading: without this, a hydration in flight
-        // across the switch would restore the selection and re-add the pin just cleared here. The
+        // across the switch would restore the selection, or take back a pin made under the new
+        // filter. The
         // cursor alone cannot carry that veto — a selection made under the new filter puts a
         // non-null id straight back — so the epoch records the switch itself.
         selectionCursorId = null
@@ -757,56 +760,105 @@ class HomeViewModel(
     fun clearArticleContents() = articleContentCache.clear()
 
     /**
+     * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
+     * [SelectionReadIntents]. Recorded by [setRead], [markSelectedUnread] and [markAllRead].
+     */
+    private val readIntents = SelectionReadIntents()
+
+    /**
+     * Identity of the newest [selectArticle] call: only the hydration holding the latest token may
+     * update the reader. Unlike comparing [selectionCursorId] to the article id, this also tells two
+     * selections of the *same* article apart, so an older one finishing later cannot overwrite the
+     * newer one's result. Main thread only, like [selectionCursorId].
+     */
+    private var latestSelectionToken = 0L
+
+    /**
      * Selects an existing article, loads its full content, and marks it as read.
      *
      * @param article The article row to select.
      */
     fun selectArticle(article: ArticleListRow) {
+        // Marking read is unconditional (external-spec §7: read the instant it is selected), so an
+        // article passed over by a fast key repeat is still marked read. Enqueued here, at call time,
+        // rather than after the body lookup below: dbWriteDispatcher runs writes one at a time in
+        // the order they were enqueued, so this keeps DB writes in the user's order — a "mark as
+        // unread" on this article made while the lookup is still waiting lands after this write,
+        // not before it. Also dispatched before the optimistic pin below — see
+        // reconcilePinnedArticlesAndSelection's own KDoc for why that order is load-bearing. Should a
+        // sync merge tombstone the row concurrently, marking it read only stamps read_at/updated_at;
+        // deletion's last-write-wins runs on deleted_updated_at, which this write never touches, so
+        // it cannot revive or otherwise disturb the deletion.
+        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
         selectionCursorId = article.id
-        // Stamped here too: the hydration below must pin into the browsing context the user actually
-        // selected in, not into whichever one is current when its DB lookup finally returns.
+        val token = ++latestSelectionToken
+        // Stamped here: the hydration below must only touch the pin within the browsing context the
+        // user actually selected in, not whichever one is current when its DB lookup returns.
         val epoch = browsingEpoch
-        viewModelScope.launch {
-            // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup
-            // on selection, in place of loading every article's body on every list emission. Off the
-            // UI thread: this pulls the whole row including `content`, and the JVM driver opens a
-            // fresh connection per statement, so under a sync merge's or refresh's write lock it can
-            // wait out the whole busy_timeout. Held arrow keys would do that ~30 times a second.
-            val full = withContext(dispatcher) { articleRepository.getArticleById(article.id) }
-            // A null (or tombstoned) row means a sync merge deleted it between the emission the user
-            // clicked and the click itself: leave the selection, the pin and the persisted id
-            // entirely alone rather than resurrecting deleted content into the list (which is what
-            // pinning would do — the `articles` merge above re-adds any pinned id missing from the
-            // query result) or restoring it on the next launch.
-            if (full == null || full.deleted_at != null) {
-                // Resume navigating from what is actually on screen, not from the dead article.
-                if (selectionCursorId == article.id) selectionCursorId = _selectedArticle.value?.id
-                return@launch
-            }
-            // Marking read is unconditional (external-spec §7: read the instant it is selected), so
-            // an article passed over by a fast key repeat is still marked read exactly as before.
-            // Dispatched before the optimistic pin/selection below, not after — see
-            // reconcilePinnedArticlesAndSelection's own KDoc for why this order is load-bearing.
-            viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
-            // Nothing is selected any more — a filter switch, or an earlier hydration finding its
-            // own article tombstoned — so there is nothing left to apply below.
-            val cursor = selectionCursorId ?: return@launch
-            // Pinned even when superseded, so an unread-only list cannot collapse under a held key —
-            // but never into a browsing context that dropped every pin (a filter switch, a new search
-            // query) while this lookup was still running, which the `articles` merge would read as an
-            // instruction to re-add this article to a list it does not belong to.
-            if (epoch == browsingEpoch && article.is_read == 0L) {
-                _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
-            }
-            // Only the newest selection reaches the reader: an older lookup that finished later
-            // would otherwise put the wrong article back on screen.
-            if (cursor != article.id) return@launch
-            // Optimistic: show it read immediately; the persist above already went out.
-            _selectedArticle.value = full.copy(is_read = 1L)
-            settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
+        // Pinned now, right after the write is enqueued, rather than once the body has loaded: the
+        // write can commit while the lookup is still waiting (e.g. out a sync's busy_timeout), and an
+        // unread-only list would then drop the selected row until the hydration caught up. Pinned
+        // even if a newer selection supersedes this one, so an unread-only list cannot collapse
+        // under a held key.
+        val pinnedAtSelect = article.is_read == 0L
+        if (pinnedAtSelect) {
+            _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
         }
+        // Read intents recorded after this point override this selection's implicit "read". Begun
+        // synchronously and ended in the coroutine's `finally`; UNDISPATCHED runs the body up to its
+        // first suspension even in an already-cancelled scope, so the `finally` — and with it end() —
+        // always runs, keeping the two paired.
+        val seqAtSelect = readIntents.begin()
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                hydrateSelection(article, token, epoch, pinnedAtSelect, seqAtSelect)
+            } finally {
+                readIntents.end()
+            }
+        }
+    }
+
+    /** The asynchronous half of [selectArticle]: loads the body and applies the selection. */
+    private suspend fun hydrateSelection(
+        article: ArticleListRow,
+        token: Long,
+        epoch: Int,
+        pinnedAtSelect: Boolean,
+        seqAtSelect: Long,
+    ) {
+        // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup on
+        // selection, in place of loading every article's body on every list emission. Off the UI
+        // thread: this pulls the whole row including `content`, and the JVM driver opens a fresh
+        // connection per statement, so under a sync merge's or refresh's write lock it can wait out
+        // the whole busy_timeout. Held arrow keys would do that ~30 times a second.
+        val full = withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+        // A null (or tombstoned) row means a sync merge deleted it between the emission the user
+        // clicked and the click itself: leave the selection and the persisted id entirely alone, and
+        // take back the pin selectArticle added, rather than resurrecting deleted content into the
+        // list (the `articles` merge re-adds any pinned id missing from the query result) or
+        // restoring it on the next launch. A pin dropped by a browsing-context switch since is not
+        // this hydration's to touch.
+        if (full == null || full.deleted_at != null) {
+            if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadArticles.update { it - article.id }
+            // Resume navigating from what is actually on screen, not from the dead article.
+            if (selectionCursorId == article.id) selectionCursorId = _selectedArticle.value?.id
+            return
+        }
+        // Nothing is selected any more (a filter switch, or an earlier hydration finding its own
+        // article tombstoned), or a newer selection — possibly of this same article — owns the
+        // reader: an older lookup that finished later must not put its result back on screen.
+        val cursor = selectionCursorId ?: return
+        if (cursor != article.id || token != latestSelectionToken) return
+        // An explicit read-state intent made on this article after it was selected (e.g. "Mark as
+        // unread" from the context menu that selected it) wins over the selection's implicit read;
+        // its own DB write was enqueued after selectArticle's markAsRead, so the DB agrees, and that
+        // intent already updated the pin itself.
+        val readNow = readIntents.since(article.id, seqAtSelect) ?: true
+        // Optimistic: show the intended read state immediately; its persist already went out.
+        _selectedArticle.value = full.copy(is_read = if (readNow) 1L else 0L)
+        settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
     }
 
     fun selectNext() = moveSelection(1)
@@ -816,9 +868,10 @@ class HomeViewModel(
      * Whether [selectNext] would actually land on a different article.
      *
      * Read by the article reader's swipe gesture (`ui/home/ArticleSwipeNav.kt`) to decide whether a
-     * drag in that direction moves the content or only rubber-bands, so the two must agree with
-     * [moveSelection]'s own clamping — which is why both resolve the current row through the same
-     * [selectionIndex] helper.
+     * drag in that direction moves the content or only rubber-bands, and by its screen-reader
+     * actions, so the two must agree with [moveSelection]: at the last article both do nothing
+     * (J/↓ is a no-op there, exactly like a swipe), which is why both resolve the current row
+     * through the same [selectionIndex] helper.
      *
      * @return `true` when there is a following article to move to.
      */
@@ -832,7 +885,9 @@ class HomeViewModel(
     }
 
     /**
-     * Whether [selectPrevious] would actually land on a different article.
+     * Whether [selectPrevious] would actually land on a different article. Agrees with
+     * [moveSelection], which leaves the first article selected as a no-op (K/↑ there does nothing,
+     * like a swipe past the start).
      *
      * @return `true` when there is a preceding article to move to.
      */
@@ -846,14 +901,18 @@ class HomeViewModel(
     fun currentArticles(): List<ArticleListRow> =
         if (searchActive.value) searchResults.value.map { it.article } else articles.value
 
+    /**
+     * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end
+     * of the list it does nothing — re-selecting the same article would mark it read again (undoing
+     * a "mark as unread"), and the swipe gesture and screen-reader actions already stop there
+     * ([canSelectNext]/[canSelectPrevious]).
+     */
     private fun moveSelection(delta: Int) {
         val list = currentArticles()
         if (list.isEmpty()) return
         val index = selectionIndex(list)
-        val next = when {
-            index < 0 -> 0
-            else -> (index + delta).coerceIn(0, list.lastIndex)
-        }
+        val next = if (index < 0) 0 else index + delta
+        if (next == index || next !in list.indices) return
         selectArticle(list[next])
     }
 
@@ -883,6 +942,7 @@ class HomeViewModel(
         // pass can never observe (and revert) this optimistic unread state using DB flags from
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
+        readIntents.record(id, read = false)
         // Optimistic: flip to unread in place (no DB read-back).
         _pinnedReadArticles.update { it - id }
         _selectedArticle.value = current.copy(is_read = 0L)
@@ -893,22 +953,33 @@ class HomeViewModel(
      *
      * @param article The article whose read state should be toggled.
      */
-    fun toggleRead(article: ArticleListRow) {
-        val nowRead = article.is_read == 0L
+    fun toggleRead(article: ArticleListRow) = setRead(article, read = article.is_read == 0L)
+
+    /**
+     * Sets an article's read state to [read] and persists it — an explicit intent rather than a
+     * toggle, so a caller that displayed "Mark as unread" (e.g. a context menu whose row became read
+     * through its own `onOpen`) always gets exactly that, whatever [article]'s snapshot says.
+     * Setting the state the article already has is a harmless no-op in effect.
+     *
+     * @param article The article whose read state should be set.
+     * @param read Whether the article should end up read.
+     */
+    fun setRead(article: ArticleListRow, read: Boolean) {
         // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
         // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) {
-            if (nowRead) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
+            if (read) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
-        if (nowRead) {
+        readIntents.record(article.id, read)
+        if (read) {
             _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
         } else {
             _pinnedReadArticles.update { it - article.id }
         }
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_read = if (nowRead) 1L else 0L) }
+            _selectedArticle.update { it?.copy(is_read = if (read) 1L else 0L) }
         }
     }
 
@@ -922,8 +993,16 @@ class HomeViewModel(
      *
      * @param article The article whose starred state should be toggled.
      */
-    fun toggleStar(article: ArticleListRow) {
-        val starred = article.is_starred == 0L
+    fun toggleStar(article: ArticleListRow) = setStarred(article, starred = article.is_starred == 0L)
+
+    /**
+     * Sets an article's starred state to [starred] — the explicit-intent counterpart of
+     * [toggleStar], for a caller that displayed a specific "Star"/"Unstar" label (see [setRead]).
+     *
+     * @param article The article whose starred state should be set.
+     * @param starred Whether the article should end up starred.
+     */
+    fun setStarred(article: ArticleListRow, starred: Boolean) {
         // Only the Starred filter's query excludes an unstarred article, so only pin there —
         // switching into Starred later already starts from a fresh, un-pinned query (selectFilter).
         // Re-starring UPDATES the pin to the confirmed value rather than clearing it outright: the DB
@@ -1012,6 +1091,14 @@ class HomeViewModel(
                 articleRepository.markAllAsRead(filter)
             }
         }
+        // An explicit "read" for everything this writes, so a selection still loading its body cannot
+        // apply an earlier "mark as unread" over it (see SelectionReadIntents). Under search that is
+        // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every
+        // visible row as well as the selection (including one still loading).
+        if (marksSelectedRead) {
+            val marked = if (active) idsToMark else visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)
+            marked.forEach { readIntents.record(it, read = true) }
+        }
         // Optimistic update: pin every currently-visible unread article in its read state so the list
         // doesn't collapse the instant the user presses "mark all read" under unread-only.
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
@@ -1028,9 +1115,13 @@ class HomeViewModel(
             }
             _pinnedReadArticles.value = pins
         } else {
-            // Starred: markAllAsRead is a no-op, don't alter read state.
-            _pinnedReadArticles.value =
-                if (selected != null) mapOf(selected.id to selected.toListRow()) else emptyMap()
+            // Starred: markAllAsRead is a no-op, don't alter read state. A selection still loading
+            // its body keeps the pin selectArticle gave it, just as the selected article keeps its own.
+            val pins = mutableMapOf<String, ArticleListRow>()
+            val cursor = selectionCursorId
+            if (cursor != null && cursor != selected?.id) _pinnedReadArticles.value[cursor]?.let { pins[cursor] = it }
+            if (selected != null) pins[selected.id] = selected.toListRow()
+            _pinnedReadArticles.value = pins
         }
     }
 
@@ -1067,11 +1158,11 @@ class HomeViewModel(
         val cursor = selectionCursorId
         if (cursor != null && cursor != selected?.id) {
             // A newer selection is still loading its body, so [_selectedArticle] is the article
-            // being replaced. Its own hydration only re-pins a row that was unread before this
-            // selection (see selectArticle's `article.is_read == 0L` check) — a row that was
-            // already read must keep its place here instead, or it disappears from an unread-only
-            // list for good once that hydration lands without ever re-adding it.
-            val pending = currentArticles().firstOrNull { it.id == cursor && it.is_read == 1L }
+            // being replaced. That selection is the one to keep: its own pin (selectArticle pins a
+            // row that was unread) or, for a row that was already read, its row as listed — or it
+            // disappears from an unread-only list for good, since its hydration never pins.
+            val pending = _pinnedReadArticles.value[cursor]
+                ?: currentArticles().firstOrNull { it.id == cursor && it.is_read == 1L }
                 ?: return emptyMap()
             if (pending.id !in articleRepository.aliveArticleFlags(listOf(pending.id))) return emptyMap()
             return mapOf(pending.id to pending)
@@ -1286,11 +1377,18 @@ class HomeViewModel(
         dispatcher = dispatcher,
         runner = refreshCycleRunner,
         feedRepository = feedRepository,
-        syncRepository = syncRepository,
         activityCenter = activityCenter,
         currentFilter = { _filter.value },
-        repinSelected = { _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected() },
+        repinSelected = ::repinSelected,
     )
+
+    /**
+     * Re-trims the pinned read articles down to the current selection — around every refresh and
+     * every manual sync, so rows read during the previous browse don't outlive it.
+     */
+    private fun repinSelected() {
+        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+    }
 
     /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
     fun refreshFeed(feed: Feeds) = refreshController.refreshFeed(feed)
@@ -1316,8 +1414,28 @@ class HomeViewModel(
      */
     fun pullToRefreshAll() = refreshController.pullToRefresh(ArticleFilter.All)
 
-    /** Synchronizes local data with the cloud. See [HomeRefreshController.sync]. */
-    fun sync() = refreshController.sync()
+    /**
+     * "Sync now" from Home (toolbar button, Feed menu). Delegates to the one [ManualSync] every
+     * route shares, so it runs under the same guard as the cloud-sync settings tab's button and is
+     * a no-op whenever [canSyncNow] is false. The pinned-row re-trim around it happens in the
+     * [ManualSync.runs] collector below, not here, so it covers a sync started from Settings too.
+     */
+    fun sync() = manualSync.syncNow()
+
+    /** See [ManualSync.canSyncNow]. */
+    val canSyncNow: StateFlow<Boolean> get() = manualSync.canSyncNow
+
+    /** See [ManualSync.disabledByAuth]. */
+    val syncDisabledByAuth: StateFlow<Boolean> get() = manualSync.disabledByAuth
+
+    init {
+        // Re-trim on both edges of every manual sync, whichever route started it: before, so rows
+        // read until now don't carry into the synced list; after, against the selection as it
+        // stands then (it may have changed while the sync ran).
+        viewModelScope.launch {
+            manualSync.runs.collect { repinSelected() }
+        }
+    }
 
     /** Discards the cloud sync data and re-uploads local fresh (recovery for a corrupt/incompatible
      *  cloud DB). Errors surface via the notification center from [SyncRepository]. */
@@ -1325,31 +1443,8 @@ class HomeViewModel(
         viewModelScope.launch { withContext(dispatcher) { syncRepository.resetCloudData() } }
     }
 
-    /**
-     * Whether a cloud provider is selected, configured and holds tokens.
-     *
-     * A StateFlow rather than a getter because `CloudSession.isConnected()` reaches the OS secret
-     * store, and this is read straight from composition: as a getter it ran an uncached Secret
-     * Service / Credential Manager round trip (Linux / Windows) — or, on the first macOS call, a
-     * `security` subprocess spawn — on the UI thread on *every* recomposition of the feed list and
-     * the menu bar. Re-evaluated only when the selected provider changes, which is the only thing
-     * that can change it deliberately: every connect / disconnect path writes `cloudStorageType`
-     * (SettingsViewModel, SetupViewModel). Gating on that one field matters — `localSettings` itself
-     * is rewritten by unrelated state such as pane widths, which change on every drag frame.
-     *
-     * The trade-off versus the getter this replaced: if the OS secret store is unreadable at seed
-     * time but becomes readable later, this stays `false` until the provider selection changes again,
-     * where the getter would have healed on the next recomposition.
-     */
-    val cloudConnected: StateFlow<Boolean> =
-        settingsRepository.localSettings
-            .map { it.cloudStorageType }
-            .distinctUntilChanged()
-            .map { cloudSession.isConnected() }
-            .flowOn(dispatcher)
-            // Seeded synchronously so the first frame already has the real value instead of
-            // flashing the sync action off and back on.
-            .stateIn(viewModelScope, started, cloudSession.isConnected())
+    /** See [ManualSync.connected]. */
+    val cloudConnected: StateFlow<Boolean> get() = manualSync.connected
 
     // --- Tag actions ---
 
@@ -1386,8 +1481,7 @@ class HomeViewModel(
         if (instance is FeedListRowSelection.FeedInTag && instance.tagId == id) {
             _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
         }
-        _expandedTagIds.value = _expandedTagIds.value - id
-        settingsRepository.mutateLocalSettings { it.copy(expandedTagIds = _expandedTagIds.value) }
+        expansion.forgetTag(id)
     }
 
     /**
@@ -1420,8 +1514,7 @@ class HomeViewModel(
     fun deleteFolder(id: String) {
         folderRepository.deleteFolder(id)
         if (_filter.value == ArticleFilter.Folder(id)) selectFilter(ArticleFilter.All)
-        _collapsedFolderIds.value = _collapsedFolderIds.value - id
-        settingsRepository.mutateLocalSettings { it.copy(collapsedFolderIds = _collapsedFolderIds.value) }
+        expansion.forgetFolder(id)
     }
 
     /**
