@@ -19,6 +19,10 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 This project runs **no detekt, ktlint, or spotless in Gradle or CI** — `.coderabbit.yaml` enables
 detekt on the PR side only, so nothing checks style or complexity locally. You are that check.
 
+**Test code is in scope.** A change to `commonTest/`, `desktopTest/`, or `testing/src/` gets the same
+checklist below — duplication, naming, magic numbers (a timeout constant is one), and English source
+text — as production code. A test-only target is never `Not applicable` for you.
+
 ## Not yours
 
 - Layer and platform-boundary violations → `review-architecture`.

@@ -105,14 +105,16 @@ Apply these whole-file rules first:
 
 - A Kotlin file whose changed lines are **only** comments, KDoc, blank lines, or reordered imports
   contributes no candidate except Code quality (which still checks that source text is English).
-- A target whose changed files are **only** tests (`{shared,composeApp}/src/{commonTest,desktopTest}/**`,
-  `testing/src/**`) keeps only Verification and Code quality.
+- A test file (`{shared,composeApp}/src/{commonTest,desktopTest}/**`, `testing/src/**`) contributes
+  no candidate except Verification and Code quality, whatever else the target changes. Its lines are
+  not signals for any other perspective in the table below.
 
-Then keep each remaining candidate only if the changed lines (`+` or `-`) show one of its signals:
+Then keep each remaining candidate only if the changed lines (`+` or `-`) of the files that
+produced it show one of its signals:
 
 | Perspective | Keep when the changed lines show |
 | --- | --- |
-| Security | HTTP clients, URLs, redirects; tokens, secrets, credentials, OAuth / PKCE / `state`; raw SQL strings; `File` / `Path` built from a variable; log or exception messages; any change to `gradle/libs.versions.toml` or `**/build.gradle.kts` |
+| Security | HTTP clients, redirects, request construction; an `http://` literal; tokens, secrets, credentials, OAuth / PKCE / `state`; raw SQL strings; `File` / `Path` built from a variable; `Log.*` / logger calls or `throw` with a message; any change to `gradle/libs.versions.toml` or `**/build.gradle.kts`. A fixed `https://` link passed to the browser is not a signal |
 | Data integrity | `.sq` / `.sqm` changes; query write calls (`insert` / `update` / `upsert` / `delete` / `softDelete` / `mark*`); `transaction`; `*_updated_at`, `deleted_at`, `read_at`, `starred_at`; `IdGenerator`; `LocalSettings`; token storage format; OPML |
 | Sync & merge | always kept — its 2a rows are already narrow |
 | Concurrency | `launch`, `async`, `withContext`, `Dispatchers`, `Mutex` / `withLock`, `synchronized`, `Flow` / `stateIn` / `shareIn`, `CoroutineScope`, `Job`, `Thread`, `SwingUtilities` / `EventQueue`, `close()` / `use {`, `runBlocking`; or any change under `platform/**` |
@@ -138,7 +140,8 @@ Record every perspective 2b drops, with a one-phrase reason — the report lists
 Issue **every** Agent call in a single message so they run concurrently, with
 `run_in_background: false`. Give each specialist the same block:
 
-- the resolved target, as a command it can run itself (`git diff HEAD`, `git show db9b529`, …)
+- the resolved target, as a command it can run itself (`git diff HEAD`, `git show db9b529`, …) —
+  copy it exactly from what step 1 resolved; never retype a SHA or range from memory
 - the list of changed files
 - nothing about the other perspectives
 
