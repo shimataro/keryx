@@ -1,5 +1,6 @@
 package works.merc.keryx.app.sdk
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -282,6 +283,20 @@ class KeryxSdkTest {
         } finally {
             sdk.close()
         }
+    }
+
+    @Test
+    fun theOpmlControllerRunsItsImportsOnTheScopeCloseStops() = runTest {
+        val sdk = start()
+        // Taken before close(), which closes the Koin graph it comes from.
+        val controller = sdk.opmlController
+
+        sdk.close()
+
+        // Had the graph wired the controller to any scope other than the one close() cancels, this
+        // import would start (against the closed database) instead of being refused as cancelled.
+        // (A null document returns ImportFailed before reaching the scope, so this passes a real one.)
+        assertFailsWith<CancellationException> { controller.importResult("<opml><body></body></opml>") }
     }
 
     @Test

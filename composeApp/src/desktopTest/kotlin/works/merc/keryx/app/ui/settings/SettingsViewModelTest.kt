@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
@@ -23,9 +24,11 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.withTimeout
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
@@ -197,6 +200,9 @@ class SettingsViewModelTest {
     /** The [OpmlTransferController] behind the last [newViewModel] — what the File menu would call. */
     private lateinit var lastOpmlController: OpmlTransferController
 
+    /** The app scope behind [lastOpmlController], where its imports run. */
+    private lateinit var lastOpmlScope: CoroutineScope
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -243,13 +249,17 @@ class SettingsViewModelTest {
         return FeedFetcher(client)
     }
 
-    /** [succeedingFetcher], with every response held until [gate] completes. */
-    private fun gatedSucceedingFetcher(gate: CompletableDeferred<Unit>): FeedFetcher {
+    /**
+     * [succeedingFetcher], with every response held until [gate] completes; [started] completes once
+     * a request has reached it.
+     */
+    private fun gatedSucceedingFetcher(gate: CompletableDeferred<Unit>, started: CompletableDeferred<Unit>? = null): FeedFetcher {
         val rss = """<?xml version="1.0"?><rss version="2.0"><channel>
             <title>Feed</title><link>https://ex.com</link>
             </channel></rss>"""
         val client = HttpClient(
             MockEngine {
+                started?.complete(Unit)
                 gate.await()
                 respond(rss, HttpStatusCode.OK)
             },
@@ -309,6 +319,9 @@ class SettingsViewModelTest {
         // matches the rest of newViewModel's Unconfined setup; a test can supply a CountingDispatcher
         // to assert it was actually used.
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // Where the OpmlTransferController runs an import; a test can supply a HoldingDispatcher to
+        // keep a cancelled import from stopping until it says so.
+        opmlImportDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): SettingsViewModel {
         val clock = Clock { 0L }
         val syncScheduler = SyncScheduler {}
@@ -324,8 +337,11 @@ class SettingsViewModelTest {
         val opmlImporter = OpmlImporter(feedRepository, folderRepository, tagRepository)
         val opmlTransfer = OpmlTransfer(feedRepository, folderRepository, tagRepository, opmlImporter)
         // Stands in for the app scope the controller runs imports on.
-        val opmlScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { createdSyncScopes += it }
-        val opmlController = OpmlTransferController(opmlTransfer, opmlScope, Dispatchers.Unconfined).also { lastOpmlController = it }
+        val opmlScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also {
+            createdSyncScopes += it
+            lastOpmlScope = it
+        }
+        val opmlController = OpmlTransferController(opmlTransfer, opmlScope, opmlImportDispatcher).also { lastOpmlController = it }
         // Unconfined write dispatcher so saveLocalSettings persists inline.
         val settingsRepository =
             SettingsRepository(db, LocalSettingsStore(dirOverride = dir), syncScheduler, clock, writeDispatcher = Dispatchers.Unconfined)
@@ -602,6 +618,46 @@ class SettingsViewModelTest {
 
         assertNull(vm.opmlResult.value)
         assertFalse(vm.opmlBusy.value)
+    }
+
+    @Test
+    fun cancellingTheViewModelKeepsOpmlBusyUntilTheImportHasStopped() {
+        val path = FileIO.join(dir, "import-vm-cancel.opml")
+        FileIO.writeText(path, ONE_FEED_OPML)
+        val started = CompletableDeferred<Unit>()
+        val importDispatcher = HoldingDispatcher()
+        val vm = newViewModel(
+            feedFetcher = gatedSucceedingFetcher(gate = CompletableDeferred(), started = started),
+            fileSelector = FakeFileSelector(openPath = path),
+            opmlImportDispatcher = importDispatcher,
+        )
+
+        vm.importOpml()
+        runBlocking { withTimeout(5_000) { started.await() } }
+        assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
+        val import = lastOpmlScope.coroutineContext.job.children.single()
+
+        // From here on, the import cannot finish (not even its own cancellation) until released.
+        importDispatcher.hold()
+        // Released in finally too, so a failing assertion cannot strand the import and hang the teardown.
+        try {
+            vm.viewModelScope.cancel()
+            // Only importOpml's own cancellation cancels the import (it runs on the app scope); once that
+            // has happened and a step of the import is held, the import is still running.
+            awaitTrue { import.isCancelled && importDispatcher.queuedCount > 0 }
+            assertEquals(OpmlOperation.Importing, vm.opmlRunning.value, "busy until the import has actually stopped")
+            assertTrue(vm.opmlBusy.value)
+            assertFalse(import.isCompleted, "the import is still running")
+
+            importDispatcher.release()
+            awaitTrue { vm.opmlRunning.value == null }
+
+            assertTrue(import.isCompleted, "busy was released only after the import stopped")
+            assertFalse(vm.opmlBusy.value)
+            assertNull(vm.opmlResult.value, "a cancelled import records no result")
+        } finally {
+            importDispatcher.release()
+        }
     }
 
     @Test

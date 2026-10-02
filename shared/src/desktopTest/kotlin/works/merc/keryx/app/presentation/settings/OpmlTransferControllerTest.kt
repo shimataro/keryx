@@ -26,8 +26,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import java.util.Collections
-import java.util.concurrent.ConcurrentLinkedQueue
-import kotlin.coroutines.CoroutineContext
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -40,6 +38,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import kotlin.test.AfterTest
@@ -53,31 +52,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val ONE_FEED_OPML = """<opml><body><outline text="Feed" xmlUrl="https://ex.com/feed"/></body></opml>"""
-
-/**
- * Runs each block at once, except while [hold]ing — then queues it until [release]. Lets a test keep
- * an import that has already been cancelled from finishing, to observe who waits for it.
- */
-private class ImportHoldingDispatcher : CoroutineDispatcher() {
-    private val queue = ConcurrentLinkedQueue<Runnable>()
-
-    @Volatile
-    private var holding = false
-    val queuedCount: Int get() = queue.size
-
-    fun hold() {
-        holding = true
-    }
-
-    fun release() {
-        holding = false
-        while (true) (queue.poll() ?: return).run()
-    }
-
-    override fun dispatch(context: CoroutineContext, block: Runnable) {
-        if (holding) queue.add(block) else block.run()
-    }
-}
 
 /**
  * [OpmlTransferController] is the one OPML busy/result/request state every route (the Data tab, the
@@ -275,7 +249,7 @@ class OpmlTransferControllerTest {
     @Test
     fun cancellingTheCallerWaitsForTheImportToStopBeforeRethrowing() = runBlocking {
         val started = CompletableDeferred<Unit>()
-        val importDispatcher = ImportHoldingDispatcher()
+        val importDispatcher = HoldingDispatcher()
         val scopeJob = SupervisorJob()
         val controller = controller(fetcher(gate = CompletableDeferred(), started = started), appScope(scopeJob), importDispatcher)
         var thrown: Throwable? = null
@@ -288,20 +262,32 @@ class OpmlTransferControllerTest {
             }
         }
         withTimeout(5_000) { started.await() }
+        val import = scopeJob.children.single()
 
-        // Keep the import from finishing its own cancellation until released.
+        // From here on, the import cannot finish (not even its own cancellation) until released.
         importDispatcher.hold()
-        caller.cancel()
-        awaitTrue { importDispatcher.queuedCount > 0 }
-        delay(50)
-        assertFalse(caller.isCompleted, "the caller must wait for the import to stop")
-        assertEquals(1, scopeJob.children.count(), "the import is still running on the app scope")
+        // Released in finally too, so a failing assertion cannot strand the import and hang the teardown.
+        try {
+            caller.cancel()
+            assertFalse(caller.isCompleted, "the caller must wait for the import to stop")
+            assertEquals(listOf(import), scopeJob.children.toList(), "the import is still running on the app scope")
 
-        importDispatcher.release()
-        caller.join()
+            // The import runs on the app scope, not as the caller's child, so only the caller's own
+            // cancelAndJoin cancels it: once it is cancelled, the caller has reached its wait. And once a
+            // step of the import is held, the import cannot finish — so the caller must still be waiting.
+            awaitTrue { import.isCancelled && importDispatcher.queuedCount > 0 }
+            assertFalse(caller.isCompleted, "the caller must wait for the import to stop")
+            assertEquals(listOf(import), scopeJob.children.toList(), "the import is still running on the app scope")
 
-        assertIs<CancellationException>(thrown)
-        assertEquals(0, scopeJob.children.count(), "the import had stopped by the time the caller finished")
+            importDispatcher.release()
+            withTimeout(5_000) { caller.join() }
+
+            assertIs<CancellationException>(thrown)
+            assertTrue(import.isCompleted)
+            assertEquals(0, scopeJob.children.count(), "the import had stopped by the time the caller finished")
+        } finally {
+            importDispatcher.release()
+        }
     }
 
     @Test
