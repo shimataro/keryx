@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import androidx.lifecycle.viewModelScope
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -165,22 +166,41 @@ class KeryxSdk private constructor(private val koin: Koin) {
     }
 
     private var maintenanceStarted = false
+    private var refreshLoopJob: Job? = null
+
+    /** Whether the periodic refresh loop is currently running — for tests. */
+    internal val isRefreshLoopActive: Boolean get() = refreshLoopJob?.isActive == true
 
     /**
      * Starts the startup maintenance sequence ([runStartupMaintenance]: cache cleanup, initial
      * sync, feed refresh, update check, FTS heal) and the periodic background-refresh loop
-     * ([backgroundUpdateLoop]) on the SDK's own background scope. Call once per foreground app
-     * launch; idempotent, so a repeated call (e.g. from a view that appears more than once) is a
-     * no-op rather than starting a second overlapping loop. Neither is awaited — like desktop's
-     * `main.kt`, both keep running independently for as long as this instance lives.
+     * ([backgroundUpdateLoop]) on the SDK's own background scope. Call whenever the app becomes
+     * active: idempotent, so a repeated call (e.g. from a view that appears more than once) neither
+     * reruns the startup sequence nor starts a second overlapping loop — but it does restart the
+     * loop after [stopRefreshLoop]. Neither is awaited — like desktop's `main.kt`, both keep
+     * running independently for as long as this instance lives.
      */
     @Throws(Exception::class, CancellationException::class)
     fun startMaintenance() {
-        if (maintenanceStarted) return
-        maintenanceStarted = true
         val scope = koin.get<CoroutineScope>()
-        scope.launch { runStartupMaintenance(koin) }
-        scope.launch { backgroundUpdateLoop(koin) }
+        if (!maintenanceStarted) {
+            maintenanceStarted = true
+            scope.launch { runStartupMaintenance(koin) }
+        }
+        if (!isRefreshLoopActive) {
+            refreshLoopJob = scope.launch { backgroundUpdateLoop(koin) }
+        }
+    }
+
+    /**
+     * Stops the periodic refresh loop (iOS, when the app leaves the foreground): the OS can wake the
+     * suspended process for a `BGAppRefreshTask`, and a loop timer expiring then would spend the short
+     * background slot on work [runBackgroundRefresh] deliberately skips. The next [startMaintenance]
+     * starts it again, with a fresh interval. Does nothing when the loop is not running.
+     */
+    fun stopRefreshLoop() {
+        refreshLoopJob?.cancel()
+        refreshLoopJob = null
     }
 
     /**

@@ -68,7 +68,11 @@ and cancelling the task at the end of its slot cancels the shared work with it.
 
 For the same reason `AppModel` starts `startMaintenance()` (the startup sequence and the refresh
 loop) only when the scene first becomes active, not in `init`, which a background launch also runs
-(macOS, resident in the menu bar, still starts it in `init`).
+(macOS, resident in the menu bar, still starts it in `init`). The refresh loop then runs only while
+the app is in the foreground: `AppModel` stops it (`KeryxSdk.stopRefreshLoop`) when the scene enters the
+background and the next activation restarts it with a fresh interval, so a loop timer that expires while
+the OS has woken the suspended process for a background refresh cannot spend the slot on the update
+check or the FTS rebuild. The startup sequence runs once per process.
 
 **App icon badge.** The app icon shows the total unread count (`setBadgeCount`, the same value as
 macOS's Dock badge), updated while running and after each background run. It needs the

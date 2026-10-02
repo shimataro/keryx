@@ -96,20 +96,30 @@ final class AppModel {
         )
     }
 
-    private var foregroundWorkStarted = false
+    private var searchIndexPrepared = false
 
-    /// Starts the startup maintenance, the refresh loop and the search-index preparation, once.
+    /// Starts the startup maintenance and the refresh loop — and restarts the loop after
+    /// `stopForegroundLoop()`; both are idempotent — and prepares the search index, once.
     func startForegroundWorkIfNeeded() {
         guard let sdk else { return }
         startForegroundWork(sdk)
     }
 
     private func startForegroundWork(_ sdk: KeryxSdk) {
-        guard !foregroundWorkStarted else { return }
-        foregroundWorkStarted = true
         try? sdk.startMaintenance()
+        guard !searchIndexPrepared else { return }
+        searchIndexPrepared = true
         Task { try? await sdk.prepareSearchIndex() }
     }
+
+    #if os(iOS)
+    /// Stops the periodic refresh loop when the scene leaves the foreground: the OS may wake the
+    /// suspended process for a background refresh, and the loop must not run then
+    /// (`runBackgroundRefresh` is the only work wanted in that slot).
+    func stopForegroundLoop() {
+        sdk?.stopRefreshLoop()
+    }
+    #endif
 
     #if os(iOS)
     /// The iOS background refresh: schedules the next run (a request is one-shot), runs one

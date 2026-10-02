@@ -132,11 +132,14 @@ struct KeryxApp: App {
         }
         #if os(iOS)
         // iOS runs its maintenance once the scene first becomes active (not from `AppModel.init`,
-        // which a background launch also runs), and keeps the next background refresh scheduled.
+        // which a background launch also runs), keeps its refresh loop to the foreground, and keeps
+        // the next background refresh scheduled.
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
             case .active: model.startForegroundWorkIfNeeded()
-            case .background: scheduleBackgroundRefresh()
+            case .background:
+                scheduleBackgroundRefresh()
+                model.stopForegroundLoop()
             default: break
             }
         }

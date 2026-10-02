@@ -249,6 +249,28 @@ class KeryxSdkTest {
     }
 
     @Test
+    fun theRefreshLoopStopsOnRequestAndRestartsWithTheNextStartMaintenance() = runBlocking {
+        val sdk = start()
+        try {
+            assertFalse(sdk.isRefreshLoopActive)
+            sdk.startMaintenance()
+            assertTrue(sdk.isRefreshLoopActive)
+            sdk.startMaintenance() // idempotent while running
+            assertTrue(sdk.isRefreshLoopActive)
+
+            sdk.stopRefreshLoop()
+            assertFalse(sdk.isRefreshLoopActive)
+            sdk.stopRefreshLoop() // nothing to stop is fine
+            assertFalse(sdk.isRefreshLoopActive)
+
+            sdk.startMaintenance()
+            assertTrue(sdk.isRefreshLoopActive)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
     fun theSharedControllersAreReachableAndStartInTheirLocalOnlyState() = runTest {
         val sdk = start()
         try {

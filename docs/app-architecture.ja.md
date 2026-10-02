@@ -1519,8 +1519,9 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 データタブで開き、そのタブが要求を実行する）・`notificationAlerts`・`menuState(…)`（`presentation/menu/computeMenuUiState` への直接
 パススルーで、`Commands`／メニュー項目の有効・チェック状態を返す）——を提供する。`startMaintenance()` は、
 `domain/StartupMaintenanceTasks.kt` の `runStartupMaintenance` と `domain/BackgroundRefreshLoop.kt` の
-`backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——フォアグラウンド起動ごとに1回呼ぶ。
-冪等なので、繰り返し呼んでもループが二重に始まることはない。`runBackgroundRefresh()` は iOS の
+`backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——アプリがアクティブになるたびに呼ぶ。
+冪等なので、繰り返し呼んでも起動時シーケンスが再実行されたり、ループが二重に始まることはない。
+`stopRefreshLoop()` は iOS がフォアグラウンドを離れるときにループを止める（次の `startMaintenance()` で再開する）。`runBackgroundRefresh()` は iOS の
 バックグラウンド更新の入口で、起動時シーケンスを省いた `RefreshCycleRunner.runIfIdle` の 1 サイクルを
 実行する（[background-update.ja.md](background-update.ja.md) 参照）。`importOpenedOpml(xml)` は、アプリがある文書を
 開いた状態で起動したとき用に `presentation/settings/OpmlOpenHandler.kt` の `requestOpenedOpmlImport` を包む
