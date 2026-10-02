@@ -124,7 +124,7 @@ produced it show one of its signals:
 | State vs. display | a ViewModel's exposed `StateFlow` / state fields; selection, filter, focus, pane, or scroll state; `remember` / `rememberSaveable`. A diff that changes only styling (colors, padding, shapes, `Modifier` sizing) or only string resources is dropped |
 | Code quality | any changed Kotlin line, comments included |
 | Verification | any changed Kotlin line other than comments / imports; tests; `.sq` / `.sqm`; `composeResources`; `.github/workflows/**`; Gradle files |
-| Documentation | always kept when `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md`, a `strings.xml` (wording quality), or `gradle/libs.versions.toml` (license-table sync) changed. Otherwise, grep `docs/**` and `README.md` for each changed file's base name and for each public identifier the diff adds, removes, or renames (class, function, constant, table, column, settings key); keep it only on a hit |
+| Documentation | always kept when `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md`, a `strings.xml` (wording quality), or `gradle/libs.versions.toml` (license-table sync) changed. Otherwise, grep `docs/**` and `README.md` for each changed file's base name and for each public identifier the diff adds, removes, or renames (class, function, constant, table, column, settings key), and also for one or two distinctive terms naming the behavior the changed lines alter (a feature or setting name, a state or error kind, user-visible wording) — docs often describe behavior without naming the file or class; keep it only on a hit |
 
 Two safeguards:
 
