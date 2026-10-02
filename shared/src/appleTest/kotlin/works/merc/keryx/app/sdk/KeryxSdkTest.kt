@@ -7,7 +7,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -18,6 +20,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.koin.dsl.module
+import platform.posix.usleep
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.DatabaseTooNewException
@@ -67,6 +70,9 @@ class KeryxSdkTest {
 
     private var serverItems = 1
 
+    /** Runs inside the SDK's OS-notification sink, on whichever thread the cycle posted from. */
+    private var onNotify: () -> Unit = {}
+
     private fun rss(articleCount: Int) = buildString {
         append("""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title><link>https://example.com</link>""")
         repeat(articleCount) { append("<item><title>Post $it</title><link>https://example.com/$it</link><guid>g$it</guid></item>") }
@@ -86,7 +92,7 @@ class KeryxSdkTest {
         }
         return KeryxSdk.startWithModules(
             newArticlesText = { count -> "$count new" },
-            postOsNotification = { _, _ -> },
+            postOsNotification = { _, _ -> onNotify() },
             dataDirectory = dir,
             extraModules = listOf(module { single<HttpClient> { client } }),
         )
@@ -207,6 +213,37 @@ class KeryxSdkTest {
             serverItems = 2
             assertEquals(2L, sdk.runBackgroundRefresh())
         } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun cancellingBackgroundRefreshReturnsOnlyAfterTheWorkHasStopped() = runBlocking {
+        val sdk = startWithFeedServer(FEED_URL)
+        try {
+            sdk.settingsRepository.flush()
+            sdk.prepareSearchIndex()
+            assertTrue(sdk.feedRepository.subscribeFeed(FEED_URL) is Result.Ok)
+
+            // The refresh finds a new article, so the cycle posts the OS notification — a plain,
+            // non-cancellable call inside the work: the one place it can be caught mid-flight.
+            val notifying = CompletableDeferred<Unit>()
+            var notified = false
+            onNotify = {
+                notifying.complete(Unit)
+                usleep(300_000u)
+                notified = true
+            }
+            serverItems = 2
+            val caller = launch(Dispatchers.Default) { sdk.runBackgroundRefresh() }
+            notifying.await()
+            caller.cancelAndJoin()
+
+            // Joined: the work has run past the blocking call, not merely been asked to stop.
+            assertTrue(notified)
+            assertFalse(sdk.homeViewModel.activity.value.refreshCycleRunning)
+        } finally {
+            onNotify = {}
             sdk.close()
         }
     }

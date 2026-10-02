@@ -4,10 +4,12 @@ import app.cash.sqldelight.db.SqlDriver
 import androidx.lifecycle.viewModelScope
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import org.koin.core.Koin
@@ -190,7 +192,8 @@ class KeryxSdk private constructor(private val koin: Koin) {
      *
      * Does nothing before setup completes (like `FeedRefreshWorker`), and then does not flush
      * either: the settings file's existence *is* the setup-complete marker. Cancelling the caller
-     * cancels the work, so an expired background slot stops it.
+     * cancels the work and waits for it to finish, so an expired background slot stops it before
+     * this throws.
      *
      * @return The total unread count afterwards, for the app icon badge.
      */
@@ -208,7 +211,10 @@ class KeryxSdk private constructor(private val koin: Koin) {
         try {
             return work.await()
         } catch (e: CancellationException) {
-            work.cancel()
+            // `work` runs on the SDK's scope, not as a child of the caller, so cancelling the caller
+            // does not wait for it. Join it here: iOS treats the background task as finished once the
+            // caller returns, and would suspend the app with refresh or sync cleanup still running.
+            withContext(NonCancellable) { work.cancelAndJoin() }
             throw e
         }
     }
