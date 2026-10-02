@@ -144,6 +144,29 @@ class KeryxSdkTest {
     }
 
     @Test
+    fun backgroundRefreshBeforeSetupDoesNothingAndLeavesSetupIncomplete() = runTest {
+        val sdk = start()
+        try {
+            assertEquals(0L, sdk.runBackgroundRefresh())
+            assertFalse(sdk.settingsRepository.isSetupComplete())
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun backgroundRefreshAfterSetupRunsACycleAndReturnsTheUnreadCount() = runTest {
+        val sdk = start()
+        try {
+            sdk.settingsRepository.flush()
+            assertTrue(sdk.settingsRepository.isSetupComplete())
+            assertEquals(0L, sdk.runBackgroundRefresh())
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
     fun theSharedControllersAreReachableAndStartInTheirLocalOnlyState() = runTest {
         val sdk = start()
         try {

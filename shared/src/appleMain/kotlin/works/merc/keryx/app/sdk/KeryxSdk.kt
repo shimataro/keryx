@@ -9,8 +9,10 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.data.local.FtsManager
@@ -20,6 +22,7 @@ import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.domain.AuthorizationLauncher
+import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
@@ -28,8 +31,10 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OsNotificationSink
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.runStartupMaintenance
@@ -169,6 +174,38 @@ class KeryxSdk private constructor(private val koin: Koin) {
         val scope = koin.get<CoroutineScope>()
         scope.launch { runStartupMaintenance(koin) }
         scope.launch { backgroundUpdateLoop(koin) }
+    }
+
+    /**
+     * One background-wake cycle for the OS's periodic refresh (iOS `BGAppRefreshTask`): refreshes
+     * every feed, posts the new-article notification, and syncs when a provider is connected
+     * ([RefreshCycleRunner.runIfIdle], so it is skipped while the foreground loop already runs a
+     * cycle). Unlike [startMaintenance] it neither runs the startup sequence nor rebuilds the FTS
+     * index — a background slot is far too short for either.
+     *
+     * Does nothing before setup completes (like `FeedRefreshWorker`), and then does not flush
+     * either: the settings file's existence *is* the setup-complete marker. Cancelling the caller
+     * cancels the work, so an expired background slot stops it.
+     *
+     * @return The total unread count afterwards, for the app icon badge.
+     */
+    @Throws(Exception::class, CancellationException::class)
+    suspend fun runBackgroundRefresh(): Long {
+        val settings = koin.get<SettingsRepository>()
+        val articles = koin.get<ArticleRepository>()
+        if (!settings.isSetupComplete()) return articles.watchUnreadCount().first()
+        val work = koin.get<CoroutineScope>().async {
+            koin.get<FtsManager>().ensureIndexedIfTableAbsent()
+            koin.get<RefreshCycleRunner>().runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC)
+            settings.flush()
+            articles.watchUnreadCount().first()
+        }
+        try {
+            return work.await()
+        } catch (e: CancellationException) {
+            work.cancel()
+            throw e
+        }
     }
 
     /**
