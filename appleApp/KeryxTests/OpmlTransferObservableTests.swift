@@ -14,6 +14,7 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
     private let importDelayNanoseconds: UInt64
     private let lock = NSLock()
     private var running: OpmlOperation?
+    private var lastResult: OpmlResult?
     private var pending: OpmlRequest?
     private var _importedXml: [String?] = []
     private var _finishedResults: [OpmlResult?] = []
@@ -23,6 +24,8 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
     var finishedResults: [OpmlResult?] { lock.withLock { _finishedResults } }
     var clearCount: Int { lock.withLock { _clearCount } }
     var isRunning: Bool { lock.withLock { running != nil } }
+    var currentlyBusy: Bool { isRunning }
+    var currentResult: OpmlResult? { lock.withLock { lastResult } }
 
     init(importOutcome: OpmlResult = OpmlResultImported(added: 0, failed: 0), importDelayNanoseconds: UInt64 = 0) {
         self.importOutcome = importOutcome
@@ -33,6 +36,7 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
         lock.withLock {
             guard running == nil else { return false }
             running = operation
+            lastResult = nil
             return true
         }
     }
@@ -40,18 +44,30 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
     func finish(result: OpmlResult?) {
         lock.withLock {
             running = nil
+            lastResult = result
             _finishedResults.append(result)
         }
     }
 
     func exportDocument() -> String { "<opml/>" }
 
+    /// Throws only on cancellation (during the delay), like the real `importResult`.
     func importResult(xml: String?) async throws -> OpmlResult {
         if importDelayNanoseconds > 0 {
-            try? await Task.sleep(nanoseconds: importDelayNanoseconds)
+            try await Task.sleep(nanoseconds: importDelayNanoseconds)
         }
         lock.withLock { _importedXml.append(xml) }
         return xml == nil ? OpmlResultImportFailed.shared : importOutcome
+    }
+
+    /// The real `importDocument`'s shape: refused while running, otherwise begin → import → finish,
+    /// finishing with no result when cancelled.
+    func importDocument(xml: String?) async throws -> KotlinBoolean {
+        guard tryBegin(operation: .importing) else { return KotlinBoolean(bool: false) }
+        var outcome: OpmlResult?
+        defer { finish(result: outcome) }
+        outcome = try await importResult(xml: xml)
+        return KotlinBoolean(bool: true)
     }
 
     func request(request: OpmlRequest) {
@@ -146,6 +162,79 @@ struct OpmlTransferObservableTests {
 
         #expect(observable.importDocument(xml: "<opml/>") == nil)
         #expect(fake.importedXml.isEmpty)
+        #expect(observable.isBusy, "the running import's state is left as it was")
+        #expect(fake.isRunning)
+    }
+
+    @Test
+    func importDocumentShowsBusyRightAwayAndTheControllersResultAfterwards() async throws {
+        let fake = FakeOpmlTransferring(importOutcome: OpmlResultImported(added: 2, failed: 0), importDelayNanoseconds: 50_000_000)
+        let observable = OpmlTransferObservable(controller: fake)
+        // A previous result, which starting a new import must clear at once.
+        await observable.importDocument(xml: "<opml/>")?.value
+        #expect(observable.result != nil)
+
+        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        #expect(observable.isBusy, "busy before the controller's flow catches up")
+        #expect(observable.result == nil)
+        #expect(observable.importDocument(xml: "<opml/>") == nil, "no second start while running")
+        await task.value
+
+        #expect(!observable.isBusy)
+        #expect(!fake.isRunning)
+        #expect((observable.result as? OpmlResultImported)?.added == 2)
+        #expect(fake.importedXml == ["<opml/>", "<opml/>"], "the run happened once")
+        #expect(fake.finishedResults.count == 2, "finished by the controller once per run")
+    }
+
+    @Test
+    func aCancelledImportDocumentEndsWithNoResult() async throws {
+        let fake = FakeOpmlTransferring(importDelayNanoseconds: 5_000_000_000)
+        let observable = OpmlTransferObservable(controller: fake)
+
+        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        task.cancel()
+        await task.value
+
+        #expect(!observable.isBusy)
+        #expect(!fake.isRunning)
+        #expect(observable.result == nil, "a cancellation is not an ImportFailed")
+        #expect(fake.finishedResults.count == 1)
+        #expect(fake.finishedResults.first.map { $0 == nil } == true)
+    }
+
+    @Test
+    func aCancelledPanelImportEndsWithNoResult() async throws {
+        let fake = FakeOpmlTransferring(importDelayNanoseconds: 5_000_000_000)
+        let observable = OpmlTransferObservable(controller: fake)
+        let url = try writeTempOpmlFile()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(observable.beginImport())
+        let task = observable.importOpml(from: url)
+        task.cancel()
+        await task.value
+
+        #expect(!observable.isBusy)
+        #expect(!fake.isRunning)
+        #expect(observable.result == nil, "a cancellation is not an ImportFailed")
+    }
+
+    @Test
+    func importDocumentRefusedByTheControllerTakesTheControllersState() async throws {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
+        // Another operation holds the controller before the observable has seen it (its flow has
+        // not caught up), so the observable's own guard lets the call through.
+        #expect(fake.tryBegin(operation: .exporting))
+
+        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        await task.value
+
+        #expect(observable.isBusy, "the other operation is still running")
+        #expect(observable.result == nil)
+        #expect(fake.importedXml.isEmpty)
+        #expect(fake.finishedResults.isEmpty, "the other operation is not finished by this call")
     }
 
     @Test

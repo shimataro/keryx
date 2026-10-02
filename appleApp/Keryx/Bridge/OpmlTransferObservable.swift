@@ -37,12 +37,22 @@ protocol OpmlTransferring: AnyObject, Sendable {
     func finish(result: OpmlResult?)
     func exportDocument() -> String
     func importResult(xml: String?) async throws -> OpmlResult
+    /// Kotlin's `importDocument` — the whole run (`tryBegin` → `importResult` → `finish`); `false`
+    /// when another operation already holds the controller.
+    func importDocument(xml: String?) async throws -> KotlinBoolean
     func request(request: OpmlRequest)
     func consumeRequest() -> OpmlRequest?
     func clearResult()
+    /// The controller's `busy`, read synchronously.
+    var currentlyBusy: Bool { get }
+    /// The controller's `result`, read synchronously.
+    var currentResult: OpmlResult? { get }
 }
 
-extension OpmlTransferController: OpmlTransferring {}
+extension OpmlTransferController: OpmlTransferring {
+    var currentlyBusy: Bool { busy.value.boolValue }
+    var currentResult: OpmlResult? { result.value }
+}
 
 /// Mirrors Kotlin's `OpmlTransferController` — the one OPML busy/result/request state every route
 /// shares (the Data settings tab, the File menu, an `.opml` file the app was opened with), exactly as
@@ -146,7 +156,9 @@ final class OpmlTransferObservable {
     }
 
     /// Imports the file the open panel returned; the import must already have been begun
-    /// (`beginImport()`). Returns the running task so a caller (in practice,
+    /// (`beginImport()`) — the panel needs the operation held before it opens, so this path runs
+    /// `tryBegin` → `importResult` → `finish` itself, exactly like Compose's
+    /// `SettingsViewModel.importOpml`. Returns the running task so a caller (in practice,
     /// `OpmlTransferObservableTests`) can await its completion.
     @discardableResult
     func importOpml(from url: URL) -> Task<Void, Never> {
@@ -158,10 +170,25 @@ final class OpmlTransferObservable {
 
     /// Imports an already-read document (an `.opml` file the app was opened with; `nil` when reading
     /// it failed, which ends as an import failure). Returns `nil` when another operation is running.
+    ///
+    /// The whole run is Kotlin's `OpmlTransferController.importDocument` — the same one Compose's
+    /// `SettingsViewModel.importDocument` calls — so this never begins or finishes the operation
+    /// itself. It only shows the busy state right away (the controller's flows catch up a moment
+    /// later) and, once the run is over, takes `isBusy`/`result` from the controller: that is also
+    /// right when the controller refused the run because another operation got hold of it first.
     @discardableResult
     func importDocument(xml: String?) -> Task<Void, Never>? {
-        guard begin(.importing) else { return nil }
-        return runImport(xml: xml)
+        guard !isBusy else { return nil }
+        isBusy = true
+        result = nil
+        let controller = self.controller
+        return Task {
+            // A throw is only ever cancellation, which the controller has already finished with no
+            // result; the state is taken from the controller either way.
+            _ = try? await controller.importDocument(xml: xml)
+            isBusy = controller.currentlyBusy
+            result = controller.currentResult
+        }
     }
 
     /// Turns a finished result into the status text under the Data tab's buttons, once, and clears it
@@ -205,12 +232,9 @@ final class OpmlTransferObservable {
     private func runImport(xml: String?) -> Task<Void, Never> {
         let controller = self.controller
         return Task {
-            let outcome: OpmlResult
-            do {
-                outcome = try await controller.importResult(xml: xml)
-            } catch {
-                outcome = OpmlResultImportFailed.shared
-            }
+            // `importResult` maps every failure to `ImportFailed` itself; the only thing it throws
+            // is cancellation, which ends with nothing to show — as Kotlin's own callers do.
+            let outcome = try? await controller.importResult(xml: xml)
             finish(outcome)
         }
     }

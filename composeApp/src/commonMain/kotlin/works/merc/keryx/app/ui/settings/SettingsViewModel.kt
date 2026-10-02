@@ -195,8 +195,11 @@ class SettingsViewModel(
     /**
      * Imports an already-read OPML document (an `.opml` file the app was opened with); `null` [xml]
      * means reading it failed and finishes with [OpmlResult.ImportFailed]. A no-op while any OPML
-     * operation is running. The whole run is [OpmlTransferController.importDocument], the same one
-     * the SwiftUI app calls.
+     * operation is running. The whole run is [OpmlTransferController.importDocument], which the
+     * SwiftUI app's `OpmlTransferObservable.importDocument(xml:)` calls too. (The file-picker path,
+     * [importOpml], is shared at the level of [OpmlTransferController.tryBegin] /
+     * [OpmlTransferController.importResult] / [OpmlTransferController.finish] instead, because the
+     * operation must be held before the picker opens — the SwiftUI panel path does the same.)
      */
     fun importDocument(xml: String?) {
         viewModelScope.launch { opmlController.importDocument(xml) }
