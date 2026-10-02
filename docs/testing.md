@@ -1323,7 +1323,10 @@ macOS (and on iPad, where the reader shares the screen with the list):
   long-press a row (including the one just read) and choose "Copy URL": the toast appears. Copying from
   the reader's own button (and, with a hardware keyboard, ⌘⇧C) shows the toast as well as the ✓.
 - (iOS) With VoiceOver on, copy a URL from a row's menu, and again from the reader's button: each copy
-  is announced as "URL copied" exactly once, and the toast itself is not focusable.
+  is announced as "URL copied" exactly once, even if the menu is still closing as it is spoken, and the
+  VoiceOver focus does not move to the toast. While it is up, swiping to it reads "URL copied".
+- (iOS) With the article list sorted oldest first and the new-articles pill showing at its bottom, copy a
+  URL: the toast appears above the pill rather than covering it, and both stay readable.
 
 ### (SwiftUI) Article row menu read state
 

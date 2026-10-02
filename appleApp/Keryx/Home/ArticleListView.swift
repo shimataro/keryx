@@ -30,10 +30,6 @@ struct ArticleListView: View {
     private var windowIsKey: Bool { true }
     #endif
 
-    /// Whether the new-articles pill is actually shown, debounced against `home.newArticleCount`
-    /// itself — see `pillShowDelayTask`'s own KDoc for why.
-    @State private var pillShown = false
-
     #if os(macOS)
     /// Handed to every hosted row explicitly — see `ArticleTableView.contextMenuSelectionTracker`.
     @Environment(\.contextMenuSelectionTracker) private var contextMenuSelectionTracker
@@ -122,13 +118,16 @@ struct ArticleListView: View {
     private func withNewArticlesPill(_ list: some View, jump: @escaping () -> Void) -> some View {
         list
             .overlay(alignment: home.newestFirst ? .top : .bottom) {
-                if pillShown {
+                if home.newArticlesPillVisible {
                     newArticlesPill(jump: jump)
                 }
             }
             .task(id: home.newArticleCount) {
                 await updatePillShown()
             }
+            // Not on screen (e.g. a phone-width reader pushed over the list): nothing for the copy
+            // toast to keep clear of. `.task(id:)` runs again when the list reappears.
+            .onDisappear { home.newArticlesPillVisible = false }
     }
 
     /// The pill's count going from `0` to positive is deliberately not shown immediately — the
@@ -136,14 +135,16 @@ struct ArticleListView: View {
     /// article landing *inside* the current viewport would otherwise flash the pill for a single
     /// frame before the visibility report catches up and drops it back out of the count. Going
     /// back to `0` is always immediate. Mirrors Compose's own `NewArticlesPill` (`NewArticlesPill.kt`).
+    /// The result lives in `HomeObservable.newArticlesPillVisible` so the copy toast, drawn by
+    /// `HomeView` over every column, can keep clear of the pill.
     private func updatePillShown() async {
         guard home.newArticleCount > 0 else {
-            pillShown = false
+            home.newArticlesPillVisible = false
             return
         }
         try? await Task.sleep(for: .milliseconds(200))
         guard !Task.isCancelled else { return }
-        pillShown = true
+        home.newArticlesPillVisible = true
     }
 
     // MARK: - Toolbar
@@ -401,16 +402,14 @@ struct ArticleListView: View {
             home.viewModel.markAllArticlesSeen()
             jump()
         } label: {
-            Label(LF("home_new_articles", Int64(home.newArticleCount)), systemImage: home.newestFirst ? "arrow.up" : "arrow.down")
-                .font(.callout)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.accentColor))
-                .foregroundStyle(.white)
+            PillLabel(
+                title: LF("home_new_articles", Int64(home.newArticleCount)),
+                systemImage: home.newestFirst ? "arrow.up" : "arrow.down"
+            )
         }
         .buttonStyle(.plain)
-        .padding(.top, home.newestFirst ? 8 : 0)
-        .padding(.bottom, home.newestFirst ? 0 : 8)
+        .padding(.top, home.newestFirst ? PillLabel.edgeInset : 0)
+        .padding(.bottom, home.newestFirst ? 0 : PillLabel.edgeInset)
     }
 
     #if os(iOS)

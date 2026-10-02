@@ -93,4 +93,56 @@ struct ArticleUrlCopyTests {
         #endif
         #expect(recorder.pulses == 1)
     }
+
+    // MARK: - ArticleUrlCopyConfirmation
+
+    /// Records what an `ArticleUrlCopyConfirmation` delivered.
+    @MainActor
+    private final class DeliveryLog {
+        var announcements: [String] = []
+        var toasts: [String] = []
+
+        func confirmation(withToast: Bool) -> ArticleUrlCopyConfirmation {
+            ArticleUrlCopyConfirmation(
+                announce: { self.announcements.append($0) },
+                showToast: withToast ? { self.toasts.append($0) } : nil
+            )
+        }
+    }
+
+    /// iOS: one copy shows the toast once and announces the same message once — no second
+    /// announcement from the toast itself.
+    @MainActor
+    @Test
+    func oneCopyWithAToastShowsItAndAnnouncesOnce() {
+        let log = DeliveryLog()
+        let confirmation = log.confirmation(withToast: true)
+
+        ArticleUrlCopy.perform(
+            url: "https://example.com/a2", articleId: "a2", selectedId: "a1",
+            platformShowsOwnConfirmation: false, inlineCheckConfirms: false,
+            copy: { _ in }, pulse: {}, confirm: { confirmation.confirm() }
+        )
+
+        #expect(log.toasts.count == 1)
+        #expect(log.announcements.count == 1)
+        #expect(log.toasts == log.announcements)
+    }
+
+    /// macOS: no toast — the confirmation is the announcement alone.
+    @MainActor
+    @Test
+    func aConfirmationWithoutAToastOnlyAnnounces() {
+        let log = DeliveryLog()
+        let confirmation = log.confirmation(withToast: false)
+
+        ArticleUrlCopy.perform(
+            url: "https://example.com/a2", articleId: "a2", selectedId: "a1",
+            platformShowsOwnConfirmation: false, inlineCheckConfirms: true,
+            copy: { _ in }, pulse: {}, confirm: { confirmation.confirm() }
+        )
+
+        #expect(log.toasts.isEmpty)
+        #expect(log.announcements.count == 1)
+    }
 }

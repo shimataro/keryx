@@ -56,10 +56,10 @@ struct ArticleDetailView: View {
             // in-app one), and VoiceOver does not see it change. iOS confirms every copy itself
             // (`HomeObservable.copyArticleUrl`), whether or not this reader is on screen, so
             // announcing here too would say it twice.
-            AccessibilityNotification.Announcement(L("article_url_copied")).post()
+            VoiceOverAnnouncement.post(L("article_url_copied"))
             #endif
             Task {
-                try? await Task.sleep(for: .seconds(1.5))
+                try? await Task.sleep(for: CopyConfirmationTiming.copiedCheck)
                 copyConfirmed = false
             }
         }

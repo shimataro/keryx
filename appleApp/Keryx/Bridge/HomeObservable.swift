@@ -131,16 +131,44 @@ final class HomeObservable: ObservableAssignment {
     private(set) var copyPulse: Int = 0
 
     #if os(iOS)
-    /// The iOS toast that confirms an article URL copy (`confirmArticleUrlCopy`). Whether a copy is
+    /// The iOS toast that confirms an article URL copy (`copyConfirmation`). Whether a copy is
     /// confirmed at all is the shared plan's decision (`ArticleUrlCopy`); on iOS — no OS confirmation,
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
-    let copyToast = TransientToastState()
+    let copyToast: TransientToastState
     #endif
 
-    init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
+    /// How an in-app copy confirmation is delivered — see `ArticleUrlCopyConfirmation`.
+    @ObservationIgnored private let copyConfirmation: ArticleUrlCopyConfirmation
+
+    /// Whether the article list's new-articles pill is actually on screen (debounced against
+    /// `newArticleCount` — see `ArticleListView.updatePillShown`). Written only by `ArticleListView`;
+    /// kept here so the copy toast, drawn by `HomeView` over every column, can keep clear of it.
+    var newArticlesPillVisible = false
+
+    /// Whether the new-articles pill is on screen at the bottom of the list (oldest-first order puts
+    /// it there), where the copy toast would otherwise cover it.
+    var newArticlesPillAtBottom: Bool { newArticlesPillVisible && !newestFirst }
+
+    /// - Parameter copyConfirmation: how an in-app copy confirmation is delivered; `nil` for the
+    ///   platform's own (iOS: `copyToast` plus a VoiceOver announcement; macOS: the announcement
+    ///   only).
+    init(
+        viewModel: HomeViewModel,
+        makeAddFeedController: @escaping () -> AddFeedController,
+        copyConfirmation: ArticleUrlCopyConfirmation? = nil
+    ) {
         self.viewModel = viewModel
         self.makeAddFeedController = makeAddFeedController
+        #if os(iOS)
+        let toast = TransientToastState()
+        copyToast = toast
+        let showToast: ((String) -> Void)? = { toast.show($0) }
+        #else
+        let showToast: ((String) -> Void)? = nil
+        #endif
+        self.copyConfirmation = copyConfirmation
+            ?? ArticleUrlCopyConfirmation(announce: VoiceOverAnnouncement.post, showToast: showToast)
         sidebarRebuild = CoalescedAction { [weak self] in self?.rebuildSidebar() }
     }
 
@@ -174,22 +202,14 @@ final class HomeObservable: ObservableAssignment {
             selectedId: selectedArticleId,
             copy: copyToPasteboard,
             pulse: { copyPulse += 1 },
-            confirm: { confirmArticleUrlCopy() }
+            // The one in-app copy confirmation, run whenever the shared plan's `confirmInApp` says
+            // so — `copyConfirmation` only decides how. iOS: the toast plus a VoiceOver
+            // announcement, since the reader (which announces its own ✓) may not even be on screen.
+            // macOS: the announcement only — the plan asks for it only when the reader's ✓ does not
+            // flash, e.g. a context menu opened from the keyboard or VoiceOver on a row it did not
+            // select, which would otherwise get no feedback at all.
+            confirm: { copyConfirmation.confirm() }
         )
-    }
-
-    /// The one in-app copy confirmation, run whenever the shared plan's `confirmInApp` says so
-    /// (`ArticleUrlCopy`) — this only decides how. iOS: the toast plus a VoiceOver announcement,
-    /// since the reader (which announces its own ✓) may not even be on screen. macOS: the
-    /// announcement only (desktop convention: no in-app snackbar or toast) — the plan asks for it
-    /// only when the reader's ✓ does not flash, e.g. a context menu opened from the keyboard or
-    /// VoiceOver on a row it did not select, which would otherwise get no feedback at all.
-    private func confirmArticleUrlCopy() {
-        let message = L("article_url_copied")
-        #if os(iOS)
-        copyToast.show(message)
-        #endif
-        AccessibilityNotification.Announcement(message).post()
     }
 
     /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including

@@ -34,3 +34,21 @@ enum ArticleUrlCopy {
         if plan.confirmInApp { confirm() }
     }
 }
+
+/// How the UI's one in-app URL-copy confirmation is delivered — what `HomeObservable` runs whenever
+/// the plan's `confirmInApp` says so (`ArticleUrlCopy.perform`'s `confirm`). Injected into
+/// `HomeObservable` so `ArticleUrlCopyTests` can count what one copy delivers.
+@MainActor
+struct ArticleUrlCopyConfirmation {
+    /// Speaks the message to VoiceOver (`VoiceOverAnnouncement.post` in the app).
+    let announce: (String) -> Void
+    /// Shows the message on screen (the iOS toast); `nil` where nothing is drawn — macOS, following
+    /// the desktop convention of no in-app snackbar or toast.
+    let showToast: ((String) -> Void)?
+
+    func confirm() {
+        let message = L("article_url_copied")
+        showToast?(message)
+        announce(message)
+    }
+}

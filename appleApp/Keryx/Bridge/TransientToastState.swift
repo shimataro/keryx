@@ -11,7 +11,7 @@ final class TransientToastState {
     @ObservationIgnored private var hideTask: Task<Void, Never>?
     @ObservationIgnored private let duration: Duration
 
-    init(duration: Duration = .seconds(2)) {
+    init(duration: Duration = CopyConfirmationTiming.toast) {
         self.duration = duration
     }
 
@@ -30,4 +30,13 @@ final class TransientToastState {
         hideTask = task
         return task
     }
+}
+
+/// How long the app's copy confirmations stay on screen — named in this one place.
+enum CopyConfirmationTiming {
+    /// The iOS "URL copied" toast (`TransientToastState`'s default).
+    static let toast: Duration = .seconds(2)
+    /// The reader's ✓ after a copy (`ArticleDetailView`) — as long as Compose's own
+    /// `COPIED_FEEDBACK_MS` (`ArticleDetailPane.kt`).
+    static let copiedCheck: Duration = .milliseconds(1500)
 }
