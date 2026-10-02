@@ -2,7 +2,9 @@ package works.merc.keryx.app.ui.home
 
 import kotlinx.datetime.TimeZone
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.platform.NativeMenuEntry
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -10,8 +12,9 @@ import kotlin.test.assertTrue
 
 /**
  * Covers [articleRowMenuEntries]: the article row's context menu is labelled from the read state
- * the article has once the right-click's own `onOpen` (select → mark read) has run, and each item
- * requests exactly the state its label promises.
+ * the article has once the right-click's own `onOpen` (select → mark read) has run, each item
+ * requests exactly the state its label promises, and the entries follow the menu bar's Article
+ * menu. Also covers [articleRowContextMenuOpen], that `onOpen` itself.
  */
 class ArticleRowMenuTest {
 
@@ -37,12 +40,12 @@ class ArticleRowMenuTest {
         is_starred = if (starred) 1L else 0L,
     )
 
-    private fun entries(
+    private fun rawEntries(
         article: ArticleListRow,
         selectedByOpen: Boolean,
         onSetRead: (Boolean) -> Unit = {},
         onSetStarred: (Boolean) -> Unit = {},
-    ): List<NativeMenuItem> = articleRowMenuEntries(
+    ): List<NativeMenuEntry> = articleRowMenuEntries(
         article = article,
         selectedByOpen = selectedByOpen,
         strings = strings,
@@ -50,7 +53,14 @@ class ArticleRowMenuTest {
         onSetStarred = onSetStarred,
         onCopyUrl = {},
         onOpenInBrowser = {},
-    ).map { it as NativeMenuItem }
+    )
+
+    private fun entries(
+        article: ArticleListRow,
+        selectedByOpen: Boolean,
+        onSetRead: (Boolean) -> Unit = {},
+        onSetStarred: (Boolean) -> Unit = {},
+    ): List<NativeMenuItem> = rawEntries(article, selectedByOpen, onSetRead, onSetStarred).filterIsInstance<NativeMenuItem>()
 
     private fun List<NativeMenuItem>.readItem() = single { it.label == "Mark as read" || it.label == "Mark as unread" }
 
@@ -89,10 +99,10 @@ class ArticleRowMenuTest {
 
         val unstarred = entries(article(read = true, starred = false), false, onSetStarred = { requested += it })
         val starred = entries(article(read = true, starred = true), false, onSetStarred = { requested += it })
-        assertEquals("Star", unstarred.first().label)
-        assertEquals("Unstar", starred.first().label)
-        unstarred.first().onClick()
-        starred.first().onClick()
+        val unstarredItem = unstarred.single { it.label == "Star" }
+        val starredItem = starred.single { it.label == "Unstar" }
+        unstarredItem.onClick()
+        starredItem.onClick()
 
         assertEquals(listOf(true, false), requested)
     }
@@ -108,5 +118,36 @@ class ArticleRowMenuTest {
         }
         val http = entries(article(read = true), selectedByOpen = false)
         assertTrue(http.single { it.label == "Open in Browser" }.enabled)
+    }
+
+    @Test
+    fun entriesFollowTheMenuBarsArticleMenuOrder() {
+        // AppMenuTree's Article menu: read, star, separator, open in browser, copy URL.
+        val labels = rawEntries(article(read = true), selectedByOpen = false).map { (it as? NativeMenuItem)?.label ?: "---" }
+
+        assertEquals(listOf("Mark as unread", "Star", "---", "Open in Browser", "Copy URL"), labels)
+        assertTrue(rawEntries(article(read = true), selectedByOpen = false)[2] === NativeMenuSeparator)
+    }
+
+    @Test
+    fun openingTheMenuOnAnUnselectedRowSelectsIt() {
+        val calls = mutableListOf<String>()
+
+        val selectedByOpen = articleRowContextMenuOpen(selected = false, select = { calls += "select" }, activate = { calls += "activate" })
+
+        assertTrue(selectedByOpen)
+        assertEquals(listOf("select"), calls)
+    }
+
+    @Test
+    fun openingTheMenuOnTheSelectedRowOnlyActivatesThePane() {
+        // Re-selecting would mark read again an article just marked unread, but focus must still
+        // follow the right-click into the article list.
+        val calls = mutableListOf<String>()
+
+        val selectedByOpen = articleRowContextMenuOpen(selected = true, select = { calls += "select" }, activate = { calls += "activate" })
+
+        assertFalse(selectedByOpen)
+        assertEquals(listOf("activate"), calls)
     }
 }

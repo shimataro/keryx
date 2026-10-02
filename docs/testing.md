@@ -1266,7 +1266,7 @@ emulator that it really appears from every route:
   shows the pull-to-refresh indicator and refreshes the selected list's feeds, as a pull does.
 - At phone width with an article open (the reader alone), Ctrl+Shift+R does nothing. Open the feed-list
   drawer at phone or tablet width: Ctrl+Shift+R does nothing until the drawer is closed again.
-- While search results are showing, Ctrl+Shift+R does nothing (as before).
+- While search results are showing, Ctrl+Shift+R does nothing.
 
 ### (Android) Reordering with TalkBack while renaming
 

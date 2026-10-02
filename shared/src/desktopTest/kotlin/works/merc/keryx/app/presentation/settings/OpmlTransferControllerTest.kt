@@ -17,7 +17,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -26,6 +25,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import java.util.Collections
+import works.merc.keryx.app.awaitCondition
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -133,10 +133,6 @@ class OpmlTransferControllerTest {
         return OpmlTransferController(transfer, scope, dispatcher)
     }
 
-    /** Polls in real time: the import's fetch runs on the HTTP engine's own threads. */
-    private suspend fun awaitTrue(condition: () -> Boolean) = withTimeout(5_000) {
-        while (!condition()) delay(5)
-    }
 
     @Test
     fun importDocumentIsBusyForTheWholeRunAndReportsTheOutcome() = runTest(UnconfinedTestDispatcher()) {
@@ -322,7 +318,7 @@ class OpmlTransferControllerTest {
             // The import runs on the app scope, not as the caller's child, so only the caller's own
             // cancelAndJoin cancels it: once it is cancelled, the caller has reached its wait. And once a
             // step of the import is held, the import cannot finish — so the caller must still be waiting.
-            awaitTrue { import.isCancelled && importDispatcher.queuedCount > 0 }
+            awaitCondition { import.isCancelled && importDispatcher.queuedCount > 0 }
             assertFalse(caller.isCompleted, "the caller must wait for the import to stop")
             assertEquals(listOf(import), scopeJob.children.toList(), "the import is still running on the app scope")
 

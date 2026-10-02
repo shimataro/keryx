@@ -964,13 +964,14 @@ private fun FeedListToolbarRow(
                 }
                 if (cloudConnected) {
                     // Enabled exactly when every other "Sync now" route is (ManualSync.canSyncNow).
-                    // The one disabled state the user must act on — an expired sign-in — says so.
+                    // The one disabled state the user must act on — an expired sign-in — says so;
+                    // that decision is the shared ManualSync.disabledByAuth, not combined here.
                     val canSyncNow by vm.canSyncNow.collectAsState()
-                    val syncAuthFailed by vm.syncAuthFailed.collectAsState()
+                    val syncDisabledByAuth by vm.syncDisabledByAuth.collectAsState()
                     val syncTooltip = stringResource(
                         when {
                             syncing -> Res.string.home_syncing
-                            !canSyncNow && syncAuthFailed -> Res.string.home_sync_auth_failed
+                            syncDisabledByAuth -> Res.string.home_sync_auth_failed
                             else -> Res.string.home_sync
                         },
                     )

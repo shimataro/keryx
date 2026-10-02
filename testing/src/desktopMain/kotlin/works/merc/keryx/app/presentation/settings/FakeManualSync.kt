@@ -7,14 +7,21 @@ import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.presentation.ManualSyncEdge
 
 /**
- * A [ManualSync] for tests of a screen that delegates to it (Home): [canSyncNow] is settable, every
+ * A [ManualSync] for tests of a screen that delegates to it (Home): [canSyncNow], [connected] and
+ * [disabledByAuth] are settable (and, unlike the real one, independent of each other), every
  * [syncNow] call is counted, and an allowed one emits a [ManualSyncEdge.Started] /
  * [ManualSyncEdge.Finished] pair at once — an instant sync, like [CloudSyncController]'s own when
  * nothing is connected to transfer. [emit] lets a test raise edges no [syncNow] call caused, as a
  * sync started from another screen would.
  */
-class FakeManualSync(canSyncNow: Boolean = true) : ManualSync {
+class FakeManualSync(
+    canSyncNow: Boolean = true,
+    connected: Boolean = true,
+    disabledByAuth: Boolean = false,
+) : ManualSync {
     override val canSyncNow = MutableStateFlow(canSyncNow)
+    override val connected = MutableStateFlow(connected)
+    override val disabledByAuth = MutableStateFlow(disabledByAuth)
 
     private val _runs = MutableSharedFlow<ManualSyncEdge>(extraBufferCapacity = 16)
     override val runs: SharedFlow<ManualSyncEdge> = _runs

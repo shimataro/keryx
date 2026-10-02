@@ -23,6 +23,20 @@ interface ManualSync {
      */
     val canSyncNow: StateFlow<Boolean>
 
+    /**
+     * Whether a cloud provider is connected (selected, configured and holding tokens) — what
+     * decides whether the "Sync now" action is shown at all, on every route and in every UI.
+     */
+    val connected: StateFlow<Boolean>
+
+    /**
+     * Whether [canSyncNow] is false because the last sync failed on authorization — the one
+     * disabled reason the user has to act on (reconnect in Settings ▸ Cloud sync). Every UI's
+     * tooltip / help text for a disabled "Sync now" reads this rather than combining flags of its
+     * own. True implies [canSyncNow] is false.
+     */
+    val disabledByAuth: StateFlow<Boolean>
+
     /** Starts a manual sync; a no-op whenever [canSyncNow] is false. */
     fun syncNow()
 

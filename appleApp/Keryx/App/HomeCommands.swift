@@ -98,6 +98,9 @@ struct HomeCommands: Commands {
                 Button(L("menu_article_toggle_star")) { home.viewModel.toggleStarSelected() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                     .disabled(!state.articleActionsEnabled)
+                // Same grouping as the Compose menu bar's Article menu (`AppMenuTree.kt`) and the
+                // article row's context menu (`ArticleRowView`).
+                Divider()
                 Button(L("menu_article_open_in_browser")) {
                     openInBrowserIfAllowed(home.selectedArticle?.url)
                 }

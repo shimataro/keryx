@@ -118,8 +118,9 @@ final class HomeObservable: ObservableAssignment {
     private(set) var cloudConnected: Bool = false
     /// `HomeViewModel.canSyncNow` — the "Sync now" predicate every route shares.
     private(set) var canSyncNow: Bool = false
-    /// `HomeViewModel.syncAuthFailed` — why the sync button is disabled, when it is the sign-in.
-    private(set) var syncAuthFailed: Bool = false
+    /// `HomeViewModel.syncDisabledByAuth` — the shared decision that the sync button is disabled
+    /// because of the sign-in (true implies `canSyncNow` is false).
+    private(set) var syncDisabledByAuth: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
 
     /// Bumped by every copy of the displayed article's URL (`copyArticleUrl`, shared by the reader's
@@ -276,7 +277,7 @@ final class HomeObservable: ObservableAssignment {
         async let t29: () = observeCloudConnected()
         async let t30: () = observeActivity()
         async let t31: () = observeCanSyncNow()
-        async let t32: () = observeSyncAuthFailed()
+        async let t32: () = observeSyncDisabledByAuth()
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
@@ -536,7 +537,7 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.canSyncNow { assignIfChanged(\.canSyncNow, v.boolValue) }
     }
 
-    private func observeSyncAuthFailed() async {
-        for await v in viewModel.syncAuthFailed { assignIfChanged(\.syncAuthFailed, v.boolValue) }
+    private func observeSyncDisabledByAuth() async {
+        for await v in viewModel.syncDisabledByAuth { assignIfChanged(\.syncDisabledByAuth, v.boolValue) }
     }
 }

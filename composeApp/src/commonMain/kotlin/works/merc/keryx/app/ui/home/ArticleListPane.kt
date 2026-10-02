@@ -794,6 +794,7 @@ internal fun ArticleListPaneContent(
                             onSetStarred = { starred -> onSetStarred(article, starred) },
                             onCopyUrl = { onCopyArticleUrl(article) },
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
+                            onActivate = onActivated,
                             titleOverride = titleMarkedById?.get(article.id)?.let {
                                 markedToAnnotatedString(it.ifBlank { article.title })
                             },

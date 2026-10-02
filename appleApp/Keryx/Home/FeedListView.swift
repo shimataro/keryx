@@ -193,9 +193,10 @@ struct FeedListView: View {
                     systemImage: "arrow.triangle.2.circlepath",
                     busy: home.activity.syncing,
                     // The predicate every "Sync now" route shares (ManualSync.canSyncNow); an
-                    // expired sign-in, the one disabled state the user must act on, says so.
+                    // expired sign-in, the one disabled state the user must act on, says so —
+                    // the shared ManualSync.disabledByAuth decides that, not this view.
                     enabled: home.canSyncNow,
-                    disabledHelpKey: home.syncAuthFailed ? "home_sync_auth_failed" : nil,
+                    disabledHelpKey: home.syncDisabledByAuth ? "home_sync_auth_failed" : nil,
                     action: { home.viewModel.sync() }
                 )
             }

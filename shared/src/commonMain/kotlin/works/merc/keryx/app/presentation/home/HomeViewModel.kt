@@ -48,7 +48,6 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.ArticleSearchResult
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.toListRow
-import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
@@ -83,7 +82,6 @@ class HomeViewModel(
     private val folderRepository: FolderRepository,
     private val settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
-    private val cloudSession: CloudSession,
     private val activityCenter: ActivityCenter,
     private val clock: Clock,
     private val refreshCycleRunner: RefreshCycleRunner,
@@ -1385,10 +1383,12 @@ class HomeViewModel(
     val canSyncNow: StateFlow<Boolean> get() = manualSync.canSyncNow
 
     /**
-     * Whether the last sync failed on authorization — the one reason [canSyncNow] is false that the
-     * user has to act on (reconnect in Settings), so Home's sync button explains it in its tooltip.
+     * Whether "Sync now" is disabled because the last sync failed on authorization — the one
+     * disabled reason the user has to act on (reconnect in Settings), so every UI's sync button
+     * explains it in its tooltip / help. The shared [ManualSync.disabledByAuth]: UIs read this
+     * rather than combining [canSyncNow] with a flag of their own. True implies [canSyncNow] is false.
      */
-    val syncAuthFailed: StateFlow<Boolean> get() = syncRepository.lastSyncAuthFailed
+    val syncDisabledByAuth: StateFlow<Boolean> get() = manualSync.disabledByAuth
 
     init {
         // Re-trim on both edges of every manual sync, whichever route started it: before, so rows
@@ -1406,30 +1406,17 @@ class HomeViewModel(
     }
 
     /**
-     * Whether a cloud provider is selected, configured and holds tokens.
+     * Whether a cloud provider is selected, configured and holds tokens — the same connection state
+     * the "Sync now" action is gated on ([ManualSync.connected]), so the sync action's visibility
+     * and its enablement can never disagree.
      *
-     * A StateFlow rather than a getter because `CloudSession.isConnected()` reaches the OS secret
-     * store, and this is read straight from composition: as a getter it ran an uncached Secret
-     * Service / Credential Manager round trip (Linux / Windows) — or, on the first macOS call, a
-     * `security` subprocess spawn — on the UI thread on *every* recomposition of the feed list and
-     * the menu bar. Re-evaluated only when the selected provider changes, which is the only thing
-     * that can change it deliberately: every connect / disconnect path writes `cloudStorageType`
-     * (SettingsViewModel, SetupViewModel). Gating on that one field matters — `localSettings` itself
-     * is rewritten by unrelated state such as pane widths, which change on every drag frame.
-     *
-     * The trade-off versus the getter this replaced: if the OS secret store is unreadable at seed
-     * time but becomes readable later, this stays `false` until the provider selection changes again,
-     * where the getter would have healed on the next recomposition.
+     * Constructing this ViewModel reads no secret store itself: [CloudSyncController] seeds its
+     * connected provider synchronously once, at its own construction (so the first frame already
+     * has the real value instead of flashing the sync action off and back on), and re-reads it on
+     * its background dispatcher whenever the persisted provider selection changes or its own
+     * connect / disconnect paths update it directly.
      */
-    val cloudConnected: StateFlow<Boolean> =
-        settingsRepository.localSettings
-            .map { it.cloudStorageType }
-            .distinctUntilChanged()
-            .map { cloudSession.isConnected() }
-            .flowOn(dispatcher)
-            // Seeded synchronously so the first frame already has the real value instead of
-            // flashing the sync action off and back on.
-            .stateIn(viewModelScope, started, cloudSession.isConnected())
+    val cloudConnected: StateFlow<Boolean> get() = manualSync.connected
 
     // --- Tag actions ---
 

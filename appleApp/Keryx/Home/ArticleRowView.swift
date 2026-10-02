@@ -130,31 +130,33 @@ struct ArticleRowView: View, Equatable {
         .selectsOnContextMenu(id: model.id, pointerIsOver: $pointerIsOver, perform: onContextMenuSelect)
         .contextMenu {
             // A right-click on a hovered, unselected row selects it first, matching Compose's own
-            // `onOpen = onClick` (`ArticleRowComponents.kt`) — the actual selection runs via
+            // `articleRowContextMenuOpen` (`ArticleRowComponents.kt`) — the actual selection runs via
             // `.selectsOnContextMenu` above, not as a side effect of this builder (see
             // `ContextMenuSelectionTracker`'s own doc for why). That selection marks an unread
             // article read, so the read item is labelled from the state after it, and each item
             // requests the explicit state its label promises rather than toggling — otherwise
             // "Mark as read" on a row the right-click just marked read would mark it unread. A menu
             // opened with the pointer elsewhere (keyboard, VoiceOver) selects nothing, so its label
-            // is the row's current state.
+            // is the row's current state. The items follow the Article menu's order and separator
+            // (`HomeCommands.swift`), like Compose's `articleRowMenuEntries`.
             let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
             let readAfterOpen = ArticleListModelKt.articleReadAfterContextMenuOpen(
                 isRead: model.isRead,
                 selectedByOpen: selectedByOpen
             )
-            Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
-                viewModel.setStarred(article: model.row, starred: !model.isStarred)
-            }
             Button(readAfterOpen ? Self.markUnreadLabel : Self.markReadLabel) {
                 viewModel.setRead(article: model.row, read: !readAfterOpen)
             }
-            Button(Self.copyUrlLabel, action: onCopyUrl)
-            .disabled(!model.hasUsableUrl)
+            Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
+                viewModel.setStarred(article: model.row, starred: !model.isStarred)
+            }
+            Divider()
             Button(Self.openInBrowserLabel) {
                 openInBrowserIfAllowed(model.url)
             }
             .disabled(!model.canOpenInBrowser)
+            Button(Self.copyUrlLabel, action: onCopyUrl)
+            .disabled(!model.hasUsableUrl)
         }
     }
 

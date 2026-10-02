@@ -71,8 +71,10 @@ class CloudSyncController(
      * can be connected or disconnected by code that never goes through this controller — the
      * first-run setup screen's own connect (`SetupController`), most importantly, which on desktop
      * runs while this controller already exists. Without that, [canSyncNow] would stay false and
-     * the cloud-sync tab would show "not connected" until the app restarted. The same signal
-     * Home's `cloudConnected` re-evaluates on.
+     * the cloud-sync tab would show "not connected" until the app restarted.
+     *
+     * Seeded synchronously, once, at construction (one secure-store read), so the first frame
+     * already shows the real connection state; every later re-read runs on [dispatcher].
      */
     private val _connectedType = MutableStateFlow(cloudSession.connectedType())
     val connectedType = _connectedType.asStateFlow()
@@ -117,6 +119,21 @@ class CloudSyncController(
      */
     private val _lastSyncAuthFailed = MutableStateFlow(false)
     val lastSyncAuthFailed = _lastSyncAuthFailed.asStateFlow()
+
+    /**
+     * [ManualSync.connected]: [connectedType] is non-null. Derived on read (see [canSyncNow]'s
+     * init), so it can never disagree with [connectedType] or [canSyncNow].
+     */
+    override val connected: StateFlow<Boolean> = DerivedStateFlow(
+        compute = { _connectedType.value != null },
+        changes = _connectedType.map { it != null },
+    )
+
+    /**
+     * [ManualSync.disabledByAuth]: the same flag as [lastSyncAuthFailed]. [canSyncNowNow] is false
+     * whenever it is true, so "disabled because of authorization" never shows on an enabled action.
+     */
+    override val disabledByAuth: StateFlow<Boolean> = _lastSyncAuthFailed.asStateFlow()
 
     /**
      * Mirrors [ActivityCenter.activity]'s [works.merc.keryx.app.domain.ActivitySnapshot.syncing] —
@@ -180,7 +197,6 @@ class CloudSyncController(
     }
 
     init {
-        refreshLastSyncedAt()
         viewModelScope.launch {
             // Skips the subscription-time replay while it still matches what the initializer above
             // already read, so construction does not pay a second secure-store round trip; any
@@ -209,16 +225,22 @@ class CloudSyncController(
             // but this launch only starts collecting once viewModelScope actually dispatches it,
             // so the StateFlow's value can have moved on in between. Dropping that replay (as a
             // once-tried `drop(1)` did) would silently swallow a real transition happening in that
-            // window; collecting it is safe since it just repeats work this controller already does
-            // at startup (refreshLastSyncedAt() is a pure, idempotent read).
+            // window. The replay is also what first fills [lastSyncedAtText]: construction does no
+            // synchronous DB read of its own, so when no sync is running at subscription time the
+            // replayed `false` triggers the initial (off-UI-thread) read.
             activityCenter.activity.map { it.syncing }.distinctUntilChanged().collect { isSyncing ->
                 _syncing.value = isSyncing
                 // Guarded: a transient read failure must not kill this long-lived collector (which
                 // would silently stop all future last-synced refreshes) or leak as an uncaught
-                // exception. Best-effort UI state — log and carry on.
+                // exception. Best-effort UI state — log and carry on. Cancellation still propagates.
                 if (!isSyncing) {
-                    runCatching { refreshLastSyncedAt() }
-                        .onFailure { Log.warn(TAG, "Failed to refresh last-synced time", it) }
+                    try {
+                        refreshLastSyncedAt()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        Log.warn(TAG, "Failed to refresh last-synced time", e)
+                    }
                 }
             }
         }
@@ -413,8 +435,9 @@ class CloudSyncController(
         }
     }
 
-    private fun refreshLastSyncedAt() {
-        _lastSyncedAtText.value = syncRepository.lastSyncedAt()?.let { formatTimestamp(it) }
+    /** Re-reads the last successful sync time (a DB read, so on [dispatcher]) into [lastSyncedAtText]. */
+    private suspend fun refreshLastSyncedAt() {
+        _lastSyncedAtText.value = withContext(dispatcher) { syncRepository.lastSyncedAt() }?.let { formatTimestamp(it) }
     }
 
     private companion object {

@@ -87,19 +87,12 @@ import kotlin.test.assertTrue
 private class HomeViewModelTestTokenStorage : TokenStorage {
     private var stored: OAuthTokens? = null
 
-    /** How often the secret store was read — see `cloudConnectedDoesNotReadTokenStorageWhenObserved`. */
-    var loadCount = 0
-        private set
-
     override fun save(tokens: OAuthTokens): TokenSaveOutcome {
         stored = tokens
         return TokenSaveOutcome.SECURE
     }
 
-    override fun load(): OAuthTokens? {
-        loadCount++
-        return stored
-    }
+    override fun load(): OAuthTokens? = stored
 
     override fun clear(): TokenClearOutcome {
         stored = null
@@ -262,7 +255,7 @@ class HomeViewModelTest {
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner, manualSync,
+            syncRepository, activityCenter, clock, refreshCycleRunner, manualSync,
             Dispatchers.Unconfined,
             // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
@@ -3273,43 +3266,34 @@ class HomeViewModelTest {
         trayJob.cancel()
     }
 
+    /**
+     * `cloudConnected` is the shared [ManualSync.connected] — the same connection state "Sync now"
+     * is gated on — rather than a secret-store read of Home's own.
+     */
     @Test
-    fun cloudConnectedReflectsCloudSessionState() = runTest {
-        val vm = newViewModel(appKey = "")
-        subscribeAll(vm)
+    fun cloudConnectedMirrorsTheSharedManualSyncConnectedState() = runTest {
+        val manualSync = FakeManualSync(connected = false)
+        val vm = newViewModel(manualSync = manualSync)
         assertFalse(vm.cloudConnected.value)
+
+        manualSync.connected.value = true
+
+        assertTrue(vm.cloudConnected.value)
     }
 
     /**
-     * `cloudConnected` is read straight from composition, and answering it reaches the OS secret
-     * store (an uncached D-Bus / Credential Manager round trip on Linux and Windows). It must
-     * therefore be re-evaluated only when the selected provider changes — not per observation, and
-     * not on unrelated local-settings writes, which happen as often as every drag frame.
+     * Why "Sync now" is disabled comes from the shared [ManualSync.disabledByAuth], so every UI's
+     * tooltip reads one decision instead of combining flags of its own.
      */
     @Test
-    fun cloudConnectedDoesNotReReadTokenStorageWhenObservedOrOnUnrelatedSettingsWrites() = runTest {
-        val tokenStorage = HomeViewModelTestTokenStorage()
-        val vm = newViewModel(appKey = "app-key", tokenStorage = tokenStorage)
-        subscribeAll(vm)
-        testScheduler.advanceUntilIdle()
-        val afterStartup = tokenStorage.loadCount
-        // Guard against a false pass: with a configured client id, answering the question at all
-        // must reach the secret store, so the counter has to be moving in the first place.
-        assertTrue(afterStartup > 0, "cloudConnected should consult token storage at least once")
+    fun syncDisabledByAuthMirrorsTheSharedManualSync() = runTest {
+        val manualSync = FakeManualSync()
+        val vm = newViewModel(manualSync = manualSync)
+        assertFalse(vm.syncDisabledByAuth.value)
 
-        // What recomposition does: read the value over and over.
-        repeat(50) { assertFalse(vm.cloudConnected.value) }
-        // Unrelated local-settings writes (sort, filter, pane geometry) must not re-read either.
-        vm.toggleSort()
-        vm.selectFilter(ArticleFilter.Starred)
-        vm.toggleSort()
-        testScheduler.advanceUntilIdle()
+        manualSync.disabledByAuth.value = true
 
-        assertEquals(
-            afterStartup,
-            tokenStorage.loadCount,
-            "observing cloudConnected must not reach the secret store again",
-        )
+        assertTrue(vm.syncDisabledByAuth.value)
     }
 
     @Test

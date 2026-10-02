@@ -43,6 +43,7 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.NativeMenuEntry
 import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
@@ -194,20 +195,38 @@ internal fun articleRowMenuEntries(
     val openEnabled = canOpenInBrowser(article.url)
     return listOf(
         NativeMenuItem(
-            if (starred) strings.unstar else strings.star,
-            NativeMenuShortcut(Key.S, ctrl = true, shift = true),
-        ) { onSetStarred(!starred) },
-        NativeMenuItem(
             if (read) strings.markAsUnread else strings.markAsRead,
             NativeMenuShortcut(Key.U, ctrl = true, shift = true),
         ) { onSetRead(!read) },
-        NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = copyEnabled) {
-            onCopyUrl()
-        },
+        NativeMenuItem(
+            if (starred) strings.unstar else strings.star,
+            NativeMenuShortcut(Key.S, ctrl = true, shift = true),
+        ) { onSetStarred(!starred) },
+        NativeMenuSeparator,
         NativeMenuItem(strings.openInBrowser, NativeMenuShortcut(Key.O, ctrl = true, shift = true), enabled = openEnabled) {
             onOpenInBrowser()
         },
+        NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = copyEnabled) {
+            onCopyUrl()
+        },
     )
+}
+
+/**
+ * What opening an [ArticleRow]'s context menu does before the menu appears: an unselected row is
+ * [select]ed (which marks it read and activates the article list pane, like a click), while an
+ * already-selected row only [activate]s the pane — re-selecting it would mark read again an article
+ * the user just marked unread from this very menu or ⌘⇧U, but keyboard focus must still follow the
+ * right-click into this pane.
+ *
+ * @param selected Whether the row was selected when the menu was opened.
+ * @param select Selects the row (and activates the pane).
+ * @param activate Activates the article list pane without changing the selection.
+ * @return Whether this open selected the row — [articleRowMenuEntries]'s `selectedByOpen`.
+ */
+internal fun articleRowContextMenuOpen(selected: Boolean, select: () -> Unit, activate: () -> Unit): Boolean {
+    if (selected) activate() else select()
+    return !selected
 }
 
 /**
@@ -230,11 +249,13 @@ private class ContextMenuOpenSelection {
  * @param focused Whether the row has focus.
  * @param rowHeight The minimum height of the row.
  * @param faviconSize The display size of the feed favicon.
- * @param onClick Called when the row is clicked or its context menu is opened.
+ * @param onClick Called when the row is clicked, or its context menu is opened while it is unselected.
  * @param onSetRead Called with the read state the context menu's read item promises.
  * @param onSetStarred Called with the starred state the context menu's star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @param onActivate Called when the context menu is opened on the already-selected row, to move
+ *   keyboard focus to this pane without re-selecting it (see [articleRowContextMenuOpen]).
  * @param titleOverride An optional title to display instead of the article title.
  * @param strings The per-list strings and time zone, hoisted above `items {}` by the caller.
  * @param ripplePulse A nonzero value plays a one-shot [playPulseRipple] on [interactionSource] —
@@ -256,6 +277,7 @@ internal fun ArticleRow(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
     strings: ArticleRowStrings = rememberArticleRowStrings(),
     ripplePulse: Int = 0,
@@ -286,12 +308,9 @@ internal fun ArticleRow(
                         onOpenInBrowser = onOpenInBrowser,
                     )
                 },
-                // Selects only a row that isn't already selected: re-selecting would mark read
-                // again an article the user just marked unread from this very menu or ⌘⇧U.
                 // Reset on every open, so it only ever describes this right-click.
                 onOpen = {
-                    openSelection.selectedByOpen = !selected
-                    if (!selected) onClick()
+                    openSelection.selectedByOpen = articleRowContextMenuOpen(selected, select = onClick, activate = onActivate)
                 },
             )
             .listRowSurface(

@@ -29,6 +29,7 @@ import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Result
@@ -416,7 +417,7 @@ class SettingsViewModelTest {
         assertEquals(UpdateState.Idle, vm.updateState.value)
 
         vm.checkForUpdate()
-        awaitTrue { vm.updateState.value is UpdateState.Available }
+        awaitConditionBlocking { vm.updateState.value is UpdateState.Available }
 
         val result = vm.updateState.value
         assertIs<UpdateState.Available>(result)
@@ -441,10 +442,10 @@ class SettingsViewModelTest {
         val vm = newViewModel(updateRepository = fakeUpdateRepository(UpdateChecker(client, currentVersion = "1.0.0", repoSlug = "owner/repo")))
 
         vm.checkForUpdate()
-        awaitTrue { vm.updateState.value is UpdateState.Checking }
+        awaitConditionBlocking { vm.updateState.value is UpdateState.Checking }
         vm.checkForUpdate() // ignored: a check is already in flight
 
-        awaitTrue { vm.updateState.value is UpdateState.Available }
+        awaitConditionBlocking { vm.updateState.value is UpdateState.Available }
         assertEquals(1, requestCount)
     }
 
@@ -476,7 +477,7 @@ class SettingsViewModelTest {
 
         assertEquals(UpdateState.Idle, vm.updateState.value, "neither check has started running yet")
         assertEquals(1, dispatcher.queuedCount, "only one check may be launched")
-        awaitTrue {
+        awaitConditionBlocking {
             dispatcher.runQueued()
             vm.updateState.value is UpdateState.Available
         }
@@ -484,7 +485,7 @@ class SettingsViewModelTest {
 
         // Once it has finished, the guard is released: a later check runs again.
         vm.checkForUpdate()
-        awaitTrue {
+        awaitConditionBlocking {
             dispatcher.runQueued()
             requestCount == 2
         }
@@ -501,7 +502,7 @@ class SettingsViewModelTest {
         vm.exportOpml()
 
         // The write runs on the injected (non-test) dispatcher, so it's a real, non-virtual hop.
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Exported, vm.opmlResult.value)
         val written = FileIO.readText(path)
         assertNotNull(written)
@@ -543,7 +544,7 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Exported, vm.opmlResult.value)
         assertTrue(counting.dispatchCount > 0)
     }
@@ -557,7 +558,7 @@ class SettingsViewModelTest {
 
         vm.exportOpml()
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.ExportFailed, vm.opmlResult.value)
     }
 
@@ -582,7 +583,7 @@ class SettingsViewModelTest {
         vm.importOpml()
 
         // The read + import (network fetch, DB writes) run on the injected (non-test) dispatcher.
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         val result = vm.opmlResult.value
         assertIs<OpmlResult.Imported>(result)
         assertEquals(1, result.added)
@@ -644,13 +645,13 @@ class SettingsViewModelTest {
             vm.viewModelScope.cancel()
             // Only importOpml's own cancellation cancels the import (it runs on the app scope); once that
             // has happened and a step of the import is held, the import is still running.
-            awaitTrue { import.isCancelled && importDispatcher.queuedCount > 0 }
+            awaitConditionBlocking { import.isCancelled && importDispatcher.queuedCount > 0 }
             assertEquals(OpmlOperation.Importing, vm.opmlRunning.value, "busy until the import has actually stopped")
             assertTrue(vm.opmlBusy.value)
             assertFalse(import.isCompleted, "the import is still running")
 
             importDispatcher.release()
-            awaitTrue { vm.opmlRunning.value == null }
+            awaitConditionBlocking { vm.opmlRunning.value == null }
 
             assertTrue(import.isCompleted, "busy was released only after the import stopped")
             assertFalse(vm.opmlBusy.value)
@@ -674,7 +675,7 @@ class SettingsViewModelTest {
 
         vm.importOpml()
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertIs<OpmlResult.Imported>(vm.opmlResult.value)
         assertTrue(counting.dispatchCount > 0)
     }
@@ -704,7 +705,7 @@ class SettingsViewModelTest {
 
         vm.importDocument(xml)
 
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
         assertFalse(vm.opmlBusy.value)
     }
@@ -723,7 +724,7 @@ class SettingsViewModelTest {
         assertEquals(OpmlOperation.Importing, vm.opmlRunning.value)
 
         gate.complete(Unit)
-        awaitTrue { vm.opmlResult.value != null }
+        awaitConditionBlocking { vm.opmlResult.value != null }
         assertEquals(OpmlResult.Imported(added = 1, failed = 0), vm.opmlResult.value)
         assertFalse(vm.opmlBusy.value)
         assertEquals(1, db.feedsQueries.getAllIncludingDeleted().executeAsList().size)
@@ -803,12 +804,4 @@ class SettingsViewModelTest {
         assertEquals(OpmlRequest.ImportFile, vm.pendingOpmlRequest.value)
     }
 
-    /** Polls with real wall-clock waits (for coroutines that hop onto a real, non-virtual dispatcher). */
-    private fun awaitTrue(timeoutMs: Long = 2_000, condition: () -> Boolean) = runBlocking {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!condition()) {
-            check(System.currentTimeMillis() < deadline) { "Timed out waiting for condition" }
-            delay(5)
-        }
-    }
 }

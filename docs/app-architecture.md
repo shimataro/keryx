@@ -59,8 +59,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
                   sync-now and `canSyncNow`, re-reading the connected provider whenever
                   `cloudStorageType` changes so a connect made in Setup reaches it; it is also the one
-                  ManualSync — `canSyncNow`/`syncNow()`/`runs` — that every "Sync now" route shares:
-                  Home's toolbar button and the Feed menu (via `HomeViewModel.sync()`/`canSyncNow`,
+                  ManualSync — `canSyncNow`/`connected`/`disabledByAuth`/`syncNow()`/`runs` — that every "Sync now" route shares:
+                  Home's toolbar button and the Feed menu (via `HomeViewModel.sync()`/`canSyncNow`/`cloudConnected`/`syncDisabledByAuth`,
                   which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
                   tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
@@ -89,7 +89,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
                   one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
                   wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
-    ui/           theme/, navigation/, setup/, home/ (adaptive 1/2/3-pane layout + search + notification
+    ui/           theme/, navigation/ (Navigator; SettingsOpenRequests — the one router every "open Settings"
+                  route goes through, holding a request made during Setup until Home shows), setup/, home/ (adaptive 1/2/3-pane layout + search + notification
                   center), article/, settings/, i18n/, common/ (KeryxTextField/KeryxDialogs/KeryxIcons/
                   FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual-split, plain-M3-
                   feel components shared by every pane), menu/ (MenuController)
@@ -107,7 +108,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
-               StatusNotifierItem/dbusmenu D-Bus objects
+               StatusNotifierItem/dbusmenu D-Bus objects; TrayActionPolicy (what a tray icon/menu
+               click and the update entry do — pure), TrayMenuModel (the tray menu's pure,
+               `@Composable`-free model), UpdateMenuEntry (the one update entry the tray and the
+               Help menu share — label, and enablement derived from TrayActionPolicy's
+               updateMenuAction)
     appmenu/   KDE Global Menu / D-Bus application-menu integration (AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar) — see external-spec.md §9
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter (pure self-replace/msiexec script templates), ProcessLauncher/RealProcessLauncher (the detached-launch seam a test fakes), ArchiveExtractor (DittoArchiveExtractor on macOS, where the signed bundle seals its own symlinks; InProcessArchiveExtractor in process elsewhere), CodeSigningVerifier/RealCodeSigningVerifier (the `codesign --verify` seam)
@@ -266,7 +271,8 @@ Examples in the code today:
 
 | Action | The one implementation | Routes that call it |
 | --- | --- | --- |
-| Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
+| Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`, plus `connected` — whether the action is offered — and `disabledByAuth` — the disabled reason a tooltip names), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
+| Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
 | Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |

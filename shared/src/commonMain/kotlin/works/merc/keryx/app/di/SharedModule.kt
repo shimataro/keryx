@@ -139,7 +139,7 @@ fun updateModule(): Module = module {
  * Compose app's `appModule` and the Apple app's `KeryxSdk` both include it.
  */
 fun presentationModule(): Module = module {
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SetupController(get(), get(), get(), get()) }
     single { NotificationAlerts(get()) }
     // Also Home's "Sync now" (HomeViewModel takes it as ManualSync), so every route shares one sync.

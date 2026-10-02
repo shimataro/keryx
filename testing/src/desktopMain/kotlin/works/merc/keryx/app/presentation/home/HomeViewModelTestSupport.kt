@@ -214,7 +214,7 @@ fun newHomeViewModel(
         }
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, cloudSession, activityCenter, clock, refreshCycleRunner, manualSync ?: ownedManualSync!!,
+            syncRepository, activityCenter, clock, refreshCycleRunner, manualSync ?: ownedManualSync!!,
             Dispatchers.Unconfined, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(

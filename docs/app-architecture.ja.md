@@ -54,8 +54,8 @@
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。接続中のプロバイダは
                   `cloudStorageType` が変わるたびに読み直すので、セットアップでの接続も反映される。これは
-                  すべての「今すぐ同期」経路が共有する唯一の ManualSync（`canSyncNow`/`syncNow()`/`runs`）でもあり、
-                  Home のツールバーのボタンとフィードメニュー（`HomeViewModel.sync()`/`canSyncNow` 経由。
+                  すべての「今すぐ同期」経路が共有する唯一の ManualSync（`canSyncNow`/`connected`/`disabledByAuth`/`syncNow()`/`runs`）でもあり、
+                  Home のツールバーのボタンとフィードメニュー（`HomeViewModel.sync()`/`canSyncNow`/`cloudConnected`/`syncDisabledByAuth` 経由。
                   `runs` の各イベントで既読ピンを刈り込み直す）とクラウド同期タブが使う。PreferencesController——
                   `LocalSettings` と `global_settings` への型付き setter。OpmlTransfer——OPML 文書自体の
                   組み立て・解析。ファイルの選択は各 UI が担当。OpmlOpenHandler（requestOpenedOpmlImport——アプリで開かれた
@@ -80,7 +80,8 @@
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
-    ui/           theme/, navigation/, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
+    ui/           theme/, navigation/（Navigator、SettingsOpenRequests——設定を開くすべての経路が通る唯一の
+                  窓口。Setup 中の要求は Home が表示されるまで保留する）, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
                   通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
                   KeryxIcons/FlatButtons/FlatToggles/SegmentedControl/KeryxSearchBar/… — expect/actual
                   分割された、全ペイン共通のプレーンな M3 見た目のコンポーネント）, menu/（MenuController）
@@ -99,7 +100,10 @@
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
   desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
-               StatusNotifierItem/dbusmenu の D-Bus オブジェクト
+               StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
+               メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
+               `@Composable` を含まない純粋なモデル）、UpdateMenuEntry（トレイと Help メニューが共有する
+               唯一の更新項目——ラベルと、TrayActionPolicy の updateMenuAction から導く有効/無効）
     appmenu/   KDE Global Menu / D-Bus アプリケーションメニュー連携（AppMenuBarHost, AppMenuConnection,
                AppMenuDBusMenu, AppMenuRegistrar）— external-spec.ja.md §9 参照
     platform/update/  DesktopUpdateInstaller, UpdateScriptWriter（純粋な自己置換／msiexec スクリプトのテンプレート）, ProcessLauncher/RealProcessLauncher（テストがフェイクに差し替える detached 起動のシーム）, ArchiveExtractor（macOS は DittoArchiveExtractor——署名済みバンドルが自身の symlink を封印しているため。それ以外はインプロセスの InProcessArchiveExtractor）, CodeSigningVerifier/RealCodeSigningVerifier（`codesign --verify` のシーム）
@@ -258,7 +262,8 @@
 
 | 操作 | 唯一の実装 | それを呼ぶ経路 |
 | --- | --- | --- |
-| 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
+| 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`。加えて、操作を出すかどうかの `connected` と、ツールチップが示す無効の理由 `disabledByAuth`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
+| 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
 | OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |
