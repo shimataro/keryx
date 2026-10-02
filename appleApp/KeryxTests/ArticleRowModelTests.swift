@@ -230,36 +230,43 @@ struct ArticleRowModelTests {
 
     // MARK: - ArticleRowMenuState
 
-    /// A macOS right-click on an unselected row selects it — marking it read — before the menu
-    /// shows, so the menu must offer "Mark as unread".
+    /// A macOS right-click on a hovered, unselected row selects it (`ContextMenuSelectionTracker`).
     @Test
-    func unreadUnselectedRowIsReadOnceAMacContextClickOpensItsMenu() {
-        #expect(ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, isSelected: false, selectsOnContextClick: true))
-    }
-
-    /// An already-selected row is not selected again, so an article the user marked unread stays so.
-    @Test
-    func unreadSelectedRowStaysUnread() {
-        #expect(!ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, isSelected: true, selectsOnContextClick: true))
-    }
-
-    @Test(arguments: [(false, true), (false, false), (true, true), (true, false)])
-    func readRowStaysRead(isSelected: Bool, selectsOnContextClick: Bool) {
-        #expect(ArticleRowMenuState.readAfterContextMenuOpen(isRead: true, isSelected: isSelected, selectsOnContextClick: selectsOnContextClick))
-    }
-
-    /// An iOS long-press selects nothing, so the menu reflects the row's current state.
-    @Test(arguments: [false, true])
-    func longPressThatDoesNotSelectNeverFlipsTheReadState(isSelected: Bool) {
-        #expect(!ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, isSelected: isSelected, selectsOnContextClick: false))
-    }
-
-    @Test
-    func contextClickSelectsOnlyOnMacOS() {
+    func aRightClickOnAHoveredUnselectedRowSelectsIt() {
         #if os(macOS)
-        #expect(ArticleRowMenuState.selectsOnContextClick)
+        #expect(ArticleRowMenuState.opensBySelecting(isSelected: false, pointerIsOver: true))
         #else
-        #expect(!ArticleRowMenuState.selectsOnContextClick)
+        #expect(!ArticleRowMenuState.opensBySelecting(isSelected: false, pointerIsOver: true), "an iOS long-press never selects")
         #endif
+    }
+
+    /// A menu opened from the keyboard or VoiceOver with the pointer elsewhere selects nothing.
+    @Test(arguments: [false, true])
+    func aMenuOpenedWithThePointerElsewhereSelectsNothing(isSelected: Bool) {
+        #expect(!ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: false))
+    }
+
+    /// An already-selected row is not selected again.
+    @Test
+    func aSelectedRowIsNotSelectedAgain() {
+        #expect(!ArticleRowMenuState.opensBySelecting(isSelected: true, pointerIsOver: true))
+    }
+
+    /// The read label for each way of opening an unread row's menu: only a selecting open makes it
+    /// read ("Mark as unread"); otherwise it stays unread ("Mark as read").
+    @Test(arguments: [(false, true), (false, false), (true, true), (true, false)])
+    func anUnreadRowsReadStateAfterOpen(isSelected: Bool, pointerIsOver: Bool) {
+        let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
+        let readAfterOpen = ArticleRowMenuState.readAfterContextMenuOpen(isRead: false, selectedByOpen: selectedByOpen)
+        #if os(macOS)
+        #expect(readAfterOpen == (!isSelected && pointerIsOver))
+        #else
+        #expect(!readAfterOpen)
+        #endif
+    }
+
+    @Test(arguments: [false, true])
+    func aReadRowStaysRead(selectedByOpen: Bool) {
+        #expect(ArticleRowMenuState.readAfterContextMenuOpen(isRead: true, selectedByOpen: selectedByOpen))
     }
 }

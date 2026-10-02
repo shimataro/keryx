@@ -46,6 +46,7 @@ import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
+import works.merc.keryx.app.presentation.home.articleReadAfterContextMenuOpen
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
@@ -185,7 +186,7 @@ internal fun articleRowMenuEntries(
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
 ): List<NativeMenuEntry> {
-    val read = article.is_read == 1L || selectedByOpen
+    val read = articleReadAfterContextMenuOpen(isRead = article.is_read == 1L, selectedByOpen = selectedByOpen)
     val starred = article.is_starred == 1L
     // Copy and open have their own rules, shared with every other route to each: any non-blank
     // URL can be copied, but only an http(s) one is opened.

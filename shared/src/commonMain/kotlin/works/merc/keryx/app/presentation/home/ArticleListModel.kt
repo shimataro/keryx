@@ -45,6 +45,17 @@ fun articleUrlCopyPlan(url: String?, articleId: String, displayedArticleId: Stri
 fun canOpenInBrowser(url: String?): Boolean = isHttpOrHttpsUrl(url)
 
 /**
+ * The read state an article has once its row's context menu is open — the state the menu's
+ * "Mark as read/unread" item is labelled from and inverts. Selecting an article marks it read
+ * (external-spec §7), so when opening the menu selected the row ([selectedByOpen] — a desktop
+ * right-click on an unselected row) the article is read by the time the menu shows, even though the
+ * row was drawn unread. Both UIs call this one definition (Compose's `articleRowMenuEntries`,
+ * SwiftUI's `ArticleRowMenuState.readAfterContextMenuOpen`); each only works out whether its own
+ * open selected the row.
+ */
+fun articleReadAfterContextMenuOpen(isRead: Boolean, selectedByOpen: Boolean): Boolean = isRead || selectedByOpen
+
+/**
  * Whether the article list's "hide read articles" action has anything to do: at least one row in
  * [rows] is read and not [selectedId] (the selected article stays visible even when read, so it
  * doesn't count — hiding it would be indistinguishable from deselecting it). Used both to enable

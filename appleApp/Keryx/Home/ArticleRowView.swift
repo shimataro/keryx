@@ -20,6 +20,10 @@ struct ArticleRowView: View, Equatable {
     /// The shared article-URL copy handler (`HomeObservable.copyArticleUrl`), so the context menu's
     /// Copy URL flashes the reader's ✓ exactly like the menu bar's command and the reader's button.
     let onCopyUrl: () -> Void
+    /// Whether the pointer is over this row (macOS) — what `ArticleRowMenuState.opensBySelecting`
+    /// predicts a right-click's selection from. Only this row re-renders when it changes; it is
+    /// deliberately not part of `==`, which a `@State` change bypasses anyway.
+    @State private var pointerIsOver = false
 
     #if os(macOS)
     private static let strongSelectionFill = Color(nsColor: .selectedContentBackgroundColor)
@@ -120,19 +124,22 @@ struct ArticleRowView: View, Equatable {
         .accessibilityValue(stateAccessibilityValue)
         // The selection is otherwise only a background fill, which VoiceOver cannot see.
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .tracksPointerHover($pointerIsOver, resetOn: model.id)
         .selectsOnContextMenu(id: model.id, perform: onContextMenuSelect)
         .contextMenu {
-            // Opening the menu selects the row first, matching Compose's own `onOpen = onClick`
-            // (`ArticleRowComponents.kt`) — the actual selection runs on a right-click/Control-
-            // click via `.selectsOnContextMenu` above, not as a side effect of this builder (see
+            // A right-click on a hovered, unselected row selects it first, matching Compose's own
+            // `onOpen = onClick` (`ArticleRowComponents.kt`) — the actual selection runs via
+            // `.selectsOnContextMenu` above, not as a side effect of this builder (see
             // `ContextMenuSelectionTracker`'s own doc for why). That selection marks an unread
             // article read, so the read item is labelled from the state after it, and each item
             // requests the explicit state its label promises rather than toggling — otherwise
-            // "Mark as read" on a row the right-click just marked read would mark it unread.
+            // "Mark as read" on a row the right-click just marked read would mark it unread. A menu
+            // opened with the pointer elsewhere (keyboard, VoiceOver) selects nothing, so its label
+            // is the row's current state.
+            let selectedByOpen = ArticleRowMenuState.opensBySelecting(isSelected: isSelected, pointerIsOver: pointerIsOver)
             let readAfterOpen = ArticleRowMenuState.readAfterContextMenuOpen(
                 isRead: model.isRead,
-                isSelected: isSelected,
-                selectsOnContextClick: ArticleRowMenuState.selectsOnContextClick
+                selectedByOpen: selectedByOpen
             )
             Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
                 viewModel.setStarred(article: model.row, starred: !model.isStarred)
@@ -173,5 +180,24 @@ struct ArticleRowView: View, Equatable {
         ]
         .compactMap { $0 }
         .joined(separator: ", ")
+    }
+}
+
+private extension View {
+    /// Keeps `isOver` equal to whether the pointer is over this view (macOS; a no-op on iOS, which
+    /// has no hover that selects anything). Cleared when the view disappears and when `resetOn`
+    /// changes — a hosted article cell is reused for another article (`ArticleTableView`) without
+    /// the pointer necessarily leaving it, and the new article was never hovered as far as
+    /// `ContextMenuSelectionTracker` knows.
+    @ViewBuilder
+    func tracksPointerHover(_ isOver: Binding<Bool>, resetOn id: String) -> some View {
+        #if os(macOS)
+        self
+            .onHover { isOver.wrappedValue = $0 }
+            .onDisappear { isOver.wrappedValue = false }
+            .onChange(of: id) { isOver.wrappedValue = false }
+        #else
+        self
+        #endif
     }
 }

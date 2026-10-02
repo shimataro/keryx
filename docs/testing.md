@@ -1315,13 +1315,22 @@ macOS (and on iPad, where the reader shares the screen with the list):
 ### (SwiftUI) Article row menu read state
 
 The read item of the SwiftUI article row's context menu is labelled from the state the row is in once
-the menu is open (`ArticleRowMenuState.readAfterContextMenuOpen`, covered by `ArticleRowModelTests`),
-and each item sets that explicit state rather than toggling. Whether SwiftUI rebuilds the menu after the
-right-click's selection lands can only be seen in the running app; confirm:
+the menu is open (the shared `articleReadAfterContextMenuOpen`, covered by
+`ArticleReadAfterContextMenuOpenTest`), and each item sets that explicit state rather than toggling. On
+macOS whether the open selects the row is predicted from the pointer hover
+(`ArticleRowMenuState.opensBySelecting`, covered by `ArticleRowModelTests`). Whether SwiftUI rebuilds the
+menu after the right-click's selection lands, and whether the hover prediction holds, can only be seen
+in the running app; confirm:
 
-- (macOS) Right-click an unread, unselected article row: the row becomes selected (and read) and the
-  menu says "Mark as unread". Choosing it leaves the article unread — as ⌘⇧U would right now. The
-  star item still matches the article's current star state, and choosing it sets the opposite.
+- (macOS) With the pointer on an unread, unselected article row, right-click it: the row becomes
+  selected (and read) and the menu says "Mark as unread". Choosing it leaves the article unread — as
+  ⌘⇧U would right now. The star item still matches the article's current star state, and choosing it
+  sets the opposite.
+- (macOS) With the pointer away from the row (e.g. over the reader), move the VoiceOver cursor to an
+  unread, unselected article row and open its menu with VO+Shift+M: the menu says "Mark as read"
+  (the row's current state), and the row does not become selected. Choosing it marks the article
+  read. (Opening it with VO+Shift+M while the pointer happens to rest on that row is the known
+  limitation: the menu then says "Mark as unread", and choosing it changes nothing.)
 - (macOS) Right-click the selected row after marking it unread: the menu says "Mark as read" and the
   article stays unread until that is chosen (the row is not selected again).
 - (iOS) Long-press an unread row: nothing is selected, the menu says "Mark as read", and choosing it

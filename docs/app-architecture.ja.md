@@ -258,6 +258,7 @@
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
 | 待っている OPML の要求で設定 ▸ データを開く | `presentation/settings/OpmlTransferController.kt` の `shouldPresentOpmlRequest`（要求が待っていて、何も実行中でない） | Compose の `App.kt` と SwiftUI の `OpmlRequestPresenter`（`OpmlTransferObservable.shouldPresentRequest` 経由） |
+| 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowMenuState.readAfterContextMenuOpen`。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、ポインタのホバーから求める） |
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
 

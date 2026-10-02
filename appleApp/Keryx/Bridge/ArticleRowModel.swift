@@ -97,27 +97,34 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
 /// What an article row's context menu offers, decided from the state the row will be in once the
 /// menu is open rather than from the snapshot it was drawn with.
 enum ArticleRowMenuState {
-    /// Whether opening a row's context menu selects the row first: on macOS a right-click/Control-
-    /// click does (`.selectsOnContextMenu`, `ContextMenuSelectionTracker`); an iOS long-press does not.
-    #if os(macOS)
-    static let selectsOnContextClick = true
-    #else
-    static let selectsOnContextClick = false
-    #endif
+    /// Whether opening a row's context menu selects the row first. On macOS the only thing that
+    /// selects a row on a right-click/Control-click is `ContextMenuSelectionTracker`, which holds a
+    /// row's select closure only while the pointer hovers that row (`.selectsOnContextMenu`'s
+    /// `onHover`), and `ArticleListView.selectForContextMenu` selects only a row that isn't already
+    /// selected — so the open selects this row exactly when the pointer is over it and it isn't
+    /// selected. A menu opened from the keyboard or VoiceOver (VO+Shift+M) with the pointer elsewhere
+    /// selects nothing. An iOS long-press never selects.
+    ///
+    /// - Parameters:
+    ///   - isSelected: whether the row was selected before the menu was opened.
+    ///   - pointerIsOver: whether the pointer is over the row (`ArticleRowView`'s hover state).
+    static func opensBySelecting(isSelected: Bool, pointerIsOver: Bool) -> Bool {
+        #if os(macOS)
+        !isSelected && pointerIsOver
+        #else
+        false
+        #endif
+    }
 
     /// The read state the article has once its context menu is open — the state the menu's read item
-    /// is labelled from and inverts. Selecting an article marks it read (external-spec §7), and on
-    /// macOS the right-click selects an unselected row before the menu shows (the selection closure
-    /// only selects a row that isn't already selected), so such a row is read by then even though
-    /// its snapshot still says unread. Matches Compose's `articleRowMenuEntries`
-    /// (`ArticleRowComponents.kt`), whose `selectedByOpen` carries the same side effect.
+    /// is labelled from and inverts. Only calls the shared `articleReadAfterContextMenuOpen`
+    /// (`ArticleListModel.kt`), the same definition Compose's `articleRowMenuEntries` uses.
     ///
     /// - Parameters:
     ///   - isRead: the row's read state as last drawn.
-    ///   - isSelected: whether the row was selected before the menu was opened.
-    ///   - selectsOnContextClick: whether opening the menu selects the row (`selectsOnContextClick`).
-    static func readAfterContextMenuOpen(isRead: Bool, isSelected: Bool, selectsOnContextClick: Bool) -> Bool {
-        isRead || (selectsOnContextClick && !isSelected)
+    ///   - selectedByOpen: whether opening the menu selects the row (`opensBySelecting`).
+    static func readAfterContextMenuOpen(isRead: Bool, selectedByOpen: Bool) -> Bool {
+        ArticleListModelKt.articleReadAfterContextMenuOpen(isRead: isRead, selectedByOpen: selectedByOpen)
     }
 }
 
