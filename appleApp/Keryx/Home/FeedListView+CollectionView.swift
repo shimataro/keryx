@@ -22,12 +22,10 @@ extension FeedListView {
                 model: sidebar,
                 selectionDisplayed: displayedKey != nil,
                 selectedRow: home.selectedRowInstance,
-                filter: home.filter,
-                renamingRowKey: dialogs.renamingRowKey
+                filter: home.filter
             ),
             selectedItem: displayedKey == nil ? nil : SidebarItemID(home.selectedRowInstance),
-            renamingKey: dialogs.renamingRowKey,
-            colorPickingTagId: dialogs.colorPickingTagId
+            canPullToRefresh: home.hasFeeds
         )
     }
 
@@ -36,20 +34,8 @@ extension FeedListView {
             select: selectRow,
             setExpanded: setExpanded,
             menu: { SidebarContextMenus.menu(for: $0, home: home, dialogs: dialogs) },
-            menuWillOpen: { item in
-                guard let instance = item.rowSelection,
-                      !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
-                home.selectFilter(instance.filter, instance: instance)
-            },
-            editor: renameEditor(for:),
-            showColorPicker: { dialogs.colorPickingTagId = $0 },
-            pickColor: { tagId, hex in
-                if let tag = home.tags.first(where: { $0.id == tagId }) {
-                    home.viewModel.updateTag(id: tag.id, name: tag.name, color: hex)
-                }
-                dialogs.colorPickingTagId = nil
-            },
-            dismissColorPicker: { dialogs.colorPickingTagId = nil },
+            performSwipe: performSwipe,
+            moveRow: moveRow,
             dropIndex: { dropIndex },
             applyDrop: { applyFeedListDropAction($0, home: home) }
         )
@@ -67,6 +53,34 @@ extension FeedListView {
         if tap.navigates { onOpenArticleList() }
     }
 
+    /// VoiceOver's move up / down: the mutation a completed drop would apply, resolved by
+    /// `SidebarReorderTargets` in the row's own reorder scope.
+    private func moveRow(_ item: SidebarItemID, _ direction: SidebarMoveDirection) {
+        guard let move = SidebarReorderTargets.move(for: item, direction: direction, model: sidebar) else { return }
+        switch move {
+        case .feed(let feedId, let folderId, let insertBeforeId):
+            home.viewModel.moveFeed(feedId: feedId, folderId: folderId, targetFeedId: insertBeforeId)
+        case .folder(let folderId, let insertBeforeId):
+            home.viewModel.reorderFolders(draggedFolderId: folderId, targetFolderId: insertBeforeId)
+        }
+    }
+
+    /// A swipe action opens the same sheet or confirmation the row's context menu does.
+    private func performSwipe(_ action: SidebarSwipeAction, _ item: SidebarItemID) {
+        switch (action, item) {
+        case (.rename, _):
+            if let instance = item.rowSelection { dialogs.startRename(instance) }
+        case (.unsubscribe, .feed(let id)), (.unsubscribe, .feedInTag(let id, _)):
+            dialogs.unsubscribingFeed = home.feedsById[id]
+        case (.delete, .folder(let id)):
+            dialogs.deletingFolder = home.folders.first { $0.id == id }
+        case (.delete, .tag(let id)):
+            dialogs.deletingTag = home.tags.first { $0.id == id }
+        default:
+            break
+        }
+    }
+
     /// `toggleFolderCollapsed`/`toggleTagExpanded` flip the state, so they only run when the
     /// requested state differs.
     private func setExpanded(_ item: SidebarItemID, _ expanded: Bool) {
@@ -81,20 +95,6 @@ extension FeedListView {
             home.viewModel.toggleTagExpanded(tagId: id)
         default:
             break
-        }
-    }
-
-    private func renameEditor(for item: SidebarItemID) -> InlineRenameField? {
-        switch item {
-        case .folder(let id):
-            return home.folders.first { $0.id == id }.flatMap(folderRenameEditor)
-        case .tag(let id):
-            return home.tags.first { $0.id == id }.flatMap(tagRenameEditor)
-        case .feed(let id), .feedInTag(let id, _):
-            guard let feed = home.feedsById[id], let instance = item.rowSelection else { return nil }
-            return feedRenameEditor(feed, instance: instance)
-        default:
-            return nil
         }
     }
 }

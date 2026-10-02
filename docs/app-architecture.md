@@ -1328,14 +1328,36 @@ view on iOS.
 - **Context menus are `UIMenu`s** from `contextMenuConfigurationForItemsAt`
   (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
   macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
-  drag. The row is selected when the menu actually appears (`willDisplayContextMenu`), not when UIKit
-  first asks for it, since a long press that turns into a drag asks too.
-- **In-place rename** uses the same `InlineRenameField`, which on iOS tracks its own `@FocusState`: the
-  cell is a separate hosting tree that `HomeView`'s `focusedPane` cannot reach. Tapping another row ends
-  editing first, which commits the edit; the renaming row can be neither selected nor dragged.
-- **The tag color picker** is `TagColorPicker` in a UIKit popover presented by the controller from the
-  tag's cell, driven by `SidebarDialogState.colorPickingTagId` (the dot and the "Change color" menu item
-  both set it).
+  drag. Opening a menu does not select its row (as in the system apps, and Android's long-press menu): the
+  menu is built from the pressed row itself, so its actions land on that row whatever is selected. An erroring
+  feed's menu is titled with the reason (gone, or a fetch error) — the row's warning icon has no hover tooltip
+  on touch.
+- **Renaming** a folder, tag or feed opens the same form sheet that creates one (`NamePromptSheet`, Cancel /
+  Save in the navigation bar, a Clear button at the end of the name field), not an in-row editor: an
+  Escape-driven editor inside a cell does not suit touch, and the HIG's cancel is the sheet's Cancel. It is
+  shown for as long as `SidebarDialogState.renamingRowKey` names a row that still exists (the menu, the
+  swipe action and the keyboard all go through `startRename`); `SidebarRenameTarget` resolves the row to what
+  the sheet edits, and the rules are the shared `inlineRenameValidation`'s. macOS keeps `InlineRenameField`.
+- **Reordering without a drag.** A screen reader cannot drag, so a feed or folder row offers VoiceOver
+  "Move up" / "Move down" actions, each only where the row can move that way — the same scopes as Compose's
+  (a feed among its folder group's or the unfoldered feeds, a folder among the folders; a feed's copy under a
+  tag and tags themselves never move). `SidebarReorderTargets` resolves the landing position with the shared
+  `reorderTargetWithinScope` and the move applies the mutation a completed drop would; the availability is part
+  of `SidebarRowContent`, so a reorder that changes a neighbour's options reconfigures that row.
+- **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl`, present only while there are feeds)
+  refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
+  tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until both finish. It
+  replaces the navigation bar's Refresh All button on iOS (which keeps Sync, Add and Settings); an iPad
+  keyboard still has ⌘R from the Feed menu.
+- **Swipe actions.** A feed row swipes to "Unsubscribe" and "Rename", a folder or tag row to "Delete" and
+  "Rename" (`SidebarSwipeActions`, `trailingSwipeActionsConfigurationProvider`). Each only opens the sheet or
+  confirmation its context-menu item does, so a full swipe is off (the first action is the destructive one)
+  and nothing is offered mid-drag.
+- **A tag's color** is changed from its long-press menu: "Change color ▸" opens the swatches as a palette
+  (`UIMenu` with `.displayAsPalette`), each named by `TagColorNames` and the current one checked. There is
+  no popover on iOS — it is a poor fit on an iPhone — so the tag's color dot is only decoration there
+  (macOS keeps its dot popover, `TagColorPicker`). The new-tag sheet's swatches (`TagColorSwatchRow`,
+  shared with the macOS popover) are 44pt touch targets read out by color name.
 - UI tests find rows by accessibility identifier: the row's `feedListRowSelectionKey`, or
   `header:<section>` for a header. Arrow keys stay with `HomeView`'s own key handling
   (`allowsFocus = false` on the collection view), as on macOS.

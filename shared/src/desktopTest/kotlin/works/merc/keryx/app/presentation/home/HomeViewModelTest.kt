@@ -457,6 +457,60 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun pullToRefreshAllFetchesEveryFeedWhateverIsSelectedAndIsTrackedAsAll() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertFeed("f2")
+        val gate = CompletableDeferred<Unit>()
+        val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { request ->
+                gate.await()
+                requested += request.url.toString()
+                respond("", HttpStatusCode.NotFound)
+            },
+            cloudProvider = cloud,
+        )
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.pullToRefreshAll()
+        // Keyed by All, not by the folder the article list happens to show.
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.All), vm.pullRefreshingFilters.value)
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+
+        assertEquals(setOf("https://feed/f1", "https://feed/f2"), requested.toSet())
+        assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
+    }
+
+    @Test
+    fun pullToRefreshAllRightAfterRefreshAllWaitsForItWithoutStartingAnother() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val cloud = CountingNoCloud()
+        val vm = newViewModel(feedFetcher = gatedCountingFetcher(gate, fetches), cloudProvider = cloud)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshAll()
+        vm.pullToRefreshAll()
+        pumpUntil { fetches.get() >= 1 }
+        assertTrue(vm.pulling, "the pull waits for the in-flight refresh")
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+
+        assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
+        assertEquals(1, cloud.syncs.get())
+    }
+
+    @Test
     fun pullToRefreshDuringAnInFlightRefreshJoinsItWithoutFetching() = runTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)

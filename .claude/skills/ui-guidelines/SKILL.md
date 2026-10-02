@@ -1073,7 +1073,8 @@ should follow the same rules:
   same channel as the search field, which is what makes the root's bare-key shortcuts and the menu
   bar's F2/Delete accelerators stand aside.
 
-The SwiftUI app follows the same rules with `appleApp/Keryx/Home/InlineRenameField.swift`, driven by
+The SwiftUI macOS app follows the same rules with `appleApp/Keryx/Home/InlineRenameField.swift` (iOS renames
+in `NamePromptSheet` instead — see "Sidebar (iOS)" in `docs/app-architecture.md`), driven by
 `SidebarDialogState.renamingRowKey` (a `feedListRowSelectionKey`, so only the rendered copy that was
 asked for edits); the editing state stands the bare Return/Delete accelerators aside through
 `SidebarDialogState.isEditingInline` (not a `HomeFocusedPane` case — on macOS the editor is an AppKit

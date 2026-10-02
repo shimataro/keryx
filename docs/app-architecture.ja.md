@@ -1315,14 +1315,33 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   畳んだサイドバーが選択を表示しないとき（iPhone で一番手前の列のとき）は、エコーも出さない。
 - **コンテキストメニューは `UIMenu`** で、`contextMenuConfigurationForItemsAt` から返す
   （`Home/Sidebar/SidebarContextMenus.swift`）。項目、順序、有効・無効、チェックは macOS の SwiftUI メニューと
-  同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。行の選択は、
-  UIKit が最初にメニューを求めたときではなく、実際にメニューが出るとき（`willDisplayContextMenu`）に行う。
-  ドラッグに変わる長押しでもメニューは求められるからである。
-- **インラインの名前変更**は同じ `InlineRenameField` を使い、iOS では自前の `@FocusState` でフォーカスを管理する。
-  セルは別のホスティングツリーで、`HomeView` の `focusedPane` が届かないためである。別の行をタップすると先に編集を
-  終えて確定する。名前変更中の行は選択もドラッグもできない。
-- **タグの色の選択**は `TagColorPicker` を UIKit のポップオーバーに載せ、コントローラーがタグのセルから表示する。
-  表示は `SidebarDialogState.colorPickingTagId` で決まる（色の丸とメニューの「色を変更」がこれを設定する）。
+  同じにしている。セル内で SwiftUI の `.contextMenu` を使うと、セル自身の持ち上げやドラッグと競合する。
+  メニューを開いてもその行は選択しない（システムアプリや Android の長押しメニューと同じ）。メニューは長押しした行そのものから
+  組み立てるので、選択中の行が何であっても、操作は長押しした行に対して行われる。エラー中のフィードのメニューには、
+  理由（見つからない、または取得エラー）をタイトルとして付ける（行の警告アイコンには、タッチではホバーのツールチップがない）。
+- **名前変更**は、フォルダー・タグ・フィードのいずれも、作成と同じフォームシート（`NamePromptSheet`。ナビゲーション
+  バーに「キャンセル」と「保存」、名前欄の末尾にクリアボタン）で行い、行の中での編集にはしない。セル内の Esc 前提の
+  エディターはタッチに合わず、取り消しは HIG どおりシートの「キャンセル」とするためである。シートは
+  `SidebarDialogState.renamingRowKey` が実在する行を指している間表示される（メニュー・スワイプ・キーボードはすべて
+  `startRename` を通る）。`SidebarRenameTarget` が行をシートの編集対象に解決し、規則は共有の `inlineRenameValidation`
+  に従う。macOS は `InlineRenameField` のまま。
+- **ドラッグなしの並べ替え。** スクリーンリーダーはドラッグできないので、フィード行とフォルダー行には VoiceOver の
+  「上へ移動」「下へ移動」を、動かせる方向にだけ出す。範囲は Compose と同じ（フィードは所属フォルダーグループ内または
+  フォルダーなしのフィードの間、フォルダーはフォルダーの間。タグ配下のフィードのコピーとタグ自体は動かさない）。
+  `SidebarReorderTargets` が共有の `reorderTargetWithinScope` で移動先を求め、ドロップ完了時と同じ更新を適用する。
+  動かせる方向は `SidebarRowContent` に含めるので、並べ替えで隣の行の選択肢が変われば、その行が再構成される。
+- **引っ張って更新。** サイドバーを引き下げる（`UIRefreshControl`。フィードがあるときだけ付く）と、全フィードを更新して
+  同期する（`HomeViewModel.pullToRefreshAll()`。「すべて更新」と同じ処理で、`pullRefreshingFilters` には `All`
+  フィルターとして記録される）。インジケーターは両方が終わるまで出続ける。iOS ではナビゲーションバーの「すべて更新」
+  ボタンの代わりになる（同期・追加・設定のボタンは残る）。iPad のキーボードでは、Feed メニューの ⌘R も使える。
+- **スワイプ操作。** フィード行は「購読解除」と「名前変更」、フォルダー・タグ行は「削除」と「名前変更」を末尾側への
+  スワイプで出す（`SidebarSwipeActions`、`trailingSwipeActionsConfigurationProvider`）。どれもコンテキストメニューの
+  同じ項目と同様に、シートか確認を開くだけなので、フルスワイプは無効にしている（先頭の操作が破壊的なため）。
+  ドラッグ中は何も出さない。
+- **タグの色**は長押しメニューから変える。「色を変更 ▸」を開くと色見本がパレット（`.displayAsPalette` の `UIMenu`）で
+  並び、各色は `TagColorNames` の名前を持ち、現在の色にチェックが付く。iOS にポップオーバーはない（iPhone では
+  向かないため）。タグの色の丸は飾りにすぎない（macOS は丸のポップオーバー `TagColorPicker` のまま）。新規タグ
+  シートの色見本（macOS のポップオーバーと共通の `TagColorSwatchRow`）は 44pt のタッチ領域で、色名が読み上げられる。
 - UI テストはアクセシビリティ識別子で行を探す。行は `feedListRowSelectionKey`、ヘッダーは `header:<section>`。
   矢印キーは macOS と同じく `HomeView` のキー処理が受け持つ（コレクションビューは `allowsFocus = false`）。
 

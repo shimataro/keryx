@@ -380,4 +380,17 @@
     <!-- Apple (SwiftUI) app only — the button that closes the iOS Settings sheet. macOS reaches
          Settings as a window of its own, and Compose's dialog closes through its own controls. -->
     <string name="apple_settings_done">Done</string>
+    <!-- Apple (SwiftUI) app only — the names of the tag colors, which VoiceOver reads and the iOS
+         palette menu shows (Compose's swatches carry no names). Same order as TAG_COLOR_PALETTE. -->
+    <string name="apple_tag_color_none">No color</string>
+    <string name="apple_tag_color_red">Red</string>
+    <string name="apple_tag_color_orange">Orange</string>
+    <string name="apple_tag_color_amber">Yellow</string>
+    <string name="apple_tag_color_green">Green</string>
+    <string name="apple_tag_color_blue">Blue</string>
+    <string name="apple_tag_color_indigo">Indigo</string>
+    <string name="apple_tag_color_purple">Purple</string>
+    <string name="apple_tag_color_pink">Pink</string>
+    <!-- Apple (SwiftUI) app only — VoiceOver label of the Clear button at the end of the name field. -->
+    <string name="apple_clear_text">Clear text</string>
 </resources>

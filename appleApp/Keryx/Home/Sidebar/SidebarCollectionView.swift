@@ -13,8 +13,8 @@ struct SidebarRenderState: Equatable {
     /// The row shown as selected — `nil` while the collapsed sidebar is the topmost column (see
     /// `CompactSidebarSelection.displayedKey`).
     let selectedItem: SidebarItemID?
-    let renamingKey: String?
-    let colorPickingTagId: String?
+    /// Whether pulling the list down refreshes — not with no feeds to refresh.
+    let canPullToRefresh: Bool
 }
 
 /// What the collection view asks of `FeedListView` — the same operations the macOS source list
@@ -26,13 +26,10 @@ struct SidebarCollectionActions {
     /// A disclosure was toggled by the user.
     var setExpanded: (SidebarItemID, Bool) -> Void
     var menu: (SidebarItemID) -> UIMenu?
-    /// A row's context menu is about to show.
-    var menuWillOpen: (SidebarItemID) -> Void
-    /// The row's in-place name editor, while it is being renamed.
-    var editor: (SidebarItemID) -> InlineRenameField?
-    var showColorPicker: (_ tagId: String) -> Void
-    var pickColor: (_ tagId: String, _ hex: String?) -> Void
-    var dismissColorPicker: () -> Void
+    /// A swipe action was chosen on a row.
+    var performSwipe: (SidebarSwipeAction, SidebarItemID) -> Void
+    /// VoiceOver's "Move up" / "Move down" on a row.
+    var moveRow: (SidebarItemID, SidebarMoveDirection) -> Void
     /// The shared lookup tables the drop rules resolve against.
     var dropIndex: () -> FeedListDropIndex
     /// Applies a drop the shared rules resolved (`applyFeedListDropAction`).
@@ -60,8 +57,7 @@ struct SidebarCollectionView: UIViewControllerRepresentable {
     }
 }
 
-final class SidebarCollectionViewController: UIViewController, UICollectionViewDelegate,
-    UIPopoverPresentationControllerDelegate {
+final class SidebarCollectionViewController: UIViewController, UICollectionViewDelegate {
     var actions: SidebarCollectionActions
     private(set) var state: SidebarRenderState?
 
@@ -79,8 +75,6 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// ticking) must not collapse the row back.
     private var pendingExpansion: [SidebarItemID: (expanded: Bool, since: ContinuousClock.Instant)] = [:]
     private static let pendingExpansionTimeout: Duration = .seconds(2)
-
-    private weak var colorPicker: UIViewController?
 
     /// Whether a drag from this list is under way — see `apply(_:force:)`.
     var dragInProgress = false
@@ -140,6 +134,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             // A header is the section's first item, so it can be a drop destination; All/Starred
             // have none.
             configuration.headerMode = section == .smart || section == nil ? .none : .firstItemInSection
+            configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+                self?.swipeActionsConfiguration(at: indexPath)
+            }
             return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
         }
     }
@@ -235,19 +232,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             break
         }
         cell.accessories = accessories
-        let editor = content.isRenaming ? actions.editor(item) : nil
-        let onIconTap: (() -> Void)?
-        if case .tag(let tagId) = item {
-            onIconTap = { [weak self] in self?.actions.showColorPicker(tagId) }
-        } else {
-            onIconTap = nil
-        }
         cell.contentConfiguration = UIHostingConfiguration {
             SidebarCellContent(
                 content: content,
-                editor: editor,
                 color: Color(uiColor: textColor),
-                onIconTap: onIconTap
+                onMove: { [weak self] in self?.actions.moveRow(item, $0) }
             )
         }
     }
@@ -284,20 +273,36 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         guard force || newState != old else { return }
         state = newState
 
+        if newState.canPullToRefresh != old?.canPullToRefresh { updateRefreshControl(enabled: newState.canPullToRefresh) }
         applyStructure(newState.outline, animated: old != nil)
         reconfigure(SidebarRowContent.changedItems(from: old?.contents ?? [:], to: newState.contents))
         applySelection(newState.selectedItem, scroll: newState.selectedItem != old?.selectedItem)
-        if newState.renamingKey != old?.renamingKey, let key = newState.renamingKey,
-           let item = newState.outline.allItems.first(where: { $0.selectionKey == key }) {
-            scrollIntoView(item)
-        }
-        if newState.colorPickingTagId != old?.colorPickingTagId {
-            // Presenting from inside a SwiftUI update is not allowed; do it right after.
-            DispatchQueue.main.async { [weak self] in self?.updateColorPicker(newState.colorPickingTagId) }
-        }
         // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
         // here, on the forced apply at the drag's end.
         refreshUnreadCounts()
+    }
+
+    // MARK: - Pull to refresh
+
+    /// Pulling the sidebar down refreshes every feed and syncs, like the toolbar's Refresh All it
+    /// replaces on iOS; the indicator stays up until both have finished.
+    private func updateRefreshControl(enabled: Bool) {
+        guard enabled else {
+            collectionView.refreshControl = nil
+            return
+        }
+        guard collectionView.refreshControl == nil else { return }
+        let control = UIRefreshControl()
+        control.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        collectionView.refreshControl = control
+    }
+
+    private func pullToRefresh() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await home.pullToRefreshAll()
+            collectionView.refreshControl?.endRefreshing()
+        }
     }
 
     // MARK: - Unread counts
@@ -354,8 +359,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             outline: outline,
             contents: current.contents,
             selectedItem: current.selectedItem,
-            renamingKey: current.renamingKey,
-            colorPickingTagId: current.colorPickingTagId
+            canPullToRefresh: current.canPullToRefresh
         )
         applyStructure(outline, animated: false)
     }
@@ -465,12 +469,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     // MARK: - Selection
 
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
-        switch item {
-        // Tapping a header toggles it (its disclosure is header-style) rather than selecting it.
-        case .sectionHeader, .noFolderHeader: return true
-        default: return state?.contents[item]?.isRenaming != true
-        }
+        // A tapped header is let through too: it toggles (its disclosure is header-style) and
+        // `didSelectItemAt` puts the shared selection back.
+        dataSource.itemIdentifier(for: indexPath) != nil
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -480,15 +481,44 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             applySelection(state?.selectedItem, scroll: false)
             return
         }
-        // Ends an in-place rename in another row, which commits it — as clicking another row does
-        // on macOS.
-        view.endEditing(true)
         actions.select(item)
+    }
+
+    // MARK: - Swipe actions
+
+    /// The trailing swipe actions of the row at `indexPath` (`SidebarSwipeActions`), none mid-drag.
+    /// Every action only opens its sheet or confirmation, so each one reports "not performed" and the
+    /// row closes again instead of animating away before anything was confirmed.
+    private func swipeActionsConfiguration(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard !dragInProgress, let item = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        let contextualActions = SidebarSwipeActions.available(for: item).map { action -> UIContextualAction in
+            let contextual = UIContextualAction(style: action == .rename ? .normal : .destructive, title: Self.swipeTitle(action)) {
+                [weak self] _, _, completion in
+                self?.actions.performSwipe(action, item)
+                completion(false)
+            }
+            contextual.image = UIImage(systemName: action == .rename ? "pencil" : "trash")
+            return contextual
+        }
+        guard !contextualActions.isEmpty else { return nil }
+        let configuration = UISwipeActionsConfiguration(actions: contextualActions)
+        // A full swipe would run the first action, and that is the destructive one.
+        configuration.performsFirstActionWithFullSwipe = false
+        return configuration
+    }
+
+    private static func swipeTitle(_ action: SidebarSwipeAction) -> String {
+        switch action {
+        case .rename: return L("home_rename_feed")
+        case .unsubscribe: return L("home_unsubscribe_menu")
+        case .delete: return L("common_delete")
+        }
     }
 
     // MARK: - Context menus
 
-    /// A long press opens the menu; moving the finger instead lifts the row for a drag.
+    /// A long press opens the menu; moving the finger instead lifts the row for a drag. Opening the
+    /// menu does not select the row, as in the system apps (and Android's own long-press menu).
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
@@ -496,80 +526,17 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     ) -> UIContextMenuConfiguration? {
         guard indexPaths.count == 1,
               let item = dataSource.itemIdentifier(for: indexPaths[0]),
-              state?.contents[item]?.isRenaming != true,
               let key = item.selectionKey,
               let menu = actions.menu(item) else { return nil }
         return UIContextMenuConfiguration(identifier: key as NSString, previewProvider: nil) { _ in menu }
-    }
-
-    /// Opening the menu selects the row first, matching Compose's own
-    /// `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — only once the menu
-    /// really shows, not when UIKit merely asks for it at the start of a press that may turn into a
-    /// drag.
-    func collectionView(
-        _ collectionView: UICollectionView,
-        willDisplayContextMenu configuration: UIContextMenuConfiguration,
-        animator: (any UIContextMenuInteractionAnimating)?
-    ) {
-        guard let key = configuration.identifier as? String,
-              let item = state?.outline.allItems.first(where: { $0.selectionKey == key }) else { return }
-        actions.menuWillOpen(item)
-    }
-
-    // MARK: - Tag color popover
-
-    private func updateColorPicker(_ tagId: String?) {
-        if let colorPicker {
-            colorPicker.dismiss(animated: true)
-            self.colorPicker = nil
-        }
-        guard let tagId, let state else { return }
-        let item = SidebarItemID.tag(tagId)
-        guard let indexPath = dataSource.indexPath(for: item) else {
-            actions.dismissColorPicker()
-            return
-        }
-        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
-        collectionView.layoutIfNeeded()
-        guard let cell = collectionView.cellForItem(at: indexPath) else {
-            actions.dismissColorPicker()
-            return
-        }
-        var selectedHex: String?
-        if case .tagColor(let hex) = state.contents[item]?.icon { selectedHex = hex }
-        let picker = UIHostingController(rootView: TagColorPicker(selectedHex: selectedHex) { [weak self] hex in
-            self?.actions.pickColor(tagId, hex)
-        })
-        picker.modalPresentationStyle = .popover
-        picker.preferredContentSize = picker.sizeThatFits(in: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 200))
-        if let popover = picker.popoverPresentationController {
-            popover.sourceView = cell.contentView
-            // The color dot sits at the row's leading edge.
-            let leading = cell.contentView.directionalLayoutMargins.leading
-            popover.sourceRect = CGRect(x: leading, y: 0, width: 20, height: cell.contentView.bounds.height)
-            popover.delegate = self
-        }
-        present(picker, animated: true)
-        colorPicker = picker
-    }
-
-    /// A popover even on iPhone, like the macOS dot's — not a sheet for a single row of swatches.
-    func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle {
-        .none
-    }
-
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        colorPicker = nil
-        actions.dismissColorPicker()
     }
 }
 
 /// A row's hosted content — the shared `SidebarRowLabel` in the colors of the cell's current state.
 private struct SidebarCellContent: View {
     let content: SidebarRowContent
-    let editor: InlineRenameField?
     let color: Color
-    let onIconTap: (() -> Void)?
+    let onMove: (SidebarMoveDirection) -> Void
 
     var body: some View {
         SidebarRowLabel(
@@ -577,14 +544,17 @@ private struct SidebarCellContent: View {
             icon: content.icon ?? .symbol("circle"),
             isErroring: content.isErroring,
             isGone: content.isGone,
-            editor: editor,
-            onIconTap: onIconTap,
             symbolTint: color
         )
         .foregroundStyle(color)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // One element per row for VoiceOver, except while the name editor needs its own.
-        .accessibilityElement(children: editor == nil ? .combine : .contain)
+        // One element per row for VoiceOver, with the reorder a drag would do offered as actions (a
+        // screen reader cannot drag): each only where the row can move that way.
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if content.moves.canMoveUp { Button(L("home_move_up")) { onMove(.up) } }
+            if content.moves.canMoveDown { Button(L("home_move_down")) { onMove(.down) } }
+        }
     }
 }
 #endif

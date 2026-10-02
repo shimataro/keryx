@@ -91,6 +91,9 @@ struct FeedListView: View {
             }
         }
         .modifier(SidebarDeleteAlerts(home: home, dialogs: dialogs))
+        #if os(iOS)
+        .modifier(SidebarRenameSheet(home: home, dialogs: dialogs))
+        #endif
         // The 3-pane desktop/macOS layout keeps this field permanently visible (mirrors Compose's
         // own `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
         // there is no narrower layout here to ever hide it again), so this only needs setting once.
@@ -168,6 +171,9 @@ struct FeedListView: View {
         // either operation (or the refresh-then-sync cycle covering the gap between them) is
         // already in flight — `activity.refreshIndicatorShown`/`.syncing` pick which one's own
         // spinner shows, never both for the same phase.
+        #if os(macOS)
+        // On iOS, pulling the sidebar down refreshes everything instead (`SidebarCollectionView`), as
+        // Mail's list does — and the navigation bar has room for fewer buttons.
         ToolbarItem {
             ToolbarActivityButton(
                 titleKey: "home_refresh",
@@ -178,12 +184,13 @@ struct FeedListView: View {
                 action: { home.viewModel.refreshAll() }
             )
         }
+        #endif
         if home.cloudConnected {
             ToolbarItem {
                 ToolbarActivityButton(
                     titleKey: "home_sync",
                     busyTitleKey: "home_syncing",
-                    systemImage: "cloud",
+                    systemImage: "arrow.triangle.2.circlepath",
                     busy: home.activity.syncing,
                     enabled: home.activity.idle,
                     action: { home.viewModel.sync() }
@@ -203,6 +210,7 @@ struct FeedListView: View {
 
     // MARK: - In-place rename
 
+    #if os(macOS)
     /// The name editor for the row `instance`, or `nil` when that row isn't being renamed.
     private func renameEditor(
         for instance: FeedListRowSelection,
@@ -262,6 +270,7 @@ struct FeedListView: View {
             commit: { home.viewModel.renameFeed(id: feed.id, title: $0) }
         )
     }
+    #endif
 
     // MARK: - Sidebar structure
 
@@ -411,6 +420,41 @@ private struct SidebarDeleteAlerts: ViewModifier {
     @Bindable var dialogs: SidebarDialogState
 
     func body(content: Content) -> some View {
+        #if os(iOS)
+        // A confirmation dialog (an action sheet on iPhone), not an alert: the HIG asks for one when
+        // someone confirms an action they just chose, and it keeps the destructive choice apart from
+        // Cancel.
+        content
+            .confirmationDialog(
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                isPresented: isPresentedBinding($dialogs.deletingFolder),
+                titleVisibility: .visible,
+                presenting: dialogs.deletingFolder
+            ) { folder in
+                Button(L("common_delete"), role: .destructive) { home.viewModel.deleteFolder(id: folder.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            }
+            .confirmationDialog(
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                isPresented: isPresentedBinding($dialogs.deletingTag),
+                titleVisibility: .visible,
+                presenting: dialogs.deletingTag
+            ) { tag in
+                Button(L("common_delete"), role: .destructive) { home.viewModel.deleteTag(id: tag.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            }
+            .confirmationDialog(
+                dialogs.unsubscribingFeed.map { LF("home_unsubscribe_title", $0.custom_title ?? $0.title) } ?? "",
+                isPresented: isPresentedBinding($dialogs.unsubscribingFeed),
+                titleVisibility: .visible,
+                presenting: dialogs.unsubscribingFeed
+            ) { feed in
+                Button(L("home_unsubscribe_menu"), role: .destructive) { home.viewModel.unsubscribeFeed(id: feed.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            } message: { _ in
+                Text(L("home_unsubscribe_body"))
+            }
+        #else
         content
             .alert(
                 dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
@@ -438,12 +482,82 @@ private struct SidebarDeleteAlerts: ViewModifier {
             } message: { _ in
                 Text(L("home_unsubscribe_body"))
             }
+        #endif
     }
 
     private func isPresentedBinding<T>(_ source: Binding<T?>) -> Binding<Bool> {
         Binding(get: { source.wrappedValue != nil }, set: { if !$0 { source.wrappedValue = nil } })
     }
 }
+
+#if os(iOS)
+/// iOS renames a folder, tag or feed in the form sheet that creates one (`NamePromptSheet`), not in
+/// the row itself — a row-sized keyboard editor with an Escape key does not suit touch. It is shown
+/// for as long as `dialogs.renamingRowKey` names a row that still exists; a row removed underneath it
+/// (see the auto-cancel in `FeedListView.body`) closes the sheet.
+private struct SidebarRenameSheet: ViewModifier {
+    let home: HomeObservable
+    @Bindable var dialogs: SidebarDialogState
+
+    private var target: SidebarRenameTarget? {
+        guard let key = dialogs.renamingRowKey, let instance = home.sidebar.orderedRowsByKey[key] else { return nil }
+        return SidebarRenameTarget.resolve(
+            SidebarItemID(instance), folders: home.folders, tags: home.tags, feedsById: home.feedsById
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: Binding(
+            get: { target != nil },
+            set: { if !$0 { dialogs.renamingRowKey = nil } }
+        )) {
+            if let target {
+                NamePromptSheet(
+                    titleKey: "home_rename_feed",
+                    placeholderKey: placeholderKey(for: target),
+                    placeholderText: target.placeholder,
+                    duplicateMessageKey: target.duplicateMessageKey ?? "",
+                    confirmTitleKey: "common_save",
+                    allowBlank: target.allowBlank,
+                    initialName: target.initialName,
+                    isDuplicate: { isDuplicate($0, for: target) },
+                    onConfirm: { name, _ in commit(name, for: target) },
+                    isPresented: Binding(get: { dialogs.renamingRowKey != nil }, set: { if !$0 { dialogs.renamingRowKey = nil } })
+                )
+            }
+        }
+    }
+
+    /// The hint shown in an empty folder or tag field; a feed shows its own title instead.
+    private func placeholderKey(for target: SidebarRenameTarget) -> String {
+        switch target.kind {
+        case .folder: return "home_new_folder_hint"
+        case .tag: return "home_new_tag_hint"
+        case .feed: return "home_rename_feed"
+        }
+    }
+
+    private func isDuplicate(_ name: String, for target: SidebarRenameTarget) -> Bool {
+        switch target.kind {
+        case .folder(let id): return NameValidationKt.isDuplicateFolderName(name: name, folders: home.folders, excludeId: id)
+        case .tag(let id): return NameValidationKt.isDuplicateTagName(name: name, tags: home.tags, excludeId: id)
+        case .feed: return false
+        }
+    }
+
+    private func commit(_ name: String, for target: SidebarRenameTarget) {
+        switch target.kind {
+        case .folder(let id):
+            home.viewModel.updateFolder(id: id, name: name)
+        case .tag(let id):
+            // The tag's color is kept as it is — it has its own menu palette.
+            home.viewModel.updateTag(id: id, name: name, color: home.tags.first { $0.id == id }?.color)
+        case .feed(let id):
+            home.viewModel.renameFeed(id: id, title: name)
+        }
+    }
+}
+#endif
 
 /// Binds the sidebar's `.searchable` field to `focusedPane`'s `.search` case where the system
 /// supports it (`.searchFocused(_:equals:)` is macOS 15 / iOS 18+); a no-op before that.
@@ -459,14 +573,14 @@ private struct SearchFocusModifier: ViewModifier {
     }
 }
 
-/// A sidebar toolbar action (Refresh All / Sync) that shows a spinner while its operation runs.
+/// A sidebar toolbar action (Refresh All / Sync) that shows progress while its operation runs.
 ///
-/// On macOS the spinner replaces the icon inside the button's `Label`: `NSToolbar` hosts the view
+/// On macOS a spinner replaces the icon inside the button's `Label`: `NSToolbar` hosts the view
 /// as-is, and the title stays fixed so VoiceOver and the collapsed-sidebar overflow menu still name
 /// the action. iOS's navigation bar cannot render a `ProgressView` as a button's icon — it falls
-/// back to the label's title text — so there the spinner takes the button's place instead, carrying
-/// the in-progress title for VoiceOver. The button is disabled while busy either way, so nothing
-/// tappable is lost.
+/// back to the label's title text — so there the button stays and its icon animates instead
+/// (`BusySymbolEffect`), with the in-progress title for VoiceOver. The button is disabled while busy
+/// either way.
 private struct ToolbarActivityButton: View {
     let titleKey: String
     let busyTitleKey: String
@@ -477,15 +591,16 @@ private struct ToolbarActivityButton: View {
 
     var body: some View {
         #if os(iOS)
-        if busy {
-            ProgressView()
-                .accessibilityLabel(L(busyTitleKey))
-        } else {
-            Button(action: action) {
-                Label(L(titleKey), systemImage: systemImage)
+        // The same button while busy — disabled, its icon animating, its VoiceOver name switched —
+        // rather than a spinner in its place: swapping views changed the bar's layout every time.
+        Button(action: action) {
+            Label {
+                Text(L(busy ? busyTitleKey : titleKey))
+            } icon: {
+                Image(systemName: systemImage).modifier(BusySymbolEffect(busy: busy))
             }
-            .disabled(!enabled)
         }
+        .disabled(!enabled)
         #else
         Button(action: action) {
             // A `Label` rather than a bare icon so the toolbar's overflow menu (shown when the
@@ -505,3 +620,19 @@ private struct ToolbarActivityButton: View {
         #endif
     }
 }
+
+#if os(iOS)
+/// Animates a toolbar button's SF Symbol while its operation runs: a rotation (iOS 18 and later), or
+/// a pulse where the rotate effect does not exist.
+private struct BusySymbolEffect: ViewModifier {
+    let busy: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.symbolEffect(.rotate, isActive: busy)
+        } else {
+            content.symbolEffect(.pulse, isActive: busy)
+        }
+    }
+}
+#endif

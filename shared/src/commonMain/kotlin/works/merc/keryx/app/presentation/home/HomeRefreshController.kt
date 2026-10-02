@@ -82,8 +82,14 @@ internal class HomeRefreshController(
      * second pull on a selection whose pull is still pending is ignored; a pull on another
      * selection is tracked independently.
      */
-    fun pullToRefresh() {
-        val filter = currentFilter()
+    fun pullToRefresh() = pullToRefresh(currentFilter())
+
+    /**
+     * [pullToRefresh] for the feeds [filter] covers rather than the current selection — the iOS
+     * sidebar's pull, which is not tied to the article list's selection and refreshes every feed
+     * ([ArticleFilter.All]). The pull is tracked under [filter] in [pullRefreshingFilters].
+     */
+    fun pullToRefresh(filter: ArticleFilter) {
         var added = false
         _pullRefreshingFilters.update { current ->
             added = filter !in current
