@@ -18,6 +18,12 @@ If the target contains nothing your perspective covers, return exactly one line:
 Do not read documentation, do not explore the codebase, do not speculate. This is what keeps an
 eleven-agent review affordable.
 
+Judge this from the **changed files**, not from whether production behavior changed. Test code,
+build scripts, and resources are code: if your perspective covers them (`review-quality` and
+`review-verification` cover test code), a target that changes only them is still yours. When the
+orchestrator launched you, it already saw a reason to; return `Not applicable` only when you can
+name why none of the changed lines fall under your checklist.
+
 ## 3. Report only what your perspective owns
 
 Each agent file has a "Not yours" list. Findings outside your perspective belong to another agent and
