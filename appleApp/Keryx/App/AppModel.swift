@@ -99,7 +99,8 @@ final class AppModel {
     private var searchIndexPrepared = false
 
     /// Starts the startup maintenance and the refresh loop — and restarts the loop after
-    /// `stopForegroundLoop()`; both are idempotent — and prepares the search index, once.
+    /// `stopForegroundLoop()` (the startup maintenance too, if that interrupted it); both are
+    /// idempotent — and prepares the search index, once.
     func startForegroundWorkIfNeeded() {
         guard let sdk else { return }
         startForegroundWork(sdk)
@@ -113,8 +114,8 @@ final class AppModel {
     }
 
     #if os(iOS)
-    /// Stops the periodic refresh loop when the scene leaves the foreground: the OS may wake the
-    /// suspended process for a background refresh, and the loop must not run then
+    /// Stops the periodic refresh loop and any unfinished startup maintenance when the scene leaves the
+    /// foreground: the OS may wake the suspended process for a background refresh, and neither must run then
     /// (`runBackgroundRefresh` is the only work wanted in that slot).
     func stopForegroundLoop() {
         sdk?.stopRefreshLoop()

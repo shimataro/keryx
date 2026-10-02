@@ -1559,7 +1559,7 @@ request out), `notificationAlerts`, and
 `domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s
 `backgroundUpdateLoop` on the SDK's own background scope — call whenever the app becomes active;
 idempotent, so a repeated call neither reruns the startup sequence nor starts a second overlapping loop.
-`stopRefreshLoop()` stops the loop when iOS leaves the foreground (the next `startMaintenance()` restarts it).
+`stopRefreshLoop()` stops the loop and any unfinished startup sequence when iOS leaves the foreground (the next `startMaintenance()` restarts the loop, and reruns the startup sequence only if it was interrupted).
 `runBackgroundRefresh()` is the iOS background-refresh entry point: one `RefreshCycleRunner.runIfIdle` cycle
 without the startup sequence (see [background-update.md](background-update.md)).
 `importOpenedOpml(xml)` wraps `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`,

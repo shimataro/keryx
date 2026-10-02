@@ -165,8 +165,11 @@ class KeryxSdk private constructor(private val koin: Koin) {
         return AddFeedController(home::resolvePreview, home::subscribeFeeds)
     }
 
-    private var maintenanceStarted = false
+    private var startupJob: Job? = null
     private var refreshLoopJob: Job? = null
+
+    /** Whether the startup maintenance sequence is currently running — for tests. */
+    internal val isStartupMaintenanceActive: Boolean get() = startupJob?.isActive == true
 
     /** Whether the periodic refresh loop is currently running — for tests. */
     internal val isRefreshLoopActive: Boolean get() = refreshLoopJob?.isActive == true
@@ -176,16 +179,21 @@ class KeryxSdk private constructor(private val koin: Koin) {
      * sync, feed refresh, update check, FTS heal) and the periodic background-refresh loop
      * ([backgroundUpdateLoop]) on the SDK's own background scope. Call whenever the app becomes
      * active: idempotent, so a repeated call (e.g. from a view that appears more than once) neither
-     * reruns the startup sequence nor starts a second overlapping loop — but it does restart the
-     * loop after [stopRefreshLoop]. Neither is awaited — like desktop's `main.kt`, both keep
+     * reruns the startup sequence nor starts a second overlapping loop — but after [stopRefreshLoop]
+     * it restarts the loop, and the startup sequence too if that call interrupted it (a sequence
+     * that completed is never rerun). Neither is awaited — like desktop's `main.kt`, both keep
      * running independently for as long as this instance lives.
      */
     @Throws(Exception::class, CancellationException::class)
     fun startMaintenance() {
         val scope = koin.get<CoroutineScope>()
-        if (!maintenanceStarted) {
-            maintenanceStarted = true
-            scope.launch { runStartupMaintenance(koin) }
+        val previous = startupJob
+        if (previous == null || previous.isCancelled) {
+            // Join the interrupted run first, so a quick reactivation never overlaps it.
+            startupJob = scope.launch {
+                previous?.cancelAndJoin()
+                runStartupMaintenance(koin)
+            }
         }
         if (!isRefreshLoopActive) {
             refreshLoopJob = scope.launch { backgroundUpdateLoop(koin) }
@@ -193,14 +201,17 @@ class KeryxSdk private constructor(private val koin: Koin) {
     }
 
     /**
-     * Stops the periodic refresh loop (iOS, when the app leaves the foreground): the OS can wake the
-     * suspended process for a `BGAppRefreshTask`, and a loop timer expiring then would spend the short
-     * background slot on work [runBackgroundRefresh] deliberately skips. The next [startMaintenance]
-     * starts it again, with a fresh interval. Does nothing when the loop is not running.
+     * Stops the periodic refresh loop and any unfinished startup sequence (iOS, when the app leaves the
+     * foreground): the OS can wake the suspended process for a `BGAppRefreshTask`, and a loop timer
+     * expiring — or the startup sequence still running — would then spend the short background slot on
+     * work [runBackgroundRefresh] deliberately skips. The next [startMaintenance] starts the loop again,
+     * with a fresh interval, and reruns the startup sequence if it was interrupted. Does nothing for
+     * whatever is not running.
      */
     fun stopRefreshLoop() {
         refreshLoopJob?.cancel()
         refreshLoopJob = null
+        startupJob?.takeIf { it.isActive }?.cancel()
     }
 
     /**

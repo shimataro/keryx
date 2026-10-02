@@ -72,7 +72,7 @@ loop) only when the scene first becomes active, not in `init`, which a backgroun
 the app is in the foreground: `AppModel` stops it (`KeryxSdk.stopRefreshLoop`) when the scene enters the
 background and the next activation restarts it with a fresh interval, so a loop timer that expires while
 the OS has woken the suspended process for a background refresh cannot spend the slot on the update
-check or the FTS rebuild. The startup sequence runs once per process.
+check or the FTS rebuild. The startup sequence is stopped the same way if it is still running then, and the next activation reruns it from the start; once it has completed, it is not run again in that process.
 
 **App icon badge.** The app icon shows the total unread count (`setBadgeCount`, the same value as
 macOS's Dock badge), updated while running and after each background run. It needs the

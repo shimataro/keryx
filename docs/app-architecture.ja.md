@@ -1521,7 +1521,7 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 `domain/StartupMaintenanceTasks.kt` の `runStartupMaintenance` と `domain/BackgroundRefreshLoop.kt` の
 `backgroundUpdateLoop` を SDK 自身のバックグラウンドスコープで開始する——アプリがアクティブになるたびに呼ぶ。
 冪等なので、繰り返し呼んでも起動時シーケンスが再実行されたり、ループが二重に始まることはない。
-`stopRefreshLoop()` は iOS がフォアグラウンドを離れるときにループを止める（次の `startMaintenance()` で再開する）。`runBackgroundRefresh()` は iOS の
+`stopRefreshLoop()` は iOS がフォアグラウンドを離れるときにループと未完了の起動時シーケンスを止める（次の `startMaintenance()` でループを再開し、起動時シーケンスは中断されていた場合のみ再実行する）。`runBackgroundRefresh()` は iOS の
 バックグラウンド更新の入口で、起動時シーケンスを省いた `RefreshCycleRunner.runIfIdle` の 1 サイクルを
 実行する（[background-update.ja.md](background-update.ja.md) 参照）。`importOpenedOpml(xml)` は、アプリがある文書を
 開いた状態で起動したとき用に `presentation/settings/OpmlOpenHandler.kt` の `requestOpenedOpmlImport` を包む

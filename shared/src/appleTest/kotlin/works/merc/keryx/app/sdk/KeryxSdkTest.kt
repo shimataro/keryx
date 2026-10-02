@@ -13,6 +13,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -73,6 +75,10 @@ class KeryxSdkTest {
     /** Runs inside the SDK's OS-notification sink, on whichever thread the cycle posted from. */
     private var onNotify: () -> Unit = {}
 
+    /** When set, the feed server signals [feedRequested] and then holds every response until it completes. */
+    private var feedGate: CompletableDeferred<Unit>? = null
+    private val feedRequested = CompletableDeferred<Unit>()
+
     private fun rss(articleCount: Int) = buildString {
         append("""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title><link>https://example.com</link>""")
         repeat(articleCount) { append("<item><title>Post $it</title><link>https://example.com/$it</link><guid>g$it</guid></item>") }
@@ -84,6 +90,10 @@ class KeryxSdkTest {
         val client = HttpClient(
             MockEngine { request ->
                 check(request.url.toString() == url) { "unexpected request ${request.url}" }
+                feedGate?.let {
+                    feedRequested.complete(Unit)
+                    it.await()
+                }
                 respond(rss(serverItems), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/rss+xml"))
             },
         ) {
@@ -264,6 +274,54 @@ class KeryxSdkTest {
             assertFalse(sdk.isRefreshLoopActive)
 
             sdk.startMaintenance()
+            assertTrue(sdk.isRefreshLoopActive)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun anInterruptedStartupSequenceRerunsOnTheNextStartMaintenance() = runBlocking {
+        val sdk = startWithFeedServer(FEED_URL)
+        try {
+            sdk.settingsRepository.flush()
+            sdk.prepareSearchIndex()
+            assertTrue(sdk.feedRepository.subscribeFeed(FEED_URL) is Result.Ok)
+
+            // The startup sequence's refresh stage is held at the server, so it is still running.
+            val gate = CompletableDeferred<Unit>()
+            feedGate = gate
+            sdk.startMaintenance()
+            feedRequested.await()
+            assertTrue(sdk.isStartupMaintenanceActive)
+
+            sdk.stopRefreshLoop()
+            assertFalse(sdk.isStartupMaintenanceActive)
+
+            sdk.startMaintenance()
+            assertTrue(sdk.isStartupMaintenanceActive)
+            gate.complete(Unit)
+            Unit
+        } finally {
+            feedGate?.complete(Unit)
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun aCompletedStartupSequenceIsNotRerunAfterTheLoopRestarts() = runBlocking {
+        val sdk = startWithFeedServer(FEED_URL)
+        try {
+            sdk.settingsRepository.flush()
+            sdk.prepareSearchIndex()
+            assertTrue(sdk.feedRepository.subscribeFeed(FEED_URL) is Result.Ok)
+
+            sdk.startMaintenance()
+            withTimeout(30_000) { while (sdk.isStartupMaintenanceActive) delay(10) }
+
+            sdk.stopRefreshLoop()
+            sdk.startMaintenance()
+            assertFalse(sdk.isStartupMaintenanceActive)
             assertTrue(sdk.isRefreshLoopActive)
         } finally {
             sdk.close()
