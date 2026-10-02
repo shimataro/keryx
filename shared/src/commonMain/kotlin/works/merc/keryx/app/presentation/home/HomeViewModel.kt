@@ -56,7 +56,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
-import works.merc.keryx.app.presentation.settings.ManualSync
+import works.merc.keryx.app.presentation.ManualSync
 
 /**
  * How long the article-change signal must stay quiet before an active search re-runs — short

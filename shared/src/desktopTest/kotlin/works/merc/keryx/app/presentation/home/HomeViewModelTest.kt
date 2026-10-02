@@ -32,8 +32,8 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.presentation.settings.FakeManualSync
-import works.merc.keryx.app.presentation.settings.ManualSync
-import works.merc.keryx.app.presentation.settings.ManualSyncEdge
+import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.singleProviderCloudSession
 import works.merc.keryx.app.data.cloud.TokenClearOutcome
 import works.merc.keryx.app.data.cloud.TokenSaveOutcome

@@ -1,4 +1,4 @@
-package works.merc.keryx.app.presentation.settings
+package works.merc.keryx.app.presentation
 
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,8 +10,9 @@ enum class ManualSyncEdge { Started, Finished }
  * The single "Sync now" action every route shares — Home's toolbar button, the Feed menu item
  * (desktop menu bar and SwiftUI `Commands`), and the cloud-sync settings tab's button — so they
  * run the same sync under the same guard and are enabled and disabled together (see "Actions with
- * more than one route" in `docs/external-spec.md` §9). [CloudSyncController] is the one
- * implementation; Home reaches it through this interface rather than the whole controller.
+ * more than one route" in `docs/external-spec.md` §9).
+ * [works.merc.keryx.app.presentation.settings.CloudSyncController] is the one implementation; Home
+ * reaches it through this interface rather than the whole controller.
  */
 interface ManualSync {
     /**

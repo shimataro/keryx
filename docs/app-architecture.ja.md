@@ -71,7 +71,9 @@
                   `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
                   リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
                   リーダーが共有）、RelativeTime（relativeTimeOf——タイムスタンプの経過時間を
-                  now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）。
+                  now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）、
+                  ManualSync（Home と設定の両方が依存する「今すぐ同期」の契約。実装は
+                  `settings/CloudSyncController`）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
@@ -256,7 +258,7 @@
 
 | 操作 | 唯一の実装 | それを呼ぶ経路 |
 | --- | --- | --- |
-| 今すぐ同期 | `presentation/settings/ManualSync.kt`（`canSyncNow` / `syncNow`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
+| 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
 | OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |

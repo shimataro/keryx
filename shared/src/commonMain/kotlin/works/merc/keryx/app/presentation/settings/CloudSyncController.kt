@@ -30,6 +30,8 @@ import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.awaitCancellableConnect
+import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
 
 /**

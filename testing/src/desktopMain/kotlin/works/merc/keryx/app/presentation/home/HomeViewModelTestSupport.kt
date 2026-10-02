@@ -42,7 +42,7 @@ import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.presentation.settings.CloudSyncController
-import works.merc.keryx.app.presentation.settings.ManualSync
+import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.singleProviderCloudSession
 import kotlin.random.Random
 

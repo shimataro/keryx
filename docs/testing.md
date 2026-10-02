@@ -418,7 +418,7 @@ Cloud-data corruption recovery needs a real cloud connection end to end, so conf
 
 "Sync now" has three routes — the feed list toolbar's cloud button, Feed ▸ Sync now in the menu bar
 (the SwiftUI app's `Commands` too), and the button in Settings ▸ Cloud sync — which all run
-`ManualSync.syncNow()` and follow `ManualSync.canSyncNow` (`presentation/settings/ManualSync.kt`).
+`ManualSync.syncNow()` and follow `ManualSync.canSyncNow` (`presentation/ManualSync.kt`).
 `MenuStateTest`/`HomeViewModelTest`/`CloudSyncControllerTest` cover the predicate and delegation;
 confirm the routes really agree on screen, with a provider connected:
 

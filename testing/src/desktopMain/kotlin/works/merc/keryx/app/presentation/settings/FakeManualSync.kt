@@ -3,6 +3,8 @@ package works.merc.keryx.app.presentation.settings
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.ManualSyncEdge
 
 /**
  * A [ManualSync] for tests of a screen that delegates to it (Home): [canSyncNow] is settable, every

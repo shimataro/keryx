@@ -479,7 +479,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 
 「今すぐ同期」には 3 つの経路——フィードリストのツールバーのクラウドボタン、メニューバーの
 フィード ▸ 今すぐ同期（SwiftUI 版の `Commands` も同様）、設定 ▸ クラウド同期のボタン——があり、
-いずれも `ManualSync.syncNow()` を実行し、`ManualSync.canSyncNow`（`presentation/settings/ManualSync.kt`）
+いずれも `ManualSync.syncNow()` を実行し、`ManualSync.canSyncNow`（`presentation/ManualSync.kt`）
 に従う。判定と委譲は `MenuStateTest`/`HomeViewModelTest`/`CloudSyncControllerTest` がカバーしているが、
 画面上で実際に経路どうしが一致することを、プロバイダを接続した状態で確認する:
 

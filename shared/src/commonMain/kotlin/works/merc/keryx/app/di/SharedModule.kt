@@ -42,7 +42,7 @@ import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.presentation.settings.CloudSyncController
-import works.merc.keryx.app.presentation.settings.ManualSync
+import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.presentation.settings.OpmlTransfer
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
 import works.merc.keryx.app.presentation.settings.PreferencesController

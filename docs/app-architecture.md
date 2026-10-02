@@ -81,7 +81,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the reader's "author · date" meta line, shared by Compose's 3-pane reader and the
                   Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
                   into now/minutes/hours/days/absolute, shared by both apps' notification center
-                  rows). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  rows), ManualSync (the "Sync now" contract Home and Settings both depend on,
+                  implemented by `settings/CloudSyncController`). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -265,7 +266,7 @@ Examples in the code today:
 
 | Action | The one implementation | Routes that call it |
 | --- | --- | --- |
-| Sync now | `presentation/settings/ManualSync.kt` (`canSyncNow` / `syncNow`), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
+| Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
 | Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |

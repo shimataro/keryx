@@ -11,7 +11,7 @@ import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
 import works.merc.keryx.app.presentation.home.newHomeViewModel
-import works.merc.keryx.app.presentation.settings.ManualSync
+import works.merc.keryx.app.presentation.ManualSync
 
 /**
  * Builds a [HomeViewModel] over [driver]/[db], runs [block] against it, then tears the whole
