@@ -126,15 +126,33 @@ struct ArticleListView: View {
             prompt: L("home_search_placeholder")
         )
         .modifier(SearchFocusModifier(focusedPane: focusedPane))
-        // `initial: true`: at a compact width `HomeView` pushes this list in response to the same
+        // Also runs on mount: at a compact width `HomeView` pushes this list in response to the same
         // request, so it may only be mounted after the request was made.
-        .onChange(of: home.pendingSearchFocus, initial: true) { _, pending in
-            guard pending else { return }
-            focusedPane.wrappedValue = .search
-            home.viewModel.consumeSearchFocusRequest()
+        .task(id: home.pendingSearchFocus) {
+            guard home.pendingSearchFocus else { return }
+            await focusSearchField()
         }
         #endif
     }
+
+    #if os(iOS)
+    /// Gives the search field keyboard focus, then consumes the request. A list pushed in response to
+    /// the request does not have its system field in place on the first pass, and an assignment made
+    /// before that is silently dropped — so this re-assigns until it sticks, as
+    /// `HomeView.applyInitialFocus` does for the panes. Bounded, since before iOS 18 the field cannot
+    /// report its focus at all (`SearchFocusModifier`).
+    private func focusSearchField() async {
+        for _ in 0..<ArticleListView.searchFocusAttempts {
+            focusedPane.wrappedValue = .search
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled || focusedPane.wrappedValue == .search { break }
+        }
+        home.viewModel.consumeSearchFocusRequest()
+    }
+
+    /// 50 ms apart: long enough to outlast a navigation push.
+    private static let searchFocusAttempts = 12
+    #endif
 
     #if os(iOS)
     private var searchQueryBinding: Binding<String> {
