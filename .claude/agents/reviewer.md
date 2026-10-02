@@ -38,7 +38,17 @@ If you cannot determine a target, return one line saying so and asking for one. 
 For a whole-tree review, run all perspectives. If the tree is too large for one agent per
 perspective, split by directory and say so in the report — never silently sample.
 
+The caller may also ask for **all perspectives**（全観点で）alongside any target above. That skips the
+content triage in step 2b: every perspective step 2a selects runs.
+
 ## 2. Choose the perspectives
+
+Two passes: **2a** picks candidates from the changed paths, **2b** drops the candidates the diff's
+content gives no reason to run. Each specialist launch is expensive, so 2b exists to keep the
+launch count down; a missed perspective is worse than a wasted one, so 2b only ever drops on clear
+evidence.
+
+### 2a. Candidates by path
 
 Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 
@@ -58,8 +68,9 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 | `.github/workflows/**` | verification |
 | `{shared,composeApp}/src/{commonTest,desktopTest}/**`, `testing/src/**` | verification |
 
-`docs` runs on code changes, not only doc changes: the commonest drift is code moving while
-`app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
+`docs` is a candidate on code changes, not only doc changes: the commonest drift is code moving
+while `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
+Step 2b keeps it only when the docs actually mention what changed.
 
 `state-consistency` covers the whole of `ui/**` on purpose: the divergences it looks for live
 between a ViewModel and the composable that reads it, and a diff touching only one of the two is
@@ -79,7 +90,48 @@ no row here on purpose — treat it as unchecked, not as a clean pass.
   report; say so plainly instead of emitting an empty report (see "No perspective matched" below).
 
 If the caller named specific perspectives — "only the security angle"（セキュリティ観点だけ）— use
-exactly those and skip this table.
+exactly those and skip both this table and step 2b.
+
+### 2b. Triage by content
+
+Narrow the candidates from 2a by what the diff actually changes. Skip this step for a whole-tree
+review, for named perspectives, and for an "all perspectives" request.
+
+Read the diff cheaply — `<target> --stat` for the file list and `<target> -U0` for the changed lines
+only — and search it with `grep -E`. Do not read the whole diff or explore the codebase here; the
+specialists do that.
+
+Apply these whole-file rules first:
+
+- A Kotlin file whose changed lines are **only** comments, KDoc, blank lines, or reordered imports
+  contributes no candidate except Code quality (which still checks that source text is English).
+- A target whose changed files are **only** tests (`{shared,composeApp}/src/{commonTest,desktopTest}/**`,
+  `testing/src/**`) keeps only Verification and Code quality.
+
+Then keep each remaining candidate only if the changed lines (`+` or `-`) show one of its signals:
+
+| Perspective | Keep when the changed lines show |
+| --- | --- |
+| Security | HTTP clients, URLs, redirects; tokens, secrets, credentials, OAuth / PKCE / `state`; raw SQL strings; `File` / `Path` built from a variable; log or exception messages; any change to `gradle/libs.versions.toml` or `**/build.gradle.kts` |
+| Data integrity | `.sq` / `.sqm` changes; query write calls (`insert` / `update` / `upsert` / `delete` / `softDelete` / `mark*`); `transaction`; `*_updated_at`, `deleted_at`, `read_at`, `starred_at`; `IdGenerator`; `LocalSettings`; token storage format; OPML |
+| Sync & merge | always kept — its 2a rows are already narrow |
+| Concurrency | `launch`, `async`, `withContext`, `Dispatchers`, `Mutex` / `withLock`, `synchronized`, `Flow` / `stateIn` / `shareIn`, `CoroutineScope`, `Job`, `Thread`, `SwingUtilities` / `EventQueue`, `close()` / `use {`, `runBlocking`; or any change under `platform/**` |
+| Architecture | added or changed `import`s; `expect` / `actual`; a new file; `Result`, `KeryxException`, `NotificationCenter`, `AppNotification` |
+| Performance | SQL text or query calls; loops and collection pipelines; `Flow` operators; `remember` / `LaunchedEffect` / `derivedStateOf` / `key(` inside composables; network transfer (download, upload, request headers) |
+| UI / i18n | always kept — its 2a rows already require Compose or user-visible text |
+| State vs. display | a ViewModel's exposed `StateFlow` / state fields; selection, filter, focus, pane, or scroll state; `remember` / `rememberSaveable`. A diff that changes only styling (colors, padding, shapes, `Modifier` sizing) or only string resources is dropped |
+| Code quality | any changed Kotlin line, comments included |
+| Verification | any changed Kotlin line other than comments / imports; tests; `.sq` / `.sqm`; `composeResources`; `.github/workflows/**`; Gradle files |
+| Documentation | always kept when `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md`, a `strings.xml` (wording quality), or `gradle/libs.versions.toml` (license-table sync) changed. Otherwise, grep `docs/**` and `README.md` for each changed file's base name and for each public identifier the diff adds, removes, or renames (class, function, constant, table, column, settings key); keep it only on a hit |
+
+Two safeguards:
+
+- **When in doubt, keep.** A signal you cannot judge cheaply counts as present. The specialist's own
+  `Not applicable` early return (`common.md` §2) is the second line of defense, not this step.
+- **Never triage down to nothing.** If 2b would drop every candidate 2a produced, ignore 2b and run
+  all of 2a's candidates.
+
+Record every perspective 2b drops, with a one-phrase reason — the report lists them (step 5).
 
 ## 3. Launch
 
@@ -114,10 +166,11 @@ labels and prose below, and leave code, paths, and identifiers alone.
 ## Review target
 
 - Range: `git diff HEAD` (staged + unstaged) / 7 files / +214 −38
-- Perspectives: Security, Data integrity, Architecture, Concurrency, Performance, Code quality,
-  Verification, Documentation
+- Perspectives: Security, Data integrity, Architecture, Performance, Code quality, Verification
   (changes detected under `domain/**` and `data/**`; UI / i18n skipped — nothing under `ui/**`;
-  Sync & merge skipped — no change to `MergeSql.kt` and friends)
+  Sync & merge skipped — no change to `MergeSql.kt` and friends;
+  Concurrency triaged out — no coroutine / locking / lifecycle change in the diff;
+  Documentation triaged out — changed identifiers not referenced in `docs/**` or `README.md`)
 
 ## Findings
 
@@ -156,6 +209,8 @@ High 2 / Medium 3 / Low 1 (plus 2 needing confirmation)
 | Verification (tests / build) | none |
 
 Skipped: UI / i18n (nothing under `ui/**`), Sync & merge (no change to `MergeSql.kt` and friends)
+Triaged out: Concurrency (no coroutine / locking / lifecycle change), Documentation (changed
+identifiers not referenced in `docs/**` or `README.md`)
 
 Say which findings to fix — by number, by severity, or by perspective.
 ```
@@ -176,11 +231,17 @@ None.
 | … (every perspective that ran, each "none") | |
 
 Skipped: …
+Triaged out: …
 ```
+
+"Skipped" is a perspective no path selected (step 2a); "Triaged out" is one a path selected but the
+diff's content gave no reason to run (step 2b). Keep the two lines separate, each with its reason, so
+the user can tell "nothing here for it" from "judged unnecessary" — and ask for the latter by name.
+Omit a line that would be empty.
 
 ### No perspective matched
 
-When every changed path falls outside step 2's table, no specialist runs at all.
+When every changed path falls outside step 2a's table, no specialist runs at all.
 Do not emit the "No findings" template above — it would read as "reviewed,
 clean" when nothing was actually reviewed. Instead:
 
