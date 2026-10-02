@@ -83,13 +83,18 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   （`presentation/settings/OpmlTransferController` が busy と結果を共有する）。設定を閉じた後に終わった結果は、
   次にデータタブを開いたとき 1 回だけ表示される。記事 URL のコピーは、ボタン・キーボードショートカット・メニューバー・記事行の
   コンテキストメニューのどの経路から行っても、リーダーのコピーボタンに ✓ を表示する
-  （[external-spec.ja.md](external-spec.ja.md#複数の経路から実行できる操作) の「複数の経路から実行できる操作」を参照）。Android だけはプラットフォーム固有の例外で、URL コピーの確認を M3 の `Snackbar` で
+  （[external-spec.ja.md](external-spec.ja.md#複数の経路から実行できる操作) の「複数の経路から実行できる操作」を参照）。Android はプラットフォーム固有の例外の 1 つで、URL コピーの確認を M3 の `Snackbar` で
   表示するが、これは API 33 未満に限られる — API 33 以降は OS 側が既にクリップボードコピーの確認を
   表示するため、Snackbar を出すとそれと重複してしまう（`platform/PlatformOs.kt` の
   `platformShowsOwnCopyConfirmation` を参照）。✓ と同じく、これはリーダーではなく共通のコピー処理
   （`ui/home/ArticleUrlCopier.kt`）が出すので、どの経路でも表示される——リーダーが画面に無いとき
   （電話幅の記事一覧）や、リーダーが表示しているのとは別の行をコピーしたときも含む。コピー 1 回につき
-  Snackbar は 1 つで、表示時間は M3 の標準（Short）。
+  Snackbar は 1 つで、表示時間は M3 の標準（Short）。もう 1 つの例外は iOS（SwiftUI アプリ）で、iOS は
+  クリップボードコピーの確認を OS 側で表示せず、リーダーの ✓ も画面に無いことが多い（長押しした行は選択されず、
+  iPhone 幅ではリーダーが表示されない）ため、どの経路からのコピーでも、画面下部に一時的なトースト（「URL を
+  コピーしました」）を約 2 秒表示し、VoiceOver で 1 回読み上げる（`HomeObservable.copyArticleUrl`。
+  `ArticleUrlCopy.perform` の `confirm` 経由）。macOS の SwiftUI アプリはデスクトップの規約どおり、リーダーの ✓
+  だけでトーストは出さない。
   Android における Snackbar のもう一つの用途は `ui/home/HomeScreen.kt` の `ForegroundAlertSnackbar`（後述）。
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**

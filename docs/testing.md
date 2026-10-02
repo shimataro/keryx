@@ -1311,6 +1311,16 @@ macOS (and on iPad, where the reader shares the screen with the list):
   that article's URL.
 - Feed ▸ Copy feed URL and Feed ▸ Copy site URL copy their URL but do **not** flash the reader's ✓
   (the reader shows an article, not that feed).
+- (macOS) No toast appears for any of these: the reader's ✓ is the only confirmation.
+- (iOS, iPhone and iPad) Long-press an article row that is not the one the reader shows and choose
+  "Copy URL": a "URL copied" toast appears at the bottom of the screen and fades out after about two
+  seconds, and the reader's ✓ does not flash. Copying again before it fades keeps it up for another two
+  seconds rather than hiding it early.
+- (iOS, iPhone width) Go back from the reader to the article list (the reader is no longer on screen),
+  long-press a row (including the one just read) and choose "Copy URL": the toast appears. Copying from
+  the reader's own button (and, with a hardware keyboard, ⌘⇧C) shows the toast as well as the ✓.
+- (iOS) With VoiceOver on, copy a URL from a row's menu, and again from the reader's button: each copy
+  is announced as "URL copied" exactly once, and the toast itself is not focusable.
 
 ### (SwiftUI) Article row menu read state
 

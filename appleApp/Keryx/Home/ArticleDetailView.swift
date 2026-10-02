@@ -51,8 +51,12 @@ struct ArticleDetailView: View {
         .toolbar { toolbarContent }
         .onChange(of: home.copyPulse) { _, _ in
             copyConfirmed = true
+            #if os(macOS)
             // The checkmark is the only other confirmation, and VoiceOver does not see it change.
+            // iOS announces every copy itself (`HomeObservable.copyArticleUrl`), whether or not
+            // this reader is on screen, so announcing here too would say it twice.
             AccessibilityNotification.Announcement(L("article_url_copied")).post()
+            #endif
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
                 copyConfirmed = false

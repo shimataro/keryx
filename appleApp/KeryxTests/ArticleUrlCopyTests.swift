@@ -1,13 +1,15 @@
 import Testing
 
 /// Covers `ArticleUrlCopy`, which every article "Copy URL" route goes through, carrying out the shared
-/// `articleUrlCopyPlan`: what reaches the pasteboard, and when the reader's ✓ pulses.
+/// `articleUrlCopyPlan`: what reaches the pasteboard, when the reader's ✓ pulses, and that every
+/// written copy is confirmed (the iOS toast), whether or not the reader shows that article.
 @Suite
 struct ArticleUrlCopyTests {
     /// Records what a `perform` call copied and how often it pulsed.
     private final class Recorder {
         var copied: [String] = []
         var pulses = 0
+        var confirmations = 0
     }
 
     private func perform(url: String?, articleId: String, selectedId: String?) -> Recorder {
@@ -17,7 +19,8 @@ struct ArticleUrlCopyTests {
             articleId: articleId,
             selectedId: selectedId,
             copy: { recorder.copied.append($0) },
-            pulse: { recorder.pulses += 1 }
+            pulse: { recorder.pulses += 1 },
+            confirm: { recorder.confirmations += 1 }
         )
         return recorder
     }
@@ -28,6 +31,7 @@ struct ArticleUrlCopyTests {
 
         #expect(recorder.copied.isEmpty)
         #expect(recorder.pulses == 0)
+        #expect(recorder.confirmations == 0)
     }
 
     @Test
@@ -36,6 +40,7 @@ struct ArticleUrlCopyTests {
 
         #expect(recorder.copied == ["https://example.com/a1"])
         #expect(recorder.pulses == 1)
+        #expect(recorder.confirmations == 1)
     }
 
     @Test
@@ -44,6 +49,7 @@ struct ArticleUrlCopyTests {
 
         #expect(recorder.copied == ["https://example.com/a2"])
         #expect(recorder.pulses == 0)
+        #expect(recorder.confirmations == 1, "confirmed even though the reader's ✓ does not flash")
     }
 
     @Test
@@ -52,5 +58,6 @@ struct ArticleUrlCopyTests {
 
         #expect(recorder.copied == ["https://example.com/a2"])
         #expect(recorder.pulses == 0)
+        #expect(recorder.confirmations == 1, "confirmed even though the reader's ✓ does not flash")
     }
 }

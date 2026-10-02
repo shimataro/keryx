@@ -1,6 +1,9 @@
 import Foundation
 import KeryxShared
 import Observation
+#if os(iOS)
+import SwiftUI
+#endif
 
 /// Mirrors `HomeViewModel`'s `StateFlow`s as plain `@Observable` properties, so SwiftUI views read
 /// them like any other observable state instead of collecting a `SkieSwiftStateFlow` themselves.
@@ -129,6 +132,15 @@ final class HomeObservable: ObservableAssignment {
     /// same reason Compose's own pulse lives in the screen's `ArticleUrlCopier`, not the ViewModel.
     private(set) var copyPulse: Int = 0
 
+    #if os(iOS)
+    /// The iOS confirmation of every article URL copy (`copyArticleUrl`). iOS shows no confirmation
+    /// of its own, and the reader's ✓ is often not on screen (a long-pressed row is not selected, and
+    /// at iPhone width the reader is not shown), so — as Android below API 33 does with its snackbar —
+    /// every copy is confirmed here. macOS needs none: every route there copies the article the
+    /// always-visible reader shows, whose ✓ is the desktop confirmation.
+    let copyToast = TransientToastState()
+    #endif
+
     init(viewModel: HomeViewModel, makeAddFeedController: @escaping () -> AddFeedController) {
         self.viewModel = viewModel
         self.makeAddFeedController = makeAddFeedController
@@ -164,8 +176,20 @@ final class HomeObservable: ObservableAssignment {
             articleId: articleId,
             selectedId: selectedArticleId,
             copy: copyToPasteboard,
-            pulse: { copyPulse += 1 }
+            pulse: { copyPulse += 1 },
+            confirm: { confirmArticleUrlCopy() }
         )
+    }
+
+    /// The one copy confirmation per UI platform: on iOS the toast, plus a VoiceOver announcement —
+    /// made here for every copy, since the reader (which announces its ✓ on macOS) may not even be on
+    /// screen. Nothing on macOS (desktop convention: the reader's inline ✓, no in-app snackbar).
+    private func confirmArticleUrlCopy() {
+        #if os(iOS)
+        let message = L("article_url_copied")
+        copyToast.show(message)
+        AccessibilityNotification.Announcement(message).post()
+        #endif
     }
 
     /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including
