@@ -1,8 +1,8 @@
 import KeryxShared
 import SwiftUI
 
-/// OS notification permission request (`UNUserNotificationCenter`) is wired in M5 alongside the
-/// rest of the OS-notification plumbing; this tab only exposes the app-level on/off switch for now.
+/// Only the app-level on/off switch: the OS permission request (`UNUserNotificationCenter`) is made
+/// by `KeryxApp` whenever this setting is on, at startup and the moment it is switched on.
 struct NotificationsSettingsTab: View {
     let preferences: PreferencesObservable
 
