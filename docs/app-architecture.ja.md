@@ -64,7 +64,9 @@
                   共有する唯一の OPML の busy・直近の結果・保留中の要求（`OpmlRequest`）。ファイルメニューは
                   `request` するだけで、設定 ▸ データがその要求を実行し（`consumeRequest`。何も実行中でない
                   ときだけ渡す）、結果はデータタブが表示するまで保持される。インポートはアプリのスコープで動くので、
-                  どの UI から始めたものも `KeryxSdk.close()` が待ち合わせ、キャンセルする）、menu/（MenuUiState + computeMenuUiState——
+                  どの UI から始めたものも `KeryxSdk.close()` が待ち合わせ、キャンセルする。インポートの経路——`importDocument`、
+                  Compose のファイル選択、SwiftUI のパネルと開かれたファイルの経路——はすべて `importBegun` で終わる。
+                  これは `tryBegin` で確保済みのインポートを実行し、必ず `finish` する（キャンセル時は結果なし）唯一の処理）、menu/（MenuUiState + computeMenuUiState——
                   メニューの各動的項目の有効・チェック状態。Compose 独自の `Screen` 型ではなく、素の
                   `onHome: Boolean` を受け取る）、Formatting（formatTimestamp、articleMetaText——
                   リーダーの「著者・日付」のメタ行。Compose の 3 ペイン版リーダーと Apple アプリ自身の
@@ -257,6 +259,7 @@
 | 今すぐ同期 | `presentation/settings/ManualSync.kt`（`canSyncNow` / `syncNow`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
+| OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |
 | 待っている OPML の要求で設定 ▸ データを開く | `presentation/settings/OpmlTransferController.kt` の `shouldPresentOpmlRequest`（要求が待っていて、何も実行中でない） | Compose の `App.kt` と SwiftUI の `OpmlRequestPresenter`（`OpmlTransferObservable.shouldPresentRequest` 経由） |
 | 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowMenuState.readAfterContextMenuOpen`。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、ポインタのホバーから求める） |
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |

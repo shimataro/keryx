@@ -136,15 +136,15 @@ class OpmlTransferController(
     fun exportDocument(): String = transfer.exportOpml()
 
     /**
-     * Imports [xml] and maps the outcome to an [OpmlResult], without touching [busy] — for a caller
-     * that already holds the operation via [tryBegin]. `null` [xml] (the file could not be read) and
+     * Imports [xml] and maps the outcome to an [OpmlResult], without touching [busy] — the step
+     * [importBegun] wraps (call that instead, so the operation is always finished). `null` [xml] (the file could not be read) and
      * any failure are [OpmlResult.ImportFailed]; cancellation propagates.
      *
      * The import runs on the app [scope] (on [dispatcher]), not the caller's, so `KeryxSdk.close()` —
      * which cancels and joins that scope — waits for and cancels an import started from any UI.
      * A failure is mapped inside that coroutine, so it never reaches the scope's exception handler.
      * When the caller is cancelled, this waits for the import to actually stop before rethrowing, so
-     * the caller's [finish] never releases [busy] while the import is still writing.
+     * [importBegun]'s [finish] never releases [busy] while the import is still writing.
      */
     suspend fun importResult(xml: String?): OpmlResult {
         if (xml == null) return OpmlResult.ImportFailed
@@ -168,17 +168,29 @@ class OpmlTransferController(
     }
 
     /**
-     * Runs a whole import of an already-read document — [tryBegin], [importResult], [finish] — and
-     * returns `false` without doing anything when an operation is already running.
+     * Finishes an import whose operation the caller already holds ([tryBegin] returned `true`):
+     * runs [importResult] on [xml] and **always** [finish]es — with its outcome, or with `null` when
+     * the caller is cancelled (the [CancellationException] then propagates, after the import has
+     * stopped). The one finish-guaranteeing step every import path shares: [importDocument], Compose's
+     * file-picker import (`SettingsViewModel.importOpml`) and the SwiftUI panel import
+     * (`OpmlTransferObservable.importOpml(from:)`), so none of them writes its own cleanup.
      */
-    suspend fun importDocument(xml: String?): Boolean {
-        if (!tryBegin(OpmlOperation.Importing)) return false
+    suspend fun importBegun(xml: String?) {
         var outcome: OpmlResult? = null
         try {
             outcome = importResult(xml)
         } finally {
             finish(outcome)
         }
+    }
+
+    /**
+     * Runs a whole import of an already-read document — [tryBegin], then [importBegun] — and returns
+     * `false` without doing anything when an operation is already running.
+     */
+    suspend fun importDocument(xml: String?): Boolean {
+        if (!tryBegin(OpmlOperation.Importing)) return false
+        importBegun(xml)
         return true
     }
 

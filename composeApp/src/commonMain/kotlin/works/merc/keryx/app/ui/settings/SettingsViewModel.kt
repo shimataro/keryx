@@ -28,7 +28,9 @@ import works.merc.keryx.app.presentation.settings.PreferencesController
  * [CloudSyncController] / [PreferencesController] / [OpmlTransferController], plus the two things
  * that stay Compose/desktop-only: the in-app updater ([UpdateRepository], since the SwiftUI app
  * updates through the App Store or Sparkle instead) and OPML file picking (native file dialogs are
- * platform-specific; [OpmlTransferController] owns the busy/result state and the document work).
+ * platform-specific). [OpmlTransferController] owns everything else about OPML for both UIs — the
+ * busy/result/request state, the document work, and the always-finishing import step
+ * ([OpmlTransferController.importBegun]) every import path ends in.
  */
 class SettingsViewModel(
     private val cloudSyncController: CloudSyncController,
@@ -180,15 +182,21 @@ class SettingsViewModel(
     fun importOpml() {
         if (!opmlController.tryBegin(OpmlOperation.Importing)) return
         viewModelScope.launch {
-            var result: OpmlResult? = null
-            try {
-                val source = fileSelector.pickOpenFile(opmlFileRequests.import()) ?: return@launch
+            // Held from before the picker: until the read document is handed to importBegun (which
+            // always finishes), a dismissed picker, a failing picker or a cancellation ends it here.
+            val xml = try {
+                val source = fileSelector.pickOpenFile(opmlFileRequests.import())
+                if (source == null) {
+                    opmlController.finish(null)
+                    return@launch
+                }
                 // Only the read hops here; importResult dispatches the import itself.
-                val xml = withContext(dispatcher) { readOrNull(source) }
-                result = opmlController.importResult(xml)
-            } finally {
-                opmlController.finish(result)
+                withContext(dispatcher) { readOrNull(source) }
+            } catch (e: Throwable) {
+                opmlController.finish(null)
+                throw e
             }
+            opmlController.importBegun(xml)
         }
     }
 
@@ -196,10 +204,10 @@ class SettingsViewModel(
      * Imports an already-read OPML document (an `.opml` file the app was opened with); `null` [xml]
      * means reading it failed and finishes with [OpmlResult.ImportFailed]. A no-op while any OPML
      * operation is running. The whole run is [OpmlTransferController.importDocument], which the
-     * SwiftUI app's `OpmlTransferObservable.importDocument(xml:)` calls too. (The file-picker path,
-     * [importOpml], is shared at the level of [OpmlTransferController.tryBegin] /
-     * [OpmlTransferController.importResult] / [OpmlTransferController.finish] instead, because the
-     * operation must be held before the picker opens — the SwiftUI panel path does the same.)
+     * SwiftUI app's `OpmlTransferObservable.importDocument(request:)` calls too. (The file-picker
+     * path, [importOpml], holds the operation via [OpmlTransferController.tryBegin] before the picker
+     * opens and then hands the document to [OpmlTransferController.importBegun] — the same shared,
+     * always-finishing step the SwiftUI panel path and [OpmlTransferController.importDocument] use.)
      */
     fun importDocument(xml: String?) {
         viewModelScope.launch { opmlController.importDocument(xml) }

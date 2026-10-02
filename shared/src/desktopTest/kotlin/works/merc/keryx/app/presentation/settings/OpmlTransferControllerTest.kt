@@ -158,6 +158,53 @@ class OpmlTransferControllerTest {
     }
 
     @Test
+    fun importBegunRecordsTheOutcomeAndFinishes() = runTest {
+        val controller = controller()
+        assertTrue(controller.tryBegin(OpmlOperation.Importing))
+
+        controller.importBegun(ONE_FEED_OPML)
+
+        assertFalse(controller.busy.value)
+        assertEquals(OpmlResult.Imported(added = 1, failed = 0), controller.result.value)
+        assertTrue(controller.tryBegin(OpmlOperation.Exporting), "the operation was released")
+    }
+
+    @Test
+    fun importBegunFinishesAnUnreadableDocumentAsImportFailed() = runTest {
+        val controller = controller()
+        assertTrue(controller.tryBegin(OpmlOperation.Importing))
+
+        controller.importBegun(null)
+
+        assertFalse(controller.busy.value)
+        assertEquals(OpmlResult.ImportFailed, controller.result.value)
+    }
+
+    @Test
+    fun importBegunFinishesWithNoResultWhenTheCallerIsCancelled() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val controller = controller(fetcher(gate = CompletableDeferred(), started = started))
+        assertTrue(controller.tryBegin(OpmlOperation.Importing))
+        var thrown: Throwable? = null
+        val caller = launch(Dispatchers.Default) {
+            try {
+                controller.importBegun(ONE_FEED_OPML)
+            } catch (e: Throwable) {
+                thrown = e
+                throw e
+            }
+        }
+        withTimeout(5_000) { started.await() }
+
+        caller.cancel()
+        withTimeout(5_000) { caller.join() }
+
+        assertIs<CancellationException>(thrown, "cancellation propagates to the caller")
+        assertFalse(controller.busy.value, "finished even though cancelled")
+        assertNull(controller.result.value, "a cancellation is not an ImportFailed")
+    }
+
+    @Test
     fun aSecondOperationIsRefusedWhileOneRuns() {
         val controller = controller()
 

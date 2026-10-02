@@ -71,8 +71,11 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   last result and pending request (`OpmlRequest`) every route and UI shares: the File
                   menu only `request`s, Settings ▸ Data carries the request out (`consumeRequest`,
                   handed out only while nothing runs), a result is kept until the Data tab shows
-                  it, and an import runs on the app scope, so `KeryxSdk.close()` waits for — and
-                  cancels — one started from any UI), menu/ (MenuUiState + computeMenuUiState — enabled/
+                  it, an import runs on the app scope, so `KeryxSdk.close()` waits for — and
+                  cancels — one started from any UI, and every import path — `importDocument`,
+                  Compose's file picker, the SwiftUI panel and opened-file paths — ends in
+                  `importBegun`, the one step that runs an import already held by `tryBegin` and
+                  always `finish`es it, with no result when cancelled), menu/ (MenuUiState + computeMenuUiState — enabled/
                   checked state for every dynamic menu item, taking a plain `onHome: Boolean` rather
                   than Compose's own `Screen` type), Formatting (formatTimestamp, articleMetaText —
                   the reader's "author · date" meta line, shared by Compose's 3-pane reader and the
@@ -265,6 +268,7 @@ Examples in the code today:
 | Sync now | `presentation/settings/ManualSync.kt` (`canSyncNow` / `syncNow`), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
+| Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |
 | Open Settings ▸ Data for a waiting OPML request | `presentation/settings/OpmlTransferController.kt`'s `shouldPresentOpmlRequest` (a request is waiting and nothing runs) | Compose's `App.kt` and SwiftUI's `OpmlRequestPresenter` (through `OpmlTransferObservable.shouldPresentRequest`) |
 | Article row menu's read label | `presentation/home/ArticleListModel.kt`'s `articleReadAfterContextMenuOpen` (read once the menu is open: already read, or the open selected the row) | Compose's `articleRowMenuEntries` and SwiftUI's `ArticleRowMenuState.readAfterContextMenuOpen`; each UI only works out whether its own open selected the row (SwiftUI on macOS: `ArticleRowMenuState.opensBySelecting`, from the pointer hover) |
 | Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓? confirm in-app? — the last from the shared `platformShowsOwnCopyConfirmation` and whether the ✓ confirms on this platform: never where the OS confirms, on a desktop only when the ✓ does not flash, on a touch platform every copy) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |

@@ -3,12 +3,15 @@ import KeryxShared
 import Testing
 
 /// Fakes `OpmlTransferring` — `KeryxTests` is standalone/non-hosted, so this substitutes for a
-/// running `KeryxSdk`'s real `OpmlTransferController`, with the same rules in miniature: one
-/// operation at a time, a request handed out only while nothing runs. `@unchecked Sendable` (not an
-/// `actor`/`@MainActor` class): the Kotlin result types aren't themselves `Sendable`, and an actor's
-/// isolated `importResult(xml:)` would be barred from returning one across the isolation boundary —
-/// a restriction the real controller (a plain, non-isolated conformance) never hits. The mutable
-/// state is protected by a lock instead.
+/// running `KeryxSdk`'s real `OpmlTransferController`, with its rules in miniature: one operation at a
+/// time, a request handed out only while nothing runs, and `importBegun` always finishing. Kept
+/// deliberately minimal: the real controller's ordering and cancellation guarantees are pinned by
+/// `OpmlTransferControllerTest` (and, against the real SDK graph, `KeryxSdkTest`) in `:shared`, which
+/// is the authority — these tests only cover what `OpmlTransferObservable` does with its answers.
+/// `@unchecked Sendable` (not an `actor`/`@MainActor` class): the Kotlin result types aren't
+/// themselves `Sendable`, which an actor's isolated methods would be barred from handing across the
+/// isolation boundary — a restriction the real controller (a plain, non-isolated conformance) never
+/// hits. The mutable state is protected by a lock instead.
 final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
     private let importOutcome: OpmlResult
     private let importDelayNanoseconds: UInt64
@@ -26,6 +29,7 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
     var isRunning: Bool { lock.withLock { running != nil } }
     var currentlyBusy: Bool { isRunning }
     var currentResult: OpmlResult? { lock.withLock { lastResult } }
+    var currentPendingRequest: OpmlRequest? { lock.withLock { pending } }
 
     init(importOutcome: OpmlResult = OpmlResultImported(added: 0, failed: 0), importDelayNanoseconds: UInt64 = 0) {
         self.importOutcome = importOutcome
@@ -51,23 +55,16 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
 
     func exportDocument() -> String { "<opml/>" }
 
-    /// Throws only on cancellation (during the delay), like the real `importResult`.
-    func importResult(xml: String?) async throws -> OpmlResult {
+    /// The real `importBegun`'s shape: imports, then always finishes — with no result when cancelled
+    /// (during the delay), rethrowing the cancellation.
+    func importBegun(xml: String?) async throws {
+        var outcome: OpmlResult?
+        defer { finish(result: outcome) }
         if importDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: importDelayNanoseconds)
         }
         lock.withLock { _importedXml.append(xml) }
-        return xml == nil ? OpmlResultImportFailed.shared : importOutcome
-    }
-
-    /// The real `importDocument`'s shape: refused while running, otherwise begin → import → finish,
-    /// finishing with no result when cancelled.
-    func importDocument(xml: String?) async throws -> KotlinBoolean {
-        guard tryBegin(operation: .importing) else { return KotlinBoolean(bool: false) }
-        var outcome: OpmlResult?
-        defer { finish(result: outcome) }
-        outcome = try await importResult(xml: xml)
-        return KotlinBoolean(bool: true)
+        outcome = xml == nil ? OpmlResultImportFailed.shared : importOutcome
     }
 
     func request(request: OpmlRequest) {
@@ -83,7 +80,10 @@ final class FakeOpmlTransferring: OpmlTransferring, @unchecked Sendable {
     }
 
     func clearResult() {
-        lock.withLock { _clearCount += 1 }
+        lock.withLock {
+            _clearCount += 1
+            lastResult = nil
+        }
     }
 }
 
@@ -141,12 +141,16 @@ struct OpmlTransferObservableTests {
         #expect(result.map { !OpmlTransferObservable.statusText(for: $0).1 } == true)
     }
 
+    private func document(_ xml: String?) -> OpmlRequestImportDocument {
+        OpmlRequestImportDocument(xml: xml)
+    }
+
     @Test
     func anUnreadableOpenedFileFinishesAsImportFailed() async throws {
         let fake = FakeOpmlTransferring()
         let observable = OpmlTransferObservable(controller: fake)
 
-        let task = try #require(observable.importDocument(xml: nil))
+        let task = try #require(observable.importDocument(document(nil)))
         await task.value
 
         let result = try #require(observable.result)
@@ -155,15 +159,74 @@ struct OpmlTransferObservableTests {
     }
 
     @Test
-    func importDocumentIsRefusedWhileAnotherOperationRuns() {
+    func importDocumentRefusedByTheControllerPutsTheRequestBack() {
         let fake = FakeOpmlTransferring()
         let observable = OpmlTransferObservable(controller: fake)
-        _ = observable.beginImport()
+        // Another operation holds the controller — whatever the observable's mirrored state says.
+        #expect(fake.tryBegin(operation: .exporting))
+        let request = document("<opml/>")
 
-        #expect(observable.importDocument(xml: "<opml/>") == nil)
+        #expect(observable.importDocument(request) == nil)
+
         #expect(fake.importedXml.isEmpty)
-        #expect(observable.isBusy, "the running import's state is left as it was")
-        #expect(fake.isRunning)
+        #expect(fake.finishedResults.isEmpty, "the other operation is not finished by this call")
+        #expect(observable.isBusy, "the running operation's state is taken from the controller")
+        #expect(fake.currentPendingRequest === request, "put back, to run once the other operation finishes")
+        #expect(observable.pendingRequest === request)
+    }
+
+    @Test
+    func aRefusedRequestDoesNotReplaceANewerOne() {
+        let fake = FakeOpmlTransferring()
+        let observable = OpmlTransferObservable(controller: fake)
+        #expect(fake.tryBegin(operation: .exporting))
+        let newer = OpmlRequestExportFile.shared
+        observable.request(newer)
+
+        #expect(observable.importDocument(document("<opml/>")) == nil)
+
+        #expect(fake.currentPendingRequest === newer, "the last request still wins")
+    }
+
+    @Test
+    func importDocumentIsNotRefusedByAStaleMirroredBusyState() async throws {
+        let fake = FakeOpmlTransferring(importOutcome: OpmlResultImported(added: 1, failed: 0))
+        let observable = OpmlTransferObservable(controller: fake)
+        // The mirrored state says busy (an operation that has since finished on the controller, before
+        // the flow observer caught up); only the controller's own answer decides.
+        _ = observable.beginImport()
+        fake.finish(result: nil)
+        #expect(observable.isBusy)
+
+        let task = try #require(observable.importDocument(document("<opml/>")))
+        await task.value
+
+        #expect(fake.importedXml == ["<opml/>"])
+        #expect((observable.result as? OpmlResultImported)?.added == 1)
+        #expect(!observable.isBusy)
+    }
+
+    @Test
+    func aSecondRequestArrivingBeforeTheFirstRunStartsIsKeptAndRunNext() async throws {
+        let fake = FakeOpmlTransferring(importDelayNanoseconds: 20_000_000)
+        let observable = OpmlTransferObservable(controller: fake)
+
+        observable.request(document("<first/>"))
+        let first = try #require(observable.takeRequest() as? OpmlRequestImportDocument)
+        let firstRun = try #require(observable.importDocument(first))
+        // Before the first run's Task has had a chance to start, a second .opml file is opened and
+        // the Data tab tries to carry it out.
+        observable.request(document("<second/>"))
+        #expect(observable.takeRequest() == nil, "not handed out while the first holds the controller")
+        #expect(observable.pendingRequest != nil, "the second request is still waiting")
+
+        await firstRun.value
+        let second = try #require(observable.takeRequest() as? OpmlRequestImportDocument)
+        await observable.importDocument(second)?.value
+
+        #expect(fake.importedXml == ["<first/>", "<second/>"], "both documents were imported, in order")
+        #expect(observable.pendingRequest == nil)
+        #expect(!observable.isBusy)
     }
 
     @Test
@@ -171,19 +234,18 @@ struct OpmlTransferObservableTests {
         let fake = FakeOpmlTransferring(importOutcome: OpmlResultImported(added: 2, failed: 0), importDelayNanoseconds: 50_000_000)
         let observable = OpmlTransferObservable(controller: fake)
         // A previous result, which starting a new import must clear at once.
-        await observable.importDocument(xml: "<opml/>")?.value
+        await observable.importDocument(document("<opml/>"))?.value
         #expect(observable.result != nil)
 
-        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        let task = try #require(observable.importDocument(document("<opml/>")))
         #expect(observable.isBusy, "busy before the controller's flow catches up")
         #expect(observable.result == nil)
-        #expect(observable.importDocument(xml: "<opml/>") == nil, "no second start while running")
         await task.value
 
         #expect(!observable.isBusy)
         #expect(!fake.isRunning)
         #expect((observable.result as? OpmlResultImported)?.added == 2)
-        #expect(fake.importedXml == ["<opml/>", "<opml/>"], "the run happened once")
+        #expect(fake.importedXml == ["<opml/>", "<opml/>"], "each run happened once")
         #expect(fake.finishedResults.count == 2, "finished by the controller once per run")
     }
 
@@ -192,7 +254,7 @@ struct OpmlTransferObservableTests {
         let fake = FakeOpmlTransferring(importDelayNanoseconds: 5_000_000_000)
         let observable = OpmlTransferObservable(controller: fake)
 
-        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        let task = try #require(observable.importDocument(document("<opml/>")))
         task.cancel()
         await task.value
 
@@ -218,23 +280,6 @@ struct OpmlTransferObservableTests {
         #expect(!observable.isBusy)
         #expect(!fake.isRunning)
         #expect(observable.result == nil, "a cancellation is not an ImportFailed")
-    }
-
-    @Test
-    func importDocumentRefusedByTheControllerTakesTheControllersState() async throws {
-        let fake = FakeOpmlTransferring()
-        let observable = OpmlTransferObservable(controller: fake)
-        // Another operation holds the controller before the observable has seen it (its flow has
-        // not caught up), so the observable's own guard lets the call through.
-        #expect(fake.tryBegin(operation: .exporting))
-
-        let task = try #require(observable.importDocument(xml: "<opml/>"))
-        await task.value
-
-        #expect(observable.isBusy, "the other operation is still running")
-        #expect(observable.result == nil)
-        #expect(fake.importedXml.isEmpty)
-        #expect(fake.finishedResults.isEmpty, "the other operation is not finished by this call")
     }
 
     @Test
@@ -273,7 +318,7 @@ struct OpmlTransferObservableTests {
     func aResultIsShownOnceAndThenCleared() async throws {
         let fake = FakeOpmlTransferring(importOutcome: OpmlResultImported(added: 3, failed: 0))
         let observable = OpmlTransferObservable(controller: fake)
-        let task = try #require(observable.importDocument(xml: "<opml/>"))
+        let task = try #require(observable.importDocument(document("<opml/>")))
         await task.value
 
         observable.showPendingResult()

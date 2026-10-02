@@ -110,13 +110,14 @@ struct DataSettingsTab: View {
         }
         // Carries out an import/export asked for outside this tab (the File menu, an opened .opml
         // file) here, so it gets the same panel, spinner and result as the buttons above — matching
-        // Compose's `DataTab`. Waits while another operation runs (`takeRequest()` is `nil` then).
+        // Compose's `DataTab`. Waits while another operation runs (`takeRequest()` is `nil` then); a
+        // taken import the controller still refuses is put back by `importDocument(_:)`, never lost.
         .task(id: RequestTrigger(pending: opmlTransfer.pendingRequest != nil, busy: opmlTransfer.isBusy)) {
             guard let request = opmlTransfer.takeRequest() else { return }
             switch onEnum(of: request) {
             case .importFile: startImport()
             case .exportFile: startExport()
-            case .importDocument(let document): opmlTransfer.importDocument(xml: document.xml)
+            case .importDocument(let document): opmlTransfer.importDocument(document)
             }
         }
         // Shows a finished result once — including one that finished while Settings was closed.

@@ -1,8 +1,10 @@
 package works.merc.keryx.app.sdk
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -18,6 +20,7 @@ import works.merc.keryx.app.platform.FileSystemExtras
 import works.merc.keryx.app.platform.RawSqliteConnection
 import works.merc.keryx.app.tempFilePath
 import works.merc.keryx.app.presentation.settings.OpmlRequest
+import works.merc.keryx.app.presentation.settings.OpmlResult
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -280,6 +283,29 @@ class KeryxSdkTest {
             // An unreadable file is still requested, so the Data tab shows the failure.
             sdk.importOpenedOpml(null)
             assertEquals(OpmlRequest.ImportDocument(null), sdk.opmlController.pendingRequest.value)
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun theRealOpmlControllerHoldsAnImportedDocumentUntilItFinishesAndRefusesASecondRun() = runTest {
+        val sdk = start()
+        try {
+            val controller = sdk.opmlController
+            // No feeds, so the import needs no network.
+            val document = "<opml><body></body></opml>"
+
+            // UNDISPATCHED: runs up to the import's first suspension (awaiting the import on the app
+            // scope), so the controller is held when this returns and the run cannot finish before
+            // the test body suspends.
+            val first = async(start = CoroutineStart.UNDISPATCHED) { controller.importDocument(document) }
+            assertTrue(controller.busy.value, "busy from the moment the import begins")
+            assertFalse(controller.importDocument(document), "a second run is refused while the first holds it")
+
+            assertTrue(first.await())
+            assertFalse(controller.busy.value)
+            assertEquals(OpmlResult.Imported(added = 0, failed = 0), controller.result.value)
         } finally {
             sdk.close()
         }
