@@ -420,6 +420,41 @@ private struct SidebarDeleteAlerts: ViewModifier {
     @Bindable var dialogs: SidebarDialogState
 
     func body(content: Content) -> some View {
+        #if os(iOS)
+        // A confirmation dialog (an action sheet on iPhone), not an alert: the HIG asks for one when
+        // someone confirms an action they just chose, and it keeps the destructive choice apart from
+        // Cancel.
+        content
+            .confirmationDialog(
+                dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
+                isPresented: isPresentedBinding($dialogs.deletingFolder),
+                titleVisibility: .visible,
+                presenting: dialogs.deletingFolder
+            ) { folder in
+                Button(L("common_delete"), role: .destructive) { home.viewModel.deleteFolder(id: folder.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            }
+            .confirmationDialog(
+                dialogs.deletingTag.map { LF("home_delete_tag_confirm", $0.name) } ?? "",
+                isPresented: isPresentedBinding($dialogs.deletingTag),
+                titleVisibility: .visible,
+                presenting: dialogs.deletingTag
+            ) { tag in
+                Button(L("common_delete"), role: .destructive) { home.viewModel.deleteTag(id: tag.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            }
+            .confirmationDialog(
+                dialogs.unsubscribingFeed.map { LF("home_unsubscribe_title", $0.custom_title ?? $0.title) } ?? "",
+                isPresented: isPresentedBinding($dialogs.unsubscribingFeed),
+                titleVisibility: .visible,
+                presenting: dialogs.unsubscribingFeed
+            ) { feed in
+                Button(L("home_unsubscribe_menu"), role: .destructive) { home.viewModel.unsubscribeFeed(id: feed.id) }
+                Button(L("common_cancel"), role: .cancel) {}
+            } message: { _ in
+                Text(L("home_unsubscribe_body"))
+            }
+        #else
         content
             .alert(
                 dialogs.deletingFolder.map { LF("home_delete_folder_confirm", $0.name) } ?? "",
@@ -447,6 +482,7 @@ private struct SidebarDeleteAlerts: ViewModifier {
             } message: { _ in
                 Text(L("home_unsubscribe_body"))
             }
+        #endif
     }
 
     private func isPresentedBinding<T>(_ source: Binding<T?>) -> Binding<Bool> {
