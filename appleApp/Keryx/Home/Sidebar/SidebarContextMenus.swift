@@ -80,7 +80,12 @@ enum SidebarContextMenus {
             UIAction(title: L("home_new_tag"), image: UIImage(systemName: "plus")) { _ in dialogs.creatingTagForFeed = feed },
         ])
         let siteAttributes: UIMenuElement.Attributes = ArticleListModelKt.hasUsableUrl(url: feed.site_url) ? [] : .disabled
-        return UIMenu(children: [
+        // The warning icon in the row has no hover tooltip on touch, so an erroring feed's menu says
+        // why: the same two localized reasons as the row's accessibility label (never the raw
+        // `last_error` text).
+        let status = SidebarRowStaticContent(feed: feed)
+        let reason = status.isErroring ? L(status.isGone ? "home_feed_gone" : "home_feed_error") : ""
+        return UIMenu(title: reason, children: [
             UIMenu(options: .displayInline, children: [
                 UIAction(title: L("home_refresh"), image: UIImage(systemName: "arrow.clockwise")) { _ in home.refreshFeed(feed) },
                 moveToFolder,

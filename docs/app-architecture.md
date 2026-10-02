@@ -1329,7 +1329,9 @@ view on iOS.
   (`Home/Sidebar/SidebarContextMenus.swift`), with the same items, order, enablement and checkmarks as the
   macOS SwiftUI menus — a SwiftUI `.contextMenu` inside a cell would compete with the cell's own lift and
   drag. Opening a menu does not select its row (as in the system apps, and Android's long-press menu): the
-  menu is built from the pressed row itself, so its actions land on that row whatever is selected.
+  menu is built from the pressed row itself, so its actions land on that row whatever is selected. An erroring
+  feed's menu is titled with the reason (gone, or a fetch error) — the row's warning icon has no hover tooltip
+  on touch.
 - **Renaming** a folder, tag or feed opens the same form sheet that creates one (`NamePromptSheet`, Cancel /
   Save in the navigation bar, a Clear button at the end of the name field), not an in-row editor: an
   Escape-driven editor inside a cell does not suit touch, and the HIG's cancel is the sheet's Cancel. It is
