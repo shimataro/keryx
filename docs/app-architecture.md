@@ -43,7 +43,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
-                  actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListModel —
+                  actions; ArticleContentCache, HomeRefreshController, NewArticleTracking; FeedListExpansion —
+                  which folders/tags are collapsed/expanded, persisted device-locally; SelectionReadIntents —
+                  the explicit read/unread actions taken while a selection's body is still loading, so they win
+                  over that selection's implicit read; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
                   the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —

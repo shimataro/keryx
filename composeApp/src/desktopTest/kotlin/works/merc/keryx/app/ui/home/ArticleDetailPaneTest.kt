@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.domain.ArticleListRow
@@ -26,6 +27,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertContains
 import kotlin.test.assertTrue
+
+/** The size every case lays the pane out at. */
+private val PANE_TEST_SIZE = DpSize(400.dp, 500.dp)
 
 /**
  * `ArticleDetailPaneContent` composes its native reader unconditionally, regardless of whether an
@@ -44,7 +48,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -63,7 +67,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -79,7 +83,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -98,7 +102,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(url = ""),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -113,7 +117,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(url = "file:///etc/passwd"),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -130,7 +134,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onOpenInBrowser = { opened += it },
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -148,7 +152,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
         }
@@ -165,7 +169,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(content = "   ", summary = "fallback summary"),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, body, _, _ -> capturedBody = body; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -182,7 +186,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, articleUrl, _ -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -198,7 +202,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = null,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, articleUrl, _ -> capturedArticleUrl = articleUrl; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -214,7 +218,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = article,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onCopyUrl = { copied += it },
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -236,7 +240,7 @@ class ArticleDetailPaneTest {
             CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
                 ArticleDetailPaneContent(
                     article = testArticle(),
-                    modifier = Modifier.size(400.dp, 500.dp),
+                    modifier = Modifier.size(PANE_TEST_SIZE),
                     reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
                 )
             }
@@ -257,7 +261,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 copyPulse = copyPulse,
                 onCopyUrl = { copyPulse++ },
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
@@ -280,7 +284,7 @@ class ArticleDetailPaneTest {
             CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
                 ArticleDetailPaneContent(
                     article = testArticle(),
-                    modifier = Modifier.size(400.dp, 500.dp),
+                    modifier = Modifier.size(PANE_TEST_SIZE),
                     copyPulse = 5,
                     reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
                 )
@@ -298,7 +302,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 copyPulse = copyPulse,
                 reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
             )
@@ -321,7 +325,7 @@ class ArticleDetailPaneTest {
                 if (shown) {
                     ArticleDetailPaneContent(
                         article = testArticle(),
-                        modifier = Modifier.size(400.dp, 500.dp),
+                        modifier = Modifier.size(PANE_TEST_SIZE),
                         copyPulse = copyPulse,
                         reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
                     )
@@ -356,7 +360,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
@@ -373,7 +377,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = false,
@@ -394,7 +398,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = null,
                 isTouchPrimary = true,
@@ -416,7 +420,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = null,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 isTouchPrimary = true,
@@ -433,7 +437,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { false }, { true }),
                 isTouchPrimary = true,
@@ -451,7 +455,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle(),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 onNavigateUp = {},
                 swipeNavigation = ArticleSwipeNavigation({ invoked = true }, {}, { true }, { true }),
                 isTouchPrimary = true,
@@ -482,7 +486,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = articles[1],
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 isTouchPrimary = true,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 readerPaging = pagingFor(articles, selected = articles[1]),
@@ -508,7 +512,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = selected,
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 isTouchPrimary = true,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 // Only the selected article's own body is supplied, mirroring the moment a page
@@ -536,7 +540,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = testArticle("a1"),
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 reader = { _, _, _, _ -> readerCalls++; Box(Modifier.fillMaxSize()) },
             )
         }
@@ -560,7 +564,7 @@ class ArticleDetailPaneTest {
         setContent {
             ArticleDetailPaneContent(
                 article = articles[0],
-                modifier = Modifier.size(400.dp, 500.dp),
+                modifier = Modifier.size(PANE_TEST_SIZE),
                 isTouchPrimary = false,
                 swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
                 readerPaging = pagingFor(articles, selected = articles[0]),

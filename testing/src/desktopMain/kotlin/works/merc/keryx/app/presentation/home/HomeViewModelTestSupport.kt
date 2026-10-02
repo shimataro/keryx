@@ -204,17 +204,18 @@ fun newHomeViewModel(
             activityCenter, feedRepository, syncRepository, cloudSession, NewArticleNotifier(),
             settingsRepository, FakeNotificationMessages(),
         )
-        val ownedManualSync = if (manualSync == null) {
-            CloudSyncController(
-                cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository),
-                activityCenter, settingsRepository, Dispatchers.Unconfined,
-            ).also { controller -> cleanupOnFailure += { controller.viewModelScope.cancel() } }
-        } else {
-            null
+        // The controller this fixture creates (and so must tear down) when the caller passed none.
+        var ownedManualSync: CloudSyncController? = null
+        val effectiveManualSync: ManualSync = manualSync ?: CloudSyncController(
+            cloudSession, syncRepository, CloudConnectionService(cloudSession, settingsRepository, syncRepository),
+            activityCenter, settingsRepository, Dispatchers.Unconfined,
+        ).also { controller ->
+            ownedManualSync = controller
+            cleanupOnFailure += { controller.viewModelScope.cancel() }
         }
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
-            syncRepository, activityCenter, clock, refreshCycleRunner, manualSync ?: ownedManualSync!!,
+            syncRepository, activityCenter, clock, refreshCycleRunner, effectiveManualSync,
             Dispatchers.Unconfined, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(

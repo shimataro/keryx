@@ -13,6 +13,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** The fixed "now" every tray-click case evaluates at; recency boundaries are offsets from it. */
+private const val NOW_MS = 100_000L
+
 private val SOME_ASSET =
     UpdateAsset("Keryx-2.0.0-macos-arm64.zip", "https://x", 100L, "a".repeat(64), UpdateAssetKind.MAC_APP_ZIP)
 
@@ -30,7 +33,7 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
@@ -44,7 +47,7 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 99_000L,
                 recencyWindowMs = 5_000L,
             ),
@@ -58,7 +61,7 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 95_000L,
                 recencyWindowMs = 5_000L,
             ),
@@ -86,7 +89,7 @@ class TrayActionPolicyTest {
                 windowVisible = false,
                 windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
@@ -100,7 +103,7 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = false,
                 windowFocused = false,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
@@ -125,7 +128,7 @@ class TrayActionPolicyTest {
                 windowVisible = visible,
                 windowMinimized = minimized,
                 windowFocused = focused,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             )
@@ -140,7 +143,7 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = true,
                 windowFocused = true,
-                nowMillis = 100_000L,
+                nowMillis = NOW_MS,
                 lastNotificationSentAtMillis = 0L,
                 recencyWindowMs = 5_000L,
             ),
@@ -206,7 +209,7 @@ class TrayActionPolicyTest {
                     val expected = if (visible && !minimized && focused) TrayWindowAction.Hide else TrayWindowAction.Activate
                     assertEquals(
                         expected,
-                        trayIconAction(visible, minimized, focused, nowMillis = 100_000L),
+                        trayIconAction(visible, minimized, focused, nowMillis = NOW_MS),
                         "visible=$visible minimized=$minimized focused=$focused",
                     )
                 }
@@ -218,7 +221,7 @@ class TrayActionPolicyTest {
     fun `icon click activates a minimized window even while it is focused`() {
         assertEquals(
             TrayWindowAction.Activate,
-            trayIconAction(windowVisible = true, windowMinimized = true, windowFocused = true, nowMillis = 100_000L),
+            trayIconAction(windowVisible = true, windowMinimized = true, windowFocused = true, nowMillis = NOW_MS),
         )
     }
 
@@ -228,8 +231,8 @@ class TrayActionPolicyTest {
             for (minimized in listOf(true, false)) {
                 for (focused in listOf(true, false)) {
                     assertEquals(
-                        trayIconAction(visible, minimized, focused, nowMillis = 100_000L, lastNotificationSentAtMillis = NO_NOTIFICATION_MILLIS),
-                        trayIconAction(visible, minimized, focused, nowMillis = 100_000L),
+                        trayIconAction(visible, minimized, focused, nowMillis = NOW_MS, lastNotificationSentAtMillis = NO_NOTIFICATION_MILLIS),
+                        trayIconAction(visible, minimized, focused, nowMillis = NOW_MS),
                         "visible=$visible minimized=$minimized focused=$focused",
                     )
                 }
@@ -245,8 +248,8 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
-                lastNotificationSentAtMillis = 100_000L - TRAY_ACTION_NOTIFICATION_RECENCY_MS + 1,
+                nowMillis = NOW_MS,
+                lastNotificationSentAtMillis = NOW_MS - TRAY_ACTION_NOTIFICATION_RECENCY_MS + 1,
             ),
         )
     }
@@ -259,8 +262,8 @@ class TrayActionPolicyTest {
                 windowVisible = true,
                 windowMinimized = false,
                 windowFocused = true,
-                nowMillis = 100_000L,
-                lastNotificationSentAtMillis = 100_000L - TRAY_ACTION_NOTIFICATION_RECENCY_MS,
+                nowMillis = NOW_MS,
+                lastNotificationSentAtMillis = NOW_MS - TRAY_ACTION_NOTIFICATION_RECENCY_MS,
             ),
         )
     }

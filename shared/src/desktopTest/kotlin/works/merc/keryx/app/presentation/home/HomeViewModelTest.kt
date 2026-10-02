@@ -62,6 +62,7 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.CountingSqlDriver
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
@@ -72,6 +73,7 @@ import works.merc.keryx.app.insertTag
 import works.merc.keryx.app.stampArticleDeleted
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -206,6 +208,9 @@ class HomeViewModelTest {
         // Overridable so a test can pause a read/star write mid-flight (e.g. with a virtual-time
         // StandardTestDispatcher) instead of the default Unconfined, which always runs it inline.
         dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // The ViewModel's background dispatcher (flows, selectArticle's body lookup) — overridable
+        // so a test can hold a hydration mid-flight (e.g. with a HoldingDispatcher).
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         // Consulted once per sync() — a test can count invocations to tell whether a sync ran.
         // Passing one also connects the CloudSession (a client ID plus stored tokens), since a
         // refresh-then-sync cycle only syncs while a provider is connected.
@@ -256,7 +261,7 @@ class HomeViewModelTest {
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, activityCenter, clock, refreshCycleRunner, manualSync,
-            Dispatchers.Unconfined,
+            dispatcher,
             // dbWriteDispatcher: Unconfined by default so read/star writes run inline for
             // deterministic assertions; overridable via the dbWriteDispatcher parameter above.
             dbWriteDispatcher,
@@ -954,7 +959,8 @@ class HomeViewModelTest {
     /**
      * A sync merge can tombstone the row between the list emission the user clicked and the click
      * itself. Blanking the reader on that race would be worse than leaving the previous article up,
-     * so the selection is kept; the read write still goes out (it is a no-op on a tombstone).
+     * so the selection is kept and the pin the selection gave the row is taken back; the read write
+     * still goes out, and leaves the deletion itself untouched.
      */
     @Test
     fun selectingAnArticleTombstonedSinceTheEmissionKeepsThePreviousSelection() = runTest {
@@ -978,6 +984,10 @@ class HomeViewModelTest {
         // step re-add it to the visible list, and persisting it would restore it on the next launch.
         assertTrue(vm.articles.value.none { it.id == "a2" && it.is_read == 1L })
         assertEquals("a1", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
+        // The read write that still went out must leave the deletion itself untouched.
+        val dead = db.articlesQueries.getById("a2").executeAsOne()
+        assertEquals(10L, dead.deleted_at)
+        assertEquals(10L, dead.deleted_updated_at)
     }
 
     /**
@@ -1178,6 +1188,208 @@ class HomeViewModelTest {
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, vm.selectedArticle.value?.is_read)
         assertEquals("a1", vm.selectedArticle.value?.id)
+    }
+
+    /**
+     * One feed holding an unread article per id in [ids] (newest first), and a ViewModel whose
+     * background [dispatcher] — the one `selectArticle`'s body lookup runs on — the test controls.
+     *
+     * @return The ViewModel, already subscribed and settled.
+     */
+    private fun TestScope.newViewModelWithHydrationOn(dispatcher: CoroutineDispatcher, vararg ids: String): HomeViewModel {
+        db.insertFeed("f1")
+        ids.forEachIndexed { index, id ->
+            val order = (ids.size - index).toLong()
+            db.insertArticle(id, "f1", isRead = 0L, publishedAt = order, createdAt = order, content = "<p>$id</p>")
+        }
+        val vm = newViewModel(dispatcher = dispatcher)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        return vm
+    }
+
+    private fun HomeViewModel.row(id: String) = articles.value.single { it.id == id }
+
+    private fun dbIsRead(id: String) = db.articlesQueries.getById(id).executeAsOne().is_read
+
+    /**
+     * A right-click on an unselected row selects it (its `onOpen`) and then runs "Mark as unread"
+     * while the selection's body lookup can still be waiting (e.g. out a sync's busy_timeout). The
+     * explicit unread must win everywhere: the selection's own read write is enqueued at select
+     * time, so it lands before the unread one, and the late hydration must not show it read in the
+     * reader.
+     */
+    @Test
+    fun markingUnreadWhileTheSelectionIsStillLoadingWins() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1")
+        val row = vm.row("a1")
+
+        holding.hold()
+        vm.selectArticle(row)
+        testScheduler.advanceUntilIdle()
+        vm.setRead(row, read = false)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+        assertEquals(0L, vm.row("a1").is_read)
+    }
+
+    /** Without an explicit intent in between, a held hydration still ends up read everywhere. */
+    @Test
+    fun aHeldSelectionWithoutAnExplicitIntentEndsUpRead() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+        assertEquals(1L, vm.row("a1").is_read)
+    }
+
+    /**
+     * An intent made *before* a selection must not override it: selecting the article again after
+     * "mark as unread" is a fresh "read", and its writes land read → unread → read.
+     */
+    @Test
+    fun anUnreadIntentMadeBeforeAReselectionDoesNotOverrideIt() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1")
+        val row = vm.row("a1")
+
+        holding.hold()
+        vm.selectArticle(row)
+        vm.setRead(row, read = false)
+        vm.selectArticle(row.copy(is_read = 0L))
+        testScheduler.advanceUntilIdle()
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+        assertEquals(1L, vm.row("a1").is_read)
+    }
+
+    /**
+     * Two selections of the same article, the older one's lookup finishing last: the reader must
+     * keep the newer one's result. Here the older selection saw a later "mark as unread" that the
+     * newer one supersedes, so letting it through would show the article unread while the DB says
+     * read.
+     */
+    @Test
+    fun anOlderSelectionOfTheSameArticleFinishingLastDoesNotOverwriteTheReader() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1")
+        val row = vm.row("a1")
+
+        parking.hold()
+        vm.selectArticle(row)
+        val older = parking.parkLast()
+        vm.setRead(row, read = false)
+        vm.selectArticle(row.copy(is_read = 0L))
+        val newer = parking.parkLast()
+        settle(parking)
+        parking.run(newer)
+        settle(parking)
+        parking.run(older)
+        settle(parking)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
+     * The reader's own "mark as unread" ([HomeViewModel.markSelectedUnread]) made while a
+     * re-selection of the displayed article is still loading wins, just like [HomeViewModel.setRead].
+     */
+    @Test
+    fun markSelectedUnreadWhileAReselectionIsStillLoadingWins() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1")
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+
+        holding.hold()
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.markSelectedUnread()
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+        assertEquals(0L, vm.row("a1").is_read)
+    }
+
+    /**
+     * "Mark all read" after a "mark as unread" on a still-loading selection is the newest intent: the
+     * reader must end up read like the DB, not keep the earlier unread.
+     */
+    @Test
+    fun markAllReadAfterAnUnreadIntentOnALoadingSelectionWins() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1", "a2")
+        val row = vm.row("a1")
+
+        holding.hold()
+        vm.selectArticle(row)
+        vm.setRead(row, read = false)
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
+     * Under unread-only, the selection's read write can commit while its body lookup is still
+     * waiting. The row must stay in the list (read) through that window, not vanish until the
+     * hydration catches up.
+     */
+    @Test
+    fun unreadOnlyKeepsASelectedRowWhoseReadWriteLandedBeforeItsHydration() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        parking.hold()
+        vm.selectArticle(vm.row("a1"))
+        val hydration = parking.parkLast()
+        settle(parking)
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(1L, vm.row("a1").is_read)
+
+        parking.run(hydration)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.row("a1").is_read)
+        assertEquals("a1", vm.selectedArticle.value?.id)
+    }
+
+    /** Pumps [parking]'s queued (non-parked) blocks and the test scheduler until both are idle. */
+    private fun TestScope.settle(parking: ParkingDispatcher) {
+        do {
+            parking.drain()
+            testScheduler.advanceUntilIdle()
+        } while (parking.hasQueued())
     }
 
     @Test
@@ -4844,3 +5056,53 @@ private const val DISCOVERY_HTML = """<html><head>
 <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="RSS"/>
 <link rel="alternate" type="application/atom+xml" href="/atom.xml" title="Atom"/>
 </head><body>site</body></html>"""
+
+/**
+ * Like [HoldingDispatcher], but lets a test set individual queued blocks aside ([parkLast]) and run
+ * them in any order ([run]), while everything else queued can be drained on its own ([drain]).
+ * `selectArticle`'s body lookup is the last block it dispatches, so [parkLast] right after the call
+ * captures that hydration — and only it — whatever DB-flow work the call queued before it.
+ */
+private class ParkingDispatcher : CoroutineDispatcher() {
+    private val lock = Any()
+    private val queue = ArrayDeque<Runnable>()
+    private val parked = mutableListOf<Runnable>()
+    private var holding = false
+
+    fun hold() {
+        synchronized(lock) { holding = true }
+    }
+
+    /** Sets the most recently queued block aside until [run] or [release]. */
+    fun parkLast(): Runnable = synchronized(lock) { queue.removeLast().also { parked += it } }
+
+    fun hasQueued(): Boolean = synchronized(lock) { queue.isNotEmpty() }
+
+    /** Runs every queued (non-parked) block, including ones queued while draining. */
+    fun drain() {
+        while (true) {
+            val next = synchronized(lock) { queue.removeFirstOrNull() } ?: return
+            next.run()
+        }
+    }
+
+    /** Runs one parked block on the calling thread. */
+    fun run(block: Runnable) {
+        synchronized(lock) { check(parked.remove(block)) { "not parked" } }
+        block.run()
+    }
+
+    /** Stops holding and runs every parked, then every queued, block. */
+    fun release() {
+        val drained = synchronized(lock) {
+            holding = false
+            (parked + queue).also { parked.clear(); queue.clear() }
+        }
+        drained.forEach { it.run() }
+    }
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        val queued = synchronized(lock) { holding.also { if (it) queue.addLast(block) } }
+        if (!queued) block.run()
+    }
+}
