@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import org.koin.core.Koin
+import org.koin.core.module.Module
 import org.koin.dsl.koinApplication
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.CloudStorageAvailability
@@ -26,6 +27,7 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
+import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
@@ -76,6 +78,9 @@ class KeryxSdk private constructor(private val koin: Koin) {
     val syncRepository: SyncRepository get() = koin.get()
 
     val settingsRepository: SettingsRepository get() = koin.get()
+
+    /** Test-only handle on the feed subscriptions, which no screen reaches through this class. */
+    internal val feedRepository: FeedRepository get() = koin.get()
 
     val cloudSession: CloudSession get() = koin.get()
 
@@ -344,6 +349,22 @@ class KeryxSdk private constructor(private val koin: Koin) {
             dataDirectory: String?,
             openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
             useDataProtectionKeychain: Boolean = false,
+        ): KeryxSdk = startWithModules(
+            newArticlesText, postOsNotification, dataDirectory, openAuthorization, useDataProtectionKeychain,
+            extraModules = emptyList(),
+        )
+
+        /**
+         * [start] with [extraModules] registered after the production modules, so they override its
+         * bindings — a test seam (e.g. a `MockEngine` `HttpClient`). `internal`, so Swift never sees it.
+         */
+        internal fun startWithModules(
+            newArticlesText: (count: Int) -> String,
+            postOsNotification: (message: String, count: Int) -> Unit,
+            dataDirectory: String?,
+            openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
+            useDataProtectionKeychain: Boolean = false,
+            extraModules: List<Module>,
         ): KeryxSdk {
             AppDirs.rootOverride = dataDirectory
             val messages = object : NotificationMessages {
@@ -361,6 +382,8 @@ class KeryxSdk private constructor(private val koin: Koin) {
                     presentationModule(),
                     applePlatformModule(messages, sink, authorizationLauncher, useDataProtectionKeychain),
                 )
+                // Last, so a test's module overrides the production binding of the same type.
+                modules(extraModules)
             }.koin
             // Open the database now, so a too-new file is reported here, as a Swift error — unwrapped
             // from Koin's own instance-creation wrapper so the app can recognise it. A failed start

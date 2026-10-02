@@ -1,16 +1,25 @@
 package works.merc.keryx.app.sdk
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import org.koin.dsl.module
 import works.merc.keryx.app.core.DB_FILE_NAME
+import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.DatabaseTooNewException
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.OAuthCallbackParams
@@ -29,6 +38,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+private const val FEED_URL = "https://example.com/feed.xml"
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class KeryxSdkTest {
@@ -53,6 +64,33 @@ class KeryxSdkTest {
         postOsNotification = { _, _ -> },
         dataDirectory = dir,
     )
+
+    private var serverItems = 1
+
+    private fun rss(articleCount: Int) = buildString {
+        append("""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed</title><link>https://example.com</link>""")
+        repeat(articleCount) { append("<item><title>Post $it</title><link>https://example.com/$it</link><guid>g$it</guid></item>") }
+        append("</channel></rss>")
+    }
+
+    /** An SDK whose HTTP client serves [serverItems] articles at [url] instead of using the network. */
+    private fun startWithFeedServer(url: String): KeryxSdk {
+        val client = HttpClient(
+            MockEngine { request ->
+                check(request.url.toString() == url) { "unexpected request ${request.url}" }
+                respond(rss(serverItems), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/rss+xml"))
+            },
+        ) {
+            followRedirects = false
+            expectSuccess = false
+        }
+        return KeryxSdk.startWithModules(
+            newArticlesText = { count -> "$count new" },
+            postOsNotification = { _, _ -> },
+            dataDirectory = dir,
+            extraModules = listOf(module { single<HttpClient> { client } }),
+        )
+    }
 
     @Test
     fun startKeepsEverythingUnderTheGivenDataDirectory() = runTest {
@@ -155,12 +193,19 @@ class KeryxSdkTest {
     }
 
     @Test
-    fun backgroundRefreshAfterSetupRunsACycleAndReturnsTheUnreadCount() = runTest {
-        val sdk = start()
+    fun backgroundRefreshAfterSetupRunsACycleAndReturnsTheUnreadCount() = runBlocking {
+        val sdk = startWithFeedServer(FEED_URL)
         try {
             sdk.settingsRepository.flush()
             assertTrue(sdk.settingsRepository.isSetupComplete())
-            assertEquals(0L, sdk.runBackgroundRefresh())
+            // The app creates the search index at launch; subscribing indexes into it.
+            sdk.prepareSearchIndex()
+            assertTrue(sdk.feedRepository.subscribeFeed(FEED_URL) is Result.Ok)
+            assertEquals(1L, sdk.runBackgroundRefresh())
+            // A skipped cycle would leave the count at the subscribe-time value; a second item
+            // served on the next fetch is only counted if the cycle actually fetched.
+            serverItems = 2
+            assertEquals(2L, sdk.runBackgroundRefresh())
         } finally {
             sdk.close()
         }
