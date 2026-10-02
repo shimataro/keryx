@@ -1338,6 +1338,12 @@ view on iOS.
   shown for as long as `SidebarDialogState.renamingRowKey` names a row that still exists (the menu, the
   swipe action and the keyboard all go through `startRename`); `SidebarRenameTarget` resolves the row to what
   the sheet edits, and the rules are the shared `inlineRenameValidation`'s. macOS keeps `InlineRenameField`.
+- **Reordering without a drag.** A screen reader cannot drag, so a feed or folder row offers VoiceOver
+  "Move up" / "Move down" actions, each only where the row can move that way — the same scopes as Compose's
+  (a feed among its folder group's or the unfoldered feeds, a folder among the folders; a feed's copy under a
+  tag and tags themselves never move). `SidebarReorderTargets` resolves the landing position with the shared
+  `reorderTargetWithinScope` and the move applies the mutation a completed drop would; the availability is part
+  of `SidebarRowContent`, so a reorder that changes a neighbour's options reconfigures that row.
 - **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl`, present only while there are feeds)
   refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
   tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until both finish. It

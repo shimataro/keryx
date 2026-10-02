@@ -1325,6 +1325,11 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   `SidebarDialogState.renamingRowKey` が実在する行を指している間表示される（メニュー・スワイプ・キーボードはすべて
   `startRename` を通る）。`SidebarRenameTarget` が行をシートの編集対象に解決し、規則は共有の `inlineRenameValidation`
   に従う。macOS は `InlineRenameField` のまま。
+- **ドラッグなしの並べ替え。** スクリーンリーダーはドラッグできないので、フィード行とフォルダー行には VoiceOver の
+  「上へ移動」「下へ移動」を、動かせる方向にだけ出す。範囲は Compose と同じ（フィードは所属フォルダーグループ内または
+  フォルダーなしのフィードの間、フォルダーはフォルダーの間。タグ配下のフィードのコピーとタグ自体は動かさない）。
+  `SidebarReorderTargets` が共有の `reorderTargetWithinScope` で移動先を求め、ドロップ完了時と同じ更新を適用する。
+  動かせる方向は `SidebarRowContent` に含めるので、並べ替えで隣の行の選択肢が変われば、その行が再構成される。
 - **引っ張って更新。** サイドバーを引き下げる（`UIRefreshControl`。フィードがあるときだけ付く）と、全フィードを更新して
   同期する（`HomeViewModel.pullToRefreshAll()`。「すべて更新」と同じ処理で、`pullRefreshingFilters` には `All`
   フィルターとして記録される）。インジケーターは両方が終わるまで出続ける。iOS ではナビゲーションバーの「すべて更新」

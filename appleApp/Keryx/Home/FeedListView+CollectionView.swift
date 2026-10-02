@@ -35,6 +35,7 @@ extension FeedListView {
             setExpanded: setExpanded,
             menu: { SidebarContextMenus.menu(for: $0, home: home, dialogs: dialogs) },
             performSwipe: performSwipe,
+            moveRow: moveRow,
             dropIndex: { dropIndex },
             applyDrop: { applyFeedListDropAction($0, home: home) }
         )
@@ -50,6 +51,18 @@ extension FeedListView {
             focusedPane.wrappedValue = .feedList
         }
         if tap.navigates { onOpenArticleList() }
+    }
+
+    /// VoiceOver's move up / down: the mutation a completed drop would apply, resolved by
+    /// `SidebarReorderTargets` in the row's own reorder scope.
+    private func moveRow(_ item: SidebarItemID, _ direction: SidebarMoveDirection) {
+        guard let move = SidebarReorderTargets.move(for: item, direction: direction, model: sidebar) else { return }
+        switch move {
+        case .feed(let feedId, let folderId, let insertBeforeId):
+            home.viewModel.moveFeed(feedId: feedId, folderId: folderId, targetFeedId: insertBeforeId)
+        case .folder(let folderId, let insertBeforeId):
+            home.viewModel.reorderFolders(draggedFolderId: folderId, targetFolderId: insertBeforeId)
+        }
     }
 
     /// A swipe action opens the same sheet or confirmation the row's context menu does.

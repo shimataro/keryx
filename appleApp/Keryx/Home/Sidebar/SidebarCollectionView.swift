@@ -28,6 +28,8 @@ struct SidebarCollectionActions {
     var menu: (SidebarItemID) -> UIMenu?
     /// A swipe action was chosen on a row.
     var performSwipe: (SidebarSwipeAction, SidebarItemID) -> Void
+    /// VoiceOver's "Move up" / "Move down" on a row.
+    var moveRow: (SidebarItemID, SidebarMoveDirection) -> Void
     /// The shared lookup tables the drop rules resolve against.
     var dropIndex: () -> FeedListDropIndex
     /// Applies a drop the shared rules resolved (`applyFeedListDropAction`).
@@ -233,7 +235,8 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         cell.contentConfiguration = UIHostingConfiguration {
             SidebarCellContent(
                 content: content,
-                color: Color(uiColor: textColor)
+                color: Color(uiColor: textColor),
+                onMove: { [weak self] in self?.actions.moveRow(item, $0) }
             )
         }
     }
@@ -533,6 +536,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 private struct SidebarCellContent: View {
     let content: SidebarRowContent
     let color: Color
+    let onMove: (SidebarMoveDirection) -> Void
 
     var body: some View {
         SidebarRowLabel(
@@ -544,8 +548,13 @@ private struct SidebarCellContent: View {
         )
         .foregroundStyle(color)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // One element per row for VoiceOver.
+        // One element per row for VoiceOver, with the reorder a drag would do offered as actions (a
+        // screen reader cannot drag): each only where the row can move that way.
         .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if content.moves.canMoveUp { Button(L("home_move_up")) { onMove(.up) } }
+            if content.moves.canMoveDown { Button(L("home_move_down")) { onMove(.down) } }
+        }
     }
 }
 #endif

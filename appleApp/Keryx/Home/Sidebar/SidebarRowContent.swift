@@ -51,6 +51,9 @@ struct SidebarRowContent: Equatable, Sendable {
     let isGone: Bool
     /// `.none` or `.echo`; the drop highlight is the cell's own drop state, not content.
     let highlight: SidebarRowHighlight
+    /// Which VoiceOver move actions the row offers — part of the contents, so a reorder that changes
+    /// a neighbour's options reconfigures that row.
+    var moves: SidebarMoveAvailability = .none
 
     /// The contents of every item in `outline`, hidden ones included.
     ///
@@ -67,6 +70,7 @@ struct SidebarRowContent: Equatable, Sendable {
         selectedRow: FeedListRowSelection,
         filter: ArticleFilter
     ) -> [SidebarItemID: SidebarRowContent] {
+        let moves = SidebarReorderTargets.availability(model: model)
         func row(_ item: SidebarItemID, _ base: SidebarRowStaticContent) -> SidebarRowContent {
             SidebarRowContent(
                 title: base.title,
@@ -75,7 +79,8 @@ struct SidebarRowContent: Equatable, Sendable {
                 isGone: base.isGone,
                 highlight: selectionDisplayed
                     ? model.rowSelection(item).map { highlight(for: $0.instance, selectedRow: selectedRow, filter: filter) } ?? .none
-                    : .none
+                    : .none,
+                moves: moves[item] ?? .none
             )
         }
 
