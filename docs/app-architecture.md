@@ -1559,6 +1559,8 @@ request out), `notificationAlerts`, and
 `domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s
 `backgroundUpdateLoop` on the SDK's own background scope — call once per foreground launch;
 idempotent, so a repeated call doesn't start a second overlapping loop.
+`runBackgroundRefresh()` is the iOS background-refresh entry point: one `RefreshCycleRunner.runIfIdle` cycle
+without the startup sequence (see [background-update.md](background-update.md)).
 `importOpenedOpml(xml)` wraps `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`,
 for a document the app was opened with (`null` when it could not be read; mirrors desktop's/Android's
 own ".opml file association" handling): it only requests the import, which Settings ▸ Data carries out
