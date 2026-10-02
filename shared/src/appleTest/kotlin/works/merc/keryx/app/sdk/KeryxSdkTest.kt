@@ -294,6 +294,8 @@ class KeryxSdkTest {
             feedGate = gate
             sdk.startMaintenance()
             withTimeout(30_000) { feedRequests.receive() }
+            // Exactly one request so far, so the next receive can only be the replacement run's.
+            assertTrue(feedRequests.tryReceive().isFailure)
             assertTrue(sdk.isStartupMaintenanceActive)
 
             sdk.stopRefreshLoop()
