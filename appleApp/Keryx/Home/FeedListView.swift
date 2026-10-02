@@ -213,7 +213,7 @@ struct FeedListView: View {
         // field permanently visible), not on every keystroke here.
         Binding(
             get: { home.searchQuery },
-            set: { home.viewModel.setSearchQuery(query: $0) }
+            set: { home.setSearchQuery($0) }
         )
     }
     #endif

@@ -140,7 +140,7 @@ struct ArticleListView: View {
     private var searchQueryBinding: Binding<String> {
         Binding(
             get: { home.searchQuery },
-            set: { home.viewModel.setSearchQuery(query: $0) }
+            set: { home.setSearchQuery($0) }
         )
     }
 

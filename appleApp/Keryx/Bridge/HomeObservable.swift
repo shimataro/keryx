@@ -384,11 +384,26 @@ final class HomeObservable: ObservableAssignment {
         }
     }
 
+    /// The search field's write path. Assigns `searchQuery` at once rather than waiting for the
+    /// flow's emission to come back: a binding reading only the emitted value is re-rendered with the
+    /// previous query when keystrokes outrun that round trip, and the field then drops characters.
+    func setSearchQuery(_ query: String) {
+        viewModel.setSearchQuery(query: query)
+        assignSearchQuery(query)
+    }
+
     private func observeSearchQuery() async {
-        for await v in viewModel.searchQuery {
-            guard assignIfChanged(\.searchQuery, v) else { continue }
-            assignIfChanged(\.searchQueryHasTerms, !SearchQueryKt.searchTerms(raw: v).isEmpty)
+        // Reads the flow's current value rather than the emitted one, which may already be stale by
+        // the time it is delivered (a later keystroke landed in between) and would otherwise revert
+        // the field to it.
+        for await _ in viewModel.searchQuery {
+            assignSearchQuery(viewModel.searchQuery.value)
         }
+    }
+
+    private func assignSearchQuery(_ query: String) {
+        guard assignIfChanged(\.searchQuery, query) else { return }
+        assignIfChanged(\.searchQueryHasTerms, !SearchQueryKt.searchTerms(raw: query).isEmpty)
     }
 
     private func observeSearchBarVisible() async {
