@@ -171,6 +171,9 @@ struct FeedListView: View {
         // either operation (or the refresh-then-sync cycle covering the gap between them) is
         // already in flight — `activity.refreshIndicatorShown`/`.syncing` pick which one's own
         // spinner shows, never both for the same phase.
+        #if os(macOS)
+        // On iOS, pulling the sidebar down refreshes everything instead (`SidebarCollectionView`), as
+        // Mail's list does — and the navigation bar has room for fewer buttons.
         ToolbarItem {
             ToolbarActivityButton(
                 titleKey: "home_refresh",
@@ -181,6 +184,7 @@ struct FeedListView: View {
                 action: { home.viewModel.refreshAll() }
             )
         }
+        #endif
         if home.cloudConnected {
             ToolbarItem {
                 ToolbarActivityButton(

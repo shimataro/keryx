@@ -1310,6 +1310,12 @@ class HomeViewModel(
     /** Pull-to-refresh on the current selection. See [HomeRefreshController.pullToRefresh]. */
     fun pullToRefresh() = refreshController.pullToRefresh()
 
+    /**
+     * Pull-to-refresh on every feed, whatever is selected — the iOS sidebar's pull. Tracked as
+     * [ArticleFilter.All] in [pullRefreshingFilters]. See [HomeRefreshController.pullToRefresh].
+     */
+    fun pullToRefreshAll() = refreshController.pullToRefresh(ArticleFilter.All)
+
     /** Synchronizes local data with the cloud. See [HomeRefreshController.sync]. */
     fun sync() = refreshController.sync()
 

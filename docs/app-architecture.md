@@ -1336,6 +1336,11 @@ view on iOS.
   shown for as long as `SidebarDialogState.renamingRowKey` names a row that still exists (the menu, the
   swipe action and the keyboard all go through `startRename`); `SidebarRenameTarget` resolves the row to what
   the sheet edits, and the rules are the shared `inlineRenameValidation`'s. macOS keeps `InlineRenameField`.
+- **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl`, present only while there are feeds)
+  refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
+  tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until both finish. It
+  replaces the navigation bar's Refresh All button on iOS (which keeps Sync, Add and Settings); an iPad
+  keyboard still has ⌘R from the Feed menu.
 - **Swipe actions.** A feed row swipes to "Unsubscribe" and "Rename", a folder or tag row to "Delete" and
   "Rename" (`SidebarSwipeActions`, `trailingSwipeActionsConfigurationProvider`). Each only opens the sheet or
   confirmation its context-menu item does, so a full swipe is off (the first action is the destructive one)

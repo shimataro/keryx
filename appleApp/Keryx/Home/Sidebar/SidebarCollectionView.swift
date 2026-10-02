@@ -13,6 +13,8 @@ struct SidebarRenderState: Equatable {
     /// The row shown as selected — `nil` while the collapsed sidebar is the topmost column (see
     /// `CompactSidebarSelection.displayedKey`).
     let selectedItem: SidebarItemID?
+    /// Whether pulling the list down refreshes — not with no feeds to refresh.
+    let canPullToRefresh: Bool
 }
 
 /// What the collection view asks of `FeedListView` — the same operations the macOS source list
@@ -268,12 +270,36 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         guard force || newState != old else { return }
         state = newState
 
+        if newState.canPullToRefresh != old?.canPullToRefresh { updateRefreshControl(enabled: newState.canPullToRefresh) }
         applyStructure(newState.outline, animated: old != nil)
         reconfigure(SidebarRowContent.changedItems(from: old?.contents ?? [:], to: newState.contents))
         applySelection(newState.selectedItem, scroll: newState.selectedItem != old?.selectedItem)
         // Counts that changed mid-drag (when `refreshUnreadCounts()` holds back) reach their cells
         // here, on the forced apply at the drag's end.
         refreshUnreadCounts()
+    }
+
+    // MARK: - Pull to refresh
+
+    /// Pulling the sidebar down refreshes every feed and syncs, like the toolbar's Refresh All it
+    /// replaces on iOS; the indicator stays up until both have finished.
+    private func updateRefreshControl(enabled: Bool) {
+        guard enabled else {
+            collectionView.refreshControl = nil
+            return
+        }
+        guard collectionView.refreshControl == nil else { return }
+        let control = UIRefreshControl()
+        control.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        collectionView.refreshControl = control
+    }
+
+    private func pullToRefresh() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await home.pullToRefreshAll()
+            collectionView.refreshControl?.endRefreshing()
+        }
     }
 
     // MARK: - Unread counts
@@ -329,7 +355,8 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         state = SidebarRenderState(
             outline: outline,
             contents: current.contents,
-            selectedItem: current.selectedItem
+            selectedItem: current.selectedItem,
+            canPullToRefresh: current.canPullToRefresh
         )
         applyStructure(outline, animated: false)
     }

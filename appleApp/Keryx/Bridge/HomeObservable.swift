@@ -168,8 +168,18 @@ final class HomeObservable: ObservableAssignment {
     /// `.refreshable` indicator stays up exactly as long as Compose's own `pullRefreshing` does
     /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`.
     func pullToRefresh() async {
+        await awaitPull(of: filter) { viewModel.pullToRefresh() }
+    }
+
+    /// The iOS sidebar's pull: every feed, whatever the article list shows. Held up like
+    /// `pullToRefresh()`, under the `All` filter it is tracked as.
+    func pullToRefreshAll() async {
+        await awaitPull(of: ArticleFilterAll()) { viewModel.pullToRefreshAll() }
+    }
+
+    private func awaitPull(of filter: ArticleFilter, start: () -> Void) async {
         let filter = filter as AnyObject
-        viewModel.pullToRefresh()
+        start()
         for await pending in viewModel.pullRefreshingFilters {
             if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
         }

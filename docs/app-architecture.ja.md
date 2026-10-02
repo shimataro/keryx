@@ -1324,6 +1324,10 @@ iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectio
   `SidebarDialogState.renamingRowKey` が実在する行を指している間表示される（メニュー・スワイプ・キーボードはすべて
   `startRename` を通る）。`SidebarRenameTarget` が行をシートの編集対象に解決し、規則は共有の `inlineRenameValidation`
   に従う。macOS は `InlineRenameField` のまま。
+- **引っ張って更新。** サイドバーを引き下げる（`UIRefreshControl`。フィードがあるときだけ付く）と、全フィードを更新して
+  同期する（`HomeViewModel.pullToRefreshAll()`。「すべて更新」と同じ処理で、`pullRefreshingFilters` には `All`
+  フィルターとして記録される）。インジケーターは両方が終わるまで出続ける。iOS ではナビゲーションバーの「すべて更新」
+  ボタンの代わりになる（同期・追加・設定のボタンは残る）。iPad のキーボードでは、Feed メニューの ⌘R も使える。
 - **スワイプ操作。** フィード行は「購読解除」と「名前変更」、フォルダー・タグ行は「削除」と「名前変更」を末尾側への
   スワイプで出す（`SidebarSwipeActions`、`trailingSwipeActionsConfigurationProvider`）。どれもコンテキストメニューの
   同じ項目と同様に、シートか確認を開くだけなので、フルスワイプは無効にしている（先頭の操作が破壊的なため）。

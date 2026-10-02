@@ -24,7 +24,8 @@ extension FeedListView {
                 selectedRow: home.selectedRowInstance,
                 filter: home.filter
             ),
-            selectedItem: displayedKey == nil ? nil : SidebarItemID(home.selectedRowInstance)
+            selectedItem: displayedKey == nil ? nil : SidebarItemID(home.selectedRowInstance),
+            canPullToRefresh: home.hasFeeds
         )
     }
 
