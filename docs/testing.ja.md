@@ -8,7 +8,7 @@
   OPML、Dropbox ストレージ/認証、ローカル設定）。デスクトップターゲット上で動くため、`expect` 宣言は
   desktop の `actual` に解決される（`AppDirs` を一時ディレクトリで利用可能。`FileIO` は kotlinx-io による共通実装）。
 - `desktopTest/` — 実際の SQLDelight ドライバ（`JdbcSqliteDriver`）が必要なテスト（スキーマ、記事 upsert、
-  ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。`:shared` と `:composeApp` の両方のテストから使えるよう `:testing` モジュールに置いている。
+  ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。`:shared` と `:composeApp` の両方のテストから使えるよう `:testing` モジュールに置いている。同じモジュールには `HoldingDispatcher.kt` もある。ディスパッチされた処理を止めておき、任意の時点で流せるコルーチンディスパッチャーで、コントローラや ViewModel のキャンセルのテスト（`OpmlTransferControllerTest`、`CloudSyncControllerTest`、`SettingsViewModelTest`）が、キャンセル済みのコルーチンを進ませずに、誰がそれを待つかを確かめるのに使う。
   同ディレクトリには、実際に Composable をレンダリングして検証する Compose UI テスト
   （`androidx.compose.ui.test.runDesktopComposeUiTest`、JUnit4 ルール不要）も置く
   （例: `ArticleListPaneTest.kt`）。実 Skia/AWT レンダラが必要なため `commonTest` ではなく

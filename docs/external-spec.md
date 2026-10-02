@@ -187,7 +187,13 @@ in the feed list toolbar, the Feed menu and Settings ▸ Cloud sync at exactly t
 after a sign-in expires). Routes may differ only in *which
 item* they act on — a context menu acts on the row it was opened on — never in what happens to it;
 feedback tied to a particular on-screen control appears whenever that control is showing the item
-acted on. A key that works only in one pane is shown beside a menu item only while it would work:
+acted on. For a URL copy that means the reader's ✓ shows only when the copied article is the one the
+reader displays. A platform whose OS does not confirm a copy itself and whose reader is often off
+screen (Android below 13, iOS) also confirms every copy in the app, with a snackbar or a toast; on
+desktop the ✓ is the confirmation, and only a copy of an article the reader does not display — which
+the native macOS app allows from a context menu opened with the keyboard or VoiceOver — is confirmed
+in the app instead, by a VoiceOver announcement (details: "Notification Center" in
+[error-design.md](error-design.md)). A key that works only in one pane is shown beside a menu item only while it would work:
 Feed ▸ Rename and Delete stay clickable whenever a feed-list item is selected, but the list
 shortcuts F2 (Return on macOS) and Delete are shown, and respond, only while the feed list has
 keyboard focus and no text field is being typed into.
