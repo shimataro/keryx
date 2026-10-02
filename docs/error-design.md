@@ -76,8 +76,9 @@ from the `NotificationMessages` interface (just `newArticles(count)`), which eac
   route: the File menu's Import/Export items open Settings ▸ Data and run there, with the same spinner and result
   text as the tab's own buttons (`presentation/settings/OpmlTransferController`'s shared busy/result state); a
   result that lands after Settings was closed is shown once on the next visit to the Data tab. An article-URL copy shows its ✓ on the
-  reader's copy button whichever route it came from (the button, the keyboard shortcut, the menu bar, or the article
-  row's context menu) — see "Actions with more than one route" in
+  reader's copy button when the copied article is the one the reader displays, whichever route it came from (the
+  button, the keyboard shortcut, the menu bar, or the article row's context menu); a platform that confirms neither
+  itself nor through a visible ✓ gets its own confirmation instead (Android below API 33 and iOS, both below) — see "Actions with more than one route" in
   [external-spec.md](external-spec.md#actions-with-more-than-one-route). Android is one platform-specific
   exception: it shows an M3 `Snackbar` for the URL-copy confirmation, but only below API 33 — from API 33 onward the
   OS already shows its own clipboard-copy confirmation, and a Snackbar there would just duplicate it (see

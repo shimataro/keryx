@@ -735,6 +735,9 @@ All four share one visibility check, `tray/TrayActionPolicy.kt`'s `trayWindowSho
 not minimized), for the Show/Hide label and for `main.kt`'s single menu-item handler, which hides a
 shown window and otherwise goes through `activationRequests` (un-minimize, raise, focus); an icon
 click hides only a shown *and focused* window (`shouldHideOnTrayAction`) and activates otherwise.
+Both decisions resolve to a `TrayWindowAction` (`trayMenuToggleAction` for the Show/Hide item,
+`trayIconAction` for an icon click), and `main.kt`'s `applyTrayWindowAction` is the only place that
+carries one out.
 
 **Why Linux needs SNI.** `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` fills the whole 24x24 canvas
 with the component background *before* drawing the icon, and `sun.awt.X11.XSystemTrayPeer` never reads

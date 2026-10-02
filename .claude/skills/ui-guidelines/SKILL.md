@@ -885,11 +885,14 @@ part lives, with the current examples, is `docs/app-architecture.md`'s "One impl
 action". In practice:
 
 - Route every entry point through **one shared handler** rather than re-implementing the effect
-  (and forgetting the feedback) at each call site. Example: every route to "copy article URL" —
+  (and forgetting the feedback) at each call site. Example: what one "copy article URL" does is
+  decided by the shared `articleUrlCopyPlan` (`:shared`, used by both UIs); in Compose every route —
   the reader's button included — calls `ArticleUrlCopier.copy` (`ui/home/ArticleUrlCopier.kt`),
-  which writes the clipboard, bumps the pulse that flashes the reader's copy button ✓, and shows
-  Android's "URL copied" snackbar; the reader only watches the pulse. Keep feedback in the shared
-  handler rather than in one pane, or it goes missing whenever that pane isn't composed.
+  which carries that plan out: it writes the clipboard when the URL is usable, flashes the reader's
+  copy button ✓ only when the copied article is the one the reader displays, and shows the "URL
+  copied" snackbar only on Android below API 33. The reader only watches the pulse. (SwiftUI: iOS
+  shows a transient toast on every copy, macOS the ✓ only.) Keep feedback in the shared handler
+  rather than in one pane, or it goes missing whenever that pane isn't composed.
 - **A decision both UIs need goes in `:shared` `presentation/`, and Swift calls it** — a pure
   function or a ViewModel method — rather than being re-derived in Compose and again in SwiftUI.
   Examples: "Sync now"'s `ManualSync.canSyncNow`/`syncNow`, and the menu's enabled/checked flags

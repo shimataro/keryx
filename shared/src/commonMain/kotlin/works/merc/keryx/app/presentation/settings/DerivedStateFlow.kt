@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * A read-only [StateFlow] whose [value] is [compute]d from other state flows on every read, and
  * whose collectors receive [changes] (deduplicated) — a derived value that, unlike one produced by
  * `stateIn`, can never be observed out of step with its inputs.
+ *
+ * Only the `settings` package uses it today; if another package needs it, move it up to `presentation/`.
  */
 @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
 internal class DerivedStateFlow<T>(

@@ -737,6 +737,8 @@ Compose の `Tray()` だけであるため）。
 最小化されていない）を使い、表示/非表示ラベルと `main.kt` の唯一のメニュー項目ハンドラを決める。ハンドラは
 表示中なら隠し、それ以外は `activationRequests`（最小化解除・前面化・フォーカス）を通す。アイコンの
 クリックは、表示中*かつフォーカス中*のときだけ隠し（`shouldHideOnTrayAction`）、それ以外は前面に出す。
+どちらの判定も `TrayWindowAction` を返し（表示/非表示の項目は `trayMenuToggleAction`、アイコンのクリックは
+`trayIconAction`）、それを実行するのは `main.kt` の `applyTrayWindowAction` だけである。
 
 **Linux で SNI が必要な理由**: `sun.awt.X11.XTrayIconPeer.IconCanvas.paint()` はアイコン描画の *前* に
 24x24 のキャンバス全面をコンポーネント背景色で塗り潰し、さらに `sun.awt.X11.XSystemTrayPeer` は
