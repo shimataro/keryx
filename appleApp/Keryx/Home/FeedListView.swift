@@ -537,14 +537,14 @@ private struct SearchFocusModifier: ViewModifier {
     }
 }
 
-/// A sidebar toolbar action (Refresh All / Sync) that shows a spinner while its operation runs.
+/// A sidebar toolbar action (Refresh All / Sync) that shows progress while its operation runs.
 ///
-/// On macOS the spinner replaces the icon inside the button's `Label`: `NSToolbar` hosts the view
+/// On macOS a spinner replaces the icon inside the button's `Label`: `NSToolbar` hosts the view
 /// as-is, and the title stays fixed so VoiceOver and the collapsed-sidebar overflow menu still name
 /// the action. iOS's navigation bar cannot render a `ProgressView` as a button's icon — it falls
-/// back to the label's title text — so there the spinner takes the button's place instead, carrying
-/// the in-progress title for VoiceOver. The button is disabled while busy either way, so nothing
-/// tappable is lost.
+/// back to the label's title text — so there the button stays and its icon animates instead
+/// (`BusySymbolEffect`), with the in-progress title for VoiceOver. The button is disabled while busy
+/// either way.
 private struct ToolbarActivityButton: View {
     let titleKey: String
     let busyTitleKey: String
@@ -555,15 +555,16 @@ private struct ToolbarActivityButton: View {
 
     var body: some View {
         #if os(iOS)
-        if busy {
-            ProgressView()
-                .accessibilityLabel(L(busyTitleKey))
-        } else {
-            Button(action: action) {
-                Label(L(titleKey), systemImage: systemImage)
+        // The same button while busy — disabled, its icon animating, its VoiceOver name switched —
+        // rather than a spinner in its place: swapping views changed the bar's layout every time.
+        Button(action: action) {
+            Label {
+                Text(L(busy ? busyTitleKey : titleKey))
+            } icon: {
+                Image(systemName: systemImage).modifier(BusySymbolEffect(busy: busy))
             }
-            .disabled(!enabled)
         }
+        .disabled(!enabled)
         #else
         Button(action: action) {
             // A `Label` rather than a bare icon so the toolbar's overflow menu (shown when the
@@ -583,3 +584,19 @@ private struct ToolbarActivityButton: View {
         #endif
     }
 }
+
+#if os(iOS)
+/// Animates a toolbar button's SF Symbol while its operation runs: a rotation (iOS 18 and later), or
+/// a pulse where the rotate effect does not exist.
+private struct BusySymbolEffect: ViewModifier {
+    let busy: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.symbolEffect(.rotate, isActive: busy)
+        } else {
+            content.symbolEffect(.pulse, isActive: busy)
+        }
+    }
+}
+#endif
