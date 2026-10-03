@@ -2,9 +2,11 @@ package works.merc.keryx.app.platform
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,6 +19,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import works.merc.keryx.app.core.Log
+
+private const val TAG = "NotificationPermission"
 
 @Composable
 actual fun rememberNotificationPermission(onResult: (granted: Boolean) -> Unit): NotificationPermissionController {
@@ -56,12 +61,27 @@ actual fun rememberNotificationPermission(onResult: (granted: Boolean) -> Unit):
                 }
             }
 
-            override fun openSystemSettings() {
-                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            }
+            override fun openSystemSettings() = context.openNotificationSettings()
+        }
+    }
+}
+
+/**
+ * Opens this app's notification settings page, falling back to its app-details page on a device
+ * whose Settings app has no notification page (some OEM / restricted builds). Called from a click
+ * handler, so a missing page must never throw: if neither page exists this only logs.
+ */
+private fun Context.openNotificationSettings() {
+    val notificationSettings = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+    val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+    for (intent in listOf(notificationSettings, appDetails)) {
+        if (this !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(intent)
+            return
+        } catch (e: ActivityNotFoundException) {
+            Log.warn(TAG, "No activity found for ${intent.action}", e)
         }
     }
 }
