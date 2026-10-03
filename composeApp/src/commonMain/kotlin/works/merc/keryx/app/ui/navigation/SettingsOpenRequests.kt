@@ -6,11 +6,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 
 /**
- * One request to show the settings dialog on [tabId]. The consumer bumps its own tab-request token
- * per released request, so a repeated request for the same tab still re-navigates an already-open
- * dialog (see `SettingsDialog`'s `tabRequestToken`).
+ * One request to show the settings dialog on [tabId], or on its default entry when [tabId] is
+ * `null` — the category list on Android, the first tab on desktop (see `KeryxTabDialog`). The
+ * consumer bumps its own tab-request token per released request, so a repeated request for the same
+ * tab still re-navigates an already-open dialog (see `SettingsDialog`'s `tabRequestToken`).
  */
-data class SettingsOpenRequest(val tabId: String)
+data class SettingsOpenRequest(val tabId: String?)
 
 /**
  * The single router every "open Settings" route goes through: the application menu's Settings… /
@@ -32,23 +33,24 @@ class SettingsOpenRequests {
     val pending: StateFlow<SettingsOpenRequest?> = _pending.asStateFlow()
 
     /**
-     * Asks for the settings dialog on [tabId]. Held until Home is showing when it isn't yet (a
-     * notification action, the update entry, or an `.opml` file opened during Setup), and replaces
-     * any request still waiting.
+     * Asks for the settings dialog on [tabId] (`null` = its default entry, see
+     * [SettingsOpenRequest]). Held until Home is showing when it isn't yet (a notification action,
+     * the update entry, or an `.opml` file opened during Setup), and replaces any request still
+     * waiting.
      */
-    fun request(tabId: String) {
+    fun request(tabId: String? = null) {
         _pending.value = SettingsOpenRequest(tabId)
     }
 
     /**
-     * Asks for the settings dialog on [tabId] only if it is reachable right now ([currentScreen] is
+     * Asks for the settings dialog on [tabId] (`null` = its default entry) only if it is reachable right now ([currentScreen] is
      * Home), dropping the request otherwise. For a direct user gesture whose own menu item is
      * disabled off Home — the macOS native "Settings…" item is always enabled, and pressing it during
      * Setup must not open Settings later as a surprise.
      *
      * @return whether the request was accepted.
      */
-    fun requestIfReachable(tabId: String, currentScreen: Screen): Boolean {
+    fun requestIfReachable(tabId: String?, currentScreen: Screen): Boolean {
         if (currentScreen != Screen.Home) return false
         request(tabId)
         return true

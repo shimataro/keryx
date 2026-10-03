@@ -154,9 +154,12 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
     `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
     see "Icon set" below), KeryxTabDialog (a modal, near-fullscreen `Dialog`, safe-drawing-padded
-    for edge-to-edge, topped by a real M3 `TopAppBar` (back arrow + the screen's own name) above a
-    genuine `PrimaryScrollableTabRow`/`Tab` — unlike desktop's own hand-rolled tab bar, see the
-    `ui-guidelines` skill), PlatformTheme
+    for edge-to-edge, that has no tab row: Android's own settings pattern, a category list of M3
+    `ListItem`s (icon + name) whose rows open each category as a detail screen. Both screens are
+    topped by a real M3 `TopAppBar` — back arrow + the screen's own name on the list, the
+    category's name on a detail. A `null` selection is the list; the arrow and the system back
+    (a `BackHandler` inside the dialog) share the one back step `goBackInTabDialog` — detail →
+    list, list → dismissed. Unlike desktop's tab bar, see the `ui-guidelines` skill), PlatformTheme
     (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
@@ -205,7 +208,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     unreadable file so Settings ▸ Data shows the failure), nativeContextMenu (a real long-press `DropdownMenu`, added in
     the adaptive-layout phase — see its
     KDoc for the tap-vs-long-press disambiguation), BackHandler (delegates to
-    `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
+    `androidx.activity.compose.BackHandler`; its `PredictiveBackHandler` companion delegates to
+    `androidx.activity.compose.PredictiveBackHandler`, mapping each `BackEventCompat` to a
+    `BackProgress`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
     so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
     Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see [background-update.md](background-update.md)),
     NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`, re-reads the grant on resume, and opens `Settings.ACTION_APP_NOTIFICATION_SETTINGS`; the flow around it is `ui/settings/NotificationPermissionFlow.kt`) +
@@ -278,7 +283,7 @@ Examples in the code today:
 | Action | The one implementation | Routes that call it |
 | --- | --- | --- |
 | Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`, plus `connected` — whether the action is offered — and `disabledByAuth` — the disabled reason a tooltip names), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
-| Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
+| Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone; a `null` tab is the default entry — Android's category list, desktop's first tab — while a notification, the update entry and OPML name their tab) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
 | Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |
@@ -1014,6 +1019,24 @@ depth 2, `Dual` at every depth), since closing the bar always changes what's on 
 itself for `None`, so a back press there falls through to the platform's own default (exiting the
 app on Android) rather than this codebase swallowing it with nowhere to go.
 
+**The reader → article list pop is a predictive back on Android.** `HomeScreen` composes two
+handlers unconditionally, with mutually exclusive `enabled` flags, both standing down while the
+drawer is open (which handles its own predictive back): a plain `BackHandler` for
+`HomeBackAction.CloseSearchBar`, and `platform/PredictiveBackHandler` for `HomeBackAction.PopPane`
+(`PaneLayout.Single`'s reader depth only). While the gesture is in progress, `NarrowPaneRow`
+composes the article list *behind* the reader — at `PaneLayout.Single` it stacks its two fixed
+`if` blocks in a `Box` (list first, reader second), so the list appearing or disappearing never
+changes the reader's composition identity and its WebView slots are never recreated — and slides
+both by `Modifier.offset` alone (the reader with the swipe, the list in from a small parallax).
+`ui/home/ReaderBackGesture.kt` holds the pure state machine (`Idle` / `Tracking` / `Settling`) and
+the progress → offset functions, and `ReaderBackController` runs it: the progress flow completing
+means commit (animate the reader out, then call `goBack()` — still the one implementation of the
+pop and of the return flash), a `CancellationException` means cancel (animate back, then drop the
+list), and a back that reported no progress at all (3-button navigation, Android before 14)
+calls `goBack()` at once, exactly as before. The manifest's `enableOnBackInvokedCallback` opts
+Android 13–15 in. Closing the search bar, the drawer, dialogs and settings keep their own back
+handling; the article list's own depth still falls through (`None`).
+
 Unlike before the drawer existed, `PaneLayout.Dual` is *not* a sliding window over the stack: the
 feed list being a drawer rather than a pane means `visiblePanes(Dual, depth)` returns the same
 `[ArticleList, ArticleDetail]` regardless of depth — the article detail pane is a permanent neighbor
@@ -1033,7 +1056,13 @@ as the stack's depth changes between `ArticleList` and `ArticleDetail`, and ther
 `LazyListState`, which `rememberLazyListState` stores that way — and restores it as the list
 state's *initial* index/offset, so nothing scrolls and no new call lands in the
 `scrollToIndexIfNeeded` code path `known-issues.md` implicates in an unfixed upstream Compose
-crash. `ArticleListPane`'s `lastFilter` is a `rememberSaveable` holding `ArticleFilter.encode()`'s
+crash. The reader → article list predictive back (above) mounts the list earlier — at gesture
+start, behind the reader — and a cancel unmounts it again; each mount runs the same restore, plus
+`ArticleListPane`'s existing scroll-the-selection-into-view effect, which waits for the first
+measure and is a no-op when the selected row is already fully visible (it scrolls only when the
+reader moved the selection off the restored viewport, as it already did on a plain back). The
+list takes no touch input during the gesture, so that scroll cannot coincide with the user scroll
+the crash also needs. `ArticleListPane`'s `lastFilter` is a `rememberSaveable` holding `ArticleFilter.encode()`'s
 string for the same reason: the filter can change while the pane is unmounted (a notification's
 `ShowFeedDetail`, or deleting the feed being viewed), and a plain `remember` would re-initialize to
 the new filter on remount, leaving the restored position pointing into the previous filter's list

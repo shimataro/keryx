@@ -144,8 +144,11 @@
     `Checkbox`/`SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）を
     そのまま使う — 詳細は下記「アイコンセット」参照）,
     KeryxTabDialog（ほぼ全画面のモーダル `Dialog`。エッジツーエッジ対応で safe-drawing padding 済み。
-    本物の M3 `TopAppBar`（戻る矢印＋画面名）を、デスクトップ側の自前タブバーとは異なる本物の M3
-    `PrimaryScrollableTabRow`/`Tab` の上に載せる — 詳細は `ui-guidelines` スキル参照）,
+    タブ行は持たず、Android 自身の設定の作法に従う: M3 `ListItem`（アイコン＋名前）のカテゴリ一覧で、
+    行から各カテゴリを詳細画面として開く。どちらの画面も本物の M3 `TopAppBar` を載せる — 一覧では
+    戻る矢印＋画面名、詳細ではカテゴリ名。選択が `null` なら一覧で、矢印とシステムの戻る（ダイアログ内の
+    `BackHandler`）は 1 つの戻る処理 `goBackInTabDialog` を共有する — 詳細 → 一覧、一覧 → 閉じる。
+    デスクトップのタブバーとは異なる — 詳細は `ui-guidelines` スキル参照）,
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
@@ -195,7 +198,8 @@
     読めないファイルは `null` として渡し、設定 ▸ データに失敗を表示させる）,
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
-    へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
+    へ委譲。対になる `PredictiveBackHandler` は `androidx.activity.compose.PredictiveBackHandler` へ委譲し、
+    各 `BackEventCompat` を `BackProgress` に変換する）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
     無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
     Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、[background-update.ja.md](background-update.ja.md) 参照）,
@@ -267,7 +271,7 @@
 | 操作 | 唯一の実装 | それを呼ぶ経路 |
 | --- | --- | --- |
 | 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`。加えて、操作を出すかどうかの `connected` と、ツールチップが示す無効の理由 `disabledByAuth`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
-| 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
+| 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ。タブが `null` なら既定の入口 — Android はカテゴリ一覧、デスクトップは先頭タブ — で、通知・アップデート項目・OPML はタブを指定する） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
 | OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |
@@ -1012,6 +1016,22 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 そこでの戻る操作はプラットフォームの既定動作（Android ではアプリの終了）へフォールスルーし、
 このコードベースが戻り先の無い操作を握りつぶすことはない。
 
+**リーダー → 記事一覧の戻りは、Android では予測型バックである。** `HomeScreen` は 2 つのハンドラを
+無条件に compose し、`enabled` を互いに排他にする（どちらもドロワーが開いている間は譲る——ドロワーは
+自前で予測型バックを処理する）: `HomeBackAction.CloseSearchBar` には従来の `BackHandler`、
+`HomeBackAction.PopPane`（`PaneLayout.Single` のリーダーの深さのみ）には `platform/PredictiveBackHandler`。
+ジェスチャーの進行中、`NarrowPaneRow` は記事一覧をリーダーの**背面**に compose する——`PaneLayout.Single`
+では固定の `if` ブロック 2 つを `Box` に重ねて（一覧が先、リーダーが後）配置するため、一覧の出現・消滅で
+リーダーの composition 同一性は変わらず、WebView のスロットも再生成されない——そして両者を
+`Modifier.offset` だけで動かす（リーダーはスワイプ方向へ、一覧は少しずらした位置からパララックスで入る）。
+`ui/home/ReaderBackGesture.kt` が純粋な状態機械（`Idle` / `Tracking` / `Settling`）と進捗 → オフセットの
+関数を持ち、`ReaderBackController` がそれを動かす: 進捗の Flow が正常終了したら確定（リーダーを出し切って
+から `goBack()` を呼ぶ——ペインを戻す処理と戻り先のフラッシュの実装は引き続きこの 1 つ）、
+`CancellationException` ならキャンセル（元に戻してから一覧を外す）、進捗が 1 つも来なかった戻る操作
+（3 ボタンナビゲーション、Android 14 未満）は従来どおり即座に `goBack()` を呼ぶ。マニフェストの
+`enableOnBackInvokedCallback` が Android 13〜15 を有効にする。検索バーを閉じる戻り、ドロワー、
+ダイアログ、設定の戻りはそれぞれ従来どおりで、記事一覧自身の深さは引き続きフォールスルーする（`None`）。
+
 ドロワーが存在する以前と異なり、`PaneLayout.Dual` はもはやスタック上をスライドする窓では
 **ない**: フィード一覧がペインではなくドロワーになったことで、`visiblePanes(Dual, depth)` は
 深さに関わらず常に同じ `[ArticleList, ArticleDetail]` を返す——記事詳細ペインは記事一覧の常設の
@@ -1031,7 +1051,13 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 由来の state（実質は `LazyListState`。`rememberLazyListState` がその形で保持している）を保存し、
 リスト state の**初期** index/offset として復元する。よってスクロールは一切走らず、
 `known-issues.md` が未修正の上流 Compose クラッシュの要因として挙げている `scrollToIndexIfNeeded`
-の経路に新たな呼び出しが増えることもない。`ArticleListPane` の `lastFilter` が
+の経路に新たな呼び出しが増えることもない。リーダー → 記事一覧の予測型バック（前述）は一覧を
+より早く——ジェスチャー開始時にリーダーの背面に——マウントし、キャンセルで再びアンマウントする。
+マウントのたびに同じ復元が行われ、加えて `ArticleListPane` の既存の「選択行を表示範囲に入れる」効果が
+走るが、これは最初の測定を待ったうえで、選択行がすでに完全に見えていれば何もしない（リーダーで選択が
+復元後の表示範囲の外へ移っていた場合だけスクロールし、これは従来の戻るでも同じだった）。ジェスチャー中の
+一覧はタッチ入力を受けないため、そのスクロールがクラッシュに必要なもう一方の条件であるユーザー操作の
+スクロールと重なることはない。`ArticleListPane` の `lastFilter` が
 `ArticleFilter.encode()` の文字列を保持する `rememberSaveable` なのも同じ理由による: ペインが
 アンマウントされている間にフィルタが変わりうる（通知の `ShowFeedDetail`、あるいは閲覧中フィードの
 削除）ため、素の `remember` では再マウント時に新しいフィルタで初期化されてしまい、復元された位置が

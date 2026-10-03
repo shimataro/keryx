@@ -241,7 +241,13 @@ detail) at a time as a hierarchical stack with its own back control; a tablet-wi
 both together, permanently — there is no narrower state where the reader loses its own back control
 without the article list gaining a permanent one beside it (see the note on the swipe gesture
 below). Nothing about either pane's own content changes between these — only how many are on screen
-together — with one exception: search.
+together — with one exception: search. On Android, going back from the reader to the article list
+at phone width is a predictive back: while the back gesture is still in progress, the reader slides
+aside to preview the article list behind it (at its scroll position), and releasing completes the
+transition or cancelling slides the reader back. Where the system shows no preview (3-button
+navigation, Android before 14) back simply returns to the list at once. Every other back — closing
+the search bar, the drawer, dialogs, settings, and leaving the app from the article list — is
+unchanged.
 
 **Search field placement.** At the 3-pane width the search field stays where it has always been, in
 the feed list's sidebar, with results appearing reactively in the article list beside it. At a
@@ -286,9 +292,14 @@ of the row can still be scrolled normally) — both work the same way inside the
 in the sidebar it replaced; a right-click context menu on desktop is a long-press menu on Android.
 Settings — reached from the desktop application menu — gets its own entry point on Android, which
 has no menu bar: a labelled row fixed to the bottom of the feed list/drawer, below the scrolling
-folder/tag/feed list, with the drawer's own header showing the app's name in its place; the settings
-screen itself also carries its own back arrow, since its near-fullscreen dialog otherwise leaves no
-other tappable way out. List rows (feeds, folders, tags, articles) grow to a taller, M3-minimum
+folder/tag/feed list, with the drawer's own header showing the app's name in its place. The settings
+screen itself follows Android's own settings pattern rather than desktop's tabs: it opens on a list
+of the categories (General, Notifications, Cloud sync, Data, Updates — whichever this build has), and
+tapping one opens that category's own screen. A notification or action that leads to a particular
+category (a sync error, a new version, an OPML import/export) opens that category's screen directly.
+Both screens carry their own back arrow, since the near-fullscreen dialog otherwise leaves no other
+tappable way out; the arrow and the system back alike return from a category to the list, and close
+Settings from the list. List rows (feeds, folders, tags, articles) grow to a taller, M3-minimum
 touch density on Android. Keyboard navigation (arrow keys between panes, J/K between articles,
 F2/Delete on the selected feed-list item) is not desktop-exclusive: an Android tablet can have a
 physical keyboard attached, and the same shortcuts work there too, including reaching into the

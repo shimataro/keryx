@@ -22,15 +22,17 @@ import works.merc.keryx.app.resources.settings_updates
 
 /**
  * The settings screen (see [KeryxTabDialog]): a modeless, macOS-System-Settings-style tabbed
- * dialog window on desktop; a near-fullscreen, modal tabbed `Dialog` with its own back arrow on
- * Android, since a near-fullscreen surface otherwise leaves no other way out. Each tab's content
- * lives in its own file (`GeneralTab` / `NotificationsTab` / `CloudSyncTab` / `DataTab` /
- * `UpdatesTab`), with shared building blocks in `SettingsComponents`.
+ * dialog window on desktop; on Android, a near-fullscreen, modal `Dialog` that lists the categories
+ * and opens one as a detail screen, each with its own back arrow, since a near-fullscreen surface
+ * otherwise leaves no other way out. Each tab's content lives in its own file (`GeneralTab` /
+ * `NotificationsTab` / `CloudSyncTab` / `DataTab` / `UpdatesTab`), with shared building blocks in
+ * `SettingsComponents`.
  *
  * @param onDismiss Called when the dialog should be dismissed.
  * @param permissionPrompt App's notification-permission prompt, handed to the Notifications tab.
- * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
- *   `ShowSettingsTab` action opens the dialog directly on the tab where the problem is fixable.
+ * @param initialTabId The tab shown when the dialog opens, or `null` for the default entry (Android's
+ *   category list, desktop's first tab). A notification's `ShowSettingsTab` action opens the dialog
+ *   directly on the tab where the problem is fixable.
  * @param tabRequestToken Bumped by the caller on every fresh explicit navigation request (a
  *   notification action or the "Open Settings" menu command), so the dialog jumps to [initialTabId]
  *   even if it's already open on that same tab id and the user has since switched tabs manually.
@@ -39,7 +41,7 @@ import works.merc.keryx.app.resources.settings_updates
 internal fun SettingsDialog(
     onDismiss: () -> Unit,
     permissionPrompt: NotificationPermissionPrompt,
-    initialTabId: String = "general",
+    initialTabId: String? = null,
     tabRequestToken: Int = 0,
 ) {
     val vm = koinInject<SettingsViewModel>()
@@ -84,17 +86,25 @@ internal fun SettingsDialog(
 /** Re-initializes to [initialTabId] whenever [tabRequestToken] changes — a fresh explicit
  *  navigation request should always land on the requested tab, even if it's the same tab id
  *  the dialog is already showing (see App.kt's ShowSettingsTab / OpenSettings handling).
- *  Falls back to the first entry of [tabs] when [initialTabId] doesn't match any of them (e.g. a
- *  `ShowSettingsTab("cloud_sync")` notification surviving into a build with no cloud provider
- *  configured), so the dialog never opens on a tab id that isn't actually rendered. */
+ *  `null` means no tab is selected: the dialog's default entry (see [resolveSettingsEntry]). */
 @Composable
 internal fun rememberSelectedTabId(
-    initialTabId: String,
+    initialTabId: String?,
     tabRequestToken: Int,
     tabs: List<KeryxDialogTab>,
-): MutableState<String> =
+): MutableState<String?> =
     // Saveable so the tab the user switched to survives an Android configuration change, along
     // with the dialog itself (App.kt); a new tabRequestToken still re-initializes it.
     rememberSaveable(tabRequestToken) {
-        mutableStateOf(if (tabs.any { it.id == initialTabId }) initialTabId else tabs.first().id)
+        mutableStateOf(resolveSettingsEntry(initialTabId, tabs))
     }
+
+/**
+ * The tab the settings dialog opens on for a request of [requestedTabId]: that tab when [tabs]
+ * renders it, otherwise `null` — the dialog's default entry (Android's category list, desktop's
+ * first tab). An unknown id falls back the same way (e.g. a `ShowSettingsTab("cloud_sync")`
+ * notification surviving into a build with no cloud provider configured), so the dialog never
+ * opens on a tab id that isn't actually rendered.
+ */
+internal fun resolveSettingsEntry(requestedTabId: String?, tabs: List<KeryxDialogTab>): String? =
+    requestedTabId?.takeIf { id -> tabs.any { it.id == id } }

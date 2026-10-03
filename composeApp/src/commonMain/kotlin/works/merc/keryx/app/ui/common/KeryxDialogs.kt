@@ -44,17 +44,17 @@ expect fun KeryxAlertDialog(
     destructive: Boolean = false,
 )
 
-/** One tab in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized [label]
- * (shown under the icon and, on macOS, mirrored as the window title), and an [icon]. */
+/** One tab (category) in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized
+ * [label] (shown with the icon — under it in desktop's tab bar, beside it in Android's category
+ * list — and as the selected tab's window title on macOS / detail-screen title on Android), and an
+ * [icon]. */
 data class KeryxDialogTab(val id: String, val label: String, val icon: DrawableResource)
 
 /**
  * Renders the tab children for a Material3 [androidx.compose.material3.TabRow] or
- * [androidx.compose.material3.ScrollableTabRow] in both Android and Desktop `actual`s.
- *
- * Kept in [commonMain] so the icon/label rendering and truncation behavior stay identical across
- * platforms; only the surrounding container (`PrimaryScrollableTabRow` on Android,
- * `SecondaryScrollableTabRow` on Desktop) differs.
+ * [androidx.compose.material3.ScrollableTabRow]: the desktop [KeryxTabDialog] `actual`'s
+ * `SecondaryScrollableTabRow`. Android's `actual` has no tab row — it lists the categories instead
+ * (see its own KDoc).
  */
 @Composable
 internal fun KeryxDialogTabs(
@@ -77,34 +77,52 @@ internal fun KeryxDialogTabs(
 }
 
 /**
- * A dialog with tab-based navigation: a row of tabs up top and a content area below that shows
- * whichever tab is currently selected — see [KeryxDialogTab] for what each tab carries. The two
- * `actual`s differ in how "native" is expressed here, not just in tab-bar style: desktop's is a
- * modeless, macOS-System-Preferences-style `DialogWindow` (see [KeryxAlertDialog] for why a real
- * `DialogWindow` rather than a Compose `Popup`) with a Material3 `SecondaryScrollableTabRow`/
- * `Tab` tab bar (rendered by [KeryxDialogTabs]), whose selected tab's label is mirrored as the
- * window title next to the traffic lights on macOS — the main window stays interactive while it
- * is open, matching the real macOS System Settings window. Android's is a modal, near-fullscreen
- * `Dialog` hosting a genuine M3 `PrimaryScrollableTabRow`/`Tab`. See each platform's own
- * `KeryxDialogs.*.kt` for the details.
+ * A dialog with category navigation over a set of [KeryxDialogTab]s (see that class for what each
+ * one carries), presented in each platform's own idiom. Desktop's is a modeless,
+ * macOS-System-Preferences-style `DialogWindow` (see [KeryxAlertDialog] for why a real
+ * `DialogWindow` rather than a Compose `Popup`) with a Material3 `SecondaryScrollableTabRow`/`Tab`
+ * tab bar (rendered by [KeryxDialogTabs]) above the selected tab's content, whose label is mirrored
+ * as the window title next to the traffic lights on macOS — the main window stays interactive while
+ * it is open, matching the real macOS System Settings window. Android's is a modal, near-fullscreen
+ * `Dialog` following Android's own settings pattern: a list of the categories, each opening its
+ * content as a detail screen. See each platform's own `KeryxDialogs.*.kt` for the details.
  *
  * Has no button row: the caller's content applies its changes immediately. Desktop closes it via
- * the native close box or Escape; Android via the system back gesture/button, or a back arrow in
- * a `TopAppBar` above the tab row (added because the near-fullscreen `Dialog` leaves no tappable
- * area outside its own content — see [KeryxTabDialog]'s Android `actual` for why "outside tap"
- * alone isn't a real dismiss path there).
+ * the native close box or Escape. Android's back step — the `TopAppBar` back arrow and the system
+ * back gesture/button alike, through [goBackInTabDialog] — returns from a category's detail to the
+ * list, and closes the dialog from the list (the arrow exists because the near-fullscreen `Dialog`
+ * leaves no tappable area outside its own content — see [KeryxTabDialog]'s Android `actual` for why
+ * "outside tap" alone isn't a real dismiss path there).
  *
- * @param title The screen's own name. Rendered as the Android `actual`'s `TopAppBar` title;
- *   desktop's `actual` ignores it, since it already mirrors the selected tab's own label as the
- *   native window title instead (see that `actual`'s KDoc).
- * @param content receives the currently selected tab's [KeryxDialogTab.id] and renders that tab.
+ * @param selectedTabId The selected tab's [KeryxDialogTab.id], or `null` for none: the dialog's
+ *   default entry — Android's category list; desktop shows its first tab.
+ * @param onSelectTab Called with the tab the user picked, or with `null` when Android's back step
+ *   returns to the category list. Desktop's `actual` never passes `null`.
+ * @param title The screen's own name. Rendered as the Android `actual`'s `TopAppBar` title on the
+ *   category list; desktop's `actual` ignores it, since it already mirrors the selected tab's own
+ *   label as the native window title instead (see that `actual`'s KDoc).
+ * @param content receives the currently shown tab's [KeryxDialogTab.id] and renders that tab.
  */
 @Composable
 expect fun KeryxTabDialog(
     onDismissRequest: () -> Unit,
     tabs: List<KeryxDialogTab>,
-    selectedTabId: String,
-    onSelectTab: (String) -> Unit,
+    selectedTabId: String?,
+    onSelectTab: (String?) -> Unit,
     title: String? = null,
     content: @Composable (String) -> Unit,
 )
+
+/**
+ * The one back step of a [KeryxTabDialog] that has a category list (Android's): from a category's
+ * detail ([selectedTabId] non-null) back to the list, and from the list out of the dialog. Every
+ * back route — the `TopAppBar` arrow and the system back gesture/button — calls this, so they can
+ * never disagree.
+ */
+internal fun goBackInTabDialog(
+    selectedTabId: String?,
+    onSelectTab: (String?) -> Unit,
+    onDismissRequest: () -> Unit,
+) {
+    if (selectedTabId != null) onSelectTab(null) else onDismissRequest()
+}

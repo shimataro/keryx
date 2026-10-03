@@ -11,6 +11,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import works.merc.keryx.app.ui.common.KeryxDialogTab
 import works.merc.keryx.app.ui.common.KeryxIcons
 
@@ -29,7 +30,7 @@ class SettingsDialogTabStateTest {
 
     @Test
     fun initializesToInitialTabId() = runDesktopComposeUiTest {
-        lateinit var selectedTabIdState: MutableState<String>
+        lateinit var selectedTabIdState: MutableState<String?>
 
         setContent {
             selectedTabIdState = rememberSelectedTabId(
@@ -45,7 +46,7 @@ class SettingsDialogTabStateTest {
 
     @Test
     fun manualTabSwitchChangesValue() = runDesktopComposeUiTest {
-        lateinit var selectedTabIdState: MutableState<String>
+        lateinit var selectedTabIdState: MutableState<String?>
 
         setContent {
             selectedTabIdState = rememberSelectedTabId(
@@ -66,7 +67,7 @@ class SettingsDialogTabStateTest {
     fun requestTokenBumpReNavigatesEvenWithSameTabId() = runDesktopComposeUiTest {
         var initialTabId by mutableStateOf("cloud_sync")
         var tabRequestToken by mutableStateOf(0)
-        lateinit var selectedTabIdState: MutableState<String>
+        lateinit var selectedTabIdState: MutableState<String?>
 
         setContent {
             selectedTabIdState = rememberSelectedTabId(initialTabId, tabRequestToken, tabsWithCloudSync)
@@ -87,9 +88,27 @@ class SettingsDialogTabStateTest {
         assertEquals("cloud_sync", selectedTabIdState.value)
     }
 
+    /** No requested tab (the plain "Open Settings" command): nothing is selected, which is the
+     *  dialog's default entry — Android's category list, desktop's first tab. */
     @Test
-    fun fallsBackToFirstTabWhenInitialTabIdIsNotInTabs() = runDesktopComposeUiTest {
-        lateinit var selectedTabIdState: MutableState<String>
+    fun initializesToNoSelectionWithoutAnInitialTabId() = runDesktopComposeUiTest {
+        lateinit var selectedTabIdState: MutableState<String?>
+
+        setContent {
+            selectedTabIdState = rememberSelectedTabId(
+                initialTabId = null,
+                tabRequestToken = 0,
+                tabs = tabsWithCloudSync,
+            )
+        }
+        waitForIdle()
+
+        assertNull(selectedTabIdState.value)
+    }
+
+    @Test
+    fun fallsBackToNoSelectionWhenInitialTabIdIsNotInTabs() = runDesktopComposeUiTest {
+        lateinit var selectedTabIdState: MutableState<String?>
 
         setContent {
             selectedTabIdState = rememberSelectedTabId(
@@ -100,13 +119,13 @@ class SettingsDialogTabStateTest {
         }
         waitForIdle()
 
-        assertEquals("general", selectedTabIdState.value)
+        assertNull(selectedTabIdState.value)
     }
 
     @Test
     fun requestTokenBumpFallsBackWhenTabBecameUnavailable() = runDesktopComposeUiTest {
         var tabRequestToken by mutableStateOf(0)
-        lateinit var selectedTabIdState: MutableState<String>
+        lateinit var selectedTabIdState: MutableState<String?>
 
         setContent {
             selectedTabIdState = rememberSelectedTabId(
@@ -116,7 +135,7 @@ class SettingsDialogTabStateTest {
             )
         }
         waitForIdle()
-        assertEquals("general", selectedTabIdState.value)
+        assertNull(selectedTabIdState.value)
 
         selectedTabIdState.value = "data"
         waitForIdle()
@@ -126,14 +145,14 @@ class SettingsDialogTabStateTest {
         tabRequestToken++
         waitForIdle()
 
-        assertEquals("general", selectedTabIdState.value)
+        assertNull(selectedTabIdState.value)
     }
 
     /** Stands in for an Android configuration change: the composition is torn down after its
      *  saveable state was saved, then rebuilt from that saved state. */
     @Test
     fun manualTabSwitchSurvivesStateRestoration() = runDesktopComposeUiTest {
-        lateinit var selectedTabIdState: MutableState<String>
+        lateinit var selectedTabIdState: MutableState<String?>
         var registry by mutableStateOf(SaveableStateRegistry(restoredValues = null) { true })
         var shown by mutableStateOf(true)
 
@@ -161,4 +180,61 @@ class SettingsDialogTabStateTest {
 
         assertEquals("cloud_sync", selectedTabIdState.value)
     }
+
+    /** Android's back step from a category's detail to the list is a selection of `null`, which
+     *  must survive a configuration change like any other selection. */
+    @Test
+    fun returningToTheListSurvivesStateRestoration() = runDesktopComposeUiTest {
+        lateinit var selectedTabIdState: MutableState<String?>
+        var registry by mutableStateOf(SaveableStateRegistry(restoredValues = null) { true })
+        var shown by mutableStateOf(true)
+
+        setContent {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                if (shown) {
+                    selectedTabIdState = rememberSelectedTabId(
+                        initialTabId = "cloud_sync",
+                        tabRequestToken = 0,
+                        tabs = tabsWithCloudSync,
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        selectedTabIdState.value = null
+        waitForIdle()
+
+        val saved = registry.performSave()
+        shown = false
+        waitForIdle()
+        registry = SaveableStateRegistry(restoredValues = saved) { true }
+        shown = true
+        waitForIdle()
+
+        assertNull(selectedTabIdState.value)
+    }
+
+    /** A fresh request re-navigates even from the category list (no selection). */
+    @Test
+    fun requestTokenBumpReNavigatesFromTheList() = runDesktopComposeUiTest {
+        var tabRequestToken by mutableStateOf(0)
+        lateinit var selectedTabIdState: MutableState<String?>
+
+        setContent {
+            selectedTabIdState = rememberSelectedTabId("updates", tabRequestToken, tabsWithUpdates)
+        }
+        waitForIdle()
+        selectedTabIdState.value = null
+        waitForIdle()
+
+        tabRequestToken++
+        waitForIdle()
+
+        assertEquals("updates", selectedTabIdState.value)
+    }
+
+    private val tabsWithUpdates = listOf(
+        KeryxDialogTab("general", "General", KeryxIcons.Tune),
+        KeryxDialogTab("updates", "Updates", KeryxIcons.Update),
+    )
 }

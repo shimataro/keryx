@@ -85,4 +85,46 @@ class SettingsOpenRequestsTest {
         assertNull(router.release(Screen.Setup), "still held across recompositions on Setup")
         assertEquals(SettingsOpenRequest("data"), router.release(Screen.Home))
     }
+
+    /** The plain "Open Settings" command asks for no tab at all: the dialog's default entry. */
+    @Test
+    fun aDefaultEntryRequestCarriesNoTab() {
+        val router = SettingsOpenRequests()
+        router.request()
+
+        assertEquals(SettingsOpenRequest(null), router.release(Screen.Home))
+    }
+
+    @Test
+    fun aDefaultEntryRequestMadeDuringSetupIsHeldUntilHome() {
+        val router = SettingsOpenRequests()
+        router.request(null)
+
+        assertNull(router.release(Screen.Setup))
+        assertEquals(SettingsOpenRequest(null), router.pending.value, "the request stays latched")
+        assertEquals(SettingsOpenRequest(null), router.release(Screen.Home))
+    }
+
+    @Test
+    fun aTabRequestReplacesAWaitingDefaultEntryRequestAndViceVersa() {
+        val router = SettingsOpenRequests()
+        router.request(null)
+        router.request("cloud_sync")
+        assertEquals(SettingsOpenRequest("cloud_sync"), router.release(Screen.Home))
+
+        router.request("cloud_sync")
+        router.request(null)
+        assertEquals(SettingsOpenRequest(null), router.release(Screen.Home))
+    }
+
+    @Test
+    fun requestIfReachableWithoutATabIsDroppedAwayFromHomeAndAcceptedOnHome() {
+        val router = SettingsOpenRequests()
+
+        assertFalse(router.requestIfReachable(null, Screen.Setup))
+        assertNull(router.pending.value)
+
+        assertTrue(router.requestIfReachable(null, Screen.Home))
+        assertEquals(SettingsOpenRequest(null), router.release(Screen.Home))
+    }
 }

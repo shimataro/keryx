@@ -88,8 +88,9 @@ fun App() {
         // (like the tab state below) so an open dialog survives an Android configuration change.
         var showAbout by rememberSaveable { mutableStateOf(false) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
-        // Which tab the settings dialog opens on, from the last released SettingsOpenRequest.
-        var settingsInitialTab by rememberSaveable { mutableStateOf("general") }
+        // Which tab the settings dialog opens on, from the last released SettingsOpenRequest; null
+        // is the dialog's default entry (Android's category list, desktop's first tab).
+        var settingsInitialTab by rememberSaveable { mutableStateOf<String?>(null) }
         // Bumped on every explicit tab-navigation request so the dialog re-navigates even when
         // settingsInitialTab is reassigned the same value it already holds (see SettingsDialog's
         // rememberSelectedTabId, which keys off this instead of the tab id's value).
@@ -135,8 +136,9 @@ fun App() {
                     MenuCommand.About -> showAbout = true
                     // Dropped (not held) away from Home, matching the menu item's enabled state; the
                     // native macOS "Settings…" item is always enabled but is a no-op away from Home.
-                    // Opened by the user, not by a notification: always start on the first tab.
-                    MenuCommand.OpenSettings -> settingsOpenRequests.requestIfReachable("general", navigator.current)
+                    // Opened by the user, not by a notification: always start on the default entry
+                    // (Android's category list, desktop's first tab).
+                    MenuCommand.OpenSettings -> settingsOpenRequests.requestIfReachable(null, navigator.current)
                     else -> {}
                 }
             }
