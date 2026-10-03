@@ -132,7 +132,7 @@ fun feedsForTag(feeds: List<Feeds>, feedTagMap: Map<String, Set<String>>, tagId:
  * [PaneLayout.Triple]. Falls back to [allLabel] for a feed/tag/folder id that no
  * longer exists (e.g. deleted on another device and not yet synced here), matching
  * `groupFeedsByFolder`'s own defensive "no folder" treatment. The SwiftUI app shows the same
- * title as the iOS article list's navigation title, at every width (`HomeObservable.articleListTitle`).
+ * title in the iOS article list's heading, at every width (`HomeObservable.articleListTitle`).
  *
  * Search has no title of its own here — its own query field replaces this title row entirely
  * while it's expanded (see `ArticleListPane`'s own KDoc) — so [filter] alone (never displaced by

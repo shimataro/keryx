@@ -64,6 +64,11 @@ struct ArticleListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            #if os(iOS)
+            // Names the selection being shown (and, during a search, the one being narrowed). Not a
+            // navigation title: see `ArticleListHeader`.
+            ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+            #endif
             #if os(macOS)
             // `ArticleTableView` does its own scrolling: back to the top on a filter switch, to an
             // off-screen selection, and to the fresh end for the pill.
@@ -113,10 +118,6 @@ struct ArticleListView: View {
         #endif
         .toolbar { toolbarContent }
         #if os(iOS)
-        // Names the selection being shown (and, during a search, the one being narrowed), as Android's
-        // narrow-layout header does. Inline, so the rows keep the vertical space.
-        .navigationTitle(home.articleListTitle)
-        .navigationBarTitleDisplayMode(.inline)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
         // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
         // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
