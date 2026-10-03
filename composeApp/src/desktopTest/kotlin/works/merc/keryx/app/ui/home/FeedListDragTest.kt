@@ -4,6 +4,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -13,7 +14,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
@@ -37,6 +41,7 @@ import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -48,6 +53,7 @@ import works.merc.keryx.app.ui.menu.MenuController
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -61,6 +67,19 @@ import kotlin.test.fail
  */
 @OptIn(ExperimentalTestApi::class)
 class FeedListDragTest {
+
+    private object NoHaptics : HapticFeedback {
+        override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
+    }
+
+    /** A [HapticFeedback] that records what the drag asked for, in order. */
+    private class RecordingHaptics : HapticFeedback {
+        val performed = mutableListOf<HapticFeedbackType>()
+
+        override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+            performed += hapticFeedbackType
+        }
+    }
 
     /** Comfortably above `FeedListDragGestures.kt`'s private `MOUSE_DRAG_THRESHOLD_DP` (4dp), so a
      * single move reliably crosses the drag-start threshold regardless of test-environment density
@@ -93,6 +112,7 @@ class FeedListDragTest {
         vm: HomeViewModel,
         dragOverlay: FeedDragOverlayState,
         isTouchPrimary: Boolean = false,
+        haptics: HapticFeedback = LocalHapticFeedback.current,
     ) {
         // Mirrors HomeScreen.kt's own request-id wiring for the keyboard rename/delete shortcuts,
         // so tests can drive them end to end (real F2/Delete key presses -> real FeedListPane
@@ -114,16 +134,18 @@ class FeedListDragTest {
                 onSearch = {},
             ),
         ) {
-            FeedListPane(
-                vm = vm,
-                focused = true,
-                dragOverlay = dragOverlay,
-                onActivated = {},
-                renameSelectedRequestId = renameSelectedRequestId,
-                deleteSelectedRequestId = deleteSelectedRequestId,
-                isTouchPrimary = isTouchPrimary,
-            )
-            FeedDragGhost(dragOverlay)
+            CompositionLocalProvider(LocalHapticFeedback provides haptics) {
+                FeedListPane(
+                    vm = vm,
+                    focused = true,
+                    dragOverlay = dragOverlay,
+                    onActivated = {},
+                    renameSelectedRequestId = renameSelectedRequestId,
+                    deleteSelectedRequestId = deleteSelectedRequestId,
+                    isTouchPrimary = isTouchPrimary,
+                )
+            }
+            FeedDragGhost(dragOverlay, isTouchPrimary)
         }
     }
 
@@ -132,6 +154,7 @@ class FeedListDragTest {
         dragOverlay: FeedDragOverlayState = FeedDragOverlayState(),
         menuController: MenuController = testMenuController,
         isTouchPrimary: Boolean = false,
+        haptics: HapticFeedback = NoHaptics,
     ): FeedDragOverlayState {
         setContent {
             KoinApplication(
@@ -143,7 +166,7 @@ class FeedListDragTest {
                     )
                 },
             ) {
-                FeedListDragTestHost(vm, dragOverlay, isTouchPrimary)
+                FeedListDragTestHost(vm, dragOverlay, isTouchPrimary, haptics)
             }
         }
         return dragOverlay
@@ -194,7 +217,7 @@ class FeedListDragTest {
         // With isTouchPrimary, feedListReorderDrag only starts from the row's trailing handle
         // band — everywhere else on the row must fall through untouched so the LazyColumn's own
         // scroll gesture can claim it instead (see feedListReorderDrag's KDoc). A press+move on
-        // the row's own title text (comfortably left of the 44dp band) exercises exactly that.
+        // the row's own title text (comfortably left of the 48dp band) exercises exactly that.
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
@@ -235,7 +258,7 @@ class FeedListDragTest {
             val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            // Comfortably inside the trailing 44dp handle band, regardless of exactly where the
+            // Comfortably inside the trailing 48dp handle band, regardless of exactly where the
             // title text itself sits.
             val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
             val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
@@ -252,6 +275,245 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("b", "a"), order)
+        }
+    }
+
+    /** Touch-drags feed "a" from [pressInsetDp] left of the host's trailing edge down to "b"'s lower
+     * half, and returns the resulting root-level feed order. */
+    private fun ComposeUiTest.touchDragFromTrailingInset(
+        vm: HomeViewModel,
+        db: KeryxDatabase,
+        pressInsetDp: Float,
+    ): List<String> {
+        setFeedListDragContent(vm, isTouchPrimary = true)
+        waitForIdle()
+
+        val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val pressX = hostBounds.right - with(density) { pressInsetDp.dp.toPx() }
+        val start = localOf(Offset(pressX, aBounds.center.y), hostBounds)
+        val target = localOf(Offset(pressX, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+        onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+            down(start)
+            moveTo(start + Offset(0f, dragThresholdCrossPx))
+            moveTo(target)
+            up()
+        }
+        waitForIdle()
+        return db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
+    }
+
+    @Test
+    fun touchPressJustInsideTheMinimumTouchTargetBandStartsAReorder() = runDesktopComposeUiTest {
+        // The handle band is M3's 48dp minimum touch target, so a press 46dp from the trailing edge
+        // (outside the former 44dp band) must now start the drag.
+        val (_, driver, db) = fileDb(foreignKeys = true)
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            assertEquals(listOf("b", "a"), touchDragFromTrailingInset(fixture.vm, db, pressInsetDp = 46f))
+        }
+    }
+
+    @Test
+    fun touchPressJustOutsideTheMinimumTouchTargetBandNeverStartsAReorder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            assertEquals(listOf("a", "b"), touchDragFromTrailingInset(fixture.vm, db, pressInsetDp = 52f))
+        }
+    }
+
+    @Test
+    fun touchDragKeepsTheGhostAtTheHostsLeftEdgeWhilePointerMovesSideways() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val overlay = setFeedListDragContent(fixture.vm, isTouchPrimary = true)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+            val sideways = start + Offset(-with(density) { 120.dp.toPx() }, dragThresholdCrossPx)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+                down(start)
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(sideways)
+            }
+            waitForIdle()
+
+            assertEquals(hostBounds.left, overlay.positionInRoot.x)
+            onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertExists()
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput { up() }
+        }
+    }
+
+    @Test
+    fun mouseDragGhostStillFollowsThePointerHorizontally() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val overlay = setFeedListDragContent(fixture.vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val shift = with(density) { 40.dp.toPx() }
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(start + Offset(shift, dragThresholdCrossPx))
+            }
+            waitForIdle()
+
+            // The grab offset cancels the press X, so the ghost's left edge is the host's left plus the shift.
+            assertEquals(hostBounds.left + shift, overlay.positionInRoot.x)
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
+        }
+    }
+
+    // --- Haptics: lift-off, each new valid target, an applied drop — touch only.
+
+    @Test
+    fun touchDragPerformsLiftTickAndDropHaptics() = runDesktopComposeUiTest {
+        val (_, driver, db) = fileDb(foreignKeys = true)
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val haptics = RecordingHaptics()
+            setFeedListDragContent(fixture.vm, isTouchPrimary = true, haptics = haptics)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+            val target = localOf(Offset(handleX, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+            // Separate input blocks, so each position is delivered as its own pointer event (moves
+            // within one block are coalesced into a single event at the final position).
+            val host = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true)
+            host.performTouchInput {
+                down(start)
+                // Past the (larger) touch slop, so the drag lifts here and not at the target.
+                moveTo(start + Offset(0f, with(density) { 24.dp.toPx() }))
+            }
+            host.performTouchInput { moveTo(target) }
+            host.performTouchInput { up() }
+            waitForIdle()
+
+            val performed = haptics.performed
+            assertEquals(HapticFeedbackType.GestureThresholdActivate, performed.first())
+            assertEquals(HapticFeedbackType.GestureEnd, performed.last())
+            assertEquals(1, performed.count { it == HapticFeedbackType.GestureThresholdActivate })
+            assertEquals(1, performed.count { it == HapticFeedbackType.GestureEnd })
+            assertTrue(performed.any { it == HapticFeedbackType.SegmentFrequentTick }, "expected a tick on reaching a new target: $performed")
+        }
+    }
+
+    @Test
+    fun cancelledTouchDragNeverPerformsTheDropHaptic() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val haptics = RecordingHaptics()
+            val overlay = setFeedListDragContent(fixture.vm, isTouchPrimary = true, haptics = haptics)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+                down(start)
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+            }
+            waitForIdle()
+            overlay.cancel()
+            waitForIdle()
+
+            assertTrue(haptics.performed.none { it == HapticFeedbackType.GestureEnd }, "${haptics.performed}")
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput { up() }
+        }
+    }
+
+    @Test
+    fun mouseDragOnTouchPrimaryPerformsNoHaptics() = runDesktopComposeUiTest {
+        val (_, driver, db) = fileDb(foreignKeys = true)
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val haptics = RecordingHaptics()
+            val overlay = setFeedListDragContent(fixture.vm, isTouchPrimary = true, haptics = haptics)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+            val target = localOf(Offset(handleX, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+            val host = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true)
+            host.performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+            }
+            waitForIdle()
+            // The drag really started (a mouse press in the handle band is accepted on a touch-primary
+            // device), so the empty haptics log below is the gate working, not a drag that never began.
+            assertNotNull(overlay.item)
+            host.performMouseInput {
+                moveTo(target)
+                release()
+            }
+            waitForIdle()
+
+            assertEquals(emptyList(), haptics.performed)
+        }
+    }
+
+    @Test
+    fun mouseDragPerformsNoHaptics() = runDesktopComposeUiTest {
+        val (_, driver, db) = fileDb(foreignKeys = true)
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val haptics = RecordingHaptics()
+            setFeedListDragContent(fixture.vm, haptics = haptics)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val target = localOf(Offset(bBounds.center.x, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(target)
+                release()
+            }
+            waitForIdle()
+
+            assertEquals(emptyList(), haptics.performed)
         }
     }
 

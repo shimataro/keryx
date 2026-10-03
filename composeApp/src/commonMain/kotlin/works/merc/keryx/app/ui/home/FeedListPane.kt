@@ -54,7 +54,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -361,6 +363,12 @@ internal fun FeedListPane(
 
     val listState = rememberLazyListState()
 
+    // Haptics are a touch affordance: non-touch platforms get a no-op here, and the controller
+    // additionally keeps each mouse drag silent on a touch-primary device (per-drag pointer type).
+    val haptics = LocalHapticFeedback.current
+    val onDragHaptic: (HapticFeedbackType) -> Unit =
+        if (isTouchPrimary) { type -> haptics.performHapticFeedback(type) } else { _ -> }
+
     val dragController = rememberFeedListDragController(
         vm = vm,
         listState = listState,
@@ -371,6 +379,8 @@ internal fun FeedListPane(
         hoveredAttachTagIdState = hoveredAttachTagIdState,
         dragPointerYState = dragPointerYState,
         overlay = dragOverlay,
+        lockHorizontal = isTouchPrimary,
+        onHaptic = onDragHaptic,
     ) { key ->
         when (key) {
             is FeedListDragSourceKey.Feed -> feeds.find { it.id == key.feedId }?.displayTitle().orEmpty()
@@ -626,6 +636,7 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                 isTouchPrimary = isTouchPrimary,
+                                isBeingDragged = isTouchPrimary && draggedFeedId == feed.id,
                                 onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
                                 onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
@@ -698,6 +709,8 @@ internal fun FeedListPane(
                                     },
                                     isDragSource = folder.id == draggedFeedFolderId,
                                     isTouchPrimary = isTouchPrimary,
+                                    isBeingDragged = isTouchPrimary &&
+                                        (dragOverlay.item as? DraggedItem.Folder)?.folderId == folder.id,
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.

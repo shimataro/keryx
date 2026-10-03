@@ -290,6 +290,11 @@ the underlying action: reordering a feed or folder is a plain click-and-drag wit
 drag from a dedicated handle icon with touch (touch needs a distinct starting gesture so the rest
 of the row can still be scrolled normally) — both work the same way inside the drawer as they did
 in the sidebar it replaced; a right-click context menu on desktop is a long-press menu on Android.
+On Android the lifted row follows Material 3's dragged-item look (an opaque, elevated row that moves
+along the list only, with the row it came from dimmed in place), the drag gives haptic feedback as it
+lifts, reaches each new drop position and lands, and — since a drag is not something every user can
+perform — the same long-press menu (and TalkBack's custom actions) offers "Move up" / "Move down"
+for any feed or folder that has room to move in that direction.
 Settings — reached from the desktop application menu — gets its own entry point on Android, which
 has no menu bar: a labelled row fixed to the bottom of the feed list/drawer, below the scrolling
 folder/tag/feed list, with the drawer's own header showing the app's name in its place. The settings

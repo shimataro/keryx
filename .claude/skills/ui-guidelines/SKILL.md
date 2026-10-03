@@ -287,6 +287,26 @@ without one stealing the other's press. All of this works the same way whether `
 rendering as `Triple`'s sidebar or a narrow layout's drawer content — reordering, renaming,
 deleting, and the context menu are unaffected by which one it is.
 
+The touch drag follows Material 3's *dragged* list-item treatment rather than the desktop chip:
+
+- **Handle size.** The drag-start band is M3's 48dp minimum touch target
+  (`TOUCH_TARGET_MIN_SIZE`) and the handle icon is the standard 24dp.
+- **Lifted row.** `FeedDragGhost` draws, when `isTouchPrimary`, an opaque `surfaceContainerHigh`
+  row with an elevation-3 shadow and a 16% `onSurface` state layer — no border, no translucency —
+  and `FeedListDragController`'s `lockHorizontal` keeps it at the list's left edge so it moves
+  vertically only. An invalid position drops the state layer and dims the row to 60%; it never turns
+  `error` red (M3 has no error treatment for a drag). The dragged row itself fades to 38% through
+  `dragSourcePlaceholder`, applied between `insertionMarkers` and `listRowSurface` so an insertion
+  line on its edge stays at full strength. Desktop keeps the translucent outlined chip.
+- **Haptics.** `FeedListDragController`'s `onHaptic`: `GestureThresholdActivate` on lift-off,
+  `SegmentFrequentTick` each time the insertion boundary / hovered tag moves onto a new valid
+  target (leaving to nothing is silent), `GestureEnd` on an applied drop. A cancelled or rejected
+  drop and every mouse drag perform none.
+- **Non-drag reordering.** `reorderMoves` builds the "Move up" / "Move down" steps once; both the
+  TalkBack custom actions (`reorderAccessibilityActions`) and the long-press menu entries
+  (`reorderMenuEntries`) are derived from that one list, so availability, label and effect cannot
+  drift apart (constraint #10).
+
 **Touch input on the article reader.** At a narrow layout the article detail pane
 (`ui/home/ArticleDetailPane.kt`) renders as a `HorizontalPager` over
 `HomeViewModel.pagerArticles`, so a horizontal swipe moves to the next/previous article with that

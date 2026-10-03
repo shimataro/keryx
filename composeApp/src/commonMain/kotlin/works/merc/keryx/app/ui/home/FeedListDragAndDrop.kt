@@ -248,6 +248,8 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
  * @param onMoveUp Moves this folder one position up in the folder order, or `null` when it is
  *   already the first one (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this folder one position down, or `null` when it is already the last one.
+ * @param isBeingDragged Whether this folder is the one being dragged on a touch platform, so it
+ *   dims to a placeholder (see [dragSourcePlaceholder]).
  */
 @Composable
 internal fun FolderGroupHeader(
@@ -273,6 +275,7 @@ internal fun FolderGroupHeader(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
+    isBeingDragged: Boolean = false,
 ) {
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
@@ -294,6 +297,7 @@ internal fun FolderGroupHeader(
         onToggleCollapse()
     }
 
+    val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
     // Always unpaired: no folder ever checks the boundary before the *next* folder from its own
@@ -319,18 +323,19 @@ internal fun FolderGroupHeader(
     Row(
         Modifier.fillMaxWidth()
             .testTag(folderRowTestTag(folder.id))
-            .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
+            .reorderAccessibilityActions(reorderMoves)
             .listRowClickable(rowInteraction, selected, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(
                         NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
                         NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
-                    )
+                    ) + if (reorderMoves.isEmpty()) emptyList() else listOf(NativeMenuSeparator) + reorderMenuEntries(reorderMoves)
                 },
                 onOpen = { if (!selected) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .dragSourcePlaceholder(isBeingDragged)
             .listRowSurface(
                 dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
                 ListRowKind.NavItem,
@@ -479,6 +484,8 @@ internal fun NoFolderHeader(
  *   it is already the first one there (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
  *   already the last one there.
+ * @param isBeingDragged Whether this feed is the one being dragged on a touch platform, so it
+ *   dims to a placeholder (see [dragSourcePlaceholder]).
  */
 @Composable
 internal fun FeedRow(
@@ -509,6 +516,7 @@ internal fun FeedRow(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
+    isBeingDragged: Boolean = false,
     onCreateNewFolderForFeed: () -> Unit = {},
     onCreateNewTagForFeed: () -> Unit = {},
 ) {
@@ -528,6 +536,7 @@ internal fun FeedRow(
     val siteUrlCopyable = hasUsableUrl(feed.site_url)
     val siteUrlOpenable = canOpenInBrowser(feed.site_url)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
+    val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
     // Both edges, not just the last row's: for any feed but the last in its group, the row after
@@ -542,7 +551,7 @@ internal fun FeedRow(
     Row(
         Modifier.fillMaxWidth()
             .testTag(feedRowTestTag(feed.id))
-            .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
+            .reorderAccessibilityActions(reorderMoves)
             .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
             .nativeContextMenu(
                 items = {
@@ -578,6 +587,7 @@ internal fun FeedRow(
                                 add(NativeMenuItem(newFolderLabel) { onCreateNewFolderForFeed() })
                             },
                         ),
+                        *reorderMenuEntries(reorderMoves).toTypedArray(),
                         NativeMenuSeparator,
                         NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
                         NativeMenuItem(copySiteUrlLabel, enabled = siteUrlCopyable) { onCopySiteUrl() },
@@ -593,6 +603,7 @@ internal fun FeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .dragSourcePlaceholder(isBeingDragged)
             .listRowSurface(
                 selectionBackground(selectionTone, focused),
                 ListRowKind.NavItem,
