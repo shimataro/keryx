@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -162,6 +164,9 @@ internal class FeedDragOverlayState {
  * @param dragPointerYState Updated with the drag pointer's Y in root coordinates, driving auto-scroll.
  * @param titleOfState Resolves a dragged row's display title, for the ghost chip's label.
  * @param overlay The window-wide ghost state this controller writes while a drag is in progress.
+ * @param lockHorizontal Whether the ghost stays at the drag host's left edge instead of following
+ *   the pointer horizontally — the touch (M3) "lifted row" drag moves along the list's axis only.
+ *   Drop resolution is unaffected: it only ever looks at the pointer's Y.
  */
 internal class FeedListDragController(
     private val vm: HomeViewModel,
@@ -174,6 +179,7 @@ internal class FeedListDragController(
     private val dragPointerYState: MutableState<Float?>,
     private val titleOfState: State<(FeedListDragSourceKey) -> String>,
     private val overlay: FeedDragOverlayState,
+    private val lockHorizontal: Boolean = false,
 ) {
     init {
         overlay.onCancel = ::cancel
@@ -247,7 +253,8 @@ internal class FeedListDragController(
         if (overlay.item == null) return
         lastPosition = pos
         val bounds = hostBoundsState.value
-        overlay.positionInRoot = Offset(bounds.left, bounds.top) + pos - grabOffset
+        val ghostX = if (lockHorizontal) bounds.left else bounds.left + pos.x - grabOffset.x
+        overlay.positionInRoot = Offset(ghostX, bounds.top + pos.y - grabOffset.y)
         dragPointerYState.value = bounds.top + pos.y
         updateHover(pos)
     }
@@ -342,6 +349,7 @@ internal class FeedListDragController(
 /**
  * Remembers a feed-list drag controller for the specified view model and list state.
  *
+ * @param lockHorizontal See [FeedListDragController]'s parameter of the same name.
  * @param titleOf Resolves the current title for a draggable feed or folder.
  * @return The remembered feed-list drag controller.
  */
@@ -356,10 +364,11 @@ internal fun rememberFeedListDragController(
     hoveredAttachTagIdState: MutableState<String?>,
     dragPointerYState: MutableState<Float?>,
     overlay: FeedDragOverlayState,
+    lockHorizontal: Boolean = false,
     titleOf: (FeedListDragSourceKey) -> String,
 ): FeedListDragController {
     val titleOfState = rememberUpdatedState(titleOf)
-    return remember(vm, listState) {
+    return remember(vm, listState, lockHorizontal) {
         FeedListDragController(
             vm = vm,
             listState = listState,
@@ -371,6 +380,7 @@ internal fun rememberFeedListDragController(
             dragPointerYState = dragPointerYState,
             titleOfState = titleOfState,
             overlay = overlay,
+            lockHorizontal = lockHorizontal,
         )
     }
 }
@@ -381,6 +391,16 @@ internal fun rememberFeedListDragController(
  * visible underneath the chip instead of being fully hidden by it.
  */
 private const val DRAG_GHOST_ALPHA = 0.75f
+
+/** Opacity of the touch "lifted row" ghost while the pointer is over a position that cannot accept
+ * the drop — dimmed rather than recoloured, since M3 has no error treatment for a drag. */
+private const val LIFTED_ROW_INVALID_ALPHA = 0.6f
+
+/** M3's dragged-state layer opacity, drawn in `onSurface` over the lifted row. */
+private const val DRAGGED_STATE_LAYER_ALPHA = 0.16f
+
+/** M3 elevation level 3, the resting elevation of a dragged list item. */
+private val LIFTED_ROW_ELEVATION = 6.dp
 
 /**
  * Draws a rounded drag-preview chip containing an icon and an ellipsized title.
@@ -393,14 +413,18 @@ private fun DrawScope.drawDragPreviewChip(
     icon: Painter,
     iconTint: Color,
     backgroundColor: Color,
-    borderColor: Color,
+    borderColor: Color?,
+    cornerRadius: Dp = 6.dp,
+    stateLayerColor: Color? = null,
+    contentPadding: Dp = 8.dp,
 ) {
-    val corner = CornerRadius(6.dp.toPx())
+    val corner = CornerRadius(cornerRadius.toPx())
     drawRoundRect(color = backgroundColor, cornerRadius = corner)
-    drawRoundRect(color = borderColor, cornerRadius = corner, style = Stroke(1.dp.toPx()))
+    if (stateLayerColor != null) drawRoundRect(color = stateLayerColor, cornerRadius = corner)
+    if (borderColor != null) drawRoundRect(color = borderColor, cornerRadius = corner, style = Stroke(1.dp.toPx()))
 
     val iconSize = 18.dp.toPx()
-    val padding = 8.dp.toPx()
+    val padding = contentPadding.toPx()
     translate(left = padding, top = (size.height - iconSize) / 2f) {
         with(icon) { draw(size = Size(iconSize, iconSize), colorFilter = ColorFilter.tint(iconTint)) }
     }
@@ -442,12 +466,47 @@ private fun rememberFeedDragDecoration(
 }
 
 /**
+ * The touch counterpart of [rememberFeedDragDecoration]: a Material 3 *dragged* list item — an
+ * opaque `surfaceContainerHigh` row with a 16% `onSurface` state layer, no border and square
+ * corners (the elevation shadow is applied by [FeedDragGhost]). An invalid position drops the
+ * state layer instead of turning red; the ghost's own alpha does the rest.
+ */
+@Composable
+private fun rememberLiftedRowDecoration(
+    title: String,
+    icon: Painter,
+    iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    isValidTarget: Boolean = true,
+): DrawScope.() -> Unit {
+    val textMeasurer = rememberTextMeasurer()
+    val textStyle = MaterialTheme.typography.bodyLarge
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val backgroundColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val stateLayerColor = textColor.copy(alpha = DRAGGED_STATE_LAYER_ALPHA).takeIf { isValidTarget }
+    return {
+        drawDragPreviewChip(
+            title, textMeasurer, textStyle, textColor, icon, iconTint, backgroundColor,
+            borderColor = null,
+            cornerRadius = 0.dp,
+            stateLayerColor = stateLayerColor,
+            contentPadding = 16.dp,
+        )
+    }
+}
+
+/**
  * Displays the active feed or folder drag preview across the window.
  *
  * @param state The drag overlay state that provides the item, position, size, and target validity.
+ * @param isTouchPrimary Whether to draw the touch "lifted row" (opaque, elevated, dimmed rather
+ *   than red on an invalid position) instead of the desktop's translucent outlined chip. Overridable
+ *   for tests only, like `feedListReorderDrag`'s parameter of the same name.
  */
 @Composable
-internal fun FeedDragGhost(state: FeedDragOverlayState) {
+internal fun FeedDragGhost(
+    state: FeedDragOverlayState,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+) {
     // Resolved up front, outside the `state.item == null` early return: painterResource loads
     // asynchronously, so resolving it only once a drag starts would paint the chip's first frame
     // without its icon.
@@ -461,13 +520,25 @@ internal fun FeedDragGhost(state: FeedDragOverlayState) {
     Box(Modifier.onGloballyPositioned { originInRoot = it.positionInRoot() }) {
         val item = state.item ?: return@Box
         val decoration = when (item) {
-            is DraggedItem.Feed -> rememberFeedDragDecoration(item.title, feedIcon, isValidTarget = state.hasValidTarget)
-            is DraggedItem.Folder -> rememberFeedDragDecoration(
-                title = item.title,
-                icon = folderIcon,
-                iconTint = MaterialTheme.colorScheme.primary,
-                isValidTarget = state.hasValidTarget,
-            )
+            is DraggedItem.Feed ->
+                if (isTouchPrimary) {
+                    rememberLiftedRowDecoration(item.title, feedIcon, isValidTarget = state.hasValidTarget)
+                } else {
+                    rememberFeedDragDecoration(item.title, feedIcon, isValidTarget = state.hasValidTarget)
+                }
+            is DraggedItem.Folder -> {
+                val primary = MaterialTheme.colorScheme.primary
+                if (isTouchPrimary) {
+                    rememberLiftedRowDecoration(item.title, folderIcon, primary, state.hasValidTarget)
+                } else {
+                    rememberFeedDragDecoration(item.title, folderIcon, primary, state.hasValidTarget)
+                }
+            }
+        }
+        val ghostAlpha = when {
+            !isTouchPrimary -> DRAG_GHOST_ALPHA
+            state.hasValidTarget -> 1f
+            else -> LIFTED_ROW_INVALID_ALPHA
         }
         val density = LocalDensity.current
         val size = state.size
@@ -479,7 +550,8 @@ internal fun FeedDragGhost(state: FeedDragOverlayState) {
                     IntOffset(local.x.roundToInt(), local.y.roundToInt())
                 }
                 .size(with(density) { size.width.toDp() }, with(density) { size.height.toDp() })
-                .alpha(DRAG_GHOST_ALPHA)
+                .alpha(ghostAlpha)
+                .then(if (isTouchPrimary) Modifier.shadow(LIFTED_ROW_ELEVATION) else Modifier)
                 .drawBehind(decoration),
         )
     }

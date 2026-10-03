@@ -371,6 +371,7 @@ internal fun FeedListPane(
         hoveredAttachTagIdState = hoveredAttachTagIdState,
         dragPointerYState = dragPointerYState,
         overlay = dragOverlay,
+        lockHorizontal = isTouchPrimary,
     ) { key ->
         when (key) {
             is FeedListDragSourceKey.Feed -> feeds.find { it.id == key.feedId }?.displayTitle().orEmpty()
@@ -626,6 +627,7 @@ internal fun FeedListPane(
                                 onCopySiteUrl = { feed.site_url?.let(copyUrl) },
                                 onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
                                 isTouchPrimary = isTouchPrimary,
+                                isBeingDragged = isTouchPrimary && draggedFeedId == feed.id,
                                 onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
                                 onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
@@ -698,6 +700,8 @@ internal fun FeedListPane(
                                     },
                                     isDragSource = folder.id == draggedFeedFolderId,
                                     isTouchPrimary = isTouchPrimary,
+                                    isBeingDragged = isTouchPrimary &&
+                                        (dragOverlay.item as? DraggedItem.Folder)?.folderId == folder.id,
                                     // A folder's reorder scope is the top-level folder order, so
                                     // these resolve against `folders` — the same list
                                     // FeedListDropIndex.nextFolderId is built from.

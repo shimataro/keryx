@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -94,6 +95,18 @@ internal fun CountBadge(
             ?: MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
+
+/** Opacity of a row's content while it is the row being dragged on a touch platform — M3's
+ * disabled-content level, so the row reads as the empty slot the lifted ghost came from. */
+private const val DRAG_SOURCE_PLACEHOLDER_ALPHA = 0.38f
+
+/**
+ * Dims a row while it is the one being dragged ([active], touch platforms only — the caller gates
+ * it). Applied *between* `insertionMarkers` and `listRowSurface` so the row's own surface and
+ * content fade but an insertion line drawn on its edge does not.
+ */
+internal fun Modifier.dragSourcePlaceholder(active: Boolean): Modifier =
+    if (active) alpha(DRAG_SOURCE_PLACEHOLDER_ALPHA) else this
 
 /**
  * A touch-only drag affordance appended to the end of a draggable row (a folder header, or a feed

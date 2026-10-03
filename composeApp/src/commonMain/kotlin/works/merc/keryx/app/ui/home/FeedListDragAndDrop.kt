@@ -248,6 +248,8 @@ internal fun Modifier.insertionMarkers(top: InsertionMarker? = null, bottom: Ins
  * @param onMoveUp Moves this folder one position up in the folder order, or `null` when it is
  *   already the first one (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this folder one position down, or `null` when it is already the last one.
+ * @param isBeingDragged Whether this folder is the one being dragged on a touch platform, so it
+ *   dims to a placeholder (see [dragSourcePlaceholder]).
  */
 @Composable
 internal fun FolderGroupHeader(
@@ -273,6 +275,7 @@ internal fun FolderGroupHeader(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
+    isBeingDragged: Boolean = false,
 ) {
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
@@ -331,6 +334,7 @@ internal fun FolderGroupHeader(
                 onOpen = { if (!selected) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .dragSourcePlaceholder(isBeingDragged)
             .listRowSurface(
                 dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
                 ListRowKind.NavItem,
@@ -479,6 +483,8 @@ internal fun NoFolderHeader(
  *   it is already the first one there (see [reorderTargetWithinScope]).
  * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
  *   already the last one there.
+ * @param isBeingDragged Whether this feed is the one being dragged on a touch platform, so it
+ *   dims to a placeholder (see [dragSourcePlaceholder]).
  */
 @Composable
 internal fun FeedRow(
@@ -509,6 +515,7 @@ internal fun FeedRow(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
+    isBeingDragged: Boolean = false,
     onCreateNewFolderForFeed: () -> Unit = {},
     onCreateNewTagForFeed: () -> Unit = {},
 ) {
@@ -593,6 +600,7 @@ internal fun FeedRow(
                 onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
             )
             .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .dragSourcePlaceholder(isBeingDragged)
             .listRowSurface(
                 selectionBackground(selectionTone, focused),
                 ListRowKind.NavItem,

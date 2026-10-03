@@ -124,7 +124,7 @@ class FeedListDragTest {
                 deleteSelectedRequestId = deleteSelectedRequestId,
                 isTouchPrimary = isTouchPrimary,
             )
-            FeedDragGhost(dragOverlay)
+            FeedDragGhost(dragOverlay, isTouchPrimary)
         }
     }
 
@@ -302,6 +302,62 @@ class FeedListDragTest {
         db.insertFeed("b", sortOrder = 1L)
         useHomeViewModel(driver, db) { fixture ->
             assertEquals(listOf("a", "b"), touchDragFromTrailingInset(fixture.vm, db, pressInsetDp = 52f))
+        }
+    }
+
+    @Test
+    fun touchDragKeepsTheGhostAtTheHostsLeftEdgeWhilePointerMovesSideways() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val overlay = setFeedListDragContent(fixture.vm, isTouchPrimary = true)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+            val sideways = start + Offset(-with(density) { 120.dp.toPx() }, dragThresholdCrossPx)
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+                down(start)
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(sideways)
+            }
+            waitForIdle()
+
+            assertEquals(hostBounds.left, overlay.positionInRoot.x)
+            onNodeWithTag(FEED_DRAG_GHOST_TEST_TAG, useUnmergedTree = true).assertExists()
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput { up() }
+        }
+    }
+
+    @Test
+    fun mouseDragGhostStillFollowsThePointerHorizontally() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val overlay = setFeedListDragContent(fixture.vm)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val start = localOf(aBounds.center, hostBounds)
+            val shift = with(density) { 40.dp.toPx() }
+
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+                moveTo(start + Offset(shift, dragThresholdCrossPx))
+            }
+            waitForIdle()
+
+            // The grab offset cancels the press X, so the ghost's left edge is the host's left plus the shift.
+            assertEquals(hostBounds.left + shift, overlay.positionInRoot.x)
+            onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performMouseInput { release() }
         }
     }
 
