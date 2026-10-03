@@ -111,7 +111,7 @@ internal fun DragHandle() {
         KeryxIcons.DragHandle,
         contentDescription = null,
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 8.dp).size(20.dp),
+        modifier = Modifier.padding(start = 8.dp).size(24.dp),
     )
 }
 

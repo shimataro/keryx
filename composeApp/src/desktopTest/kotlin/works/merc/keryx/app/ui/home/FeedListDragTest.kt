@@ -37,6 +37,7 @@ import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -194,7 +195,7 @@ class FeedListDragTest {
         // With isTouchPrimary, feedListReorderDrag only starts from the row's trailing handle
         // band — everywhere else on the row must fall through untouched so the LazyColumn's own
         // scroll gesture can claim it instead (see feedListReorderDrag's KDoc). A press+move on
-        // the row's own title text (comfortably left of the 44dp band) exercises exactly that.
+        // the row's own title text (comfortably left of the 48dp band) exercises exactly that.
         val (driver, db) = inMemoryDb()
         db.insertFeed("a", sortOrder = 0L)
         db.insertFeed("b", sortOrder = 1L)
@@ -235,7 +236,7 @@ class FeedListDragTest {
             val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            // Comfortably inside the trailing 44dp handle band, regardless of exactly where the
+            // Comfortably inside the trailing 48dp handle band, regardless of exactly where the
             // title text itself sits.
             val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
             val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
@@ -252,6 +253,55 @@ class FeedListDragTest {
 
             val order = db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
             assertEquals(listOf("b", "a"), order)
+        }
+    }
+
+    /** Touch-drags feed "a" from [pressInsetDp] left of the host's trailing edge down to "b"'s lower
+     * half, and returns the resulting root-level feed order. */
+    private fun ComposeUiTest.touchDragFromTrailingInset(
+        vm: HomeViewModel,
+        db: KeryxDatabase,
+        pressInsetDp: Float,
+    ): List<String> {
+        setFeedListDragContent(vm, isTouchPrimary = true)
+        waitForIdle()
+
+        val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val pressX = hostBounds.right - with(density) { pressInsetDp.dp.toPx() }
+        val start = localOf(Offset(pressX, aBounds.center.y), hostBounds)
+        val target = localOf(Offset(pressX, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+        onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput {
+            down(start)
+            moveTo(start + Offset(0f, dragThresholdCrossPx))
+            moveTo(target)
+            up()
+        }
+        waitForIdle()
+        return db.feedsQueries.getByFolder(null).executeAsList().map { it.id }
+    }
+
+    @Test
+    fun touchPressJustInsideTheMinimumTouchTargetBandStartsAReorder() = runDesktopComposeUiTest {
+        // The handle band is M3's 48dp minimum touch target, so a press 46dp from the trailing edge
+        // (outside the former 44dp band) must now start the drag.
+        val (_, driver, db) = fileDb(foreignKeys = true)
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            assertEquals(listOf("b", "a"), touchDragFromTrailingInset(fixture.vm, db, pressInsetDp = 46f))
+        }
+    }
+
+    @Test
+    fun touchPressJustOutsideTheMinimumTouchTargetBandNeverStartsAReorder() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            assertEquals(listOf("a", "b"), touchDragFromTrailingInset(fixture.vm, db, pressInsetDp = 52f))
         }
     }
 

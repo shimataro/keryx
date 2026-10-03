@@ -18,21 +18,14 @@ import androidx.compose.ui.unit.dp
 private const val MOUSE_DRAG_THRESHOLD_DP = 4f
 
 /**
- * Width of the touch-only drag-start band, measured from a row's trailing edge — see
- * [DragHandle]'s KDoc. Comfortably wider than the handle icon's own visible footprint (20dp icon +
- * 8dp leading padding), matching Material's general touch-target sizing guidance so the band is
- * reliably hittable with a thumb without needing to also grow the row's height.
- */
-private const val TOUCH_DRAG_HANDLE_BAND_DP = 44f
-
-/**
  * Adds feed-row reordering gestures to a non-virtualized drag host.
  *
  * Secondary and tertiary presses are ignored, and dragging begins only after the pointer moves
  * beyond the applicable drag threshold. Active drags consume pointer events and are ended or
  * cancelled when the gesture finishes.
  *
- * When [isTouchPrimary], a press must additionally land within [TOUCH_DRAG_HANDLE_BAND_DP] of the
+ * When [isTouchPrimary], a press must additionally land within [TOUCH_TARGET_MIN_SIZE] (the M3 48dp minimum
+ * touch target, wider than the handle icon's own footprint) of the
  * drag host's trailing edge (which — since every draggable row fills the host's width — is the
  * same as the row's own trailing edge) to start a drag at all; everywhere else on the row, touch
  * input falls through untouched to the `LazyColumn`'s own scroll gesture. Without this gate, any
@@ -65,7 +58,7 @@ internal fun Modifier.feedListReorderDrag(
                 val buttons = currentEvent.buttons
                 if (buttons.isSecondaryPressed || buttons.isTertiaryPressed) return@awaitEachGesture
                 val grab = controller.sourceAt(down.position.y) ?: return@awaitEachGesture
-                if (isTouchPrimary && down.position.x < size.width - TOUCH_DRAG_HANDLE_BAND_DP.dp.toPx()) {
+                if (isTouchPrimary && down.position.x < size.width - TOUCH_TARGET_MIN_SIZE.toPx()) {
                     return@awaitEachGesture
                 }
                 val thresholdPx = if (down.type == PointerType.Mouse) {
