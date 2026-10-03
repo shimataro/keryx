@@ -179,7 +179,7 @@ struct ArticleListView: View {
     private var searchPresentedBinding: Binding<Bool> {
         Binding(
             get: { home.searchBarVisible },
-            set: { home.viewModel.setSearchBarVisible(visible: $0) }
+            set: { home.setSearchBarVisible($0) }
         )
     }
     #endif

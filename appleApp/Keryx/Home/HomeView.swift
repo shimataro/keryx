@@ -372,7 +372,7 @@ struct HomeView: View {
         case .search:
             // Focusing the system search field needs `.searchFocused` (macOS 15 / iOS 18+).
             guard #available(macOS 15, iOS 18, *) else { return .ignored }
-            home.viewModel.setSearchBarVisible(visible: true)
+            home.setSearchBarVisible(true)
             home.viewModel.requestSearchFocus()
         case .renameFeedListItem:
             guard focusedPane == .feedList else { return .ignored }

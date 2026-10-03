@@ -104,7 +104,7 @@ struct FeedListView: View {
         // The 3-pane macOS layout keeps this field permanently visible (mirrors Compose's own
         // `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
         // there is no narrower layout here to ever hide it again), so this only needs setting once.
-        .task { home.viewModel.setSearchBarVisible(visible: true) }
+        .task { home.setSearchBarVisible(true) }
         .onChange(of: home.pendingSearchFocus) { _, pending in
             guard pending else { return }
             focusedPane.wrappedValue = .search

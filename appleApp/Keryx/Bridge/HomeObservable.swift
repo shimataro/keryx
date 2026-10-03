@@ -411,8 +411,19 @@ final class HomeObservable: ObservableAssignment {
         assignIfChanged(\.searchQueryHasTerms, !SearchQueryKt.searchTerms(raw: query).isEmpty)
     }
 
+    /// The search field's presentation write path. Assigns at once, as `setSearchQuery` does: when
+    /// the field is dismissed, `.searchable(isPresented:)` re-reads the binding before the flow's
+    /// emission comes back, and a stale `true` makes it present the field again.
+    func setSearchBarVisible(_ visible: Bool) {
+        viewModel.setSearchBarVisible(visible: visible)
+        assignIfChanged(\.searchBarVisible, visible)
+    }
+
     private func observeSearchBarVisible() async {
-        for await v in viewModel.searchBarVisible { assignIfChanged(\.searchBarVisible, v.boolValue) }
+        // The flow's current value, not the emitted one — see `observeSearchQuery`.
+        for await _ in viewModel.searchBarVisible {
+            assignIfChanged(\.searchBarVisible, viewModel.searchBarVisible.value.boolValue)
+        }
     }
 
     private func observeSearchActive() async {

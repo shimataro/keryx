@@ -68,7 +68,7 @@ struct HomeCommands: Commands {
                 // so before that the item would do nothing and is left out entirely.
                 if #available(macOS 15, *) {
                     Button(L("menu_view_search")) {
-                        home.viewModel.setSearchBarVisible(visible: true)
+                        home.setSearchBarVisible(true)
                         home.viewModel.requestSearchFocus()
                     }
                     .keyboardShortcut("f", modifiers: .command)
