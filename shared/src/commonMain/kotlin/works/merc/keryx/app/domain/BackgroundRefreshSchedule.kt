@@ -1,7 +1,7 @@
 package works.merc.keryx.app.domain
 
 /**
- * The schedule a periodic background-refresh mechanism (Android's `WorkManager`) should run at,
+ * The schedule a periodic background-refresh mechanism (Android's `WorkManager`, iOS's `BGAppRefreshTask`) should run at,
  * derived from the user's refresh-interval setting. Kept as a pure mapping in commonMain — rather
  * than inline in `androidMain`'s WorkManager wiring — so it's testable without an
  * `androidUnitTest` source set (this module has none).

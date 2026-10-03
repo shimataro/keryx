@@ -140,7 +140,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
   of an active notification (unlike iOS's `setApplicationIconBadgeNumber`) — so the app icon instead
   shows the OS's own notification dot (tied to the presence of an active notification) plus a
   long-press count via `setNumber` on launchers that support it, a deliberate asymmetry rather than an oversight; see
-  `background-update.md` for the full comparison.
+  `background-update.md` for the full comparison. The SwiftUI iOS app likewise refreshes in the
+  background (a `BGAppRefreshTask`; the OS picks the timing), posts the new-article notification, and shows the total
+  unread count as the app icon's badge.
 
 ### Behavior on Feed URL Change / Disappearance
 

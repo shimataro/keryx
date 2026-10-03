@@ -61,10 +61,13 @@ final class AppModel {
             // (both at startup and whenever the setting is switched on) — see its own
             // `.onChange(of: model.preferences?.notificationEnabled)`, matching
             // desktop's own gate (`App.kt:69-72`).
-            try sdk.startMaintenance()
-            Task {
-                try? await sdk.prepareSearchIndex()
-            }
+            #if os(macOS)
+            // macOS stays resident, so its maintenance starts with the process. iOS starts it when
+            // the scene first becomes active instead (`startForegroundWorkIfNeeded`): the OS also
+            // launches the process for a background refresh, which must not run the startup
+            // sequence and the refresh loop.
+            startForegroundWork(sdk)
+            #endif
         } catch {
             self.startupError = error
         }
@@ -92,6 +95,43 @@ final class AppModel {
             useDataProtectionKeychain: true
         )
     }
+
+    private var searchIndexPrepared = false
+
+    /// Starts the startup maintenance and the refresh loop — and restarts the loop after
+    /// `stopForegroundLoop()` (the startup maintenance too, if that interrupted it); both are
+    /// idempotent — and prepares the search index, once.
+    func startForegroundWorkIfNeeded() {
+        guard let sdk else { return }
+        startForegroundWork(sdk)
+    }
+
+    private func startForegroundWork(_ sdk: KeryxSdk) {
+        try? sdk.startMaintenance()
+        guard !searchIndexPrepared else { return }
+        searchIndexPrepared = true
+        Task { try? await sdk.prepareSearchIndex() }
+    }
+
+    #if os(iOS)
+    /// Stops the periodic refresh loop and any unfinished startup maintenance when the scene leaves the
+    /// foreground: the OS may wake the suspended process for a background refresh, and neither must run then
+    /// (`runBackgroundRefresh` is the only work wanted in that slot).
+    func stopForegroundLoop() {
+        sdk?.stopRefreshLoop()
+    }
+    #endif
+
+    #if os(iOS)
+    /// The iOS background refresh: schedules the next run (a request is one-shot), runs one
+    /// refresh cycle, then shows the unread count on the app icon.
+    func runBackgroundRefresh() async {
+        guard let sdk else { return }
+        BackgroundRefresh.schedule(refreshIntervalMinutes: sdk.settingsRepository.getLocalSettings().refreshIntervalMinutes)
+        guard let unread = try? await sdk.runBackgroundRefresh() else { return }
+        updateAppIconBadge(unreadCount: unread.int64Value)
+    }
+    #endif
 
     func completeSetup() {
         needsSetup = false

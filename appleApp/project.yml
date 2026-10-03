@@ -75,6 +75,10 @@ targets:
     info:
       path: Generated-Info.plist
       properties:
+        # iOS-only keys (macOS ignores them): the periodic background refresh, see
+        # Platform/BackgroundRefresh.swift.
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [works.merc.keryx.refresh]
         CFBundleDocumentTypes:
           - CFBundleTypeName: OPML Document
             LSHandlerRank: Default
@@ -140,6 +144,8 @@ targets:
       - path: Keryx/Bridge/OpmlTransferObservable.swift
       - path: Keryx/Platform/Localized.swift
       - path: Keryx/Platform/DockBadge.swift
+      - path: Keryx/Platform/AppIconBadge.swift
+      - path: Keryx/Platform/BackgroundRefreshDate.swift
       - path: Keryx/Bridge/ArticleRowModel.swift
       - path: Keryx/Bridge/ArticleUrlCopy.swift
       - path: Keryx/Bridge/TransientToastState.swift

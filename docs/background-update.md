@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Windows / macOS / Linux | ✅ Runs reliably at the specified interval | Coroutine-based periodic loop (current) |
 | Android | ✅ Roughly at the specified interval (subject to Doze/App Standby) | `WorkManager` `PeriodicWorkRequest` (current) |
-| iOS | ⚠️ OS decides execution timing | BGTaskScheduler (planned) |
+| iOS | ⚠️ OS decides execution timing | `BGAppRefreshTask` (current) |
 
 ## Desktop Implementation (`desktopMain/main.kt` + `StartupTasks.kt`)
 
@@ -46,6 +46,40 @@ while (true) {
   StatusNotifierItem host uses `LinuxTray`'s `org.freedesktop.Notifications.Notify`, and only the
   remaining case — Linux without an SNI host — falls through to Compose's own `Tray()` composable and
   its `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
+
+## iOS Implementation (`KeryxSdk.runBackgroundRefresh` + `appleApp/Keryx/Platform/BackgroundRefresh.swift`)
+
+The SwiftUI app's `backgroundUpdateLoop` only runs while the process does, so iOS additionally
+schedules a `BGAppRefreshTask` (`works.merc.keryx.refresh`; `UIBackgroundModes: fetch` and
+`BGTaskSchedulerPermittedIdentifiers` in `project.yml`). `BackgroundRefresh.schedule` maps
+`refreshIntervalMinutes` through the same `backgroundRefreshSchedule` Android uses (15-minute floor;
+"Manual only" cancels the request) and sets it as the request's `earliestBeginDate`. A request is
+one-shot, so it is submitted again whenever the scene moves to the background, when the setting
+changes, and at the start of every background run.
+
+The SwiftUI `.backgroundTask(.appRefresh(…))` handler calls `AppModel.runBackgroundRefresh`, which
+calls `KeryxSdk.runBackgroundRefresh`: one `RefreshCycleRunner.runIfIdle` cycle (refresh, the
+new-article OS notification through the same `OsNotificationPoster`, then sync if a provider is
+connected). It does nothing before setup completes — without even flushing settings, since the
+settings file's existence is the setup-complete marker. It skips the startup sequence, the update
+check and the FTS full rebuild (a background slot lasts about 30 seconds); only
+`ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running,
+and cancelling the task at the end of its slot cancels the shared work with it.
+
+For the same reason `AppModel` starts `startMaintenance()` (the startup sequence and the refresh
+loop) only when the scene first becomes active, not in `init`, which a background launch also runs
+(macOS, resident in the menu bar, still starts it in `init`). The refresh loop then runs only while
+the app is in the foreground: `AppModel` stops it (`KeryxSdk.stopRefreshLoop`) when the scene enters the
+background and the next activation restarts it with a fresh interval, so a loop timer that expires while
+the OS has woken the suspended process for a background refresh cannot spend the slot on the update
+check or the FTS rebuild. The startup sequence is stopped the same way if it is still running then, and the next activation reruns it from the start; once it has completed, it is not run again in that process.
+
+**App icon badge.** The app icon shows the total unread count (`setBadgeCount`, the same value as
+macOS's Dock badge), updated while running and after each background run. It needs the
+notification authorization, which the app requests whenever its "notifications" setting is on.
+
+**Limits.** iOS decides when and how often the task runs — the setting is only a lower bound on the
+delay. Force-quitting the app from the app switcher stops background runs until the next manual launch.
 
 ## Android Implementation (`androidMain/background/` + `AndroidStartupTasks.kt`)
 

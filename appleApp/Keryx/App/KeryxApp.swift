@@ -11,6 +11,7 @@ struct KeryxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
     #endif
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         #if os(macOS)
@@ -38,6 +39,11 @@ struct KeryxApp: App {
         #else
         WindowGroup(id: "main") {
             mainContent
+        }
+        // The OS wakes the app for this (see `BackgroundRefresh`); it cancels the closure at the
+        // end of its time slot, which cancels the shared refresh with it.
+        .backgroundTask(.appRefresh(BackgroundRefresh.taskIdentifier)) {
+            await model.runBackgroundRefresh()
         }
         .commands { HomeCommands(model: model) }
         #endif
@@ -77,12 +83,14 @@ struct KeryxApp: App {
                 } else if let notifications = model.notifications, let opmlTransfer = model.opmlTransfer {
                     HomeView(home: home, sidebarDialogs: model.sidebarDialogs, notifications: notifications, settingsNavigation: model.settingsNavigation, preferences: preferences)
                         .modifier(OpmlRequestPresenter(opmlTransfer: opmlTransfer, settingsNavigation: model.settingsNavigation))
-                        #if os(macOS)
                         .modifier(UnreadCountObserver(home: home) { count in
+                            #if os(macOS)
                             updateDockBadge(count)
                             appDelegate.updateStatusItemAppearance(unreadCount: count)
+                            #else
+                            updateAppIconBadge(unreadCount: count)
+                            #endif
                         })
-                        #endif
                 }
             } else {
                 StartupErrorView(error: model.startupError)
@@ -116,15 +124,35 @@ struct KeryxApp: App {
         .onChange(of: model.preferences?.themeMode, initial: true) { _, mode in
             applyAppearance(mode)
         }
+        #endif
         // Requested at startup (if already on) and the moment it's switched on — never
         // unconditionally at every launch — matching desktop's own gate (`App.kt:69-72`).
         .onChange(of: model.preferences?.notificationEnabled, initial: true) { _, enabled in
             if enabled == true { OsNotificationPoster.requestAuthorization() }
         }
+        #if os(iOS)
+        // iOS runs its maintenance once the scene first becomes active (not from `AppModel.init`,
+        // which a background launch also runs), keeps its refresh loop to the foreground, and keeps
+        // the next background refresh scheduled.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            switch phase {
+            case .active: model.startForegroundWorkIfNeeded()
+            case .background:
+                scheduleBackgroundRefresh()
+                model.stopForegroundLoop()
+            default: break
+            }
+        }
+        .onChange(of: model.preferences?.refreshIntervalMinutes) { _, _ in scheduleBackgroundRefresh() }
         #endif
     }
 
     #if os(iOS)
+    private func scheduleBackgroundRefresh() {
+        guard let minutes = model.preferences?.refreshIntervalMinutes else { return }
+        BackgroundRefresh.schedule(refreshIntervalMinutes: minutes)
+    }
+
     /// The iOS counterpart of the macOS `Settings` scene above, presented from the sidebar's gear
     /// button or a bell row's `ShowSettingsTab` (`SettingsNavigation.isSheetPresented`).
     @ViewBuilder
@@ -174,8 +202,8 @@ struct KeryxApp: App {
     }
 }
 
-#if os(macOS)
-/// Reports `home.totalUnread` (the Dock badge and the menu bar status item) from a modifier of its
+/// Reports `home.totalUnread` (the Dock badge and the menu bar status item on macOS, the app icon
+/// badge on iOS) from a modifier of its
 /// own, so only this modifier — not `KeryxApp`'s whole main content — depends on the count, which
 /// changes with every article read.
 private struct UnreadCountObserver: ViewModifier {
@@ -186,4 +214,3 @@ private struct UnreadCountObserver: ViewModifier {
         content.onChange(of: home.totalUnread, initial: true) { _, count in onChange(count) }
     }
 }
-#endif

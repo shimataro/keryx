@@ -4,13 +4,19 @@ import app.cash.sqldelight.db.SqlDriver
 import androidx.lifecycle.viewModelScope
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import org.koin.core.Koin
+import org.koin.core.module.Module
 import org.koin.dsl.koinApplication
+import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.data.local.FtsManager
@@ -20,16 +26,20 @@ import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.data.cloud.OAuthTokens
 import works.merc.keryx.app.domain.AuthorizationLauncher
+import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.DefaultAuthorizationLauncher
+import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.NotificationMessages
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.OsNotificationSink
+import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.parseOAuthUri
 import works.merc.keryx.app.domain.runStartupMaintenance
@@ -71,6 +81,9 @@ class KeryxSdk private constructor(private val koin: Koin) {
     val syncRepository: SyncRepository get() = koin.get()
 
     val settingsRepository: SettingsRepository get() = koin.get()
+
+    /** Test-only handle on the feed subscriptions, which no screen reaches through this class. */
+    internal val feedRepository: FeedRepository get() = koin.get()
 
     val cloudSession: CloudSession get() = koin.get()
 
@@ -152,23 +165,89 @@ class KeryxSdk private constructor(private val koin: Koin) {
         return AddFeedController(home::resolvePreview, home::subscribeFeeds)
     }
 
-    private var maintenanceStarted = false
+    private var startupJob: Job? = null
+    private var refreshLoopJob: Job? = null
+
+    /** Whether the startup maintenance sequence is currently running — for tests. */
+    internal val isStartupMaintenanceActive: Boolean get() = startupJob?.isActive == true
+
+    /** Whether the periodic refresh loop is currently running — for tests. */
+    internal val isRefreshLoopActive: Boolean get() = refreshLoopJob?.isActive == true
 
     /**
      * Starts the startup maintenance sequence ([runStartupMaintenance]: cache cleanup, initial
      * sync, feed refresh, update check, FTS heal) and the periodic background-refresh loop
-     * ([backgroundUpdateLoop]) on the SDK's own background scope. Call once per foreground app
-     * launch; idempotent, so a repeated call (e.g. from a view that appears more than once) is a
-     * no-op rather than starting a second overlapping loop. Neither is awaited — like desktop's
-     * `main.kt`, both keep running independently for as long as this instance lives.
+     * ([backgroundUpdateLoop]) on the SDK's own background scope. Call whenever the app becomes
+     * active: idempotent, so a repeated call (e.g. from a view that appears more than once) neither
+     * reruns the startup sequence nor starts a second overlapping loop — but after [stopRefreshLoop]
+     * it restarts the loop, and the startup sequence too if that call interrupted it (a sequence
+     * that completed is never rerun). Neither is awaited — like desktop's `main.kt`, both keep
+     * running independently for as long as this instance lives.
      */
     @Throws(Exception::class, CancellationException::class)
     fun startMaintenance() {
-        if (maintenanceStarted) return
-        maintenanceStarted = true
         val scope = koin.get<CoroutineScope>()
-        scope.launch { runStartupMaintenance(koin) }
-        scope.launch { backgroundUpdateLoop(koin) }
+        val previous = startupJob
+        if (previous == null || previous.isCancelled) {
+            // Join the interrupted run first, so a quick reactivation never overlaps it.
+            startupJob = scope.launch {
+                previous?.cancelAndJoin()
+                runStartupMaintenance(koin)
+            }
+        }
+        if (!isRefreshLoopActive) {
+            refreshLoopJob = scope.launch { backgroundUpdateLoop(koin) }
+        }
+    }
+
+    /**
+     * Stops the periodic refresh loop and any unfinished startup sequence (iOS, when the app leaves the
+     * foreground): the OS can wake the suspended process for a `BGAppRefreshTask`, and a loop timer
+     * expiring — or the startup sequence still running — would then spend the short background slot on
+     * work [runBackgroundRefresh] deliberately skips. The next [startMaintenance] starts the loop again,
+     * with a fresh interval, and reruns the startup sequence if it was interrupted. Does nothing for
+     * whatever is not running.
+     */
+    fun stopRefreshLoop() {
+        refreshLoopJob?.cancel()
+        refreshLoopJob = null
+        startupJob?.takeIf { it.isActive }?.cancel()
+    }
+
+    /**
+     * One background-wake cycle for the OS's periodic refresh (iOS `BGAppRefreshTask`): refreshes
+     * every feed, posts the new-article notification, and syncs when a provider is connected
+     * ([RefreshCycleRunner.runIfIdle], so it is skipped while the foreground loop already runs a
+     * cycle). Unlike [startMaintenance] it neither runs the startup sequence nor rebuilds the FTS
+     * index — a background slot is far too short for either.
+     *
+     * Does nothing before setup completes (like `FeedRefreshWorker`), and then does not flush
+     * either: the settings file's existence *is* the setup-complete marker. Cancelling the caller
+     * cancels the work and waits for it to finish, so an expired background slot stops it before
+     * this throws.
+     *
+     * @return The total unread count afterwards, for the app icon badge.
+     */
+    @Throws(Exception::class, CancellationException::class)
+    suspend fun runBackgroundRefresh(): Long {
+        val settings = koin.get<SettingsRepository>()
+        val articles = koin.get<ArticleRepository>()
+        if (!settings.isSetupComplete()) return articles.watchUnreadCount().first()
+        val work = koin.get<CoroutineScope>().async {
+            koin.get<FtsManager>().ensureIndexedIfTableAbsent()
+            koin.get<RefreshCycleRunner>().runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC)
+            settings.flush()
+            articles.watchUnreadCount().first()
+        }
+        try {
+            return work.await()
+        } catch (e: CancellationException) {
+            // `work` runs on the SDK's scope, not as a child of the caller, so cancelling the caller
+            // does not wait for it. Join it here: iOS treats the background task as finished once the
+            // caller returns, and would suspend the app with refresh or sync cleanup still running.
+            withContext(NonCancellable) { work.cancelAndJoin() }
+            throw e
+        }
     }
 
     /**
@@ -307,6 +386,22 @@ class KeryxSdk private constructor(private val koin: Koin) {
             dataDirectory: String?,
             openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
             useDataProtectionKeychain: Boolean = false,
+        ): KeryxSdk = startWithModules(
+            newArticlesText, postOsNotification, dataDirectory, openAuthorization, useDataProtectionKeychain,
+            extraModules = emptyList(),
+        )
+
+        /**
+         * [start] with [extraModules] registered after the production modules, so they override its
+         * bindings — a test seam (e.g. a `MockEngine` `HttpClient`). `internal`, so Swift never sees it.
+         */
+        internal fun startWithModules(
+            newArticlesText: (count: Int) -> String,
+            postOsNotification: (message: String, count: Int) -> Unit,
+            dataDirectory: String?,
+            openAuthorization: ((url: String, callbackScheme: String) -> Unit)? = null,
+            useDataProtectionKeychain: Boolean = false,
+            extraModules: List<Module>,
         ): KeryxSdk {
             AppDirs.rootOverride = dataDirectory
             val messages = object : NotificationMessages {
@@ -324,6 +419,8 @@ class KeryxSdk private constructor(private val koin: Koin) {
                     presentationModule(),
                     applePlatformModule(messages, sink, authorizationLauncher, useDataProtectionKeychain),
                 )
+                // Last, so a test's module overrides the production binding of the same type.
+                modules(extraModules)
             }.koin
             // Open the database now, so a too-new file is reported here, as a Swift error — unwrapped
             // from Koin's own instance-creation wrapper so the app can recognise it. A failed start

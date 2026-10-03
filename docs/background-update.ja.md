@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Windows / macOS / Linux | ✅ 指定間隔で確実に実行 | コルーチンによる周期ループ（現行） |
 | Android | ✅ 概ね指定間隔（Doze / App Standby の影響を受ける） | `WorkManager` の `PeriodicWorkRequest`（現行） |
-| iOS | ⚠️ OS が実行タイミングを判断 | BGTaskScheduler（予定） |
+| iOS | ⚠️ OS が実行タイミングを判断 | `BGAppRefreshTask`（現行） |
 
 ## デスクトップ実装（`desktopMain/main.kt` + `StartupTasks.kt`）
 
@@ -43,6 +43,39 @@ while (true) {
   `org.freedesktop.Notifications.Notify` を使う。残る唯一のケース——SNI ホストの無い Linux——だけが
   Compose 自体の `Tray()` コンポーザブルにフォールバックし、その `TrayState.sendNotification` を使う。
   詳細は [app-architecture.ja.md](app-architecture.ja.md) の「デスクトップトレイ」を参照。
+
+## iOS 実装（`KeryxSdk.runBackgroundRefresh` + `appleApp/Keryx/Platform/BackgroundRefresh.swift`）
+
+SwiftUI アプリの `backgroundUpdateLoop` はプロセスが動いている間しか走らないため、iOS では加えて
+`BGAppRefreshTask`（`works.merc.keryx.refresh`。`project.yml` の `UIBackgroundModes: fetch` と
+`BGTaskSchedulerPermittedIdentifiers`）をスケジュールする。`BackgroundRefresh.schedule` は
+`refreshIntervalMinutes` を Android と同じ `backgroundRefreshSchedule`（15 分の下限。「手動のみ」は
+リクエストの取り消し）に通し、リクエストの `earliestBeginDate` に設定する。リクエストは 1 回限りなので、
+シーンがバックグラウンドへ移るとき、設定が変わったとき、そしてバックグラウンド実行の開始時に毎回
+提出し直す。
+
+SwiftUI の `.backgroundTask(.appRefresh(…))` ハンドラが `AppModel.runBackgroundRefresh` を呼び、それが
+`KeryxSdk.runBackgroundRefresh` を呼ぶ。中身は `RefreshCycleRunner.runIfIdle` の 1 サイクル（更新、
+同じ `OsNotificationPoster` 経由の新着記事 OS 通知、接続中なら同期）。セットアップ完了前は何もしない——
+設定ファイルの存在がセットアップ完了の目印なので、設定の flush もしない。起動時シーケンス、アップデート確認、
+FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 秒）。実行するのは
+`ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もせず、
+枠の終了でタスクがキャンセルされると、共有している処理もキャンセルされる。
+
+同じ理由で、`AppModel` は `startMaintenance()`（起動時シーケンスと更新ループ）を `init` ではなく
+シーンが最初にアクティブになったときに開始する（`init` はバックグラウンド起動でも実行されるため。
+メニューバーに常駐する macOS は従来どおり `init` で開始する）。更新ループが動くのはアプリが
+フォアグラウンドにある間だけで、シーンがバックグラウンドに入ると `AppModel` が止め
+（`KeryxSdk.stopRefreshLoop`）、次にアクティブになったときに新しい間隔で再開する。OS が停止中の
+プロセスをバックグラウンド更新のために起こしている間にループのタイマーが満了しても、更新チェックや
+FTS の再構築に枠を使わないようにするため。起動時シーケンスもその時点で実行中なら同様に止め、次にアクティブになったときに最初から再実行する。完了済みなら、そのプロセスでは再実行しない。
+
+**アプリアイコンのバッジ。** アプリアイコンには未読の総数（`setBadgeCount`。macOS の Dock バッジと
+同じ値）を、実行中とバックグラウンド実行のたびに更新して表示する。通知の許可が必要で、アプリは
+「通知」設定がオンのときに許可を求める。
+
+**制約。** タスクをいつ・どのくらいの頻度で実行するかは iOS が決める——設定は遅延の下限にすぎない。
+アプリスイッチャーからアプリを強制終了すると、次に手動で起動するまでバックグラウンド実行は止まる。
 
 ## Android 実装（`androidMain/background/` + `AndroidStartupTasks.kt`）
 

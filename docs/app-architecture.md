@@ -1557,8 +1557,11 @@ request out), `notificationAlerts`, and
 `menuState(…)` (a direct passthrough to `presentation/menu/computeMenuUiState` for a
 `Commands`/menu item's enabled/checked state). `startMaintenance()` starts
 `domain/StartupMaintenanceTasks.kt`'s `runStartupMaintenance` and `domain/BackgroundRefreshLoop.kt`'s
-`backgroundUpdateLoop` on the SDK's own background scope — call once per foreground launch;
-idempotent, so a repeated call doesn't start a second overlapping loop.
+`backgroundUpdateLoop` on the SDK's own background scope — call whenever the app becomes active;
+idempotent, so a repeated call neither reruns the startup sequence nor starts a second overlapping loop.
+`stopRefreshLoop()` stops the loop and any unfinished startup sequence when iOS leaves the foreground (the next `startMaintenance()` restarts the loop, and reruns the startup sequence only if it was interrupted).
+`runBackgroundRefresh()` is the iOS background-refresh entry point: one `RefreshCycleRunner.runIfIdle` cycle
+without the startup sequence (see [background-update.md](background-update.md)).
 `importOpenedOpml(xml)` wraps `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`,
 for a document the app was opened with (`null` when it could not be read; mirrors desktop's/Android's
 own ".opml file association" handling): it only requests the import, which Settings ▸ Data carries out
