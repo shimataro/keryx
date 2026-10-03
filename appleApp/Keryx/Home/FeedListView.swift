@@ -3,9 +3,9 @@ import SwiftUI
 
 /// The sidebar pane: All / Starred, folders (collapsible, with unread badges), unfoldered feeds,
 /// and tags (expandable, with color + attached feeds) — see `external-spec.md` §9's "3-pane width"
-/// and `docs/app-architecture.md`. Desktop/macOS is unconditionally the 3-pane steady state, so
-/// this pane (and its permanent search field) is always on screen — there is no narrower-width
-/// drawer variant to reproduce here (that only applies to Android; see M2's research notes).
+/// and `docs/app-architecture.md`. On macOS — unconditionally the 3-pane steady state — this pane
+/// also carries the permanent search field; iOS puts that field on the article list instead (see
+/// `ArticleListView`), so the sidebar there holds no search of its own.
 ///
 /// M3 adds feed/folder/tag management here: add-feed sheet, folder/tag create+rename+delete
 /// (`NamePromptSheet`, shared with duplicate-name validation via `NameValidation.kt`), context
@@ -57,13 +57,19 @@ struct FeedListView: View {
     var body: some View {
         rows
         .toolbar { toolbarContent }
-        // The system search field. Its focus is reported into `focusedPane` (for ⌘F, the
-        // `textInputFocused` guard and the ↓/↑ hand-off into the results — see `HomeScreen.kt`'s
-        // own `focusSearch`/`moveArticleSelectionFromSearchField`) only from macOS 15 / iOS 18,
-        // where `.searchFocused(_:equals:)` exists; earlier systems get the field without them.
+        #if os(iOS)
+        .navigationTitle(L("app_name"))
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        #if os(macOS)
+        // The system search field — macOS only: iOS puts it on the article list instead, the
+        // column whose contents it narrows (see `ArticleListView`'s own `.searchable`). Its focus is
+        // reported into `focusedPane` (for ⌘F, the `textInputFocused` guard and the ↓/↑ hand-off
+        // into the results — see `HomeScreen.kt`'s own `focusSearch`/
+        // `moveArticleSelectionFromSearchField`) only from macOS 15, where
+        // `.searchFocused(_:equals:)` exists; earlier systems get the field without them.
         .searchable(text: searchQueryBinding, placement: .sidebar, prompt: L("home_search_placeholder"))
         .modifier(SearchFocusModifier(focusedPane: focusedPane))
-        #if os(macOS)
         // Spring-loaded folder: holding a dragged feed over a collapsed folder opens it after a
         // short pause, so its feeds become reachable drop targets mid-drag — matches Compose's own
         // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListDragAndDrop.kt`). The pause and
@@ -94,15 +100,17 @@ struct FeedListView: View {
         #if os(iOS)
         .modifier(SidebarRenameSheet(home: home, dialogs: dialogs))
         #endif
-        // The 3-pane desktop/macOS layout keeps this field permanently visible (mirrors Compose's
-        // own `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
+        #if os(macOS)
+        // The 3-pane macOS layout keeps this field permanently visible (mirrors Compose's own
+        // `FeedListPane`, whose `onSelectionAdvance == null` branch is this same steady state —
         // there is no narrower layout here to ever hide it again), so this only needs setting once.
-        .task { home.viewModel.setSearchBarVisible(visible: true) }
+        .task { home.setSearchBarVisible(true) }
         .onChange(of: home.pendingSearchFocus) { _, pending in
             guard pending else { return }
             focusedPane.wrappedValue = .search
             home.viewModel.consumeSearchFocusRequest()
         }
+        #endif
     }
 
     /// The rows themselves: the native source list on macOS (`FeedListView+SourceList.swift`), a
@@ -143,6 +151,9 @@ struct FeedListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
+        // The title names this column in the article list's back button and its long-press menu;
+        // the bar's own centered title stays empty, as on macOS.
+        ToolbarItem(placement: .principal) { Color.clear }
         // iOS has no app menu to hold "Settings…", so the sidebar carries it — the same role as
         // Android's own settings row at the bottom of its feed list (`external-spec.md` §9).
         ToolbarItem(placement: .topBarLeading) {
@@ -203,14 +214,16 @@ struct FeedListView: View {
         }
     }
 
+    #if os(macOS)
     private var searchQueryBinding: Binding<String> {
         // `setSearchBarVisible` is set once in `body`'s own `.task` (the 3-pane layout keeps this
         // field permanently visible), not on every keystroke here.
         Binding(
             get: { home.searchQuery },
-            set: { home.viewModel.setSearchQuery(query: $0) }
+            set: { home.setSearchQuery($0) }
         )
     }
+    #endif
 
     // MARK: - In-place rename
 
@@ -562,20 +575,6 @@ private struct SidebarRenameSheet: ViewModifier {
     }
 }
 #endif
-
-/// Binds the sidebar's `.searchable` field to `focusedPane`'s `.search` case where the system
-/// supports it (`.searchFocused(_:equals:)` is macOS 15 / iOS 18+); a no-op before that.
-private struct SearchFocusModifier: ViewModifier {
-    var focusedPane: FocusState<HomeFocusedPane?>.Binding
-
-    func body(content: Content) -> some View {
-        if #available(macOS 15, iOS 18, *) {
-            content.searchFocused(focusedPane, equals: .search)
-        } else {
-            content
-        }
-    }
-}
 
 /// A sidebar toolbar action (Refresh All / Sync) that shows progress while its operation runs.
 ///

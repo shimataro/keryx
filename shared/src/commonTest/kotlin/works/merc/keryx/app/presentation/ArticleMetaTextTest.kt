@@ -29,4 +29,22 @@ class ArticleMetaTextTest {
         assertEquals(timestamp, articleMetaText("", publishedAt))
         assertEquals(timestamp, articleMetaText("   ", publishedAt))
     }
+
+    @Test
+    fun articleMetaTextPutsFeedNameFirst() {
+        assertEquals(
+            "Feed · Alice · ${formatTimestamp(publishedAt)}",
+            articleMetaText("Alice", publishedAt, feedName = "Feed"),
+        )
+    }
+
+    @Test
+    fun articleMetaTextDropsAbsentParts() {
+        val timestamp = formatTimestamp(publishedAt)
+        assertEquals("Feed · $timestamp", articleMetaText(null, publishedAt, feedName = "Feed"))
+        assertEquals("Feed · Alice", articleMetaText("Alice", null, feedName = "Feed"))
+        assertEquals("Feed", articleMetaText(null, null, feedName = "Feed"))
+        assertEquals("Alice · $timestamp", articleMetaText("Alice", publishedAt, feedName = "  "))
+        assertEquals("", articleMetaText(null, null, feedName = null))
+    }
 }

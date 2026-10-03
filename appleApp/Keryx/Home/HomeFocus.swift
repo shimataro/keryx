@@ -40,3 +40,18 @@ func moveFocusFromFeedListToArticleList(home: HomeObservable, focusedPane: Focus
     }
     focusedPane.wrappedValue = .articleList
 }
+
+/// Binds a `.searchable` field — the sidebar's on macOS, the article list's on iOS — to
+/// `focusedPane`'s `.search` case where the system supports it (`.searchFocused(_:equals:)` is
+/// macOS 15 / iOS 18+); a no-op before that.
+struct SearchFocusModifier: ViewModifier {
+    var focusedPane: FocusState<HomeFocusedPane?>.Binding
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, iOS 18, *) {
+            content.searchFocused(focusedPane, equals: .search)
+        } else {
+            content
+        }
+    }
+}

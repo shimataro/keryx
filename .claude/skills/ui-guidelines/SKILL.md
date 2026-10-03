@@ -1476,8 +1476,11 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     states); at a narrow layout, `ArticleListPane`'s own `KeryxExpandedSearchBar`
     (`ui/common/KeryxSearchBar.kt`) instead, reached through `ArticleListTopBar`'s search icon — see
     "Adaptive pane layout & touch affordances" below → **already ported, to `.searchable()`**:
-    `FeedListView` (`appleApp/Keryx/Home/FeedListView.swift`) attaches
-    `.searchable(text:placement: .sidebar, …)`, and its `SearchFocusModifier` binds the field to
+    on macOS `FeedListView` (`appleApp/Keryx/Home/FeedListView.swift`) attaches
+    `.searchable(text:placement: .sidebar, …)`; on iOS `ArticleListView` attaches
+    `.searchable(text:isPresented:placement: .automatic, …)` instead, at every width — the column
+    whose contents it narrows (HIG, as Mail does), with `isPresented` bound to `searchBarVisible`.
+    Either way `SearchFocusModifier` (`HomeFocus.swift`) binds the field to
     `focusedPane`'s `.search` case through `.searchFocused(_:equals:)` only where that exists
     (macOS 15 / iOS 18+). On macOS 14 / iOS 17 the field cannot report its focus, so
     `HomeView`'s own `textInputFocused` stays false there and the shortcut/focus-handoff logic

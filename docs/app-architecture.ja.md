@@ -465,6 +465,9 @@ WebView、macOS/Linux の WebKit）では、そのいずれか 1 つでも定義
 *測定される高さ*は変わらない: 実際に高さを固定しているのは常在する `TooltipIconButton` の
 アクション行であり、タイトル枠にどちらのコンテンツが組み込まれているかに関わらず、リーダー自身の
 計測済みバウンズは状態間で常に同一に保たれる。
+（ネイティブ iOS のリーダーはツールバーにフィード名を出さない——iPhone では 4 つの操作と並べると切れてしまうため。
+フィード名は記事自身のヘッダーの署名行の先頭に、`articleMetaText` の `feedName` で、フィードのファビコン（`wrapArticleHtml` の `metaIconUrl`。WebView 自身が読み込む `<img>` で、失敗時は除去）の後ろに表示する。pager の各ページは
+自分の行の `feed_id` から解決するので、All Feeds での隣接ページも自分のフィード名を表示する。macOS はツールバーの名前のまま。）
 
 **Android では `color-scheme` だけでは足りない。** `android.webkit.WebView` の既定スタイル
 `Widget.WebView` は `scrollbars="horizontal|vertical"` を設定しており、そのルートフレームの
@@ -1354,8 +1357,13 @@ UI ごとに異なるのはフィードバックだけで、macOS では `NSOutl
 iOS のサイドバーは SwiftUI の `List` ではなく UIKit の `UICollectionView` のリストで描く
 （`Home/Sidebar/SidebarCollectionView.swift`、`UIViewControllerRepresentable` で包む）。サイドバー自身が
 コレクションビューのデリゲートを持つためで、理由はドラッグ＆ドロップにある（後述）。`FeedListView` は両プラット
-フォーム共通の外枠（ツールバー、`.searchable` の検索欄、シート、アラート、名前変更の自動キャンセル）を持ったまま、
-行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。
+フォーム共通の外枠（ツールバー、シート、アラート、名前変更の自動キャンセル）を持ったまま、
+行の部分だけを差し替える。`#if os(macOS)` ではソースリスト、iOS ではコレクションビューになる。`.searchable` の
+検索欄はここでは macOS だけに付ける。iOS では `ArticleListView` に付ける——検索が絞り込む中身を表示するカラムで、
+HIG が「表示中のビューの検索」に勧める位置であり、メールも同じ配置である。compact 幅ではサイドバーの検索欄の
+結果が画面外のカラムに出てしまうためだ。iOS では `isPresented` を `HomeViewModel.searchBarVisible`（Android の
+狭いレイアウトで検索バーを開閉するフラグ）と双方向に結び、compact 幅で検索へのフォーカス要求があれば、まず
+記事一覧を前面に出す（`CompactSearchNavigation`）。
 
 - **データの流れ。** `FeedListView.body` が `SidebarRenderState` を作る。中身は `SidebarOutline`（セクションごとの
   木構造と展開状態）、各行の `SidebarRowContent`（タイトル、アイコン、エラー状態、エコーのハイライト、名前

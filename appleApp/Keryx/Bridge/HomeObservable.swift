@@ -112,6 +112,11 @@ final class HomeObservable: ObservableAssignment {
     private(set) var selectedArticleCanOpenInBrowser = false
     /// The sidebar item the selected filter resolves to (`resolveFeedListSelectionTarget`).
     private(set) var feedListSelectionTarget: FeedListSelectionTarget?
+    /// The selected filter's display name (`articleListTitle`), shown in the iOS article list's
+    /// heading — the same name Android's narrow-layout header shows.
+    private(set) var articleListTitle: String = L("home_all_feeds")
+    /// The icon beside it (`ArticleListHeaderIcon`) — the one the subscription list gives that item.
+    private(set) var articleListIcon: SidebarRowIcon = SidebarRowStaticContent.all.icon
     private(set) var selectedFeedName: String?
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
@@ -384,15 +389,41 @@ final class HomeObservable: ObservableAssignment {
         }
     }
 
+    /// The search field's write path. Assigns `searchQuery` at once rather than waiting for the
+    /// flow's emission to come back: a binding reading only the emitted value is re-rendered with the
+    /// previous query when keystrokes outrun that round trip, and the field then drops characters.
+    func setSearchQuery(_ query: String) {
+        viewModel.setSearchQuery(query: query)
+        assignSearchQuery(query)
+    }
+
     private func observeSearchQuery() async {
-        for await v in viewModel.searchQuery {
-            guard assignIfChanged(\.searchQuery, v) else { continue }
-            assignIfChanged(\.searchQueryHasTerms, !SearchQueryKt.searchTerms(raw: v).isEmpty)
+        // Reads the flow's current value rather than the emitted one, which may already be stale by
+        // the time it is delivered (a later keystroke landed in between) and would otherwise revert
+        // the field to it.
+        for await _ in viewModel.searchQuery {
+            assignSearchQuery(viewModel.searchQuery.value)
         }
     }
 
+    private func assignSearchQuery(_ query: String) {
+        guard assignIfChanged(\.searchQuery, query) else { return }
+        assignIfChanged(\.searchQueryHasTerms, !SearchQueryKt.searchTerms(raw: query).isEmpty)
+    }
+
+    /// The search field's presentation write path. Assigns at once, as `setSearchQuery` does: when
+    /// the field is dismissed, `.searchable(isPresented:)` re-reads the binding before the flow's
+    /// emission comes back, and a stale `true` makes it present the field again.
+    func setSearchBarVisible(_ visible: Bool) {
+        viewModel.setSearchBarVisible(visible: visible)
+        assignIfChanged(\.searchBarVisible, visible)
+    }
+
     private func observeSearchBarVisible() async {
-        for await v in viewModel.searchBarVisible { assignIfChanged(\.searchBarVisible, v.boolValue) }
+        // The flow's current value, not the emitted one — see `observeSearchQuery`.
+        for await _ in viewModel.searchBarVisible {
+            assignIfChanged(\.searchBarVisible, viewModel.searchBarVisible.value.boolValue)
+        }
     }
 
     private func observeSearchActive() async {
@@ -441,6 +472,11 @@ final class HomeObservable: ObservableAssignment {
         default: false
         }
         if !unchanged { feedListSelectionTarget = target }
+        assignIfChanged(\.articleListTitle, FeedListModelKt.articleListTitle(
+            filter: filter, feeds: structuralFeeds, folders: folders, tags: tags,
+            allLabel: L("home_all_feeds"), starredLabel: L("home_starred")
+        ))
+        assignIfChanged(\.articleListIcon, ArticleListHeaderIcon.resolve(filter: filter, model: sidebar))
     }
 
     /// Runs through `sidebarRebuild` only, once per MainActor turn in which any of its inputs changed.

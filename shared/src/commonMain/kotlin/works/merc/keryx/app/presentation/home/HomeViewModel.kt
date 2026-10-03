@@ -220,7 +220,8 @@ class HomeViewModel(
     // Whether the expanded search bar/field is open. At PaneLayout.Triple this is always true —
     // FeedListPane's own field is permanent there — kept true by HomeScreen's own
     // LaunchedEffect(layout); at a narrow layout it starts false and is toggled by the search
-    // icon/back arrow (see ArticleListPane's own KDoc). searchActive (below) additionally requires
+    // icon/back arrow (see ArticleListPane's own KDoc). The SwiftUI app's iOS search field (on its
+    // article list) binds this to `.searchable`'s `isPresented`. searchActive (below) additionally requires
     // a non-empty query, so opening the bar alone never disturbs the article list underneath it.
     private val _searchBarVisible = MutableStateFlow(false)
     val searchBarVisible: StateFlow<Boolean> = _searchBarVisible.asStateFlow()

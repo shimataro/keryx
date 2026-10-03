@@ -38,6 +38,9 @@ struct ArticlePagerView: View {
                 ReaderPageView(
                     row: isSelected ? selected?.toReaderRow() : cached,
                     revision: isSelected ? selected.map(ObjectIdentifier.init) : cached.map(ObjectIdentifier.init),
+                    // Each page names its own feed: a neighbour in All Feeds may belong to another one.
+                    feedName: (isSelected ? selected?.feed_id : cached?.feed_id).flatMap { home.feedsById[$0]?.displayTitle() },
+                    feedFaviconUrl: (isSelected ? selected?.feed_id : cached?.feed_id).flatMap { home.feedsById[$0]?.favicon_url },
                     preferences: preferences
                 )
                 .tag(Optional(id))

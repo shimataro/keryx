@@ -78,6 +78,7 @@ data class ArticleSearchResult(
  */
 data class ArticleReaderRow(
     val id: String,
+    val feed_id: String,
     val url: String,
     val title: String,
     val author: String?,
@@ -89,6 +90,7 @@ data class ArticleReaderRow(
 /** Narrows a full article row to the columns the reader renders. */
 fun Articles.toReaderRow(): ArticleReaderRow = ArticleReaderRow(
     id = id,
+    feed_id = feed_id,
     url = url,
     title = title,
     author = author,

@@ -231,6 +231,22 @@ editable copy of the same query. Tapping it moves the field to sit directly abov
 filters, in the same header a hamburger button normally occupies, and it stays put there when the
 device is rotated between phone and tablet width.
 
+The native iOS / iPadOS app places search by the same principle at every width: the field always
+belongs to the article list — the column whose contents it narrows — and never to the sidebar, even
+on an iPad wide enough to show all three columns. This follows Apple's Human Interface Guidelines,
+which put a search that filters the current view in that view's own bar, and matches Mail, whose
+search sits on the message list rather than the mailbox list. It uses the system search field, so
+its exact position follows the iOS version (a pull-down field under the article list's title before
+iOS 26, the toolbar from iOS 26 — at the bottom of the screen on iPhone). On iPhone, ⌘F from a
+hardware keyboard while the sidebar or the reader is showing first moves to the article list. The
+article list's heading shows the selected subscription-list item — its name beside the icon the
+subscription list gives it — at every width, as Android's narrower-width header does, so the
+selection a search narrows stays on screen while searching. The native iOS reader's toolbar has
+no room for a feed name beside its four actions on a phone, so it does not show one; the feed
+name leads the article's own byline ("feed · author · date"), behind its favicon, instead, and each swiped-to article
+names its own feed. The
+native macOS app is always 3-pane and keeps the field in the sidebar, as above.
+
 **What search narrows.** At every width, search narrows whatever subscription-list item is
 currently selected rather than being a separate destination of its own. At the 3-pane width this
 selection stays visible and highlighted in the sidebar throughout, showing plainly what the query is

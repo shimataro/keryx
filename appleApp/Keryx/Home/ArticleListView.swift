@@ -64,6 +64,11 @@ struct ArticleListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            #if os(iOS)
+            // Names the selection being shown (and, during a search, the one being narrowed). Not a
+            // navigation title: see `ArticleListHeader`.
+            ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+            #endif
             #if os(macOS)
             // `ArticleTableView` does its own scrolling: back to the top on a filter switch, to an
             // off-screen selection, and to the fresh end for the pill.
@@ -112,7 +117,72 @@ struct ArticleListView: View {
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
+        #if os(iOS)
+        .navigationTitle(home.articleListTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        // The system search field. iOS keeps it here, on the column whose contents it narrows (the
+        // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
+        // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
+        // `.automatic` gives a navigation-bar drawer on iOS 17/18 and the toolbar on iOS 26 (the
+        // bottom bar on iPhone). Its focus is reported into `focusedPane` only from iOS 18 — see
+        // `SearchFocusModifier`.
+        .searchable(
+            text: searchQueryBinding,
+            isPresented: searchPresentedBinding,
+            placement: .automatic,
+            prompt: L("home_search_placeholder")
+        )
+        .modifier(SearchFocusModifier(focusedPane: focusedPane))
+        // Also runs on mount: at a compact width `HomeView` pushes this list in response to the same
+        // request, so it may only be mounted after the request was made.
+        .task(id: home.pendingSearchFocus) {
+            guard home.pendingSearchFocus else { return }
+            await focusSearchField()
+        }
+        #endif
     }
+
+    #if os(iOS)
+    /// Gives the search field keyboard focus, then consumes the request. A list pushed in response to
+    /// the request does not have its system field in place on the first pass, and an assignment made
+    /// before that is silently dropped — so this re-assigns until it sticks, as
+    /// `HomeView.applyInitialFocus` does for the panes. Bounded, since before iOS 18 the field cannot
+    /// report its focus at all (`SearchFocusModifier`). A cancelled attempt (e.g. this list unmounted
+    /// mid-loop) leaves the request for the next list to mount; one never consumed is cleared when
+    /// the search closes (`setSearchBarVisible(false)`).
+    private func focusSearchField() async {
+        for _ in 0..<ArticleListView.searchFocusAttempts {
+            focusedPane.wrappedValue = .search
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return }
+            if focusedPane.wrappedValue == .search { break }
+        }
+        home.viewModel.consumeSearchFocusRequest()
+    }
+
+    /// 50 ms apart: long enough to outlast a navigation push.
+    private static let searchFocusAttempts = 12
+    #endif
+
+    #if os(iOS)
+    private var searchQueryBinding: Binding<String> {
+        Binding(
+            get: { home.searchQuery },
+            set: { home.setSearchQuery($0) }
+        )
+    }
+
+    /// Whether the field is presented, two-way bound to `searchBarVisible` — the same flag Android's
+    /// narrower layouts open and close their expanded search bar with. Cancelling the field closes it
+    /// (`searchActive` turns false and the selection's own list comes back), as does any dismissal
+    /// the system makes on its own; ⌘F opens it through `setSearchBarVisible(true)`.
+    private var searchPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { home.searchBarVisible },
+            set: { home.setSearchBarVisible($0) }
+        )
+    }
+    #endif
 
     /// Overlays the new-articles pill on `list`; tapping it clears the count and runs `jump`.
     private func withNewArticlesPill(_ list: some View, jump: @escaping () -> Void) -> some View {
@@ -154,6 +224,11 @@ struct ArticleListView: View {
     // hand-rolled capsule Compose uses as a stand-in (see `ui-guidelines`' "Icon grouping").
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        #if os(iOS)
+        // The title feeds the next column's back button and its long-press menu; the heading is
+        // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
+        ToolbarItem(placement: .principal) { Color.clear }
+        #endif
         // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
         // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
