@@ -160,7 +160,8 @@ private val promptStateSaver = listSaver<NotificationPermissionPromptState, Bool
 
 /**
  * Remembers a [NotificationPermissionPrompt] whose state (including an open explanation dialog)
- * survives an Android configuration change.
+ * survives an Android configuration change. App calls it once and shares the result with Settings,
+ * so the denial marker outlives the Settings dialog.
  */
 @Composable
 internal fun rememberNotificationPermissionPrompt(setNotificationEnabled: (Boolean) -> Unit): NotificationPermissionPrompt {

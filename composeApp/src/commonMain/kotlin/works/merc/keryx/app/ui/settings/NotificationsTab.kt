@@ -24,12 +24,13 @@ import works.merc.keryx.app.ui.common.KeryxSettingRow
  * since a permanent denial returns without any system dialog and the switch alone would just stay
  * off unexplained.
  *
- * @param vm The view model that provides the setting state and handles changes.
+ * @param vm The view model that provides the setting state.
+ * @param permissionPrompt The one prompt App owns, so a denial made earlier (here or from Home) is still
+ *   known after this tab or the Settings dialog was closed and reopened.
  */
 @Composable
-internal fun NotificationsTabContent(vm: SettingsViewModel) {
+internal fun NotificationsTabContent(vm: SettingsViewModel, permissionPrompt: NotificationPermissionPrompt) {
     val settings by vm.localSettings.collectAsState()
-    val permissionPrompt = rememberNotificationPermissionPrompt(vm::setNotificationEnabled)
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         SettingsCard(settingRowsOnly = true) {
             SwitchRow(

@@ -67,8 +67,8 @@ fun App() {
         // explanation first, then the system request on "Allow"; "Not now" or a denial turns the
         // setting off so it matches reality (see NotificationPermissionFlow). Never shows on desktop
         // or below Android 13, where the permission always reads as granted. Turning the setting on
-        // later from Settings ▸ Notifications goes through the same flow there, without the
-        // explanation. Keyed on navigator.current (live navigation state), not setupComplete: that's
+        // later from Settings ▸ Notifications goes through this same prompt (handed to the dialog, so a
+        // denial is remembered while Settings is closed), without the explanation. Keyed on navigator.current (live navigation state), not setupComplete: that's
         // a remember{} snapshot taken once to pick the *initial* screen, so a user who completes
         // setup right now would otherwise not be asked until the next cold start.
         val preferences = koinInject<PreferencesController>()
@@ -151,6 +151,7 @@ fun App() {
             if (showSettings) {
                 SettingsDialog(
                     onDismiss = { showSettings = false },
+                    permissionPrompt = notificationPermissionPrompt,
                     initialTabId = settingsInitialTab,
                     tabRequestToken = settingsTabRequestToken,
                 )
