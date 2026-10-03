@@ -54,7 +54,6 @@ import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.DRAWER_SHEET_END_INSET
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
@@ -594,9 +593,7 @@ fun HomeScreen() {
                             CompositionLocalProvider(LocalRowSelectionVisible provides true) {
                                 ModalDrawerSheet(
                                     drawerState = drawerState,
-                                    modifier = Modifier.width(
-                                        (maxWidth - DRAWER_SHEET_END_INSET.dp).coerceAtLeast(0.dp),
-                                    ),
+                                    modifier = Modifier.width(drawerSheetWidth(maxWidth)),
                                 ) {
                                     FeedListPane(
                                         vm,

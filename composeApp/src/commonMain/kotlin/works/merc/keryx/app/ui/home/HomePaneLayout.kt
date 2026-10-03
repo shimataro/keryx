@@ -1,10 +1,12 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.material3.DrawerDefaults
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.DRAWER_SHEET_END_INSET
 import works.merc.keryx.app.core.DUAL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.TRIPLE_PANE_MIN_WIDTH
@@ -137,6 +139,22 @@ internal fun triplePaneWidths(availableForPanes: Dp, feedPreference: Dp, article
 internal fun dualPaneArticleListWidth(availableWidth: Dp): Dp =
     (availableWidth - DETAIL_PANE_MIN_WIDTH.dp)
         .coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.dp, ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp)
+
+/**
+ * The width of the narrow layouts' feed-list `ModalDrawerSheet`, given the [availableWidth] of the
+ * home screen.
+ *
+ * It leaves [endInset] uncovered on the end side so the scrim (and with it a tap-to-close target)
+ * stays visible, and never grows past [maxWidth] — Material 3's own drawer maximum
+ * ([DrawerDefaults.MaximumDrawerWidth], 360dp), which an explicit `Modifier.width` on the sheet
+ * would otherwise override, stretching the drawer across most of a tablet-width screen. Never
+ * negative, for a degenerate width narrower than the inset itself.
+ */
+internal fun drawerSheetWidth(
+    availableWidth: Dp,
+    endInset: Dp = DRAWER_SHEET_END_INSET.dp,
+    maxWidth: Dp = DrawerDefaults.MaximumDrawerWidth,
+): Dp = (availableWidth - endInset).coerceIn(0.dp, maxWidth)
 
 /**
  * The panes to render for [layout], given the navigation stack's current [depth] (1..3, see

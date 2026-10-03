@@ -688,6 +688,10 @@ internal fun ArticleListPaneContent(
         }
         listState.scrollToIndexIfNeeded(index)
     }
+    val searchHighlight = searchHighlightSpanStyle(
+        works.merc.keryx.app.platform.isTouchPrimary,
+        MaterialTheme.colorScheme,
+    )
 
     Column(
         modifier
@@ -796,7 +800,7 @@ internal fun ArticleListPaneContent(
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
                             onActivate = onActivated,
                             titleOverride = titleMarkedById?.get(article.id)?.let {
-                                markedToAnnotatedString(it.ifBlank { article.title })
+                                markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight)
                             },
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),

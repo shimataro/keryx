@@ -1,6 +1,8 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -10,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -24,6 +27,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.presentation.home.inlineRenameValidation
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_cancel
@@ -107,18 +111,36 @@ internal fun InlineRenameField(
         horizontalPadding = InlineRenameHorizontalPadding,
         initiallySelectAll = true,
         trailingIcon = {
-            KeryxIcon(
-                KeryxIcons.CloseFilled,
-                contentDescription = cancelLabel,
-                modifier = Modifier
+            Box(
+                // The "×" keeps its 16dp layout footprint on every platform, so showing it can never
+                // make the editor (and the row) taller — see InlineRenameCancelIconSize. A
+                // touch-primary platform additionally grows the *hit target* to M3's 48dp square
+                // around that footprint via layoutAs, the same technique TagRow's color dot uses;
+                // `clickable` must come after layoutAs/requiredSize so it sees the enlarged target.
+                Modifier
                     .testTag(INLINE_RENAME_CANCEL_TEST_TAG)
-                    .size(InlineRenameCancelIconSize)
+                    .then(
+                        if (isTouchPrimary) {
+                            Modifier
+                                .layoutAs(InlineRenameCancelIconSize, InlineRenameCancelIconSize)
+                                .requiredSize(TOUCH_TARGET_MIN_SIZE)
+                        } else {
+                            Modifier.size(InlineRenameCancelIconSize)
+                        },
+                    )
                     // `clickable` is focusable by default, and taking focus from the field beside it
                     // would run the blur path — *committing* — before this click's own handler ever
                     // ran, making the cancel button commit.
                     .focusProperties { canFocus = false }
                     .clickable(onClickLabel = cancelLabel) { finish(commit = false) },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                KeryxIcon(
+                    KeryxIcons.CloseFilled,
+                    contentDescription = cancelLabel,
+                    modifier = Modifier.size(InlineRenameCancelIconSize),
+                )
+            }
         },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { if (canCommit) finish(commit = true) }),

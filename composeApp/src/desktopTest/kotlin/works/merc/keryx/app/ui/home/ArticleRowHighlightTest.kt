@@ -3,11 +3,16 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -156,6 +161,47 @@ class ArticleRowHighlightTest {
         waitForIdle()
 
         assertEquals(emptyList(), interactions)
+    }
+
+    // --- state description (Android/TalkBack only) ---
+
+    @Composable
+    private fun StateRow(article: ArticleListRow, isTouchPrimary: Boolean) {
+        ArticleRow(
+            article = article,
+            feedTitle = "Feed",
+            feedFavicon = null,
+            selected = false,
+            focused = true,
+            rowHeight = 48.dp,
+            faviconSize = 20.dp,
+            onClick = {},
+            onSetRead = {},
+            onSetStarred = {},
+            onCopyUrl = {},
+            onOpenInBrowser = {},
+            // Explicit labels, so the assertion doesn't depend on the test machine's locale.
+            strings = rememberArticleRowStrings().copy(stateUnread = "Unread", stateStarred = "Starred"),
+            isTouchPrimary = isTouchPrimary,
+        )
+    }
+
+    @Test
+    fun onTouchAnUnreadStarredRowExposesItsStateDescription() = runDesktopComposeUiTest {
+        setContent { StateRow(article("a1").copy(is_read = 0L, is_starred = 1L), isTouchPrimary = true) }
+        waitForIdle()
+
+        onNodeWithTag("article-a1").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Unread, Starred"),
+        )
+    }
+
+    @Test
+    fun onDesktopTheRowHasNoStateDescription() = runDesktopComposeUiTest {
+        setContent { StateRow(article("a1").copy(is_read = 0L, is_starred = 1L), isTouchPrimary = false) }
+        waitForIdle()
+
+        onNodeWithTag("article-a1").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
     }
 }
 

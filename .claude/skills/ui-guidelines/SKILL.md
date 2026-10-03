@@ -1412,7 +1412,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   differed in padding, `KeryxPaneTopBar` applies none of its own — a caller supplies padding (and
   keeps `WindowDragArea`/`WindowChrome.titleBarInsetDp` wrapped *around* the call, since neither is
   shared across all three panes either) via its own `modifier`. Android's `actual` is a real M3
-  `TopAppBar`.
+  `TopAppBar` with a transparent container, so the bar takes the tone of the pane it heads
+  (M3's opaque `surface` default would band the `surfaceContainerLow`/`surfaceContainer` panes).
 - **`KeryxExpandedSearchBar`** (`ui/common/KeryxSearchBar.kt`, expect/actual): the narrow-layout
   header `ArticleListPane` swaps in described in "Adaptive pane layout & touch affordances" above —
   a back arrow, an editable query field, and a clear action, all on one bar. **Deliberately not built on

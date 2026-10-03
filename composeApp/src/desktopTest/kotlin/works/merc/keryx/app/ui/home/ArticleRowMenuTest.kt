@@ -27,6 +27,8 @@ class ArticleRowMenuTest {
         openInBrowser = "Open in Browser",
         noTitleFallback = "(no title)",
         zone = TimeZone.UTC,
+        stateUnread = "Unread",
+        stateStarred = "Starred",
     )
 
     private fun article(read: Boolean, starred: Boolean = false, url: String = "https://example.com/a1") = ArticleListRow(

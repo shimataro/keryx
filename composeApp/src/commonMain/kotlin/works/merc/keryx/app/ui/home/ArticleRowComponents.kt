@@ -34,6 +34,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -56,6 +58,8 @@ import works.merc.keryx.app.resources.article_mark_as_read
 import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
+import works.merc.keryx.app.resources.article_state_starred
+import works.merc.keryx.app.resources.article_state_unread
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.home_notifications
@@ -123,6 +127,10 @@ internal data class ArticleRowStrings(
     val openInBrowser: String,
     val noTitleFallback: String,
     val zone: TimeZone,
+    /** The row's spoken "unread" state (see [articleRowStateDescription]). */
+    val stateUnread: String,
+    /** The row's spoken "starred" state (see [articleRowStateDescription]). */
+    val stateStarred: String,
 )
 
 /**
@@ -139,12 +147,14 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     val copyUrl = stringResource(Res.string.article_copy_url)
     val openInBrowser = stringResource(Res.string.article_open_in_browser)
     val noTitleFallback = stringResource(Res.string.article_no_title)
+    val stateUnread = stringResource(Res.string.article_state_unread)
+    val stateStarred = stringResource(Res.string.article_state_starred)
     // Resolved once with the strings rather than per row. The keys below never change for a
     // time-zone change, so a zone switched while Keryx is running (it is tray-resident, so that can
     // be days) is only picked up when this composition is recreated. Accepted: the alternative is
     // TimeZone.currentSystemDefault() — which clones the JVM default zone — per visible row per
     // composition, and article timestamps are not a clock.
-    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, noTitleFallback) {
+    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, noTitleFallback, stateUnread, stateStarred) {
         ArticleRowStrings(
             markAsRead = markAsRead,
             markAsUnread = markAsUnread,
@@ -154,6 +164,8 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
             openInBrowser = openInBrowser,
             noTitleFallback = noTitleFallback,
             zone = TimeZone.currentSystemDefault(),
+            stateUnread = stateUnread,
+            stateStarred = stateStarred,
         )
     }
 }
@@ -230,6 +242,23 @@ internal fun articleRowContextMenuOpen(selected: Boolean, select: () -> Unit, ac
 }
 
 /**
+ * The state a screen reader announces for an article row, or `null` when there is none to announce.
+ *
+ * The row shows its unread and starred state only visually — an unlabelled dot and a star icon with
+ * no content description — so without this TalkBack reads a row's title, feed and date but never
+ * whether it is unread or starred. Unread comes first, then starred, joined with ", " — the same
+ * order and separator as the SwiftUI row's `stateAccessibilityValue`.
+ */
+internal fun articleRowStateDescription(
+    unread: Boolean,
+    starred: Boolean,
+    unreadLabel: String,
+    starredLabel: String,
+): String? = listOfNotNull(unreadLabel.takeIf { unread }, starredLabel.takeIf { starred })
+    .joinToString(", ")
+    .ifEmpty { null }
+
+/**
  * What the most recent context-menu open did to an [ArticleRow]'s selection, carried from the menu's
  * `onOpen` to its `items()`. A plain mutable holder, deliberately not snapshot state — see its use
  * in [ArticleRow].
@@ -262,6 +291,9 @@ private class ContextMenuOpenSelection {
  *   see `ArticleListPane.kt`'s `ripplePulseFor`. `0` (the default) never plays one.
  * @param interactionSource The row's press/selection interaction source. Hoisted (rather than
  *   created internally) so [ripplePulse] can be exercised directly in tests.
+ * @param isTouchPrimary Whether to expose the row's unread/starred state as a semantics
+ *   `stateDescription` (see [articleRowStateDescription]). Defaults to the platform's own value;
+ *   a parameter so the Android path can be exercised in desktop tests.
  */
 @Composable
 internal fun ArticleRow(
@@ -282,6 +314,7 @@ internal fun ArticleRow(
     strings: ArticleRowStrings = rememberArticleRowStrings(),
     ripplePulse: Int = 0,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val unread = article.is_read == 0L
     // Whether the most recent right-click selected this row (desktop only — Android never calls
@@ -292,8 +325,22 @@ internal fun ArticleRow(
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
     PulseRippleEffect(ripplePulse, interactionSource)
+    // Touch-primary (Android/TalkBack) only, so desktop's semantics stay exactly as they were. Merged
+    // into the row's own clickable node, so it is announced together with the row.
+    val stateDescriptionText = if (isTouchPrimary) {
+        articleRowStateDescription(unread, article.is_starred == 1L, strings.stateUnread, strings.stateStarred)
+    } else {
+        null
+    }
     Row(
         Modifier.testTag(testTag)
+            .then(
+                if (stateDescriptionText != null) {
+                    Modifier.semantics { stateDescription = stateDescriptionText }
+                } else {
+                    Modifier
+                },
+            )
             .fillMaxWidth()
             .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(
