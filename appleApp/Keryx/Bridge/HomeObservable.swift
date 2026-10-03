@@ -112,6 +112,9 @@ final class HomeObservable: ObservableAssignment {
     private(set) var selectedArticleCanOpenInBrowser = false
     /// The sidebar item the selected filter resolves to (`resolveFeedListSelectionTarget`).
     private(set) var feedListSelectionTarget: FeedListSelectionTarget?
+    /// The selected filter's display name (`articleListTitle`), shown as the iOS article list's
+    /// navigation title — the same name Android's narrow-layout header shows.
+    private(set) var articleListTitle: String = L("home_all_feeds")
     private(set) var selectedFeedName: String?
     private(set) var selectedFeedFaviconUrl: String?
     private(set) var articleContents: [String: ArticleReaderRow] = [:]
@@ -456,6 +459,10 @@ final class HomeObservable: ObservableAssignment {
         default: false
         }
         if !unchanged { feedListSelectionTarget = target }
+        assignIfChanged(\.articleListTitle, FeedListModelKt.articleListTitle(
+            filter: filter, feeds: structuralFeeds, folders: folders, tags: tags,
+            allLabel: L("home_all_feeds"), starredLabel: L("home_starred")
+        ))
     }
 
     /// Runs through `sidebarRebuild` only, once per MainActor turn in which any of its inputs changed.

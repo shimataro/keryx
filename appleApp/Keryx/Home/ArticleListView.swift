@@ -113,6 +113,10 @@ struct ArticleListView: View {
         #endif
         .toolbar { toolbarContent }
         #if os(iOS)
+        // Names the selection being shown (and, during a search, the one being narrowed), as Android's
+        // narrow-layout header does. Inline, so the rows keep the vertical space.
+        .navigationTitle(home.articleListTitle)
+        .navigationBarTitleDisplayMode(.inline)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
         // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
         // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
