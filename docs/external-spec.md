@@ -239,6 +239,8 @@ search sits on the message list rather than the mailbox list. It uses the system
 its exact position follows the iOS version (a pull-down field under the article list's title before
 iOS 26, the toolbar from iOS 26 — at the bottom of the screen on iPhone). On iPhone, ⌘F from a
 hardware keyboard while the sidebar or the reader is showing first moves to the article list. The
+article list's title names the selected subscription-list item at every width, as Android's
+narrower-width header does, so the selection a search narrows stays on screen while searching. The
 native macOS app is always 3-pane and keeps the field in the sidebar, as above.
 
 **What search narrows.** At every width, search narrows whatever subscription-list item is
