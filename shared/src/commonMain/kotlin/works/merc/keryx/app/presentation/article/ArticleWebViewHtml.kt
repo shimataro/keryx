@@ -60,6 +60,8 @@ private val ArticleHtmlTheme.isDark: Boolean
  * that stops it pulling in the source site's own stylesheets, and for how far the `!important`
  * chrome rules do — and don't — hold against inline styles it carries itself.
  *
+ * [metaIconUrl], when an http(s) URL, puts a small icon (the feed's favicon) before [meta].
+ *
  * [baseUrl], when non-blank, is the article's own URL and is emitted as a `<base href>` so
  * relative `src`/`href` values inside [body] (relative images, links) resolve against the
  * article's origin instead of failing to resolve at all. Left `null`/blank, no `<base>` tag is
@@ -73,7 +75,8 @@ fun wrapArticleHtml(
     baseUrl: String? = null,
     titleUrl: String? = null,
     titleTooltip: String? = null,
-): String = articleDocument(theme, articleHeader(title, meta, titleUrl, titleTooltip) + body, baseUrl = baseUrl)
+    metaIconUrl: String? = null,
+): String = articleDocument(theme, articleHeader(title, meta, titleUrl, titleTooltip, metaIconUrl) + body, baseUrl = baseUrl)
 
 /**
  * Same header as [wrapArticleHtml], with a muted [message] where the body would be — for an
@@ -87,7 +90,8 @@ fun articleNoContentHtml(
     message: String,
     titleUrl: String? = null,
     titleTooltip: String? = null,
-): String = articleDocument(theme, articleHeader(title, meta, titleUrl, titleTooltip) + """<p class="article-notice">${escapeHtml(message)}</p>""")
+    metaIconUrl: String? = null,
+): String = articleDocument(theme, articleHeader(title, meta, titleUrl, titleTooltip, metaIconUrl) + """<p class="article-notice">${escapeHtml(message)}</p>""")
 
 /** [message] centered in the viewport with no header — the "no article selected" state. */
 fun articlePlaceholderHtml(theme: ArticleHtmlTheme, message: String): String =
@@ -102,6 +106,7 @@ private fun articleHeader(
     meta: String,
     titleUrl: String? = null,
     titleTooltip: String? = null,
+    metaIconUrl: String? = null,
 ): String = buildString {
     if (title.isNotBlank()) {
         if (titleUrl != null && isHttpOrHttpsUrl(titleUrl)) {
@@ -111,7 +116,13 @@ private fun articleHeader(
             append("""<h1 class="article-title">${escapeHtml(title)}</h1>""")
         }
     }
-    if (meta.isNotBlank()) append("""<div class="article-meta">${escapeHtml(meta)}</div>""")
+    if (meta.isNotBlank()) {
+        // Decorative, and dropped again if it fails to load (no favicon, blocked, unreachable).
+        val icon = metaIconUrl?.takeIf { isHttpOrHttpsUrl(it) }?.let {
+            """<img class="article-meta-icon" src="${escapeHtml(it)}" alt="" onerror="this.remove()">"""
+        }.orEmpty()
+        append("""<div class="article-meta">$icon${escapeHtml(meta)}</div>""")
+    }
 }
 
 /**
@@ -191,6 +202,7 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
           .article-title a:hover { opacity: 0.7 !important; }
           .article-title a:active { opacity: 0.5 !important; }
           .article-meta { font-size: 0.85em !important; color: ${theme.mutedColor.toCssHex()} !important; margin: 0 0 16px !important; }
+          .article-meta-icon { height: 1.1em !important; width: 1.1em !important; vertical-align: -0.2em !important; margin-right: 0.4em !important; border-radius: 3px !important; }
           .article-notice { color: ${theme.mutedColor.toCssHex()} !important; margin: 0 !important; }
           .article-placeholder {
             position: fixed !important;

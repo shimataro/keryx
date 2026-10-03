@@ -208,6 +208,35 @@ class ArticleWebViewHtmlTest {
     }
 
     @Test
+    fun wrapArticleHtmlPutsMetaIconBeforeMeta() {
+        val result = wrapArticleHtml(
+            theme, title = "t", meta = "Feed · now", body = "<p>b</p>",
+            metaIconUrl = "https://example.com/a.png?x=1&y=\"2\"",
+        )
+        assertTrue(
+            result.contains(
+                """<div class="article-meta"><img class="article-meta-icon" src="https://example.com/a.png?x=1&amp;y=&quot;2&quot;" alt="" onerror="this.remove()">Feed · now</div>""",
+            ),
+        )
+        val noContent = articleNoContentHtml(theme, title = "t", meta = "Feed", message = "m", metaIconUrl = "https://example.com/a.png")
+        assertTrue(noContent.contains("""<div class="article-meta"><img class="article-meta-icon" src="https://example.com/a.png""""))
+    }
+
+    @Test
+    fun wrapArticleHtmlOmitsMetaIconForNonHttpOrBlankUrl() {
+        for (url in listOf(null, "", "  ", "javascript:alert(1)", "data:image/png;base64,AAAA", "/favicon.ico")) {
+            val result = wrapArticleHtml(theme, title = "t", meta = "Feed", body = "<p>b</p>", metaIconUrl = url)
+            assertTrue(result.contains("""<div class="article-meta">Feed</div>"""), "url=$url")
+        }
+    }
+
+    @Test
+    fun wrapArticleHtmlOmitsMetaIconWhenThereIsNoMeta() {
+        val result = wrapArticleHtml(theme, title = "t", meta = "", body = "<p>b</p>", metaIconUrl = "https://example.com/a.png")
+        assertTrue(!result.contains("article-meta-icon\""))
+    }
+
+    @Test
     fun wrapArticleHtmlEmitsBaseHrefWhenUrlProvided() {
         val result = wrapArticleHtml(theme, title = "", meta = "", body = "<p>body</p>", baseUrl = "https://example.com/article/1")
         assertTrue(result.contains("""<base href="https://example.com/article/1" />"""))
@@ -360,6 +389,7 @@ class ArticleWebViewHtmlTest {
             ".article-title a:hover",
             ".article-title a:active",
             ".article-meta",
+            ".article-meta-icon",
             ".article-notice",
             ".article-placeholder",
             "body.placeholder",
