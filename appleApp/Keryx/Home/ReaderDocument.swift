@@ -19,6 +19,8 @@ struct ReaderDocumentInputs: Sendable {
     struct Header: Sendable {
         let title: String
         let meta: String
+        /// The feed's favicon URL, shown before `meta` (nil where the toolbar names the feed).
+        let metaIconUrl: String?
         let url: String
         /// Whether `url` itself counts as an outbound link (only an http(s) URL does).
         let urlIsOutbound: Bool
@@ -46,6 +48,7 @@ extension ArticleReaderRow: @retroactive @unchecked Sendable {}
 struct ReaderDocumentKey: Hashable {
     let article: ObjectIdentifier?
     let feedName: String?
+    let feedFaviconUrl: String?
     let colorScheme: ColorScheme
     let fontSizeScale: Double
 }
@@ -110,7 +113,8 @@ struct ReaderDocument: Sendable {
                     body: body,
                     baseUrl: header.url,
                     titleUrl: header.url,
-                    titleTooltip: header.openInBrowserTooltip
+                    titleTooltip: header.openInBrowserTooltip,
+                    metaIconUrl: header.metaIconUrl
                 )
                 let source = ReaderLinkSource(body: body, baseUri: header.url, includesBaseUri: header.urlIsOutbound)
                 let reused = previous.linkSource == source ? previous.outboundLinks : nil
@@ -122,7 +126,8 @@ struct ReaderDocument: Sendable {
                 meta: header.meta,
                 message: noContentMessage,
                 titleUrl: header.url,
-                titleTooltip: header.openInBrowserTooltip
+                titleTooltip: header.openInBrowserTooltip,
+                metaIconUrl: header.metaIconUrl
             )
             // A blank body has nothing worth deferring: parsing whitespace is instant.
             let links = body.map {

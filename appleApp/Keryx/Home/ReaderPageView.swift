@@ -18,6 +18,8 @@ struct ReaderPageView: View {
     let revision: ObjectIdentifier?
     /// The owning feed's name for the byline, where the toolbar has no room to show it (iOS); nil on macOS.
     var feedName: String?
+    /// The owning feed's favicon URL, shown before the byline; nil on macOS.
+    var feedFaviconUrl: String?
     let preferences: PreferencesObservable
 
     @Environment(\.colorScheme) private var colorScheme
@@ -51,6 +53,7 @@ struct ReaderPageView: View {
         ReaderDocumentKey(
             article: revision,
             feedName: feedName,
+            feedFaviconUrl: feedFaviconUrl,
             colorScheme: colorScheme,
             fontSizeScale: preferences.fontSizeScale
         )
@@ -96,6 +99,7 @@ struct ReaderPageView: View {
         let header = ReaderDocumentInputs.Header(
             title: title,
             meta: meta,
+            metaIconUrl: feedFaviconUrl,
             url: row.url,
             // Only an http(s) article URL counts as an outbound link — the same rule as Open in
             // Browser (`canOpenInBrowser`); a `keryx://`-scheme or empty URL

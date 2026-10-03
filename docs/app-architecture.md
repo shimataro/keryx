@@ -464,7 +464,7 @@ states, but its *measured height* does not: the always-present row of `TooltipIc
 what actually pins it, keeping the reader's own measured bounds identical across states regardless
 of which title-slot content is composed. (The native iOS reader's toolbar omits the feed name —
 it would truncate beside the four actions on a phone — and the name leads the byline in the
-article's own header instead, via `articleMetaText`'s `feedName`; each pager page resolves it from
+article's own header instead, via `articleMetaText`'s `feedName`, behind the feed's favicon (`wrapArticleHtml`'s `metaIconUrl` — an `<img>` the WebView loads itself, dropped on failure); each pager page resolves it from
 its own row's `feed_id`, so a neighbour in All Feeds names its own feed. macOS keeps the toolbar
 name.)
 
