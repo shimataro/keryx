@@ -364,10 +364,12 @@ tablet in landscape also reaches — the reader is a permanent, keyboard-driven 
 see `app-architecture.md`), and the swipe gesture does not apply there.
 
 The article list has one more touch-only affordance, on Android at **every** width (including the
-3-pane layout a large tablet reaches) and with no desktop counterpart, since a mouse has no pull
-gesture: **pulling the list down refreshes it**, using Material 3's own pull-to-refresh indicator.
-Unlike the toolbar's refresh button — which keeps refreshing every feed, unchanged — a pull refreshes
-only the feeds behind the list currently on screen:
+3-pane layout a large tablet reaches) and in the native iOS / iPadOS app, with no desktop
+counterpart (the Compose desktop app or the native macOS one), since a mouse has no pull gesture:
+**pulling the list down refreshes it**, using each platform's own indicator (Material 3's
+pull-to-refresh on Android, the system refresh control on iOS). Unlike Refresh All — which keeps
+refreshing every feed, unchanged — a pull refreshes only the feeds behind the list currently on
+screen:
 
 | Selected in the feed list | Feeds a pull refreshes |
 | --- | --- |
@@ -379,17 +381,28 @@ only the feeds behind the list currently on screen:
 A selection that covers no subscribed feed at all (an empty folder or tag) finishes at once, fetching
 and syncing nothing. The gesture works on an empty list too (e.g. "unread only" with nothing unread),
 but is disabled while search results are showing — pulling a result list isn't a request to refresh
-the feeds behind it — and while there are no feeds at all. As with the toolbar's refresh button, a
+the feeds behind it — and while there are no feeds at all. As with Refresh All, a
 pull is followed by a cloud sync when one is connected, and the indicator stays up until that sync
 has finished too, not just the feed fetches. A pull made while a refresh or sync is already running (a
 background refresh, say) starts nothing new; the indicator simply stays up until the running one
-finishes. The same refresh is also reachable without the gesture, wherever the gesture itself is
-available: as a TalkBack custom action on the list ("Refresh this list"), and from a physical
-keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width screen
-shows the reader alone, and not while the feed-list drawer covers the list. On desktop the same
-chord is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a different
-platform (desktop has no pull gesture to mirror, and its menu bar already owns the chord), not two
-routes to one action.
+finishes. On Android, the same refresh is also reachable without the gesture, wherever the gesture
+itself is available: as a TalkBack custom action on the list ("Refresh this list"), and from a
+physical keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width
+screen shows the reader alone, and not while the feed-list drawer covers the list. On desktop the
+same chord is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a
+different platform (desktop has no pull gesture to mirror, and its menu bar already owns the chord),
+not two routes to one action. The native iOS app has no non-gesture route to this scoped refresh; an
+iPad's hardware keyboard instead reaches the Feed menu's Refresh All (⌘R) and Refresh (⌘⇧R, the
+selected feed alone) — likewise different actions, not routes to the pull.
+
+On iOS the sidebar (the feed list) can be pulled down as well, and that pull is Refresh All rather
+than the scoped refresh above: it refreshes every feed whatever is selected, followed by a cloud sync
+when one is connected, with the indicator staying up until both have finished; it is disabled while
+there are no feeds. It takes the place of a Refresh All button in the iOS navigation bar, which keeps
+only sync (when a cloud is connected), add-feed and settings. This is how Mail's mailbox list is
+refreshed, and it leaves the bar's limited room to the other actions. Android's feed-list drawer has no pull — it is a modal navigation
+surface laid over the article list, and keeps its refresh button in its header — and neither does
+the macOS sidebar, which keeps its toolbar button.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
