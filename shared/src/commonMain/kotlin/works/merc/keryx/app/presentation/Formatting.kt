@@ -49,7 +49,7 @@ fun formatTimestamp(epochMillis: Long?, zone: TimeZone): String {
  * @param author The article's author, if available.
  * @param publishedAt The article's publication time in Unix milliseconds, if available.
  * @param feedName The owning feed's display title, for a UI whose toolbar has no room to show it
- *   (the iOS reader); null where the toolbar already does.
+ *   (the iOS and Android readers); null where the toolbar already does (desktop, macOS).
  * @return The formatted metadata line, or an empty string when no value is available.
  */
 fun articleMetaText(author: String?, publishedAt: Long?, feedName: String? = null): String =

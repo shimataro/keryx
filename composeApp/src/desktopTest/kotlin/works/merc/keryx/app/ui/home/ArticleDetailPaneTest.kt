@@ -15,17 +15,20 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.toReaderRow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertContains
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** The size every case lays the pane out at. */
@@ -577,6 +580,77 @@ class ArticleDetailPaneTest {
         // per-page calls (2, one for each page).
         assertEquals(1, readerCalls)
     }
+    /**
+     * On a touch-primary platform the feed is named in the article's own byline rather than the
+     * toolbar, which has no room for it beside the back button and four actions at phone width.
+     */
+    @Test
+    fun touchPrimaryNamesTheFeedInTheBylineNotTheToolbar() = runDesktopComposeUiTest {
+        var html = ""
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                feedName = "Feed f1",
+                feedsById = mapOf("f1" to testFeed("f1", faviconUrl = "https://example.com/icon.png")),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                isTouchPrimary = true,
+                reader = { h, _, _, _ -> html = h; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("Feed f1").assertDoesNotExist()
+        assertContains(html, "Feed f1")
+        assertContains(html, "https://example.com/icon.png")
+    }
+
+    @Test
+    fun desktopKeepsTheFeedNameInTheToolbarAndOutOfTheByline() = runDesktopComposeUiTest {
+        var html = ""
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                feedName = "Feed f1",
+                feedsById = mapOf("f1" to testFeed("f1", faviconUrl = "https://example.com/icon.png")),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                isTouchPrimary = false,
+                reader = { h, _, _, _ -> html = h; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("Feed f1").assertExists()
+        assertFalse("Feed f1" in html)
+        assertFalse("https://example.com/icon.png" in html)
+    }
+
+    /** Each pager page resolves its own feed, so a neighbour in a mixed list names its own feed. */
+    @Test
+    fun eachPagerPageNamesItsOwnFeedInItsByline() = runDesktopComposeUiTest {
+        val first = testArticle("a1", feedId = "f1")
+        val second = testArticle("a2", feedId = "f2")
+        val htmlByUrl = mutableMapOf<String?, String>()
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = first,
+                feedsById = mapOf("f1" to testFeed("f1"), "f2" to testFeed("f2")),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                isTouchPrimary = true,
+                swipeNavigation = ArticleSwipeNavigation({}, {}, { true }, { true }),
+                readerPaging = pagingFor(listOf(first, second), selected = first, hydrated = listOf(first, second)),
+                reader = { h, _, url, _ -> htmlByUrl[url] = h; Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        val firstHtml = htmlByUrl.getValue(first.url)
+        val secondHtml = htmlByUrl.getValue(second.url)
+        assertContains(firstHtml, "Feed f1")
+        assertFalse("Feed f2" in firstHtml)
+        assertContains(secondHtml, "Feed f2")
+        assertFalse("Feed f1" in secondHtml)
+    }
 }
 
 /**
@@ -602,9 +676,10 @@ private fun testArticle(
     content: String? = "<p>content</p>",
     summary: String? = null,
     isStarred: Long = 0L,
+    feedId: String = "f1",
 ): Articles = Articles(
     id = id,
-    feed_id = "f1",
+    feed_id = feedId,
     guid = "g$id",
     url = url,
     title = title,
@@ -622,5 +697,28 @@ private fun testArticle(
     updated_at = 0L,
     created_at = 0L,
     deleted_at = null,
+    deleted_updated_at = null,
+)
+
+private fun testFeed(id: String, faviconUrl: String? = null): Feeds = Feeds(
+    id = id,
+    url = "https://example.com/$id.xml",
+    site_url = null,
+    title = "Feed $id",
+    description = null,
+    favicon_url = faviconUrl,
+    etag = null,
+    last_modified = null,
+    error_count = 0L,
+    last_error = null,
+    custom_title = null,
+    folder_id = null,
+    deleted_at = null,
+    updated_at = 0L,
+    created_at = 0L,
+    sort_order = 0L,
+    folder_updated_at = null,
+    sort_order_updated_at = null,
+    custom_title_updated_at = null,
     deleted_updated_at = null,
 )

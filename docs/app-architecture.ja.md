@@ -467,7 +467,11 @@ WebView、macOS/Linux の WebKit）では、そのいずれか 1 つでも定義
 計測済みバウンズは状態間で常に同一に保たれる。
 （ネイティブ iOS のリーダーはツールバーにフィード名を出さない——iPhone では 4 つの操作と並べると切れてしまうため。
 フィード名は記事自身のヘッダーの署名行の先頭に、`articleMetaText` の `feedName` で、フィードのファビコン（`wrapArticleHtml` の `metaIconUrl`。WebView 自身が読み込む `<img>` で、失敗時は除去）の後ろに表示する。pager の各ページは
-自分の行の `feed_id` から解決するので、All Feeds での隣接ページも自分のフィード名を表示する。macOS はツールバーの名前のまま。）
+自分の行の `feed_id` から解決するので、All Feeds での隣接ページも自分のフィード名を表示する。macOS はツールバーの名前のまま。
+Compose も同じプラットフォーム区分に従う: タッチ主体のプラットフォーム（Android）ではツールバーのタイトル枠を空のままにし、
+`ArticleDetailPaneContent` が署名行にフィード名を表示する。各ページは `HomeViewModel.structuralFeeds` から作ったマップを
+`feed_id` で引き、解決した名前とファビコンをキーにするため、無関係な feeds の更新でページの文書が作り直されることはない。
+デスクトップはツールバーの名前のまま。）
 
 **Android では `color-scheme` だけでは足りない。** `android.webkit.WebView` の既定スタイル
 `Widget.WebView` は `scrollbars="horizontal|vertical"` を設定しており、そのルートフレームの

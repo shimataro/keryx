@@ -62,8 +62,10 @@ import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
+import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.domain.readerBody
 import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.toReaderRow
@@ -142,6 +144,15 @@ fun ArticleDetailPane(
     val article by vm.selectedArticle.collectAsState()
     val feedName by vm.selectedFeedName.collectAsState()
     val feedFaviconUrl by vm.selectedFeedFaviconUrl.collectAsState()
+    // Only a touch-primary platform names the feed in each article's byline (see
+    // ArticleDetailPaneContent), so only there is the feed lookup collected at all. The structural
+    // variant skips the per-fetch etag/last_modified rewrites, which change nothing a byline shows.
+    val feedsById = if (isTouchPrimary) {
+        val feeds by vm.structuralFeeds.collectAsState()
+        remember(feeds) { feeds.associateBy { it.id } }
+    } else {
+        emptyMap()
+    }
 
     // Built only where a swipe exists at all *and* the platform is touch-driven, which is what
     // keeps the pager off desktop structurally rather than by way of a window-width constant: a
@@ -174,6 +185,7 @@ fun ArticleDetailPane(
         article = article,
         feedName = feedName,
         feedFaviconUrl = feedFaviconUrl,
+        feedsById = feedsById,
         modifier = modifier,
         onActivated = onActivated,
         copyPulse = copyPulse,
@@ -212,6 +224,7 @@ internal fun ArticleDetailPaneContent(
     article: Articles?,
     feedName: String? = null,
     feedFaviconUrl: String? = null,
+    feedsById: Map<String, Feeds> = emptyMap(),
     modifier: Modifier = Modifier,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
@@ -258,6 +271,14 @@ internal fun ArticleDetailPaneContent(
 
     val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
 
+    // Where the feed is named: in the toolbar on desktop, and in each article's own byline on a
+    // touch-primary platform (Android), matching the SwiftUI app's macOS/iOS split. A phone-width
+    // toolbar has no room for the name beside the back button and four actions, and a byline lets
+    // each swiped-to page name its own feed rather than the toolbar catching up once a swipe settles.
+    // Keyed on the platform, not the width, so the name never moves between layouts on one device.
+    val feedInByline = isTouchPrimary
+    val bylineFeeds = if (feedInByline) feedsById else emptyMap()
+
     // Only enabled where the caller supplied sibling-article navigation (swipeNavigation != null
     // — see ArticleSwipeNavigation's own KDoc for why this, not onNavigateUp, is the swipe
     // boundary) and only while an article is actually on screen to swipe away from. At
@@ -297,7 +318,7 @@ internal fun ArticleDetailPaneContent(
         WindowDragArea(Modifier.fillMaxWidth()) {
             ArticleDetailToolbar(
                 article = article,
-                feedName = feedName,
+                feedName = if (feedInByline) null else feedName,
                 feedFaviconUrl = feedFaviconUrl,
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
@@ -379,6 +400,7 @@ internal fun ArticleDetailPaneContent(
                         pages = pages,
                         contents = readerPaging.contents,
                         selectedId = selectedId,
+                        bylineFeeds = bylineFeeds,
                         requestContent = readerPaging.requestContent,
                         widthPx = { swipeController.widthPx },
                         theme = theme,
@@ -388,8 +410,15 @@ internal fun ArticleDetailPaneContent(
                         reader = reader,
                     )
                 } else {
-                    val document = remember(theme, article, noTitleText, placeholderText, noContentText, openInBrowserTooltip) {
-                        singleReaderDocument(theme, article, noTitleText, placeholderText, noContentText, openInBrowserTooltip)
+                    val bylineFeed = article?.let { bylineFeeds[it.feed_id] }
+                    val bylineFeedName = bylineFeed?.displayTitle()
+                    val bylineFaviconUrl = bylineFeed?.favicon_url
+                    val document = remember(
+                        theme, article, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
+                    ) {
+                        singleReaderDocument(
+                            theme, article, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
+                        )
                     }
                     reader(document.html, document.body, document.articleUrl, true)
                 }
@@ -409,6 +438,10 @@ internal fun ArticleDetailPaneContent(
  * at a narrow [PaneLayout] — see `ArticleDetailPane`'s KDoc). The action group stays pinned to the
  * trailing edge via a leading `Spacer(weight(1f))` rather than a fixed end arrangement, so its
  * position doesn't move whether or not the back button is present.
+ *
+ * [feedName] fills the title slot on desktop only; a touch-primary platform passes `null` and
+ * names the feed in the article's own byline instead (see `feedInByline` in
+ * [ArticleDetailPaneContent]).
  */
 @Composable
 private fun ArticleDetailToolbar(
@@ -516,23 +549,29 @@ private data class ReaderDocument(val html: String, val body: String, val articl
  *
  * @param row The list row, which is all that is known about a page until its body loads.
  * @param full The hydrated article, or `null` while its lookup is still in flight.
+ * @param feedName The owning feed's name to lead the byline with, or `null` where the toolbar
+ *   already shows it (desktop — see `feedInByline` in [ArticleDetailPaneContent]).
+ * @param feedFaviconUrl The owning feed's favicon, shown before the byline alongside [feedName].
  */
 private fun readerDocument(
     theme: ArticleHtmlTheme,
     row: ArticleListRow,
     full: ArticleReaderRow?,
+    feedName: String?,
+    feedFaviconUrl: String?,
     noTitleText: String,
     noContentText: String,
     openInBrowserTooltip: String,
 ): ReaderDocument {
     val url = full?.url ?: row.url
     val title = (full?.title ?: row.title).ifBlank { noTitleText }
-    val meta = articleMetaText(full?.author, full?.published_at ?: row.published_at)
+    val meta = articleMetaText(full?.author, full?.published_at ?: row.published_at, feedName)
+    val metaIconUrl = feedFaviconUrl.takeIf { feedName != null }
     val body = full?.readerBody()
     val html = when {
-        full == null -> wrapArticleHtml(theme, title, meta, body = "", baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip)
-        body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText, titleUrl = url, titleTooltip = openInBrowserTooltip)
-        else -> wrapArticleHtml(theme, title, meta, body, baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip)
+        full == null -> wrapArticleHtml(theme, title, meta, body = "", baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
+        body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
+        else -> wrapArticleHtml(theme, title, meta, body, baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
     }
     return ReaderDocument(html, body.orEmpty(), url)
 }
@@ -549,13 +588,17 @@ private fun readerDocument(
 private fun singleReaderDocument(
     theme: ArticleHtmlTheme,
     article: Articles?,
+    feedName: String?,
+    feedFaviconUrl: String?,
     noTitleText: String,
     placeholderText: String,
     noContentText: String,
     openInBrowserTooltip: String,
 ): ReaderDocument {
     if (article == null) return ReaderDocument(articlePlaceholderHtml(theme, placeholderText), body = "", articleUrl = null)
-    return readerDocument(theme, article.toListRow(), article.toReaderRow(), noTitleText, noContentText, openInBrowserTooltip)
+    return readerDocument(
+        theme, article.toListRow(), article.toReaderRow(), feedName, feedFaviconUrl, noTitleText, noContentText, openInBrowserTooltip,
+    )
 }
 
 /**
@@ -602,6 +645,7 @@ private fun ArticleWebViewCarousel(
     pages: List<ArticleListRow>,
     contents: Map<String, ArticleReaderRow>,
     selectedId: String?,
+    bylineFeeds: Map<String, Feeds>,
     requestContent: (String) -> Unit,
     widthPx: () -> Float,
     theme: ArticleHtmlTheme,
@@ -618,6 +662,7 @@ private fun ArticleWebViewCarousel(
                 pages = pages,
                 contents = contents,
                 selectedId = selectedId,
+                bylineFeeds = bylineFeeds,
                 requestContent = requestContent,
                 widthPx = widthPx,
                 theme = theme,
@@ -669,6 +714,7 @@ private fun ArticleWebViewSlot(
     pages: List<ArticleListRow>,
     contents: Map<String, ArticleReaderRow>,
     selectedId: String?,
+    bylineFeeds: Map<String, Feeds>,
     requestContent: (String) -> Unit,
     widthPx: () -> Float,
     theme: ArticleHtmlTheme,
@@ -681,8 +727,14 @@ private fun ArticleWebViewSlot(
     val row = pages.getOrNull(index) ?: return
     LaunchedEffect(row.id) { requestContent(row.id) }
     val full = contents[row.id]
-    val document = remember(theme, row, full, noTitleText, noContentText, openInBrowserTooltip) {
-        readerDocument(theme, row, full, noTitleText, noContentText, openInBrowserTooltip)
+    // Resolved from this page's own row, so a neighbour in a mixed list (All Feeds, a folder, a tag)
+    // names its own feed. Keyed by value: a feeds emission that leaves this page's name and favicon
+    // alone does not rebuild — and so reload — its document.
+    val bylineFeed = bylineFeeds[row.feed_id]
+    val bylineFeedName = bylineFeed?.displayTitle()
+    val bylineFaviconUrl = bylineFeed?.favicon_url
+    val document = remember(theme, row, full, bylineFeedName, bylineFaviconUrl, noTitleText, noContentText, openInBrowserTooltip) {
+        readerDocument(theme, row, full, bylineFeedName, bylineFaviconUrl, noTitleText, noContentText, openInBrowserTooltip)
     }
     // A page the user has not swiped to is held ready, not shown. It must not be reachable by a
     // screen reader's linear traversal (its WebView is a real view, clipped rather than
