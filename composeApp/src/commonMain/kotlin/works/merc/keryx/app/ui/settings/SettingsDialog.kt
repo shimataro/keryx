@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -28,6 +28,7 @@ import works.merc.keryx.app.resources.settings_updates
  * `UpdatesTab`), with shared building blocks in `SettingsComponents`.
  *
  * @param onDismiss Called when the dialog should be dismissed.
+ * @param permissionPrompt App's notification-permission prompt, handed to the Notifications tab.
  * @param initialTabId The tab shown when the dialog opens. Defaults to the first tab; a notification's
  *   `ShowSettingsTab` action opens the dialog directly on the tab where the problem is fixable.
  * @param tabRequestToken Bumped by the caller on every fresh explicit navigation request (a
@@ -35,7 +36,12 @@ import works.merc.keryx.app.resources.settings_updates
  *   even if it's already open on that same tab id and the user has since switched tabs manually.
  */
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabRequestToken: Int = 0) {
+internal fun SettingsDialog(
+    onDismiss: () -> Unit,
+    permissionPrompt: NotificationPermissionPrompt,
+    initialTabId: String = "general",
+    tabRequestToken: Int = 0,
+) {
     val vm = koinInject<SettingsViewModel>()
 
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time.
@@ -66,7 +72,7 @@ fun SettingsDialog(onDismiss: () -> Unit, initialTabId: String = "general", tabR
     ) { tabId ->
         when (tabId) {
             "general" -> GeneralTabContent(vm)
-            "notifications" -> NotificationsTabContent(vm)
+            "notifications" -> NotificationsTabContent(vm, permissionPrompt)
             "cloud_sync" -> CloudSyncTabContent(vm)
             "data" -> DataTabContent(vm)
             "updates" -> UpdatesTabContent(vm)
@@ -87,6 +93,8 @@ internal fun rememberSelectedTabId(
     tabRequestToken: Int,
     tabs: List<KeryxDialogTab>,
 ): MutableState<String> =
-    remember(tabRequestToken) {
+    // Saveable so the tab the user switched to survives an Android configuration change, along
+    // with the dialog itself (App.kt); a new tabRequestToken still re-initializes it.
+    rememberSaveable(tabRequestToken) {
         mutableStateOf(if (tabs.any { it.id == initialTabId }) initialTabId else tabs.first().id)
     }

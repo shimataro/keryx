@@ -88,7 +88,7 @@ internal fun GeneralTabContent(vm: SettingsViewModel) {
 
         if (hasSystemTray) {
             Spacer(Modifier.height(8.dp))
-            SettingsCard {
+            SettingsCard(settingRowsOnly = true) {
                 SwitchRow(
                     label = stringResource(Res.string.settings_start_minimized),
                     checked = settings.startMinimized,

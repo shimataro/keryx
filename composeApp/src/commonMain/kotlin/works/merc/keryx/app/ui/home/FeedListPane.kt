@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -1026,7 +1027,15 @@ private fun SidebarRow(
         CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
             icon()
             Spacer(Modifier.width(12.dp))
-            Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                label,
+                Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                // Android follows M3's NavigationDrawerItem, whose label is labelLarge; desktop keeps
+                // the ambient text style it has always used.
+                style = if (isTouchPrimary) MaterialTheme.typography.labelLarge else LocalTextStyle.current,
+            )
         }
         if (count != null && count > 0) CountBadge(count, selected, focused)
     }

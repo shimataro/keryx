@@ -235,6 +235,60 @@ class ArticleDetailPaneTest {
     }
 
     @Test
+    fun withoutAShareHandlerTheToolbarHasNoShareButton() = runDesktopComposeUiTest {
+        // Desktop: no share sheet, so HomeScreen passes no handler.
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(),
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("共有").assertDoesNotExist()
+    }
+
+    @Test
+    fun shareButtonInvokesTheSharedHandlerWithTheDisplayedArticle() = runDesktopComposeUiTest {
+        val article = testArticle()
+        val shared = mutableListOf<Articles>()
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                onShare = { shared += it },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("共有").assertIsEnabled().performClick()
+        waitForIdle()
+
+        assertEquals(listOf(article), shared)
+    }
+
+    @Test
+    fun shareButtonIsDisabledWithoutAnArticleOrAUsableUrl() = runDesktopComposeUiTest {
+        var article by mutableStateOf<Articles?>(null)
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                onShare = {},
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+        onNodeWithContentDescription("共有").assertIsNotEnabled()
+
+        article = testArticle(url = " ")
+        waitForIdle()
+        onNodeWithContentDescription("共有").assertIsNotEnabled()
+    }
+
+    @Test
     fun copyButtonDoesNotShowASnackbarItself() = runDesktopComposeUiTest {
         // The snackbar belongs to the shared ArticleUrlCopier, so it appears for every copy route;
         // the reader showing one too would double it for a copy made from its own button.

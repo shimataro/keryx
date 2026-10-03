@@ -17,6 +17,9 @@ actual val hasSystemTray: Boolean = isMacOs
 /** Neither macOS nor iOS shows its own confirmation when an app copies to the pasteboard. */
 actual val platformShowsOwnCopyConfirmation: Boolean = false
 
+/** The SwiftUI app presents its own share UI and never reads this; nothing Compose runs here. */
+actual val platformSupportsShare: Boolean = false
+
 @OptIn(ExperimentalNativeApi::class)
 actual val hostArchitecture: HostArchitecture = when (Platform.cpuArchitecture) {
     CpuArchitecture.ARM64 -> HostArchitecture.ARM64

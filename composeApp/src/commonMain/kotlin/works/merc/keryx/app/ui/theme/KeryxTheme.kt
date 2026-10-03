@@ -98,6 +98,30 @@ fun keryxSurfaceColor(dark: Boolean): Color = if (dark) DarkColors.surface else 
  */
 fun keryxAccentColor(dark: Boolean): Color = if (dark) DarkColors.primary else LightColors.primary
 
+/** Lower bound of the app's own font-size setting (see [effectiveFontScale]). */
+const val APP_FONT_SCALE_MIN = 0.8f
+
+/** Upper bound of the app's own font-size setting (see [effectiveFontScale]). */
+const val APP_FONT_SCALE_MAX = 1.6f
+
+/**
+ * The font scale the UI is drawn with: the app's own font-size setting ([appScale], clamped to
+ * [APP_FONT_SCALE_MIN]–[APP_FONT_SCALE_MAX] as a defensive bound) applied **on top of** the
+ * system's font size ([systemScale], the platform `Density.fontScale`) rather than replacing it,
+ * so a user who enlarged text system-wide still gets it enlarged in Keryx at the app's default
+ * setting. Desktop's system scale is always 1, leaving its result unchanged.
+ *
+ * Only the app setting is clamped; the system scale passes through as-is, since it is the user's
+ * own accessibility choice.
+ *
+ * On Android 14+ the system applies font scaling nonlinearly (large text grows less than small
+ * text). That curve is preserved: the `Density` built from this value carries no converter of its
+ * own, so Compose's Android `FontScaling` defaults pick the platform's nonlinear table for the
+ * combined scale (`FontScaleConverterFactory`) whenever it is large enough to call for one.
+ */
+fun effectiveFontScale(appScale: Float, systemScale: Float): Float =
+    appScale.coerceIn(APP_FONT_SCALE_MIN, APP_FONT_SCALE_MAX) * systemScale
+
 /**
  * Applies [appFontFamily] (an OS-native UI font resolved by name, if found — see
  * `ui/theme/AppFont.kt`) to every text style, leaving sizes/line-heights/tracking untouched.
@@ -132,8 +156,9 @@ private fun typographyWithFontFamily(family: FontFamily): Typography {
  * brand color scheme (teal) is used instead.
  *
  * @param themeMode Selects light, dark, or system-based appearance.
- * @param fontScale Scales text, clamped to 0.8–1.6 as a defensive bound; the Settings UI's own
- *   font-size options (`GeneralTab`) only ever offer 0.85–1.4.
+ * @param fontScale The app's font-size setting, multiplied into the system font scale by
+ *   [effectiveFontScale] (clamped to 0.8–1.6 as a defensive bound; the Settings UI's own
+ *   font-size options (`GeneralTab`) only ever offer 0.85–1.4).
  * @param content The composable content displayed within the theme.
  */
 @Composable
@@ -150,7 +175,7 @@ fun KeryxTheme(
     }
     val colorScheme = platformColorScheme(dark)
     CompositionLocalProvider(
-        LocalDensity provides Density(density.density, fontScale.coerceIn(0.8f, 1.6f)),
+        LocalDensity provides Density(density.density, effectiveFontScale(fontScale, density.fontScale)),
     ) {
         ProvidePlatformInteraction(dark) {
             if (typography != null) {

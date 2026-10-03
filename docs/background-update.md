@@ -147,13 +147,19 @@ time a refresh finishes, since `trayEvents` has replay 0 and silently drops anyt
 a collector exists; desktop's own binding is a no-op for the same reason). `AndroidNotificationSink`
 guards every post on `NotificationManagerCompat.areNotificationsEnabled()`, which alone covers both
 the Android 13+ `POST_NOTIFICATIONS` runtime permission and a user-level app/channel block — the
-permission itself is requested via `platform/NotificationPermission.kt`'s
-`rememberNotificationPermissionRequester`, called once at startup (`App.kt`, if the user's own
-"notifications enabled" setting is already on) and again whenever `NotificationsTab` flips that
-setting on. Once a user denies the system dialog a second time ("don't ask again"), Android itself
-stops showing it for subsequent programmatic requests — the setting can still be left on, it just
-won't produce a notification until the user grants it from OS settings directly; this app does not
-build a "please open your device settings" flow for that case.
+permission itself is asked for through `platform/NotificationPermission.kt`'s
+`rememberNotificationPermission` (a `NotificationPermissionController` reporting `isGranted`, re-read
+on resume, and the outcome of each request), driven by `ui/settings/NotificationPermissionFlow.kt`.
+The user's own "notifications enabled" setting follows the permission rather than being left on
+while it is refused. When Home is first shown with that setting on but the permission not granted,
+`App.kt` shows an in-app explanation once; "Allow" goes on to the system request, and "Not now" or a
+denial turns the setting off, so the explanation does not return on every launch. Turning the
+setting on from `NotificationsTab` goes straight to the system request (the context is already
+clear) and leaves the switch off if it is denied. Once a user has denied the system dialog twice
+("don't ask again"), Android answers later requests with an immediate denial and no dialog, so after
+any denial the tab shows a row below the switch that opens the app's notification settings in the OS
+(`Settings.ACTION_APP_NOTIFICATION_SETTINGS`), where it can still be granted. Only the device-local
+`local_settings.json` `notificationEnabled` is written; nothing synced changes.
 
 The posted notification's small icon is `composeApp/src/androidMain/res/drawable/ic_stat_keryx.xml`
 — a monochrome, alpha-only VectorDrawable silhouette of the Keryx logo mark (converted by hand from

@@ -140,7 +140,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     brings different rows into view — the same estimate Android's own lists make, and accepted for
     the same reason: it's a non-interactive indicator, not a precise position),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
-    static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
+    static Context holder set once from KeryxApplication.onCreate, which also weakly tracks the
+    resumed Activity so BrowserOpener can launch an http(s) link's Custom Tab — androidx.browser —
+    from it rather than from the application context; the launch kind itself is commonMain's pure
+    `browserLaunchKind`), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
     exists — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
     CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead
@@ -205,7 +208,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
     so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
     Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see [background-update.md](background-update.md)),
-    NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
+    NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`, re-reads the grant on resume, and opens `Settings.ACTION_APP_NOTIFICATION_SETTINGS`; the flow around it is `ui/settings/NotificationPermissionFlow.kt`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
     `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android
@@ -283,6 +286,8 @@ Examples in the code today:
 | Article row menu's read label | `presentation/home/ArticleListModel.kt`'s `articleReadAfterContextMenuOpen` (read once the menu is open: already read, or the open selected the row) | Compose's `articleRowMenuEntries` and SwiftUI's `ArticleRowView` (calling it directly); each UI only works out whether its own open selected the row (SwiftUI on macOS: `ArticleRowMenuState.opensBySelecting`, from the same pointer hover `.selectsOnContextMenu` selects on) |
 | Copy article URL (decision) | `presentation/home/ArticleListModel.kt`'s `articleUrlCopyPlan` → `ArticleUrlCopyPlan` (write the clipboard? flash the reader's ✓? confirm in-app? — the last from the shared `platformShowsOwnCopyConfirmation` and whether the ✓ confirms on this platform: never where the OS confirms, on a desktop only when the ✓ does not flash, on a touch platform every copy) | Compose's `ArticleUrlCopier.copy` and SwiftUI's `ArticleUrlCopy.perform` (`HomeObservable.copyArticleUrl`), which only carry it out |
 | Copy article URL (Compose) | `ui/home/ArticleUrlCopier.kt`'s `ArticleUrlCopier.copy` — clipboard, the reader's ✓ pulse and Android's snackbar | The reader's copy button, ⌘/Ctrl+Shift+C, the menu bar and the article row's context menu |
+| Share an article (Compose, Android) | `ui/home/ArticleSharer.kt`'s `ArticleSharer` — `canShare` / `share`, both on `:shared`'s `canShareArticleUrl`, the latter calling the `platform/ShareSheet` expect (Android: `Intent.createChooser` around `ACTION_SEND`). `rememberArticleSharer` returns `null` where `platformSupportsShare` is `false` (desktop), which leaves every route out | The reader's share button and the article row's long-press menu |
+| Pre-fill Add feed from outside the app | `ui/navigation/AddFeedRequests.kt` (`request`; latched until Home shows, released by `HomeScreen` alone) | A link shared to Keryx from another Android app (`AndroidSharedLink.kt`, URL picked by `:shared`'s `extractSharedFeedUrl`) |
 
 **Adding a route to an existing action** means calling its existing handler/predicate. If no shared
 one exists yet — the action's logic still sits inside one route — extract it first, move the other
@@ -476,9 +481,10 @@ desktop keeps the toolbar name.)
 `Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
 the Android **View framework**, not by the rendering engine — no CSS, including `color-scheme`,
 reaches it. Its thumb is the platform's own drawable, tinted `?attr/colorControlNormal` resolved
-against the hosting Activity's theme, which `:androidApp` fixes to
-`Theme.Material.Light.NoActionBar` (the app's light/dark setting is its own, independent of the
-OS). Left alone, the thumb stays a light-theme dark grey over a dark reader background — all but
+against the hosting Activity's theme, `:androidApp`'s `Theme.Keryx` — a platform
+`Theme.Material.Light.NoActionBar`, or `Theme.Material.NoActionBar` when the *OS* is in dark mode
+(`values-night/`, which exists so a cold start doesn't flash a white window) — while the app's own
+light/dark setting is independent of the OS. Left alone, the thumb stays a light-theme dark grey over a dark reader background — all but
 invisible. `platform/NativeWebViewScrollbar.kt`'s `setNativeWebViewScrollbarColor` fixes this
 directly: on Android (API 29+ only — `setVerticalScrollbarThumbDrawable`/
 `setHorizontalScrollbarThumbDrawable` have no public equivalent below it) it replaces both the

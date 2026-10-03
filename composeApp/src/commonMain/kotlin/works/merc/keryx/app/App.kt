@@ -8,14 +8,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.domain.SettingsRepository
-import works.merc.keryx.app.platform.rememberNotificationPermissionRequester
 import works.merc.keryx.app.presentation.settings.OpmlTransferController
+import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.settings.shouldPresentOpmlRequest
 import works.merc.keryx.app.ui.home.HomeScreen
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
@@ -25,7 +26,9 @@ import works.merc.keryx.app.ui.navigation.Screen
 import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.ui.navigation.rememberNavigator
 import works.merc.keryx.app.ui.settings.AboutDialog
+import works.merc.keryx.app.ui.settings.NotificationPermissionDialog
 import works.merc.keryx.app.ui.settings.SettingsDialog
+import works.merc.keryx.app.ui.settings.rememberNotificationPermissionPrompt
 import works.merc.keryx.app.ui.setup.SetupScreen
 import works.merc.keryx.app.ui.theme.KeryxTheme
 
@@ -59,31 +62,38 @@ fun App() {
         // Keep the menu bar's screen-gating (see AppMenuBar) in sync with the active destination.
         LaunchedEffect(navigator.current) { menuController.currentScreen.value = navigator.current }
 
-        // Requests Android's POST_NOTIFICATIONS whenever the user's own notification setting is on
-        // while Home is showing — a no-op on desktop and on an Android version/state with nothing
-        // to request (see the expect's KDoc). This is the single requester for both cases: the
-        // setting already on when Home is first reached, and the user flipping it on later from
-        // NotificationsTab (the Settings dialog is a modeless overlay on Home, so navigator.current
-        // stays Home while it's open, and settings.notificationEnabled — a key here — changes too).
-        // Keyed on navigator.current (live navigation state), not setupComplete: that's a
-        // remember{} snapshot taken once at first composition specifically to pick the *initial*
-        // screen, so it never flips to true within the same session — a user who completes setup
-        // and lands on Home right now would otherwise never trigger this until the next cold start.
-        val requestNotificationPermission = rememberNotificationPermissionRequester()
-        LaunchedEffect(navigator.current, settings.notificationEnabled) {
-            if (navigator.current == Screen.Home && settings.notificationEnabled) requestNotificationPermission()
+        // Asks once, in context, for Android 13+'s notification permission when Home is first shown
+        // with the user's own notification setting on but the permission not granted: an in-app
+        // explanation first, then the system request on "Allow"; "Not now" or a denial turns the
+        // setting off so it matches reality (see NotificationPermissionFlow). Never shows on desktop
+        // or below Android 13, where the permission always reads as granted. Turning the setting on
+        // later from Settings ▸ Notifications goes through this same prompt (handed to the dialog, so a
+        // denial is remembered while Settings is closed), without the explanation. Keyed on navigator.current (live navigation state), not setupComplete: that's
+        // a remember{} snapshot taken once to pick the *initial* screen, so a user who completes
+        // setup right now would otherwise not be asked until the next cold start.
+        val preferences = koinInject<PreferencesController>()
+        val notificationPermissionPrompt = rememberNotificationPermissionPrompt(preferences::setNotificationEnabled)
+        LaunchedEffect(navigator.current) {
+            if (navigator.current == Screen.Home) notificationPermissionPrompt.onHomeShown(settings.notificationEnabled)
+        }
+        if (navigator.current == Screen.Home && notificationPermissionPrompt.explanationVisible) {
+            NotificationPermissionDialog(
+                onAllow = notificationPermissionPrompt::onAllow,
+                onNotNow = notificationPermissionPrompt::onNotNow,
+            )
         }
 
         // Menu commands whose target lives in App's own composition (the About/Settings dialogs).
-        // Both dialogs are modeless windows shown over Home, tracked by boolean state here.
-        var showAbout by remember { mutableStateOf(false) }
-        var showSettings by remember { mutableStateOf(false) }
+        // Both dialogs are modeless windows shown over Home, tracked by boolean state here. Saveable
+        // (like the tab state below) so an open dialog survives an Android configuration change.
+        var showAbout by rememberSaveable { mutableStateOf(false) }
+        var showSettings by rememberSaveable { mutableStateOf(false) }
         // Which tab the settings dialog opens on, from the last released SettingsOpenRequest.
-        var settingsInitialTab by remember { mutableStateOf("general") }
+        var settingsInitialTab by rememberSaveable { mutableStateOf("general") }
         // Bumped on every explicit tab-navigation request so the dialog re-navigates even when
         // settingsInitialTab is reassigned the same value it already holds (see SettingsDialog's
         // rememberSelectedTabId, which keys off this instead of the tab id's value).
-        var settingsTabRequestToken by remember { mutableStateOf(0) }
+        var settingsTabRequestToken by rememberSaveable { mutableStateOf(0) }
 
         // Every route that opens Settings goes through the one SettingsOpenRequests router (see its
         // KDoc), which holds a request made over Setup until Home is showing. This is its single
@@ -141,6 +151,7 @@ fun App() {
             if (showSettings) {
                 SettingsDialog(
                     onDismiss = { showSettings = false },
+                    permissionPrompt = notificationPermissionPrompt,
                     initialTabId = settingsInitialTab,
                     tabRequestToken = settingsTabRequestToken,
                 )

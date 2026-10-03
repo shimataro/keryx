@@ -40,12 +40,16 @@ data class AddFeedState(
  *
  * @param resolvePreview Resolves a typed URL (e.g. [HomeViewModel.resolvePreview]).
  * @param subscribeFeeds Subscribes to feed URLs (e.g. [HomeViewModel.subscribeFeeds]).
+ * @param initialUrl The URL the input starts with — a URL restored after the dialog was recreated
+ *   (e.g. an Android configuration change) or one handed in from outside. Not previewed until the
+ *   user confirms, exactly as if it had been typed.
  */
 class AddFeedController(
     private val resolvePreview: suspend (String) -> AddFeedPreview,
     private val subscribeFeeds: suspend (List<String>) -> SubscribeOutcome,
+    initialUrl: String = "",
 ) {
-    private val _state = MutableStateFlow(AddFeedState())
+    private val _state = MutableStateFlow(AddFeedState(url = initialUrl))
     val state: StateFlow<AddFeedState> = _state.asStateFlow()
 
     /**

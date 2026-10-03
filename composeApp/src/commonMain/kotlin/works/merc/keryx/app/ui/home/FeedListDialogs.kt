@@ -100,6 +100,7 @@ internal fun FeedListDialogs(
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteTag(tag.id); onConfirmingDeleteTagChange(null) },
             dismissText = stringResource(Res.string.common_cancel),
+            destructive = true,
         )
     }
     if (showAddFolder) {
@@ -133,6 +134,7 @@ internal fun FeedListDialogs(
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.deleteFolder(folder.id); onConfirmingDeleteFolderChange(null) },
             dismissText = stringResource(Res.string.common_cancel),
+            destructive = true,
         )
     }
     confirmingUnsubscribeFeed?.let { feed ->
@@ -144,6 +146,7 @@ internal fun FeedListDialogs(
             confirmText = stringResource(Res.string.common_delete),
             onConfirm = { vm.unsubscribeFeed(feed.id); onConfirmingUnsubscribeFeedChange(null) },
             dismissText = stringResource(Res.string.common_cancel),
+            destructive = true,
         )
     }
 }

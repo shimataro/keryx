@@ -52,6 +52,15 @@ expect val hasSystemTray: Boolean
 expect val platformShowsOwnCopyConfirmation: Boolean
 
 /**
+ * Whether the Compose UI offers "Share" for an article — handing its URL to the OS share sheet.
+ * `true` only on Android, whose system share sheet (`Intent.ACTION_SEND`) is the native way to pass
+ * a link to another app. `false` on desktop, which has no comparable cross-OS share UI, so no share
+ * route is shown there at all; and `false` on Apple, whose SwiftUI app builds its own UI and does
+ * not read this flag.
+ */
+expect val platformSupportsShare: Boolean
+
+/**
  * The CPU architecture this build is running on, as far as [works.merc.keryx.app.domain.UpdateAsset]
  * needs to know which release asset to download. Not a general-purpose ABI abstraction — it exists
  * solely to pick the right suffix among the assets `release.yml` publishes per architecture (today,

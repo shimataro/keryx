@@ -34,6 +34,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -49,6 +51,7 @@ import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.presentation.home.articleReadAfterContextMenuOpen
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
+import works.merc.keryx.app.presentation.home.canShareArticleUrl
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -56,6 +59,9 @@ import works.merc.keryx.app.resources.article_mark_as_read
 import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
+import works.merc.keryx.app.resources.article_share
+import works.merc.keryx.app.resources.article_state_starred
+import works.merc.keryx.app.resources.article_state_unread
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.home_notifications
@@ -121,8 +127,13 @@ internal data class ArticleRowStrings(
     val unstar: String,
     val copyUrl: String,
     val openInBrowser: String,
+    val share: String,
     val noTitleFallback: String,
     val zone: TimeZone,
+    /** The row's spoken "unread" state (see [articleRowStateDescription]). */
+    val stateUnread: String,
+    /** The row's spoken "starred" state (see [articleRowStateDescription]). */
+    val stateStarred: String,
 )
 
 /**
@@ -138,13 +149,16 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     val unstar = stringResource(Res.string.article_unstar)
     val copyUrl = stringResource(Res.string.article_copy_url)
     val openInBrowser = stringResource(Res.string.article_open_in_browser)
+    val share = stringResource(Res.string.article_share)
     val noTitleFallback = stringResource(Res.string.article_no_title)
+    val stateUnread = stringResource(Res.string.article_state_unread)
+    val stateStarred = stringResource(Res.string.article_state_starred)
     // Resolved once with the strings rather than per row. The keys below never change for a
     // time-zone change, so a zone switched while Keryx is running (it is tray-resident, so that can
     // be days) is only picked up when this composition is recreated. Accepted: the alternative is
     // TimeZone.currentSystemDefault() — which clones the JVM default zone — per visible row per
     // composition, and article timestamps are not a clock.
-    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, noTitleFallback) {
+    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, share, noTitleFallback, stateUnread, stateStarred) {
         ArticleRowStrings(
             markAsRead = markAsRead,
             markAsUnread = markAsUnread,
@@ -152,8 +166,11 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
             unstar = unstar,
             copyUrl = copyUrl,
             openInBrowser = openInBrowser,
+            share = share,
             noTitleFallback = noTitleFallback,
             zone = TimeZone.currentSystemDefault(),
+            stateUnread = stateUnread,
+            stateStarred = stateStarred,
         )
     }
 }
@@ -176,7 +193,11 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
  * @param onSetStarred Called with the starred state the star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
- * @return The menu entries, in the app menu bar's Article-menu order.
+ * @param onShare Called to share the article URL ([ArticleSharer.share]); `null` where the platform
+ *   has no share sheet, which leaves the item out entirely (a per-platform constant, so the menu's
+ *   shape stays stable at any one call site).
+ * @return The menu entries, in the app menu bar's Article-menu order, then Share (which no menu bar
+ *   carries).
  */
 internal fun articleRowMenuEntries(
     article: ArticleListRow,
@@ -186,14 +207,16 @@ internal fun articleRowMenuEntries(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ): List<NativeMenuEntry> {
     val read = articleReadAfterContextMenuOpen(isRead = article.is_read == 1L, selectedByOpen = selectedByOpen)
     val starred = article.is_starred == 1L
-    // Copy and open have their own rules, shared with every other route to each: any non-blank
-    // URL can be copied, but only an http(s) one is opened.
+    // Copy, open and share have their own rules, shared with every other route to each: any
+    // non-blank URL can be copied or shared, but only an http(s) one is opened.
     val copyEnabled = hasUsableUrl(article.url)
     val openEnabled = canOpenInBrowser(article.url)
-    return listOf(
+    val shareEnabled = canShareArticleUrl(article.url)
+    return listOfNotNull(
         NativeMenuItem(
             if (read) strings.markAsUnread else strings.markAsRead,
             NativeMenuShortcut(Key.U, ctrl = true, shift = true),
@@ -209,6 +232,7 @@ internal fun articleRowMenuEntries(
         NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = copyEnabled) {
             onCopyUrl()
         },
+        onShare?.let { NativeMenuItem(strings.share, enabled = shareEnabled) { it() } },
     )
 }
 
@@ -228,6 +252,23 @@ internal fun articleRowContextMenuOpen(selected: Boolean, select: () -> Unit, ac
     if (selected) activate() else select()
     return !selected
 }
+
+/**
+ * The state a screen reader announces for an article row, or `null` when there is none to announce.
+ *
+ * The row shows its unread and starred state only visually — an unlabelled dot and a star icon with
+ * no content description — so without this TalkBack reads a row's title, feed and date but never
+ * whether it is unread or starred. Unread comes first, then starred, joined with ", " — the same
+ * order and separator as the SwiftUI row's `stateAccessibilityValue`.
+ */
+internal fun articleRowStateDescription(
+    unread: Boolean,
+    starred: Boolean,
+    unreadLabel: String,
+    starredLabel: String,
+): String? = listOfNotNull(unreadLabel.takeIf { unread }, starredLabel.takeIf { starred })
+    .joinToString(", ")
+    .ifEmpty { null }
 
 /**
  * What the most recent context-menu open did to an [ArticleRow]'s selection, carried from the menu's
@@ -254,6 +295,8 @@ private class ContextMenuOpenSelection {
  * @param onSetStarred Called with the starred state the context menu's star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @param onShare Called to share the article URL; `null` (no share sheet on this platform) leaves the
+ *   context menu's Share item out.
  * @param onActivate Called when the context menu is opened on the already-selected row, to move
  *   keyboard focus to this pane without re-selecting it (see [articleRowContextMenuOpen]).
  * @param titleOverride An optional title to display instead of the article title.
@@ -262,6 +305,9 @@ private class ContextMenuOpenSelection {
  *   see `ArticleListPane.kt`'s `ripplePulseFor`. `0` (the default) never plays one.
  * @param interactionSource The row's press/selection interaction source. Hoisted (rather than
  *   created internally) so [ripplePulse] can be exercised directly in tests.
+ * @param isTouchPrimary Whether to expose the row's unread/starred state as a semantics
+ *   `stateDescription` (see [articleRowStateDescription]). Defaults to the platform's own value;
+ *   a parameter so the Android path can be exercised in desktop tests.
  */
 @Composable
 internal fun ArticleRow(
@@ -277,11 +323,13 @@ internal fun ArticleRow(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onShare: (() -> Unit)? = null,
     onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
     strings: ArticleRowStrings = rememberArticleRowStrings(),
     ripplePulse: Int = 0,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val unread = article.is_read == 0L
     // Whether the most recent right-click selected this row (desktop only — Android never calls
@@ -292,8 +340,22 @@ internal fun ArticleRow(
     val noTitleFallback = strings.noTitleFallback
     val testTag = remember(article.id) { "article-${article.id}" }
     PulseRippleEffect(ripplePulse, interactionSource)
+    // Touch-primary (Android/TalkBack) only, so desktop's semantics stay exactly as they were. Merged
+    // into the row's own clickable node, so it is announced together with the row.
+    val stateDescriptionText = if (isTouchPrimary) {
+        articleRowStateDescription(unread, article.is_starred == 1L, strings.stateUnread, strings.stateStarred)
+    } else {
+        null
+    }
     Row(
         Modifier.testTag(testTag)
+            .then(
+                if (stateDescriptionText != null) {
+                    Modifier.semantics { stateDescription = stateDescriptionText }
+                } else {
+                    Modifier
+                },
+            )
             .fillMaxWidth()
             .listRowClickable(interactionSource, selected, onClick)
             .nativeContextMenu(
@@ -306,6 +368,7 @@ internal fun ArticleRow(
                         onSetStarred = onSetStarred,
                         onCopyUrl = onCopyUrl,
                         onOpenInBrowser = onOpenInBrowser,
+                        onShare = onShare,
                     )
                 },
                 // Reset on every open, so it only ever describes this right-click.

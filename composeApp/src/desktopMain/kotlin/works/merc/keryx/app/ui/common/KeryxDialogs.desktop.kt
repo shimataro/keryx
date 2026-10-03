@@ -723,6 +723,8 @@ private class ButtonRowLayoutInputs {
  * @param text Optional composable dialog content.
  * @param containerColor Background color of the dialog.
  * @param modal Whether the dialog blocks interaction with its owner window.
+ * @param destructive Ignored on desktop: the confirm button is a native Swing button whose look
+ *   follows the platform Look & Feel, which has no destructive variant to switch to.
  */
 @Composable
 actual fun KeryxAlertDialog(
@@ -736,6 +738,7 @@ actual fun KeryxAlertDialog(
     text: (@Composable () -> Unit)?,
     containerColor: Color,
     modal: Boolean,
+    destructive: Boolean,
 ) {
     DesktopModalWindow(
         title = title,

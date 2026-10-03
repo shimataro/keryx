@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Feed fetching, cloud sync (Phase 4), and the update checker all need network access. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -15,7 +16,11 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:localeConfig="@xml/locales_config"
+        android:theme="@style/Theme.Keryx"
+        tools:targetApi="tiramisu">
+        <!-- localeConfig (the per-app language setting) is read from Android 13 on; older
+             versions ignore it, hence tools:targetApi. -->
 
         <activity
             android:name=".MainActivity"
@@ -92,6 +97,16 @@
                     android:host="*"
                     android:mimeType="*/*"
                     android:pathPattern=".*\\.opml" />
+            </intent-filter>
+
+            <!-- "Share" to Keryx from another app (a browser's share menu, a link in a chat): the
+                 shared text's first http(s) URL opens the Add feed dialog pre-filled, never
+                 subscribing on its own — see AndroidSharedLink.kt. text/plain only: a link is
+                 shared as plain text. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
     </application>

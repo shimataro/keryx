@@ -139,6 +139,8 @@
     <string name="article_state_starred">スター付き</string>
     <string name="article_copy_url">URL をコピー</string>
     <string name="article_url_copied">URL をコピーしました</string>
+    <string name="article_share">共有</string>
+    <string name="article_share_chooser_title">記事を共有</string>
     <string name="article_prev">前の記事</string>
     <string name="article_next">次の記事</string>
     <string name="article_reader_simple_notice">この環境では WebView を利用できないため、簡易表示にしています</string>
@@ -187,6 +189,12 @@
     <string name="settings_refresh_hour3">3時間</string>
     <string name="settings_refresh_manual">手動</string>
     <string name="settings_notification_enabled">新着通知を有効にする</string>
+    <string name="settings_notification_blocked_hint">Android の設定で Keryx の通知がオフになっています。新着記事の通知を受け取るには、そこで許可してください。</string>
+    <string name="settings_notification_open_system_settings">通知設定を開く</string>
+    <string name="notification_permission_title">新着記事を通知しますか？</string>
+    <string name="notification_permission_body">フィードに新しい記事が届いたときに、Keryx から通知を送れます。この設定はいつでも変更できます。</string>
+    <string name="notification_permission_allow">許可する</string>
+    <string name="notification_permission_not_now">今はしない</string>
     <string name="settings_start_minimized">起動時にトレイに収納する</string>
     <string name="settings_cloud_sync">クラウド同期</string>
     <string name="settings_cloud_sync_hint">接続できるクラウドは1つです。</string>

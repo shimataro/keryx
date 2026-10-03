@@ -126,13 +126,28 @@ data exists in the cloud it is automatically merged (imported) during the initia
   action stays visible but disabled on every route (toolbar, menu bar, shortcut, context menu), while "Copy URL"
   still works for any non-empty link. An article's link comes from the feed unvalidated, so this keeps a
   `file:`, `javascript:` or custom-scheme link from launching another application.
+  On Android, an `http`/`https` link opens in a Custom Tab — the user's default browser's in-app tab,
+  themed to the app's own light/dark setting and offering the browser's share action — so Back returns
+  straight to the app; where no installed browser supports Custom Tabs, it opens in the default browser
+  instead.
+- **Sharing links (Android only).** An article's link can be sent to another app through the system share
+  sheet — from the reader's toolbar or the article row's long-press menu, enabled under the same rule as
+  "Copy URL" (any non-empty link), with the article's title as the share's subject. Desktop shows no share
+  action anywhere. In the other direction, a link shared *to* Keryx from another app (a browser's share
+  menu, say) opens the "Add feed" dialog with the first `http`/`https` URL in the shared text already
+  filled in; anything else in the text, and any other scheme, is ignored. Nothing is subscribed until the
+  user confirms in the dialog. A link shared during first-run Setup waits until Setup is done; one shared
+  while the dialog is already open replaces what was typed there.
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
   and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
   StatusNotifierItem host is running. Desktop also composites the unread count directly onto the
   Dock/taskbar/window icon as a digit badge. On Android, new-article notifications are posted through
-  `NotificationManagerCompat` (requesting the OS notification permission on Android 13+) and
+  `NotificationManagerCompat` (on Android 13+ the OS notification permission is asked for once, in
+  context: an in-app explanation when the app opens with notifications on but not allowed (after which
+  the setting matches the answer, so it is not asked again), or the system request directly when the setting is switched on — and the setting turns
+  off if the permission is refused, with a link to the OS notification settings after a denial) and
   background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
   in-app "check for update" is hidden when the app was installed from an app store (currently just
   Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no
@@ -159,7 +174,12 @@ data exists in the cloud it is automatically merged (imported) during the initia
   fallback — plus `values-ja/strings.xml` for Japanese, same key set). Selected according to system locale,
   falling back to English if the system locale isn't one of the two. The SwiftUI app follows the same rule
   (its String Catalog is generated from these files and its development language is English).
-- Font size setting (reflected in `LocalDensity` fontScale).
+- Font size setting (reflected in `LocalDensity` fontScale). It is applied on top of the OS's own font
+  size rather than replacing it — the app setting multiplies the system font scale — so text enlarged
+  system-wide stays enlarged in Keryx. On Android 14+, the OS's nonlinear scaling (large text grows
+  less than small text) still applies, evaluated for the combined scale.
+- On Android, the status and navigation bar icons follow the in-app light/dark setting (including in
+  the settings screen), not the OS's.
 
 ## 9. UI Direction
 
@@ -186,7 +206,8 @@ copy button shows after a URL copy appears whether the copy came from that butto
 ⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu; likewise "Sync now" is enabled
 in the feed list toolbar, the Feed menu and Settings ▸ Cloud sync at exactly the same moments
 (disabled during a connect, disconnect, reset or initial sync, while anything else is running, and
-after a sign-in expires).
+after a sign-in expires). "Share" (Android only — §7) is enabled in the reader's toolbar and the
+article row's long-press menu under the same rule, and opens the same system share sheet from both.
 
 Routes may differ only in *which item* they act on — a context menu acts on the row it was opened
 on — never in what happens to it; feedback tied to a particular on-screen control appears whenever
@@ -245,7 +266,7 @@ selection a search narrows stays on screen while searching. The native iOS reade
 no room for a feed name beside its four actions on a phone, so it does not show one; the feed
 name leads the article's own byline ("feed · author · date"), behind its favicon, instead, and each swiped-to article
 names its own feed. Android's reader does the same, at every width (its toolbar likewise has no room
-beside a back button and four actions on a phone, and the name stays in one place on a device
+beside a back button and five actions on a phone, and the name stays in one place on a device
 whose layout changes on rotation); desktop and the native macOS reader keep the feed name in the
 toolbar. The
 native macOS app is always 3-pane and keeps the field in the sidebar, as above.

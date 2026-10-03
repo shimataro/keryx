@@ -130,7 +130,9 @@
     どの行が画面に入るかでつまみの長さがわずかに揺れる——Android 自身の一覧が使うのと同じ推定であり、
     理由も同じ: これは非操作のインジケーターであって正確な位置指示ではないため受け入れる）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
-    で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
+    で一度だけ設定される静的 Context ホルダ。再開中の Activity も弱参照で追跡しており、BrowserOpener は
+    http(s) リンクの Custom Tab（androidx.browser）を application context ではなくその Activity から
+    起動する。起動方法の判定自体は commonMain の純粋関数 `browserLaunchKind`）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
     Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
     CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
@@ -197,7 +199,7 @@
     無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
     Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、[background-update.ja.md](background-update.ja.md) 参照）,
-    NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
+    NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップし、再開時に許可状態を読み直し、`Settings.ACTION_APP_NOTIFICATION_SETTINGS` を開く。その周りの流れは `ui/settings/NotificationPermissionFlow.kt`）+
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
     `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
@@ -273,6 +275,8 @@
 | 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowView`（直接呼ぶ）。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、`.selectsOnContextMenu` が選択に使うのと同じポインタのホバーから求める） |
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
+| 記事の共有（Compose、Android） | `ui/home/ArticleSharer.kt` の `ArticleSharer`（`canShare` / `share`。どちらも `:shared` の `canShareArticleUrl` に従い、後者は `platform/ShareSheet` の expect を呼ぶ。Android は `ACTION_SEND` を `Intent.createChooser` で包む）。`platformSupportsShare` が `false` のプラットフォーム（デスクトップ）では `rememberArticleSharer` が `null` を返し、どの経路も表示しない | リーダーの共有ボタン、記事行の長押しメニュー |
+| アプリ外からのフィード追加の入力済み表示 | `ui/navigation/AddFeedRequests.kt`（`request`。Home が表示されるまで保留し、`HomeScreen` だけが取り出す） | 他の Android アプリから Keryx へ共有されたリンク（`AndroidSharedLink.kt`。URL は `:shared` の `extractSharedFeedUrl` が取り出す） |
 
 **既存の操作に経路を足す**ときは、既存のハンドラ/述語を呼ぶ。共通のものがまだない（操作の処理が 1 つの経路の中に
 ある）場合は、先にそれを切り出して他の経路をそこへ移し、それから新しい経路を足す。
@@ -478,8 +482,10 @@ Compose も同じプラットフォーム区分に従う: タッチ主体のプ�
 スクロールバーは描画エンジンではなく Android の**View フレームワーク自身**が描く——
 `color-scheme` を含むいかなる CSS もそこには届かない。そのサムはプラットフォーム自身の
 drawable で、ホストする Activity のテーマに対して解決された `?attr/colorControlNormal` で
-ティントされる。`:androidApp` はそのテーマを固定で `Theme.Material.Light.NoActionBar` にしている
-（アプリのライト/ダーク設定は OS とは独立した自前の設定のため）。何もしなければサムは常に
+ティントされる。そのテーマは `:androidApp` の `Theme.Keryx` で、プラットフォームの
+`Theme.Material.Light.NoActionBar`（*OS* がダークモードのときは `values-night/` の `Theme.Material.NoActionBar`。
+コールドスタートで白いウィンドウが一瞬表示されるのを防ぐためのもの）だが、アプリ自身のライト/ダーク設定は
+OS とは独立している。何もしなければサムは常に
 ライトテーマの暗いグレーのままとなり、ダークなリーダー背景の上ではほとんど見えない。
 `platform/NativeWebViewScrollbar.kt` の `setNativeWebViewScrollbarColor` がこれを直接修正する:
 Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／

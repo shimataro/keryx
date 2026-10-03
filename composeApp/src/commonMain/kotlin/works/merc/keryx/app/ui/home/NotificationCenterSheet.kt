@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +32,8 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -44,6 +49,7 @@ import works.merc.keryx.app.presentation.RelativeTime
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.presentation.relativeTimeOf
 import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.home_notifications
 import works.merc.keryx.app.resources.notification_dismiss
 import works.merc.keryx.app.resources.notification_dismiss_all
 import works.merc.keryx.app.resources.notification_empty
@@ -95,46 +101,68 @@ fun NotificationCenterSheet(vm: NotificationCenterViewModel, onNavigated: () -> 
         }
     }
 
-    val body = @Composable {
-        Column(Modifier.padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                val clearTooltip = stringResource(Res.string.notification_dismiss_all)
-                TooltipIconButton(tooltip = clearTooltip, onClick = { vm.dismissAll() }, enabled = items.isNotEmpty()) {
-                    KeryxIcon(KeryxIcons.DeleteSweep, contentDescription = clearTooltip)
-                }
-            }
-
-            if (items.isEmpty()) {
-                Text(
-                    stringResource(Res.string.notification_empty),
-                    Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-            } else {
-                Column(Modifier.padding(top = 8.dp)) {
-                    items.forEach { notification ->
-                        NotificationRow(
-                            notification = notification,
-                            nowMillis = nowMillis,
-                            onDismiss = { vm.dismiss(notification.id) },
-                            onRequestHostAction = { vm.requestAction(notification) },
-                            onNavigated = onNavigated,
-                        )
-                    }
-                }
-            }
+    val dismissAllButton = @Composable {
+        val clearTooltip = stringResource(Res.string.notification_dismiss_all)
+        TooltipIconButton(tooltip = clearTooltip, onClick = { vm.dismissAll() }, enabled = items.isNotEmpty()) {
+            KeryxIcon(KeryxIcons.DeleteSweep, contentDescription = clearTooltip)
+        }
+    }
+    val emptyText = @Composable {
+        Text(
+            stringResource(Res.string.notification_empty),
+            Modifier.fillMaxWidth().padding(vertical = 24.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+        )
+    }
+    val rows = @Composable {
+        items.forEach { notification ->
+            NotificationRow(
+                notification = notification,
+                nowMillis = nowMillis,
+                onDismiss = { vm.dismiss(notification.id) },
+                onRequestHostAction = { vm.requestAction(notification) },
+                onNavigated = onNavigated,
+            )
         }
     }
 
     if (isTouchPrimary) {
-        body()
+        // Android's ModalBottomSheet: a titled sheet whose header (title + dismiss all) stays pinned
+        // while only the rows scroll, so a long history stays reachable and "dismiss all" never
+        // scrolls out of view. The sheet bounds this Column's height, which is what gives the
+        // verticalScroll below a finite viewport; it is nested-scroll aware, so dragging the rows
+        // first expands a partially expanded sheet before scrolling them.
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(Res.string.home_notifications),
+                    Modifier.weight(1f).semantics { heading() },
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                dismissAllButton()
+            }
+            if (items.isEmpty()) {
+                emptyText()
+            } else {
+                Column(Modifier.padding(top = 8.dp).verticalScroll(rememberScrollState())) { rows() }
+            }
+        }
     } else {
         KeryxRaisedSurface(
             modifier = Modifier.widthIn(min = 280.dp, max = 360.dp).shadow(4.dp, shape = shape),
             shape = shape,
-        ) { body() }
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { dismissAllButton() }
+                if (items.isEmpty()) {
+                    emptyText()
+                } else {
+                    Column(Modifier.padding(top = 8.dp)) { rows() }
+                }
+            }
+        }
     }
 }
 
@@ -180,7 +208,11 @@ private fun NotificationRow(
             AppNotificationLevel.ERROR ->
                 Triple(KeryxIcons.ErrorOutlined, MaterialTheme.colorScheme.error, stringResource(Res.string.notification_level_error))
             AppNotificationLevel.WARNING ->
-                Triple(KeryxIcons.Warning, Color(0xFFF9A825), stringResource(Res.string.notification_level_warning))
+                Triple(
+                    KeryxIcons.Warning,
+                    warningLevelTint(works.merc.keryx.app.platform.isTouchPrimary, MaterialTheme.colorScheme),
+                    stringResource(Res.string.notification_level_warning),
+                )
             AppNotificationLevel.INFO ->
                 Triple(KeryxIcons.Info, MaterialTheme.colorScheme.primary, stringResource(Res.string.notification_level_info))
         }
@@ -217,6 +249,20 @@ private fun NotificationRow(
         }
     }
 }
+
+/** Desktop's fixed amber tint for a [AppNotificationLevel.WARNING] row's icon. */
+internal val DesktopWarningTint = Color(0xFFF9A825)
+
+/**
+ * The tint of a [AppNotificationLevel.WARNING] row's icon. Desktop keeps its fixed amber
+ * ([DesktopWarningTint]); a touch-primary platform (Android) takes [ColorScheme.tertiary] from its
+ * color scheme instead, so the icon follows the theme (including Material You dynamic color) and
+ * keeps M3's guaranteed contrast against the sheet surface in light and dark — a fixed amber is too
+ * faint on a light surface. Material 3 has no warning role; the icon's shape and its level label
+ * already distinguish a warning from an error, so a non-error accent is enough here.
+ */
+internal fun warningLevelTint(isTouchPrimary: Boolean, colorScheme: ColorScheme): Color =
+    if (isTouchPrimary) colorScheme.tertiary else DesktopWarningTint
 
 /** How often an open notification panel re-reads the clock; minutes are the finest unit shown. */
 private const val RELATIVE_TIME_REFRESH_MS = 60_000L

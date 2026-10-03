@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome layer of the adaptive launcher icon (Android 13+ themed icons): the same
+     alpha-only glyph as composeApp's notification icon (ic_stat_keryx.xml), placed back on the
+     adaptive icon's 108dp / 1024-unit canvas. ic_stat_keryx crops its viewport to the glyph
+     (526 units, recentred by a translate group) to fill the status bar; here the uncropped
+     1024-unit viewport is kept instead, which puts the glyph (x≈289..735 / y≈271..753, strokes
+     included — about 51dp) at the same position and size as ic_launcher_foreground.xml, inside
+     the central 66dp safe zone the launcher's mask never clips. The launcher tints it, so only
+     the alpha channel of the colors below matters. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- The vertical bar (a round-capped stroke equivalent to the source's 121-wide capsule). -->
+    <path
+        android:pathData="M349.75,362.5 L349.75,661.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="121"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <!-- The dot. -->
+    <path
+        android:pathData="M350.85,512 A59.4,59.4 0 1,1 469.65,512 A59.4,59.4 0 1,1 350.85,512 Z"
+        android:fillColor="#FFFFFFFF"/>
+    <!-- The two broadcast arcs. -->
+    <path
+        android:pathData="M518.76,403.49 A153.45,153.45 0 0,1 518.76,620.51"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="77"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M612.48,309.77 A286,286 0 0,1 612.48,714.23"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="77"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+</vector>

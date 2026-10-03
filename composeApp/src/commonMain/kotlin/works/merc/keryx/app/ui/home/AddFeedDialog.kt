@@ -20,8 +20,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -71,6 +74,7 @@ import works.merc.keryx.app.ui.i18n.userMessage
  * @param feeds The feeds used to determine whether the entered URL is already subscribed.
  * @param onDismiss Called when the dialog is dismissed.
  * @param onSubscribed Called after all requested feeds are subscribed successfully.
+ * @param initialUrl The URL the input starts with when the dialog first opens.
  */
 @Composable
 internal fun AddFeedDialog(
@@ -78,9 +82,16 @@ internal fun AddFeedDialog(
     feeds: List<Feeds>,
     onDismiss: () -> Unit,
     onSubscribed: () -> Unit,
+    initialUrl: String = "",
 ) {
-    val controller = remember(vm) { AddFeedController(vm::resolvePreview, vm::subscribeFeeds) }
+    // The typed URL is mirrored into saved instance state so it survives an Android configuration
+    // change (rotation, multi-window resize), which recreates the composition and with it the
+    // controller. Only the URL is restored — a preview in flight or already shown is simply asked
+    // for again on the next confirm.
+    var savedUrl by rememberSaveable { mutableStateOf(initialUrl) }
+    val controller = remember(vm) { AddFeedController(vm::resolvePreview, vm::subscribeFeeds, initialUrl = savedUrl) }
     val state by controller.state.collectAsState()
+    LaunchedEffect(state.url) { savedUrl = state.url }
     val scope = rememberCoroutineScope()
     val submit: () -> Unit = { scope.launch { if (controller.submit()) onSubscribed() } }
     val alreadySubscribed = addFeedAlreadySubscribed(state.url, feeds)

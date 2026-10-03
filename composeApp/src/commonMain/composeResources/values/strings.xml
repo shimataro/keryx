@@ -144,6 +144,8 @@
     <string name="article_state_starred">Starred</string>
     <string name="article_copy_url">Copy URL</string>
     <string name="article_url_copied">URL copied</string>
+    <string name="article_share">Share</string>
+    <string name="article_share_chooser_title">Share article</string>
     <string name="article_prev">Previous article</string>
     <string name="article_next">Next article</string>
     <string name="article_reader_simple_notice">The web view is unavailable here, so the article is shown in simplified form.</string>
@@ -194,6 +196,12 @@
     <string name="settings_refresh_hour3">3h</string>
     <string name="settings_refresh_manual">Manual</string>
     <string name="settings_notification_enabled">Enable new article notifications</string>
+    <string name="settings_notification_blocked_hint">Notifications for Keryx are turned off in Android settings. Allow them there to get new article notifications.</string>
+    <string name="settings_notification_open_system_settings">Open notification settings</string>
+    <string name="notification_permission_title">Get notified about new articles?</string>
+    <string name="notification_permission_body">Keryx can post a notification when new articles arrive in your feeds. You can change this anytime in Settings.</string>
+    <string name="notification_permission_allow">Allow</string>
+    <string name="notification_permission_not_now">Not now</string>
     <string name="settings_start_minimized">Start minimized to tray</string>
     <string name="settings_cloud_sync">Cloud Sync</string>
     <string name="settings_cloud_sync_hint">Only one cloud storage can be connected at a time.</string>

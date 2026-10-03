@@ -144,13 +144,18 @@ return した呼び出しは、`FeedRefreshWorker` 自身が実行しない `cle
 なっている）。`AndroidNotificationSink` は投稿のたびに
 `NotificationManagerCompat.areNotificationsEnabled()` でガードしており、これ1回で Android 13+ の
 `POST_NOTIFICATIONS` ランタイム権限とユーザーによるアプリ/チャンネル単位のブロックの両方をカバーする。
-権限自体は `platform/NotificationPermission.kt` の `rememberNotificationPermissionRequester` で
-リクエストし、起動時に1回（`App.kt`。ユーザー自身の「通知を有効にする」設定が既に ON の場合）と、
-`NotificationsTab` でその設定を ON にしたときの両方で呼ぶ。ユーザーがシステムダイアログを2回目に
-拒否（「今後表示しない」）した後は、Android 自身がそれ以降のプログラムからのリクエストに対して
-ダイアログを表示しなくなる — 設定のトグル自体は ON のままにしておいてよいが、ユーザーが OS の設定から
-直接許可するまで通知は届かない。この場合に「端末の設定を開いてください」と誘導するフローは今回は
-作っていない。
+権限自体は `platform/NotificationPermission.kt` の `rememberNotificationPermission`
+（`isGranted`（再開時に読み直す）と各リクエストの結果を返す `NotificationPermissionController`）で
+要求し、その流れは `ui/settings/NotificationPermissionFlow.kt` が決める。ユーザー自身の
+「通知を有効にする」設定は権限に追従し、権限が拒否されたまま ON で残ることはない。設定が ON で
+権限が未許可のまま Home を初めて表示したとき、`App.kt` はアプリ内の説明を1回だけ表示する。
+［許可する］でシステムの要求へ進み、［今はしない］または拒否で設定を OFF にするので、説明が起動の
+たびに出ることはない。`NotificationsTab` で設定を ON にした場合は文脈が明らかなので、説明なしで
+システムの要求へ進み、拒否されればスイッチは OFF のまま。ユーザーがシステムダイアログを2回拒否
+（「今後表示しない」）した後は、Android はそれ以降の要求をダイアログなしで即座に拒否するため、
+拒否の後はタブのスイッチの下に、OS 側のアプリの通知設定（`Settings.ACTION_APP_NOTIFICATION_SETTINGS`）
+を開く行を表示し、そこから許可できるようにしている。書き換えるのは端末ローカルの
+`local_settings.json` の `notificationEnabled` だけで、同期対象は何も変わらない。
 
 投稿する通知の小アイコンは `composeApp/src/androidMain/res/drawable/ic_stat_keryx.xml` —
 `design/icons/svg/app_icon_foreground.svg` から手作業で変換した、Keryx ロゴマークのモノクロ・

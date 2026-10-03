@@ -1256,6 +1256,15 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (WCAG 1.4.1): such a button always also carries its own glyph
   (`KeryxIcons.Delete`) plus either a label or a tooltip, and a prose
   confirmation dialog behind it.
+  **That confirmation dialog passes `KeryxAlertDialog(destructive = true)`** — as
+  does every confirmation whose action deletes or resets something (delete
+  folder/tag, unsubscribe, reset sync data, from Settings or the bell). Android's
+  `actual` paints the confirm `TextButton`'s *text* in `colorScheme.error` (a
+  text button has no container, so `errorContainer` has nothing to tint; this is
+  M3's own treatment of a destructive dialog action); desktop's `actual` ignores
+  the flag, since its confirm button is a native Swing `JButton`. The confirm
+  label itself always names the action ("Delete", "Reset"), so color is again
+  not the only signal.
 - **`SegmentedControl<T>` / `ToggleChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
@@ -1412,7 +1421,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   differed in padding, `KeryxPaneTopBar` applies none of its own — a caller supplies padding (and
   keeps `WindowDragArea`/`WindowChrome.titleBarInsetDp` wrapped *around* the call, since neither is
   shared across all three panes either) via its own `modifier`. Android's `actual` is a real M3
-  `TopAppBar`.
+  `TopAppBar` with a transparent container, so the bar takes the tone of the pane it heads
+  (M3's opaque `surface` default would band the `surfaceContainerLow`/`surfaceContainer` panes).
 - **`KeryxExpandedSearchBar`** (`ui/common/KeryxSearchBar.kt`, expect/actual): the narrow-layout
   header `ArticleListPane` swaps in described in "Adaptive pane layout & touch affordances" above —
   a back arrow, an editable query field, and a clear action, all on one bar. **Deliberately not built on

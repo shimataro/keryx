@@ -306,6 +306,8 @@ kotlin {
         getByName("androidMain") {
             dependencies {
                 implementation(libs.androidx.core.ktx)
+                // CustomTabsIntent, for BrowserOpener.android.kt.
+                implementation(libs.androidx.browser)
                 // GoogleApiAvailability, for CloudStorageAvailability's "is Google Drive offerable
                 // on this device" check — see composeApp/build.gradle.kts for the auth flow itself.
                 implementation(libs.play.services.auth)

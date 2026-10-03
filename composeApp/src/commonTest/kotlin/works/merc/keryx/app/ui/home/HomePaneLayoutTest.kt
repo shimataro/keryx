@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
+import works.merc.keryx.app.core.DRAWER_SHEET_END_INSET
 import works.merc.keryx.app.core.DUAL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
@@ -213,6 +214,32 @@ class HomePaneLayoutTest {
         assertTrue(listWidth >= ARTICLE_LIST_PANE_MIN_WIDTH.dp, "article list below its minimum: $listWidth")
         assertTrue(listWidth <= ARTICLE_LIST_PANE_WIDTH_DEFAULT.dp, "article list above its default: $listWidth")
         assertTrue(available - listWidth >= DETAIL_PANE_MIN_WIDTH.dp, "reader below its minimum: ${available - listWidth}")
+    }
+
+    // --- drawerSheetWidth ---
+
+    @Test
+    fun drawerSheetWidthLeavesTheEndInsetOnAPhoneWidthScreen() {
+        // 360dp phone: 360 - 56 = 304dp, below Material 3's 360dp cap.
+        assertEquals((360 - DRAWER_SHEET_END_INSET).dp, drawerSheetWidth(360.dp))
+    }
+
+    @Test
+    fun drawerSheetWidthCapsAtMaterialsMaximumDrawerWidthOnATabletWidthScreen() {
+        // A tablet-width Dual layout must not stretch the drawer to ~available - 56dp.
+        assertEquals(360.dp, drawerSheetWidth(840.dp))
+        assertEquals(360.dp, drawerSheetWidth((360 + DRAWER_SHEET_END_INSET).dp))
+    }
+
+    @Test
+    fun drawerSheetWidthNeverGoesNegative() {
+        assertEquals(0.dp, drawerSheetWidth((DRAWER_SHEET_END_INSET - 10).dp))
+    }
+
+    @Test
+    fun drawerSheetWidthHonorsExplicitInsetAndCap() {
+        assertEquals(200.dp, drawerSheetWidth(300.dp, endInset = 100.dp, maxWidth = 250.dp))
+        assertEquals(250.dp, drawerSheetWidth(500.dp, endInset = 100.dp, maxWidth = 250.dp))
     }
 
     // --- canNavigateBack ---

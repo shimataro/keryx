@@ -47,6 +47,8 @@ compose-material3 = "1.9.0"
 androidx-activity-compose = "1.13.0"
 androidx-core-ktx = "1.19.0"
 androidx-work = "2.11.2"
+# Custom Tabs, for BrowserOpener.android.kt opening http(s) links in the default browser's in-app tab.
+androidx-browser = "1.10.0"
 # Google Drive's Android authorization path (AuthorizationClient). Brings play-services-base in
 # transitively, which is where GoogleApiAvailability — the "is Google Drive offerable on this
 # device" check in CloudStorageAvailability.android.kt — lives.
@@ -119,6 +121,7 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx
 # work-runtime, not work-runtime-ktx: CoroutineWorker and the other Kotlin-specific APIs moved
 # into the main artifact as of 2.9.0, leaving work-runtime-ktx empty (see its own release notes).
 androidx-work = { module = "androidx.work:work-runtime", version.ref = "androidx-work" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "androidx-browser" }
 play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }
 
 # --- Koin (dependency injection) ---

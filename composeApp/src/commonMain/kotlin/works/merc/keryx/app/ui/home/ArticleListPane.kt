@@ -155,6 +155,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * @param onOpenArticleInBrowser An article row's "Open in Browser" context-menu item — the same
  *   guarded handler ([openInBrowserIfAllowed]) as the reader's button, the keyboard shortcut and the
  *   menu bar, so only an http(s) URL is ever opened.
+ * @param onShareArticle An article row's "Share" context-menu item — the same [ArticleSharer.share]
+ *   as the reader's share button. `null` (the default, and what `HomeScreen` passes where the
+ *   platform has no share sheet) leaves the item out.
  */
 @Composable
 fun ArticleListPane(
@@ -172,6 +175,7 @@ fun ArticleListPane(
     returnRipplePulse: Int = 0,
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onShareArticle: ((ArticleListRow) -> Unit)? = null,
     // Overridable only so a desktopTest can exercise the touch-primary pull-to-refresh path without
     // a real touch-primary platform to run on; every real call site relies on the default.
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
@@ -380,6 +384,7 @@ fun ArticleListPane(
         onSetStarred = { article, starred -> vm.setStarred(article, starred) },
         onCopyArticleUrl = onCopyArticleUrl,
         onOpenArticleInBrowser = onOpenArticleInBrowser,
+        onShareArticle = onShareArticle,
         modifier = modifier,
         listState = listState,
         returnRipplePulse = branchReturnRipplePulse,
@@ -654,6 +659,7 @@ internal fun ArticleListPaneContent(
     onSetStarred: (ArticleListRow, Boolean) -> Unit = { _, _ -> },
     onCopyArticleUrl: (ArticleListRow) -> Unit = rememberPlainArticleUrlCopy(),
     onOpenArticleInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onShareArticle: ((ArticleListRow) -> Unit)? = null,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
     focused: Boolean = true,
@@ -688,6 +694,10 @@ internal fun ArticleListPaneContent(
         }
         listState.scrollToIndexIfNeeded(index)
     }
+    val searchHighlight = searchHighlightSpanStyle(
+        works.merc.keryx.app.platform.isTouchPrimary,
+        MaterialTheme.colorScheme,
+    )
 
     Column(
         modifier
@@ -794,9 +804,10 @@ internal fun ArticleListPaneContent(
                             onSetStarred = { starred -> onSetStarred(article, starred) },
                             onCopyUrl = { onCopyArticleUrl(article) },
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
+                            onShare = onShareArticle?.let { share -> { share(article) } },
                             onActivate = onActivated,
                             titleOverride = titleMarkedById?.get(article.id)?.let {
-                                markedToAnnotatedString(it.ifBlank { article.title })
+                                markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight)
                             },
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
