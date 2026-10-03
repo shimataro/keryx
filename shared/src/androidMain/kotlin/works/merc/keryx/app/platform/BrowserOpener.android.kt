@@ -27,9 +27,12 @@ actual object BrowserOpener {
     actual fun open(url: String) {
         val activity = AndroidAppContext.resumedActivity
         val context: Context = activity ?: AndroidAppContext.application
-        val uri = Uri.parse(url)
+        // Trim once and normalize the scheme: browserLaunchKind judges the trimmed text without regard
+        // to case, but Android's intent-filter scheme matching is case-sensitive and does not trim.
+        val target = url.trim()
+        val uri = Uri.parse(target).normalizeScheme()
         try {
-            when (browserLaunchKind(url)) {
+            when (browserLaunchKind(target)) {
                 BrowserLaunchKind.IN_APP_BROWSER_TAB -> {
                     val customTab = CustomTabsIntent.Builder()
                         .setColorScheme(
@@ -50,7 +53,7 @@ actual object BrowserOpener {
                     context.startActivity(Intent(Intent.ACTION_VIEW, uri).withTaskFlag(activity == null))
             }
         } catch (e: ActivityNotFoundException) {
-            Log.warn(TAG, "No activity found to open URL: $url", e)
+            Log.warn(TAG, "No activity found to open URL: $target", e)
         }
     }
 
