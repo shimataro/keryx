@@ -462,7 +462,11 @@ article's feed name and favicon (`FeedAvatar`) when one is selected, swapped in 
 slot via `KeryxPaneTopBar`'s `titleContent` — so the toolbar's Compose structure does change between
 states, but its *measured height* does not: the always-present row of `TooltipIconButton` actions is
 what actually pins it, keeping the reader's own measured bounds identical across states regardless
-of which title-slot content is composed.
+of which title-slot content is composed. (The native iOS reader's toolbar omits the feed name —
+it would truncate beside the four actions on a phone — and the name leads the byline in the
+article's own header instead, via `articleMetaText`'s `feedName`; each pager page resolves it from
+its own row's `feed_id`, so a neighbour in All Feeds names its own feed. macOS keeps the toolbar
+name.)
 
 **`color-scheme` alone is not enough on Android.** `android.webkit.WebView`'s default style,
 `Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by

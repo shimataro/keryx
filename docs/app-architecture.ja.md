@@ -465,6 +465,9 @@ WebView、macOS/Linux の WebKit）では、そのいずれか 1 つでも定義
 *測定される高さ*は変わらない: 実際に高さを固定しているのは常在する `TooltipIconButton` の
 アクション行であり、タイトル枠にどちらのコンテンツが組み込まれているかに関わらず、リーダー自身の
 計測済みバウンズは状態間で常に同一に保たれる。
+（ネイティブ iOS のリーダーはツールバーにフィード名を出さない——iPhone では 4 つの操作と並べると切れてしまうため。
+フィード名は記事自身のヘッダーの署名行の先頭に、`articleMetaText` の `feedName` で表示する。pager の各ページは
+自分の行の `feed_id` から解決するので、All Feeds での隣接ページも自分のフィード名を表示する。macOS はツールバーの名前のまま。）
 
 **Android では `color-scheme` だけでは足りない。** `android.webkit.WebView` の既定スタイル
 `Widget.WebView` は `scrollbars="horizontal|vertical"` を設定しており、そのルートフレームの

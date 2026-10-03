@@ -241,7 +241,10 @@ iOS 26, the toolbar from iOS 26 — at the bottom of the screen on iPhone). On i
 hardware keyboard while the sidebar or the reader is showing first moves to the article list. The
 article list's heading shows the selected subscription-list item — its name beside the icon the
 subscription list gives it — at every width, as Android's narrower-width header does, so the
-selection a search narrows stays on screen while searching. The
+selection a search narrows stays on screen while searching. The native iOS reader's toolbar has
+no room for a feed name beside its four actions on a phone, so it does not show one; the feed
+name leads the article's own byline ("feed · author · date") instead, and each swiped-to article
+names its own feed. The
 native macOS app is always 3-pane and keeps the field in the sidebar, as above.
 
 **What search narrows.** At every width, search narrows whatever subscription-list item is
