@@ -10,12 +10,15 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
@@ -121,5 +124,119 @@ class NarrowPaneRowTest {
         assertSame(scrolled, state, "the pane stayed on screen, so it must keep the same state")
         assertEquals(index, state.firstVisibleItemIndex)
         assertEquals(offset, state.firstVisibleItemScrollOffset)
+    }
+
+    /** Counts how often the stub reader is composed fresh and disposed, and where it was placed. */
+    private class ReaderProbe {
+        var mounts = 0
+        var disposals = 0
+        var left = 0f
+    }
+
+    @Composable
+    private fun StubReader(modifier: Modifier, probe: ReaderProbe) {
+        DisposableEffect(Unit) {
+            probe.mounts++
+            onDispose { probe.disposals++ }
+        }
+        Box(
+            modifier.fillMaxSize().testTag("stub-reader").onGloballyPositioned {
+                probe.left = it.boundsInParent().left
+            },
+        )
+    }
+
+    @Composable
+    private fun PreviewHost(
+        depth: Int,
+        listBehind: Boolean,
+        gesture: () -> ReaderBackGesture,
+        probe: ReaderProbe,
+        onArticleListState: (LazyListState) -> Unit,
+    ) {
+        NarrowPaneRow(
+            visiblePanes(PaneLayout.Single, depth),
+            360.dp,
+            Modifier.size(360.dp, 400.dp),
+            rememberSaveableStateHolder(),
+            listBehind = listBehind,
+            backGesture = gesture,
+        ) { pane, paneModifier ->
+            when (pane) {
+                HomePane.ArticleList -> StubListPane(paneModifier, onArticleListState)
+                else -> StubReader(paneModifier, probe)
+            }
+        }
+    }
+
+    @Test
+    fun backPreviewComposesTheListBehindWithoutRecreatingTheReader() = runDesktopComposeUiTest {
+        var depth by mutableStateOf(2)
+        var listBehind by mutableStateOf(false)
+        var gesture by mutableStateOf<ReaderBackGesture>(ReaderBackGesture.Idle)
+        val probe = ReaderProbe()
+        lateinit var state: LazyListState
+
+        setContent { PreviewHost(depth, listBehind, { gesture }, probe) { state = it } }
+        waitForIdle()
+        onNodeWithTag("stub-list").performMouseInput { moveTo(center); repeat(12) { scroll(3f) } }
+        waitForIdle()
+        val index = state.firstVisibleItemIndex
+        assertTrue(index > 0, "precondition: the list should be scrolled away from the top")
+
+        depth = 3
+        waitForIdle()
+        onNodeWithTag("stub-list").assertDoesNotExist()
+        assertEquals(1, probe.mounts)
+
+        // Gesture starts: the list is composed behind the reader, at its saved scroll position,
+        // and the reader is the very same composition, now offset with the swipe.
+        listBehind = true
+        gesture = ReaderBackGesture.Tracking(0.5f, fromRightEdge = false)
+        waitForIdle()
+        onNodeWithTag("stub-list").assertExists()
+        assertEquals(index, state.firstVisibleItemIndex)
+        assertEquals(1, probe.mounts)
+        assertEquals(0, probe.disposals)
+        assertTrue(probe.left > 0f, "the reader should slide rightwards with a left-edge swipe")
+
+        // Cancelled: the list leaves again, the reader is still the same composition, back in place.
+        gesture = ReaderBackGesture.Idle
+        listBehind = false
+        waitForIdle()
+        onNodeWithTag("stub-list").assertDoesNotExist()
+        assertEquals(1, probe.mounts)
+        assertEquals(0, probe.disposals)
+        assertEquals(0f, probe.left)
+    }
+
+    @Test
+    fun committingKeepsThePreviewedListComposedAndDropsTheReader() = runDesktopComposeUiTest {
+        var depth by mutableStateOf(3)
+        var listBehind by mutableStateOf(false)
+        var gesture by mutableStateOf<ReaderBackGesture>(ReaderBackGesture.Idle)
+        val probe = ReaderProbe()
+        var state: LazyListState? = null
+
+        setContent { PreviewHost(depth, listBehind, { gesture }, probe) { state = it } }
+        waitForIdle()
+        assertEquals(null, state, "precondition: the reader alone is composed at depth 3")
+
+        listBehind = true
+        gesture = ReaderBackGesture.Settling(commit = true, fromRightEdge = true, progress = 1f)
+        waitForIdle()
+        val previewed = state
+
+        // The commit itself: pop to depth 2 and return to Idle in the same frame (as
+        // ReaderBackController does), so the list must not be torn down and rebuilt.
+        depth = 2
+        listBehind = false
+        gesture = ReaderBackGesture.Idle
+        waitForIdle()
+
+        assertSame(previewed, state, "the previewed list must stay composed through the commit")
+        onNodeWithTag("stub-reader").assertDoesNotExist()
+        assertEquals(1, probe.mounts)
+        assertEquals(1, probe.disposals)
     }
 }

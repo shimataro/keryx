@@ -162,7 +162,8 @@ cloud account configured (`shouldAutoOpenFeedDrawer` — the "+" button that wou
 lives inside a drawer closed by default). The two remaining panes — article list, article detail —
 show one at a time at a phone width (`PaneLayout.Single`) as a hierarchical stack with its own back
 button (`ArticleListPane`'s `onExitSearch` while in Search, `ArticleDetailPane`'s `onNavigateUp`
-outside it) and — on Android — the OS back gesture/button (`platform/BackHandler`); at a tablet
+outside it) and — on Android — the OS back gesture/button (`platform/BackHandler`, or
+`platform/PredictiveBackHandler` for the reader → article list pop, see below); at a tablet
 width (`PaneLayout.Dual`) both stay on screen together, permanently — `visiblePanes(Dual, depth)`
 returns the same `[ArticleList, ArticleDetail]` at every depth, unlike before the drawer existed.
 Nothing about either pane's own internal layout (tonal roles, dividers, row chrome) changes between
@@ -193,6 +194,24 @@ what's on screen there. **A back press on the article list itself, with the bar 
 deliberately left unhandled (`HomeBackAction.None`)** — `HomeScreen`'s `BackHandler` disables itself
 for `None`, so the press falls through to the platform's own default (exiting the app on Android)
 rather than this codebase swallowing it with nowhere to go.
+
+**The reader → article list pop (`HomeBackAction.PopPane`) is a predictive back on Android; every
+other back is not.** `HomeScreen` composes a plain `BackHandler` for `CloseSearchBar` and a
+`platform/PredictiveBackHandler` for `PopPane`, both unconditionally with mutually exclusive
+`enabled` flags and both gated by `!drawerState.isOpen` (the drawer runs its own predictive back).
+During the gesture `NarrowPaneRow` composes the article list behind the reader (`ReaderBackGesture`
+/ `ReaderBackController` in `ui/home/ReaderBackGesture.kt`), and the commit still goes through
+`goBack()` — never re-implement the pop or its return flash in the gesture path. Rules that keep the
+reader's native WebViews intact:
+
+- At `PaneLayout.Single`, `NarrowPaneRow` stacks its two fixed `if` blocks in a `Box`, the article
+  list's first and the reader's second, so the list coming and going never changes the reader's
+  composition identity. Don't reorder them, wrap them in a branch keyed on the gesture, or move the
+  reader under a container that only exists during the gesture.
+- Move the panes with `Modifier.offset` only, read at placement time — no `graphicsLayer`
+  scale/alpha on the reader's `AndroidView` subtree.
+- The list composed for the preview gets `returnRipplePulse = 0` (`readerBackListPulse`), so the
+  "where you were" flash plays once, on commit, not when a preview starts.
 
 **Search is orthogonal to the article filter, not a filter (or a pane) of its own.**
 `core/ArticleFilter.kt` has no `Search` case — the query (`HomeViewModel.searchQuery`) narrows

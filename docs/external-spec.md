@@ -241,7 +241,13 @@ detail) at a time as a hierarchical stack with its own back control; a tablet-wi
 both together, permanently — there is no narrower state where the reader loses its own back control
 without the article list gaining a permanent one beside it (see the note on the swipe gesture
 below). Nothing about either pane's own content changes between these — only how many are on screen
-together — with one exception: search.
+together — with one exception: search. On Android, going back from the reader to the article list
+at phone width is a predictive back: while the back gesture is still in progress, the reader slides
+aside to preview the article list behind it (at its scroll position), and releasing completes the
+transition or cancelling slides the reader back. Where the system shows no preview (3-button
+navigation, Android before 14) back simply returns to the list at once. Every other back — closing
+the search bar, the drawer, dialogs, settings, and leaving the app from the article list — is
+unchanged.
 
 **Search field placement.** At the 3-pane width the search field stays where it has always been, in
 the feed list's sidebar, with results appearing reactively in the article list beside it. At a

@@ -198,7 +198,8 @@
     読めないファイルは `null` として渡し、設定 ▸ データに失敗を表示させる）,
     nativeContextMenu（適応レイアウトのフェーズで実装した実際の
     長押し DropdownMenu — タップと長押しの判別は KDoc 参照）, BackHandler（`androidx.activity.compose.BackHandler`
-    へ委譲）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
+    へ委譲。対になる `PredictiveBackHandler` は `androidx.activity.compose.PredictiveBackHandler` へ委譲し、
+    各 `BackEventCompat` を `BackProgress` に変換する）, PlatformOs（isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android にはメニューバーやシステムトレイが
     無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
     Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、[background-update.ja.md](background-update.ja.md) 参照）,
@@ -1015,6 +1016,22 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 そこでの戻る操作はプラットフォームの既定動作（Android ではアプリの終了）へフォールスルーし、
 このコードベースが戻り先の無い操作を握りつぶすことはない。
 
+**リーダー → 記事一覧の戻りは、Android では予測型バックである。** `HomeScreen` は 2 つのハンドラを
+無条件に compose し、`enabled` を互いに排他にする（どちらもドロワーが開いている間は譲る——ドロワーは
+自前で予測型バックを処理する）: `HomeBackAction.CloseSearchBar` には従来の `BackHandler`、
+`HomeBackAction.PopPane`（`PaneLayout.Single` のリーダーの深さのみ）には `platform/PredictiveBackHandler`。
+ジェスチャーの進行中、`NarrowPaneRow` は記事一覧をリーダーの**背面**に compose する——`PaneLayout.Single`
+では固定の `if` ブロック 2 つを `Box` に重ねて（一覧が先、リーダーが後）配置するため、一覧の出現・消滅で
+リーダーの composition 同一性は変わらず、WebView のスロットも再生成されない——そして両者を
+`Modifier.offset` だけで動かす（リーダーはスワイプ方向へ、一覧は少しずらした位置からパララックスで入る）。
+`ui/home/ReaderBackGesture.kt` が純粋な状態機械（`Idle` / `Tracking` / `Settling`）と進捗 → オフセットの
+関数を持ち、`ReaderBackController` がそれを動かす: 進捗の Flow が正常終了したら確定（リーダーを出し切って
+から `goBack()` を呼ぶ——ペインを戻す処理と戻り先のフラッシュの実装は引き続きこの 1 つ）、
+`CancellationException` ならキャンセル（元に戻してから一覧を外す）、進捗が 1 つも来なかった戻る操作
+（3 ボタンナビゲーション、Android 14 未満）は従来どおり即座に `goBack()` を呼ぶ。マニフェストの
+`enableOnBackInvokedCallback` が Android 13〜15 を有効にする。検索バーを閉じる戻り、ドロワー、
+ダイアログ、設定の戻りはそれぞれ従来どおりで、記事一覧自身の深さは引き続きフォールスルーする（`None`）。
+
 ドロワーが存在する以前と異なり、`PaneLayout.Dual` はもはやスタック上をスライドする窓では
 **ない**: フィード一覧がペインではなくドロワーになったことで、`visiblePanes(Dual, depth)` は
 深さに関わらず常に同じ `[ArticleList, ArticleDetail]` を返す——記事詳細ペインは記事一覧の常設の
@@ -1034,7 +1051,13 @@ depth)`（「1段戻っても実際には画面が変わらない」場合に常
 由来の state（実質は `LazyListState`。`rememberLazyListState` がその形で保持している）を保存し、
 リスト state の**初期** index/offset として復元する。よってスクロールは一切走らず、
 `known-issues.md` が未修正の上流 Compose クラッシュの要因として挙げている `scrollToIndexIfNeeded`
-の経路に新たな呼び出しが増えることもない。`ArticleListPane` の `lastFilter` が
+の経路に新たな呼び出しが増えることもない。リーダー → 記事一覧の予測型バック（前述）は一覧を
+より早く——ジェスチャー開始時にリーダーの背面に——マウントし、キャンセルで再びアンマウントする。
+マウントのたびに同じ復元が行われ、加えて `ArticleListPane` の既存の「選択行を表示範囲に入れる」効果が
+走るが、これは最初の測定を待ったうえで、選択行がすでに完全に見えていれば何もしない（リーダーで選択が
+復元後の表示範囲の外へ移っていた場合だけスクロールし、これは従来の戻るでも同じだった）。ジェスチャー中の
+一覧はタッチ入力を受けないため、そのスクロールがクラッシュに必要なもう一方の条件であるユーザー操作の
+スクロールと重なることはない。`ArticleListPane` の `lastFilter` が
 `ArticleFilter.encode()` の文字列を保持する `rememberSaveable` なのも同じ理由による: ペインが
 アンマウントされている間にフィルタが変わりうる（通知の `ShowFeedDetail`、あるいは閲覧中フィードの
 削除）ため、素の `remember` では再マウント時に新しいフィルタで初期化されてしまい、復元された位置が

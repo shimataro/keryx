@@ -1294,6 +1294,28 @@ opens and what a back step does; the Android screens themselves need an emulator
 - With TalkBack, every category row is read as one item with its name; the back arrow is read as "Back".
 - At a tablet width, the list and a category's screen fill the dialog without clipping.
 
+### (Android) Predictive back from the reader
+
+`ReaderBackGestureTest.kt` covers the gesture's state machine, the pane offsets and the
+commit/cancel/no-preview outcomes, and `NarrowPaneRowTest.kt` that the article list is composed behind
+the reader during a preview without the reader being recreated. The gesture itself needs an emulator or
+device at phone width (`PaneLayout.Single`), on Android 13 (with the developer option "Predictive back
+animations"), 14, 15 and 16:
+
+- Open an article from a scrolled article list, then start a back swipe from either edge and hold it:
+  the reader slides with the finger and the article list shows behind it at the position it was left at.
+  The reader's page does not flash blank or reload.
+- Cancel the swipe (move back to the edge and release): the reader slides back into place, still showing
+  the same page at the same scroll position, and the article list behind it has not moved or changed its
+  selection when you later return to it.
+- Complete the swipe: the reader slides out, the article list stays (no jump or re-scroll), and the row
+  you were reading flashes once.
+- With 3-button navigation, and on Android 13 without the developer option, Back returns to the list at
+  once with the flash, as before.
+- Unchanged elsewhere: Back closes the open drawer (with its own predictive animation), closes the
+  expanded search bar, dismisses dialogs and bottom sheets, steps through Settings (category screen →
+  list → closed), and on the article list itself leaves the app (with the system's back-to-home preview).
+
 ### (iOS) The sidebar
 
 The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));

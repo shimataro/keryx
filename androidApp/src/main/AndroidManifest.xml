@@ -18,9 +18,12 @@
         android:label="@string/app_name"
         android:localeConfig="@xml/locales_config"
         android:theme="@style/Theme.Keryx"
+        android:enableOnBackInvokedCallback="true"
         tools:targetApi="tiramisu">
         <!-- localeConfig (the per-app language setting) is read from Android 13 on; older
-             versions ignore it, hence tools:targetApi. -->
+             versions ignore it, hence tools:targetApi. enableOnBackInvokedCallback opts Android
+             13-15 into predictive back (16+ already uses it at this targetSdk), which the reader's
+             back-to-article-list preview relies on (HomeScreen's PredictiveBackHandler). -->
 
         <activity
             android:name=".MainActivity"

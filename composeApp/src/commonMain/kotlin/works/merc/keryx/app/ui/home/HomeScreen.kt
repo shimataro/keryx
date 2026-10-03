@@ -28,11 +28,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -61,6 +63,7 @@ import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.BackHandler
+import works.merc.keryx.app.platform.PredictiveBackHandler
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -302,6 +305,18 @@ fun HomeScreen() {
         }
     }
 
+    // Drives the predictive back gesture from the reader to the article list at PaneLayout.Single
+    // (see ReaderBackGesture.kt). Hoisted here, outside BoxWithConstraints, like drawerState. Its
+    // commit is goBack() itself — the one implementation of popping the pane (and of the return
+    // flash) — read through rememberUpdatedState so the remembered controller never calls a
+    // stale copy.
+    val currentGoBack by rememberUpdatedState(::goBack)
+    val readerBack = remember(scope) { ReaderBackController(scope, onCommit = { currentGoBack() }) }
+    // Derived, so composition only re-reads these when they flip — not on every gesture frame,
+    // whose offsets NarrowPaneRow reads at placement time instead.
+    val readerBackListBehind by remember(readerBack) { derivedStateOf { readerBack.gesture.showsListBehind } }
+    val readerBackAccepting by remember(readerBack) { derivedStateOf { readerBack.gesture.acceptsNewGesture } }
+
     // Mirrors feedListKeysActive into MenuController (composition-local state -> StateFlow, same
     // pattern App.kt already uses for currentScreen): a native Swing accelerator can't defer to a
     // focused text field or another pane the way homeKeyboardShortcuts does, so AppMenuBar attaches
@@ -541,8 +556,18 @@ fun HomeScreen() {
                 // BackHandler stand down while it's open, independent of registration order, so
                 // the drawer always wins a back press over whatever's behind it (the only case
                 // where the two could otherwise race is Dual + the search bar open + the drawer
-                // open).
-                BackHandler(enabled = backAction != HomeBackAction.None && !drawerState.isOpen) { goBack() }
+                // open). Both handlers below are composed unconditionally with mutually exclusive
+                // `enabled` flags: closing the search bar stays a plain back, while popping the
+                // reader (PopPane, PaneLayout.Single only) previews the article list behind it
+                // during Android's predictive back gesture and commits through goBack(). It also
+                // stands down while a committed gesture is still animating out (acceptsNewGesture),
+                // so a second back can't pop past the article list.
+                BackHandler(enabled = backAction == HomeBackAction.CloseSearchBar && !drawerState.isOpen) { goBack() }
+                PredictiveBackHandler(
+                    enabled = backAction == HomeBackAction.PopPane &&
+                        !drawerState.isOpen &&
+                        readerBackAccepting,
+                ) { progress -> readerBack.handle(progress) }
 
                 if (layout == PaneLayout.Triple) {
                     // Dual/Triple keep the selection highlight: the selected row's pane stays on
@@ -663,7 +688,14 @@ fun HomeScreen() {
                         // LocalRowSelectionVisible's own KDoc. Dual keeps it: both panes it shows
                         // stay on screen throughout.
                         CompositionLocalProvider(LocalRowSelectionVisible provides (layout != PaneLayout.Single)) {
-                        NarrowPaneRow(visible, maxWidth, Modifier.fillMaxSize(), paneState) { pane, paneModifier ->
+                        NarrowPaneRow(
+                            visible,
+                            maxWidth,
+                            Modifier.fillMaxSize(),
+                            paneState,
+                            listBehind = readerBackListBehind,
+                            backGesture = { readerBack.gesture },
+                        ) { pane, paneModifier ->
                             when (pane) {
                                 HomePane.FeedList ->
                                     error("The feed list is a drawer at a narrow PaneLayout, never a NarrowPaneRow pane.")
@@ -702,7 +734,7 @@ fun HomeScreen() {
                                         vm.setSearchBarVisible(true)
                                         vm.requestSearchFocus()
                                     },
-                                    returnRipplePulse = articleReturnRipplePulse,
+                                    returnRipplePulse = readerBackListPulse(articleReturnRipplePulse, readerBackListBehind),
                                     onAddFeedClick = { openAddFeed() },
                                     onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
                                     onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
