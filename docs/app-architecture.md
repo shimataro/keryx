@@ -466,7 +466,11 @@ of which title-slot content is composed. (The native iOS reader's toolbar omits 
 it would truncate beside the four actions on a phone — and the name leads the byline in the
 article's own header instead, via `articleMetaText`'s `feedName`, behind the feed's favicon (`wrapArticleHtml`'s `metaIconUrl` — an `<img>` the WebView loads itself, dropped on failure); each pager page resolves it from
 its own row's `feed_id`, so a neighbour in All Feeds names its own feed. macOS keeps the toolbar
-name.)
+name. Compose follows the same platform split: on a touch-primary platform (Android) the toolbar's
+title slot stays empty and `ArticleDetailPaneContent` names the feed in the byline instead, each
+page looking its feed up by `feed_id` in a map built from `HomeViewModel.structuralFeeds` — keyed
+by the resolved name and favicon, so an unrelated feeds emission never rebuilds a page's document;
+desktop keeps the toolbar name.)
 
 **`color-scheme` alone is not enough on Android.** `android.webkit.WebView`'s default style,
 `Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
