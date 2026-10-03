@@ -478,8 +478,10 @@ Compose も同じプラットフォーム区分に従う: タッチ主体のプ�
 スクロールバーは描画エンジンではなく Android の**View フレームワーク自身**が描く——
 `color-scheme` を含むいかなる CSS もそこには届かない。そのサムはプラットフォーム自身の
 drawable で、ホストする Activity のテーマに対して解決された `?attr/colorControlNormal` で
-ティントされる。`:androidApp` はそのテーマを固定で `Theme.Material.Light.NoActionBar` にしている
-（アプリのライト/ダーク設定は OS とは独立した自前の設定のため）。何もしなければサムは常に
+ティントされる。そのテーマは `:androidApp` の `Theme.Keryx` で、プラットフォームの
+`Theme.Material.Light.NoActionBar`（*OS* がダークモードのときは `values-night/` の `Theme.Material.NoActionBar`。
+コールドスタートで白いウィンドウが一瞬表示されるのを防ぐためのもの）だが、アプリ自身のライト/ダーク設定は
+OS とは独立している。何もしなければサムは常に
 ライトテーマの暗いグレーのままとなり、ダークなリーダー背景の上ではほとんど見えない。
 `platform/NativeWebViewScrollbar.kt` の `setNativeWebViewScrollbarColor` がこれを直接修正する:
 Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／

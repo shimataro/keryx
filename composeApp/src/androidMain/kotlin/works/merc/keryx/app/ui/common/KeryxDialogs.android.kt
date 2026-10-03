@@ -26,6 +26,8 @@ import androidx.compose.ui.window.DialogProperties
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
+import works.merc.keryx.app.ui.theme.LocalAppDarkTheme
+import works.merc.keryx.app.ui.theme.SyncSystemBarAppearance
 
 /**
  * Android [KeryxAlertDialog]: a plain M3 [AlertDialog] — none of the desktop actual's `DialogWindow`
@@ -145,6 +147,9 @@ actual fun KeryxTabDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        // This Dialog is a window of its own, so the Activity window's system-bar appearance
+        // (set by ProvidePlatformInteraction) does not carry over — apply the same one here.
+        SyncSystemBarAppearance(LocalAppDarkTheme.current)
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surfaceContainerLow,

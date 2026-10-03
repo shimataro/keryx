@@ -476,9 +476,10 @@ desktop keeps the toolbar name.)
 `Widget.WebView`, sets `scrollbars="horizontal|vertical"`, so its root-frame scrollbar is drawn by
 the Android **View framework**, not by the rendering engine — no CSS, including `color-scheme`,
 reaches it. Its thumb is the platform's own drawable, tinted `?attr/colorControlNormal` resolved
-against the hosting Activity's theme, which `:androidApp` fixes to
-`Theme.Material.Light.NoActionBar` (the app's light/dark setting is its own, independent of the
-OS). Left alone, the thumb stays a light-theme dark grey over a dark reader background — all but
+against the hosting Activity's theme, `:androidApp`'s `Theme.Keryx` — a platform
+`Theme.Material.Light.NoActionBar`, or `Theme.Material.NoActionBar` when the *OS* is in dark mode
+(`values-night/`, which exists so a cold start doesn't flash a white window) — while the app's own
+light/dark setting is independent of the OS. Left alone, the thumb stays a light-theme dark grey over a dark reader background — all but
 invisible. `platform/NativeWebViewScrollbar.kt`'s `setNativeWebViewScrollbarColor` fixes this
 directly: on Android (API 29+ only — `setVerticalScrollbarThumbDrawable`/
 `setHorizontalScrollbarThumbDrawable` have no public equivalent below it) it replaces both the

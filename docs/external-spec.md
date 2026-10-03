@@ -159,7 +159,12 @@ data exists in the cloud it is automatically merged (imported) during the initia
   fallback — plus `values-ja/strings.xml` for Japanese, same key set). Selected according to system locale,
   falling back to English if the system locale isn't one of the two. The SwiftUI app follows the same rule
   (its String Catalog is generated from these files and its development language is English).
-- Font size setting (reflected in `LocalDensity` fontScale).
+- Font size setting (reflected in `LocalDensity` fontScale). It is applied on top of the OS's own font
+  size rather than replacing it — the app setting multiplies the system font scale — so text enlarged
+  system-wide stays enlarged in Keryx. On Android 14+, the OS's nonlinear scaling (large text grows
+  less than small text) still applies, evaluated for the combined scale.
+- On Android, the status and navigation bar icons follow the in-app light/dark setting (including in
+  the settings screen), not the OS's.
 
 ## 9. UI Direction
 

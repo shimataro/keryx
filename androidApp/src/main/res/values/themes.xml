@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The window theme shown before Compose draws its first frame (cold start). values-night/
+     defines the same-named theme for a device in dark mode, so a dark-mode launch no longer flashes
+     a white window first. windowBackground is the app's fallback light `surface`
+     (keryxSurfaceColor in ui/theme/KeryxTheme.kt: M3's default light surface, #FEF7FF); the
+     in-app light/dark setting is applied once Compose takes over. Platform themes only — no
+     AppCompat dependency. -->
+<resources>
+    <style name="Theme.Keryx" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/keryx_window_background</item>
+    </style>
+
+    <color name="keryx_window_background">#FFFEF7FF</color>
+</resources>

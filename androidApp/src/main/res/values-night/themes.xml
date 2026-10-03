@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark-mode counterpart of values/themes.xml: the same-named theme on the platform dark parent,
+     with windowBackground set to the app's fallback dark `surface` (keryxSurfaceColor in
+     ui/theme/KeryxTheme.kt: M3's default dark surface, #141218). -->
+<resources>
+    <style name="Theme.Keryx" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/keryx_window_background</item>
+    </style>
+
+    <color name="keryx_window_background">#FF141218</color>
+</resources>

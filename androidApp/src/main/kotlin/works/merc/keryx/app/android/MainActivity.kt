@@ -52,6 +52,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Defaults (bar icons following the OS dark mode) only until the first composition:
+        // the Android ProvidePlatformInteraction then re-applies it keyed on the in-app theme
+        // (ui/theme/SystemBarAppearance.android.kt).
         enableEdgeToEdge()
         setContent {
             App()
