@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.platform.NativeMenuEntry
+import works.merc.keryx.app.platform.NativeMenuItem
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_move_down
 import works.merc.keryx.app.resources.home_move_up
@@ -128,36 +130,54 @@ internal fun DragHandle() {
     )
 }
 
+/** One reorder step a row offers without dragging: its localized [label] and what it [run]s. */
+internal data class ReorderMove(val label: String, val run: () -> Unit)
+
 /**
- * The assistive-technology counterpart of [DragHandle], applied to the whole row band rather than
- * to the handle icon (which is purely decorative, and whose drag is raw pointer input —
- * `feedListReorderDrag` — that a screen reader cannot perform at all): a "move up" / "move down"
- * custom action per direction that is actually available, running the same
- * `HomeViewModel.moveFeed`/`reorderFolders` mutation a completed drop would.
+ * The reorder steps a row offers without a drag: "move up" / "move down", one per direction that is
+ * actually available, running the same `HomeViewModel.moveFeed`/`reorderFolders` mutation a
+ * completed drop would. This is the single source both non-drag routes are built from — the
+ * assistive-technology actions ([reorderAccessibilityActions]) and the long-press menu entries
+ * ([reorderMenuEntries]) — so they cannot disagree on availability, label or effect.
  *
  * Both labels are shared by feed and folder rows — the direction, not the kind of row being moved,
  * is what the label has to say. A direction whose callback is `null` (the row is already first or
- * last **within its own reorder scope** — see `reorderTargetWithinScope`) exposes no action for
- * that direction at all, rather than one that would do nothing.
+ * last **within its own reorder scope** — see `reorderTargetWithinScope`) yields no move for that
+ * direction at all, rather than one that would do nothing.
  *
  * @param enabled Gated by the caller on `isTouchPrimary`, exactly like [DragHandle] itself: these
- *   actions exist for the platform whose reorder gesture starts from that handle. Checked *before*
- *   resolving [moveUpLabel]/[moveDownLabel] below — desktop always passes `false` here, so without
- *   this ordering every visible feed/folder row would resolve two `stringResource` slots on every
- *   recomposition (e.g. every row, on every frame of a drag) purely to discard both immediately.
+ *   moves exist for the platform whose reorder gesture starts from that handle. Checked *before*
+ *   resolving the labels below — desktop always passes `false` here, so without this ordering every
+ *   visible feed/folder row would resolve two `stringResource` slots on every recomposition (e.g.
+ *   every row, on every frame of a drag) purely to discard both immediately.
  */
 @Composable
-internal fun Modifier.reorderAccessibilityActions(
+internal fun reorderMoves(
     enabled: Boolean,
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
-): Modifier {
-    if (!enabled || (onMoveUp == null && onMoveDown == null)) return this
+): List<ReorderMove> {
+    if (!enabled || (onMoveUp == null && onMoveDown == null)) return emptyList()
     val moveUpLabel = stringResource(Res.string.home_move_up)
     val moveDownLabel = stringResource(Res.string.home_move_down)
-    val actions = buildList {
-        onMoveUp?.let { move -> add(CustomAccessibilityAction(moveUpLabel) { move(); true }) }
-        onMoveDown?.let { move -> add(CustomAccessibilityAction(moveDownLabel) { move(); true }) }
+    return buildList {
+        onMoveUp?.let { add(ReorderMove(moveUpLabel, it)) }
+        onMoveDown?.let { add(ReorderMove(moveDownLabel, it)) }
     }
+}
+
+/**
+ * The assistive-technology counterpart of [DragHandle], applied to the whole row band rather than
+ * to the handle icon (which is purely decorative, and whose drag is raw pointer input —
+ * `feedListReorderDrag` — that a screen reader cannot perform at all): a custom action per [moves]
+ * entry.
+ */
+internal fun Modifier.reorderAccessibilityActions(moves: List<ReorderMove>): Modifier {
+    if (moves.isEmpty()) return this
+    val actions = moves.map { move -> CustomAccessibilityAction(move.label) { move.run(); true } }
     return this.semantics { customActions = actions }
 }
+
+/** The long-press menu entries for [moves] — see [reorderMoves]. Empty when there are none. */
+internal fun reorderMenuEntries(moves: List<ReorderMove>): List<NativeMenuEntry> =
+    moves.map { move -> NativeMenuItem(move.label, onClick = move.run) }

@@ -297,6 +297,7 @@ internal fun FolderGroupHeader(
         onToggleCollapse()
     }
 
+    val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
     // Always unpaired: no folder ever checks the boundary before the *next* folder from its own
@@ -322,14 +323,14 @@ internal fun FolderGroupHeader(
     Row(
         Modifier.fillMaxWidth()
             .testTag(folderRowTestTag(folder.id))
-            .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
+            .reorderAccessibilityActions(reorderMoves)
             .listRowClickable(rowInteraction, selected, onClick)
             .nativeContextMenu(
                 items = {
                     listOf(
                         NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
                         NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
-                    )
+                    ) + if (reorderMoves.isEmpty()) emptyList() else listOf(NativeMenuSeparator) + reorderMenuEntries(reorderMoves)
                 },
                 onOpen = { if (!selected) onClick() },
             )
@@ -535,6 +536,7 @@ internal fun FeedRow(
     val siteUrlCopyable = hasUsableUrl(feed.site_url)
     val siteUrlOpenable = canOpenInBrowser(feed.site_url)
     val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
+    val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
     val rowInteraction = remember { MutableInteractionSource() }
     val currentBoundary = activeBoundaryState.value
     // Both edges, not just the last row's: for any feed but the last in its group, the row after
@@ -549,7 +551,7 @@ internal fun FeedRow(
     Row(
         Modifier.fillMaxWidth()
             .testTag(feedRowTestTag(feed.id))
-            .reorderAccessibilityActions(isTouchPrimary, onMoveUp, onMoveDown)
+            .reorderAccessibilityActions(reorderMoves)
             .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
             .nativeContextMenu(
                 items = {
@@ -585,6 +587,7 @@ internal fun FeedRow(
                                 add(NativeMenuItem(newFolderLabel) { onCreateNewFolderForFeed() })
                             },
                         ),
+                        *reorderMenuEntries(reorderMoves).toTypedArray(),
                         NativeMenuSeparator,
                         NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
                         NativeMenuItem(copySiteUrlLabel, enabled = siteUrlCopyable) { onCopySiteUrl() },
