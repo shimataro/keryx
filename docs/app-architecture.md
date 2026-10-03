@@ -140,7 +140,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     brings different rows into view — the same estimate Android's own lists make, and accepted for
     the same reason: it's a non-interactive indicator, not a precise position),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
-    static Context holder set once from KeryxApplication.onCreate), PlatformModule (Ktor OkHttp
+    static Context holder set once from KeryxApplication.onCreate, which also weakly tracks the
+    resumed Activity so BrowserOpener can launch an http(s) link's Custom Tab — androidx.browser —
+    from it rather than from the application context; the launch kind itself is commonMain's pure
+    `browserLaunchKind`), PlatformModule (Ktor OkHttp
     engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
     exists — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
     CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead

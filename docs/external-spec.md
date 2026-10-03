@@ -126,6 +126,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   action stays visible but disabled on every route (toolbar, menu bar, shortcut, context menu), while "Copy URL"
   still works for any non-empty link. An article's link comes from the feed unvalidated, so this keeps a
   `file:`, `javascript:` or custom-scheme link from launching another application.
+  On Android, an `http`/`https` link opens in a Custom Tab — the user's default browser's in-app tab,
+  themed to the app's own light/dark setting and offering the browser's share action — so Back returns
+  straight to the app; where no installed browser supports Custom Tabs, it opens in the default browser
+  instead.
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols

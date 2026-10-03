@@ -130,7 +130,9 @@
     どの行が画面に入るかでつまみの長さがわずかに揺れる——Android 自身の一覧が使うのと同じ推定であり、
     理由も同じ: これは非操作のインジケーターであって正確な位置指示ではないため受け入れる）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
-    で一度だけ設定される静的 Context ホルダ）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
+    で一度だけ設定される静的 Context ホルダ。再開中の Activity も弱参照で追跡しており、BrowserOpener は
+    http(s) リンクの Custom Tab（androidx.browser）を application context ではなくその Activity から
+    起動する。起動方法の判定自体は commonMain の純粋関数 `browserLaunchKind`）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
     プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
     Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
     CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
