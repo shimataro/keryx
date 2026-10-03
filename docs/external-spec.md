@@ -400,9 +400,9 @@ than the scoped refresh above: it refreshes every feed whatever is selected, fol
 when one is connected, with the indicator staying up until both have finished; it is disabled while
 there are no feeds. It takes the place of a Refresh All button in the iOS navigation bar, which keeps
 only sync (when a cloud is connected), add-feed and settings. This is how Mail's mailbox list is
-refreshed, and it leaves the bar's limited room to the other actions. Android's feed-list drawer has no pull — it is a modal navigation
-surface laid over the article list, and keeps its refresh button in its header — and neither does
-the macOS sidebar, which keeps its toolbar button.
+refreshed, and it leaves the bar's limited room to the other actions. Android's feed-list drawer has
+no pull — it is a modal navigation surface laid over the article list, and keeps its refresh button
+in its header. Neither does the macOS sidebar, which keeps its toolbar button.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
