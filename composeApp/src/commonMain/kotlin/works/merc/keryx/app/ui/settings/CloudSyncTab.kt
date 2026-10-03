@@ -215,6 +215,7 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
             onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
             dismissText = stringResource(Res.string.common_cancel),
+            destructive = true,
         )
     }
     confirmingSwitchTo?.let { type ->

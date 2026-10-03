@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +48,9 @@ import works.merc.keryx.app.ui.theme.SyncSystemBarAppearance
  * [AlertDialog] only constrains its text slot's height, it doesn't scroll it, so content taller
  * than the screen (a phone in landscape, a large font scale) would otherwise be clipped. A caller
  * embedding a lazy list must bound its height, as it already must on desktop.
+ *
+ * [destructive] colors the confirm [TextButton]'s content with `colorScheme.error`, M3's own
+ * convention for a dialog action that deletes or resets something.
  */
 @Composable
 actual fun KeryxAlertDialog(
@@ -60,11 +64,20 @@ actual fun KeryxAlertDialog(
     text: (@Composable () -> Unit)?,
     containerColor: Color,
     modal: Boolean,
+    destructive: Boolean,
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = confirmEnabled) {
+            TextButton(
+                onClick = onConfirm,
+                enabled = confirmEnabled,
+                colors = if (destructive) {
+                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                } else {
+                    ButtonDefaults.textButtonColors()
+                },
+            ) {
                 Text(confirmText)
             }
         },
@@ -145,7 +158,10 @@ actual fun KeryxTabDialog(
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        // decorFitsSystemWindows = false makes the dialog window itself edge-to-edge; leaving it at
+        // its default (true) would have the window inset its own content by the system bars,
+        // contradicting the safeDrawingPadding() below and leaving unpainted strips behind them.
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         // This Dialog is a window of its own, so the Activity window's system-bar appearance
         // (set by ProvidePlatformInteraction) does not carry over — apply the same one here.

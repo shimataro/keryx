@@ -1,8 +1,11 @@
 package works.merc.keryx.app.ui.settings
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -124,5 +127,38 @@ class SettingsDialogTabStateTest {
         waitForIdle()
 
         assertEquals("general", selectedTabIdState.value)
+    }
+
+    /** Stands in for an Android configuration change: the composition is torn down after its
+     *  saveable state was saved, then rebuilt from that saved state. */
+    @Test
+    fun manualTabSwitchSurvivesStateRestoration() = runDesktopComposeUiTest {
+        lateinit var selectedTabIdState: MutableState<String>
+        var registry by mutableStateOf(SaveableStateRegistry(restoredValues = null) { true })
+        var shown by mutableStateOf(true)
+
+        setContent {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                if (shown) {
+                    selectedTabIdState = rememberSelectedTabId(
+                        initialTabId = "general",
+                        tabRequestToken = 0,
+                        tabs = tabsWithCloudSync,
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        selectedTabIdState.value = "cloud_sync"
+        waitForIdle()
+
+        val saved = registry.performSave()
+        shown = false
+        waitForIdle()
+        registry = SaveableStateRegistry(restoredValues = saved) { true }
+        shown = true
+        waitForIdle()
+
+        assertEquals("cloud_sync", selectedTabIdState.value)
     }
 }

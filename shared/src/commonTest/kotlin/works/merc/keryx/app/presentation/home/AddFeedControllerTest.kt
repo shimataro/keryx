@@ -35,6 +35,35 @@ class AddFeedControllerTest {
         SubscribeOutcome(successCount = ok, failCount = failed, firstError = error, feedIds = emptyList())
 
     @Test
+    fun anInitialUrlStartsTheInputWithoutPreviewingIt() {
+        var previews = 0
+        val c = AddFeedController({ previews++; single }, { outcome(1, 0) }, initialUrl = "ex.com")
+
+        val s = c.state.value
+        assertEquals("ex.com", s.url)
+        assertNull(s.preview)
+        assertNull(s.phase)
+        assertTrue(s.confirmEnabled)
+        assertEquals(0, previews)
+    }
+
+    @Test
+    fun anInitialUrlIsPreviewedOnTheFirstSubmitLikeATypedOne() = runTest {
+        val c = AddFeedController({ single }, { outcome(1, 0) }, initialUrl = "ex.com")
+
+        assertFalse(c.submit())
+
+        assertEquals(single, c.state.value.preview)
+        assertEquals("https://ex.com/feed.xml", c.state.value.url)
+    }
+
+    @Test
+    fun theInputIsEmptyByDefault() {
+        val c = AddFeedController({ single }, { outcome(1, 0) })
+        assertEquals("", c.state.value.url)
+    }
+
+    @Test
     fun confirmIsOnlyEnabledForANonBlankUrlBeforeAPreview() {
         val c = AddFeedController({ single }, { outcome(1, 0) })
         assertFalse(c.state.value.confirmEnabled)

@@ -108,7 +108,9 @@ fun HomeScreen() {
     val feedListPaneWidth by layoutVm.feedListPaneWidth.collectAsState()
     val articleListPaneWidth by layoutVm.articleListPaneWidth.collectAsState()
 
-    var showAddFeed by remember { mutableStateOf(false) }
+    // Saveable so an open dialog survives an Android configuration change (rotation, multi-window
+    // resize); AddFeedDialog saves its own typed URL the same way.
+    var showAddFeed by rememberSaveable { mutableStateOf(false) }
     // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
     // float across the whole window (past the feed pane's right edge, over the article list), and a
     // composable inside FeedListPane would be painted before — and therefore under — its siblings.
@@ -761,6 +763,7 @@ internal fun PendingNotificationActionHost(
                     notifVm.clearPendingAction()
                 },
                 dismissText = stringResource(Res.string.common_cancel),
+                destructive = true,
             )
         // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
         // where that list is a screen of its own and focusing it would navigate backwards; see

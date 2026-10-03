@@ -22,7 +22,7 @@ internal fun NotificationsTabContent(vm: SettingsViewModel) {
     val settings by vm.localSettings.collectAsState()
     // The permission request itself happens in App.kt, keyed on this same setting — see its KDoc.
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        SettingsCard {
+        SettingsCard(settingRowsOnly = true) {
             SwitchRow(
                 label = stringResource(Res.string.settings_notification_enabled),
                 checked = settings.notificationEnabled,

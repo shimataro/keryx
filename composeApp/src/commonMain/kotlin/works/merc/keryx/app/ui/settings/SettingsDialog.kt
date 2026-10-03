@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -87,6 +87,8 @@ internal fun rememberSelectedTabId(
     tabRequestToken: Int,
     tabs: List<KeryxDialogTab>,
 ): MutableState<String> =
-    remember(tabRequestToken) {
+    // Saveable so the tab the user switched to survives an Android configuration change, along
+    // with the dialog itself (App.kt); a new tabRequestToken still re-initializes it.
+    rememberSaveable(tabRequestToken) {
         mutableStateOf(if (tabs.any { it.id == initialTabId }) initialTabId else tabs.first().id)
     }

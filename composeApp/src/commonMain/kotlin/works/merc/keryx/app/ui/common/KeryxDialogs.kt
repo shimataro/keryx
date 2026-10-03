@@ -24,6 +24,10 @@ import org.jetbrains.compose.resources.DrawableResource
  * dialog surface, not the caller's composition tree. Any trailing icon action next to the title
  * (e.g. "add folder"/"add tag") is a separate [titleAction] slot; when [dismissText] is non-null,
  * clicking it always just calls [onDismissRequest].
+ *
+ * @param destructive Marks [onConfirm] as a destructive action (deleting, unsubscribing, resetting
+ *   cloud data). Android renders the confirm button in `colorScheme.error`, M3's convention for a
+ *   destructive dialog action; desktop accepts it and keeps its native Swing button unchanged.
  */
 @Composable
 expect fun KeryxAlertDialog(
@@ -37,6 +41,7 @@ expect fun KeryxAlertDialog(
     text: (@Composable () -> Unit)? = null,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     modal: Boolean = true,
+    destructive: Boolean = false,
 )
 
 /** One tab in a [KeryxTabDialog]: a stable [id] used for selection/dispatch, a localized [label]

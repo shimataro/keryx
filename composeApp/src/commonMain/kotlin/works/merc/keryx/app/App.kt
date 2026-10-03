@@ -8,6 +8,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.koin.compose.koinInject
@@ -75,15 +76,16 @@ fun App() {
         }
 
         // Menu commands whose target lives in App's own composition (the About/Settings dialogs).
-        // Both dialogs are modeless windows shown over Home, tracked by boolean state here.
-        var showAbout by remember { mutableStateOf(false) }
-        var showSettings by remember { mutableStateOf(false) }
+        // Both dialogs are modeless windows shown over Home, tracked by boolean state here. Saveable
+        // (like the tab state below) so an open dialog survives an Android configuration change.
+        var showAbout by rememberSaveable { mutableStateOf(false) }
+        var showSettings by rememberSaveable { mutableStateOf(false) }
         // Which tab the settings dialog opens on, from the last released SettingsOpenRequest.
-        var settingsInitialTab by remember { mutableStateOf("general") }
+        var settingsInitialTab by rememberSaveable { mutableStateOf("general") }
         // Bumped on every explicit tab-navigation request so the dialog re-navigates even when
         // settingsInitialTab is reassigned the same value it already holds (see SettingsDialog's
         // rememberSelectedTabId, which keys off this instead of the tab id's value).
-        var settingsTabRequestToken by remember { mutableStateOf(0) }
+        var settingsTabRequestToken by rememberSaveable { mutableStateOf(0) }
 
         // Every route that opens Settings goes through the one SettingsOpenRequests router (see its
         // KDoc), which holds a request made over Setup until Home is showing. This is its single

@@ -29,13 +29,23 @@ import works.merc.keryx.app.ui.common.KeryxSettingRow
  *
  * @param modifier Applied to the outer raised surface — e.g. a `testTag` for a call site a test
  *   needs to locate directly (most callers can leave this at its default).
+ * @param settingRowsOnly Whether [content] is made up solely of [KeryxSettingRow]s (e.g.
+ *   [SwitchRow]). On a touch-primary platform those are M3 `ListItem`s that already carry their own
+ *   16dp side inset, so the card drops its own horizontal padding instead of doubling it; desktop's
+ *   rows have no inset of their own and keep the card's. Leave it `false` for any other content
+ *   (plain text, custom rows), which would otherwise touch the card's edge.
  * @param content The composable content displayed inside the card.
  */
 @Composable
-internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsCard(
+    modifier: Modifier = Modifier,
+    settingRowsOnly: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val horizontalPadding = if (settingRowsOnly && isTouchPrimary) 0.dp else 12.dp
     KeryxRaisedSurface(modifier = modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             content = content,
         )

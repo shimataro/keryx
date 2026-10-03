@@ -1256,6 +1256,15 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (WCAG 1.4.1): such a button always also carries its own glyph
   (`KeryxIcons.Delete`) plus either a label or a tooltip, and a prose
   confirmation dialog behind it.
+  **That confirmation dialog passes `KeryxAlertDialog(destructive = true)`** — as
+  does every confirmation whose action deletes or resets something (delete
+  folder/tag, unsubscribe, reset sync data, from Settings or the bell). Android's
+  `actual` paints the confirm `TextButton`'s *text* in `colorScheme.error` (a
+  text button has no container, so `errorContainer` has nothing to tint; this is
+  M3's own treatment of a destructive dialog action); desktop's `actual` ignores
+  the flag, since its confirm button is a native Swing `JButton`. The confirm
+  label itself always names the action ("Delete", "Reset"), so color is again
+  not the only signal.
 - **`SegmentedControl<T>` / `ToggleChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
