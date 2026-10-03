@@ -224,7 +224,7 @@ Feed ▸ Rename and Delete stay clickable whenever a feed-list item is selected,
 shortcuts F2 (Return on macOS) and Delete are shown, and respond, only while the feed list has
 keyboard focus and no text field is being typed into.
 
-### Adaptive layout (width) and touch input (Android)
+### Adaptive layout (width) and touch input
 
 **3-pane width (desktop's steady state).** The window can never narrow below the width all three
 panes need, so it always shows all three, with the feed list as a permanent sidebar pane. "The width
