@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -167,6 +168,11 @@ internal class FeedDragOverlayState {
  * @param lockHorizontal Whether the ghost stays at the drag host's left edge instead of following
  *   the pointer horizontally — the touch (M3) "lifted row" drag moves along the list's axis only.
  *   Drop resolution is unaffected: it only ever looks at the pointer's Y.
+ * @param onHaptic Performs a haptic of the given type. Called on lift-off
+ *   ([HapticFeedbackType.GestureThresholdActivate]), each time the insertion boundary / hovered tag
+ *   changes to a new valid target ([HapticFeedbackType.SegmentFrequentTick]) and on a drop that is
+ *   applied ([HapticFeedbackType.GestureEnd]) — never on a cancelled or rejected drop. A no-op by
+ *   default, which is what non-touch platforms pass.
  */
 internal class FeedListDragController(
     private val vm: HomeViewModel,
@@ -180,6 +186,7 @@ internal class FeedListDragController(
     private val titleOfState: State<(FeedListDragSourceKey) -> String>,
     private val overlay: FeedDragOverlayState,
     private val lockHorizontal: Boolean = false,
+    private val onHaptic: (HapticFeedbackType) -> Unit = {},
 ) {
     init {
         overlay.onCancel = ::cancel
@@ -199,6 +206,12 @@ internal class FeedListDragController(
 
     /** Last reported pointer position, local to the drag host — replayed by [refreshHover]. */
     private var lastPosition: Offset = Offset.Zero
+
+    /** The (boundary, tag) the last hover resolved to, so a haptic tick fires only on a change. */
+    private var lastHoverTarget: Pair<DropBoundary?, String?> = null to null
+
+    /** Set while [start] runs its first [move], whose hover must not tick on top of the lift-off. */
+    private var lifting = false
 
     /**
      * Determines which visible feed-list row contains [localY].
@@ -241,7 +254,13 @@ internal class FeedListDragController(
         overlay.item = item
         overlay.size = IntSize(hostBoundsState.value.width.roundToInt(), rowHeightPx)
         draggedFeedIdState.value = (item as? DraggedItem.Feed)?.feedId
-        move(pos)
+        onHaptic(HapticFeedbackType.GestureThresholdActivate)
+        lifting = true
+        try {
+            move(pos)
+        } finally {
+            lifting = false
+        }
     }
 
     /**
@@ -291,12 +310,14 @@ internal class FeedListDragController(
             activeBoundaryState.value = null
             hoveredAttachTagIdState.value = null
             overlay.hasValidTarget = false
+            tickOnTargetChange(null, null)
             return
         }
         val band = bandAt(pos.y) ?: run {
             activeBoundaryState.value = null
             hoveredAttachTagIdState.value = null
             overlay.hasValidTarget = false
+            tickOnTargetChange(null, null)
             return
         }
         val half = resolveRowHalf(pos.y, band).toShared()
@@ -305,6 +326,15 @@ internal class FeedListDragController(
         activeBoundaryState.value = boundary
         hoveredAttachTagIdState.value = tagId
         overlay.hasValidTarget = boundary != null || tagId != null
+        tickOnTargetChange(boundary, tagId)
+    }
+
+    /** Ticks when the hover moved onto a different valid target; leaving to "nothing" stays silent. */
+    private fun tickOnTargetChange(boundary: DropBoundary?, tagId: String?) {
+        val target = boundary to tagId
+        if (target == lastHoverTarget) return
+        lastHoverTarget = target
+        if (!lifting && (boundary != null || tagId != null)) onHaptic(HapticFeedbackType.SegmentFrequentTick)
     }
 
     /**
@@ -327,6 +357,7 @@ internal class FeedListDragController(
             is FeedListDropAction.AttachTag -> vm.setFeedTag(action.feedId, action.tagId, true)
             is FeedListDropAction.ReorderFolder -> vm.reorderFolders(action.draggedFolderId, action.targetFolderId)
         }
+        onHaptic(HapticFeedbackType.GestureEnd)
         return true
     }
 
@@ -337,6 +368,7 @@ internal class FeedListDragController(
 
     /** Drops every piece of drag state: the ghost, the insertion line, the tag highlight, auto-scroll. */
     private fun clear() {
+        lastHoverTarget = null to null
         overlay.item = null
         overlay.hasValidTarget = false
         draggedFeedIdState.value = null
@@ -350,6 +382,8 @@ internal class FeedListDragController(
  * Remembers a feed-list drag controller for the specified view model and list state.
  *
  * @param lockHorizontal See [FeedListDragController]'s parameter of the same name.
+ * @param onHaptic See [FeedListDragController]'s parameter of the same name. Read through
+ *   [rememberUpdatedState], so the permanently-remembered controller always calls the current one.
  * @param titleOf Resolves the current title for a draggable feed or folder.
  * @return The remembered feed-list drag controller.
  */
@@ -365,9 +399,11 @@ internal fun rememberFeedListDragController(
     dragPointerYState: MutableState<Float?>,
     overlay: FeedDragOverlayState,
     lockHorizontal: Boolean = false,
+    onHaptic: (HapticFeedbackType) -> Unit = {},
     titleOf: (FeedListDragSourceKey) -> String,
 ): FeedListDragController {
     val titleOfState = rememberUpdatedState(titleOf)
+    val onHapticState = rememberUpdatedState(onHaptic)
     return remember(vm, listState, lockHorizontal) {
         FeedListDragController(
             vm = vm,
@@ -381,6 +417,7 @@ internal fun rememberFeedListDragController(
             titleOfState = titleOfState,
             overlay = overlay,
             lockHorizontal = lockHorizontal,
+            onHaptic = { type -> onHapticState.value(type) },
         )
     }
 }

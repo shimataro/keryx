@@ -54,7 +54,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -361,6 +363,11 @@ internal fun FeedListPane(
 
     val listState = rememberLazyListState()
 
+    // Haptics are a touch affordance: a mouse drag stays silent, so non-touch platforms get a no-op.
+    val haptics = LocalHapticFeedback.current
+    val onDragHaptic: (HapticFeedbackType) -> Unit =
+        if (isTouchPrimary) { type -> haptics.performHapticFeedback(type) } else { _ -> }
+
     val dragController = rememberFeedListDragController(
         vm = vm,
         listState = listState,
@@ -372,6 +379,7 @@ internal fun FeedListPane(
         dragPointerYState = dragPointerYState,
         overlay = dragOverlay,
         lockHorizontal = isTouchPrimary,
+        onHaptic = onDragHaptic,
     ) { key ->
         when (key) {
             is FeedListDragSourceKey.Feed -> feeds.find { it.id == key.feedId }?.displayTitle().orEmpty()
