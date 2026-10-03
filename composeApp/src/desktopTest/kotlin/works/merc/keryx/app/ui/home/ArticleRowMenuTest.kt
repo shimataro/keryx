@@ -25,6 +25,7 @@ class ArticleRowMenuTest {
         unstar = "Unstar",
         copyUrl = "Copy URL",
         openInBrowser = "Open in Browser",
+        share = "Share",
         noTitleFallback = "(no title)",
         zone = TimeZone.UTC,
         stateUnread = "Unread",
@@ -47,6 +48,7 @@ class ArticleRowMenuTest {
         selectedByOpen: Boolean,
         onSetRead: (Boolean) -> Unit = {},
         onSetStarred: (Boolean) -> Unit = {},
+        onShare: (() -> Unit)? = null,
     ): List<NativeMenuEntry> = articleRowMenuEntries(
         article = article,
         selectedByOpen = selectedByOpen,
@@ -55,6 +57,7 @@ class ArticleRowMenuTest {
         onSetStarred = onSetStarred,
         onCopyUrl = {},
         onOpenInBrowser = {},
+        onShare = onShare,
     )
 
     private fun entries(
@@ -129,6 +132,42 @@ class ArticleRowMenuTest {
 
         assertEquals(listOf("Mark as unread", "Star", "---", "Open in Browser", "Copy URL"), labels)
         assertTrue(rawEntries(article(read = true), selectedByOpen = false)[2] === NativeMenuSeparator)
+    }
+
+    @Test
+    fun withoutAShareHandlerThereIsNoShareItem() {
+        // Desktop: no share sheet, so HomeScreen passes no handler and the item is left out.
+        val labels = entries(article(read = true), selectedByOpen = false).map { it.label }
+
+        assertFalse("Share" in labels)
+    }
+
+    @Test
+    fun withAShareHandlerShareComesLastAndSharesThisRow() {
+        var shared = 0
+        val raw = rawEntries(article(read = true), selectedByOpen = false, onShare = { shared++ })
+        val labels = raw.map { (it as? NativeMenuItem)?.label ?: "---" }
+
+        assertEquals(listOf("Mark as unread", "Star", "---", "Open in Browser", "Copy URL", "Share"), labels)
+        val share = raw.filterIsInstance<NativeMenuItem>().single { it.label == "Share" }
+        assertTrue(share.enabled)
+        share.onClick()
+        assertEquals(1, shared)
+    }
+
+    @Test
+    fun shareFollowsTheCopyRuleNotTheOpenRule() {
+        // canShareArticleUrl: any non-blank URL, like copying — a share hands the text over.
+        for (url in listOf("file:///etc/passwd", "/relative/path", "https://example.com/a")) {
+            val menu = rawEntries(article(read = true, url = url), selectedByOpen = false, onShare = {})
+                .filterIsInstance<NativeMenuItem>()
+            assertTrue(menu.single { it.label == "Share" }.enabled, "share for $url")
+        }
+        for (url in listOf("", "   ")) {
+            val menu = rawEntries(article(read = true, url = url), selectedByOpen = false, onShare = {})
+                .filterIsInstance<NativeMenuItem>()
+            assertFalse(menu.single { it.label == "Share" }.enabled, "share for '$url'")
+        }
     }
 
     @Test

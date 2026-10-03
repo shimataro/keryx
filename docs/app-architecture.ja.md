@@ -275,6 +275,8 @@
 | 記事行メニューの既読ラベル | `presentation/home/ArticleListModel.kt` の `articleReadAfterContextMenuOpen`（メニューを開いた時点で既読か: もともと既読か、開いたときに行が選択された） | Compose の `articleRowMenuEntries` と SwiftUI の `ArticleRowView`（直接呼ぶ）。各 UI は、自分の開き方で行が選択されたかどうかだけを求める（macOS の SwiftUI は `ArticleRowMenuState.opensBySelecting` で、`.selectsOnContextMenu` が選択に使うのと同じポインタのホバーから求める） |
 | 記事 URL のコピー（判定） | `presentation/home/ArticleListModel.kt` の `articleUrlCopyPlan` → `ArticleUrlCopyPlan`（クリップボードに書き込むか、リーダーの ✓ を光らせるか、アプリ内で確認を出すか。最後のものは共有の `platformShowsOwnCopyConfirmation` と、そのプラットフォームで ✓ が確認になるかどうかから決まる: OS が確認を出すなら出さない、デスクトップでは ✓ が光らないときだけ、タッチ端末では毎回） | Compose の `ArticleUrlCopier.copy` と SwiftUI の `ArticleUrlCopy.perform`（`HomeObservable.copyArticleUrl`）。どちらもその結果を実行するだけ |
 | 記事 URL のコピー（Compose） | `ui/home/ArticleUrlCopier.kt` の `ArticleUrlCopier.copy`（クリップボード、リーダーの ✓ の pulse、Android のスナックバー） | リーダーのコピーボタン、⌘/Ctrl+Shift+C、メニューバー、記事行のコンテキストメニュー |
+| 記事の共有（Compose、Android） | `ui/home/ArticleSharer.kt` の `ArticleSharer`（`canShare` / `share`。どちらも `:shared` の `canShareArticleUrl` に従い、後者は `platform/ShareSheet` の expect を呼ぶ。Android は `ACTION_SEND` を `Intent.createChooser` で包む）。`platformSupportsShare` が `false` のプラットフォーム（デスクトップ）では `rememberArticleSharer` が `null` を返し、どの経路も表示しない | リーダーの共有ボタン、記事行の長押しメニュー |
+| アプリ外からのフィード追加の入力済み表示 | `ui/navigation/AddFeedRequests.kt`（`request`。Home が表示されるまで保留し、`HomeScreen` だけが取り出す） | 他の Android アプリから Keryx へ共有されたリンク（`AndroidSharedLink.kt`。URL は `:shared` の `extractSharedFeedUrl` が取り出す） |
 
 **既存の操作に経路を足す**ときは、既存のハンドラ/述語を呼ぶ。共通のものがまだない（操作の処理が 1 つの経路の中に
 ある）場合は、先にそれを切り出して他の経路をそこへ移し、それから新しい経路を足す。

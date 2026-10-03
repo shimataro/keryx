@@ -13,6 +13,7 @@ import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.App
 import works.merc.keryx.app.dispatchOAuthCallbackIfPresent
 import works.merc.keryx.app.handleOpmlOpenIfPresent
+import works.merc.keryx.app.handleSharedLinkIfPresent
 import works.merc.keryx.app.platform.AndroidAuthorizationHost
 import works.merc.keryx.app.platform.AndroidFilePickerHost
 import works.merc.keryx.app.runAndroidStartupTasks
@@ -83,8 +84,8 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * `singleTask` (see `AndroidManifest.xml`) means a `keryx://` OAuth redirect or an `.opml`
-     * "open with Keryx" reaches an already-running instance here rather than via a fresh
+     * `singleTask` (see `AndroidManifest.xml`) means a `keryx://` OAuth redirect, an `.opml`
+     * "open with Keryx" or a link shared to Keryx reaches an already-running instance here rather than via a fresh
      * [onCreate].
      */
     override fun onNewIntent(intent: Intent) {
@@ -96,15 +97,23 @@ class MainActivity : ComponentActivity() {
     /**
      * Forwards this Activity's current intent to [dispatchOAuthCallbackIfPresent] and
      * [handleOpmlOpenIfPresent] (the two `ACTION_VIEW` cases `AndroidManifest.xml` declares
-     * intent-filters for), then clears the intent's data if either claimed it. The clear matters
+     * intent-filters for), then clears the intent's data if either claimed it; and to
+     * [handleSharedLinkIfPresent] (the `ACTION_SEND` share filter), clearing the action and the
+     * shared text if it claimed the intent. The clear matters
      * because a screen rotation recreates the Activity with the *same* [getIntent] object (no new
      * [onNewIntent] call) — without clearing the data, a rotation right after handling one of
      * these would resubmit it. For the OAuth case that's harmless but pointless (nothing is still
      * listening for that `state` by then); for the OPML case it would re-import the same file and
-     * duplicate real data, so this clearing is required rather than just a courtesy.
+     * duplicate real data, so this clearing is required rather than just a courtesy. For a shared
+     * link it would reopen the Add feed dialog over whatever the user had moved on to.
      */
     private fun dispatchIncomingViewIntent(koin: Koin) {
         val current = intent ?: return
+        if (handleSharedLinkIfPresent(koin, current)) {
+            current.action = null
+            current.removeExtra(Intent.EXTRA_TEXT)
+            return
+        }
         val handled = dispatchOAuthCallbackIfPresent(koin, current.data?.toString()) ||
             handleOpmlOpenIfPresent(koin, current)
         if (handled) current.data = null

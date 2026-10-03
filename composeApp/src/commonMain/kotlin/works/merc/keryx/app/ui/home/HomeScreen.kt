@@ -29,6 +29,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,7 +57,9 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
+import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
@@ -80,6 +83,8 @@ import works.merc.keryx.app.ui.i18n.infoDialogText
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.navigation.AddFeedRequests
+import works.merc.keryx.app.ui.navigation.Screen
 
 /**
  * Renders the home screen and coordinates feed selection, article actions, pane focus, keyboard shortcuts, menu commands, feed subscriptions, and pending notification actions.
@@ -111,6 +116,25 @@ fun HomeScreen() {
     // Saveable so an open dialog survives an Android configuration change (rotation, multi-window
     // resize); AddFeedDialog saves its own typed URL the same way.
     var showAddFeed by rememberSaveable { mutableStateOf(false) }
+    // What the next Add feed dialog's input starts with (a link shared from another app, or empty),
+    // and a token bumped per open: the dialog is keyed on it, so a link shared while the dialog is
+    // already open replaces its input instead of being ignored by the dialog's own saved state.
+    var addFeedInitialUrl by rememberSaveable { mutableStateOf("") }
+    var addFeedOpenToken by rememberSaveable { mutableStateOf(0) }
+    fun openAddFeed(initialUrl: String = "") {
+        // A plain open (button, menu) of an already-open dialog keeps what the user has typed.
+        if (showAddFeed && initialUrl.isEmpty()) return
+        addFeedInitialUrl = initialUrl
+        addFeedOpenToken++
+        showAddFeed = true
+    }
+    // A link shared to Keryx from another app (AddFeedRequests' KDoc). This screen only composes
+    // while Home is current, so a request made during first-run Setup stays latched until then.
+    val addFeedRequests = koinInject<AddFeedRequests>()
+    val pendingAddFeedUrl by addFeedRequests.pending.collectAsState()
+    LaunchedEffect(pendingAddFeedUrl) {
+        addFeedRequests.release(Screen.Home)?.let { openAddFeed(it) }
+    }
     // The feed list's drag ghost is hosted here, not in FeedListPane: the chip has to be able to
     // float across the whole window (past the feed pane's right edge, over the article list), and a
     // composable inside FeedListPane would be painted before — and therefore under — its siblings.
@@ -129,6 +153,15 @@ fun HomeScreen() {
     // an Android long-press menu doesn't select its row first, so it can copy a different one), and
     // Android's "URL copied" snackbar, which therefore appears even when the reader isn't on screen.
     val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticle.value?.id }
+    // The one handler behind every "Share" route — the reader's button and the article-row context
+    // menu. Null where the platform has no share sheet (desktop), which keeps both routes off screen.
+    val articleSharer = rememberArticleSharer()
+    val shareArticleRow: ((ArticleListRow) -> Unit)? = remember(articleSharer) {
+        articleSharer?.let { sharer -> { row: ArticleListRow -> sharer.share(row.url, row.title) } }
+    }
+    val shareArticle: ((Articles) -> Unit)? = remember(articleSharer) {
+        articleSharer?.let { sharer -> { article: Articles -> sharer.share(article.url, article.title) } }
+    }
     val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
     // down to the returned-to article's own row, which plays a one-shot ripple so the user can
@@ -321,7 +354,7 @@ fun HomeScreen() {
     LaunchedEffect(Unit) {
         menuController.commands.collect { command ->
             when (command) {
-                MenuCommand.AddFeed -> showAddFeed = true
+                MenuCommand.AddFeed -> openAddFeed()
                 MenuCommand.FocusSearch -> focusSearch()
                 MenuCommand.OpenInBrowser -> openSelectedInBrowser()
                 MenuCommand.CopyUrl -> copySelectedUrl()
@@ -531,7 +564,7 @@ fun HomeScreen() {
                             dragOverlay = dragOverlay,
                             onActivated = { activatePane(HomePane.FeedList) },
                             modifier = Modifier.width(displayedFeedWidth),
-                            onAddFeedClick = { showAddFeed = true },
+                            onAddFeedClick = { openAddFeed() },
                             onTextInputFocusChange = { feedListTextInput = it },
                             renameSelectedRequestId = feedListRenameRequestId,
                             deleteSelectedRequestId = feedListDeleteRequestId,
@@ -545,9 +578,10 @@ fun HomeScreen() {
                             onActivated = { activatePane(HomePane.ArticleList) },
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
-                            onAddFeedClick = { showAddFeed = true },
+                            onAddFeedClick = { openAddFeed() },
                             onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
                             onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
+                            onShareArticle = shareArticleRow,
                         )
                         ResizableDivider(onDrag = { deltaPx ->
                             layoutVm.setArticleListPaneWidth(articleListPaneWidth + with(density) { deltaPx.toDp().value })
@@ -559,6 +593,7 @@ fun HomeScreen() {
                             copyPulse = urlCopier.pulse,
                             onCopyUrl = { urlCopier.copy(it.url, it.id) },
                             onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
+                            onShare = shareArticle,
                         )
                     }
                     }
@@ -602,7 +637,7 @@ fun HomeScreen() {
                                         focused = keyboardPane == HomePane.FeedList && keyboardNavActive,
                                         dragOverlay = dragOverlay,
                                         onActivated = { returnKeyboardFocusToRoot() },
-                                        onAddFeedClick = { showAddFeed = true },
+                                        onAddFeedClick = { openAddFeed() },
                                         onTextInputFocusChange = { feedListTextInput = it },
                                         renameSelectedRequestId = feedListRenameRequestId,
                                         deleteSelectedRequestId = feedListDeleteRequestId,
@@ -668,9 +703,10 @@ fun HomeScreen() {
                                         vm.requestSearchFocus()
                                     },
                                     returnRipplePulse = articleReturnRipplePulse,
-                                    onAddFeedClick = { showAddFeed = true },
+                                    onAddFeedClick = { openAddFeed() },
                                     onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
                                     onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
+                                    onShareArticle = shareArticleRow,
                                 )
                                 HomePane.ArticleDetail -> ArticleDetailPane(
                                     vm,
@@ -679,6 +715,7 @@ fun HomeScreen() {
                                     copyPulse = urlCopier.pulse,
                                     onCopyUrl = { urlCopier.copy(it.url, it.id) },
                                     onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
+                                    onShare = shareArticle,
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
                                     // Dual the reader is a permanent neighbor of the article list,
@@ -722,14 +759,17 @@ fun HomeScreen() {
     ForegroundAlertSnackbar(notifVm, snackbarHostState, windowFocused)
 
     if (showAddFeed) {
-        AddFeedDialog(
-            vm = vm,
-            feeds = feeds,
-            onDismiss = { showAddFeed = false },
-            // Full success closes silently — the new feed appearing in the list is the confirmation.
-            // Partial/total failure keeps the dialog open (see runSubscribe) to show what failed.
-            onSubscribed = { showAddFeed = false },
-        )
+        key(addFeedOpenToken) {
+            AddFeedDialog(
+                vm = vm,
+                feeds = feeds,
+                onDismiss = { showAddFeed = false },
+                // Full success closes silently — the new feed appearing in the list is the confirmation.
+                // Partial/total failure keeps the dialog open (see runSubscribe) to show what failed.
+                onSubscribed = { showAddFeed = false },
+                initialUrl = addFeedInitialUrl,
+            )
+        }
     }
 
     PendingNotificationActionHost(vm, notifVm, paneLayout, onFocusPane = { setFocusedPane(it) })

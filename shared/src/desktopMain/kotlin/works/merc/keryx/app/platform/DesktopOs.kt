@@ -23,6 +23,9 @@ actual val hasSystemTray = true
 /** No desktop OS shows its own clipboard-copy confirmation. */
 actual val platformShowsOwnCopyConfirmation = false
 
+/** No desktop share sheet is used: Swing has no cross-OS one, so no share route is shown. */
+actual val platformSupportsShare = false
+
 /**
  * Whether this desktop JVM is running on Windows. Gates the integrations the OS only offers there
  * (registering the `keryx://` URI scheme in the registry) and the tray implementation that avoids

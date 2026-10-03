@@ -98,6 +98,16 @@
                     android:mimeType="*/*"
                     android:pathPattern=".*\\.opml" />
             </intent-filter>
+
+            <!-- "Share" to Keryx from another app (a browser's share menu, a link in a chat): the
+                 shared text's first http(s) URL opens the Add feed dialog pre-filled, never
+                 subscribing on its own — see AndroidSharedLink.kt. text/plain only: a link is
+                 shared as plain text. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

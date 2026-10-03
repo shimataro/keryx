@@ -7,6 +7,7 @@ import works.merc.keryx.app.ui.home.HomeLayoutViewModel
 import works.merc.keryx.app.ui.home.NotificationCenterViewModel
 import works.merc.keryx.app.ui.i18n.ComposeNotificationMessages
 import works.merc.keryx.app.ui.menu.MenuController
+import works.merc.keryx.app.ui.navigation.AddFeedRequests
 import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.ui.settings.SettingsViewModel
 
@@ -23,6 +24,7 @@ val appModule: Module = module {
 
     single { MenuController() }
     single { SettingsOpenRequests() }
+    single { AddFeedRequests() }
     single<NotificationMessages> { ComposeNotificationMessages() }
 
     // ViewModels are app-scoped for this single-window desktop app.

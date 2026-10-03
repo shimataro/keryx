@@ -80,6 +80,7 @@ import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.presentation.articleMetaText
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
+import works.merc.keryx.app.presentation.home.canShareArticleUrl
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.presentation.home.readerContents
@@ -90,6 +91,7 @@ import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_content
 import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
+import works.merc.keryx.app.resources.article_share
 import works.merc.keryx.app.resources.article_star
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.article_url_copied
@@ -126,6 +128,9 @@ internal const val ARTICLE_READER_TEST_TAG = "article-reader"
  * @param onOpenInBrowser The shared "open in browser" handler ([openInBrowserIfAllowed]) the
  *   toolbar's open button calls with the displayed article. The button is enabled only for an
  *   http(s) URL ([canOpenInBrowser]); copying needs only a non-blank one.
+ * @param onShare The shared "Share" handler ([ArticleSharer.share]) the toolbar's share button calls
+ *   with the displayed article, enabled by the same [canShareArticleUrl] rule as every other share
+ *   route. `null` where the platform has no share sheet, which leaves the button out.
  */
 @Composable
 fun ArticleDetailPane(
@@ -135,6 +140,7 @@ fun ArticleDetailPane(
     copyPulse: Int = 0,
     onCopyUrl: (Articles) -> Unit = {},
     onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onShare: ((Articles) -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     // Overridable only so a desktopTest can exercise the touch-primary branch below without a real
@@ -191,6 +197,7 @@ fun ArticleDetailPane(
         copyPulse = copyPulse,
         onCopyUrl = onCopyUrl,
         onOpenInBrowser = onOpenInBrowser,
+        onShare = onShare,
         onToggleStar = { vm.toggleStarSelected() },
         onMarkUnread = { vm.markSelectedUnread() },
         onNavigateUp = onNavigateUp,
@@ -230,6 +237,7 @@ internal fun ArticleDetailPaneContent(
     copyPulse: Int = 0,
     onCopyUrl: (Articles) -> Unit = {},
     onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onShare: ((Articles) -> Unit)? = null,
     onToggleStar: () -> Unit = {},
     onMarkUnread: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
@@ -325,6 +333,7 @@ internal fun ArticleDetailPaneContent(
                 onMarkUnread = onMarkUnread,
                 onCopyUrl = { article?.let(onCopyUrl) },
                 onOpenInBrowser = { article?.let(onOpenInBrowser) },
+                onShare = onShare?.let { share -> { article?.let(share) } },
                 onNavigateUp = onNavigateUp,
             )
         }
@@ -428,8 +437,9 @@ internal fun ArticleDetailPaneContent(
 }
 
 /**
- * The detail pane's action toolbar. Always renders all four actions — star, mark unread, copy
- * URL, open in browser — rather than hiding them when [article] is `null` or lacks a usable URL,
+ * The detail pane's action toolbar. Always renders all its actions — star, mark unread, copy URL,
+ * open in browser, and (where the platform has a share sheet, i.e. [onShare] is non-null — a
+ * per-platform constant) share — rather than hiding them when [article] is `null` or lacks a usable URL,
  * per the "prefer disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an
  * unconditional toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has
  * to move.
@@ -453,14 +463,16 @@ private fun ArticleDetailToolbar(
     onMarkUnread: () -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onShare: (() -> Unit)?,
     onNavigateUp: (() -> Unit)? = null,
 ) {
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
-    // Separate rules, shared with every other route: any non-blank URL can be copied, but only an
-    // http(s) one is opened.
+    // Separate rules, shared with every other route: any non-blank URL can be copied or shared, but
+    // only an http(s) one is opened.
     val copyEnabled = hasArticle && hasUsableUrl(article.url)
     val openEnabled = hasArticle && canOpenInBrowser(article.url)
+    val shareEnabled = hasArticle && canShareArticleUrl(article.url)
 
     val titleContent: (@Composable () -> Unit)? = if (feedName != null) {
         {
@@ -524,6 +536,12 @@ private fun ArticleDetailToolbar(
             val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
             TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {
                 KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
+            }
+            if (onShare != null) {
+                val shareTooltip = stringResource(Res.string.article_share)
+                TooltipIconButton(tooltip = shareTooltip, enabled = shareEnabled, onClick = onShare) {
+                    KeryxIcon(KeryxIcons.Share, contentDescription = shareTooltip)
+                }
             }
         }
     }

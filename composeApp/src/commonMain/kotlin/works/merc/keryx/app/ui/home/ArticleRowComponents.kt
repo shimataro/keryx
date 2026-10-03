@@ -51,6 +51,7 @@ import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.presentation.home.articleReadAfterContextMenuOpen
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
+import works.merc.keryx.app.presentation.home.canShareArticleUrl
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
@@ -58,6 +59,7 @@ import works.merc.keryx.app.resources.article_mark_as_read
 import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
+import works.merc.keryx.app.resources.article_share
 import works.merc.keryx.app.resources.article_state_starred
 import works.merc.keryx.app.resources.article_state_unread
 import works.merc.keryx.app.resources.article_star
@@ -125,6 +127,7 @@ internal data class ArticleRowStrings(
     val unstar: String,
     val copyUrl: String,
     val openInBrowser: String,
+    val share: String,
     val noTitleFallback: String,
     val zone: TimeZone,
     /** The row's spoken "unread" state (see [articleRowStateDescription]). */
@@ -146,6 +149,7 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     val unstar = stringResource(Res.string.article_unstar)
     val copyUrl = stringResource(Res.string.article_copy_url)
     val openInBrowser = stringResource(Res.string.article_open_in_browser)
+    val share = stringResource(Res.string.article_share)
     val noTitleFallback = stringResource(Res.string.article_no_title)
     val stateUnread = stringResource(Res.string.article_state_unread)
     val stateStarred = stringResource(Res.string.article_state_starred)
@@ -154,7 +158,7 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
     // be days) is only picked up when this composition is recreated. Accepted: the alternative is
     // TimeZone.currentSystemDefault() — which clones the JVM default zone — per visible row per
     // composition, and article timestamps are not a clock.
-    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, noTitleFallback, stateUnread, stateStarred) {
+    return remember(markAsRead, markAsUnread, star, unstar, copyUrl, openInBrowser, share, noTitleFallback, stateUnread, stateStarred) {
         ArticleRowStrings(
             markAsRead = markAsRead,
             markAsUnread = markAsUnread,
@@ -162,6 +166,7 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
             unstar = unstar,
             copyUrl = copyUrl,
             openInBrowser = openInBrowser,
+            share = share,
             noTitleFallback = noTitleFallback,
             zone = TimeZone.currentSystemDefault(),
             stateUnread = stateUnread,
@@ -188,7 +193,11 @@ internal fun rememberArticleRowStrings(): ArticleRowStrings {
  * @param onSetStarred Called with the starred state the star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
- * @return The menu entries, in the app menu bar's Article-menu order.
+ * @param onShare Called to share the article URL ([ArticleSharer.share]); `null` where the platform
+ *   has no share sheet, which leaves the item out entirely (a per-platform constant, so the menu's
+ *   shape stays stable at any one call site).
+ * @return The menu entries, in the app menu bar's Article-menu order, then Share (which no menu bar
+ *   carries).
  */
 internal fun articleRowMenuEntries(
     article: ArticleListRow,
@@ -198,14 +207,16 @@ internal fun articleRowMenuEntries(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ): List<NativeMenuEntry> {
     val read = articleReadAfterContextMenuOpen(isRead = article.is_read == 1L, selectedByOpen = selectedByOpen)
     val starred = article.is_starred == 1L
-    // Copy and open have their own rules, shared with every other route to each: any non-blank
-    // URL can be copied, but only an http(s) one is opened.
+    // Copy, open and share have their own rules, shared with every other route to each: any
+    // non-blank URL can be copied or shared, but only an http(s) one is opened.
     val copyEnabled = hasUsableUrl(article.url)
     val openEnabled = canOpenInBrowser(article.url)
-    return listOf(
+    val shareEnabled = canShareArticleUrl(article.url)
+    return listOfNotNull(
         NativeMenuItem(
             if (read) strings.markAsUnread else strings.markAsRead,
             NativeMenuShortcut(Key.U, ctrl = true, shift = true),
@@ -221,6 +232,7 @@ internal fun articleRowMenuEntries(
         NativeMenuItem(strings.copyUrl, NativeMenuShortcut(Key.C, ctrl = true, shift = true), enabled = copyEnabled) {
             onCopyUrl()
         },
+        onShare?.let { NativeMenuItem(strings.share, enabled = shareEnabled) { it() } },
     )
 }
 
@@ -283,6 +295,8 @@ private class ContextMenuOpenSelection {
  * @param onSetStarred Called with the starred state the context menu's star item promises.
  * @param onCopyUrl Called to copy the article URL.
  * @param onOpenInBrowser Called to open the article URL in a browser.
+ * @param onShare Called to share the article URL; `null` (no share sheet on this platform) leaves the
+ *   context menu's Share item out.
  * @param onActivate Called when the context menu is opened on the already-selected row, to move
  *   keyboard focus to this pane without re-selecting it (see [articleRowContextMenuOpen]).
  * @param titleOverride An optional title to display instead of the article title.
@@ -309,6 +323,7 @@ internal fun ArticleRow(
     onSetStarred: (Boolean) -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
+    onShare: (() -> Unit)? = null,
     onActivate: () -> Unit = {},
     titleOverride: AnnotatedString? = null,
     strings: ArticleRowStrings = rememberArticleRowStrings(),
@@ -353,6 +368,7 @@ internal fun ArticleRow(
                         onSetStarred = onSetStarred,
                         onCopyUrl = onCopyUrl,
                         onOpenInBrowser = onOpenInBrowser,
+                        onShare = onShare,
                     )
                 },
                 // Reset on every open, so it only ever describes this right-click.

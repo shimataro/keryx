@@ -130,6 +130,14 @@ data exists in the cloud it is automatically merged (imported) during the initia
   themed to the app's own light/dark setting and offering the browser's share action — so Back returns
   straight to the app; where no installed browser supports Custom Tabs, it opens in the default browser
   instead.
+- **Sharing links (Android only).** An article's link can be sent to another app through the system share
+  sheet — from the reader's toolbar or the article row's long-press menu, enabled under the same rule as
+  "Copy URL" (any non-empty link), with the article's title as the share's subject. Desktop shows no share
+  action anywhere. In the other direction, a link shared *to* Keryx from another app (a browser's share
+  menu, say) opens the "Add feed" dialog with the first `http`/`https` URL in the shared text already
+  filled in; anything else in the text, and any other scheme, is ignored. Nothing is subscribed until the
+  user confirms in the dialog. A link shared during first-run Setup waits until Setup is done; one shared
+  while the dialog is already open replaces what was typed there.
 - Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
 - Desktop notifications, task tray residence (close minimizes to tray), notification center.
   On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
@@ -195,7 +203,8 @@ copy button shows after a URL copy appears whether the copy came from that butto
 ⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu; likewise "Sync now" is enabled
 in the feed list toolbar, the Feed menu and Settings ▸ Cloud sync at exactly the same moments
 (disabled during a connect, disconnect, reset or initial sync, while anything else is running, and
-after a sign-in expires).
+after a sign-in expires). "Share" (Android only — §7) is enabled in the reader's toolbar and the
+article row's long-press menu under the same rule, and opens the same system share sheet from both.
 
 Routes may differ only in *which item* they act on — a context menu acts on the row it was opened
 on — never in what happens to it; feedback tied to a particular on-screen control appears whenever
@@ -254,7 +263,7 @@ selection a search narrows stays on screen while searching. The native iOS reade
 no room for a feed name beside its four actions on a phone, so it does not show one; the feed
 name leads the article's own byline ("feed · author · date"), behind its favicon, instead, and each swiped-to article
 names its own feed. Android's reader does the same, at every width (its toolbar likewise has no room
-beside a back button and four actions on a phone, and the name stays in one place on a device
+beside a back button and five actions on a phone, and the name stays in one place on a device
 whose layout changes on rotation); desktop and the native macOS reader keep the feed name in the
 toolbar. The
 native macOS app is always 3-pane and keeps the field in the sidebar, as above.

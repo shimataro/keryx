@@ -139,6 +139,8 @@
     <string name="article_state_starred">スター付き</string>
     <string name="article_copy_url">URL をコピー</string>
     <string name="article_url_copied">URL をコピーしました</string>
+    <string name="article_share">共有</string>
+    <string name="article_share_chooser_title">記事を共有</string>
     <string name="article_prev">前の記事</string>
     <string name="article_next">次の記事</string>
     <string name="article_reader_simple_notice">この環境では WebView を利用できないため、簡易表示にしています</string>

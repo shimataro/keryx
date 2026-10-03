@@ -54,6 +54,15 @@ fun articleUrlCopyPlan(
 }
 
 /**
+ * Whether an article with [url] can be shared through the platform's share sheet — the single
+ * enablement rule *and* guard for every route of "Share" (the reader's toolbar button, the article
+ * row's context menu). The same rule as copying ([hasUsableUrl]): sharing hands the URL over as
+ * plain text, exactly as a copy would, so no scheme is singled out. Whether a platform offers the
+ * action at all is a separate, per-platform fact (`platform/PlatformOs.kt`'s `platformSupportsShare`).
+ */
+fun canShareArticleUrl(url: String?): Boolean = hasUsableUrl(url)
+
+/**
  * Whether [url] may be opened in the external browser — the single enablement rule *and* guard for
  * every route of "Open in browser" (toolbar button, menu bar, keyboard shortcut, context menu), for
  * an article's URL or a feed's site URL alike: only http(s) qualifies.

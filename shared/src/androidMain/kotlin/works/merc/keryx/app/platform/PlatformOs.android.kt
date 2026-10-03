@@ -19,6 +19,9 @@ actual val hasSystemTray: Boolean = false
  * the commonMain `expect`'s KDoc for the Google guidance this follows. */
 actual val platformShowsOwnCopyConfirmation: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
+/** Android's system share sheet (`ACTION_SEND`) — see the commonMain `expect`'s KDoc. */
+actual val platformSupportsShare: Boolean = true
+
 /** Android ships a single universal APK (no per-ABI split — see `androidApp/build.gradle.kts`), so
  * this value is never consulted by [works.merc.keryx.app.domain.selectUpdateAsset]. Implemented
  * honestly anyway (from the device's primary ABI) rather than a hardcoded placeholder, since the
