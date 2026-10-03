@@ -132,6 +132,9 @@ struct ArticleDetailView: View {
                     }
                 }
             }
+            // iOS renders a toolbar icon as a template in the button's tint and ignores the icon's own
+            // `foregroundStyle`, so the starred state needs the tint as well (macOS honors either).
+            .tint(article?.is_starred == 1 ? .yellow : nil)
             .disabled(article == nil)
             .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
 
