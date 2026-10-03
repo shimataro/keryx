@@ -65,6 +65,7 @@ struct ArticleDetailView: View {
         }
     }
 
+    #if os(macOS)
     private var feedName: String? { home.selectedFeedName }
     private var feedFaviconUrl: String? { home.selectedFeedFaviconUrl }
 
@@ -88,6 +89,7 @@ struct ArticleDetailView: View {
             .labelStyle(.titleAndIcon)
         }
     }
+    #endif
 
     // MARK: - Toolbar
 
@@ -103,16 +105,20 @@ struct ArticleDetailView: View {
         // Default placement: `.navigation` items of this column land at the end of the *previous*
         // column's toolbar section instead of at the start of this one.
         // Plain label, not a control: hide the shared glass capsule macOS 26 groups items into.
-        if #available(macOS 26, iOS 26, *) {
+        // macOS only: an iPhone toolbar has no room for the name beside four actions and would
+        // truncate it, so iOS shows it in the article's own byline instead (`ReaderPageView`).
+        #if os(macOS)
+        if #available(macOS 26, *) {
             ToolbarItem { feedHeader }
                 .sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItem { feedHeader }
         }
 
-        if #available(macOS 26, iOS 26, *) {
+        if #available(macOS 26, *) {
             ToolbarSpacer(.flexible)
         }
+        #endif
 
         // `Label`s rather than bare icons so the toolbar's overflow menu (at a narrow width) gets titles;
         // the toolbar itself still renders them icon-only.

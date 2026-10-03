@@ -42,17 +42,22 @@ fun formatTimestamp(epochMillis: Long?, zone: TimeZone): String {
 }
 
 /**
- * The reader's byline: `"author · formatted timestamp"`, dropping either half when it is absent —
+ * The reader's byline: `"feed · author · formatted timestamp"`, dropping any part that is absent —
  * shared so every UI (Compose's `ArticleDetailPane.kt`, the Apple app's `ArticleDetailView.swift`)
  * renders the same meta line rather than re-deriving it.
  *
  * @param author The article's author, if available.
  * @param publishedAt The article's publication time in Unix milliseconds, if available.
- * @return The formatted metadata line, or an empty string when neither value is available.
+ * @param feedName The owning feed's display title, for a UI whose toolbar has no room to show it
+ *   (the iOS reader); null where the toolbar already does.
+ * @return The formatted metadata line, or an empty string when no value is available.
  */
-fun articleMetaText(author: String?, publishedAt: Long?): String =
-    listOfNotNull(author?.takeIf { it.isNotBlank() }, formatTimestamp(publishedAt).ifBlank { null })
-        .joinToString(" · ")
+fun articleMetaText(author: String?, publishedAt: Long?, feedName: String? = null): String =
+    listOfNotNull(
+        feedName?.takeIf { it.isNotBlank() },
+        author?.takeIf { it.isNotBlank() },
+        formatTimestamp(publishedAt).ifBlank { null },
+    ).joinToString(" · ")
 
 private fun StringBuilder.appendTwoDigits(value: Int) = appendNumber(value, 2)
 

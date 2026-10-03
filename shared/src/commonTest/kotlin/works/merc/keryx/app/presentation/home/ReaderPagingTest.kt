@@ -131,7 +131,7 @@ class ReaderPagingTest {
 
     @Test
     fun readerContentsAddsTheSelectedArticleOverTheCache() {
-        val cached = mapOf("a1" to ArticleReaderRow("a1", "u1", "cached title", null, 1L, "<p>old</p>", null))
+        val cached = mapOf("a1" to ArticleReaderRow("a1", "f1", "u1", "cached title", null, 1L, "<p>old</p>", null))
         val result = readerContents(cached, selected = article("a2"))
 
         assertTrue("a1" in result)
@@ -143,7 +143,7 @@ class ReaderPagingTest {
         // The cache does not skip the selected article, so a stale copy of it can coexist with the
         // ViewModel's own authoritative row. The selected row must win, or the page on screen would
         // show a body that could be older than what selectArticle already loaded.
-        val cached = mapOf("a1" to ArticleReaderRow("a1", "u1", "stale", null, 1L, "<p>stale</p>", null))
+        val cached = mapOf("a1" to ArticleReaderRow("a1", "f1", "u1", "stale", null, 1L, "<p>stale</p>", null))
         val result = readerContents(cached, selected = article("a1"))
 
         assertEquals("<p>content a1</p>", result.getValue("a1").content)
@@ -151,7 +151,7 @@ class ReaderPagingTest {
 
     @Test
     fun readerContentsReturnsTheCacheUnchangedWhenNothingIsSelected() {
-        val cached = mapOf("a1" to ArticleReaderRow("a1", "u1", "t", null, 1L, "<p>c</p>", null))
+        val cached = mapOf("a1" to ArticleReaderRow("a1", "f1", "u1", "t", null, 1L, "<p>c</p>", null))
         assertEquals(cached, readerContents(cached, selected = null))
     }
 

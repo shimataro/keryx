@@ -45,6 +45,7 @@ extension ArticleReaderRow: @retroactive @unchecked Sendable {}
 /// What `ArticleDetailView.rebuildDocument` keys its rebuild on.
 struct ReaderDocumentKey: Hashable {
     let article: ObjectIdentifier?
+    let feedName: String?
     let colorScheme: ColorScheme
     let fontSizeScale: Double
 }

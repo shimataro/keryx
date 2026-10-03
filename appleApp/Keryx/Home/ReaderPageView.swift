@@ -16,6 +16,8 @@ struct ReaderPageView: View {
     /// Identifies the instance `row` came from, so the document is rebuilt only when a new one is
     /// actually published — see `rebuildDocument()`.
     let revision: ObjectIdentifier?
+    /// The owning feed's name for the byline, where the toolbar has no room to show it (iOS); nil on macOS.
+    var feedName: String?
     let preferences: PreferencesObservable
 
     @Environment(\.colorScheme) private var colorScheme
@@ -48,6 +50,7 @@ struct ReaderPageView: View {
     private var documentKey: ReaderDocumentKey {
         ReaderDocumentKey(
             article: revision,
+            feedName: feedName,
             colorScheme: colorScheme,
             fontSizeScale: preferences.fontSizeScale
         )
@@ -89,7 +92,7 @@ struct ReaderPageView: View {
             return ReaderDocumentInputs(theme: theme, content: .placeholder)
         }
         let title = row.title.isEmpty ? L("article_no_title") : row.title
-        let meta = FormattingKt.articleMetaText(author: row.author, publishedAt: row.published_at)
+        let meta = FormattingKt.articleMetaText(author: row.author, publishedAt: row.published_at, feedName: feedName)
         let header = ReaderDocumentInputs.Header(
             title: title,
             meta: meta,
