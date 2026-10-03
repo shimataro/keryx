@@ -147,12 +147,15 @@ struct ArticleListView: View {
     /// the request does not have its system field in place on the first pass, and an assignment made
     /// before that is silently dropped — so this re-assigns until it sticks, as
     /// `HomeView.applyInitialFocus` does for the panes. Bounded, since before iOS 18 the field cannot
-    /// report its focus at all (`SearchFocusModifier`).
+    /// report its focus at all (`SearchFocusModifier`). A cancelled attempt (e.g. this list unmounted
+    /// mid-loop) leaves the request for the next list to mount; one never consumed is cleared when
+    /// the search closes (`setSearchBarVisible(false)`).
     private func focusSearchField() async {
         for _ in 0..<ArticleListView.searchFocusAttempts {
             focusedPane.wrappedValue = .search
             try? await Task.sleep(for: .milliseconds(50))
-            if Task.isCancelled || focusedPane.wrappedValue == .search { break }
+            if Task.isCancelled { return }
+            if focusedPane.wrappedValue == .search { break }
         }
         home.viewModel.consumeSearchFocusRequest()
     }
