@@ -144,8 +144,11 @@
     `Checkbox`/`SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip`（コンポーネント）を
     そのまま使う — 詳細は下記「アイコンセット」参照）,
     KeryxTabDialog（ほぼ全画面のモーダル `Dialog`。エッジツーエッジ対応で safe-drawing padding 済み。
-    本物の M3 `TopAppBar`（戻る矢印＋画面名）を、デスクトップ側の自前タブバーとは異なる本物の M3
-    `PrimaryScrollableTabRow`/`Tab` の上に載せる — 詳細は `ui-guidelines` スキル参照）,
+    タブ行は持たず、Android 自身の設定の作法に従う: M3 `ListItem`（アイコン＋名前）のカテゴリ一覧で、
+    行から各カテゴリを詳細画面として開く。どちらの画面も本物の M3 `TopAppBar` を載せる — 一覧では
+    戻る矢印＋画面名、詳細ではカテゴリ名。選択が `null` なら一覧で、矢印とシステムの戻る（ダイアログ内の
+    `BackHandler`）は 1 つの戻る処理 `goBackInTabDialog` を共有する — 詳細 → 一覧、一覧 → 閉じる。
+    デスクトップのタブバーとは異なる — 詳細は `ui-guidelines` スキル参照）,
     PlatformTheme（`platformShapes` は M3 既定の `Shapes()`、`ProvidePlatformInteraction` は
     no-op — `LocalIndication`/`LocalRippleConfiguration` を M3 既定のままにすることで、あらゆる
     `clickable` と M3 部品が本物のリップルを持つようになる。external-spec.ja.md の「UI 方針」参照）、
@@ -267,7 +270,7 @@
 | 操作 | 唯一の実装 | それを呼ぶ経路 |
 | --- | --- | --- |
 | 今すぐ同期 | `presentation/ManualSync.kt`（`canSyncNow` / `syncNow`。加えて、操作を出すかどうかの `connected` と、ツールチップが示す無効の理由 `disabledByAuth`）。実装は `CloudSyncController` | Home のツールバーのボタンとフィードメニュー（`HomeViewModel` 経由）、SwiftUI の `Commands`、設定 ▸ クラウド同期 |
-| 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
+| 設定を開く | `ui/navigation/SettingsOpenRequests.kt`（`request` / `requestIfReachable`。Home が表示されるまで保留し、解放するのは `App.kt` だけ。タブが `null` なら既定の入口 — Android はカテゴリ一覧、デスクトップは先頭タブ — で、通知・アップデート項目・OPML はタブを指定する） | アプリケーションメニューの「設定…」/ ⌘,（と Android のフィード一覧の設定行）、通知の `ShowSettingsTab` 行、トレイ / Help メニューの更新項目、OPML のインポート/エクスポート |
 | メニュー項目の有効/無効 | `presentation/menu/MenuState.kt` の `computeMenuUiState` → `MenuUiState` のフラグ | デスクトップのメニューバー（`AppMenuBar.kt`）と SwiftUI の `Commands`（`HomeCommands.swift`、`KeryxSdk.menuState` 経由） |
 | 既読 / スターの設定 | `HomeViewModel.setRead` / `setStarred`（指定した状態の書き込みと、その楽観的なピン留め） | 特定の状態を設定するすべての経路（例: 記事行のコンテキストメニュー） |
 | OPML のインポートを終える | `presentation/settings/OpmlTransferController.kt` の `importBegun`（`tryBegin` で確保済みのインポートを実行し、必ず `finish` する。キャンセル時は結果なし） | `OpmlTransferController.importDocument`、Compose の `SettingsViewModel.importOpml`（ファイル選択の後）、SwiftUI の `OpmlTransferObservable`（パネルの `importOpml(from:)` と、開かれたファイルの `importDocument(_:)`。コントローラが断った要求は捨てずに戻す） |

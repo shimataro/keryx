@@ -1529,9 +1529,18 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   - **Desktop only.** The Settings dialog's tab switcher (desktop's `KeryxTabDialog`
     actual in `KeryxDialogs.desktop.kt`) now uses Material3's
     `SecondaryScrollableTabRow`/`Tab` via the shared `KeryxDialogTabs` helper, making
-    it a standard Compose Multiplatform component just like Android's `KeryxTabDialog`
-    actual uses `PrimaryScrollableTabRow`/`Tab` — only the surrounding dialog shape
-    and tab-row variant differ by platform. The previous hand-rolled flat
+    it a standard Compose Multiplatform component. Android's `KeryxTabDialog` actual has
+    no tab row at all: it follows Android's own settings pattern — a category list of M3
+    `ListItem`s (the tab's icon as `leadingContent`, its label as the headline, M3's 56dp
+    one-line height) on `surfaceContainerLow`, each row opening that category as a detail
+    screen whose `TopAppBar` is titled with the category's name; the list's bar carries the
+    screen's own name. A `null` `selectedTabId` is the list (desktop shows its first tab
+    for it). Back is one step, `goBackInTabDialog` (detail → list, list → dismissed), called
+    by both the bar's back arrow and the system back (a `BackHandler` inside the `Dialog`,
+    with `dismissOnBackPress = false`) — never a second implementation per route. A route
+    that leads to one category (a notification's `ShowSettingsTab`, OPML, the update entry)
+    opens its detail directly; the plain "Open Settings" command opens the list. No
+    transition animation between the two. The previous hand-rolled flat
     `KeryxDialogTabBar` was removed. On a future SwiftUI port, replace this with a
     native NSToolbar-style preferences tab switcher rather than porting the Compose
     approximation as-is. Two earlier rounds of AWT/Swing interop (`SwingPanel` +
@@ -1577,7 +1586,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (`isTouchPrimary`) and icon + label buttons on desktop — see `ui/settings/CloudSyncTab.kt`'s
   `ProviderActionButton`, which routes both through one helper so the emphasis is expressed once,
   as an `IconButtonKind`. This is not a taste call: two labelled buttons plus the row's own name
-  need ~340-366dp of the ~288dp a phone-width settings dialog actually has, and a `Row` measures
+  need ~340-366dp of the ~288dp a phone-width settings category screen actually has, and a `Row` measures
   its non-weighted children first, so the labelled buttons take their intrinsic width and the name
   gets only the remainder — which is how the connected provider row used to wrap "OneDrive" onto
   four lines. Desktop's settings dialog is a fixed `KERYX_TAB_DIALOG_WIDTH`, so it keeps its

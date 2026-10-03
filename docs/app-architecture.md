@@ -154,9 +154,12 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
     `SingleChoiceSegmentedButtonRow`+`SegmentedButton`/`FilterChip` (components) as the Android side —
     see "Icon set" below), KeryxTabDialog (a modal, near-fullscreen `Dialog`, safe-drawing-padded
-    for edge-to-edge, topped by a real M3 `TopAppBar` (back arrow + the screen's own name) above a
-    genuine `PrimaryScrollableTabRow`/`Tab` — unlike desktop's own hand-rolled tab bar, see the
-    `ui-guidelines` skill), PlatformTheme
+    for edge-to-edge, that has no tab row: Android's own settings pattern, a category list of M3
+    `ListItem`s (icon + name) whose rows open each category as a detail screen. Both screens are
+    topped by a real M3 `TopAppBar` — back arrow + the screen's own name on the list, the
+    category's name on a detail. A `null` selection is the list; the arrow and the system back
+    (a `BackHandler` inside the dialog) share the one back step `goBackInTabDialog` — detail →
+    list, list → dismissed. Unlike desktop's tab bar, see the `ui-guidelines` skill), PlatformTheme
     (`platformShapes` = M3's own default `Shapes()`,
     `ProvidePlatformInteraction` a no-op — leaving `LocalIndication`/`LocalRippleConfiguration` at
     their M3 defaults is what gives every `clickable` and M3 component a real ripple; see "UI
@@ -278,7 +281,7 @@ Examples in the code today:
 | Action | The one implementation | Routes that call it |
 | --- | --- | --- |
 | Sync now | `presentation/ManualSync.kt` (`canSyncNow` / `syncNow`, plus `connected` — whether the action is offered — and `disabledByAuth` — the disabled reason a tooltip names), implemented by `CloudSyncController` | Home's toolbar button and Feed menu (through `HomeViewModel`), the SwiftUI `Commands`, and Settings ▸ Cloud sync |
-| Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
+| Open Settings | `ui/navigation/SettingsOpenRequests.kt` (`request` / `requestIfReachable`; latched until Home shows, released by `App.kt` alone; a `null` tab is the default entry — Android's category list, desktop's first tab — while a notification, the update entry and OPML name their tab) | The application menu's Settings… / ⌘, (and Android's feed-list settings row), a notification's `ShowSettingsTab` row, the tray / Help menu update entry, and OPML import/export |
 | Menu item enablement | `presentation/menu/MenuState.kt`'s `computeMenuUiState` → `MenuUiState` flags | The desktop menu bar (`AppMenuBar.kt`) and the SwiftUI `Commands` (`HomeCommands.swift`, via `KeryxSdk.menuState`) |
 | Set read / starred | `HomeViewModel.setRead` / `setStarred` — the explicit-state write plus its optimistic pin | Every route that sets a specific state, e.g. the article row's context menu |
 | Finish an OPML import | `presentation/settings/OpmlTransferController.kt`'s `importBegun` (run an import already held by `tryBegin`; always `finish` it, with no result when cancelled) | `OpmlTransferController.importDocument`, Compose's `SettingsViewModel.importOpml` (after the picker) and SwiftUI's `OpmlTransferObservable` (the panel's `importOpml(from:)` and an opened file's `importDocument(_:)`, which puts a request the controller refuses back rather than dropping it) |

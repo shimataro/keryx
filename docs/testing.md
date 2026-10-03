@@ -1223,7 +1223,7 @@ whether `LocalWindowInfo`'s focus flag behaves as assumed on a real device. Conf
 device/emulator:
 
 - With a cloud provider connected, launch in airplane mode: the startup sync fails and a Snackbar
-  announces it, with an action that opens the settings dialog on the sync tab.
+  announces it, with an action that opens Settings directly on the Cloud sync category's screen.
 - Subscribe to an unreachable feed URL, then refresh: the Snackbar's action lands on **that feed's
   article list**, not back on the feed list.
 - With an article open, raise an alert: the Snackbar draws above the reader's `WebView`.
@@ -1277,6 +1277,22 @@ TalkBack on an emulator:
   where a move is possible. Start renaming that row (long-press → Rename, or F2 on a hardware keyboard):
   while the editor is open, neither that row nor any other offers the move actions, and the drag handle
   does not start a drag. Close the editor (× or Enter): the actions come back.
+
+### (Android) The settings category list
+
+`SettingsEntryTest.kt`, `TabDialogBackTest.kt` and `SettingsDialogTabStateTest.kt` cover where Settings
+opens and what a back step does; the Android screens themselves need an emulator or device:
+
+- The feed list's Settings row opens the category list (titled "Settings"). Tapping a category opens its
+  screen, titled with the category's name. The top bar's back arrow and the system back (gesture and
+  3-button) both return to the list; from the list, either one closes Settings.
+- A sync-error notification's action opens the Cloud sync category's screen directly; a new-version
+  notification's action opens Updates, which checks for an update exactly once. Back from either returns
+  to the list.
+- Rotate on the list and on a category's screen: each stays where it was (including the category's
+  scroll position).
+- With TalkBack, every category row is read as one item with its name; the back arrow is read as "Back".
+- At a tablet width, the list and a category's screen fill the dialog without clipping.
 
 ### (iOS) The sidebar
 

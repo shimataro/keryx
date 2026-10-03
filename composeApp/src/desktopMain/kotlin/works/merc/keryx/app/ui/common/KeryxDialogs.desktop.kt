@@ -838,8 +838,11 @@ actual fun KeryxAlertDialog(
  * component keeps maintenance low until a future SwiftUI port can use a real NSToolbar preferences
  * switcher.
  *
+ * Desktop has no category list: a `null` [selectedTabId] (the default entry) simply shows the first
+ * tab, and [onSelectTab] is only ever called with a tab the user clicked, never with `null`.
+ *
  * @param tabs The tabs available for selection.
- * @param selectedTabId The identifier of the selected tab.
+ * @param selectedTabId The identifier of the selected tab, or `null` for the first one.
  * @param onSelectTab Called with the identifier of the tab selected by the user.
  * @param title Unused here: this actual already mirrors the selected tab's own label as the
  *   native window title (see below) instead of showing a fixed screen name — see the Android
@@ -851,14 +854,15 @@ actual fun KeryxAlertDialog(
 actual fun KeryxTabDialog(
     onDismissRequest: () -> Unit,
     tabs: List<KeryxDialogTab>,
-    selectedTabId: String,
-    onSelectTab: (String) -> Unit,
+    selectedTabId: String?,
+    onSelectTab: (String?) -> Unit,
     title: String?,
     content: @Composable (String) -> Unit,
 ) {
+    val shownTabId = selectedTabId ?: tabs.first().id
     // The window title (and, on macOS, the merged-title-bar row) mirrors the selected tab's label.
     // `title` (the fixed screen name) is intentionally unused here — see this function's KDoc.
-    val selectedLabel = tabs.firstOrNull { it.id == selectedTabId }?.label
+    val selectedLabel = tabs.firstOrNull { it.id == shownTabId }?.label
     DesktopModalWindow(
         title = selectedLabel,
         onDismissRequest = onDismissRequest,
@@ -886,7 +890,7 @@ actual fun KeryxTabDialog(
                 // Tab bar: Material3 SecondaryScrollableTabRow with shared KeryxDialogTabs items.
                 // Desktop keeps its own container choice (Secondary vs Android's Primary) and flat
                 // surface/divider styling; only the per-tab icon/label rendering is shared.
-                val selectedIndex = tabs.indexOfFirst { it.id == selectedTabId }
+                val selectedIndex = tabs.indexOfFirst { it.id == shownTabId }
                 SecondaryScrollableTabRow(
                     selectedTabIndex = selectedIndex,
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -897,7 +901,7 @@ actual fun KeryxTabDialog(
                 ) {
                     KeryxDialogTabs(
                         tabs = tabs,
-                        selectedTabId = selectedTabId,
+                        selectedTabId = shownTabId,
                         onSelectTab = onSelectTab,
                         selectedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -919,7 +923,7 @@ actual fun KeryxTabDialog(
                         // the last row never sits flush against the window's bottom edge.
                         .padding(bottom = 16.dp),
                 ) {
-                    content(selectedTabId)
+                    content(shownTabId)
                 }
             }
         }
