@@ -118,6 +118,8 @@ struct ArticleListView: View {
         #endif
         .toolbar { toolbarContent }
         #if os(iOS)
+        .navigationTitle(home.articleListTitle)
+        .navigationBarTitleDisplayMode(.inline)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
         // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
         // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
@@ -219,6 +221,11 @@ struct ArticleListView: View {
     // hand-rolled capsule Compose uses as a stand-in (see `ui-guidelines`' "Icon grouping").
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        #if os(iOS)
+        // The title feeds the next column's back button and its long-press menu; the heading is
+        // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
+        ToolbarItem(placement: .principal) { Color.clear }
+        #endif
         // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
         // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.

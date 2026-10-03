@@ -57,6 +57,10 @@ struct FeedListView: View {
     var body: some View {
         rows
         .toolbar { toolbarContent }
+        #if os(iOS)
+        .navigationTitle(L("app_name"))
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         #if os(macOS)
         // The system search field — macOS only: iOS puts it on the article list instead, the
         // column whose contents it narrows (see `ArticleListView`'s own `.searchable`). Its focus is
@@ -147,6 +151,9 @@ struct FeedListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
+        // The title names this column in the article list's back button and its long-press menu;
+        // the bar's own centered title stays empty, as on macOS.
+        ToolbarItem(placement: .principal) { Color.clear }
         // iOS has no app menu to hold "Settings…", so the sidebar carries it — the same role as
         // Android's own settings row at the bottom of its feed list (`external-spec.md` §9).
         ToolbarItem(placement: .topBarLeading) {
