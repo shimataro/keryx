@@ -144,7 +144,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
   StatusNotifierItem host is running. Desktop also composites the unread count directly onto the
   Dock/taskbar/window icon as a digit badge. On Android, new-article notifications are posted through
-  `NotificationManagerCompat` (requesting the OS notification permission on Android 13+) and
+  `NotificationManagerCompat` (on Android 13+ the OS notification permission is asked for once, in
+  context: an in-app explanation when the app opens with notifications on but not allowed (after which
+  the setting matches the answer, so it is not asked again), or the system request directly when the setting is switched on — and the setting turns
+  off if the permission is refused, with a link to the OS notification settings after a denial) and
   background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
   in-app "check for update" is hidden when the app was installed from an app store (currently just
   Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no

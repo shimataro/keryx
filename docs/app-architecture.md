@@ -208,7 +208,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     `androidx.activity.compose.BackHandler`), PlatformOs (isTouchPrimary = true, hasNativeAppMenu = false, hasSystemTray = false — Android has no menu bar or system tray,
     so `FeedListPane`'s own settings footer row (below the scrolling folder/tag/feed list) is Android's
     Settings entry point, and `GeneralTab` carries About instead), SelfUpdateCheck (installer-package-based, see [background-update.md](background-update.md)),
-    NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`) +
+    NotificationPermission (wraps `rememberLauncherForActivityResult` for `POST_NOTIFICATIONS`, re-reads the grant on resume, and opens `Settings.ACTION_APP_NOTIFICATION_SETTINGS`; the flow around it is `ui/settings/NotificationPermissionFlow.kt`) +
     AndroidStartupTasks.kt (`runAndroidStartupTasks`, called from `:androidApp`'s `MainActivity`) +
     background/ (`FeedRefreshWorker` + `BackgroundRefresh.kt`'s `startBackgroundRefresh`,
     `WorkManager`-based — see [background-update.md](background-update.md) for the whole Android

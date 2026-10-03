@@ -199,7 +199,7 @@
     無いため、`FeedListPane` 自身の設定用フッター行（スクロールするフォルダー/タグ/フィード一覧の下）が
     Android の設定への導線となり、`GeneralTab` がバージョン情報を持つ）,
     SelfUpdateCheck（インストール元パッケージ名に基づく判定、[background-update.ja.md](background-update.ja.md) 参照）,
-    NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップ）+
+    NotificationPermission（`POST_NOTIFICATIONS` 用に `rememberLauncherForActivityResult` をラップし、再開時に許可状態を読み直し、`Settings.ACTION_APP_NOTIFICATION_SETTINGS` を開く。その周りの流れは `ui/settings/NotificationPermissionFlow.kt`）+
     AndroidStartupTasks.kt（`runAndroidStartupTasks`。`:androidApp` の `MainActivity` から呼ばれる）+
     background/（`FeedRefreshWorker` + `BackgroundRefresh.kt` の `startBackgroundRefresh`。
     `WorkManager` ベース — Android のバックグラウンド/通知の全体像は
