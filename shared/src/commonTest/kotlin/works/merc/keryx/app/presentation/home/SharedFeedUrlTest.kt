@@ -123,4 +123,44 @@ class SharedFeedUrlTest {
     fun aPortStaysPartOfTheUrl() {
         assertEquals("https://example.com:8443/feed", extractSharedFeedUrl("https://example.com:8443/feed"))
     }
+
+    // The text is untrusted and parsed on the UI thread: these inputs take minutes if any step is
+    // quadratic in the text length, and milliseconds when the parse is linear.
+    private val huge = 200_000
+
+    @Test
+    fun aHugeRunOfTrailingBracketsIsTrimmedWithoutStalling() {
+        assertEquals(
+            "https://example.com/feed",
+            extractSharedFeedUrl("https://example.com/feed" + ")".repeat(huge)),
+        )
+        assertEquals(
+            "https://example.com/(a)",
+            extractSharedFeedUrl("https://example.com/(a" + ")".repeat(huge)),
+        )
+    }
+
+    @Test
+    fun aHugeRunOfTrailingPunctuationIsTrimmedWithoutStalling() {
+        assertEquals("https://example.com/feed", extractSharedFeedUrl("https://example.com/feed" + ".".repeat(huge)))
+    }
+
+    @Test
+    fun manyHostlessSchemesBeforeAValidUrlAreSkippedWithoutStalling() {
+        assertEquals(
+            "https://example.com/feed",
+            extractSharedFeedUrl("https:///".repeat(huge / 9) + " " + "https://example.com/feed"),
+        )
+        // No whitespace at all: every scheme sits inside one run, and only the last has a host.
+        assertEquals(
+            "https://example.com/feed",
+            extractSharedFeedUrl("https:///".repeat(huge / 9) + "https://example.com/feed"),
+        )
+    }
+
+    @Test
+    fun aHugeInputWithOnlyOneKindOfSchemeStillParses() {
+        assertNull(extractSharedFeedUrl("x".repeat(huge)))
+        assertEquals("http://a.example/", extractSharedFeedUrl("http://a.example/ " + "ftp://x ".repeat(huge / 8)))
+    }
 }
