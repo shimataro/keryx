@@ -53,6 +53,7 @@ import works.merc.keryx.app.ui.menu.MenuController
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -447,6 +448,43 @@ class FeedListDragTest {
 
             assertTrue(haptics.performed.none { it == HapticFeedbackType.GestureEnd }, "${haptics.performed}")
             onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).performTouchInput { up() }
+        }
+    }
+
+    @Test
+    fun mouseDragOnTouchPrimaryPerformsNoHaptics() = runDesktopComposeUiTest {
+        val (_, driver, db) = fileDb(foreignKeys = true)
+        db.insertFeed("a", sortOrder = 0L)
+        db.insertFeed("b", sortOrder = 1L)
+        useHomeViewModel(driver, db) { fixture ->
+            val haptics = RecordingHaptics()
+            val overlay = setFeedListDragContent(fixture.vm, isTouchPrimary = true, haptics = haptics)
+            waitForIdle()
+
+            val hostBounds = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val aBounds = onNodeWithText("Feed a", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val bBounds = onNodeWithText("Feed b", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val handleX = hostBounds.right - with(density) { 10.dp.toPx() }
+            val start = localOf(Offset(handleX, aBounds.center.y), hostBounds)
+            val target = localOf(Offset(handleX, bBounds.top + bBounds.height * 0.75f), hostBounds)
+
+            val host = onNodeWithTag(FEED_LIST_DRAG_HOST_TEST_TAG, useUnmergedTree = true)
+            host.performMouseInput {
+                moveTo(start)
+                press()
+                moveTo(start + Offset(0f, dragThresholdCrossPx))
+            }
+            waitForIdle()
+            // The drag really started (a mouse press in the handle band is accepted on a touch-primary
+            // device), so the empty haptics log below is the gate working, not a drag that never began.
+            assertNotNull(overlay.item)
+            host.performMouseInput {
+                moveTo(target)
+                release()
+            }
+            waitForIdle()
+
+            assertEquals(emptyList(), haptics.performed)
         }
     }
 

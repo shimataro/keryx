@@ -95,6 +95,7 @@ internal fun Modifier.feedListReorderDrag(
                             pos = change.position,
                             grabOffset = Offset(down.position.x, grab.grabOffsetY),
                             rowHeightPx = grab.rowHeightPx,
+                            withHaptics = down.type != PointerType.Mouse,
                         )
                     }
                 }

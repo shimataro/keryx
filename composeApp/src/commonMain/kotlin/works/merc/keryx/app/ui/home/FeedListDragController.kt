@@ -171,7 +171,8 @@ internal class FeedDragOverlayState {
  * @param onHaptic Performs a haptic of the given type. Called on lift-off
  *   ([HapticFeedbackType.GestureThresholdActivate]), each time the insertion boundary / hovered tag
  *   changes to a new valid target ([HapticFeedbackType.SegmentFrequentTick]) and on a drop that is
- *   applied ([HapticFeedbackType.GestureEnd]) — never on a cancelled or rejected drop. A no-op by
+ *   applied ([HapticFeedbackType.GestureEnd]) — never on a cancelled or rejected drop, and never for a
+ *   drag [start]ed without haptics (a mouse drag, even on a touch-primary device). A no-op by
  *   default, which is what non-touch platforms pass.
  */
 internal class FeedListDragController(
@@ -213,6 +214,9 @@ internal class FeedListDragController(
     /** Set while [start] runs its first [move], whose hover must not tick on top of the lift-off. */
     private var lifting = false
 
+    /** Whether the drag in progress performs haptics at all — set per drag by [start]. */
+    private var hapticsEnabled = false
+
     /**
      * Determines which visible feed-list row contains [localY].
      *
@@ -248,13 +252,16 @@ internal class FeedListDragController(
      * @param pos The current pointer position, local to the drag host.
      * @param grabOffset The pointer's offset from the dragged row's top-left at press time.
      * @param rowHeightPx The dragged row's height.
+     * @param withHaptics Whether this drag performs [onHaptic] haptics — `false` for a mouse drag,
+     *   which stays silent even on a touch-primary device.
      */
-    fun start(item: DraggedItem, pos: Offset, grabOffset: Offset, rowHeightPx: Int) {
+    fun start(item: DraggedItem, pos: Offset, grabOffset: Offset, rowHeightPx: Int, withHaptics: Boolean) {
         this.grabOffset = grabOffset
+        hapticsEnabled = withHaptics
         overlay.item = item
         overlay.size = IntSize(hostBoundsState.value.width.roundToInt(), rowHeightPx)
         draggedFeedIdState.value = (item as? DraggedItem.Feed)?.feedId
-        onHaptic(HapticFeedbackType.GestureThresholdActivate)
+        haptic(HapticFeedbackType.GestureThresholdActivate)
         lifting = true
         try {
             move(pos)
@@ -334,7 +341,7 @@ internal class FeedListDragController(
         val target = boundary to tagId
         if (target == lastHoverTarget) return
         lastHoverTarget = target
-        if (!lifting && (boundary != null || tagId != null)) onHaptic(HapticFeedbackType.SegmentFrequentTick)
+        if (!lifting && (boundary != null || tagId != null)) haptic(HapticFeedbackType.SegmentFrequentTick)
     }
 
     /**
@@ -357,8 +364,13 @@ internal class FeedListDragController(
             is FeedListDropAction.AttachTag -> vm.setFeedTag(action.feedId, action.tagId, true)
             is FeedListDropAction.ReorderFolder -> vm.reorderFolders(action.draggedFolderId, action.targetFolderId)
         }
-        onHaptic(HapticFeedbackType.GestureEnd)
+        haptic(HapticFeedbackType.GestureEnd)
         return true
+    }
+
+    /** Performs [type] through [onHaptic], unless the drag in progress is a silent one. */
+    private fun haptic(type: HapticFeedbackType) {
+        if (hapticsEnabled) onHaptic(type)
     }
 
     /** Aborts the drag without committing anything (Escape, focus loss, composition teardown). */

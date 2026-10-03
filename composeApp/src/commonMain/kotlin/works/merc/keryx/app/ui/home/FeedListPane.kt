@@ -363,7 +363,8 @@ internal fun FeedListPane(
 
     val listState = rememberLazyListState()
 
-    // Haptics are a touch affordance: a mouse drag stays silent, so non-touch platforms get a no-op.
+    // Haptics are a touch affordance: non-touch platforms get a no-op here, and the controller
+    // additionally keeps each mouse drag silent on a touch-primary device (per-drag pointer type).
     val haptics = LocalHapticFeedback.current
     val onDragHaptic: (HapticFeedbackType) -> Unit =
         if (isTouchPrimary) { type -> haptics.performHapticFeedback(type) } else { _ -> }
