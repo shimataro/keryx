@@ -936,12 +936,14 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
        すれば、こちらを公開する。これにより F-Droid のユーザーも他のチャネルと同じ署名になる（後述の
        「F-Droid への公開」参照）。アプリ内アップデートが選ぶのは `-android-universal.apk` だけなので、
        サイドロード版にこの APK が提示されることはない。
-     - **F-Droid 用バージョンファイル。** このジョブは最後のステップで `fdroid-version.json`
-       （`{"versionName":"<version>","versionCode":<n>}`。versionCode は `printAndroidVersionCodes`
-       プローブ経由で `versionCodeOf` から取得）も添付する。F-Droid の更新チェッカーは、これを最新の
-       リリースから読む —— 後述の「F-Droid への公開」を参照。このステップは `continue-on-error` で、
-       失敗しても F-Droid がリリースに気づくのが遅れるだけなので、ジョブ（ひいては `deploy-pages`）を
-       失敗させない。`.apk` ではないので、アプリ内アップデートのアセット選択の対象にもならない。
+   - `attach-fdroid-version` は独立したジョブで（`package-android` に依存し、その出力からバージョンを
+     受け取る）、`fdroid-version.json`（`{"versionName":"<version>","versionCode":<n>}`。versionCode は
+     `printAndroidVersionCodes` プローブ経由で `versionCodeOf` から取得）を添付する。F-Droid の更新
+     チェッカーは、これを最新のリリースから読む —— 後述の「F-Droid への公開」を参照。これが無いと
+     そのリリースは F-Droid に届かないので、失敗するとワークフロー全体が赤になる。ただし独立した
+     ジョブなので、`package-android` にだけ依存する `publish-play` と `deploy-pages` は止めない。失敗
+     したら、このジョブだけを再実行する（「Re-run failed jobs」）。`.apk` ではないので、アプリ内
+     アップデートのアセット選択の対象にもならない。
    - `publish-play` は独立したジョブで（`package-android` に依存するため、そのジョブの AAB
      成果物ができてから初めて開始する）、その成果物をダウンロードして**Google Play へ公開する**
      （`.github/scripts/publish-play.sh`。Play Developer API の 1 つの edit の中で AAB を 1 回だけ

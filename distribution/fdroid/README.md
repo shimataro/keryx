@@ -75,3 +75,13 @@ What the recipe encodes, and why:
 Before submitting, replace `versionName` / `versionCode` / `commit` with the first release tag that
 contains the `fdroid` flavor. Tags before v0.22.0 have no
 `:shared` module, so this recipe (which edits files in that layout) cannot be used with them.
+
+None of the release side can be exercised before a real release, so check these on the first one
+that contains the `fdroid` flavor, before submitting:
+
+1. The release run is green, including the `attach-fdroid-version` job, and the release carries
+   `Keryx-<version>-android-fdroid.apk` and `fdroid-version.json`.
+2. Building that tag the way the recipe does (F-Droid's `buildserver` image, the recipe's `rm` /
+   `prebuild` / `gradleprops`, `assembleFdroidRelease`) yields an APK identical to the attached
+   `-android-fdroid.apk` once its signing block is removed.
+3. `fdroid checkupdates works.merc.keryx` against the real `UpdateCheckData` URL finds that version.

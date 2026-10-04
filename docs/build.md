@@ -928,12 +928,14 @@ Flow:
        F-Droid users share every other channel's signature (see "Publishing to F-Droid" below). The
        in-app updater only ever picks the `-android-universal.apk` asset, so it never offers this
        one to a sideloaded install.
-     - **F-Droid version file.** As its last step the job also attaches `fdroid-version.json`
-       (`{"versionName":"<version>","versionCode":<n>}`, the code taken from `versionCodeOf` through
-       the `printAndroidVersionCodes` probe), which F-Droid's update checker reads from the latest
-       release — see "Publishing to F-Droid" below. The step is `continue-on-error`: a failure only
-       delays F-Droid noticing the release, so it never fails the job (and with it `deploy-pages`).
-       It is not an `.apk`, so the in-app updater's asset selection never considers it.
+   - `attach-fdroid-version`, a separate job (needs `package-android`, whose output carries the
+     version) that attaches `fdroid-version.json` (`{"versionName":"<version>","versionCode":<n>}`, the
+     code taken from `versionCodeOf` through the `printAndroidVersionCodes` probe). F-Droid's update
+     checker reads it from the latest release — see "Publishing to F-Droid" below. Without it that
+     release never reaches F-Droid, so a failure turns the whole run red; but being its own job, it
+     holds back neither `publish-play` nor `deploy-pages`, which depend on `package-android` alone.
+     If it fails, re-run just this job ("Re-run failed jobs"). It is not an `.apk`, so the in-app
+     updater's asset selection never considers it.
    - `publish-play`, a separate job (needs `package-android`, so it starts only once that job's AAB
      artifact exists) that downloads that artifact and **publishes it to Google Play**
      (`.github/scripts/publish-play.sh`, one atomic Play Developer API edit that uploads the AAB

@@ -489,6 +489,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    # Read by attach-fdroid-version, so the tag is interpreted in one place only.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -660,20 +663,51 @@ jobs:
           name: android-aab
           path: ${{ steps.artifact.outputs.aab }}
 
-      # F-Droid builds the fdroid flavor itself, so nothing of the APK goes to it — but its update
-      # checker cannot read this app's versionCode from the tagged source (versionCodeOf computes it
-      # from the tag at build time, and F-Droid's `Tags` mode only reads a literal). The recipe
-      # (distribution/fdroid/works.merc.keryx.yml) therefore uses `UpdateCheckMode: HTTP` against
-      # this file on the latest release. versionCode comes from versionCodeOf itself, through the
-      # printAndroidVersionCodes probe, never recomputed here. Last step and continue-on-error: a
-      # failure only delays F-Droid noticing the release, so it must not fail this job and with it
-      # deploy-pages. Not an .apk, so the in-app updater's asset selection never considers it.
+  # F-Droid builds the fdroid flavor itself, but its update checker cannot read this app's
+  # versionCode from the tagged source (versionCodeOf computes it from the tag at build time, and
+  # F-Droid's `Tags` mode only reads a literal). The recipe (distribution/fdroid/works.merc.keryx.yml)
+  # therefore uses `UpdateCheckMode: HTTP` against this file on the latest release. versionCode comes
+  # from versionCodeOf itself, through the printAndroidVersionCodes probe, never recomputed here.
+  # Its own job rather than a step of package-android: a failure has to turn the run red — otherwise
+  # the release becomes "latest" without the file and F-Droid silently never sees it — yet must not
+  # hold back publish-play or deploy-pages, which depend on package-android alone. Re-run just this
+  # job if it fails. Not an .apk, so the in-app updater's asset selection never considers it.
+  attach-fdroid-version:
+    name: Attach F-Droid version file
+    needs: package-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # Same as package-android: optional on ubuntu-latest, kept against runner-image changes.
+      # Configuring :androidApp for the probe below needs the SDK.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
       - name: Attach F-Droid version file
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.package-android.outputs.version }}
         run: |
           version_code=$(./gradlew -q :androidApp:printAndroidVersionCodes -PversionCodeProbe="$VERSION" | sed -n "s/^${VERSION//./\\.}=//p")
           if ! [[ "$version_code" =~ ^[0-9]+$ ]]; then
