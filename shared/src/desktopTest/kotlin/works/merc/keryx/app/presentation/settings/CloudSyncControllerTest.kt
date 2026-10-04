@@ -915,15 +915,25 @@ class CloudSyncControllerTest {
         val tokenStorage = FakeTokenStorage()
         tokenStorage.save(OAuthTokens("AT"))
         val cloud = AlwaysFailingCloudStorage()
-        val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        // Holds the reconnect's authorization so the teardown is observable on its own: the test
+        // starts on Dropbox, so awaiting Dropbox alone would pass even if reconnect() did nothing.
+        val authorization = CompletableDeferred<Result<OAuthTokens>>()
+        val connectFlow = object : CloudConnectFlow {
+            override suspend fun connect(): Result<OAuthTokens> = authorization.await()
+        }
+        val controller = newController(tokenStorage = tokenStorage, connectFlow = connectFlow, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
         awaitConditionBlocking { controller.lastSyncAuthFailed.value }
 
         controller.reconnect()
 
-        // Back on the same provider — the teardown cleared it, then connect re-set it. The await is
-        // the assertion: re-reading the value afterwards could catch a transient write from the
-        // settings watcher, which this test's multi-threaded Unconfined Main lets interleave.
+        // Torn down first; nothing can set it back while the authorization is held.
+        awaitConditionBlocking { controller.connectedType.value == null }
+        authorization.complete(Result.Ok(OAuthTokens("AT2")))
+
+        // Back on the same provider — connect re-set it. The await is the assertion: re-reading the
+        // value afterwards could catch a transient write from the settings watcher, which this
+        // test's multi-threaded Unconfined Main lets interleave.
         awaitConditionBlocking { controller.connectedType.value == CloudStorageType.DROPBOX }
     }
 
