@@ -3,9 +3,21 @@ package works.merc.keryx.app.core
 /**
  * Package names of installers that represent an app store with its own update mechanism.
  * `com.android.vending` is the modern Google Play Store; `com.google.android.feedback` is its
- * legacy predecessor, still occasionally reported by very old devices.
+ * legacy predecessor, still occasionally reported by very old devices. The rest are F-Droid clients
+ * (the official client in its full and basic builds, its privileged extension, Droid-ify and Neo
+ * Store): each updates the apps it installed from its own repositories — F-Droid's own build, or the
+ * developer's APK republished by a repository such as IzzyOnDroid — so a GitHub-based update path
+ * next to it would only compete with it.
  */
-internal val PLAY_STORE_INSTALLERS = setOf("com.android.vending", "com.google.android.feedback")
+internal val STORE_INSTALLERS = setOf(
+    "com.android.vending",
+    "com.google.android.feedback",
+    "org.fdroid.fdroid",
+    "org.fdroid.basic",
+    "org.fdroid.fdroid.privileged",
+    "com.looker.droidify",
+    "com.machiav3lli.fdroid",
+)
 
 /**
  * Whether an in-app "check for update" — which, depending on the install form, can go as far as
@@ -27,6 +39,9 @@ internal val PLAY_STORE_INSTALLERS = setOf("com.android.vending", "com.google.an
  * @param installerPackageName The package that installed this app, or `null` when unknown (e.g.
  *   adb-installed, or the platform couldn't report it) — treated the same as an unrecognized
  *   installer, since there's no evidence of a store update mechanism to defer to.
+ * @param distributionAllowsSelfUpdate Whether the build itself permits the check — `false` for a
+ *   build made for a store that updates the app on its own (the Android `fdroid` flavor declares
+ *   this in its manifest), whichever way that particular install happened to arrive.
  */
-fun isSelfUpdateCheckSupported(installerPackageName: String?): Boolean =
-    installerPackageName !in PLAY_STORE_INSTALLERS
+fun isSelfUpdateCheckSupported(installerPackageName: String?, distributionAllowsSelfUpdate: Boolean = true): Boolean =
+    distributionAllowsSelfUpdate && installerPackageName !in STORE_INSTALLERS
