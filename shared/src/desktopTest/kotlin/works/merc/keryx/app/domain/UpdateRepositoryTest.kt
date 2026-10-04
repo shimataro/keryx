@@ -7,10 +7,12 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -179,6 +181,45 @@ class UpdateRepositoryTest {
         assertEquals(1, items.size, "the \"available\" row must be replaced, not left alongside a new one")
         assertEquals(NotificationText.UpdateReadyToInstall("2.0.0"), items.single().text)
         assertEquals(AppNotificationAction.ShowSettingsTab("updates"), items.single().action)
+    }
+
+    /**
+     * Regression guard for `runDownload`'s "Notification first, Ready second" ordering: whoever
+     * observes [UpdateState.Ready] must already see the "ready to install" row, never the stale
+     * "available" one. Polling [UpdateRepository.state] and inspecting the notification center
+     * afterwards (as the test above does) cannot tell the two orders apart — by the time the poll
+     * notices Ready the notification may have been posted either way. An Unconfined collector is
+     * resumed inline, inside the very `_state.value = Ready(...)` assignment on the download thread,
+     * so its snapshot is taken before `runDownload` executes anything after that line. UNDISPATCHED
+     * makes it subscribed before `launch` returns, so it cannot miss the transition.
+     */
+    @Test
+    fun aReadyObserverAlreadySeesTheReadyToInstallNotification() {
+        val payload = Random(36).nextBytes(1024)
+        val sha256 = sha256Hex(payload)
+        val downloaderClient = HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val notificationCenter = NotificationCenter()
+        val repo = UpdateRepository(
+            checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
+            downloader = UpdateDownloader(downloaderClient),
+            installer = noOpInstaller(),
+            notificationCenter = notificationCenter,
+            scope = trackedScope(),
+            location = WRITABLE_MAC_LOCATION,
+            cacheDirOverride = newTempDir(),
+        )
+        runBlocking { repo.check() }
+
+        val seenAtReady = CompletableDeferred<List<NotificationText>>()
+        trackedScope().launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            repo.state.first { it is UpdateState.Ready }
+            seenAtReady.complete(notificationCenter.items.value.map { it.text })
+        }
+
+        repo.startDownload()
+        val seen = runBlocking { withTimeout(5_000) { seenAtReady.await() } }
+
+        assertEquals(listOf<NotificationText>(NotificationText.UpdateReadyToInstall("2.0.0")), seen)
     }
 
     @Test
