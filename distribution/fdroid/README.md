@@ -37,10 +37,11 @@ What the recipe encodes, and why:
 - `gradleprops` passes the **public** OAuth client identifiers: F-Droid does not sign up for API
   keys, and Dropbox's App Key and OneDrive's Client ID are PKCE public clients with no secret
   (see [`docs/build.md`](../../docs/build.md)'s "Cloud Storage Integration"). The values in the draft
-  are placeholders — fill in **exactly** the values `release.yml` builds with (the
-  `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` secrets): they are compiled into the APK, so any other
-  value breaks the reproducible-build match below. Google Drive needs none: the F-Droid build has
-  no Google Drive.
+  are the ones `release.yml` builds with (the `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` secrets,
+  confirmed against the v0.22.0 release APK, which contains both): they are compiled into the APK,
+  so any other value breaks the reproducible-build match below. They change only if the production
+  Dropbox / OneDrive app registration is recreated — then update the GitHub secrets, this draft and
+  the recipe in `fdroiddata` together. Google Drive needs none: the F-Droid build has no Google Drive.
 - `Binaries` / `AllowedAPKSigningKeys` — reproducible builds. `release.yml` attaches the `fdroid`
   APK signed with the app signing key as `Keryx-<version>-android-fdroid.apk`; F-Droid builds the
   same tag, compares, and only if the two match apart from the signature publishes the
@@ -67,5 +68,5 @@ What the recipe encodes, and why:
     submitted once a stable release carrying `fdroid-version.json` exists.
 
 Before submitting, replace `versionName` / `versionCode` / `commit` with the first release tag that
-contains the `fdroid` flavor, and fill in the two client identifiers. Tags before v0.22.0 have no
+contains the `fdroid` flavor. Tags before v0.22.0 have no
 `:shared` module, so this recipe (which edits files in that layout) cannot be used with them.

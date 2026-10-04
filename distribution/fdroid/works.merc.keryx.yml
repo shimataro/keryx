@@ -32,8 +32,8 @@ Builds:
       - sed -i -e '/androidGms/d' ../settings.gradle.kts build.gradle.kts
       - echo "appVersion=$$VERSION$$" >> ../gradle.properties
     gradleprops:
-      - dropboxAppKey=<DROPBOX_APP_KEY>
-      - oneDriveClientId=<ONEDRIVE_CLIENT_ID>
+      - dropboxAppKey=x0df310b9t8a94n
+      - oneDriveClientId=1ed27627-5a42-4f37-87f5-d0b402d6f9d4
 
 AllowedAPKSigningKeys: 536f7155021d73419135cb67dd3c7c3e316cfdc607735208dfd45d971e426d20
 

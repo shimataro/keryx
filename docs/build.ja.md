@@ -58,6 +58,11 @@ APIキーが指定されていないクラウドサービスは連携機能が�
 
 以下に各サービスでのAPIキーの取得方法を示す。
 
+本番の Dropbox / OneDrive のアプリ登録を作り直して App Key / Client ID が変わったときは、`release.yml` の
+シークレット（`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID`）と F-Droid のレシピ（下書きと `fdroiddata` のもの）を
+一緒に更新すること —— F-Droid がリリースの APK を公開するには、レシピも同じ値でビルドする必要がある
+（[`distribution/fdroid/README.md`](../distribution/fdroid/README.md) 参照）。
+
 ### Dropbox
 
 1. [DBX Platform](https://www.dropbox.com/developers/apps/create)で連携先アプリを作成
@@ -1217,7 +1222,8 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 - **入力が同じであること。** レシピの Dropbox App Key / OneDrive Client ID は、`release.yml` がビルドに
   使う値（`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` シークレット）と完全に同じでなければならない ——
   `BuildConfig` に埋め込まれるので、違う値だと APK が変わる。公開の PKCE クライアント識別子なので、
-  そのままレシピに書いてよい。
+  そのままレシピに書いてよい。本番のアプリ登録を作り直して識別子が変わったときは、GitHub のシークレット、
+  レシピの下書き、`fdroiddata` のレシピを一緒に更新すること。
 - **APK に環境依存のものを入れないこと。** `androidApp/build.gradle.kts` は、環境で変わりうる AGP の
   出力 2 つを無効にしている: `dependenciesInfo.includeInApk`（署名ブロック内の Google 向け依存関係
   レポート。F-Droid の scanner も拒否する）と `vcsInfo`（`META-INF/version-control-info.textproto` の

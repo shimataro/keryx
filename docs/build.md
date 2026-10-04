@@ -57,6 +57,12 @@ This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`gener
 
 Below is how to obtain API keys for each service.
 
+If the production Dropbox or OneDrive app registration is ever recreated, so that its App Key /
+Client ID changes, update the `release.yml` secrets (`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID`) and the
+F-Droid recipe (the draft and the one in `fdroiddata`) together — the recipe has to build with the same
+values for F-Droid to publish the release APK (see
+[`distribution/fdroid/README.md`](../distribution/fdroid/README.md)).
+
 ### Dropbox
 
 1. Create an app on [DBX Platform](https://www.dropbox.com/developers/apps/create)
@@ -1203,7 +1209,9 @@ What must stay true for F-Droid's build to reproduce the release APK:
 - **Same inputs.** The recipe's Dropbox App Key / OneDrive Client ID have to be exactly the values
   `release.yml` builds with (the `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` secrets) — they are
   compiled into `BuildConfig`, so any other value changes the APK. Being public PKCE client
-  identifiers, they can appear in the recipe as they are.
+  identifiers, they can appear in the recipe as they are. If the production app registration is
+  ever recreated and the identifiers change, update the GitHub secrets, the recipe draft and the
+  recipe in `fdroiddata` together.
 - **Nothing environment-dependent in the APK.** `androidApp/build.gradle.kts` turns off the two AGP
   outputs that would differ: `dependenciesInfo.includeInApk` (Google's dependency report in the
   signing block, which F-Droid's scanner rejects anyway) and `vcsInfo` (the git state in
