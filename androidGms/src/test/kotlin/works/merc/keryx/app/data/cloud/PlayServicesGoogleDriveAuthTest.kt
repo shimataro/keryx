@@ -13,11 +13,10 @@ import kotlin.test.assertIs
  * way, which would have let the connect report success and only fail later as a 403 on every Drive
  * request.
  *
- * Lives in `androidDeviceTest` because [tokenFrom] is `androidMain` code (there is no
- * `androidUnitTest` source set — see docs/testing.md), but it deliberately touches neither Play
+ * A plain JVM unit test of `:androidGms` (`src/test`): it deliberately touches neither Play
  * services nor an `AuthorizationResult`, so it needs nothing of the device beyond the JVM.
  */
-class PlayServicesGoogleDriveAuthDeviceTest {
+class PlayServicesGoogleDriveAuthTest {
 
     @Test
     fun acceptsATokenGrantedTheAppDataScope() {

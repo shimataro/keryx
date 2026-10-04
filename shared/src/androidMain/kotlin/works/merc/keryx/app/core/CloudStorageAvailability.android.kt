@@ -1,7 +1,5 @@
 package works.merc.keryx.app.core
 
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
 import works.merc.keryx.app.BuildConfig
 import works.merc.keryx.app.platform.AndroidAppContext
 
@@ -13,15 +11,18 @@ import works.merc.keryx.app.platform.AndroidAppContext
  *
  * Google Drive is the exception: it is gated on **the device**, not on a build-time key. Google's
  * OAuth policy leaves no redirect-based flow for an Android client type, so this platform reaches
- * Drive through Play services' `AuthorizationClient` instead (`data/cloud/PlayServicesGoogleDriveAuth.kt`),
- * which identifies the app by package name + signing certificate rather than by a client id this
- * build would have to carry. A device without Play services — a de-Googled ROM — therefore cannot
- * offer Google Drive at all, and simply never sees it in the provider list; Dropbox, OneDrive and
- * local-only are unaffected. See `docs/sync-architecture.md`'s "Google Drive on Android".
+ * Drive through Play services' `AuthorizationClient` instead (`:androidGms`), which identifies the
+ * app by package name + signing certificate rather than by a client id this build would have to
+ * carry. A device without Play services — a de-Googled ROM — therefore cannot offer Google Drive at
+ * all, and simply never sees it in the provider list; Dropbox, OneDrive and local-only are
+ * unaffected. See `docs/sync-architecture.md`'s "Google Drive on Android".
  *
- * Deliberately **not** keyed on the distribution flavor (`github` / `play`). A play-flavored APK
- * can be sideloaded outside Play and a github-flavored one runs perfectly well on a device that has
- * Play services, so the flavor answers the wrong question — the same reasoning
+ * Play services is reached only through [AndroidGoogleDriveSupport]'s backend, which the
+ * application registers: the `fdroid` flavor registers none (it contains no Play services code at
+ * all), and that answers "unavailable" exactly like a device without Play services. Beyond that
+ * the answer is deliberately **not** keyed on the distribution flavor (`github` / `play`): a
+ * play-flavored APK can be sideloaded outside Play and a github-flavored one runs perfectly well on
+ * a device that has Play services, so the flavor answers the wrong question — the same reasoning
  * `AndroidUpdateInstaller` applies to `REQUEST_INSTALL_PACKAGES`.
  */
 actual object CloudStorageAvailability {
@@ -34,12 +35,12 @@ actual object CloudStorageAvailability {
      * `AndroidAppContext.application` from being read during class initialization, which can run
      * before `KeryxApplication.onCreate` has set it.
      *
-     * Only [ConnectionResult.SUCCESS] counts — a device whose Play services needs an update or is
-     * disabled cannot serve an authorization request, so offering Drive there would just fail later.
+     * A device whose Play services needs an update or is disabled cannot serve an authorization
+     * request, so offering Drive there would just fail later — see
+     * [AndroidGoogleDriveBackend.isAvailable].
      */
     actual val googleDriveAvailable: Boolean by lazy {
-        GoogleApiAvailability.getInstance()
-            .isGooglePlayServicesAvailable(AndroidAppContext.application) == ConnectionResult.SUCCESS
+        AndroidGoogleDriveSupport.backend?.isAvailable(AndroidAppContext.application) == true
     }
 
     // OneDrive is a PKCE public client — the client id alone gates availability (no secret).

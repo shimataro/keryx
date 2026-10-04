@@ -307,6 +307,14 @@ android {
             dimension = "distribution"
         }
     }
+
+    // The flavors that ship Google Play services share one flavor-specific source file
+    // (src/gms/.../FlavorIntegration.kt, which hands :androidGms's Google Drive backend to the app)
+    // instead of each carrying a copy; see the dependencies block for the matching dependency.
+    sourceSets {
+        getByName("github") { kotlin.directories.add("src/gms/kotlin") }
+        getByName("play") { kotlin.directories.add("src/gms/kotlin") }
+    }
 }
 
 // playDebug builds and installs like any other debug variant, but nobody has a reason to run it:
@@ -354,6 +362,12 @@ androidComponents {
 
 dependencies {
     implementation(project(":composeApp"))
+
+    // Google Drive on Android needs Google Play services, which the F-Droid flavor must not contain
+    // (F-Droid's inclusion policy), so only the flavors that may ship it depend on :androidGms. See
+    // androidGms/build.gradle.kts and `AndroidGoogleDriveBackend`.
+    "githubImplementation"(project(":androidGms"))
+    "playImplementation"(project(":androidGms"))
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.compose.runtime)
