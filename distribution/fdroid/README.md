@@ -6,6 +6,14 @@ here is read by any build or workflow in this repository. It is submitted by han
 to `fdroiddata`; the store listing (title, descriptions, changelogs, screenshots) is read from
 [`fastlane/metadata/android/`](../../fastlane/README.md) in this repository, not from the recipe.
 
+The file is kept exactly in the form `fdroid rewritemeta` writes — field order, line wrapping and no
+comments — because the `fdroiddata` merge request's CI fails on any file that `rewritemeta` would
+change. The explanations therefore live here rather than in the file; after editing it, run
+`fdroid rewritemeta works.merc.keryx` in an `fdroiddata` checkout (or F-Droid's `buildserver`
+image) and copy the result back.
+
+The `Builds` entry is a placeholder until the first submission (see the end of this file).
+
 What the recipe encodes, and why:
 
 - `gradle: [fdroid]` — the `fdroid` flavor, the only one without Google Play services and with the
@@ -29,7 +37,18 @@ What the recipe encodes, and why:
 - `gradleprops` passes the **public** OAuth client identifiers: F-Droid does not sign up for API
   keys, and Dropbox's App Key and OneDrive's Client ID are PKCE public clients with no secret
   (see [`docs/build.md`](../../docs/build.md)'s "Cloud Storage Integration"). The values in the draft
-  are placeholders. Google Drive needs none: the F-Droid build has no Google Drive.
+  are placeholders — fill in **exactly** the values `release.yml` builds with (the
+  `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` secrets): they are compiled into the APK, so any other
+  value breaks the reproducible-build match below. Google Drive needs none: the F-Droid build has
+  no Google Drive.
+- `Binaries` / `AllowedAPKSigningKeys` — reproducible builds. `release.yml` attaches the `fdroid`
+  APK signed with the app signing key as `Keryx-<version>-android-fdroid.apk`; F-Droid builds the
+  same tag, compares, and only if the two match apart from the signature publishes the
+  developer-signed one. `AllowedAPKSigningKeys` is the SHA-256 of that certificate (from
+  `apksigner verify --print-certs` on any release APK). F-Droid users then share the GitHub and Play
+  signature and can switch channels without reinstalling. If a release does not match, F-Droid
+  publishes nothing for it — see `docs/build.md`'s "Publishing to F-Droid" for what keeps the build
+  reproducible.
 - `AntiFeatures: NonFreeNet` — the optional sync talks to Dropbox / OneDrive, which are
   proprietary network services.
 

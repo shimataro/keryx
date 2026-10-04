@@ -616,8 +616,9 @@ and `fdroid`, same `applicationId`:
   (see [background-update.md](background-update.md)'s "In-App Update"); the `play` flavor's manifest
   omits it, since Play already updates the app itself and Play policy restricts that permission to
   apps whose primary purpose is installing other apps.
-- `fdroid` is the flavor F-Droid builds and signs itself, and it contains **no Google Play services
-  at all** — F-Droid's inclusion policy forbids them. Everything that needs Play services (Google
+- `fdroid` is the flavor F-Droid builds from source (and, when its build reproduces the
+  developer-signed APK `release.yml` attaches, publishes with the app's own signature — see
+  "Publishing to F-Droid"), and it contains **no Google Play services at all** — F-Droid's inclusion policy forbids them. Everything that needs Play services (Google
   Drive on Android) lives in the `:androidGms` module, which only `github` and `play` depend on;
   `fdroid` therefore never offers Google Drive (Dropbox, OneDrive and local-only work as usual), the
   same state as a device without Play services. Its manifest
@@ -1163,8 +1164,13 @@ existing release once published.
 
 ### Publishing to F-Droid
 
-F-Droid builds the `fdroid` flavor from source itself and signs it with its own key, so no APK is
-uploaded for it. What this repository supplies instead:
+F-Droid builds the `fdroid` flavor from source itself. It then compares its build with the
+developer-signed `Keryx-<version>-android-fdroid.apk` that `release.yml` attaches to the release
+and, only if the two are identical apart from the signature, publishes the developer-signed one
+(the recipe's `Binaries` and `AllowedAPKSigningKeys`). That keeps F-Droid installs on the same
+signature as the GitHub and Play ones, so users can move between channels without reinstalling. If
+a release does not match, F-Droid publishes nothing for it rather than an F-Droid-signed build.
+What this repository supplies:
 
 - `fastlane/metadata/android/{en-US,ja-JP}/` — the store listing F-Droid reads from the tagged
   commit (see [`fastlane/README.md`](../fastlane/README.md)). Add `changelogs/<versionCode>.txt`
@@ -1191,6 +1197,21 @@ What a build on F-Droid's server needs to differ from a local one:
   flavor has no Google Drive.
 - **No Kotlin/Native download and no Apple tasks** on Linux for `:androidApp:assembleFdroidRelease`,
   so nothing besides Maven Central, Google Maven, JitPack and the Gradle plugin portal is fetched.
+
+What must stay true for F-Droid's build to reproduce the release APK:
+
+- **Same inputs.** The recipe's Dropbox App Key / OneDrive Client ID have to be exactly the values
+  `release.yml` builds with (the `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` secrets) — they are
+  compiled into `BuildConfig`, so any other value changes the APK. Being public PKCE client
+  identifiers, they can appear in the recipe as they are.
+- **Nothing environment-dependent in the APK.** `androidApp/build.gradle.kts` turns off the two AGP
+  outputs that would differ: `dependenciesInfo.includeInApk` (Google's dependency report in the
+  signing block, which F-Droid's scanner rejects anyway) and `vcsInfo` (the git state in
+  `META-INF/version-control-info.textproto`). With those off, the `fdroid` APK built on macOS was
+  byte-identical, signature aside, to the one built in F-Droid's buildserver image with the recipe's
+  own edits (`rm androidGms`, the `sed` lines), across different JDK distributions (Debian OpenJDK
+  vs Temurin) and checkout paths. Re-check after adding a Gradle plugin or anything that writes
+  build-time data into the APK.
 
 `fdroid scanner` finding **zero** problems — in the source and in the built APK — is what a change
 to the dependency graph must preserve. Run it in F-Droid's own `buildserver` image

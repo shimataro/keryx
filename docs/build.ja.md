@@ -616,7 +616,9 @@ JUL のルートロガーに自前の formatter/handler を仕込んでいる。
   （[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）。`play`
   flavor のマニフェストはこの権限を含まない — Play は既にアプリ自身を更新してくれるうえ、Play の
   ポリシーはこの権限を「他のアプリのインストールを主目的とするアプリ」に限定しているため。
-- `fdroid` は F-Droid が自分でビルド・署名する flavor で、**Google Play services を一切含まない** ——
+- `fdroid` は F-Droid がソースからビルドする flavor（`release.yml` が添付する開発者署名の APK を
+  F-Droid のビルドが再現できたときは、アプリ自身の署名のまま公開される —— 「F-Droid への公開」参照）で、
+  **Google Play services を一切含まない** ——
   F-Droid の掲載ポリシーが禁止しているため。Play services を必要とするもの（Android の Google Drive）は
   すべて `:androidGms` モジュールにあり、これに依存するのは `github` と `play` だけ。したがって
   `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・ローカルのみは通常どおり使える）—— Play
@@ -1177,8 +1179,12 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 
 ### F-Droid への公開
 
-F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の鍵で署名するため、APK はアップロード
-しない。代わりにこのリポジトリが次のものを用意する:
+F-Droid は `fdroid` flavor をソースから自分でビルドする。そのうえで、`release.yml` がリリースに添付する
+開発者署名の `Keryx-<version>-android-fdroid.apk` と自分のビルドを比べ、署名以外がまったく同じときに
+限って、開発者署名のものを公開する（レシピの `Binaries` と `AllowedAPKSigningKeys`）。これにより
+F-Droid でのインストールも GitHub 版・Play 版と同じ署名になり、再インストールせずにチャネルを
+乗り換えられる。一致しないリリースについては、F-Droid 署名のビルドを代わりに出すのではなく、何も
+公開しない。このリポジトリが用意するもの:
 
 - `fastlane/metadata/android/{en-US,ja-JP}/` — F-Droid がタグ付きコミットから読むストア掲載情報
   （[`fastlane/README.md`](../fastlane/README.md) 参照）。ノートを表示したいリリースごとに
@@ -1205,6 +1211,20 @@ F-Droid のサーバー上のビルドがローカルと違わなければなら
   `fdroid` flavor に Google Drive は無い。
 - **Linux での `:androidApp:assembleFdroidRelease` に Kotlin/Native のダウンロードも Apple 向けタスクも
   無い**ので、Maven Central・Google Maven・JitPack・Gradle プラグインポータル以外からは何も取得しない。
+
+F-Droid のビルドがリリースの APK を再現できるために保たなければならない点:
+
+- **入力が同じであること。** レシピの Dropbox App Key / OneDrive Client ID は、`release.yml` がビルドに
+  使う値（`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` シークレット）と完全に同じでなければならない ——
+  `BuildConfig` に埋め込まれるので、違う値だと APK が変わる。公開の PKCE クライアント識別子なので、
+  そのままレシピに書いてよい。
+- **APK に環境依存のものを入れないこと。** `androidApp/build.gradle.kts` は、環境で変わりうる AGP の
+  出力 2 つを無効にしている: `dependenciesInfo.includeInApk`（署名ブロック内の Google 向け依存関係
+  レポート。F-Droid の scanner も拒否する）と `vcsInfo`（`META-INF/version-control-info.textproto` の
+  git の状態）。これらを無効にした状態で、macOS でビルドした `fdroid` APK と、F-Droid の buildserver
+  イメージでレシピの編集（`rm androidGms`、`sed` の行）を当ててビルドしたものは、JDK の配布物
+  （Debian の OpenJDK と Temurin）やチェックアウトのパスが違っても、署名を除いてバイト単位で一致した。
+  Gradle プラグインや、ビルド時のデータを APK に書き込むものを足したときは、確認し直すこと。
 
 `fdroid scanner` の検出が、ソースでもビルドした APK でも**ゼロ**であることが、依存グラフの変更が
 守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の

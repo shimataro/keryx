@@ -183,8 +183,8 @@ Android は完全に OS 自身の通知ドット（未読数ではなく、通�
 「常に有効」と同じ既定値）。後者については、`fdroid` flavor のマニフェストが
 `works.merc.keryx.SELF_UPDATE_CHECK` meta-data を `false` にしており
 （`SelfUpdateCheck.android.kt` の `distributionAllowsSelfUpdate`）、その APK をどのインストーラーが
-届けたかに関係なく確認がオフになる —— F-Droid が自分でビルド・署名するため、GitHub のアップデートでは
-そもそも置き換えられないからである。これは Google Play のポリシー要件
+届けたかに関係なく確認がオフになる —— そのビルドは F-Droid クライアントが更新するうえ、GitHub の
+アップデートで置き換えると、Google Drive と更新確認を持つ `github` flavor に変わってしまうからである。これは Google Play のポリシー要件
 ではなく UX 上の判断である — Play が禁じているのはアプリが Play 以外の方法で**自身を置換すること**と
 Play 以外からの実行可能コードのダウンロードであり、この機能はどちらも行っていない。理由は、Play（や F-Droid クライアント）は
 既にアプリを更新しているため、そこに GitHub 版の更新導線をもう一つ並べるとユーザーがどちらを
