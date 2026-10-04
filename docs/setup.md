@@ -257,7 +257,7 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 ./gradlew build
 
 # Android: with a device connected (or an emulator already running, see Prerequisites above).
-# Per-variant task, not installDebug: :androidApp has github/play product flavors and only
+# Per-variant task, not installDebug: :androidApp has github/play/fdroid product flavors and only
 # githubDebug is enabled (see build.md).
 ./gradlew :androidApp:installGithubDebug
 ```
@@ -303,7 +303,7 @@ release APK (the App Bundle does not come out of it — `:androidApp:bundlePlayR
 explicitly). Without an Android release signing keystore configured,
 `androidApp/build.gradle.kts` prints a build warning and produces an **unsigned** release APK per
 flavor (`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` and
-the `play` equivalent) — `./gradlew build` still succeeds, since this only affects
+the `play` / `fdroid` equivalents) — `./gradlew build` still succeeds, since this only affects
 distributability, not desktop work. The unsigned APK cannot be installed on a device or uploaded
 to Google Play.
 

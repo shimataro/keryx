@@ -17,7 +17,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | Platform | Support |
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform (current) |
-| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md)) |
+| Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md); the F-Droid build contains no Play services and so has no Google Drive at all, and no in-app update — see §4 and §7) |
 | iOS / iPadOS | In development (native SwiftUI UI, sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md)) |
 | macOS (native) | In development — a native SwiftUI macOS app (Apple Silicon) that replaces the Compose one above for users; the shared logic is already built for it |
 
@@ -54,6 +54,10 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   local-only work as usual. The same account and the same sync file
   are shared with the desktop app. See "Google Drive on Android" in
   [sync-architecture.md](sync-architecture.md).
+- **The F-Droid build has no Google Drive at all.** F-Droid's inclusion policy forbids Google Play
+  services, so the build F-Droid makes (the `fdroid` flavor — see [build.md](build.md)) ships none of
+  it and never offers Google Drive — the same as on a device without Play services: Dropbox,
+  OneDrive and local-only work as usual.
 
 ## 5. Conflict Resolution Policy
 
@@ -90,7 +94,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - In-app update (download and install, not just a link to the release page): supported for a macOS
   `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
   falls back to opening the release page, as does any install form the app can't recognize), and a sideloaded
-  Android install (never through Google Play, which already updates the app itself). Presented from
+  Android install (never through Google Play, which already updates the app itself, nor through
+  F-Droid, whose client does the same — the F-Droid build omits the feature altogether). Presented from
   the moment an update is detected, via the notification-center bell, the desktop task tray, and
   the application menu's Help menu — the latter two showing one and the same entry, which is also
   where a check can be asked for on demand ("Check for updates" whenever nothing is pending).

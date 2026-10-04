@@ -327,8 +327,10 @@ How the scheme is registered with the OS differs per platform. macOS declares it
 ### Google Drive on Android (Play services `AuthorizationClient`)
 
 Android reaches Google Drive through a different mechanism than every other provider-platform pair
-here: Play services' `AuthorizationClient`, not a browser redirect. `data/cloud/PlayServicesGoogleDriveAuth.kt`
-holds the whole of it.
+here: Play services' `AuthorizationClient`, not a browser redirect. `:androidGms`'s
+`data/cloud/PlayServicesGoogleDriveAuth.kt` holds the whole of it, and that module exists in the
+`github` and `play` flavors only — the `fdroid` flavor contains no Play services and never offers
+Google Drive.
 
 - **Why the desktop configuration cannot be reused.** Google's OAuth policy deprecates *both*
   redirect styles for its Android client type — the custom URI scheme (cited reason: app
@@ -346,11 +348,13 @@ holds the whole of it.
   certificate SHA-1, registered in the Cloud Console (see [build.md](build.md)); nothing is read
   from `BuildConfig`. A build signed with an unregistered key therefore fails at `authorize()` time
   rather than at build time. `CloudSession.Provider.clientId` still has to be non-empty (it doubles
-  as "is this backend configured in this build"), so `PlatformModule.android.kt` passes the
+  as "is this backend configured in this build"), so `PlayServicesGoogleDriveBackend` passes the
   placeholder `"play-services"` — not an OAuth client id.
 - **Gated on the device, not on the distribution channel.** `CloudStorageAvailability.googleDriveAvailable`
-  is `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS`, evaluated once per
-  process, and `platformModule` registers the provider only when that holds. A de-Googled ROM
+  asks the registered `AndroidGoogleDriveBackend` (`:androidGms`'s implementation answers
+  `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS`), evaluated once per
+  process, and `platformModule` registers the provider only when that holds. With no backend
+  registered at all — the `fdroid` flavor — the answer is simply "unavailable". A de-Googled ROM
   (GrapheneOS, LineageOS without GApps) simply never sees Google Drive offered; Dropbox, OneDrive
   and local-only are unaffected. Deliberately **not** keyed on the `github`/`play` product flavor —
   a play-flavored APK can be sideloaded and a github-flavored one runs fine where Play services

@@ -181,12 +181,18 @@ would fight Android's own notification model. See `external-spec.md` §7 for the
 The in-app "check for update" (`checkForUpdateAndNotify`, and the Updates settings tab) is gated on
 `platform/SelfUpdateCheck.kt`'s `selfUpdateCheckSupported`, backed by
 `core/UpdateDistribution.kt`'s `isSelfUpdateCheckSupported` fed this app's own installer package
-name (`com.android.vending` / the legacy `com.google.android.feedback` → disabled; anything else,
-including `null`, → enabled, matching desktop's always-on behavior). This is a UX call, not a
+name (`com.android.vending` / the legacy `com.google.android.feedback`, and the F-Droid clients —
+`org.fdroid.fdroid`, `org.fdroid.basic`, `org.fdroid.fdroid.privileged`, Droid-ify, Neo Store →
+disabled; anything else, including `null`, → enabled, matching desktop's always-on behavior) plus
+whether the build itself allows it: the `fdroid` flavor's manifest sets the
+`works.merc.keryx.SELF_UPDATE_CHECK` meta-data to `false`
+(`SelfUpdateCheck.android.kt`'s `distributionAllowsSelfUpdate`), which turns the check off whichever
+installer delivered that APK — F-Droid builds and signs it itself, so a GitHub update could not even
+replace it. This is a UX call, not a
 Google Play policy requirement — Play only disallows an app replacing *itself* outside Play's own
 mechanism or downloading executable code from elsewhere, neither of which this feature does — the
-reason is that Play already auto-updates the app, so a second, GitHub-flavored update path next to
-it would only confuse the user about which one to use.
+reason is that Play (or the F-Droid client) already updates the app, so a second, GitHub-flavored
+update path next to it would only confuse the user about which one to use.
 
 ## In-App Update
 
@@ -410,7 +416,7 @@ each a separate, explicit click (Updates tab button, or that menu item).
     revoked since the download started), the app instead opens the "install unknown apps" system
     settings screen and leaves state at `Ready` rather than failing outright, so a later click
     retries once consent is granted. `REQUEST_INSTALL_PACKAGES` is declared only in the `github`
-    distribution flavor's manifest (`androidApp/build.gradle.kts`'s `flavorDimensions` — see
+    distribution flavor's manifest (the `fdroid` flavor omits it too and turns the check off altogether) (`androidApp/build.gradle.kts`'s `flavorDimensions` — see
     `build.md`) — not the one submitted to Google Play, both because Play policy restricts that
     permission to apps whose primary purpose is installing other apps and because Play already
     updates the app itself. The gate this drives, `canInstallAndroidApkUpdate`

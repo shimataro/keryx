@@ -170,6 +170,8 @@ composeApp/src/                  # Compose UI for desktop + Android (depends on 
 ├── commonMain/composeResources/ # values/ (English, default) + values-ja/ strings.xml (i18n), drawable (tray icons)
 ├── desktopMain/kotlin/…/        # main.kt, tray, app menu, token storages, update installer
 └── commonTest/, desktopTest/    # UI + ViewModel tests
+androidApp/src/                  # Android application: manifest, MainActivity, KeryxApplication; flavors github / play / fdroid
+androidGms/src/                  # Google Play services code (Google Drive on Android); github + play flavors only, never fdroid
 testing/src/                     # test-only helpers (DbTestSupport, fakes) for both modules
 appleApp/                        # SwiftUI app (macOS + iOS), consumes :shared as KeryxShared.xcframework
 ├── project.yml                  # XcodeGen source of truth — Keryx.xcodeproj is generated, never committed

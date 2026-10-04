@@ -24,6 +24,7 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 | `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
 | `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
 | `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
+| `:androidGms` | Everything that needs Google Play services: Google Drive on Android (`PlayServicesGoogleDriveAuth.kt`). Its own module so the `fdroid` flavor can omit it — only `:androidApp`'s `github`/`play` flavors depend on it (see below). |
 | `:testing` | Test-only helpers used by both modules' tests (`DbTestSupport`, `CloudTestSupport`, `FakeNotificationMessages`, token-storage fakes). Never a main-source dependency. |
 
 Tests live next to the code they test: `shared/src/{commonTest,desktopTest,androidDeviceTest}` and
@@ -144,11 +145,12 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     resumed Activity so BrowserOpener can launch an http(s) link's Custom Tab — androidx.browser —
     from it rather than from the application context; the launch kind itself is commonMain's pure
     `browserLaunchKind`), PlatformModule (Ktor OkHttp
-    engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where Play services
-    exists — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
+    engine, CloudSession with Dropbox/OneDrive providers plus Google Drive where the app registered
+    an `AndroidGoogleDriveBackend` and Play services works — see Provider/DI below — plus AndroidNotificationSink, see [background-update.md](background-update.md)),
     CloudStorageAvailability (Dropbox/OneDrive read their BuildConfig keys; Google Drive is instead
-    a once-per-process `GoogleApiAvailability` check, since it goes through Play services rather
-    than a build-time client id — see sync-architecture.md's "Google Drive on Android"), KeryxTextField/KeryxAlertDialog/
+    a once-per-process `AndroidGoogleDriveBackend.isAvailable` check (`:androidGms`'s
+    `GoogleApiAvailability`; no backend registered ⇒ unavailable), since it goes through Play
+    services rather than a build-time client id — see sync-architecture.md's "Google Drive on Android"), KeryxTextField/KeryxAlertDialog/
     KeryxIcons/FlatButtons/FlatToggles/SegmentedControl (plain M3 — the last four are
     `expect`/`actual` split the same way, with Material Symbols (icons) or M3's own
     `Button`/`FilledTonalButton`/`TextButton`/`Switch`/`Checkbox`/
@@ -229,8 +231,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     icon `AndroidNotificationSink.kt` posts with (see background-update.md)
   commonTest/ + desktopTest/ + androidDeviceTest/ (instrumented tests for the Android actuals that
     need a real device/emulator — not just DatabaseMerger/DatabaseSnapshot's bundled-SQLite native
-    library, but also the Android Keystore (`KeystoreTokenStorageDeviceTest`), Play services
-    (`PlayServicesGoogleDriveAuthDeviceTest`, `AndroidAuthorizationHostDeviceTest`), and the Storage
+    library, but also the Android Keystore (`KeystoreTokenStorageDeviceTest`), the consent-screen
+    host (`AndroidAuthorizationHostDeviceTest`), and the Storage
     Access Framework (`FilePickerDeviceTest`); see testing.md)
 ```
 
@@ -243,13 +245,30 @@ Multiplatform source-set layout above), holds `AndroidManifest.xml`, `KeryxAppli
 db-schema.md's `articles_fts` section), `startBackgroundRefresh`), and `MainActivity`
 (`setContent { App() }`, then `runAndroidStartupTasks`) — plus its own `res/` (launcher icon,
 `values/strings.xml`, `backup_rules.xml`, `data_extraction_rules.xml`), a `github`-flavor
-`AndroidManifest.xml` that separates the sideloadable GitHub build from the Play Store one, and
+`AndroidManifest.xml` that separates the sideloadable GitHub build from the Play Store one (plus an
+`fdroid`-flavor one that opts out of the in-app update check — see below), the per-flavor
+`FlavorIntegration.kt` (`src/gms/` for `github`/`play`, `src/fdroid/`) that supplies the Google Drive
+backend, and
 `androidTest/` (`KeryxSearchBarAndroidTest`, `NativeMenuAndroidGestureTest`,
 `KeryxSettingRowAndroidGestureTest` — instrumented Compose UI tests that need a real device/emulator,
 unlike `androidDeviceTest` above). It exists because AGP
 9's `com.android.application` plugin cannot be applied to the same module as the Kotlin Multiplatform
 plugin — `composeApp` is instead an Android library via `com.android.kotlin.multiplatform.library`,
 and `androidApp` depends on it to produce the installable APK.
+
+**`:androidGms` and the three distribution flavors.** `androidApp` has three product flavors
+(`github`, `play`, `fdroid` — see build.md's "Android (APK / AAB)"). `:shared` and `:composeApp` are
+KMP libraries and so cannot have flavors: a Google Play services dependency in their `androidMain`
+would reach every flavor, and F-Droid's inclusion policy forbids it. Everything that needs Play
+services therefore sits in `:androidGms` (an Android library, depending on `:composeApp`), which only
+the `github` and `play` flavors depend on. The two sides meet at one interface in `:shared`,
+`AndroidGoogleDriveBackend` (`isAvailable(context)` + `provider(client, tokenStorage)`), and its holder
+`AndroidGoogleDriveSupport`: each flavor's `FlavorIntegration.kt` exposes `googleDriveBackend`
+(`PlayServicesGoogleDriveBackend` for `github`/`play`, `null` for `fdroid`), and
+`KeryxApplication.onCreate` installs it right after `AndroidAppContext.init`, before Koin starts.
+`CloudStorageAvailability.googleDriveAvailable` and `platformModule`'s `extraProviders` both read the
+installed backend, so with none installed Google Drive is unavailable and unregistered — exactly the
+state of a device without Play services, which no UI needs to tell apart.
 
 ## Layer Responsibilities
 

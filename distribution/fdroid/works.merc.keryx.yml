@@ -1,0 +1,45 @@
+# Draft of fdroiddata's metadata/works.merc.keryx.yml — see README.md in this directory.
+Categories:
+  - Reading
+License: MIT
+AuthorName: shimataro
+SourceCode: https://github.com/shimataro/keryx
+IssueTracker: https://github.com/shimataro/keryx/issues
+AntiFeatures:
+  NonFreeNet:
+    en-US: Optional sync via Dropbox or OneDrive.
+    ja-JP: Dropbox / OneDrive による任意の同期。
+
+RepoType: git
+Repo: https://github.com/shimataro/keryx.git
+
+# Placeholder entry: neither v0.22.0 nor any earlier tag contains the `fdroid` flavor, so replace
+# versionName / versionCode / commit with the first release tag that does before submitting.
+Builds:
+  - versionName: 0.22.0
+    versionCode: 220099
+    commit: v0.22.0
+    subdir: androidApp
+    sudo:
+      - apt-get update
+      - apt-get install -y openjdk-25-jdk-headless
+      - update-java-alternatives -a
+    gradle:
+      - fdroid
+    rm:
+      - androidGms
+    prebuild:
+      - sed -i -e '/foojay/d' ../settings.gradle.kts
+      - sed -i -e '/androidGms/d' ../settings.gradle.kts build.gradle.kts
+    gradleprops:
+      - appVersion=0.22.0
+      - dropboxAppKey=<DROPBOX_APP_KEY>
+      - oneDriveClientId=<ONEDRIVE_CLIENT_ID>
+
+# Releases are added by hand: this app's versionCode is computed in androidApp/build.gradle.kts
+# (versionCodeOf, from the tag-derived appVersion), so `UpdateCheckMode: Tags` — which reads a
+# literal versionCode from the Gradle files — finds no version information (see README.md).
+AutoUpdateMode: None
+UpdateCheckMode: None
+CurrentVersion: 0.22.0
+CurrentVersionCode: 220099

@@ -177,11 +177,17 @@ Android は完全に OS 自身の通知ドット（未読数ではなく、通�
 アプリ内の「アップデートを確認」（`checkForUpdateAndNotify` と設定の「アップデート」タブ）は
 `platform/SelfUpdateCheck.kt` の `selfUpdateCheckSupported` でゲートしている。これは
 `core/UpdateDistribution.kt` の `isSelfUpdateCheckSupported` に自アプリのインストール元パッケージ名を
-渡した結果を使う（`com.android.vending` / 旧 `com.google.android.feedback` → 無効、それ以外
-（`null` を含む）→ 有効。デスクトップの「常に有効」と同じ既定値）。これは Google Play のポリシー要件
+渡した結果と、ビルド自身が許可しているかどうかを使う（`com.android.vending` / 旧
+`com.google.android.feedback`、および F-Droid クライアント —— `org.fdroid.fdroid`、`org.fdroid.basic`、
+`org.fdroid.fdroid.privileged`、Droid-ify、Neo Store → 無効、それ以外（`null` を含む）→ 有効。デスクトップの
+「常に有効」と同じ既定値）。後者については、`fdroid` flavor のマニフェストが
+`works.merc.keryx.SELF_UPDATE_CHECK` meta-data を `false` にしており
+（`SelfUpdateCheck.android.kt` の `distributionAllowsSelfUpdate`）、その APK をどのインストーラーが
+届けたかに関係なく確認がオフになる —— F-Droid が自分でビルド・署名するため、GitHub のアップデートでは
+そもそも置き換えられないからである。これは Google Play のポリシー要件
 ではなく UX 上の判断である — Play が禁じているのはアプリが Play 以外の方法で**自身を置換すること**と
-Play 以外からの実行可能コードのダウンロードであり、この機能はどちらも行っていない。理由は、Play は
-既にアプリを自動更新しているため、そこに GitHub 版の更新導線をもう一つ並べるとユーザーがどちらを
+Play 以外からの実行可能コードのダウンロードであり、この機能はどちらも行っていない。理由は、Play（や F-Droid クライアント）は
+既にアプリを更新しているため、そこに GitHub 版の更新導線をもう一つ並べるとユーザーがどちらを
 使えばよいのか混乱するからである。
 
 ## アプリ内アップデート
@@ -408,6 +414,7 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
     アプリは即座に失敗させる代わりに「提供元不明のアプリ」システム設定画面を開き、state を
     `Ready` のままにしておく——同意が得られた後の再クリックで再試行できるようにするため。
     `REQUEST_INSTALL_PACKAGES` は `github` distribution flavor のマニフェストにのみ宣言されており
+    （`fdroid` flavor も宣言せず、確認自体をオフにしている）
     （`androidApp/build.gradle.kts` の `flavorDimensions` — `build.ja.md` 参照）、Google Play へ
     提出する方には含めない——Play のポリシーがこの権限を「他アプリのインストールを主目的とする
     アプリ」に限定していることと、Play が既にアプリ自身を更新してくれることの両方が理由。これを

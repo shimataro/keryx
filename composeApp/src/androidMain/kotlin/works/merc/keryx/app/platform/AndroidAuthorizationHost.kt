@@ -9,7 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
 
 /**
  * Bridges `MainActivity`'s `StartIntentSenderForResult` launcher to the Google Drive connect flow
- * (`data/cloud/PlayServicesGoogleDriveAuth.kt`), which needs an Activity to run Play services'
+ * (`:androidGms`'s `PlayServicesGoogleDriveAuth.kt`), which needs an Activity to run Play services'
  * consent screen: `AuthorizationClient.authorize()` answers with a [PendingIntent] whenever the
  * user has not granted the scope yet, and only an Activity can start it for a result.
  *
@@ -23,7 +23,8 @@ import kotlinx.coroutines.CompletableDeferred
  *
  * [attach]/[detach]/[onResult] are public rather than `internal`: `MainActivity` lives in the
  * separate `:androidApp` Gradle module, which `internal`'s module-scoped visibility would put out
- * of reach (the same reason [AndroidFilePickerHost]'s are).
+ * of reach (the same reason [AndroidFilePickerHost]'s are). So is [launch], for the same reason: its
+ * caller lives in the separate `:androidGms` module.
  */
 object AndroidAuthorizationHost {
     private var launcher: ActivityResultLauncher<IntentSenderRequest>? = null
@@ -74,7 +75,7 @@ object AndroidAuthorizationHost {
      * reason [AndroidFilePickerHost.detach]'s KDoc gives — `ActivityResultRegistry` redelivers the
      * result to the recreated Activity's freshly re-registered launcher.
      */
-    internal suspend fun launch(pendingIntent: PendingIntent): Intent? {
+    suspend fun launch(pendingIntent: PendingIntent): Intent? {
         val launcher = this.launcher ?: return null
         if (pending != null) return null
         val deferred = CompletableDeferred<Intent?>()

@@ -41,7 +41,7 @@
 
 `:androidApp` には `distribution` プロダクトフレーバー次元があるため（後述「Android（APK / AAB）」）、
 インストールはバリアント単位のタスクになる —— `installDebug` は存在せず、デバッグバリアントは
-`githubDebug` だけ（`playDebug` は無効化済み）。`assembleDebug` は有効なデバッグバリアントを束ねる
+`githubDebug` だけ（`playDebug` と `fdroidDebug` は無効化済み）。`assembleDebug` は有効なデバッグバリアントを束ねる
 集約タスクとして残っているので、上記のままで動く。
 
 ## クラウドストレージとの連携
@@ -607,24 +607,40 @@ JUL のルートロガーに自前の formatter/handler を仕込んでいる。
 上記のデスクトップパッケージと違い、APK/AAB は**どの OS からでも**ビルドできる —
 クロスコンパイルの制約は無い。
 
-`androidApp` は `distribution` という次元で `github` と `play` という 2 つの product flavor に
-分かれている（`applicationId` は同一）。両者が異なるのはただ 1 点だけ:
-`androidApp/src/github/AndroidManifest.xml` が `REQUEST_INSTALL_PACKAGES` を宣言しており、これは
-アプリ内アップデートのインストーラーが `PackageInstaller` セッションを張るために必要
-（[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）。`play`
-flavor のマニフェストはこの権限を含まない — Play は既にアプリ自身を更新してくれるうえ、Play の
-ポリシーはこの権限を「他のアプリのインストールを主目的とするアプリ」に限定しているため。
-`composeApp`（KMP ライブラリモジュール）には flavor 次元が無く、両 flavor から同一に消費される。
+`androidApp` は `distribution` という次元で `github`・`play`・`fdroid` という 3 つの product flavor に
+分かれている（`applicationId` は同一）:
+
+- `github` と `play` が異なるのは 1 点だけ: `androidApp/src/github/AndroidManifest.xml` が
+  `REQUEST_INSTALL_PACKAGES` を宣言しており、これはアプリ内アップデートのインストーラーが
+  `PackageInstaller` セッションを張るために必要
+  （[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）。`play`
+  flavor のマニフェストはこの権限を含まない — Play は既にアプリ自身を更新してくれるうえ、Play の
+  ポリシーはこの権限を「他のアプリのインストールを主目的とするアプリ」に限定しているため。
+- `fdroid` は F-Droid が自分でビルド・署名する flavor で、**Google Play services を一切含まない** ——
+  F-Droid の掲載ポリシーが禁止しているため。Play services を必要とするもの（Android の Google Drive）は
+  すべて `:androidGms` モジュールにあり、これに依存するのは `github` と `play` だけ。したがって
+  `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・ローカルのみは通常どおり使える）—— Play
+  services の無い端末と同じ状態になる。この flavor のマニフェスト
+  （`androidApp/src/fdroid/AndroidManifest.xml`）は、`works.merc.keryx.SELF_UPDATE_CHECK` の
+  meta-data を `false` にして、どのインストーラーが APK を届けたかに関係なくアプリ内アップデート確認を
+  オフにし、`play` と同様に `REQUEST_INSTALL_PACKAGES` も含まない。`ci.yml` はこの 2 点を push のたびに
+  検証する（マージ後のマニフェストと、この flavor の実行時クラスパスに `com.google.android.gms` /
+  `com.google.firebase` / `:androidGms` が無いこと）。
+
+`composeApp`（KMP ライブラリモジュール）には flavor 次元が無く、すべての flavor から同一に消費される ——
+`:androidGms` を独立したモジュールにしなければならない理由がまさにこれで、`composeApp` や `shared` の
+`androidMain` に Play services の依存を置くと 3 つの flavor すべてに届いてしまう。
 
 ```bash
 ./gradlew :androidApp:assembleGithubRelease -PappVersion=1.2.3   # APK（GitHub Releases）
 ./gradlew :androidApp:bundlePlayRelease     -PappVersion=1.2.3   # AAB（Play Store 提出用の形式）
+./gradlew :androidApp:assembleFdroidRelease -PappVersion=1.2.3   # APK（F-Droid がビルドするもの）
 ```
 
-出力先はそれぞれ `androidApp/build/outputs/apk/github/release/` と
-`androidApp/build/outputs/bundle/playRelease/`（上記デスクトップパッケージの
+出力先はそれぞれ `androidApp/build/outputs/apk/github/release/`、
+`androidApp/build/outputs/bundle/playRelease/`、`androidApp/build/outputs/apk/fdroid/release/`（上記デスクトップパッケージの
 `composeApp/build/compose/binaries/main` とは別の場所）。`assembleGithubRelease` は既定の `build`
-ライフサイクルの集約タスク `assembleRelease`/`build` 経由で到達できる（両 flavor の release
+ライフサイクルの集約タスク `assembleRelease`/`build` 経由で到達できる（すべての flavor の release
 variant をビルドする）が、`bundlePlayRelease` はどの集約ライフサイクルタスクにも含まれず明示的に
 実行する必要がある — 両方の使われ方は後述の「リリース（CD）」を参照。`androidApp/build.gradle.kts`
 の `flavorDimensions` を触った後は、`release.yml` を書き換える前に
@@ -1145,6 +1161,38 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 > **リリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper にブロックされる。回避方法は
 > README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に必要な作業は下記
 > 「署名・公証」を参照。
+
+### F-Droid への公開
+
+F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の鍵で署名するため、`release.yml` も
+`publish-play.yml` もアップロードするものは無い。代わりにこのリポジトリが次の 2 つを用意する:
+
+- `fastlane/metadata/android/{en-US,ja-JP}/` — F-Droid がタグ付きコミットから読むストア掲載情報
+  （[`fastlane/README.md`](../fastlane/README.md) 参照）。ノートを表示したいリリースごとに
+  `changelogs/<versionCode>.txt` を追加し、2 つのロケールをそろえて保つ。
+- `distribution/fdroid/works.merc.keryx.yml` — `fdroiddata` のレシピの下書き。手作業でマージ
+  リクエストとして提出する（各項目の説明は
+  [`distribution/fdroid/README.md`](../distribution/fdroid/README.md) を参照）。
+
+F-Droid のサーバー上のビルドがローカルと違わなければならない点:
+
+- **Debian の JDK 25。** Gradle ビルドは JDK 25 の toolchain を対象とし、`settings.gradle.kts` は通常
+  これを `foojay` リゾルバーにダウンロードさせるが、F-Droid の scanner はそのプラグインを拒否する。
+  レシピは Debian の `openjdk-25-jdk-headless` をインストールし、ビルド前に `sed` で `foojay` の行を
+  削除するので、Gradle はインストール済みの JDK を見つける。
+- **OAuth クライアント識別子をプロパティで渡す。** F-Droid は API キーを自分では取得しないため、
+  レシピに公開の Dropbox App Key と OneDrive Client ID（`-PdropboxAppKey`、`-PoneDriveClientId` ——
+  どちらもシークレットの無い PKCE パブリッククライアント）を持たせる。Google Drive には不要:
+  `fdroid` flavor に Google Drive は無い。
+- **Linux での `:androidApp:assembleFdroidRelease` に Kotlin/Native のダウンロードも Apple 向けタスクも
+  無い**ので、Maven Central・Google Maven・JitPack・Gradle プラグインポータル以外からは何も取得しない。
+
+`fdroid scanner` の検出が、ソースでもビルドした APK でも**ゼロ**であることが、依存グラフの変更が
+守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の
+`buildserver` イメージ（`registry.gitlab.com/fdroid/fdroidserver:buildserver`）で実行すること。
+`ci.yml` の「Verify the fdroid flavor has no Google Play services」ステップは最もありそうな
+リグレッションを毎 push で検出するが、Play 開発者サービスと無関係な新たなプロプライエタリ依存までは
+検出しない。
 
 ## 署名・公証（将来対応）
 

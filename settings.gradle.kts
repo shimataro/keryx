@@ -33,3 +33,7 @@ include(":testing")
 // from :composeApp because AGP 9's com.android.application plugin cannot coexist with the Kotlin
 // Multiplatform plugin in the same module — see the plan doc's "実装中に判明した構造変更".
 include(":androidApp")
+// Everything that depends on Google Play services (Google Drive on Android, via AuthorizationClient),
+// kept out of :shared/:composeApp so the F-Droid flavor can leave it out entirely — see
+// androidGms/build.gradle.kts.
+include(":androidGms")
