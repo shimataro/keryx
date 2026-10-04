@@ -1156,9 +1156,8 @@ existing release once published.
 
 ### Publishing to F-Droid
 
-F-Droid builds the `fdroid` flavor from source itself and signs it with its own key, so neither
-`release.yml` nor `publish-play.yml` has anything to upload for it. This repository supplies two
-things instead:
+F-Droid builds the `fdroid` flavor from source itself and signs it with its own key, so no APK is
+uploaded for it. What this repository supplies instead:
 
 - `fastlane/metadata/android/{en-US,ja-JP}/` — the store listing F-Droid reads from the tagged
   commit (see [`fastlane/README.md`](../fastlane/README.md)). Add `changelogs/<versionCode>.txt`
@@ -1166,6 +1165,12 @@ things instead:
 - `distribution/fdroid/works.merc.keryx.yml` — a draft of the `fdroiddata` recipe, submitted by hand
   as a merge request ([`distribution/fdroid/README.md`](../distribution/fdroid/README.md) explains
   each field).
+- `fdroid-version.json`, attached to every release by `release.yml` (see "Release (CD)" above). The
+  recipe's update check reads it from the latest stable release, so F-Droid picks up new releases
+  on its own — its usual `Tags` check cannot, because `versionCodeOf` computes the versionCode at
+  build time. The only per-release chore is adding `changelogs/<versionCode>.txt` **before**
+  tagging, since F-Droid reads it from the tagged commit. The first submission has to wait for a
+  stable release that carries this file, because the merge request's CI runs the update check.
 
 What a build on F-Droid's server needs to differ from a local one:
 

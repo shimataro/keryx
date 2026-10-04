@@ -1170,8 +1170,8 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 
 ### F-Droid への公開
 
-F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の鍵で署名するため、`release.yml` も
-`publish-play.yml` もアップロードするものは無い。代わりにこのリポジトリが次の 2 つを用意する:
+F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の鍵で署名するため、APK はアップロード
+しない。代わりにこのリポジトリが次のものを用意する:
 
 - `fastlane/metadata/android/{en-US,ja-JP}/` — F-Droid がタグ付きコミットから読むストア掲載情報
   （[`fastlane/README.md`](../fastlane/README.md) 参照）。ノートを表示したいリリースごとに
@@ -1179,6 +1179,12 @@ F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の�
 - `distribution/fdroid/works.merc.keryx.yml` — `fdroiddata` のレシピの下書き。手作業でマージ
   リクエストとして提出する（各項目の説明は
   [`distribution/fdroid/README.md`](../distribution/fdroid/README.md) を参照）。
+- `release.yml` がすべてのリリースに添付する `fdroid-version.json`（上記「リリース（CD）」参照）。
+  レシピの更新チェックはこれを最新の安定版リリースから読むので、F-Droid は新しいリリースを自動で
+  検出する —— 通常の `Tags` チェックでは、`versionCodeOf` がビルド時に versionCode を計算するため
+  検出できない。リリースごとの手作業は、タグを打つ**前に** `changelogs/<versionCode>.txt` を足す
+  ことだけ（F-Droid はタグ付きコミットから読むため）。マージリクエストの CI が更新チェックを
+  実行するので、最初の提出はこのファイルが付いた安定版リリースを待つ必要がある。
 
 F-Droid のサーバー上のビルドがローカルと違わなければならない点:
 

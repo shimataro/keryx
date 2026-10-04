@@ -21,6 +21,11 @@ What the recipe encodes, and why:
   `play-services-auth`. The `sed` deletes the `include(":androidGms")` line and the two
   `project(":androidGms")` dependencies (of the `github`/`play` flavors) that would otherwise point at a
   module that no longer exists.
+- The last `prebuild` line writes `appVersion=$$VERSION$$` (the build's `versionName`) into
+  `gradle.properties`, which is where both `androidApp` and `shared` read the version from
+  (`findProperty("appVersion")`). It is a `prebuild` line rather than a `gradleprops` entry because
+  automatic updates (below) copy the previous build and rewrite only `versionName`, `versionCode`
+  and `commit` — `$$VERSION$$` is substituted per build, a literal in `gradleprops` would not be.
 - `gradleprops` passes the **public** OAuth client identifiers: F-Droid does not sign up for API
   keys, and Dropbox's App Key and OneDrive's Client ID are PKCE public clients with no secret
   (see [`docs/build.md`](../../docs/build.md)'s "Cloud Storage Integration"). The values in the draft
@@ -28,14 +33,19 @@ What the recipe encodes, and why:
 - `AntiFeatures: NonFreeNet` — the optional sync talks to Dropbox / OneDrive, which are
   proprietary network services.
 
-- `AutoUpdateMode: None` / `UpdateCheckMode: None` — `fdroid checkupdates` cannot follow releases
-  automatically. With `UpdateCheckMode: Tags` it fails with "Couldn't find any version information",
-  because it looks for a literal `versionCode` in the Gradle files, while this app derives both
-  `versionName` and `versionCode` from the release tag at build time (`appVersion` →
-  `versionCodeOf` in `androidApp/build.gradle.kts`). So each release that F-Droid should ship is a
-  new `Builds` entry (`versionName`, `versionCode` computed by `versionCodeOf` — `0.22.0` → `220099`
-  — and the tag as `commit`) added to the recipe by merge request. Automating this would mean
-  keeping a literal version in a file the release process updates; not done.
+- `UpdateCheckMode: HTTP` / `AutoUpdateMode: Version v%v` — new releases are picked up
+  automatically. `UpdateCheckMode: Tags` cannot do it here: it looks for a literal `versionCode` in
+  the Gradle files and fails with "Couldn't find any version information", because this app derives
+  `versionName` and `versionCode` from the release tag at build time (`appVersion` → `versionCodeOf`
+  in `androidApp/build.gradle.kts`; `0.22.0` → `220099`). Instead `release.yml` attaches
+  `fdroid-version.json` (`{"versionName":"…","versionCode":…}`, the code computed by `versionCodeOf`
+  itself) to every release, and `UpdateCheckData` reads it from
+  `releases/latest/download/fdroid-version.json` — `latest` skips pre-releases, so only stable
+  releases are picked up. A new version then becomes a new `Builds` entry with `commit: v<version>`.
+  - F-Droid's FAQ asks developers not to compute the version at build time; the recipe still records
+    a literal `versionName` / `versionCode` per build, but a reviewer may question it.
+  - `checkupdates` runs in the merge request's CI and reads that URL, so the recipe can only be
+    submitted once a stable release carrying `fdroid-version.json` exists.
 
 Before submitting, replace `versionName` / `versionCode` / `commit` with the first release tag that
 contains the `fdroid` flavor, and fill in the two client identifiers. Tags before v0.22.0 have no
