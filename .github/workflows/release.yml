@@ -575,8 +575,14 @@ jobs:
         # distribution an in-app update installs over) and the AAB from "play" (the Play Console
         # submission artifact, which must not carry that permission) — see
         # androidApp/build.gradle.kts's flavorDimensions and AndroidUpdateInstaller's own KDoc.
+        # The "fdroid" APK is signed with the same app signing key as the github one: F-Droid builds
+        # the same tag itself and, when the result matches this APK byte for byte apart from the
+        # signature, publishes this one, so F-Droid users get the same signature as every other
+        # channel (see distribution/fdroid/README.md). That only holds while F-Droid's build gets
+        # the same inputs, which includes the DROPBOX_APP_KEY / ONEDRIVE_CLIENT_ID values below.
         run: >
           ./gradlew :androidApp:assembleGithubRelease :androidApp:bundlePlayRelease
+          :androidApp:assembleFdroidRelease
           -PappVersion=${{ steps.version.outputs.version }}
           -PandroidReleaseSigningRequired=true
         env:
@@ -595,9 +601,14 @@ jobs:
         id: artifact
         run: |
           apk_src=$(find androidApp/build/outputs/apk/github/release -maxdepth 1 -name '*.apk' | head -n 1)
+          fdroid_apk_src=$(find androidApp/build/outputs/apk/fdroid/release -maxdepth 1 -name '*.apk' | head -n 1)
           aab_src=$(find androidApp/build/outputs/bundle/playRelease -maxdepth 1 -name '*.aab' | head -n 1)
           if [ -z "$apk_src" ]; then
             echo "::error::No APK produced under androidApp/build/outputs/apk/github/release."
+            exit 1
+          fi
+          if [ -z "$fdroid_apk_src" ]; then
+            echo "::error::No APK produced under androidApp/build/outputs/apk/fdroid/release."
             exit 1
           fi
           if [ -z "$aab_src" ]; then
@@ -607,22 +618,30 @@ jobs:
           # Defense in depth on top of -PandroidReleaseSigningRequired=true above: AGP names an
           # unsigned release APK with an "-unsigned" suffix (it has no equivalent marker for the
           # AAB), so this is a cheap extra check right before the irreversible upload/publish below.
-          case "$apk_src" in
-            *-unsigned.apk)
-              echo "::error::Refusing to publish an unsigned APK ($apk_src)."
-              exit 1
-              ;;
-          esac
+          for apk in "$apk_src" "$fdroid_apk_src"; do
+            case "$apk" in
+              *-unsigned.apk)
+                echo "::error::Refusing to publish an unsigned APK ($apk)."
+                exit 1
+                ;;
+            esac
+          done
           apk_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.apk"
           mv "$apk_src" "$apk_dest"
           echo "apk=$apk_dest" >> "$GITHUB_OUTPUT"
+          # The "-android-fdroid.apk" suffix keeps it out of the in-app updater's reach: a sideloaded
+          # install picks only "-android-universal.apk" (UpdateAsset.kt), and the fdroid build lacks
+          # Google Drive and the update check. It exists for F-Droid's reproducible-build check.
+          fdroid_apk_dest="Keryx-${{ steps.version.outputs.version }}-android-fdroid.apk"
+          mv "$fdroid_apk_src" "$fdroid_apk_dest"
+          echo "fdroid_apk=$fdroid_apk_dest" >> "$GITHUB_OUTPUT"
           # The AAB is never a GitHub Release asset — a user cannot install one, and
           # selectUpdateAsset never matches a `.aab` — so it keeps its AGP-generated name/location
           # and is only ever read by the publish-play job below, via the artifact uploaded next.
           echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" --clobber
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" "${{ steps.artifact.outputs.fdroid_apk }}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}

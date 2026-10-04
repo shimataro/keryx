@@ -903,8 +903,8 @@ Flow:
        Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every
        Store user by snapd's own auto-refresh with no way to recall it).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships a compatible WiX Toolset version (v3/v4/v5) preinstalled, so no separate WiX setup step is needed; see [setup.md](setup.md)), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
-   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), building
-     the APK from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an
+   - `:androidApp:assembleGithubRelease`, `:androidApp:bundlePlayRelease` and
+     `:androidApp:assembleFdroidRelease` (Ubuntu runner), building the APK from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an
      in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from
      `play` (the Play Console submission artifact, which must not carry that permission). Unlike
      the desktop installers, Android packages are built for pre-release tags too, because Android has
@@ -914,6 +914,13 @@ Flow:
        `Keryx-<version>-android-universal.apk` — the AAB is never attached (see the note at the top
        of this section for why); instead it is uploaded as a build artifact
        (`actions/upload-artifact`) for the separate `publish-play` job below to consume.
+     - **Developer-signed `fdroid` APK.** The `fdroid` flavor is built in the same invocation, signed
+       with the same app signing key as the `github` APK, and attached as
+       `Keryx-<version>-android-fdroid.apk`. It is not meant for anyone to download: F-Droid rebuilds
+       the tag and, if its result matches this APK apart from the signature, publishes this one, so
+       F-Droid users share every other channel's signature (see "Publishing to F-Droid" below). The
+       in-app updater only ever picks the `-android-universal.apk` asset, so it never offers this
+       one to a sideloaded install.
      - **F-Droid version file.** As its last step the job also attaches `fdroid-version.json`
        (`{"versionName":"<version>","versionCode":<n>}`, the code taken from `versionCodeOf` through
        the `printAndroidVersionCodes` probe), which F-Droid's update checker reads from the latest
