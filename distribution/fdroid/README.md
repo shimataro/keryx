@@ -33,9 +33,10 @@ What the recipe encodes, and why:
   because it looks for a literal `versionCode` in the Gradle files, while this app derives both
   `versionName` and `versionCode` from the release tag at build time (`appVersion` →
   `versionCodeOf` in `androidApp/build.gradle.kts`). So each release that F-Droid should ship is a
-  new `Builds` entry (`versionName`, `versionCode` computed by `versionCodeOf` — `0.21.0` → `210099`
+  new `Builds` entry (`versionName`, `versionCode` computed by `versionCodeOf` — `0.22.0` → `220099`
   — and the tag as `commit`) added to the recipe by merge request. Automating this would mean
   keeping a literal version in a file the release process updates; not done.
 
 Before submitting, replace `versionName` / `versionCode` / `commit` with the first release tag that
-contains the `fdroid` flavor, and fill in the two client identifiers.
+contains the `fdroid` flavor, and fill in the two client identifiers. Tags before v0.22.0 have no
+`:shared` module, so this recipe (which edits files in that layout) cannot be used with them.

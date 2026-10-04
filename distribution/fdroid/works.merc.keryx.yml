@@ -13,10 +13,12 @@ AntiFeatures:
 RepoType: git
 Repo: https://github.com/shimataro/keryx.git
 
+# Placeholder entry: neither v0.22.0 nor any earlier tag contains the `fdroid` flavor, so replace
+# versionName / versionCode / commit with the first release tag that does before submitting.
 Builds:
-  - versionName: 0.21.0
-    versionCode: 210099
-    commit: v0.21.0
+  - versionName: 0.22.0
+    versionCode: 220099
+    commit: v0.22.0
     subdir: androidApp
     sudo:
       - apt-get update
@@ -30,7 +32,7 @@ Builds:
       - sed -i -e '/foojay/d' ../settings.gradle.kts
       - sed -i -e '/androidGms/d' ../settings.gradle.kts build.gradle.kts
     gradleprops:
-      - appVersion=0.21.0
+      - appVersion=0.22.0
       - dropboxAppKey=<DROPBOX_APP_KEY>
       - oneDriveClientId=<ONEDRIVE_CLIENT_ID>
 
@@ -39,5 +41,5 @@ Builds:
 # literal versionCode from the Gradle files — finds no version information (see README.md).
 AutoUpdateMode: None
 UpdateCheckMode: None
-CurrentVersion: 0.21.0
-CurrentVersionCode: 210099
+CurrentVersion: 0.22.0
+CurrentVersionCode: 220099

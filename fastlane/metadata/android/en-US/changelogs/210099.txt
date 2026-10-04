@@ -1,5 +1,0 @@
-• New-articles pill: new articles that arrive beyond the scroll position surface as a tappable pill
-• "Hide read" action in the article list toolbar
-• Sync now button in the Cloud sync settings tab
-• Pull-to-refresh on the article list
-• Notification icon now fills its area in the status bar

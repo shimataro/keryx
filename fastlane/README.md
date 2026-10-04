@@ -28,8 +28,9 @@ together, and keep them in step with the Play listing when the feature list or p
 change.
 
 `changelogs/<versionCode>.txt` is named by the Android `versionCode`, which
-`androidApp/build.gradle.kts`'s `versionCodeOf` derives from the version (`0.21.0` → `210099`; see
+`androidApp/build.gradle.kts`'s `versionCodeOf` derives from the version (`0.22.0` → `220099`; see
 [`docs/build.md`](../docs/build.md)'s "Android (APK / AAB)"). Add one per release that F-Droid
-should show notes for.
+should show notes for — starting with the first release that F-Droid builds, whose file is added when
+that release is made (there is none yet, so `changelogs/` does not exist).
 
 `images/phoneScreenshots/` is empty on purpose (`.gitkeep`): screenshots are added by hand.
