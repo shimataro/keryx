@@ -288,11 +288,18 @@ android {
         }
     }
 
-    // Splits the one distribution-specific permission an in-app update install needs
-    // (REQUEST_INSTALL_PACKAGES, declared only in src/github/AndroidManifest.xml) out of the AAB
-    // submitted to Google Play, without maintaining two applicationIds — `composeApp` is a KMP
-    // library module (no flavor dimension of its own) and, having none, is consumed identically by
-    // both flavors, so no `missingDimensionStrategy` is needed on this side either. See
+    // Three distribution channels, one applicationId:
+    //  - github: the sideloaded APK on GitHub Releases. Declares the one distribution-specific
+    //    permission an in-app update install needs (REQUEST_INSTALL_PACKAGES, only in
+    //    src/github/AndroidManifest.xml).
+    //  - play: the AAB submitted to Google Play, without that permission.
+    //  - fdroid: built and signed by F-Droid. Contains no Google Play services at all (F-Droid's
+    //    inclusion policy forbids it — :androidGms is simply not a dependency here, so Google Drive
+    //    is never offered) and opts out of the in-app update check (src/fdroid/AndroidManifest.xml),
+    //    since F-Droid's client updates the app.
+    // `composeApp` is a KMP library module (no flavor dimension of its own) and, having none, is
+    // consumed identically by every flavor, so no `missingDimensionStrategy` is needed on this side
+    // either. See
     // `docs/app-architecture.md`'s in-app-update section and `AndroidUpdateInstaller`'s own KDoc
     // for how `canInstallUpdates` reads the *merged manifest* at runtime rather than branching on
     // the flavor name — a play-flavored APK can still reach this code path if sideloaded outside
@@ -306,6 +313,9 @@ android {
         create("play") {
             dimension = "distribution"
         }
+        create("fdroid") {
+            dimension = "distribution"
+        }
     }
 
     // The flavors that ship Google Play services share one flavor-specific source file
@@ -317,15 +327,19 @@ android {
     }
 }
 
-// playDebug builds and installs like any other debug variant, but nobody has a reason to run it:
-// Play Debug is never uploaded (only playRelease is), never sideloaded for manual testing (that's
-// what githubDebug is for), and the flavors differ only in the REQUEST_INSTALL_PACKAGES manifest
-// permission (see the flavorDimensions comment above) — nothing debug-build-specific to exercise
-// there that githubDebug doesn't already cover. Disabling it keeps `./gradlew assembleDebug` and
-// `connectedAndroidTest` (see docs/testing.md) from building/running a variant nobody uses, down to
-// githubDebug/githubRelease/playRelease.
+// playDebug and fdroidDebug build and install like any other debug variant, but nobody has a reason
+// to run them: neither is ever uploaded (only playRelease / fdroidRelease are), never sideloaded for
+// manual testing (that's what githubDebug is for), and the flavors differ only in a manifest
+// permission / meta-data and in whether Play services is linked (see the flavorDimensions comment
+// above) — nothing debug-build-specific to exercise there that githubDebug doesn't already cover.
+// Disabling them keeps `./gradlew assembleDebug` and `connectedAndroidTest` (see docs/testing.md)
+// from building/running variants nobody uses, down to
+// githubDebug/githubRelease/playRelease/fdroidRelease.
 androidComponents {
     beforeVariants(selector().withFlavor("distribution" to "play").withBuildType("debug")) { variantBuilder ->
+        variantBuilder.enable = false
+    }
+    beforeVariants(selector().withFlavor("distribution" to "fdroid").withBuildType("debug")) { variantBuilder ->
         variantBuilder.enable = false
     }
 
