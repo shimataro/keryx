@@ -498,11 +498,17 @@ class UpdateRepository(
                     // here would otherwise still surface as "ready to install" for a download the
                     // user had already cancelled.
                     coroutineContext.ensureActive()
-                    _state.value = UpdateState.Ready(update, destPath)
+                    // Notification first, Ready second: anyone who observes Ready on [state] must
+                    // already see the "available" row replaced by "ready to install", never both.
+                    // postNotification's only suspension point is acquiring its mutex, before it
+                    // touches anything, so a cancellation there posts nothing and falls through to
+                    // the CancellationException handler below — there is no way to end up with a
+                    // "ready" row next to an Available state.
                     postNotification(
                         NotificationText.UpdateReadyToInstall(update.version),
                         AppNotificationAction.ShowSettingsTab("updates"),
                     )
+                    _state.value = UpdateState.Ready(update, destPath)
                 }
                 is Result.Err -> {
                     Log.warn(TAG, "Update download failed: ${untrustedText(result.exception.messageText, MAX_FAILURE_REASON_LENGTH)}")
