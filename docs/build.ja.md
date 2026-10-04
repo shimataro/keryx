@@ -58,6 +58,11 @@ APIキーが指定されていないクラウドサービスは連携機能が�
 
 以下に各サービスでのAPIキーの取得方法を示す。
 
+本番の Dropbox / OneDrive のアプリ登録を作り直して App Key / Client ID が変わったときは、`release.yml` の
+シークレット（`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID`）と F-Droid のレシピ（下書きと `fdroiddata` のもの）を
+一緒に更新すること —— F-Droid がリリースの APK を公開するには、レシピも同じ値でビルドする必要がある
+（[`distribution/fdroid/README.md`](../distribution/fdroid/README.md) 参照）。
+
 ### Dropbox
 
 1. [DBX Platform](https://www.dropbox.com/developers/apps/create)で連携先アプリを作成
@@ -616,7 +621,9 @@ JUL のルートロガーに自前の formatter/handler を仕込んでいる。
   （[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）。`play`
   flavor のマニフェストはこの権限を含まない — Play は既にアプリ自身を更新してくれるうえ、Play の
   ポリシーはこの権限を「他のアプリのインストールを主目的とするアプリ」に限定しているため。
-- `fdroid` は F-Droid が自分でビルド・署名する flavor で、**Google Play services を一切含まない** ——
+- `fdroid` は F-Droid がソースからビルドする flavor（`release.yml` が添付する開発者署名の APK を
+  F-Droid のビルドが再現できたときは、アプリ自身の署名のまま公開される —— 「F-Droid への公開」参照）で、
+  **Google Play services を一切含まない** ——
   F-Droid の掲載ポリシーが禁止しているため。Play services を必要とするもの（Android の Google Drive）は
   すべて `:androidGms` モジュールにあり、これに依存するのは `github` と `play` だけ。したがって
   `fdroid` は Google Drive を提供しない（Dropbox・OneDrive・ローカルのみは通常どおり使える）—— Play
@@ -910,7 +917,8 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
        Release 側のプレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の
        自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には互換性のある WiX Toolset（v3/v4/v5）がプリインストール済みのため、別途 WiX のセットアップ手順は不要。[setup.ja.md](setup.ja.md) 参照）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
-   - Ubuntu ランナーで `:androidApp:assembleGithubRelease` と `:androidApp:bundlePlayRelease` を実行し、
+   - Ubuntu ランナーで `:androidApp:assembleGithubRelease`、`:androidApp:bundlePlayRelease`、
+     `:androidApp:assembleFdroidRelease` を実行し、
      APK は `github` flavor（`REQUEST_INSTALL_PACKAGES` を持つ——アプリ内アップデートがこの上に
      上書きインストールするため。上記「Android（APK / AAB）」参照）から、AAB は `play`（Play Console
      提出用の成果物で、この権限を持ってはならない）から生成する。Android 版はデスクトップの
@@ -922,6 +930,20 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
        （本節冒頭の説明を参照）。代わりに AAB はビルド成果物として
        （`actions/upload-artifact`）アップロードされ、後述の独立ジョブ `publish-play` が
        それを取得する。
+     - **開発者署名の `fdroid` APK。** `fdroid` flavor も同じ実行でビルドし、`github` の APK と同じ
+       アプリ署名鍵で署名して `Keryx-<version>-android-fdroid.apk` として添付する。誰かがダウンロード
+       するためのものではない: F-Droid が同じタグをビルドし、その結果が署名を除いてこの APK と一致
+       すれば、こちらを公開する。これにより F-Droid のユーザーも他のチャネルと同じ署名になる（後述の
+       「F-Droid への公開」参照）。アプリ内アップデートが選ぶのは `-android-universal.apk` だけなので、
+       サイドロード版にこの APK が提示されることはない。
+   - `attach-fdroid-version` は独立したジョブで（`package-android` に依存し、その出力からバージョンを
+     受け取る）、`fdroid-version.json`（`{"versionName":"<version>","versionCode":<n>}`。versionCode は
+     `printAndroidVersionCodes` プローブ経由で `versionCodeOf` から取得）を添付する。F-Droid の更新
+     チェッカーは、これを最新のリリースから読む —— 後述の「F-Droid への公開」を参照。これが無いと
+     そのリリースは F-Droid に届かないので、失敗するとワークフロー全体が赤になる。ただし独立した
+     ジョブなので、`package-android` にだけ依存する `publish-play` と `deploy-pages` は止めない。失敗
+     したら、このジョブだけを再実行する（「Re-run failed jobs」）。`.apk` ではないので、アプリ内
+     アップデートのアセット選択の対象にもならない。
    - `publish-play` は独立したジョブで（`package-android` に依存するため、そのジョブの AAB
      成果物ができてから初めて開始する）、その成果物をダウンロードして**Google Play へ公開する**
      （`.github/scripts/publish-play.sh`。Play Developer API の 1 つの edit の中で AAB を 1 回だけ
@@ -1164,15 +1186,24 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 
 ### F-Droid への公開
 
-F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の鍵で署名するため、`release.yml` も
-`publish-play.yml` もアップロードするものは無い。代わりにこのリポジトリが次の 2 つを用意する:
+F-Droid は `fdroid` flavor をソースから自分でビルドする。そのうえで、`release.yml` がリリースに添付する
+開発者署名の `Keryx-<version>-android-fdroid.apk` と自分のビルドを比べ、署名以外がまったく同じときに
+限って、開発者署名のものを公開する（レシピの `Binaries` と `AllowedAPKSigningKeys`）。これにより
+F-Droid でのインストールも GitHub 版・Play 版と同じ署名になり、再インストールせずにチャネルを
+乗り換えられる。一致しないリリースについては、F-Droid 署名のビルドを代わりに出すのではなく、何も
+公開しない。このリポジトリが用意するもの:
 
 - `fastlane/metadata/android/{en-US,ja-JP}/` — F-Droid がタグ付きコミットから読むストア掲載情報
-  （[`fastlane/README.md`](../fastlane/README.md) 参照）。ノートを表示したいリリースごとに
-  `changelogs/<versionCode>.txt` を追加し、2 つのロケールをそろえて保つ。
+  （[`fastlane/README.md`](../fastlane/README.md) 参照）。2 つのロケールをそろえて保つ。
 - `distribution/fdroid/works.merc.keryx.yml` — `fdroiddata` のレシピの下書き。手作業でマージ
   リクエストとして提出する（各項目の説明は
   [`distribution/fdroid/README.md`](../distribution/fdroid/README.md) を参照）。
+- `release.yml` がすべてのリリースに添付する `fdroid-version.json`（上記「リリース（CD）」参照）。
+  レシピの更新チェックはこれを最新の安定版リリースから読むので、F-Droid は新しいリリースを自動で
+  検出する —— 通常の `Tags` チェックでは、`versionCodeOf` がビルド時に versionCode を計算するため
+  検出できない。リリースごとの手作業は無い: リリースノートは GitHub Release の本文で、レシピの
+  `Changelog` フィールドからリンクされる。マージリクエストの CI が更新チェックを
+  実行するので、最初の提出はこのファイルが付いた安定版リリースを待つ必要がある。
 
 F-Droid のサーバー上のビルドがローカルと違わなければならない点:
 
@@ -1186,6 +1217,21 @@ F-Droid のサーバー上のビルドがローカルと違わなければなら
   `fdroid` flavor に Google Drive は無い。
 - **Linux での `:androidApp:assembleFdroidRelease` に Kotlin/Native のダウンロードも Apple 向けタスクも
   無い**ので、Maven Central・Google Maven・JitPack・Gradle プラグインポータル以外からは何も取得しない。
+
+F-Droid のビルドがリリースの APK を再現できるために保たなければならない点:
+
+- **入力が同じであること。** レシピの Dropbox App Key / OneDrive Client ID は、`release.yml` がビルドに
+  使う値（`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` シークレット）と完全に同じでなければならない ——
+  `BuildConfig` に埋め込まれるので、違う値だと APK が変わる。公開の PKCE クライアント識別子なので、
+  そのままレシピに書いてよい。本番のアプリ登録を作り直して識別子が変わったときは、GitHub のシークレット、
+  レシピの下書き、`fdroiddata` のレシピを一緒に更新すること。
+- **APK に環境依存のものを入れないこと。** `androidApp/build.gradle.kts` は、環境で変わりうる AGP の
+  出力 2 つを無効にしている: `dependenciesInfo.includeInApk`（署名ブロック内の Google 向け依存関係
+  レポート。F-Droid の scanner も拒否する）と `vcsInfo`（`META-INF/version-control-info.textproto` の
+  git の状態）。これらを無効にした状態で、macOS でビルドした `fdroid` APK と、F-Droid の buildserver
+  イメージでレシピの編集（`rm androidGms`、`sed` の行）を当ててビルドしたものは、JDK の配布物
+  （Debian の OpenJDK と Temurin）やチェックアウトのパスが違っても、署名を除いてバイト単位で一致した。
+  Gradle プラグインや、ビルド時のデータを APK に書き込むものを足したときは、確認し直すこと。
 
 `fdroid scanner` の検出が、ソースでもビルドした APK でも**ゼロ**であることが、依存グラフの変更が
 守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Merged into src/main/AndroidManifest.xml only for the "fdroid" product flavor (see
-     androidApp/build.gradle.kts's flavorDimensions). F-Droid builds and signs this variant itself
-     and updates it through its own client, so the in-app update check stays off whichever installer
+     androidApp/build.gradle.kts's flavorDimensions). F-Droid builds this variant from source and
+     updates it through its own client, so the in-app update check stays off whichever installer
      delivered the APK — read at runtime by SelfUpdateCheck.android.kt's distributionAllowsSelfUpdate.
      The install-packages permission only the "github" flavor declares is deliberately absent, as in
      the "play" flavor: this variant never installs an update itself. (This comment must not spell

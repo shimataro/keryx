@@ -489,6 +489,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    # Read by attach-fdroid-version, so the tag is interpreted in one place only.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -575,8 +578,14 @@ jobs:
         # distribution an in-app update installs over) and the AAB from "play" (the Play Console
         # submission artifact, which must not carry that permission) — see
         # androidApp/build.gradle.kts's flavorDimensions and AndroidUpdateInstaller's own KDoc.
+        # The "fdroid" APK is signed with the same app signing key as the github one: F-Droid builds
+        # the same tag itself and, when the result matches this APK byte for byte apart from the
+        # signature, publishes this one, so F-Droid users get the same signature as every other
+        # channel (see distribution/fdroid/README.md). That only holds while F-Droid's build gets
+        # the same inputs, which includes the DROPBOX_APP_KEY / ONEDRIVE_CLIENT_ID values below.
         run: >
           ./gradlew :androidApp:assembleGithubRelease :androidApp:bundlePlayRelease
+          :androidApp:assembleFdroidRelease
           -PappVersion=${{ steps.version.outputs.version }}
           -PandroidReleaseSigningRequired=true
         env:
@@ -595,9 +604,14 @@ jobs:
         id: artifact
         run: |
           apk_src=$(find androidApp/build/outputs/apk/github/release -maxdepth 1 -name '*.apk' | head -n 1)
+          fdroid_apk_src=$(find androidApp/build/outputs/apk/fdroid/release -maxdepth 1 -name '*.apk' | head -n 1)
           aab_src=$(find androidApp/build/outputs/bundle/playRelease -maxdepth 1 -name '*.aab' | head -n 1)
           if [ -z "$apk_src" ]; then
             echo "::error::No APK produced under androidApp/build/outputs/apk/github/release."
+            exit 1
+          fi
+          if [ -z "$fdroid_apk_src" ]; then
+            echo "::error::No APK produced under androidApp/build/outputs/apk/fdroid/release."
             exit 1
           fi
           if [ -z "$aab_src" ]; then
@@ -607,22 +621,30 @@ jobs:
           # Defense in depth on top of -PandroidReleaseSigningRequired=true above: AGP names an
           # unsigned release APK with an "-unsigned" suffix (it has no equivalent marker for the
           # AAB), so this is a cheap extra check right before the irreversible upload/publish below.
-          case "$apk_src" in
-            *-unsigned.apk)
-              echo "::error::Refusing to publish an unsigned APK ($apk_src)."
-              exit 1
-              ;;
-          esac
+          for apk in "$apk_src" "$fdroid_apk_src"; do
+            case "$apk" in
+              *-unsigned.apk)
+                echo "::error::Refusing to publish an unsigned APK ($apk)."
+                exit 1
+                ;;
+            esac
+          done
           apk_dest="Keryx-${{ steps.version.outputs.version }}-android-universal.apk"
           mv "$apk_src" "$apk_dest"
           echo "apk=$apk_dest" >> "$GITHUB_OUTPUT"
+          # The "-android-fdroid.apk" suffix keeps it out of the in-app updater's reach: a sideloaded
+          # install picks only "-android-universal.apk" (UpdateAsset.kt), and the fdroid build lacks
+          # Google Drive and the update check. It exists for F-Droid's reproducible-build check.
+          fdroid_apk_dest="Keryx-${{ steps.version.outputs.version }}-android-fdroid.apk"
+          mv "$fdroid_apk_src" "$fdroid_apk_dest"
+          echo "fdroid_apk=$fdroid_apk_dest" >> "$GITHUB_OUTPUT"
           # The AAB is never a GitHub Release asset — a user cannot install one, and
           # selectUpdateAsset never matches a `.aab` — so it keeps its AGP-generated name/location
           # and is only ever read by the publish-play job below, via the artifact uploaded next.
           echo "aab=$aab_src" >> "$GITHUB_OUTPUT"
 
       - name: Attach to release
-        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" --clobber
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.apk }}" "${{ steps.artifact.outputs.fdroid_apk }}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -640,6 +662,61 @@ jobs:
         with:
           name: android-aab
           path: ${{ steps.artifact.outputs.aab }}
+
+  # F-Droid builds the fdroid flavor itself, but its update checker cannot read this app's
+  # versionCode from the tagged source (versionCodeOf computes it from the tag at build time, and
+  # F-Droid's `Tags` mode only reads a literal). The recipe (distribution/fdroid/works.merc.keryx.yml)
+  # therefore uses `UpdateCheckMode: HTTP` against this file on the latest release. versionCode comes
+  # from versionCodeOf itself, through the printAndroidVersionCodes probe, never recomputed here.
+  # Its own job rather than a step of package-android: a failure has to turn the run red — otherwise
+  # the release becomes "latest" without the file and F-Droid silently never sees it — yet must not
+  # hold back publish-play or deploy-pages, which depend on package-android alone. Re-run just this
+  # job if it fails. Not an .apk, so the in-app updater's asset selection never considers it.
+  attach-fdroid-version:
+    name: Attach F-Droid version file
+    needs: package-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # Same as package-android: optional on ubuntu-latest, kept against runner-image changes.
+      # Configuring :androidApp for the probe below needs the SDK.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      - name: Attach F-Droid version file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.package-android.outputs.version }}
+        run: |
+          version_code=$(./gradlew -q :androidApp:printAndroidVersionCodes -PversionCodeProbe="$VERSION" | sed -n "s/^${VERSION//./\\.}=//p")
+          if ! [[ "$version_code" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not resolve the versionCode of $VERSION (got '$version_code')."
+            exit 1
+          fi
+          printf '{"versionName":"%s","versionCode":%s}\n' "$VERSION" "$version_code" > fdroid-version.json
+          cat fdroid-version.json
+          gh release upload "$RELEASE_TAG" fdroid-version.json --clobber
 
   publish-play:
     name: Publish Android AAB to Google Play

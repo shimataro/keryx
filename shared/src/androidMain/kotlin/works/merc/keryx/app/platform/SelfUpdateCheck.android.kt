@@ -32,7 +32,7 @@ internal const val SELF_UPDATE_CHECK_META_DATA = "works.merc.keryx.SELF_UPDATE_C
 
 /**
  * Whether this build's own manifest permits an in-app update check. Only the `fdroid` flavor
- * declares [SELF_UPDATE_CHECK_META_DATA] (`false`) — F-Droid builds and signs the app itself and
+ * declares [SELF_UPDATE_CHECK_META_DATA] (`false`) — F-Droid builds that flavor from source and
  * updates it through its own client, so the check must stay off whichever installer happened to
  * deliver the APK. Read from the merged manifest at runtime rather than branching on the flavor
  * name, like `AndroidUpdateInstaller` does for `REQUEST_INSTALL_PACKAGES`. A missing key or any

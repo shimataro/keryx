@@ -187,8 +187,8 @@ disabled; anything else, including `null`, → enabled, matching desktop's alway
 whether the build itself allows it: the `fdroid` flavor's manifest sets the
 `works.merc.keryx.SELF_UPDATE_CHECK` meta-data to `false`
 (`SelfUpdateCheck.android.kt`'s `distributionAllowsSelfUpdate`), which turns the check off whichever
-installer delivered that APK — F-Droid builds and signs it itself, so a GitHub update could not even
-replace it. This is a UX call, not a
+installer delivered that APK — F-Droid updates that build through its own client, and a GitHub
+update would swap it for the `github` flavor, with Google Drive and the update check back in. This is a UX call, not a
 Google Play policy requirement — Play only disallows an app replacing *itself* outside Play's own
 mechanism or downloading executable code from elsewhere, neither of which this feature does — the
 reason is that Play (or the F-Droid client) already updates the app, so a second, GitHub-flavored

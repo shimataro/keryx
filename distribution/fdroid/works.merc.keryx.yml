@@ -1,20 +1,20 @@
-# Draft of fdroiddata's metadata/works.merc.keryx.yml — see README.md in this directory.
+AntiFeatures:
+  NonFreeNet:
+    en-US: Optional sync via Dropbox or OneDrive.
+    ja-JP: Dropbox / OneDrive による任意の同期。
 Categories:
   - Reading
 License: MIT
 AuthorName: shimataro
 SourceCode: https://github.com/shimataro/keryx
 IssueTracker: https://github.com/shimataro/keryx/issues
-AntiFeatures:
-  NonFreeNet:
-    en-US: Optional sync via Dropbox or OneDrive.
-    ja-JP: Dropbox / OneDrive による任意の同期。
+Changelog: https://github.com/shimataro/keryx/releases
 
 RepoType: git
 Repo: https://github.com/shimataro/keryx.git
+Binaries: 
+  https://github.com/shimataro/keryx/releases/download/v%v/Keryx-%v-android-fdroid.apk
 
-# Placeholder entry: neither v0.22.0 nor any earlier tag contains the `fdroid` flavor, so replace
-# versionName / versionCode / commit with the first release tag that does before submitting.
 Builds:
   - versionName: 0.22.0
     versionCode: 220099
@@ -31,15 +31,16 @@ Builds:
     prebuild:
       - sed -i -e '/foojay/d' ../settings.gradle.kts
       - sed -i -e '/androidGms/d' ../settings.gradle.kts build.gradle.kts
+      - echo "appVersion=$$VERSION$$" >> ../gradle.properties
     gradleprops:
-      - appVersion=0.22.0
-      - dropboxAppKey=<DROPBOX_APP_KEY>
-      - oneDriveClientId=<ONEDRIVE_CLIENT_ID>
+      - dropboxAppKey=x0df310b9t8a94n
+      - oneDriveClientId=1ed27627-5a42-4f37-87f5-d0b402d6f9d4
 
-# Releases are added by hand: this app's versionCode is computed in androidApp/build.gradle.kts
-# (versionCodeOf, from the tag-derived appVersion), so `UpdateCheckMode: Tags` — which reads a
-# literal versionCode from the Gradle files — finds no version information (see README.md).
-AutoUpdateMode: None
-UpdateCheckMode: None
+AllowedAPKSigningKeys: 536f7155021d73419135cb67dd3c7c3e316cfdc607735208dfd45d971e426d20
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: HTTP
+UpdateCheckData: 
+  https://github.com/shimataro/keryx/releases/latest/download/fdroid-version.json|"versionCode":\s*(\d+)|.|"versionName":\s*"([^"]+)"
 CurrentVersion: 0.22.0
 CurrentVersionCode: 220099
