@@ -1162,6 +1162,38 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 > README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に必要な作業は下記
 > 「署名・公証」を参照。
 
+### F-Droid への公開
+
+F-Droid は `fdroid` flavor をソースから自分でビルドし、自分の鍵で署名するため、`release.yml` も
+`publish-play.yml` もアップロードするものは無い。代わりにこのリポジトリが次の 2 つを用意する:
+
+- `fastlane/metadata/android/{en-US,ja-JP}/` — F-Droid がタグ付きコミットから読むストア掲載情報
+  （[`fastlane/README.md`](../fastlane/README.md) 参照）。ノートを表示したいリリースごとに
+  `changelogs/<versionCode>.txt` を追加し、2 つのロケールをそろえて保つ。
+- `distribution/fdroid/works.merc.keryx.yml` — `fdroiddata` のレシピの下書き。手作業でマージ
+  リクエストとして提出する（各項目の説明は
+  [`distribution/fdroid/README.md`](../distribution/fdroid/README.md) を参照）。
+
+F-Droid のサーバー上のビルドがローカルと違わなければならない点:
+
+- **Debian の JDK 25。** Gradle ビルドは JDK 25 の toolchain を対象とし、`settings.gradle.kts` は通常
+  これを `foojay` リゾルバーにダウンロードさせるが、F-Droid の scanner はそのプラグインを拒否する。
+  レシピは Debian の `openjdk-25-jdk-headless` をインストールし、ビルド前に `sed` で `foojay` の行を
+  削除するので、Gradle はインストール済みの JDK を見つける。
+- **OAuth クライアント識別子をプロパティで渡す。** F-Droid は API キーを自分では取得しないため、
+  レシピに公開の Dropbox App Key と OneDrive Client ID（`-PdropboxAppKey`、`-PoneDriveClientId` ——
+  どちらもシークレットの無い PKCE パブリッククライアント）を持たせる。Google Drive には不要:
+  `fdroid` flavor に Google Drive は無い。
+- **Linux での `:androidApp:assembleFdroidRelease` に Kotlin/Native のダウンロードも Apple 向けタスクも
+  無い**ので、Maven Central・Google Maven・JitPack・Gradle プラグインポータル以外からは何も取得しない。
+
+`fdroid scanner` の検出が、ソースでもビルドした APK でも**ゼロ**であることが、依存グラフの変更が
+守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の
+`buildserver` イメージ（`registry.gitlab.com/fdroid/fdroidserver:buildserver`）で実行すること。
+`ci.yml` の「Verify the fdroid flavor has no Google Play services」ステップは最もありそうな
+リグレッションを毎 push で検出するが、Play 開発者サービスと無関係な新たなプロプライエタリ依存までは
+検出しない。
+
 ## 署名・公証（将来対応）
 
 現状、パッケージ成果物は **ad-hoc 署名**（実質未署名）。ローカルでの動作・開発には支障ないが、以下が

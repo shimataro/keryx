@@ -1148,6 +1148,39 @@ existing release once published.
 > [Download](../README.md#download) section for the workaround; "Signing & Notarization" below
 > covers what a permanent fix requires.
 
+### Publishing to F-Droid
+
+F-Droid builds the `fdroid` flavor from source itself and signs it with its own key, so neither
+`release.yml` nor `publish-play.yml` has anything to upload for it. This repository supplies two
+things instead:
+
+- `fastlane/metadata/android/{en-US,ja-JP}/` — the store listing F-Droid reads from the tagged
+  commit (see [`fastlane/README.md`](../fastlane/README.md)). Add `changelogs/<versionCode>.txt`
+  for each release whose notes should be shown, and keep the two locales in step.
+- `distribution/fdroid/works.merc.keryx.yml` — a draft of the `fdroiddata` recipe, submitted by hand
+  as a merge request ([`distribution/fdroid/README.md`](../distribution/fdroid/README.md) explains
+  each field).
+
+What a build on F-Droid's server needs to differ from a local one:
+
+- **JDK 25 from Debian.** The Gradle build targets a JDK 25 toolchain, which `settings.gradle.kts`
+  normally lets the `foojay` resolver download; F-Droid's scanner rejects that plugin. The recipe
+  installs Debian's `openjdk-25-jdk-headless` and deletes the `foojay` line with `sed` before
+  building, so Gradle finds the installed JDK.
+- **OAuth client identifiers passed as properties.** F-Droid does not sign up for API keys, so the
+  recipe carries the public Dropbox App Key and OneDrive Client ID (`-PdropboxAppKey`,
+  `-PoneDriveClientId` — PKCE public clients with no secret). Google Drive needs none: the `fdroid`
+  flavor has no Google Drive.
+- **No Kotlin/Native download and no Apple tasks** on Linux for `:androidApp:assembleFdroidRelease`,
+  so nothing besides Maven Central, Google Maven, JitPack and the Gradle plugin portal is fetched.
+
+`fdroid scanner` finding **zero** problems — in the source and in the built APK — is what a change
+to the dependency graph must preserve. Run it in F-Droid's own `buildserver` image
+(`registry.gitlab.com/fdroid/fdroidserver:buildserver`) after touching `androidApp`, `:androidGms`
+or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services"
+step catches the most likely regression on every push, but not a new proprietary dependency
+unrelated to Play services.
+
 ## Signing & Notarization (future)
 
 Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This is fine for local development, but the following requires **Developer ID Application** signing (requires paid Apple Developer Program enrollment):
