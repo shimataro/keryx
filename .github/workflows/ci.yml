@@ -144,10 +144,10 @@ jobs:
             echo "::error::REQUEST_INSTALL_PACKAGES leaked into the fdroid flavor's merged manifest ($FDROID_MANIFEST) — an F-Droid-distributed APK is updated by F-Droid and must never request it."
             exit 1
           fi
-          # The fdroid flavor opts out of the in-app update check through this meta-data (read by
-          # SelfUpdateCheck.android.kt); the other two must not carry it.
-          if ! grep -q "works.merc.keryx.SELF_UPDATE_CHECK" "$FDROID_MANIFEST"; then
-            echo "::error::The fdroid flavor's merged manifest ($FDROID_MANIFEST) lacks the SELF_UPDATE_CHECK meta-data — the in-app update check would stay on for F-Droid installs."
+          # The fdroid flavor opts out of the in-app update check by setting this meta-data to false
+          # (read by SelfUpdateCheck.android.kt); the other two must not carry it.
+          if ! grep -C1 "works.merc.keryx.SELF_UPDATE_CHECK" "$FDROID_MANIFEST" | grep -q 'android:value="false"'; then
+            echo "::error::The fdroid flavor's merged manifest ($FDROID_MANIFEST) does not set SELF_UPDATE_CHECK to false — the in-app update check would stay on for F-Droid installs."
             exit 1
           fi
           if grep -q "works.merc.keryx.SELF_UPDATE_CHECK" "$GITHUB_MANIFEST" "$PLAY_MANIFEST"; then
