@@ -3,7 +3,7 @@
 `works.merc.keryx.yml` is a **draft of the metadata file for
 [`fdroiddata`](https://gitlab.com/fdroid/fdroiddata)** (`metadata/works.merc.keryx.yml`) — nothing
 here is read by any build or workflow in this repository. It is submitted by hand as a merge request
-to `fdroiddata`; the store listing (title, descriptions, changelogs, screenshots) is read from
+to `fdroiddata`; the store listing (title, descriptions, images, screenshots) is read from
 [`fastlane/metadata/android/`](../../fastlane/README.md) in this repository, not from the recipe.
 
 The file is kept exactly in the form `fdroid rewritemeta` writes — field order, line wrapping and no
@@ -50,6 +50,11 @@ What the recipe encodes, and why:
   signature and can switch channels without reinstalling. If a release does not match, F-Droid
   publishes nothing for it — see `docs/build.md`'s "Publishing to F-Droid" for what keeps the build
   reproducible.
+- `Changelog` — the release notes are the GitHub Releases page: they are written in each GitHub
+  Release's body (the same text Google Play's "recent changes" are built from), and F-Droid's client
+  shows this field as a link on the app's page. No per-release notes are kept under `fastlane/`, so
+  F-Droid's own "what's new" section stays empty. The field is per app and takes no `%v`, hence the
+  list of releases rather than one release.
 - `AntiFeatures: NonFreeNet` — the optional sync talks to Dropbox / OneDrive, which are
   proprietary network services.
 

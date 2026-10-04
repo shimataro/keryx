@@ -14,7 +14,6 @@ metadata/android/
 │   ├── title.txt                 # app name
 │   ├── short_description.txt     # ≤ 80 characters
 │   ├── full_description.txt      # ≤ 4000 characters, plain text
-│   ├── changelogs/<versionCode>.txt   # ≤ 500 characters; the version code of the release
 │   └── images/
 │       ├── icon.png              # 512×512, generated (see below)
 │       ├── featureGraphic.png    # 1024×500, generated (see below)
@@ -30,11 +29,9 @@ omits) and **no update check of its own** (F-Droid updates the app). Update `en-
 together, and keep them in step with the Play listing when the feature list or privacy claims
 change.
 
-`changelogs/<versionCode>.txt` is named by the Android `versionCode`, which
-`androidApp/build.gradle.kts`'s `versionCodeOf` derives from the version (`0.22.0` → `220099`; see
-[`docs/build.md`](../docs/build.md)'s "Android (APK / AAB)"). Add one per release that F-Droid
-should show notes for — starting with the first release that F-Droid builds, whose file is added when
-that release is made (there is none yet, so `changelogs/` does not exist).
+There are deliberately no per-release notes (fastlane's `changelogs/`): release notes are written
+once, in the GitHub Release, and the F-Droid recipe's `Changelog` field links to the GitHub Releases
+page (see [`distribution/fdroid/README.md`](../distribution/fdroid/README.md)).
 
 `images/icon.png` and `images/featureGraphic.png` are generated from the SVG masters under
 [`design/`](../design/) — the app icon, and the same feature graphic the Play listing uses (its light

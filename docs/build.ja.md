@@ -1192,16 +1192,15 @@ F-Droid でのインストールも GitHub 版・Play 版と同じ署名にな�
 公開しない。このリポジトリが用意するもの:
 
 - `fastlane/metadata/android/{en-US,ja-JP}/` — F-Droid がタグ付きコミットから読むストア掲載情報
-  （[`fastlane/README.md`](../fastlane/README.md) 参照）。ノートを表示したいリリースごとに
-  `changelogs/<versionCode>.txt` を追加し、2 つのロケールをそろえて保つ。
+  （[`fastlane/README.md`](../fastlane/README.md) 参照）。2 つのロケールをそろえて保つ。
 - `distribution/fdroid/works.merc.keryx.yml` — `fdroiddata` のレシピの下書き。手作業でマージ
   リクエストとして提出する（各項目の説明は
   [`distribution/fdroid/README.md`](../distribution/fdroid/README.md) を参照）。
 - `release.yml` がすべてのリリースに添付する `fdroid-version.json`（上記「リリース（CD）」参照）。
   レシピの更新チェックはこれを最新の安定版リリースから読むので、F-Droid は新しいリリースを自動で
   検出する —— 通常の `Tags` チェックでは、`versionCodeOf` がビルド時に versionCode を計算するため
-  検出できない。リリースごとの手作業は、タグを打つ**前に** `changelogs/<versionCode>.txt` を足す
-  ことだけ（F-Droid はタグ付きコミットから読むため）。マージリクエストの CI が更新チェックを
+  検出できない。リリースごとの手作業は無い: リリースノートは GitHub Release の本文で、レシピの
+  `Changelog` フィールドからリンクされる。マージリクエストの CI が更新チェックを
   実行するので、最初の提出はこのファイルが付いた安定版リリースを待つ必要がある。
 
 F-Droid のサーバー上のビルドがローカルと違わなければならない点:
