@@ -273,8 +273,22 @@ android {
         }
     }
 
+    // Keeps the APKs reproducible, so F-Droid can verify the developer-signed fdroid APK attached to
+    // each GitHub Release against its own build of the same tag and publish it with this signature
+    // (see distribution/fdroid/README.md). AGP otherwise adds Google's encrypted dependency report as
+    // an extra block in the APK signing block — which F-Droid's scanner rejects and which no build
+    // from source can reproduce. The AAB keeps it (includeInBundle), since only Play reads it.
+    dependenciesInfo {
+        includeInApk = false
+    }
+
     buildTypes {
         release {
+            // Also for reproducibility: AGP otherwise writes the git revision and the state of the
+            // working tree into META-INF/version-control-info.textproto, so a build from an
+            // otherwise identical tree that differs only in being a clean checkout (or not a git
+            // checkout at all) would differ.
+            vcsInfo.include = false
             // Deliberately never falls back to the debug signing config: a debug-signed release
             // artifact is installable and looks legitimate, which is exactly the dangerous case.
             // `null` here is AGP's own unsigned-release behavior instead — it fails closed, since
