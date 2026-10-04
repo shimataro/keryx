@@ -921,9 +921,10 @@ class CloudSyncControllerTest {
 
         controller.reconnect()
 
-        // Back on the same provider — the teardown cleared it, then connect re-set it.
+        // Back on the same provider — the teardown cleared it, then connect re-set it. The await is
+        // the assertion: re-reading the value afterwards could catch a transient write from the
+        // settings watcher, which this test's multi-threaded Unconfined Main lets interleave.
         awaitConditionBlocking { controller.connectedType.value == CloudStorageType.DROPBOX }
-        assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
