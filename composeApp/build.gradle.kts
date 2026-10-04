@@ -166,14 +166,6 @@ kotlin {
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.work)
                 implementation(libs.ktor.client.okhttp)
-
-                // Google Drive's Android authorization path. Google's OAuth policy leaves no
-                // redirect-based flow for an Android client type (both the custom URI scheme and
-                // the loopback redirect are deprecated there), so AuthorizationClient is the only
-                // sanctioned way to reach Drive from Android — see docs/sync-architecture.md's
-                // "Google Drive on Android". Dropbox/OneDrive do not use this at all; they keep
-                // the same custom-URI PKCE flow desktop uses.
-                implementation(libs.play.services.auth)
             }
         }
 

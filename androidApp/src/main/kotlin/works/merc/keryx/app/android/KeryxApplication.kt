@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.background.startBackgroundRefresh
+import works.merc.keryx.app.core.AndroidGoogleDriveSupport
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
@@ -28,6 +29,9 @@ class KeryxApplication : Application() {
         super.onCreate()
 
         AndroidAppContext.init(this)
+        // Before Koin: the platform module reads it while wiring the cloud providers. Absent in the
+        // fdroid flavor, which ships no Play services — Google Drive is then simply never offered.
+        googleDriveBackend?.let(AndroidGoogleDriveSupport::install)
 
         startKoin { modules(appModule, platformModule) }
         val koin = KoinPlatform.getKoin()

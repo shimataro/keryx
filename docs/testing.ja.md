@@ -44,10 +44,13 @@
     Android Keystore に対して検証。
   - `FilePickerDeviceTest.kt` — Storage Access Framework のファイルピッカーの書き込み失敗経路
     （どのプロバイダーもストリームを開けない場合の `ContentUriPickedFile.writeText`）。
-  - `PlayServicesGoogleDriveAuthDeviceTest.kt` — Play 開発者サービスによる Google Drive の認可結果。
-    要求したスコープの一部しか許諾されなかったケースを含む。
   - `AndroidAuthorizationHostDeviceTest.kt` — `AndroidAuthorizationHost` が Activity へ渡す
     同意画面リクエストのスロットの寿命。
+
+- `androidGms/src/test/` — 通常の JVM ユニットテスト（`:androidGms:testDebugUnitTest`、
+  `./gradlew build` に含まれる）: `PlayServicesGoogleDriveAuthTest.kt` — Play 開発者サービスによる
+  Google Drive の認可結果。要求したスコープの一部しか許諾されなかったケースを含む。`tokenFrom` は
+  Play 開発者サービスにも `AuthorizationResult` にも触れないので、端末は不要。
 
 - `androidApp/src/androidTest/` — `androidx.compose.ui.test.junit4.v2.createComposeRule` を
   ホストできる、実際の Android アプリケーションモジュールを必要とする計装 Compose UI テスト
@@ -164,7 +167,7 @@ Android には計装テストスイートが 3 つある。CI に組み込まれ
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
 | `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ 毎プッシュ（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
-| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、Play 開発者サービスのスコープチェック） | ✗ ローカルのみ |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、同意画面リクエストのスロット） | ✗ ローカルのみ |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
@@ -183,7 +186,7 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 
 `androidApp` 自身の計装テストスイート（Compose UI のジェスチャテスト。上記の
 `androidApp/src/androidTest/` を参照）は、通常の `com.android.application` のタスク命名を使う——
-`androidApp` が `github`/`play` の product flavor に分かれた分だけタスク名も flavor 修飾される
+`androidApp` が `github`/`play`/`fdroid` の product flavor に分かれた分だけタスク名も flavor 修飾される
 （`build.ja.md` の「Android (APK / AAB)」を参照）:
 
 ```bash
@@ -192,24 +195,33 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 ```
 
 CI で実行する（そしてローカルでも実行すべき）のは `github` だけ——このスイートは flavor 固有の
-挙動を何も検証していない: **debug** ビルドに限れば、2 つの flavor の違いは
-`REQUEST_INSTALL_PACKAGES` マニフェスト権限の有無だけである（release ビルドは署名鍵も異なる——
+挙動を何も検証していない: **debug** ビルドに限れば、flavor の違いは
+`REQUEST_INSTALL_PACKAGES` マニフェスト権限の有無、`fdroid` のアプリ内アップデート確認オプトアウトの
+meta-data、Play 開発者サービスをリンクするかどうかだけである（release ビルドは署名鍵も異なる——
 `build.ja.md` の「Google Play への公開」参照——が `androidComponents` が差し替えるのは
 `playRelease` だけで debug バリアントには一切触れないため、この debug 専用スイートには無関係）。
 そもそも `connectedPlayDebugAndroidTest` にフォールバックする先すら無い:
-`androidApp/build.gradle.kts` が `playDebug` バリアント自体を無効化しているためで（`githubDebug`
+`androidApp/build.gradle.kts` が `playDebug` と `fdroidDebug` バリアント自体を無効化しているためで（`githubDebug`
 がすでにカバーしていない、デバッグビルド固有の検証対象は無い——同ファイル自身のコメント参照）、
 `connectedAndroidTest`（flavor 指定なし）は今では唯一残るデバッグバリアントである `githubDebug`
 のみを実行する。
 
-「`github`/`play` の **release** マニフェストの違いがその権限*だけ*である」こと自体は、`ci.yml` の
+「`github`/`play` の **release** マニフェストの違いがその権限*だけ*である」こと —— そして `fdroid` が
+その権限も、`SELF_UPDATE_CHECK` のオプトアウト以外のものも持たないこと —— 自体は、`ci.yml` の
 「Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)」ステップが毎 push で検証している。
-`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` を実行し、**マージ後の**
-マニフェスト 2 つを grep するので、flavor のソースセットではなく AGP が実際に生成したものに対する
+`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest`/`processFdroidReleaseManifest`
+を実行し、**マージ後の**マニフェスト 3 つを grep するので、flavor のソースセットではなく AGP が実際に生成したものに対する
 アサーションになる。マージ後であることが重要で、どちらの flavor の `AndroidManifest.xml` も変えずに
 推移的なライブラリのマニフェストが `play` 側へこの権限を復活させることがあり得る——そしてそれこそが
-Google Play に弾かれるケースである。このチェックはマニフェストのみを対象とし、2 つの release
+Google Play に弾かれるケースである。このチェックはマニフェストのみを対象とし、release
 バリアントの署名鍵については（その目的上）何も検証しないし、検証する必要もない。
+
+`fdroid` flavor の契約のもう一方 —— Google Play 開発者サービスを含まないこと —— は次のステップ
+「Verify the fdroid flavor has no Google Play services (Linux)」が検証する:
+`:androidApp:dependencies --configuration fdroidReleaseRuntimeClasspath` を解決し、
+`com.google.android.gms`、`com.google.firebase`、`:androidGms` のいずれかが現れたら失敗にする。
+ローカルでも同じコマンドと `grep` で再現できる。`github` のクラスパスには現れ、`fdroid` のには
+現れないのが正しい。
 
 `androidDeviceTest` と同様、これも `./gradlew build` には含まれない — アプリケーションモジュールの
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
@@ -315,7 +327,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - Linux の SNI トレイでは `SniConnection`（接続・バス名取得・export・登録・再登録・close）が実セッションバスと稼働中の `org.kde.StatusNotifierWatcher` を必要とするため CI では不可。同様に`NewIcon`/`NewToolTip`/`LayoutUpdated` の実配送（*発火の判断*はカバー済み）、`NameOwnerChanged` からの再登録経路、ホスト起点の `Activate`/`Event` が dbus-java のワーカースレッド経由で届くこと、`LinuxNotifier.notify` の実デーモンへの配送、`LinuxTray` コンポーザブルの結線もテスト不可。パネル上で実際に透過して見えるかは本質的に目視確認になる。
 - KDE Global Menu も同様: `X11WindowId.findOwnWindowId()`（実 X サーバーと `_NET_WM_PID` を持つマップ済みウインドウが必要）、実際の `AppMenuConnection` の connect/detect/`RegisterWindow`/reregister/`close` の往復、KWin/Plasma が実際に `_KDE_NET_WM_APPMENU_*` を書き込みパネルウィジェット／タイトルバーボタンがメニューを描画すること、`startMinimized` の XID タイミング/リトライ経路、Compose 自身の `MenuBar` ショートカット処理が本当にフレームアタッチに依存するか（手動で検証済み）、実際の `MenuShortcutDispatcher` の Ctrl+M/N/W/,/Q/R 捕捉が `KeyboardFocusManager` 経由で動くこと——いずれも未カバー（委譲先の純粋なマッチャーのみテスト済み）。
 - Android 側では、「実行」節にある計装スイートが届かない範囲の大半はまだ未カバーである: `WorkManager` の実際の定期ジョブスケジューリングと実行（純粋なスケジュール算出ロジック `BackgroundRefreshSchedule.kt` のみテスト済み）、`NotificationManagerCompat` 経由の実通知投稿、そして `AndroidUpdateInstaller` の `PackageInstaller` セッション／`BroadcastReceiver`／`canRequestPackageInstalls()` の扱い（委譲先の純粋なプラン／同意判断である `canInstallAndroidApkUpdate` のみテスト済み——上記「アプリ内アップデートのパイプライン」参照）。
-- **実際には未カバーではない——対比として記載:** Storage Access Framework のファイルピッカーの書き込み失敗経路、Keystore を使ったトークン保存のフォールバック経路、Play 開発者サービスで一部のスコープしか許諾されなかった Google Drive の同意結果は**カバーされている**——それぞれ `FilePickerDeviceTest.kt`、`KeystoreTokenStorageDeviceTest.kt`、`PlayServicesGoogleDriveAuthDeviceTest.kt`。同意画面リクエストのスロットの寿命も `AndroidAuthorizationHostDeviceTest.kt` でカバーされている（上記「構成」の `androidDeviceTest/` 参照）。
+- **実際には未カバーではない——対比として記載:** Storage Access Framework のファイルピッカーの書き込み失敗経路、Keystore を使ったトークン保存のフォールバック経路、Play 開発者サービスで一部のスコープしか許諾されなかった Google Drive の同意結果は**カバーされている**——それぞれ `FilePickerDeviceTest.kt`、`KeystoreTokenStorageDeviceTest.kt`、`:androidGms` の通常の JVM ユニットテストである `PlayServicesGoogleDriveAuthTest.kt`。同意画面リクエストのスロットの寿命も `AndroidAuthorizationHostDeviceTest.kt` でカバーされている（上記「構成」の `androidDeviceTest/` と `androidGms/src/test/` 参照）。
 - 同様にデスクトップ側でも、自己置換／`msiexec` スクリプト（`UpdateScriptWriter` の出力）を実際に実行する部分は手動確認のみ——生成されたスクリプト本文そのものは直接検証しており、`DesktopUpdateInstaller` はテスト内で実際にスクリプトを起動することがない（上記のフェイク`ProcessLauncher` を参照）。詳細は下記「アプリ内アップデート」を参照。この経路にはさらに*ユニット*テストでは到達できない箇所が2つあり、それぞれ別の形でカバーしている。
 - `DittoArchiveExtractor` が実際に `ditto` を実行する部分は `ArchiveExtractorTest.kt` の`isMacOs` ゲート付きテストがカバーしている（`ci.yml` の `build` ジョブの `macos-latest` レッグが実行するので実際に走る。Linux / Windows のランナーには `ditto` が無く、インストーラー自身のテストは既定で`InProcessArchiveExtractor` を注入する）。実署名済みの `.app` が`zip -ry` → `ditto` → `codesign --verify --strict --deep` の往復を通ること自体は macOS **かつ**jpackage バンドルを要し、どのテストソースセットにも用意できない——そこで `ci.yml` の「Verify packaging (macOS)」ステップがビルドしたてのアプリイメージに対してまさにその往復を実行し、symlink の数が変わらないことと展開後のバンドルが検証を通ることをアサートする。対になるのが`createDistributable` 自身の `verifyMacOsBundleSeal`／署名特性のガードで、zip より*前*の段階でバンドルが既に壊れていればビルドを失敗させる（[build.ja.md](build.ja.md) 参照）。両者により、当初の欠陥のどちらの半分も気付かれずリリースへ届くことはない。
 - `FileSystemExtras.move` のボリューム跨ぎフォールバックも同様にテストから到達できない（2つ目のファイルシステムを用意できない）ため、その委譲先であるリンク保持コピーを `copyTree` として切り出し、直接テストしている。
@@ -1516,7 +1528,9 @@ SwiftUI のファイルメニューのインポート／エクスポートは要
   ダウンロードとインストールを行い、OS 自身のインストール確認ダイアログが出てその場でアプリが
   更新されることを確認する。別途、`play` flavor の APK をサイドロードし、Updates タブが一切
   ダウンロードを提示しないことを確認する（`canInstallAndroidApkUpdate` は `REQUEST_INSTALL_PACKAGES`
-  を要求するが、これを宣言しているのは `github` のマニフェストだけ）。「提供元不明のアプリ」が
+  を要求するが、これを宣言しているのは `github` のマニフェストだけ）。`fdroid` flavor のビルドは
+  さらに一歩進む —— 設定に Updates カテゴリ自体が無く、クラウドプロバイダーに Google Drive も無い
+  （Dropbox・OneDrive・ローカルのみはある）。「提供元不明のアプリ」が
   まだ許可されていない場合、インストールをクリックするとセッションではなくこのシステム設定画面が
   開くこと、許可せずに戻ってきても Updates タブが固まらず「インストール準備完了」のままであることを
   確認する。サイドロードする APK と更新先のリリースは**同じ鍵**で署名されている必要がある（そうでないと

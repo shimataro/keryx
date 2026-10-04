@@ -516,7 +516,9 @@ single-instance 経由で実行中インスタンスへ転送する。
 
 Android の Google Drive は、本ドキュメントの他のどのプロバイダ・プラットフォームの組み合わせとも
 異なる仕組みを使う — ブラウザリダイレクトではなく、Play 開発者サービスの `AuthorizationClient` である。
-実装はすべて `data/cloud/PlayServicesGoogleDriveAuth.kt` にある。
+実装はすべて `:androidGms` の `data/cloud/PlayServicesGoogleDriveAuth.kt` にあり、このモジュールが
+存在するのは `github` と `play` flavor だけ —— `fdroid` flavor は Play 開発者サービスを一切含まず、
+Google Drive も提供しない。
 
 - **デスクトップ向け構成を流用できない理由。** Google の OAuth ポリシーは Android クライアント種別に
   対して、カスタム URI スキーム（理由はアプリなりすましのリスク）とループバックリダイレクトの
@@ -533,11 +535,13 @@ Android の Google Drive は、本ドキュメントの他のどのプロバイ�
   SHA-1 で照合される（Cloud Console への登録手順は [build.ja.md](build.ja.md) 参照）ため、
   `BuildConfig` から読む値は無い。したがって未登録の署名鍵でビルドした場合、ビルド時ではなく
   `authorize()` の失敗として現れる。`CloudSession.Provider.clientId` は「このビルドでこのバックエンドが
-  設定済みか」の判定も兼ねるため非空である必要があり、`PlatformModule.android.kt` は
+  設定済みか」の判定も兼ねるため非空である必要があり、`PlayServicesGoogleDriveBackend` は
   プレースホルダ `"play-services"` を渡す（OAuth クライアント ID ではない）。
 - **配信チャネルではなく端末で判定する。** `CloudStorageAvailability.googleDriveAvailable` は
-  `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS` をプロセスごとに一度だけ評価し、
-  `platformModule` はそれが真のときだけプロバイダを登録する。脱 Google の ROM（GrapheneOS、
+  登録済みの `AndroidGoogleDriveBackend` に問い合わせる（`:androidGms` の実装は
+  `GoogleApiAvailability.isGooglePlayServicesAvailable(...) == SUCCESS` を返す）。これをプロセスごとに
+  一度だけ評価し、`platformModule` はそれが真のときだけプロバイダを登録する。バックエンドが何も
+  登録されていない場合（`fdroid` flavor）の答えは単に「利用不可」。脱 Google の ROM（GrapheneOS、
   GApps なしの LineageOS）では Google Drive が選択肢に出ないだけで、Dropbox・OneDrive・ローカルのみは
   影響を受けない。`github`/`play` のプロダクトフレーバーでは**意図的に**分岐しない — play フレーバーの
   APK もサイドロードされうるし、github フレーバーの APK も Play 開発者サービスのある端末で問題なく動く。

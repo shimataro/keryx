@@ -22,6 +22,7 @@
 | `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
 | `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
 | `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
+| `:androidGms` | Google Play 開発者サービスに依存するものすべて —— Android の Google Drive（`PlayServicesGoogleDriveAuth.kt`、`PlayServicesGoogleDriveBackend`）。`fdroid` flavor がこれを外せるよう独立したモジュールにしてある。依存するのは `:androidApp` の `github` と `play` flavor だけ —— 下記参照。 |
 | `:testing` | 両モジュールのテストが使うテスト専用ヘルパー（`DbTestSupport`、`CloudTestSupport`、`FakeNotificationMessages`、トークンストレージの fake）。main のソースからは決して依存しない。 |
 
 テストはテスト対象のコードと同じモジュールに置く：`shared/src/{commonTest,desktopTest,androidDeviceTest}` と
@@ -133,11 +134,12 @@
     で一度だけ設定される静的 Context ホルダ。再開中の Activity も弱参照で追跡しており、BrowserOpener は
     http(s) リンクの Custom Tab（androidx.browser）を application context ではなくその Activity から
     起動する。起動方法の判定自体は commonMain の純粋関数 `browserLaunchKind`）, PlatformModule（Ktor OkHttp エンジン、Dropbox/OneDrive
-    プロバイダに加え Play 開発者サービスがある端末では Google Drive も登録した CloudSession — 下記
-    Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
+    プロバイダに加え、アプリが `AndroidGoogleDriveBackend` を登録していて Play 開発者サービスが使える
+    端末では Google Drive も登録した CloudSession — 下記 Provider/DI 参照。加えて AndroidNotificationSink、[background-update.ja.md](background-update.ja.md) 参照）,
     CloudStorageAvailability（Dropbox/OneDrive は BuildConfig のキーを見るが、Google Drive は
     ビルド時のクライアント ID ではなく Play 開発者サービス経由のため、プロセスごとに一度だけ
-    `GoogleApiAvailability` で判定する — sync-architecture.ja.md の「Android での Google Drive」参照）,
+    `AndroidGoogleDriveBackend.isAvailable`（`:androidGms` の `GoogleApiAvailability`。バックエンド未登録
+    なら利用不可）で判定する — sync-architecture.ja.md の「Android での Google Drive」参照）,
     KeryxTextField/KeryxAlertDialog/KeryxIcons/FlatButtons/FlatToggles/
     SegmentedControl（素の M3。後の4つも同様に `expect`/`actual` 分割されており、Android 側は
     Material Symbols（アイコン）や M3 の `Button`/`FilledTonalButton`/`TextButton`/`Switch`/
@@ -219,8 +221,8 @@
     通知ドットのアイコン。background-update.ja.md 参照）のみ
   commonTest/ + desktopTest/ + androidDeviceTest/（実機/エミュレータが必要な Android 実装向け計装テスト
     — DatabaseMerger/DatabaseSnapshot のバンドル SQLite ネイティブライブラリだけでなく、Android Keystore
-    （`KeystoreTokenStorageDeviceTest`）、Play 開発者サービス（`PlayServicesGoogleDriveAuthDeviceTest`、
-    `AndroidAuthorizationHostDeviceTest`）、Storage Access Framework（`FilePickerDeviceTest`）も含む。
+    （`KeystoreTokenStorageDeviceTest`）、同意画面のホスト（`AndroidAuthorizationHostDeviceTest`）、
+    Storage Access Framework（`FilePickerDeviceTest`）も含む。
     testing.ja.md 参照）
 ```
 
@@ -233,13 +235,29 @@
 `startBackgroundRefresh`）、`MainActivity`（`setContent { App() }`、続けて
 `runAndroidStartupTasks`）に加え、自身の `res/`（ランチャーアイコン、`values/strings.xml`、
 `backup_rules.xml`、`data_extraction_rules.xml`）、サイドロード可能な GitHub ビルドと Play ストア版を
-分ける `github` フレーバー用の `AndroidManifest.xml`、そして `androidTest/`（
+分ける `github` フレーバー用の `AndroidManifest.xml`（加えて、アプリ内アップデート確認をオプトアウトする
+`fdroid` フレーバー用のもの —— 下記参照）、Google Drive のバックエンドを供給するフレーバーごとの
+`FlavorIntegration.kt`（`github`/`play` は `src/gms/`、`fdroid` は `src/fdroid/`）、そして `androidTest/`（
 `KeryxSearchBarAndroidTest`、`NativeMenuAndroidGestureTest`、`KeryxSettingRowAndroidGestureTest` ——
 上記の `androidDeviceTest` とは異なり、実機/エミュレータが必要な計装 Compose UI テスト）を持つ。
 これが別モジュールになっているのは、AGP 9 の
 `com.android.application` プラグインが Kotlin Multiplatform プラグインと同一モジュールで併用できない
 ため — `composeApp` は代わりに `com.android.kotlin.multiplatform.library` による Android ライブラリで、
 `androidApp` がそれに依存してインストール可能な APK を生成する。
+
+**`:androidGms` と 3 つの配布フレーバー。** `androidApp` には 3 つの product flavor（`github`・`play`・
+`fdroid` —— build.ja.md の「Android（APK / AAB）」参照）がある。`:shared` と `:composeApp` は KMP
+ライブラリなので flavor を持てず、その `androidMain` に Google Play 開発者サービスの依存を置くと
+全 flavor に届いてしまうが、F-Droid の掲載ポリシーはそれを禁止している。そのため Play 開発者サービスを
+必要とするものはすべて `:androidGms`（`:composeApp` に依存する Android ライブラリ）に置き、これに依存
+するのは `github` と `play` flavor だけにしてある。両者は `:shared` の 1 つのインターフェース
+`AndroidGoogleDriveBackend`（`isAvailable(context)` と `provider(client, tokenStorage)`）とその保持
+オブジェクト `AndroidGoogleDriveSupport` で接する: 各 flavor の `FlavorIntegration.kt` が
+`googleDriveBackend` を公開し（`github`/`play` は `PlayServicesGoogleDriveBackend`、`fdroid` は
+`null`）、`KeryxApplication.onCreate` が `AndroidAppContext.init` の直後、Koin の起動前にそれを登録
+する。`CloudStorageAvailability.googleDriveAvailable` と `platformModule` の `extraProviders` はどちらも
+登録済みのバックエンドを参照するので、何も登録されていなければ Google Drive は利用不可・未登録になる ——
+Play 開発者サービスの無い端末とまったく同じ状態で、UI はその違いを区別する必要がない。
 
 ## レイヤーの責務
 

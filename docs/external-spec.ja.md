@@ -17,7 +17,7 @@
 | プラットフォーム | 対応 |
 | --- | --- |
 | Windows / macOS / Linux | ✅ Compose Multiplatform（現行） |
-| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照） |
+| Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照。F-Droid 版は Play 開発者サービスを含まないため Google Drive が一切無く、アプリ内アップデートも無い — §4 と §7 参照） |
 | iOS / iPadOS | 開発中（SwiftUI ネイティブ UI。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照） |
 | macOS（ネイティブ） | 開発中 — ユーザー向けには上記の Compose 版に代わる、ネイティブ SwiftUI 版 macOS アプリ（Apple Silicon）。共有ロジックはすでに対応済み |
 
@@ -55,6 +55,10 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
   古すぎる端末では Google Drive を選択肢として出さないが、
   Dropbox・OneDrive・ローカルのみは従来どおり利用できる。アカウントも同期ファイルもデスクトップ版と
   共通。詳細は [sync-architecture.ja.md](sync-architecture.ja.md) の「Android での Google Drive」を参照。
+- **F-Droid 版には Google Drive が一切無い。** F-Droid の掲載ポリシーが Google Play 開発者サービスを
+  禁止しているため、F-Droid がビルドするもの（`fdroid` flavor —— [build.ja.md](build.ja.md) 参照）は
+  それを一切含まず、Google Drive を選択肢として出さない —— Play 開発者サービスの無い端末と同じ状態で、
+  Dropbox・OneDrive・ローカルのみは従来どおり利用できる。
 
 ## 5. 競合解決ポリシー
 
@@ -93,7 +97,8 @@ Google Play 開発者サービスがインストール済みかつ有効かつ�
   対応するのは macOS の `.app`、Windows の MSI インストールまたは portable ZIP、Linux の
   portable ZIP のみ（deb/rpm インストールや Snap インストール、認識できないインストール形態は
   リリースページを開く従来の挙動にフォールバック）、そして Android のサイドロードインストール（Google Play 経由では
-  提供しない——Play が既にアプリ自身を更新してくれるため）。検知した時点から通知センターのベル・
+  提供しない——Play が既にアプリ自身を更新してくれるため。F-Droid 経由でも同様で、F-Droid クライアントが
+  同じことをするため、F-Droid 版はこの機能自体を持たない）。検知した時点から通知センターのベル・
   デスクトップのタスクトレイ・アプリメニューの Help メニューで提示する（後ろ 2 つには同一の項目が
   出る。ここは任意のタイミングで確認を要求する場所でもあり、何も保留がなければ「更新をチェック」
   と表示される）。この項目をクリックすると常に設定 ▸ アップデートが開き、そこで確認・ダウンロード・

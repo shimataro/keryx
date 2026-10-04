@@ -40,7 +40,7 @@ If toolchain auto-download is blocked in a sandbox:
 
 `:androidApp` has a `distribution` product-flavor dimension (see "Android (APK / AAB)" below), so
 installing is a per-variant task — there is no `installDebug`, and `githubDebug` is the only debug
-variant (`playDebug` is disabled). `assembleDebug` remains an aggregate over the enabled debug
+variant (`playDebug` and `fdroidDebug` are disabled). `assembleDebug` remains an aggregate over the enabled debug
 variants and so still works as written.
 
 ## Cloud Storage Integration
@@ -56,6 +56,12 @@ Services without an API key will not show integration options. If no service is 
 This is implemented via Gradle custom tasks in `shared/build.gradle.kts` (`generateBuildConfig`, plus `generateDesktopBuildConfig` for the desktop-only Google Drive credentials and `generateAppleBuildConfig` for the Apple app's own, secretless Google Drive client id — see "Apple (macOS / iOS)" below).
 
 Below is how to obtain API keys for each service.
+
+If the production Dropbox or OneDrive app registration is ever recreated, so that its App Key /
+Client ID changes, update the `release.yml` secrets (`DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID`) and the
+F-Droid recipe (the draft and the one in `fdroiddata`) together — the recipe has to build with the same
+values for F-Droid to publish the release APK (see
+[`distribution/fdroid/README.md`](../distribution/fdroid/README.md)).
 
 ### Dropbox
 
@@ -608,24 +614,42 @@ with the same format as the app's own, rather than going to stderr in a differen
 Unlike the desktop packages above, an APK/AAB can be built on **any** OS — there is no
 cross-compilation restriction here.
 
-`androidApp` splits into two product flavors on a `distribution` dimension — `github` and `play`,
-same `applicationId` — that differ in exactly one thing: `androidApp/src/github/AndroidManifest.xml`
-declares `REQUEST_INSTALL_PACKAGES`, needed for the in-app update installer's `PackageInstaller`
-session (see [background-update.md](background-update.md)'s "In-App Update"); the `play` flavor's
-manifest omits it, since Play already updates the app itself and Play policy restricts that
-permission to apps whose primary purpose is installing other apps. `composeApp` (a KMP library
-module) has no flavor dimension of its own and is consumed identically by both.
+`androidApp` splits into three product flavors on a `distribution` dimension — `github`, `play`
+and `fdroid`, same `applicationId`:
+
+- `github` and `play` differ in one thing: `androidApp/src/github/AndroidManifest.xml` declares
+  `REQUEST_INSTALL_PACKAGES`, needed for the in-app update installer's `PackageInstaller` session
+  (see [background-update.md](background-update.md)'s "In-App Update"); the `play` flavor's manifest
+  omits it, since Play already updates the app itself and Play policy restricts that permission to
+  apps whose primary purpose is installing other apps.
+- `fdroid` is the flavor F-Droid builds from source (and, when its build reproduces the
+  developer-signed APK `release.yml` attaches, publishes with the app's own signature — see
+  "Publishing to F-Droid"), and it contains **no Google Play services at all** — F-Droid's inclusion policy forbids them. Everything that needs Play services (Google
+  Drive on Android) lives in the `:androidGms` module, which only `github` and `play` depend on;
+  `fdroid` therefore never offers Google Drive (Dropbox, OneDrive and local-only work as usual), the
+  same state as a device without Play services. Its manifest
+  (`androidApp/src/fdroid/AndroidManifest.xml`) also carries the `works.merc.keryx.SELF_UPDATE_CHECK`
+  meta-data set to `false`, which turns the in-app update check off whichever installer delivered
+  the APK, and omits `REQUEST_INSTALL_PACKAGES` like `play` does. `ci.yml` checks both facts on
+  every push (merged manifest, and that the flavor's runtime classpath holds no `com.google.android.gms`
+  / `com.google.firebase` / `:androidGms`).
+
+`composeApp` (a KMP library module) has no flavor dimension of its own and is consumed identically
+by every flavor — which is exactly why `:androidGms` has to be a module of its own: a Play services
+dependency declared in `composeApp`'s or `shared`'s `androidMain` would reach all three.
 
 ```bash
 ./gradlew :androidApp:assembleGithubRelease -PappVersion=1.2.3   # APK (GitHub Releases)
 ./gradlew :androidApp:bundlePlayRelease     -PappVersion=1.2.3   # AAB (Play Store submission format)
+./gradlew :androidApp:assembleFdroidRelease -PappVersion=1.2.3   # APK (what F-Droid builds)
 ```
 
-Output goes to `androidApp/build/outputs/apk/github/release/` and
-`androidApp/build/outputs/bundle/playRelease/` respectively (a different location than the desktop
+Output goes to `androidApp/build/outputs/apk/github/release/`,
+`androidApp/build/outputs/bundle/playRelease/` and `androidApp/build/outputs/apk/fdroid/release/`
+respectively (a different location than the desktop
 packages' `composeApp/build/compose/binaries/main` above). `assembleGithubRelease` is reachable
-through the default `build` lifecycle's aggregate `assembleRelease`/`build` tasks (which build both
-flavors' release variants); `bundlePlayRelease` is not part of any aggregate lifecycle task and must
+through the default `build` lifecycle's aggregate `assembleRelease`/`build` tasks (which build every
+flavor's release variant); `bundlePlayRelease` is not part of any aggregate lifecycle task and must
 be invoked explicitly — see "Release (CD)" below for how `release.yml` uses both. Run
 `./gradlew :androidApp:tasks --all | grep -i release` after touching `androidApp/build.gradle.kts`'s
 `flavorDimensions` to confirm these task names and output paths before changing `release.yml` — AGP
@@ -886,8 +910,8 @@ Flow:
        Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every
        Store user by snapd's own auto-refresh with no way to recall it).
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships a compatible WiX Toolset version (v3/v4/v5) preinstalled, so no separate WiX setup step is needed; see [setup.md](setup.md)), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
-   - `:androidApp:assembleGithubRelease` and `:androidApp:bundlePlayRelease` (Ubuntu runner), building
-     the APK from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an
+   - `:androidApp:assembleGithubRelease`, `:androidApp:bundlePlayRelease` and
+     `:androidApp:assembleFdroidRelease` (Ubuntu runner), building the APK from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an
      in-app update installs over — see the "Android (APK / AAB)" section above) and the AAB from
      `play` (the Play Console submission artifact, which must not carry that permission). Unlike
      the desktop installers, Android packages are built for pre-release tags too, because Android has
@@ -897,6 +921,21 @@ Flow:
        `Keryx-<version>-android-universal.apk` — the AAB is never attached (see the note at the top
        of this section for why); instead it is uploaded as a build artifact
        (`actions/upload-artifact`) for the separate `publish-play` job below to consume.
+     - **Developer-signed `fdroid` APK.** The `fdroid` flavor is built in the same invocation, signed
+       with the same app signing key as the `github` APK, and attached as
+       `Keryx-<version>-android-fdroid.apk`. It is not meant for anyone to download: F-Droid rebuilds
+       the tag and, if its result matches this APK apart from the signature, publishes this one, so
+       F-Droid users share every other channel's signature (see "Publishing to F-Droid" below). The
+       in-app updater only ever picks the `-android-universal.apk` asset, so it never offers this
+       one to a sideloaded install.
+   - `attach-fdroid-version`, a separate job (needs `package-android`, whose output carries the
+     version) that attaches `fdroid-version.json` (`{"versionName":"<version>","versionCode":<n>}`, the
+     code taken from `versionCodeOf` through the `printAndroidVersionCodes` probe). F-Droid's update
+     checker reads it from the latest release — see "Publishing to F-Droid" below. Without it that
+     release never reaches F-Droid, so a failure turns the whole run red; but being its own job, it
+     holds back neither `publish-play` nor `deploy-pages`, which depend on `package-android` alone.
+     If it fails, re-run just this job ("Re-run failed jobs"). It is not an `.apk`, so the in-app
+     updater's asset selection never considers it.
    - `publish-play`, a separate job (needs `package-android`, so it starts only once that job's AAB
      artifact exists) that downloads that artifact and **publishes it to Google Play**
      (`.github/scripts/publish-play.sh`, one atomic Play Developer API edit that uploads the AAB
@@ -1130,6 +1169,65 @@ existing release once published.
 > **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
 > [Download](../README.md#download) section for the workaround; "Signing & Notarization" below
 > covers what a permanent fix requires.
+
+### Publishing to F-Droid
+
+F-Droid builds the `fdroid` flavor from source itself. It then compares its build with the
+developer-signed `Keryx-<version>-android-fdroid.apk` that `release.yml` attaches to the release
+and, only if the two are identical apart from the signature, publishes the developer-signed one
+(the recipe's `Binaries` and `AllowedAPKSigningKeys`). That keeps F-Droid installs on the same
+signature as the GitHub and Play ones, so users can move between channels without reinstalling. If
+a release does not match, F-Droid publishes nothing for it rather than an F-Droid-signed build.
+What this repository supplies:
+
+- `fastlane/metadata/android/{en-US,ja-JP}/` — the store listing F-Droid reads from the tagged
+  commit (see [`fastlane/README.md`](../fastlane/README.md)). Keep the two locales in step.
+- `distribution/fdroid/works.merc.keryx.yml` — a draft of the `fdroiddata` recipe, submitted by hand
+  as a merge request ([`distribution/fdroid/README.md`](../distribution/fdroid/README.md) explains
+  each field).
+- `fdroid-version.json`, attached to every release by `release.yml` (see "Release (CD)" above). The
+  recipe's update check reads it from the latest stable release, so F-Droid picks up new releases
+  on its own — its usual `Tags` check cannot, because `versionCodeOf` computes the versionCode at
+  build time. Nothing has to be done per release: the release notes are the GitHub Release body,
+  which the recipe's `Changelog` field links to. The first submission has to wait for a
+  stable release that carries this file, because the merge request's CI runs the update check.
+
+What a build on F-Droid's server needs to differ from a local one:
+
+- **JDK 25 from Debian.** The Gradle build targets a JDK 25 toolchain, which `settings.gradle.kts`
+  normally lets the `foojay` resolver download; F-Droid's scanner rejects that plugin. The recipe
+  installs Debian's `openjdk-25-jdk-headless` and deletes the `foojay` line with `sed` before
+  building, so Gradle finds the installed JDK.
+- **OAuth client identifiers passed as properties.** F-Droid does not sign up for API keys, so the
+  recipe carries the public Dropbox App Key and OneDrive Client ID (`-PdropboxAppKey`,
+  `-PoneDriveClientId` — PKCE public clients with no secret). Google Drive needs none: the `fdroid`
+  flavor has no Google Drive.
+- **No Kotlin/Native download and no Apple tasks** on Linux for `:androidApp:assembleFdroidRelease`,
+  so nothing besides Maven Central, Google Maven, JitPack and the Gradle plugin portal is fetched.
+
+What must stay true for F-Droid's build to reproduce the release APK:
+
+- **Same inputs.** The recipe's Dropbox App Key / OneDrive Client ID have to be exactly the values
+  `release.yml` builds with (the `DROPBOX_APP_KEY` / `ONEDRIVE_CLIENT_ID` secrets) — they are
+  compiled into `BuildConfig`, so any other value changes the APK. Being public PKCE client
+  identifiers, they can appear in the recipe as they are. If the production app registration is
+  ever recreated and the identifiers change, update the GitHub secrets, the recipe draft and the
+  recipe in `fdroiddata` together.
+- **Nothing environment-dependent in the APK.** `androidApp/build.gradle.kts` turns off the two AGP
+  outputs that would differ: `dependenciesInfo.includeInApk` (Google's dependency report in the
+  signing block, which F-Droid's scanner rejects anyway) and `vcsInfo` (the git state in
+  `META-INF/version-control-info.textproto`). With those off, the `fdroid` APK built on macOS was
+  byte-identical, signature aside, to the one built in F-Droid's buildserver image with the recipe's
+  own edits (`rm androidGms`, the `sed` lines), across different JDK distributions (Debian OpenJDK
+  vs Temurin) and checkout paths. Re-check after adding a Gradle plugin or anything that writes
+  build-time data into the APK.
+
+`fdroid scanner` finding **zero** problems — in the source and in the built APK — is what a change
+to the dependency graph must preserve. Run it in F-Droid's own `buildserver` image
+(`registry.gitlab.com/fdroid/fdroidserver:buildserver`) after touching `androidApp`, `:androidGms`
+or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services"
+step catches the most likely regression on every push, but not a new proprietary dependency
+unrelated to Play services.
 
 ## Signing & Notarization (future)
 

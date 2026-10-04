@@ -141,6 +141,24 @@ class UpdateAssetSelectorTest {
     }
 
     @Test
+    fun androidSideloadedNeverPicksTheFdroidApk() {
+        // release.yml also attaches the developer-signed fdroid-flavor APK for F-Droid to verify; it
+        // lacks Google Drive and the in-app update, so a sideloaded install must never update to it.
+        val assets = listOf(
+            ReleaseAsset("Keryx-0.13.0-android-fdroid.apk", "https://x/fdroid", 13L, "sha256:${"c".repeat(64)}", "uploaded"),
+        ) + stableReleaseAssets()
+        val asset = selectUpdateAsset(assets, location(InstallKind.ANDROID_SIDELOADED), HostArchitecture.X86_64)
+        assertEquals("Keryx-0.13.0-android-universal.apk", asset?.name)
+        assertNull(
+            selectUpdateAsset(
+                listOf(ReleaseAsset("Keryx-0.13.0-android-fdroid.apk", "https://x/fdroid", 13L, "sha256:${"c".repeat(64)}", "uploaded")),
+                location(InstallKind.ANDROID_SIDELOADED),
+                HostArchitecture.X86_64,
+            ),
+        )
+    }
+
+    @Test
     fun androidSideloadedPicksTheApkNeverTheAab() {
         val asset = selectUpdateAsset(stableReleaseAssets(), location(InstallKind.ANDROID_SIDELOADED), HostArchitecture.X86_64)
         assertEquals("Keryx-0.13.0-android-universal.apk", asset?.name)
