@@ -18,7 +18,7 @@ metadata/android/
 │   └── images/
 │       ├── icon.png              # 512×512, generated (see below)
 │       ├── featureGraphic.png    # 1024×500, generated (see below)
-│       └── phoneScreenshots/     # screenshots (PNG/JPG) — add before submitting
+│       └── phoneScreenshots/     # 1.png, 2.png, 3.png — shown in file-name order
 └── ja-JP/
     └── (same files)
 ```
@@ -51,4 +51,15 @@ rsvg-convert -w 1024 -h 500 design/google-play/feature-graphic/light-ja.svg -o $
 Use `rsvg-convert` (`brew install librsvg`), not ImageMagick: its built-in SVG delegate silently
 drops the arc paths of the app icon (see `design/icons/make_desktop_icons.sh`).
 
-`images/phoneScreenshots/` is empty on purpose (`.gitkeep`): screenshots are added by hand.
+`images/phoneScreenshots/` holds three screenshots per locale, taken on an Android emulator
+(1344×2992) running the `fdroid` flavor in that language: the article list, the reader, and the feed
+list drawer with folders and tags. To retake them:
+
+- Subscribe only to feeds whose content is safe to show in a store listing — the current set is
+  NASA and English Wikipedia (featured articles, picture of the day) for `en-US`, and JAXA press
+  releases, NAOJ news and Japanese Wikipedia (featured articles) for `ja-JP`. Avoid commercial news
+  sites (their logos and headlines) and check every headline in the shot.
+- Freeze the status bar with SystemUI demo mode (`sysui_demo_allowed`, then `clock -e hhmm 1200`,
+  `notifications -e visible false`, `network -e mobile hide`), and capture with
+  `adb exec-out screencap -p`, which yields a plain rectangle without the emulator's rounded corners.
+- Losslessly shrink the result with `optipng -o7 -strip all` before committing.
