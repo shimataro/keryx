@@ -15,7 +15,10 @@ metadata/android/
 │   ├── short_description.txt     # ≤ 80 characters
 │   ├── full_description.txt      # ≤ 4000 characters, plain text
 │   ├── changelogs/<versionCode>.txt   # ≤ 500 characters; the version code of the release
-│   └── images/phoneScreenshots/  # screenshots (PNG/JPG) — add before submitting
+│   └── images/
+│       ├── icon.png              # 512×512, generated (see below)
+│       ├── featureGraphic.png    # 1024×500, generated (see below)
+│       └── phoneScreenshots/     # screenshots (PNG/JPG) — add before submitting
 └── ja-JP/
     └── (same files)
 ```
@@ -32,5 +35,20 @@ change.
 [`docs/build.md`](../docs/build.md)'s "Android (APK / AAB)"). Add one per release that F-Droid
 should show notes for — starting with the first release that F-Droid builds, whose file is added when
 that release is made (there is none yet, so `changelogs/` does not exist).
+
+`images/icon.png` and `images/featureGraphic.png` are generated from the SVG masters under
+[`design/`](../design/) — the app icon, and the same feature graphic the Play listing uses (its light
+variant, one per locale). Regenerate them after changing a master:
+
+```bash
+B=fastlane/metadata/android
+rsvg-convert -w 512 -h 512 design/icons/svg/app_icon.svg -o $B/en-US/images/icon.png
+cp $B/en-US/images/icon.png $B/ja-JP/images/icon.png
+rsvg-convert -w 1024 -h 500 design/google-play/feature-graphic/light-en.svg -o $B/en-US/images/featureGraphic.png
+rsvg-convert -w 1024 -h 500 design/google-play/feature-graphic/light-ja.svg -o $B/ja-JP/images/featureGraphic.png
+```
+
+Use `rsvg-convert` (`brew install librsvg`), not ImageMagick: its built-in SVG delegate silently
+drops the arc paths of the app icon (see `design/icons/make_desktop_icons.sh`).
 
 `images/phoneScreenshots/` is empty on purpose (`.gitkeep`): screenshots are added by hand.
