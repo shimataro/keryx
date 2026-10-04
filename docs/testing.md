@@ -38,10 +38,14 @@
     Android Keystore.
   - `FilePickerDeviceTest.kt` — the Storage Access Framework file picker's write-failure path
     (`ContentUriPickedFile.writeText` when no provider can open the stream).
-  - `PlayServicesGoogleDriveAuthDeviceTest.kt` — Play services' Google Drive authorization result,
-    including the partially-granted consent where only some of the requested scopes come back.
   - `AndroidAuthorizationHostDeviceTest.kt` — the lifetime of the consent-screen request slot
     `AndroidAuthorizationHost` hands to the Activity.
+
+- `androidGms/src/test/` — plain JVM unit tests (`:androidGms:testDebugUnitTest`, part of
+  `./gradlew build`): `PlayServicesGoogleDriveAuthTest.kt` — Play services' Google Drive
+  authorization result, including the partially-granted consent where only some of the requested
+  scopes come back. `tokenFrom` touches neither Play services nor an `AuthorizationResult`, so it
+  needs no device.
 
 - `androidApp/src/androidTest/` — Instrumented Compose UI tests that need a real Android
   application module to host `androidx.compose.ui.test.junit4.v2.createComposeRule` (e.g.
@@ -142,7 +146,7 @@ into CI:
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
 | `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every push (`android-instrumented-test` job, same emulator as the row below) |
-| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, Play services token-scope checks) | ✗ local only |
+| `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, the consent-screen request slot) | ✗ local only |
 | `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every push |
 
 Both need a connected device or a running emulator — see [setup.md](setup.md) for how to create an
@@ -161,7 +165,7 @@ yet — so it only runs locally today.
 
 `androidApp`'s own instrumented suite (Compose UI gesture tests, see `androidApp/src/androidTest/`
 above) uses the regular `com.android.application` task naming instead — flavor-qualified now that
-`androidApp` splits into `github`/`play` product flavors (see `build.md`'s "Android (APK / AAB)"):
+`androidApp` splits into `github`/`play`/`fdroid` product flavors (see `build.md`'s "Android (APK / AAB)"):
 
 ```bash
 $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
@@ -169,23 +173,31 @@ $ANDROID_HOME/emulator/emulator -avd <name> -no-snapshot -no-boot-anim &
 ```
 
 Only `github` runs in CI (and is the one to run locally too) — the suite doesn't exercise anything
-flavor-specific: for **debug** builds, the two flavors differ only in the `REQUEST_INSTALL_PACKAGES`
-manifest permission (release builds also differ in signing key — see `build.md`'s "Publishing to
+flavor-specific: for **debug** builds, the flavors differ only in the `REQUEST_INSTALL_PACKAGES`
+manifest permission, the `fdroid` self-update opt-out meta-data and whether Play services is linked (release builds also differ in signing key — see `build.md`'s "Publishing to
 Google Play" — but `androidComponents` only repoints `playRelease`, never a debug variant, so that
 difference is irrelevant to this debug-only suite). There is no `connectedPlayDebugAndroidTest` to
-fall back to either way: `androidApp/build.gradle.kts` disables the `playDebug` variant entirely
-(nothing debug-build-specific to exercise there that `githubDebug` doesn't already cover — see
+fall back to either way: `androidApp/build.gradle.kts` disables the `playDebug` and `fdroidDebug`
+variants entirely (nothing debug-build-specific to exercise there that `githubDebug` doesn't already
+cover — see
 that file's own comment), so `connectedAndroidTest` (no flavor) now runs only `githubDebug`, the
 sole remaining debug variant.
 
-That the `github`/`play` **release** manifests differ only in that permission is itself checked on
-every push, by `ci.yml`'s "Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
-`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest` and greps the two **merged**
-manifests, so the assertion holds against what AGP actually produces rather than against the flavor
+That the `github`/`play` **release** manifests differ only in that permission — and that `fdroid`
+carries neither it nor anything but the `SELF_UPDATE_CHECK` opt-out — is itself checked on every
+push, by `ci.yml`'s "Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
+`:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest`/`processFdroidReleaseManifest`
+and greps the three **merged** manifests, so the assertion holds against what AGP actually produces rather than against the flavor
 source sets. Merged output is what matters here — a transitive library manifest could reintroduce
 the permission into `play` without either flavor's own `AndroidManifest.xml` changing, and that is
 exactly the case Google Play would reject. This check is scoped to the manifest alone; it says
-nothing about (and does not need to, for its own purpose) the two release variants' signing keys.
+nothing about (and does not need to, for its own purpose) the release variants' signing keys.
+
+The other half of the `fdroid` flavor's contract — no Google Play services — is checked by the next
+step, "Verify the fdroid flavor has no Google Play services (Linux)": it resolves
+`:androidApp:dependencies --configuration fdroidReleaseRuntimeClasspath` and fails if
+`com.google.android.gms`, `com.google.firebase` or `:androidGms` shows up. Reproduce it locally with
+the same command and a `grep`; the `github` classpath must show them, the `fdroid` one must not.
 
 Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
 application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
@@ -289,7 +301,7 @@ Known uncovered areas:
 - On the Linux SNI tray, `SniConnection` (connecting, claiming the bus name, exporting, registering, re-registering, closing) needs a live session bus and a running `org.kde.StatusNotifierWatcher`, which CI runners do not have; likewise the actual delivery of `NewIcon`/`NewToolTip`/`LayoutUpdated` (the *decision* to emit them is covered), the `NameOwnerChanged` re-registration path, host-initiated `Activate`/`Event` arriving through dbus-java's worker threads, `LinuxNotifier.notify` reaching a real daemon, and the `LinuxTray` composable wiring. Whether the icon actually renders transparently on a panel is inherently a visual check.
 - For the KDE Global Menu the same applies: `X11WindowId.findOwnWindowId()` (needs a real X server + a mapped window with `_NET_WM_PID`), the real `AppMenuConnection` connect/detect/`RegisterWindow`/reregister/`close` round trip, KWin/Plasma actually writing `_KDE_NET_WM_APPMENU_*` and a panel widget / titlebar button rendering the menu, the `startMinimized` XID timing/retry path, whether Compose's own `MenuBar` shortcut handling truly depends on frame attachment (verified manually), and the live `MenuShortcutDispatcher` Ctrl+M/N/W/,/Q/R interception through `KeyboardFocusManager` are all uncovered (only the pure matcher it delegates to is tested).
 - On Android, most of what the instrumented suites described in Execution don't reach is still uncovered: `WorkManager`'s actual periodic-job scheduling/execution (only the pure schedule mapping in `BackgroundRefreshSchedule.kt` is tested), real notification posting through `NotificationManagerCompat`, and `AndroidUpdateInstaller`'s `PackageInstaller` session/`BroadcastReceiver`/`canRequestPackageInstalls()` handling (only the pure plan/consent decision it delegates to, `canInstallAndroidApkUpdate`, is tested — see the in-app update pipeline above).
-- **Not actually uncovered — noted here for contrast:** the Storage Access Framework file picker's write-failure path, Keystore-backed token storage's fallback path, and Play services' partially-granted Google Drive consent **are** covered, by `FilePickerDeviceTest.kt`, `KeystoreTokenStorageDeviceTest.kt` and `PlayServicesGoogleDriveAuthDeviceTest.kt` respectively, as is the consent-screen request slot's lifetime, by `AndroidAuthorizationHostDeviceTest.kt` (see `androidDeviceTest/` in "Structure" above).
+- **Not actually uncovered — noted here for contrast:** the Storage Access Framework file picker's write-failure path, Keystore-backed token storage's fallback path, and Play services' partially-granted Google Drive consent **are** covered, by `FilePickerDeviceTest.kt`, `KeystoreTokenStorageDeviceTest.kt` and — a plain JVM unit test in `:androidGms` — `PlayServicesGoogleDriveAuthTest.kt` respectively, as is the consent-screen request slot's lifetime, by `AndroidAuthorizationHostDeviceTest.kt` (see `androidDeviceTest/` and `androidGms/src/test/` in "Structure" above).
 - Likewise on desktop, the actual execution of a self-replace/`msiexec` script (`UpdateScriptWriter`'s output) — its own generated text is asserted directly and `DesktopUpdateInstaller` never runs one in a test (see the fake `ProcessLauncher` above) — is a manual check only; see "In-App Update" below. Two more pieces of that path are out of reach of a *unit* test and are covered elsewhere instead.
 - `DittoArchiveExtractor` actually running `ditto` is exercised by `ArchiveExtractorTest.kt`'s `isMacOs`-gated cases (the `macos-latest` leg of `ci.yml`'s `build` job runs them, so they really run; the Linux/Windows runners have no `ditto`, and the installer's own tests inject `InProcessArchiveExtractor` by default). A real signed `.app` surviving the `zip -ry` → `ditto` → `codesign --verify --strict --deep` round trip needs macOS *and* a jpackage bundle, which no test source set has — so `ci.yml`'s "Verify packaging (macOS)" step performs exactly that round trip against the freshly built app image, asserting the symlink count is unchanged and the extracted bundle still verifies. Its companion is `createDistributable`'s own `verifyMacOsBundleSeal`/signature-property guard, which fails the build if the *pre*-zip bundle is already broken (see [build.md](build.md)); between them, neither half of the original defect can reach a release unnoticed.
 - `FileSystemExtras.move`'s cross-volume fallback is likewise unreachable from a test (a second filesystem cannot be provoked), which is why the link-preserving copy it delegates to is split out as `copyTree` and tested directly.
@@ -1452,7 +1464,9 @@ a rollback path has a bug that leaves it damaged.
   and install, and confirm the OS's own install-confirmation dialog appears and the app updates in
   place. Separately, sideload a `play`-flavor APK and confirm the Updates tab never offers a
   download at all (`canInstallAndroidApkUpdate` requires `REQUEST_INSTALL_PACKAGES`, which only the
-  `github` manifest declares). If "install unknown apps" hasn't been granted yet, confirm clicking
+  `github` manifest declares). An `fdroid`-flavor build goes one step further — there is no Updates
+  category in Settings at all, and Google Drive is not among the cloud providers (Dropbox, OneDrive
+  and local-only are). If "install unknown apps" hasn't been granted yet, confirm clicking
   install opens that system settings screen instead of a session, and that returning without
   granting it leaves the Updates tab back at "ready to install" rather than stuck. Both the
   sideloaded APK and the release it updates to have to be signed with the **same** key, since

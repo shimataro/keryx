@@ -255,7 +255,7 @@ keytool -genkeypair -v -keystore "$PWD/keryx-dev.keystore" \
 ./gradlew build
 
 # Android: 実機を接続済み（または前述のエミュレータを起動済み）の場合。
-# installDebug ではなくバリアント単位のタスク: :androidApp には github/play のプロダクト
+# installDebug ではなくバリアント単位のタスク: :androidApp には github/play/fdroid のプロダクト
 # フレーバーがあり、有効なデバッグバリアントは githubDebug だけ（build.ja.md 参照）
 ./gradlew :androidApp:installGithubDebug
 ```
@@ -299,7 +299,7 @@ release APK が生成される（App Bundle は生成されない — `:androidA
 叩く必要がある）。Android リリース署名キーストアを設定していない場合、
 `androidApp/build.gradle.kts` はビルド警告を出したうえでフレーバーごとに**未署名**の release APK
 （`androidApp/build/outputs/apk/github/release/androidApp-github-release-unsigned.apk` と
-`play` 側の同等物）を生成する — これはインストール可否だけに関わる話なので、
+`play` / `fdroid` 側の同等物）を生成する — これはインストール可否だけに関わる話なので、
 `./gradlew build` 自体は（デスクトップの作業しかしていなくても）成功する。未署名 APK は実機に
 インストールすることも Google Play にアップロードすることもできない。
 
