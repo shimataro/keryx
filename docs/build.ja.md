@@ -922,6 +922,12 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
        （本節冒頭の説明を参照）。代わりに AAB はビルド成果物として
        （`actions/upload-artifact`）アップロードされ、後述の独立ジョブ `publish-play` が
        それを取得する。
+     - **F-Droid 用バージョンファイル。** このジョブは最後のステップで `fdroid-version.json`
+       （`{"versionName":"<version>","versionCode":<n>}`。versionCode は `printAndroidVersionCodes`
+       プローブ経由で `versionCodeOf` から取得）も添付する。F-Droid の更新チェッカーは、これを最新の
+       リリースから読む —— 後述の「F-Droid への公開」を参照。このステップは `continue-on-error` で、
+       失敗しても F-Droid がリリースに気づくのが遅れるだけなので、ジョブ（ひいては `deploy-pages`）を
+       失敗させない。`.apk` ではないので、アプリ内アップデートのアセット選択の対象にもならない。
    - `publish-play` は独立したジョブで（`package-android` に依存するため、そのジョブの AAB
      成果物ができてから初めて開始する）、その成果物をダウンロードして**Google Play へ公開する**
      （`.github/scripts/publish-play.sh`。Play Developer API の 1 つの edit の中で AAB を 1 回だけ

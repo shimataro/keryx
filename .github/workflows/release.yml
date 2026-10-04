@@ -641,6 +641,30 @@ jobs:
           name: android-aab
           path: ${{ steps.artifact.outputs.aab }}
 
+      # F-Droid builds the fdroid flavor itself, so nothing of the APK goes to it — but its update
+      # checker cannot read this app's versionCode from the tagged source (versionCodeOf computes it
+      # from the tag at build time, and F-Droid's `Tags` mode only reads a literal). The recipe
+      # (distribution/fdroid/works.merc.keryx.yml) therefore uses `UpdateCheckMode: HTTP` against
+      # this file on the latest release. versionCode comes from versionCodeOf itself, through the
+      # printAndroidVersionCodes probe, never recomputed here. Last step and continue-on-error: a
+      # failure only delays F-Droid noticing the release, so it must not fail this job and with it
+      # deploy-pages. Not an .apk, so the in-app updater's asset selection never considers it.
+      - name: Attach F-Droid version file
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          version_code=$(./gradlew -q :androidApp:printAndroidVersionCodes -PversionCodeProbe="$VERSION" | sed -n "s/^${VERSION//./\\.}=//p")
+          if ! [[ "$version_code" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not resolve the versionCode of $VERSION (got '$version_code')."
+            exit 1
+          fi
+          printf '{"versionName":"%s","versionCode":%s}\n' "$VERSION" "$version_code" > fdroid-version.json
+          cat fdroid-version.json
+          gh release upload "$RELEASE_TAG" fdroid-version.json --clobber
+
   publish-play:
     name: Publish Android AAB to Google Play
     needs: package-android
