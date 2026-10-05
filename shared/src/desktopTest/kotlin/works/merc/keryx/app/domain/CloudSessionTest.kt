@@ -210,6 +210,98 @@ class CloudSessionTest {
         assertEquals(AppNotificationLevel.WARNING, center.items.value.single().level)
     }
 
+    /**
+     * A save that reached no store must still leave this session connected until the app exits:
+     * the connect flow already reports success, so a session that then read "no tokens" back from
+     * the store would skip every sync silently.
+     */
+    @Test
+    fun unpersistedTokensKeepTheSessionConnectedForThisProcess() = runBlocking {
+        var authHeaderSeen: String? = null
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED)
+        val s = session(storage, authHandler = { request ->
+            authHeaderSeen = request.headers["Authorization"]
+            respond("{}", HttpStatusCode.OK)
+        })
+
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        assertNull(storage.stored)
+        assertTrue(s.isConnected())
+        assertEquals(CloudStorageType.DROPBOX, s.connectedType())
+        val cloudStorage = s.current()
+        assertNotNull(cloudStorage)
+        cloudStorage.authenticate()
+        assertEquals("Bearer AT", authHeaderSeen)
+    }
+
+    /**
+     * A refresh whose save fails leaves the previous tokens in the store; the refreshed ones held
+     * in memory must win, or the next call would hand out the stale (possibly rotated-out) token.
+     */
+    @Test
+    fun anUnpersistedRefreshTakesPrecedenceOverTheStaleStoredTokens() = runBlocking {
+        val authHeaders = mutableListOf<String?>()
+        var refreshCalls = 0
+        val storage = FakeTokenStorage(OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
+        val s = session(
+            storage,
+            authHandler = { request ->
+                if (request.url.encodedPath.contains("oauth2/token")) {
+                    refreshCalls++
+                    respond("""{"access_token":"FRESH","expires_in":14400}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+                } else {
+                    authHeaders += request.headers["Authorization"]
+                    respond("{}", HttpStatusCode.OK)
+                }
+            },
+            clock = Clock { 2_000_000L },
+        )
+        storage.outcome = TokenSaveOutcome.NOT_PERSISTED
+
+        assertNotNull(s.current()).authenticate()
+        assertNotNull(s.current()).authenticate()
+
+        assertEquals("STALE", storage.stored?.accessToken) // the refresh never reached the store
+        assertEquals(listOf<String?>("Bearer FRESH", "Bearer FRESH"), authHeaders)
+        assertEquals(1, refreshCalls) // the second call used the in-memory token, no second refresh
+    }
+
+    /** Once a save reaches a store again, that store is authoritative and the memory copy is dropped. */
+    @Test
+    fun aLaterPersistedSaveReplacesTheInMemoryTokens() = runBlocking {
+        var authHeaderSeen: String? = null
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED)
+        val s = session(storage, authHandler = { request ->
+            authHeaderSeen = request.headers["Authorization"]
+            respond("{}", HttpStatusCode.OK)
+        })
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("MEMORY", "RT"))
+
+        storage.outcome = TokenSaveOutcome.SECURE
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("STORED", "RT"))
+
+        assertNotNull(s.current()).authenticate()
+        assertEquals("Bearer STORED", authHeaderSeen)
+    }
+
+    @Test
+    fun disconnectRevokesAndForgetsUnpersistedTokens() = runBlocking {
+        var authHeaderSeen: String? = null
+        val storage = FakeTokenStorage(null, outcome = TokenSaveOutcome.NOT_PERSISTED)
+        val s = session(storage, authHandler = { request ->
+            authHeaderSeen = request.headers["Authorization"]
+            respond("", HttpStatusCode.OK)
+        })
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        s.disconnect(CloudStorageType.DROPBOX)
+
+        assertEquals("Bearer AT", authHeaderSeen)
+        assertTrue(!s.isConnected())
+        assertNull(s.current())
+    }
+
     @Test
     fun disconnectRevokesTokenThenClearsStorage() = runBlocking {
         var authHeader: String? = null

@@ -23,17 +23,19 @@ import works.merc.keryx.app.domain.NotificationCenter
 /**
  * In-memory [TokenStorage] fake for tests. [outcome] is what [save] reports back — set it to
  * [TokenSaveOutcome.PLAINTEXT_FILE] to model a storage that could only reach the plaintext
- * fallback file, or to [TokenSaveOutcome.NOT_PERSISTED] to model one that could not write at all.
+ * fallback file, or to [TokenSaveOutcome.NOT_PERSISTED] to model one that could not write at all —
+ * which, like a real backend, leaves [stored] untouched. [outcome] is mutable so a test can model a
+ * store that starts working again.
  */
 class FakeTokenStorage(
     initial: OAuthTokens? = null,
-    private val outcome: TokenSaveOutcome = TokenSaveOutcome.SECURE,
+    var outcome: TokenSaveOutcome = TokenSaveOutcome.SECURE,
 ) : TokenStorage {
     var stored: OAuthTokens? = initial
         private set
 
     override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        stored = tokens
+        if (outcome != TokenSaveOutcome.NOT_PERSISTED) stored = tokens
         return outcome
     }
 
