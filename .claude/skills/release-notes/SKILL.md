@@ -256,10 +256,14 @@ Rules:
 After outputting the release-notes code block, also output a URL that opens
 GitHub's "New release" page with the same information pre-filled.
 
-1. Determine whether this release is a pre-release:
-   - The major version is `0` (for example, `v0.x.x`), **or**
-   - the version string contains a `-` pre-release suffix (for example,
-     `v1.2.3-alpha.1`).
+1. Determine whether this release is a pre-release: it is one **only when the
+   version string contains a `-` pre-release suffix** (for example,
+   `v1.2.3-alpha.1`). A major version of `0` (for example, `v0.x.x`) does **not**
+   make a release a pre-release: SemVer's `0.y.z` means an unstable API, not an
+   unfinished build, and GitHub's flag means "not ready for production". The flag
+   also decides things beyond the label — the Snap channel, GitHub's "Latest"
+   release and, through it, what F-Droid's update check finds (`releases/latest`
+   skips pre-releases) — so a plain `v0.x.x` release is a full release.
 2. Build the URL with the fixed base
    `https://github.com/shimataro/keryx/releases/new` and these query parameters:
    - `tag`: the normalized new version tag (for example, `v1.2.3-alpha.1`).

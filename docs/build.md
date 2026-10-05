@@ -908,7 +908,9 @@ Flow:
        the GitHub Release itself is marked as a pre-release, and `stable` otherwise (the deb/rpm/msi
        skip checks above key on the tag suffix alone; only the Snap Store channel also honours the
        Release's own pre-release flag, since a snap mis-channelled to `stable` is pushed to every
-       Store user by snapd's own auto-refresh with no way to recall it).
+       Store user by snapd's own auto-refresh with no way to recall it). Because a plain tag is a
+       full release even while the major version is still 0 (see "GitHub Release flags" below), a
+       plain 0.x release goes to `stable`.
    - `:composeApp:createDistributable :composeApp:packageMsi` (Windows runner — `windows-latest` ships a compatible WiX Toolset version (v3/v4/v5) preinstalled, so no separate WiX setup step is needed; see [setup.md](setup.md)), attached as `Keryx-<version>-windows-x86_64.msi` **and `Keryx-<version>-windows-x86_64.zip`**. **For a pre-release tag, `packageMsi` is skipped and only the `.zip` is attached** — MSI's `ProductVersion` must be purely numeric (see below), so every pre-release of a given target version would collapse to the same `ProductVersion` under the fixed `upgradeUuid`, and WiX would not recognize a later pre-release or the eventual final release as an upgrade of an earlier one.
    - `:androidApp:assembleGithubRelease`, `:androidApp:bundlePlayRelease` and
      `:androidApp:assembleFdroidRelease` (Ubuntu runner), building the APK from the `github` flavor (carries `REQUEST_INSTALL_PACKAGES`, since it's the one an
@@ -1094,6 +1096,30 @@ signing keystore" in [setup.md](setup.md)) rather than requiring `androidRelease
 So plain `./gradlew build` — in CI or locally — needs no keystore at all; only a workflow that
 actually distributes the result (`release.yml`, and `publish-play.yml` below) opts into hard
 failure instead.
+
+### GitHub Release flags
+
+A GitHub Release is marked **pre-release only when its tag carries a SemVer pre-release suffix**
+(`v1.2.0-beta.1`, `v0.19.0-alpha.1`). A plain tag is a full release, **including while the major
+version is `0`**: SemVer's `0.y.z` says the API is unstable, not that the build is unfinished, and
+GitHub defines the flag as "not ready for production". Well-known 0.x projects (uv, Ruff, Hugo,
+Neovim) publish plain 0.x releases the same way and reserve the flag for `-rc` / `-beta` / nightly
+builds. The `release-notes` skill builds the "new release" URL that way.
+
+The flag is not only a label — it decides:
+
+- the **Snap Store channel** (`edge` for a pre-release, `stable` otherwise) and the **Play tracks**
+  (`PLAY_TRACKS_PRERELEASE` / `PLAY_TRACKS_STABLE`, both `internal,alpha` for now), as described above;
+- which release GitHub calls **"Latest"**: `releases/latest` (the API, and `…/releases/latest/download/…`)
+  is the newest release that is neither a pre-release nor a draft. F-Droid's update check reads
+  `fdroid-version.json` from there (see "Publishing to F-Droid"), so with only pre-releases it would
+  get a 404;
+- the in-app updater's candidates: a 0.x build lists the releases and treats a plain one as eligible
+  whatever the flag says, while a 1.x build asks `releases/latest`.
+
+When publishing a maintenance release of an older line after a newer one exists (a 0.x fix after
+1.0, say), **untick "Set as the latest release"**; otherwise "Latest", and with it F-Droid, would
+point at the older line and F-Droid's version would go backwards.
 
 ### Publishing to Google Play
 

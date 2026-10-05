@@ -81,7 +81,7 @@ Real-DB measurement (a 3,671-article, 21.4 MB snapshot, gzip level default via `
 
 The upload-skip digest (step 5) is deliberately computed on the **uncompressed** snapshot, never the compressed bytes. `GZIPOutputStream` embeds a timestamp in its header, so compressing byte-identical input twice does not produce byte-identical output — hashing the compressed file would make the skip check fail to fire even when nothing changed. Hashing the content that is actually invariant (the plain snapshot) is what makes the skip check work (see "Skipping Unchanged Transfers" below); compression sits downstream of that decision, not inside it.
 
-**This fallback is deliberately temporary**, scoped to the 0.x pre-release period, and planned for removal at
+**This fallback is deliberately temporary**, scoped to the 0.x period (before v1.0.0), and planned for removal at
 v1.0.0 — `CLOUD_DB_PATH`, the legacy-fallback branch in `syncLocked()`, and the corresponding tests are all deleted
 in that release, not deprecated in place, once every device is expected to have upgraded past a `.gz`-unaware build.
 
