@@ -2,6 +2,8 @@ package works.merc.keryx.app.domain
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
@@ -36,7 +38,8 @@ import works.merc.keryx.app.data.cloud.TokenStorage
  * could not be persisted at all (see `SECURITY.md`). The fallback itself is deliberate and not
  * blocked; it just must not be silent. Tokens that could not be persisted at all are held in
  * memory by this (process-wide) instance instead, so the session keeps syncing until the app exits
- * — see [unpersisted].
+ * — see [unpersisted]. Every token write and the disconnect's clear are serialized by
+ * [tokenLifecycleMutex], so a refresh in flight cannot bring back credentials a disconnect removed.
  */
 class CloudSession(
     private val providers: Map<CloudStorageType, Provider>,
@@ -74,6 +77,15 @@ class CloudSession(
      */
     private val unpersisted = MutableStateFlow<Map<Provider, OAuthTokens>>(emptyMap())
 
+    /**
+     * Serializes the token lifecycle — the refresh-and-save in [validAccessToken], the initial save in
+     * [saveTokens], and the revoke-and-clear in [disconnect]. Without it, a disconnect landing while a
+     * refresh is suspended on the network would clear the store, and the refresh would then save its
+     * new tokens back afterwards: credentials the user just removed, and not revoked either. Held only
+     * around the token work itself, never around the cloud request that uses the returned token.
+     */
+    private val tokenLifecycleMutex = Mutex()
+
     /** [provider]'s current tokens: the in-memory copy of an unpersisted save, else the store's. */
     private fun tokensOf(provider: Provider): OAuthTokens? = unpersisted.value[provider] ?: provider.tokenStorage.load()
 
@@ -101,15 +113,17 @@ class CloudSession(
     /** Persists freshly-obtained tokens for [type] (called right after a successful connect). */
     suspend fun saveTokens(type: CloudStorageType, tokens: OAuthTokens) {
         val provider = providers[type] ?: return
-        saveTokensReportingFallback(provider, tokens)
+        tokenLifecycleMutex.withLock { saveTokensReportingFallback(provider, tokens) }
     }
 
     /** Revokes and clears [type]'s stored tokens. */
     suspend fun disconnect(type: CloudStorageType) {
         val provider = providers[type] ?: return
-        tokensOf(provider)?.accessToken?.let { provider.authManager.revoke(it) }
-        provider.tokenStorage.clear()
-        unpersisted.update { it - provider }
+        tokenLifecycleMutex.withLock {
+            tokensOf(provider)?.accessToken?.let { provider.authManager.revoke(it) }
+            provider.tokenStorage.clear()
+            unpersisted.update { it - provider }
+        }
     }
 
     /**
@@ -120,11 +134,11 @@ class CloudSession(
      * @param provider The provider whose stored credentials supply the access token.
      * @return A valid access token, the existing token when it cannot be refreshed, or `null` when no token is stored or refreshing fails.
      */
-    private suspend fun validAccessToken(provider: Provider): String? {
-        val tokens = tokensOf(provider) ?: return null
-        if (!tokens.isExpired(clock.nowMillis())) return tokens.accessToken
-        val refreshToken = tokens.refreshToken ?: return tokens.accessToken
-        return provider.authManager.refresh(provider.clientId, refreshToken).fold(
+    private suspend fun validAccessToken(provider: Provider): String? = tokenLifecycleMutex.withLock {
+        val tokens = tokensOf(provider) ?: return@withLock null
+        if (!tokens.isExpired(clock.nowMillis())) return@withLock tokens.accessToken
+        val refreshToken = tokens.refreshToken ?: return@withLock tokens.accessToken
+        provider.authManager.refresh(provider.clientId, refreshToken).fold(
             ok = { refreshed ->
                 saveTokensReportingFallback(provider, refreshed)
                 refreshed.accessToken

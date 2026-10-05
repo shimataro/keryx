@@ -6,7 +6,11 @@ import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
@@ -330,6 +334,72 @@ class CloudSessionTest {
 
         assertTrue(!revokeCalled)
         assertNull(storage.stored)
+    }
+
+    /**
+     * A disconnect landing while a refresh is suspended on the network must not be undone by that
+     * refresh saving its new tokens afterwards. Returns the Authorization header the revoke was sent
+     * with, so a caller can check the refreshed token — not the stale one — was revoked.
+     */
+    private suspend fun disconnectDuringRefresh(storage: FakeTokenStorage): Pair<CloudSession, String?> = coroutineScope {
+        val refreshStarted = CompletableDeferred<Unit>()
+        val releaseRefresh = CompletableDeferred<Unit>()
+        var revokeAuthHeader: String? = null
+        val s = session(
+            storage,
+            authHandler = { request ->
+                val path = request.url.encodedPath
+                when {
+                    path.contains("oauth2/token") -> {
+                        refreshStarted.complete(Unit)
+                        releaseRefresh.await()
+                        respond("""{"access_token":"FRESH","expires_in":14400}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+                    }
+                    path.contains("token/revoke") -> {
+                        revokeAuthHeader = request.headers["Authorization"]
+                        respond("", HttpStatusCode.OK)
+                    }
+                    else -> respond("{}", HttpStatusCode.OK)
+                }
+            },
+            clock = Clock { 2_000_000L }, // well past expiry
+        )
+        val cloudStorage = assertNotNull(s.current())
+
+        val sync = launch { cloudStorage.authenticate() }
+        refreshStarted.await()
+        val disconnect = launch { s.disconnect(CloudStorageType.DROPBOX) }
+        // Unserialized, the disconnect finishes here, before the refresh resumes; serialized, it waits.
+        withTimeoutOrNull(500) { disconnect.join() }
+        releaseRefresh.complete(Unit)
+        sync.join()
+        disconnect.join()
+        s to revokeAuthHeader
+    }
+
+    @Test
+    fun aRefreshInFlightCannotRestoreTokensAfterDisconnect() = runBlocking {
+        val storage = FakeTokenStorage(OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L))
+
+        val (s, revokeAuthHeader) = disconnectDuringRefresh(storage)
+
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
+        assertEquals("Bearer FRESH", revokeAuthHeader)
+    }
+
+    @Test
+    fun anUnpersistedRefreshInFlightCannotSurviveDisconnect() = runBlocking {
+        val storage = FakeTokenStorage(
+            OAuthTokens("STALE", "RT", expiresAtMillis = 1_000L),
+            outcome = TokenSaveOutcome.NOT_PERSISTED,
+        )
+
+        val (s, revokeAuthHeader) = disconnectDuringRefresh(storage)
+
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
+        assertEquals("Bearer FRESH", revokeAuthHeader)
     }
 
     @Test
