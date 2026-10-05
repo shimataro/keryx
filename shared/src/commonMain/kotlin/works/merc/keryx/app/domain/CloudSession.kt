@@ -1,5 +1,9 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
@@ -32,7 +36,10 @@ import works.merc.keryx.app.data.cloud.TokenStorage
  * notification-center warning whenever a [TokenStorage] could not reach the OS secure store —
  * with its own message for a token that landed in the plaintext fallback file and for one that
  * could not be persisted at all (see `SECURITY.md`). The fallback itself is deliberate and not
- * blocked; it just must not be silent.
+ * blocked; it just must not be silent. Tokens that could not be persisted at all are held in
+ * memory by this (process-wide) instance instead, so the session keeps syncing until the app exits
+ * — see [unpersisted]. Every token write and the disconnect's clear are serialized by
+ * [tokenLifecycleMutex], so a refresh in flight cannot bring back credentials a disconnect removed.
  */
 class CloudSession(
     private val providers: Map<CloudStorageType, Provider>,
@@ -61,6 +68,27 @@ class CloudSession(
         val accessTokenProvider: (suspend () -> String?)? = null,
     )
 
+    /**
+     * Tokens whose last save returned [TokenSaveOutcome.NOT_PERSISTED], keyed by provider instance.
+     * Without this, a connect whose tokens reached no store would report itself connected in the
+     * UI while [connectedType] — which reads the store — saw nothing, so every sync was silently
+     * skipped. Read in preference to the store: after a refresh whose save failed, the store still
+     * holds the previous (possibly rotated-out) tokens.
+     */
+    private val unpersisted = MutableStateFlow<Map<Provider, OAuthTokens>>(emptyMap())
+
+    /**
+     * Serializes the token lifecycle — the refresh-and-save in [validAccessToken], the initial save in
+     * [saveTokens], and the revoke-and-clear in [disconnect]. Without it, a disconnect landing while a
+     * refresh is suspended on the network would clear the store, and the refresh would then save its
+     * new tokens back afterwards: credentials the user just removed, and not revoked either. Held only
+     * around the token work itself, never around the cloud request that uses the returned token.
+     */
+    private val tokenLifecycleMutex = Mutex()
+
+    /** [provider]'s current tokens: the in-memory copy of an unpersisted save, else the store's. */
+    private fun tokensOf(provider: Provider): OAuthTokens? = unpersisted.value[provider] ?: provider.tokenStorage.load()
+
     /** True when a provider is selected, configured in this build, and has stored tokens. */
     fun isConnected(): Boolean = connectedType() != null
 
@@ -68,7 +96,7 @@ class CloudSession(
     fun connectedType(): CloudStorageType? {
         val type = selectedType() ?: return null
         val provider = providers[type] ?: return null
-        return if (provider.clientId.isNotEmpty() && provider.tokenStorage.load() != null) type else null
+        return if (provider.clientId.isNotEmpty() && tokensOf(provider) != null) type else null
     }
 
     /** The interactive connect flow for [type], or null if that provider isn't configured. */
@@ -85,14 +113,23 @@ class CloudSession(
     /** Persists freshly-obtained tokens for [type] (called right after a successful connect). */
     suspend fun saveTokens(type: CloudStorageType, tokens: OAuthTokens) {
         val provider = providers[type] ?: return
-        saveTokensReportingFallback(provider, tokens)
+        tokenLifecycleMutex.withLock { saveTokensReportingFallback(provider, tokens) }
     }
 
-    /** Revokes and clears [type]'s stored tokens. */
+    /**
+     * Revokes and clears [type]'s stored tokens. The local clear happens even when the revoke fails
+     * or is cancelled mid-request, so the provider never stays looking connected after a disconnect.
+     */
     suspend fun disconnect(type: CloudStorageType) {
         val provider = providers[type] ?: return
-        provider.tokenStorage.load()?.accessToken?.let { provider.authManager.revoke(it) }
-        provider.tokenStorage.clear()
+        tokenLifecycleMutex.withLock {
+            try {
+                tokensOf(provider)?.accessToken?.let { provider.authManager.revoke(it) }
+            } finally {
+                provider.tokenStorage.clear()
+                unpersisted.update { it - provider }
+            }
+        }
     }
 
     /**
@@ -103,11 +140,11 @@ class CloudSession(
      * @param provider The provider whose stored credentials supply the access token.
      * @return A valid access token, the existing token when it cannot be refreshed, or `null` when no token is stored or refreshing fails.
      */
-    private suspend fun validAccessToken(provider: Provider): String? {
-        val tokens = provider.tokenStorage.load() ?: return null
-        if (!tokens.isExpired(clock.nowMillis())) return tokens.accessToken
-        val refreshToken = tokens.refreshToken ?: return tokens.accessToken
-        return provider.authManager.refresh(provider.clientId, refreshToken).fold(
+    private suspend fun validAccessToken(provider: Provider): String? = tokenLifecycleMutex.withLock {
+        val tokens = tokensOf(provider) ?: return@withLock null
+        if (!tokens.isExpired(clock.nowMillis())) return@withLock tokens.accessToken
+        val refreshToken = tokens.refreshToken ?: return@withLock tokens.accessToken
+        provider.authManager.refresh(provider.clientId, refreshToken).fold(
             ok = { refreshed ->
                 saveTokensReportingFallback(provider, refreshed)
                 refreshed.accessToken
@@ -131,7 +168,9 @@ class CloudSession(
      * above collapse independently of each other.
      */
     private suspend fun saveTokensReportingFallback(provider: Provider, tokens: OAuthTokens) {
-        val (text, detail) = when (provider.tokenStorage.save(tokens)) {
+        val outcome = provider.tokenStorage.save(tokens)
+        unpersisted.update { if (outcome == TokenSaveOutcome.NOT_PERSISTED) it + (provider to tokens) else it - provider }
+        val (text, detail) = when (outcome) {
             TokenSaveOutcome.SECURE -> return
             TokenSaveOutcome.PLAINTEXT_FILE ->
                 NotificationText.TokenStorageFallback to InfoDialogText.TOKEN_STORAGE_FALLBACK

@@ -520,6 +520,17 @@ opens a browser directly:
     write succeeded but a stale fallback copy could not be deleted afterwards), or `NOT_PERSISTED`
     (neither accepted the write, so the tokens live only until the app exits and the account has to
     be connected again afterwards).
+  - **Unpersisted tokens are held in memory.** On `NOT_PERSISTED`, `CloudSession` (a process-wide
+    singleton) keeps that provider's tokens in memory and reads them in preference to the store —
+    for the connected check, the access-token supply, its refresh, and the revoke on disconnect — so
+    the session keeps syncing until the app exits. Without it, the connect would report success
+    while every sync was skipped as "not connected". A later save that reaches a store drops the
+    in-memory copy, as does a disconnect.
+  - **Token writes are serialized with disconnect.** `CloudSession` runs the refresh-and-save, the
+    initial save after a connect, and the disconnect's revoke-and-clear under one mutex. Otherwise a
+    disconnect landing while a refresh waits on the network would clear the store, and the refresh
+    would then save its new (and never revoked) tokens back — on disk, or in the in-memory copy above.
+    The lock covers only that token work, never the cloud request that uses the returned token.
   - `CloudSession` raises a coalesced `WARNING` notification (with a `ShowInfoDialog` cause-and-fix
     action) for each of the two degraded outcomes, with its own message for each, on the initial
     connect and on a background token refresh alike. The fallback is still allowed (it is the

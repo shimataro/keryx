@@ -933,10 +933,14 @@ class CloudSyncControllerTest {
         awaitConditionBlocking { controller.connectedType.value == null }
         authorization.complete(Result.Ok(OAuthTokens("AT2")))
 
-        // Back on the same provider — connect re-set it. The await is the assertion: re-reading the
-        // value afterwards could catch a transient write from the settings watcher, which this
-        // test's multi-threaded Unconfined Main lets interleave.
-        awaitConditionBlocking { controller.connectedType.value == CloudStorageType.DROPBOX }
+        // Back on the same provider — connect re-set it. connectingType stays set from reconnect()
+        // until connect has re-set connectedType, so waiting for it to clear waits out the whole
+        // cycle. The await is the assertion: re-reading the value afterwards could catch a transient
+        // write from the settings watcher, which this test's multi-threaded Unconfined Main lets
+        // interleave.
+        awaitConditionBlocking {
+            controller.connectingType.value == null && controller.connectedType.value == CloudStorageType.DROPBOX
+        }
     }
 
     /**
