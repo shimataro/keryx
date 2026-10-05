@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -334,6 +335,26 @@ class CloudSessionTest {
 
         assertTrue(!revokeCalled)
         assertNull(storage.stored)
+    }
+
+    @Test
+    fun disconnectCancelledDuringRevokeStillClearsLocalTokens() = runBlocking {
+        val revokeStarted = CompletableDeferred<Unit>()
+        // The store holds an older token; the newer one lives only in memory (NOT_PERSISTED).
+        val storage = FakeTokenStorage(OAuthTokens("OLD"), outcome = TokenSaveOutcome.NOT_PERSISTED)
+        val s = session(storage, authHandler = {
+            revokeStarted.complete(Unit)
+            CompletableDeferred<Unit>().await() // never answers
+            respond("", HttpStatusCode.OK)
+        })
+        s.saveTokens(CloudStorageType.DROPBOX, OAuthTokens("AT", "RT"))
+
+        val disconnect = launch { s.disconnect(CloudStorageType.DROPBOX) }
+        revokeStarted.await()
+        disconnect.cancelAndJoin()
+
+        assertNull(storage.stored)
+        assertTrue(!s.isConnected())
     }
 
     /**

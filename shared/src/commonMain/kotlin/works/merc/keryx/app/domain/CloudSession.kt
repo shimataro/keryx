@@ -116,13 +116,19 @@ class CloudSession(
         tokenLifecycleMutex.withLock { saveTokensReportingFallback(provider, tokens) }
     }
 
-    /** Revokes and clears [type]'s stored tokens. */
+    /**
+     * Revokes and clears [type]'s stored tokens. The local clear happens even when the revoke fails
+     * or is cancelled mid-request, so the provider never stays looking connected after a disconnect.
+     */
     suspend fun disconnect(type: CloudStorageType) {
         val provider = providers[type] ?: return
         tokenLifecycleMutex.withLock {
-            tokensOf(provider)?.accessToken?.let { provider.authManager.revoke(it) }
-            provider.tokenStorage.clear()
-            unpersisted.update { it - provider }
+            try {
+                tokensOf(provider)?.accessToken?.let { provider.authManager.revoke(it) }
+            } finally {
+                provider.tokenStorage.clear()
+                unpersisted.update { it - provider }
+            }
         }
     }
 
