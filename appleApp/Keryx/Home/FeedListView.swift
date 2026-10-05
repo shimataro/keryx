@@ -164,6 +164,11 @@ struct FeedListView: View {
             }
         }
         #endif
+        #if os(macOS)
+        // macOS 26 right-aligns the sidebar's items by itself; earlier versions pack them against
+        // the sidebar toggle unless something pushes them over.
+        FlexibleToolbarSpacer(legacyOnly: true)
+        #endif
         ToolbarItem {
             Menu {
                 Button(L("menu_file_add_feed")) { dialogs.isAddingFeed = true }
