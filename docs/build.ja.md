@@ -915,7 +915,9 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
        プレリリースとしてマークされている場合に `edge`、それ以外は `stable` になる（上記の
        deb/rpm/msi のスキップ判定はタグ接尾辞のみで決まるが、Snap Store のチャンネル判定だけは
        Release 側のプレリリースフラグも見る——チャンネルを誤って `stable` にすると snapd 自身の
-       自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。
+       自動リフレッシュで全 Store ユーザーに配信されてしまい、取り消せないため）。接尾辞の無い
+       タグはメジャーが 0 の間でも正式リリースなので（後述の「GitHub Release のフラグ」参照）、
+       接尾辞の無い 0.x のリリースは `stable` になる。
    - Windows ランナーで `:composeApp:createDistributable :composeApp:packageMsi` を実行し（`windows-latest` には互換性のある WiX Toolset（v3/v4/v5）がプリインストール済みのため、別途 WiX のセットアップ手順は不要。[setup.ja.md](setup.ja.md) 参照）、`Keryx-<version>-windows-x86_64.msi` に加えて **`Keryx-<version>-windows-x86_64.zip`** としても添付する。**プレリリースタグの場合は `packageMsi` をスキップし、`.zip` のみを添付する** — MSI の `ProductVersion`（後述）は数値のみでなければならず、同一の対象バージョンに属するプレリリースはすべて同じ `ProductVersion` に潰れてしまうため、固定の `upgradeUuid` の下では WiX が後続のプレリリースや最終的な正式版を「アップグレード」として認識できない。
    - Ubuntu ランナーで `:androidApp:assembleGithubRelease`、`:androidApp:bundlePlayRelease`、
      `:androidApp:assembleFdroidRelease` を実行し、
@@ -1107,6 +1109,31 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
 しない限りこの経路に入るため、単なる `./gradlew build` は CI でもローカルでも keystore を
 一切必要としない。成果物を実際に配布するワークフロー（`release.yml`、および後述の
 `publish-play.yml`）だけが、この経路の代わりに即座の失敗を選んでいる。
+
+### GitHub Release のフラグ
+
+GitHub Release を**プレリリースとしてマークするのは、タグに SemVer のプレリリース接尾辞が付いて
+いるときだけ**（`v1.2.0-beta.1`、`v0.19.0-alpha.1`）。接尾辞の無いタグは、**メジャーが `0` の間でも**
+正式リリースにする: SemVer の `0.y.z` は「API が不安定」という意味で「ビルドが未完成」という意味では
+なく、GitHub はこのフラグを「本番向けに準備できていない」ことの表示と定義している。0.x の有名な
+プロジェクト（uv、Ruff、Hugo、Neovim）も、接尾辞の無い 0.x を同じように公開し、フラグは
+`-rc` / `-beta` / nightly にだけ使っている。`release-notes` スキルも、そのように「新規リリース」の
+URL を組み立てる。
+
+このフラグは単なる表示ではなく、次のものを決める:
+
+- **Snap Store のチャンネル**（プレリリースは `edge`、それ以外は `stable`）と **Play のトラック**
+  （`PLAY_TRACKS_PRERELEASE` / `PLAY_TRACKS_STABLE`。今はどちらも `internal,alpha`）。前述のとおり。
+- GitHub が **「Latest」** と呼ぶリリース: `releases/latest`（API と `…/releases/latest/download/…`）
+  は、プレリリースでもドラフトでもない最新のリリース。F-Droid の更新チェックはそこから
+  `fdroid-version.json` を読む（後述の「F-Droid への公開」参照）ので、プレリリースしか無いと 404
+  になる。
+- アプリ内アップデートの候補: 0.x のビルドはリリース一覧を見て、接尾辞の無いリリースはフラグに
+  関係なく対象にする。1.x のビルドは `releases/latest` を使う。
+
+新しい系列が出たあとで古い系列の保守リリースを公開するとき（1.0 のあとの 0.x の修正など）は、
+**「Set as the latest release」のチェックを外す**こと。外さないと「Latest」、ひいては F-Droid が
+古い系列を指し、F-Droid の版が逆行してしまう。
 
 ### Google Play への公開
 

@@ -59,7 +59,10 @@ What the recipe encodes, and why:
   proprietary network services.
 
 - `UpdateCheckMode: HTTP` / `AutoUpdateMode: Version v%v` — new releases are picked up
-  automatically. `UpdateCheckMode: Tags` cannot do it here: it looks for a literal `versionCode` in
+  automatically (GitHub's "Latest" release is what the URL below resolves to: a plain tag is a full
+  release even in 0.x, only suffixed ones such as `-beta.1` are pre-releases and so ignored — see
+  `docs/build.md`'s "GitHub Release flags"; for a maintenance release of an older line, untick "Set as
+  the latest release"). `UpdateCheckMode: Tags` cannot do it here: it looks for a literal `versionCode` in
   the Gradle files and fails with "Couldn't find any version information", because this app derives
   `versionName` and `versionCode` from the release tag at build time (`appVersion` → `versionCodeOf`
   in `androidApp/build.gradle.kts`; `0.22.0` → `220099`). Instead `release.yml` attaches
