@@ -921,8 +921,13 @@ class CloudSyncControllerTest {
 
         controller.reconnect()
 
-        // Back on the same provider — the teardown cleared it, then connect re-set it.
-        awaitConditionBlocking { controller.connectedType.value == CloudStorageType.DROPBOX }
+        // Back on the same provider — the teardown cleared it, then connect re-set it. connectedType
+        // alone can't be awaited: it is still DROPBOX from before reconnect() while the teardown is
+        // suspended in revoke. connectingType stays set from reconnect() until connect has re-set
+        // connectedType, so waiting for it to clear waits out the whole cycle.
+        awaitConditionBlocking {
+            controller.connectingType.value == null && controller.connectedType.value == CloudStorageType.DROPBOX
+        }
         assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
     }
 
