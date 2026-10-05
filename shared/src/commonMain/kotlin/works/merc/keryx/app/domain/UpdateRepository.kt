@@ -122,6 +122,16 @@ class UpdateRepository(
     // rather than runTest's virtual scheduler (see its own KDoc for why), so this needs a genuine
     // seam rather than a fake clock.
     private val releaseWatchIntervalMs: Long = UPDATE_RELEASE_WATCH_INTERVAL_MS,
+    // Guards [lastNotificationId], read-modified-written by postNotification(), called from both
+    // check() (after its own mutex is released — see check()'s own KDoc for why that lock is scoped
+    // narrowly) and runDownload() (never mutex-guarded at all). A plain var there would let a
+    // background check() and a download finishing race to dismiss/replace that id, losing one of the
+    // two updates — this repository's own KDoc promises "one evolving row", not "usually one row".
+    // Its own, narrower mutex rather than folded into [mutex] so a slow notification-center update
+    // never blocks the decision points [mutex] exists for. A constructor parameter only so
+    // UpdateRepositoryTest can hold it and observe a waiter, to cover a cancellation landing at
+    // postNotification()'s only suspension point.
+    private val notificationMutex: Mutex = Mutex(),
 ) {
     private val cacheDir: String get() = cacheDirOverride ?: AppDirs.cacheDir()
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -176,18 +186,9 @@ class UpdateRepository(
     private var releaseWatchAttempts: Int = 0
     private var releaseWatchJob: Job? = null
 
-    // Read-modified-written by postNotification(), called from both check() (after its own mutex is
-    // released — see check()'s own KDoc for why that lock is scoped narrowly) and runDownload() (never
-    // mutex-guarded at all). A plain var here would let a background check() and a download finishing
-    // race to dismiss/replace this id, losing one of the two updates — this repository's own KDoc
-    // promises "one evolving row", not "usually one row". Guarded by its own, narrower mutex rather
-    // than folded into [mutex] so a slow notification-center update here never blocks the decision
-    // points [mutex] exists for.
-    private val notificationMutex = Mutex()
-
     /** The notification-center row this repository most recently posted, so a later state (e.g.
      * "ready to install") can replace it instead of leaving both rows behind — see this class's own
-     * KDoc. */
+     * KDoc. Guarded by [notificationMutex]. */
     private var lastNotificationId: String? = null
 
     /**
@@ -498,11 +499,17 @@ class UpdateRepository(
                     // here would otherwise still surface as "ready to install" for a download the
                     // user had already cancelled.
                     coroutineContext.ensureActive()
-                    _state.value = UpdateState.Ready(update, destPath)
+                    // Notification first, Ready second: anyone who observes Ready on [state] must
+                    // already see the "available" row replaced by "ready to install", never both.
+                    // postNotification's only suspension point is acquiring its mutex, before it
+                    // touches anything, so a cancellation there posts nothing and falls through to
+                    // the CancellationException handler below — there is no way to end up with a
+                    // "ready" row next to an Available state.
                     postNotification(
                         NotificationText.UpdateReadyToInstall(update.version),
                         AppNotificationAction.ShowSettingsTab("updates"),
                     )
+                    _state.value = UpdateState.Ready(update, destPath)
                 }
                 is Result.Err -> {
                     Log.warn(TAG, "Update download failed: ${untrustedText(result.exception.messageText, MAX_FAILURE_REASON_LENGTH)}")

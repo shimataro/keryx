@@ -207,7 +207,12 @@ class CloudSyncController(
                 val unchanged = skipUnchanged && id == initialCloudStorageTypeId
                 skipUnchanged = false
                 if (unchanged) return@collectLatest
-                _connectedType.value = withContext(dispatcher) { cloudSession.connectedType() }
+                val type = withContext(dispatcher) { cloudSession.connectedType() }
+                // Defensive: if a newer selection was persisted while this read ran, its own
+                // emission re-reads, and this result may predate a connect/disconnect that already
+                // wrote the newer state. collectLatest normally cancels such a read first; this
+                // keeps it from landing regardless of the dispatcher's threading.
+                if (settingsRepository.localSettings.value.cloudStorageType == id) _connectedType.value = type
             }
         }
         viewModelScope.launch {
