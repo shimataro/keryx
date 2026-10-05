@@ -13,12 +13,14 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -915,20 +917,76 @@ class CloudSyncControllerTest {
         val tokenStorage = FakeTokenStorage()
         tokenStorage.save(OAuthTokens("AT"))
         val cloud = AlwaysFailingCloudStorage()
-        val controller = newController(tokenStorage = tokenStorage, syncCloudProvider = { cloud })
+        // Holds the reconnect's authorization so the teardown is observable on its own: the test
+        // starts on Dropbox, so awaiting Dropbox alone would pass even if reconnect() did nothing.
+        val authorization = CompletableDeferred<Result<OAuthTokens>>()
+        val connectFlow = object : CloudConnectFlow {
+            override suspend fun connect(): Result<OAuthTokens> = authorization.await()
+        }
+        val controller = newController(tokenStorage = tokenStorage, connectFlow = connectFlow, syncCloudProvider = { cloud })
         runBlocking { createdSyncRepository.sync() }
         awaitConditionBlocking { controller.lastSyncAuthFailed.value }
 
         controller.reconnect()
 
-        // Back on the same provider — the teardown cleared it, then connect re-set it. connectedType
-        // alone can't be awaited: it is still DROPBOX from before reconnect() while the teardown is
-        // suspended in revoke. connectingType stays set from reconnect() until connect has re-set
-        // connectedType, so waiting for it to clear waits out the whole cycle.
+        // Torn down first; nothing can set it back while the authorization is held.
+        awaitConditionBlocking { controller.connectedType.value == null }
+        authorization.complete(Result.Ok(OAuthTokens("AT2")))
+
+        // Back on the same provider — connect re-set it. connectingType stays set from reconnect()
+        // until connect has re-set connectedType, so waiting for it to clear waits out the whole
+        // cycle. The await is the assertion: re-reading the value afterwards could catch a transient
+        // write from the settings watcher, which this test's multi-threaded Unconfined Main lets
+        // interleave.
         awaitConditionBlocking {
             controller.connectingType.value == null && controller.connectedType.value == CloudStorageType.DROPBOX
         }
-        assertEquals(CloudStorageType.DROPBOX, controller.connectedType.value)
+    }
+
+    /**
+     * A provider re-read that finished for a selection already superseded must not land. The window
+     * collectLatest cannot close: the read completes (its resumption already queued on Main) before
+     * the newer selection is persisted, so nothing cancels it. A StandardTestDispatcher Main holds
+     * both resumptions until the test runs them, in that order.
+     */
+    @Test
+    fun providerReadFinishedForASupersededSelectionIsNotApplied() {
+        val main = StandardTestDispatcher()
+        Dispatchers.setMain(main)
+        val readDispatcher = HoldingDispatcher()
+        val session = multiProviderCloudSession(
+            client = okAuthClient(),
+            dropboxTokenStorage = FakeTokenStorage(OAuthTokens("AT")),
+            googleDriveTokenStorage = FakeTokenStorage(OAuthTokens("AT2")),
+            selectedType = settingsBackedSelection(CloudStorageType.DROPBOX),
+        )
+        val controller = newController(cloudSession = session, dispatcher = readDispatcher)
+        val history = mutableListOf<CloudStorageType?>()
+        val recorder = CoroutineScope(Dispatchers.Unconfined).launch { controller.connectedType.collect { history += it } }
+        try {
+            main.scheduler.runCurrent()
+
+            // The watcher starts re-reading for Google Drive; the read itself is held.
+            createdSettingsRepository.saveLocalSettings(
+                createdSettingsRepository.getLocalSettings().copy(cloudStorageType = CloudStorageType.GOOGLE_DRIVE.id),
+            )
+            main.scheduler.runCurrent()
+            // The read completes (Google Drive), queuing its resumption on Main...
+            readDispatcher.release()
+            // ...and only then does the selection move on, before Main has run anything.
+            createdSettingsRepository.saveLocalSettings(createdSettingsRepository.getLocalSettings().copy(cloudStorageType = null))
+            main.scheduler.advanceUntilIdle()
+
+            // Google Drive differs from both the initial and the final value, so it can only appear in
+            // the history through the stale read.
+            assertEquals(listOf(CloudStorageType.DROPBOX, null), history)
+        } finally {
+            // Cancel while Main can still be driven, pass or fail: tearDown()'s cancelAndJoin would
+            // otherwise wait forever on cancellation work queued on a dispatcher nothing runs any more.
+            recorder.cancel()
+            controller.viewModelScope.cancel()
+            main.scheduler.advanceUntilIdle()
+        }
     }
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
