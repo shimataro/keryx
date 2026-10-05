@@ -256,11 +256,9 @@ struct ArticleListView: View {
             .help(L("home_hide_read"))
         }
 
-        // `.primaryAction` still flows from the column's leading edge; a flexible spacer (macOS 26)
-        // is what pushes the trailing cluster to the column's right edge.
-        if #available(macOS 26, iOS 26, *) {
-            ToolbarSpacer(.flexible)
-        }
+        // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
+        // pushes the trailing cluster to the column's right edge.
+        FlexibleToolbarSpacer()
 
         ToolbarItemGroup(placement: .primaryAction) {
             NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)

@@ -115,9 +115,7 @@ struct ArticleDetailView: View {
             ToolbarItem { feedHeader }
         }
 
-        if #available(macOS 26, *) {
-            ToolbarSpacer(.flexible)
-        }
+        FlexibleToolbarSpacer()
         #endif
 
         // `Label`s rather than bare icons so the toolbar's overflow menu (at a narrow width) gets titles;
