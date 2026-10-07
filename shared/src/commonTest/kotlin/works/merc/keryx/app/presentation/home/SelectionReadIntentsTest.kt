@@ -66,4 +66,33 @@ class SelectionReadIntentsTest {
 
         assertFailsWith<IllegalStateException> { intents.end() }
     }
+
+    @Test
+    fun pendingReadIntentCountsOnlyAnIntentOnTheCursorsArticleMadeAfterItsSelection() {
+        val intents = SelectionReadIntents()
+        intents.begin()
+        intents.record("a1", read = false)
+        val cursorSeq = intents.currentSeq
+        intents.record("a2", read = false)
+        intents.record("a3", read = true)
+
+        val snapshot = intents.state.value
+        assertEquals(false, pendingReadIntent(snapshot, "a2", cursorSeq))
+        assertEquals(true, pendingReadIntent(snapshot, "a3", cursorSeq))
+        assertNull(pendingReadIntent(snapshot, "a1", cursorSeq), "made before the selection")
+        assertNull(pendingReadIntent(snapshot, "a4", cursorSeq), "no intent for it")
+        assertNull(pendingReadIntent(snapshot, null, cursorSeq), "nothing selected")
+        assertNull(pendingReadIntent(snapshot, "a2", Long.MAX_VALUE), "a cursor no selection set")
+    }
+
+    @Test
+    fun stateEmitsEachRecordAndIsClearedWhenTheLastHydrationEnds() {
+        val intents = SelectionReadIntents()
+        intents.begin()
+        intents.record("a1", read = false)
+        assertEquals(setOf("a1"), intents.state.value.keys)
+
+        intents.end()
+        assertEquals(emptyMap(), intents.state.value)
+    }
 }
