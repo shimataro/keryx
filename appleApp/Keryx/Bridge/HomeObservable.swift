@@ -110,6 +110,8 @@ final class HomeObservable: ObservableAssignment {
     private(set) var selectedArticleHasUsableUrl = false
     /// `canOpenInBrowser` for the selected article's URL — Open in Browser's own (http(s)) rule.
     private(set) var selectedArticleCanOpenInBrowser = false
+    /// `HomeViewModel.selectedArticleShownUnread` — whether the reader's read/unread button shows "unread".
+    private(set) var selectedArticleShownUnread = false
     /// The sidebar item the selected filter resolves to (`resolveFeedListSelectionTarget`).
     private(set) var feedListSelectionTarget: FeedListSelectionTarget?
     /// The selected filter's display name (`articleListTitle`), shown in the iOS article list's
@@ -200,6 +202,31 @@ final class HomeObservable: ObservableAssignment {
         viewModel.refreshFeed(feed: currentFeed(id: feed.id) ?? feed)
     }
 
+    /// The one handler every route that selects an article goes through: it selects, then brings
+    /// `selectedArticleShownUnread` up to date at once. That value otherwise arrives from the shared
+    /// flow a moment later, and a screen pushed in the same turn (the iOS reader) would first draw the
+    /// previous article's state and then change it — see `HomeViewModel.isSelectedArticleShownUnread`.
+    func selectArticle(_ article: ArticleListRow) {
+        selecting { viewModel.selectArticle(article: article) }
+    }
+
+    func selectNextArticle() {
+        selecting { viewModel.selectNext() }
+    }
+
+    func selectPreviousArticle() {
+        selecting { viewModel.selectPrevious() }
+    }
+
+    private func selecting(_ select: () -> Void) {
+        select()
+        syncSelectedArticleShownUnread()
+    }
+
+    private func syncSelectedArticleShownUnread() {
+        assignIfChanged(\.selectedArticleShownUnread, viewModel.isSelectedArticleShownUnread())
+    }
+
     /// The one handler every "Copy URL" route for an article goes through — see `ArticleUrlCopy`.
     func copyArticleUrl(url: String?, articleId: String) {
         ArticleUrlCopy.perform(
@@ -283,11 +310,12 @@ final class HomeObservable: ObservableAssignment {
         async let t30: () = observeActivity()
         async let t31: () = observeCanSyncNow()
         async let t32: () = observeSyncDisabledByAuth()
+        async let t33: () = observeSelectedArticleShownUnread()
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t26, t27, t28, t29, t30,
-            t31, t32
+            t31, t32, t33
         )
     }
 
@@ -567,6 +595,13 @@ final class HomeObservable: ObservableAssignment {
 
     private func observeActivity() async {
         for await v in viewModel.activity { assignIfChanged(\.activity, v) }
+    }
+
+    /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a
+    /// selection can still be queued on the main actor after `selecting` has synced the new one, and would
+    /// otherwise put the previous article's state back for a moment.
+    private func observeSelectedArticleShownUnread() async {
+        for await _ in viewModel.selectedArticleShownUnread { syncSelectedArticleShownUnread() }
     }
 
     private func observeCanSyncNow() async {

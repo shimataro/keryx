@@ -923,6 +923,13 @@ feedback from a single shared piece of code that every route calls. A route only
 part lives, with the current examples, is `docs/app-architecture.md`'s "One implementation per
 action". In practice:
 
+- Give an action set **one order on every route**: the menu bar, the context menu and the toolbar
+  list the same actions in the same sequence. For an article: star, read/unread, open in browser,
+  copy URL, share (Android only). The two menus also split it into the same two groups with a
+  separator (star, read/unread │ open in browser, copy URL, share); the toolbar is a single
+  `ToolbarIconGroup` cluster, so it has no divider and shares only the order. The most-used action
+  comes first; related actions sit together (copy and share both hand the URL to something else).
+  Adding or moving an item on one route means changing every route.
 - Route every entry point through **one shared handler** rather than re-implementing the effect
   (and forgetting the feedback) at each call site. Example: what one "copy article URL" does is
   decided by the shared `articleUrlCopyPlan` (`:shared`, used by both UIs); in Compose every route —
@@ -1353,11 +1360,13 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   call site.
 - **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
   cloud sync, settings, folder/tag management, search, notifications, sort,
-  mark-all-read, mark-unread, open-in-browser, back, close) use the
+  mark-all-read, open-in-browser, back, close) use the
   `KeryxIcons.XOutlined` (or bare-name, single-variant) entry. Icons that
   encode persistent state rather than an action — `Star`/`StarBorder`,
   `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
   since they're meant to read as "on/set" indicators, not as clickable chrome.
+  The reader's read/unread toggle is a state pair of its own: the bare-name `Circle` (outline) once
+  the article is read, and `CircleFilled` (a filled primary dot) while it is unread.
   Follow this split for any new icon: ask "is this a button, or a status
   marker?" `KeryxIcons` (`ui/common/KeryxIcons.kt`) is `expect`/`actual`:
   the desktop `actual` bundles Tabler Icons (MIT) svgs (thin stroke, rounded
@@ -1494,7 +1503,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   own values apply, for the same reason `KeryxRaisedSurface` does.
 - **Icon grouping — `ToolbarIconGroup`** (`ui/common/TooltipIconButton.kt`, expect/actual): related
   toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications, sort/mark-all-read,
-  star/mark-unread, copy-url/open-in-browser) are clustered via `ToolbarIconGroup`, separated from
+  the article reader's star / read-unread / open-in-browser / copy-url / share, which is one cluster) are clustered via `ToolbarIconGroup`, separated from
   other clusters in the same row by an 8dp `Spacer`. Desktop's `actual` renders the cluster as a
   rounded capsule with the flat surface pattern's tokens (`surfaceContainerHighest` fill +
   `outlineVariant` 1.dp border, `tonalElevation = 0.dp`) — a stand-in for a native grouped-toolbar

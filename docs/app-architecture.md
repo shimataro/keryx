@@ -947,6 +947,18 @@ lets `watchArticles`' five branches keep one return type — and its parameter o
 bound to the SELECT column order (guarded by
 `ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField`).
 
+The reader toolbar's read/unread button is drawn from that cursor rather than from `_selectedArticle`,
+which lags it while a body loads: `HomeViewModel.selectedArticleShownUnread` (and its synchronous twin
+`isSelectedArticleShownUnread()`, which the SwiftUI app reads right after a selection so the pushed reader
+does not first draw the previous article's state, and again on each delivery of the flow rather than taking the
+delivered value, which may predate that selection) is true only for an unread article the cursor points at
+(`isShownUnread`), so the button shows "read" for the incoming article until its body lands — unless a
+read/unread has already been made on it in that window, which the button reads back from `SelectionReadIntents`
+(the record `setRead` and `markAllRead` write and the hydration later applies; `pendingReadIntent`, counting
+only intents made after that selection) so it shows at once whichever route made it. The toggle is bound to the
+same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of what the button
+shows, so a tap during that window can never land on the previous article, and a second tap undoes the first.
+
 ## Navigation
 
 `ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no
@@ -1214,7 +1226,7 @@ cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dro
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
 pinned. The read it does this with is deliberately routed through `dbWriteDispatcher`, the same
 serial (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
-`toggleRead`/`toggleStar`/`markAllRead`/`markSelectedUnread`) dispatches its own DB write to — and
+`toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and
 every one of those call sites dispatches that write *before* updating the pin/selection, never
 after. Since the pin/selection fields are `MutableStateFlow`s, observing a given pin here implies
 (by the flow's memory-visibility guarantee) that the write which justified it was already enqueued

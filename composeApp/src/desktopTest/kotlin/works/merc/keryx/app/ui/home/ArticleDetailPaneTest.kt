@@ -10,7 +10,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -98,6 +101,76 @@ class ArticleDetailPaneTest {
         waitForIdle()
         onNodeWithContentDescription("スター").assertIsEnabled()
         onNodeWithContentDescription("未読に戻す").assertIsEnabled()
+    }
+
+    @Test
+    fun readButtonNamesTheActionItPerformsAndFlipsWithTheArticlesReadState() = runDesktopComposeUiTest {
+        var article by mutableStateOf(testArticle(isRead = 1L))
+        var toggles = 0
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                onToggleRead = { toggles++ },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+        onNodeWithContentDescription("既読にする").assertDoesNotExist()
+
+        onNodeWithContentDescription("未読に戻す").performClick()
+        assertEquals(1, toggles)
+
+        // The article turned unread: the same button now offers the way back.
+        article = testArticle(isRead = 0L)
+        waitForIdle()
+        onNodeWithContentDescription("未読に戻す").assertDoesNotExist()
+        onNodeWithContentDescription("既読にする").performClick()
+        assertEquals(2, toggles)
+    }
+
+    /**
+     * The button follows `shownUnread`, not the article's own flag: while a newly selected article loads, the
+     * pane still holds the previous (unread) one, and the button must already show the read state.
+     */
+    @Test
+    fun readButtonFollowsShownUnreadRatherThanTheArticlesOwnFlag() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(isRead = 0L),
+                shownUnread = false,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("未読に戻す").assertExists()
+        onNodeWithContentDescription("既読にする").assertDoesNotExist()
+    }
+
+    /** The button's own label is the action; its state is exposed separately so a screen reader can say it. */
+    @Test
+    fun readButtonExposesTheArticlesStateToScreenReaders() = runDesktopComposeUiTest {
+        var unread by mutableStateOf(false)
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(isRead = 1L),
+                shownUnread = unread,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+        onNodeWithContentDescription("未読に戻す")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "既読"))
+
+        unread = true
+        waitForIdle()
+        onNodeWithContentDescription("既読にする")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "未読"))
     }
 
     @Test
@@ -730,6 +803,7 @@ private fun testArticle(
     content: String? = "<p>content</p>",
     summary: String? = null,
     isStarred: Long = 0L,
+    isRead: Long = 1L,
     feedId: String = "f1",
 ): Articles = Articles(
     id = id,
@@ -742,7 +816,7 @@ private fun testArticle(
     author = null,
     published_at = 1_754_000_000_000L,
     thumbnail_url = null,
-    is_read = 1L,
+    is_read = isRead,
     read_at = null,
     is_starred = isStarred,
     starred_at = null,

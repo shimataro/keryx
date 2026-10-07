@@ -457,16 +457,64 @@ class HomeViewModel(
     }.stateIn(viewModelScope, started, null)
 
     /**
+     * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
+     * [SelectionReadIntents]. Recorded by [setRead] and [markAllRead].
+     */
+    private val readIntents = SelectionReadIntents()
+
+    /** Backing state of [selectionCursorId], kept observable for [selectedArticleShownUnread]. */
+    private val _selectionCursor = MutableStateFlow<String?>(null)
+
+    /**
+     * [SelectionReadIntents.currentSeq] as of the selection that put the cursor where it is, so only an intent
+     * made on the cursor's article *after* that selection counts towards [selectedArticleShownUnread]
+     * ([pendingReadIntent]). `Long.MAX_VALUE` — nothing counts — for a cursor not set by [selectArticle].
+     */
+    private val _cursorIntentSeq = MutableStateFlow(Long.MAX_VALUE)
+
+    /**
      * The list cursor for keyboard navigation.
      *
      * [selectArticle] loads the article body asynchronously, so [_selectedArticle] lags the user's
      * intent; this is updated synchronously instead, which keeps a held arrow key advancing at
      * key-repeat speed and lets a hydration whose selection was cleared (a filter switch) or moved
      * elsewhere recognise it. Which of several selections is the newest is told by
-     * [latestSelectionToken]. Only ever touched on the ViewModel's (main) context, so it needs no
+     * [latestSelectionToken]. Only ever written on the ViewModel's (main) context, so it needs no
      * synchronization.
      */
-    private var selectionCursorId: String? = null
+    private var selectionCursorId: String?
+        get() = _selectionCursor.value
+        set(value) {
+            // A cursor not set by selectArticle has no selection to count intents from; selectArticle
+            // overrides this right after its own write.
+            _cursorIntentSeq.value = Long.MAX_VALUE
+            _selectionCursor.value = value
+        }
+
+    /**
+     * Whether the reader's read/unread button should show the unread state (see [isShownUnread]).
+     * An explicit unread made on the incoming article while its body loads (read back from [readIntents], the
+     * same record the hydration applies, so every route that records one is covered), or a restored unread
+     * article, is shown as soon as it applies.
+     */
+    val selectedArticleShownUnread: StateFlow<Boolean> =
+        combine(_selectedArticle, _selectionCursor, _cursorIntentSeq, readIntents.state) { article, cursor, seq, intents ->
+            isShownUnread(article, cursor, pendingReadIntent(intents, cursor, seq))
+        }
+        .stateIn(viewModelScope, started, false)
+
+    /**
+     * [selectedArticleShownUnread] right now, read synchronously.
+     *
+     * For a caller that cannot wait for the flow to deliver — the SwiftUI app copies the flow's values
+     * asynchronously, so a screen pushed in the same turn as a selection would first draw the stale value
+     * and then change it (and animate). Such a caller reads this just after the selection instead.
+     */
+    fun isSelectedArticleShownUnread(): Boolean = isShownUnread(
+        _selectedArticle.value,
+        selectionCursorId,
+        pendingReadIntent(readIntents.state.value, selectionCursorId, _cursorIntentSeq.value),
+    )
 
     /**
      * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
@@ -761,12 +809,6 @@ class HomeViewModel(
     fun clearArticleContents() = articleContentCache.clear()
 
     /**
-     * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
-     * [SelectionReadIntents]. Recorded by [setRead], [markSelectedUnread] and [markAllRead].
-     */
-    private val readIntents = SelectionReadIntents()
-
-    /**
      * Identity of the newest [selectArticle] call: only the hydration holding the latest token may
      * update the reader. Unlike comparing [selectionCursorId] to the article id, this also tells two
      * selections of the *same* article apart, so an older one finishing later cannot overwrite the
@@ -794,6 +836,13 @@ class HomeViewModel(
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
         selectionCursorId = article.id
+        _cursorIntentSeq.value = readIntents.currentSeq
+        // Selecting reads the article (its write is already enqueued above), so reselecting the one already
+        // on screen shows it read at once rather than once its body has reloaded — otherwise the reader
+        // toolbar's read/unread button would start out unread and then flip (which iOS animates).
+        if (_selectedArticle.value?.let { it.id == article.id && it.is_read == 0L } == true) {
+            _selectedArticle.update { it?.copy(is_read = 1L) }
+        }
         val token = ++latestSelectionToken
         // Stamped here: the hydration below must only touch the pin within the browsing context the
         // user actually selected in, not whichever one is current when its DB lookup returns.
@@ -933,23 +982,6 @@ class HomeViewModel(
     }
 
     /**
-     * Marks the selected article as unread.
-     */
-    fun markSelectedUnread() {
-        val current = _selectedArticle.value ?: return
-        val id = current.id
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
-        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
-        // pass can never observe (and revert) this optimistic unread state using DB flags from
-        // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
-        readIntents.record(id, read = false)
-        // Optimistic: flip to unread in place (no DB read-back).
-        _pinnedReadArticles.update { it - id }
-        _selectedArticle.value = current.copy(is_read = 0L)
-    }
-
-    /**
      * Toggles the read state of an article and persists the change.
      *
      * @param article The article whose read state should be toggled.
@@ -986,8 +1018,22 @@ class HomeViewModel(
 
     /**
      * Toggles the read state of the selected article.
+     *
+     * The one implementation behind every route to "mark as read / unread" for the displayed article —
+     * the Article menu's toggle item and the reader toolbar's read/unread button on both UIs — so the
+     * effect is always the opposite of the state the toolbar is showing (see [selectedArticleShownUnread]).
+     * That includes the moment a newly selected article's body is still loading: the target is the
+     * article the selection cursor points at, not the previous one [selectedArticle] still holds, and the
+     * state it is shown in includes an intent already made on it (see [readIntents]), so the tap
+     * never lands on a different article than the one the button is drawn for and a second tap undoes the first.
      */
-    fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
+    fun toggleReadSelected() {
+        val cursor = selectionCursorId ?: return
+        val target = currentArticles().firstOrNull { it.id == cursor }
+            ?: _selectedArticle.value?.takeIf { it.id == cursor }?.toListRow()
+            ?: return
+        setRead(target, read = isSelectedArticleShownUnread())
+    }
 
     /**
      * Toggles the starred state of an article.
@@ -1056,7 +1102,7 @@ class HomeViewModel(
                 .filter { it.article.is_read == 0L }
                 .map { it.article.id }
                 .toMutableList()
-            // The raw search snapshot can lag an optimistic unread change (e.g. markSelectedUnread()
+            // The raw search snapshot can lag an optimistic unread change (e.g. toggleReadSelected()
             // immediately followed by markAllRead()). Include the selected article if it is currently
             // unread so the operation is not treated as a no-op and the article is actually marked read.
             _selectedArticle.value
@@ -1183,7 +1229,7 @@ class HomeViewModel(
      *
      * [_pinnedReadArticles]/[_pinnedUnstarredArticles] intentionally show a value that outruns the
      * DB while their own write is still in flight (see each of [selectArticle]/[toggleRead]/
-     * [toggleStar]/[markAllRead]/[markSelectedUnread]'s own comments) — but nothing here ever
+     * [toggleStar]/[markAllRead]'s own comments) — but nothing here ever
      * re-checks that the DB actually caught up, so a pin that started as "optimistic" could
      * otherwise stay wrong forever once something *external* changes the same article: another
      * device's sync propagating a "mark unread" or a restar, or a soft-delete tombstone. This runs

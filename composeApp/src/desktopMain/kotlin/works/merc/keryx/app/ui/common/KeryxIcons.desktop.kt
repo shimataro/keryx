@@ -10,6 +10,7 @@ import works.merc.keryx.app.resources.ic_article_filled
 import works.merc.keryx.app.resources.ic_check_filled
 import works.merc.keryx.app.resources.ic_check_outlined
 import works.merc.keryx.app.resources.ic_chevron_right_outlined
+import works.merc.keryx.app.resources.ic_circle_filled
 import works.merc.keryx.app.resources.ic_circle_outlined
 import works.merc.keryx.app.resources.ic_close_filled
 import works.merc.keryx.app.resources.ic_close_outlined
@@ -59,6 +60,7 @@ actual object KeryxIcons {
     actual val Cloud: DrawableResource = Res.drawable.ic_cloud_outlined
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_outlined
     actual val Circle: DrawableResource = Res.drawable.ic_circle_outlined
+    actual val CircleFilled: DrawableResource = Res.drawable.ic_circle_filled
     actual val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_outlined
     actual val Delete: DrawableResource = Res.drawable.ic_delete_outlined
     actual val DeleteSweep: DrawableResource = Res.drawable.ic_delete_sweep_outlined

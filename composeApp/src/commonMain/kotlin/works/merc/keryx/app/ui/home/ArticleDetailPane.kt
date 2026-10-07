@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,12 +89,15 @@ import works.merc.keryx.app.presentation.home.readerContents
 import works.merc.keryx.app.presentation.home.readerPages
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
+import works.merc.keryx.app.resources.article_mark_as_read
 import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_content
 import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_share
 import works.merc.keryx.app.resources.article_star
+import works.merc.keryx.app.resources.article_state_read
+import works.merc.keryx.app.resources.article_state_unread
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.article_url_copied
 import works.merc.keryx.app.resources.common_back
@@ -116,7 +121,7 @@ private const val COPIED_FEEDBACK_MS = 1500L
 internal const val ARTICLE_READER_TEST_TAG = "article-reader"
 
 /**
- * Displays the selected article and provides actions for starring, marking it unread, copying its URL, and opening it in a browser.
+ * Displays the selected article and provides actions for starring it, toggling its read state, opening it in a browser, and copying its URL.
  *
  * @param vm The view model supplying the selected article and handling article actions.
  * @param onActivated Invoked when the pane is activated.
@@ -148,6 +153,7 @@ fun ArticleDetailPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val article by vm.selectedArticle.collectAsState()
+    val shownUnread by vm.selectedArticleShownUnread.collectAsState()
     val feedName by vm.selectedFeedName.collectAsState()
     val feedFaviconUrl by vm.selectedFeedFaviconUrl.collectAsState()
     // Only a touch-primary platform names the feed in each article's byline (see
@@ -193,13 +199,14 @@ fun ArticleDetailPane(
         feedFaviconUrl = feedFaviconUrl,
         feedsById = feedsById,
         modifier = modifier,
+        shownUnread = shownUnread,
         onActivated = onActivated,
         copyPulse = copyPulse,
         onCopyUrl = onCopyUrl,
         onOpenInBrowser = onOpenInBrowser,
         onShare = onShare,
         onToggleStar = { vm.toggleStarSelected() },
-        onMarkUnread = { vm.markSelectedUnread() },
+        onToggleRead = { vm.toggleReadSelected() },
         onNavigateUp = onNavigateUp,
         swipeNavigation = swipeNavigation,
         readerPaging = readerPaging,
@@ -233,13 +240,15 @@ internal fun ArticleDetailPaneContent(
     feedFaviconUrl: String? = null,
     feedsById: Map<String, Feeds> = emptyMap(),
     modifier: Modifier = Modifier,
+    /** Whether the read/unread button shows the unread state — see `HomeViewModel.selectedArticleShownUnread`. */
+    shownUnread: Boolean = article?.is_read == 0L,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onCopyUrl: (Articles) -> Unit = {},
     onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
     onShare: ((Articles) -> Unit)? = null,
     onToggleStar: () -> Unit = {},
-    onMarkUnread: () -> Unit = {},
+    onToggleRead: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     readerPaging: ArticleReaderPaging? = null,
@@ -330,7 +339,8 @@ internal fun ArticleDetailPaneContent(
                 feedFaviconUrl = feedFaviconUrl,
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
-                onMarkUnread = onMarkUnread,
+                unread = shownUnread,
+                onToggleRead = onToggleRead,
                 onCopyUrl = { article?.let(onCopyUrl) },
                 onOpenInBrowser = { article?.let(onOpenInBrowser) },
                 onShare = onShare?.let { share -> { article?.let(share) } },
@@ -437,8 +447,8 @@ internal fun ArticleDetailPaneContent(
 }
 
 /**
- * The detail pane's action toolbar. Always renders all its actions — star, mark unread, copy URL,
- * open in browser, and (where the platform has a share sheet, i.e. [onShare] is non-null — a
+ * The detail pane's action toolbar. Always renders all its actions — star, mark read/unread, open in
+ * browser, copy URL, and (where the platform has a share sheet, i.e. [onShare] is non-null — a
  * per-platform constant) share — rather than hiding them when [article] is `null` or lacks a usable URL,
  * per the "prefer disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an
  * unconditional toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has
@@ -460,7 +470,8 @@ private fun ArticleDetailToolbar(
     feedFaviconUrl: String?,
     showCopied: Boolean,
     onToggleStar: () -> Unit,
-    onMarkUnread: () -> Unit,
+    unread: Boolean,
+    onToggleRead: () -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
     onShare: (() -> Unit)?,
@@ -516,9 +527,28 @@ private fun ArticleDetailToolbar(
                     tint = if (starred) StarredColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val markUnreadTooltip = stringResource(Res.string.article_mark_as_unread)
-            TooltipIconButton(tooltip = markUnreadTooltip, onClick = onMarkUnread, enabled = hasArticle) {
-                KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
+            // Shows the state it would change: a filled primary dot while the article is unread (the same
+            // dot the article list draws), an outline once read. The label is the action a tap performs.
+            val readToggleTooltip = stringResource(
+                if (unread) Res.string.article_mark_as_read else Res.string.article_mark_as_unread,
+            )
+            // The label names the action, so the state itself is spoken separately for a screen reader.
+            val readStateText = stringResource(if (unread) Res.string.article_state_unread else Res.string.article_state_read)
+            TooltipIconButton(
+                tooltip = readToggleTooltip,
+                onClick = onToggleRead,
+                modifier = Modifier.semantics { stateDescription = readStateText },
+                enabled = hasArticle,
+            ) {
+                KeryxIcon(
+                    if (unread) KeryxIcons.CircleFilled else KeryxIcons.Circle,
+                    contentDescription = readToggleTooltip,
+                    tint = if (unread) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                )
+            }
+            val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
+            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {
+                KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
             }
             val copyUrlTooltip = stringResource(
                 if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
@@ -532,10 +562,6 @@ private fun ArticleDetailToolbar(
                     if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
                     contentDescription = copyUrlTooltip,
                 )
-            }
-            val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
-            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {
-                KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
             }
             if (onShare != null) {
                 val shareTooltip = stringResource(Res.string.article_share)

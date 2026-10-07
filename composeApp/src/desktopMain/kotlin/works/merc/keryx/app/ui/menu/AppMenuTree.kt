@@ -274,8 +274,8 @@ internal fun buildAppMenuTree(
     }
 
     val articleItems = listOf(
-        AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, AppMenuShortcut.ToggleRead, actions.toggleRead),
         AppMenuNode.Item(labels.toggleStar, ui.articleActionsEnabled, AppMenuShortcut.ToggleStar, actions.toggleStar),
+        AppMenuNode.Item(labels.toggleRead, ui.articleActionsEnabled, AppMenuShortcut.ToggleRead, actions.toggleRead),
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.openInBrowser, ui.openInBrowserEnabled, AppMenuShortcut.OpenInBrowser, actions.openInBrowser),
         AppMenuNode.Item(labels.copyUrl, ui.copyUrlEnabled, AppMenuShortcut.CopyUrl, actions.copyUrl),

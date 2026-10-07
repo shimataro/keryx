@@ -127,10 +127,10 @@ class ArticleRowMenuTest {
 
     @Test
     fun entriesFollowTheMenuBarsArticleMenuOrder() {
-        // AppMenuTree's Article menu: read, star, separator, open in browser, copy URL.
+        // AppMenuTree's Article menu: star, read, separator, open in browser, copy URL.
         val labels = rawEntries(article(read = true), selectedByOpen = false).map { (it as? NativeMenuItem)?.label ?: "---" }
 
-        assertEquals(listOf("Mark as unread", "Star", "---", "Open in Browser", "Copy URL"), labels)
+        assertEquals(listOf("Star", "Mark as unread", "---", "Open in Browser", "Copy URL"), labels)
         assertTrue(rawEntries(article(read = true), selectedByOpen = false)[2] === NativeMenuSeparator)
     }
 
@@ -148,7 +148,7 @@ class ArticleRowMenuTest {
         val raw = rawEntries(article(read = true), selectedByOpen = false, onShare = { shared++ })
         val labels = raw.map { (it as? NativeMenuItem)?.label ?: "---" }
 
-        assertEquals(listOf("Mark as unread", "Star", "---", "Open in Browser", "Copy URL", "Share"), labels)
+        assertEquals(listOf("Star", "Mark as unread", "---", "Open in Browser", "Copy URL", "Share"), labels)
         val share = raw.filterIsInstance<NativeMenuItem>().single { it.label == "Share" }
         assertTrue(share.enabled)
         share.onClick()

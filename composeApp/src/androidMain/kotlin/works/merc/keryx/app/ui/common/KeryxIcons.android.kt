@@ -10,6 +10,7 @@ import works.merc.keryx.app.resources.ic_article_material
 import works.merc.keryx.app.resources.ic_check_filled_material
 import works.merc.keryx.app.resources.ic_check_outlined_material
 import works.merc.keryx.app.resources.ic_chevron_right_material
+import works.merc.keryx.app.resources.ic_circle_filled_material
 import works.merc.keryx.app.resources.ic_circle_material
 import works.merc.keryx.app.resources.ic_close_filled_material
 import works.merc.keryx.app.resources.ic_close_outlined_material
@@ -70,6 +71,7 @@ actual object KeryxIcons {
     actual val Cloud: DrawableResource = Res.drawable.ic_cloud_material
     actual val ContentCopy: DrawableResource = Res.drawable.ic_content_copy_material
     actual val Circle: DrawableResource = Res.drawable.ic_circle_material
+    actual val CircleFilled: DrawableResource = Res.drawable.ic_circle_filled_material
     actual val CreateNewFolder: DrawableResource = Res.drawable.ic_create_new_folder_material
     actual val Delete: DrawableResource = Res.drawable.ic_delete_material
     actual val DeleteSweep: DrawableResource = Res.drawable.ic_delete_sweep_material

@@ -144,11 +144,11 @@ struct ArticleRowView: View, Equatable {
                 isRead: model.isRead,
                 selectedByOpen: selectedByOpen
             )
-            Button(readAfterOpen ? Self.markUnreadLabel : Self.markReadLabel) {
-                viewModel.setRead(article: model.row, read: !readAfterOpen)
-            }
             Button(model.isStarred ? Self.unstarLabel : Self.starLabel) {
                 viewModel.setStarred(article: model.row, starred: !model.isStarred)
+            }
+            Button(readAfterOpen ? Self.markUnreadLabel : Self.markReadLabel) {
+                viewModel.setRead(article: model.row, read: !readAfterOpen)
             }
             Divider()
             Button(Self.openInBrowserLabel) {

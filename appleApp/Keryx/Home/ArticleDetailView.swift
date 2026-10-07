@@ -20,6 +20,12 @@ struct ArticleDetailView: View {
     let home: HomeObservable
     let preferences: PreferencesObservable
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    /// False while the collapsed (iPhone) stack has the reader popped off screen. Its toolbar is dropped
+    /// then: a navigation bar keeps a hidden column's items as they last were and only applies an update
+    /// once a push back to it has finished, so re-opening the reader for another article would show the
+    /// previous article's buttons through the whole push and then animate them to the new state. Built
+    /// afresh on each push instead, the toolbar starts out in the new article's state.
+    var isOnScreen: Bool = true
 
     @State private var copyConfirmed = false
 
@@ -48,7 +54,7 @@ struct ArticleDetailView: View {
             }
         }
         .focused(focusedPane, equals: .reader)
-        .toolbar { toolbarContent }
+        .toolbar { if isOnScreen { toolbarContent } }
         .onChange(of: home.copyPulse) { _, _ in
             copyConfirmed = true
             #if os(macOS)
@@ -137,18 +143,47 @@ struct ArticleDetailView: View {
                 }
             }
             // iOS renders a toolbar icon as a template in the button's tint and ignores the icon's own
-            // `foregroundStyle`, so the starred state needs the tint as well (macOS honors either).
+            // `foregroundStyle`, so the starred state needs the tint as well. macOS is the other way round:
+            // it honors the icon's `foregroundStyle` above and not the tint.
             .tint(article?.is_starred == 1 ? .yellow : nil)
             .disabled(article == nil)
             .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
 
+            // Shows the state like the star does: a filled accent dot while unread (the article list's own
+            // unread dot), an outline once read; the label names the action a tap performs. The same
+            // `toggleReadSelected` the Article menu calls, so both always do the opposite of what is shown.
+            let unread = home.selectedArticleShownUnread
+            let readToggleTitle = L(unread ? "article_mark_as_read" : "article_mark_as_unread")
             Button {
-                home.viewModel.markSelectedUnread()
+                home.viewModel.toggleReadSelected()
             } label: {
-                Label(L("article_mark_as_unread"), systemImage: "circle")
+                Label {
+                    Text(readToggleTitle)
+                } icon: {
+                    // Colored only while unread, like the star: the accent color is the article row's own
+                    // unread dot, otherwise the toolbar's default monochrome applies.
+                    if unread {
+                        Image(systemName: "circle.fill").foregroundStyle(Color.accentColor)
+                    } else {
+                        Image(systemName: "circle")
+                    }
+                }
             }
+            // iOS renders a toolbar icon as a template in the button's tint, so the unread state needs it too
+            // (macOS honors the icon's `foregroundStyle` above instead).
+            .tint(unread ? .accentColor : nil)
             .disabled(article == nil)
-            .help(L("article_mark_as_unread"))
+            .help(readToggleTitle)
+            // The title names the action; the state itself is spoken separately for VoiceOver.
+            .accessibilityValue(L(unread ? "article_state_unread" : "article_state_read"))
+
+            Button {
+                if let article { openInBrowserIfAllowed(article.url) }
+            } label: {
+                Label(L("article_open_in_browser"), systemImage: "globe")
+            }
+            .disabled(!openEnabled)
+            .help(L("article_open_in_browser"))
 
             Button {
                 guard let article else { return }
@@ -158,14 +193,6 @@ struct ArticleDetailView: View {
             }
             .disabled(!copyEnabled)
             .help(L("article_copy_url"))
-
-            Button {
-                if let article { openInBrowserIfAllowed(article.url) }
-            } label: {
-                Label(L("article_open_in_browser"), systemImage: "globe")
-            }
-            .disabled(!openEnabled)
-            .help(L("article_open_in_browser"))
         }
     }
 }

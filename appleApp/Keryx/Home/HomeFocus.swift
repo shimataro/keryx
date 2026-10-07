@@ -36,7 +36,7 @@ extension FocusedValues {
 @MainActor
 func moveFocusFromFeedListToArticleList(home: HomeObservable, focusedPane: FocusState<HomeFocusedPane?>.Binding) {
     if home.selectedArticle == nil, let first = home.viewModel.currentArticles().first {
-        home.viewModel.selectArticle(article: first)
+        home.selectArticle(first)
     }
     focusedPane.wrappedValue = .articleList
 }

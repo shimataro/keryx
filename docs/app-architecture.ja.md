@@ -941,6 +941,17 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 `watchArticles` の5分岐を単一の戻り値型に保っている。パラメータ順は SELECT の列順と位置で
 結び付いている（`ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField` が担保）。
 
+リーダーツールバーの既読/未読ボタンは、本文の読み込み中に遅れる `_selectedArticle` ではなくこのカーソルから
+描画する。`HomeViewModel.selectedArticleShownUnread`（と、SwiftUI アプリが選択直後に同期的に読む
+`isSelectedArticleShownUnread()`。遷移先のリーダーがまず前の記事の状態を描かないようにするため。flow が値を
+届けるたびにも、届いた値（その選択より前のものかもしれない）を使わずにこれを読み直す）は、
+カーソルが指す未読記事のときだけ true になる（`isShownUnread`）ので、本文が届くまでは新しい記事に対して
+ボタンは「既読」を表示する。ただし、その間に既読/未読の操作が行われていれば、ボタンはそれをすぐ表示する。
+その操作は `SelectionReadIntents`（`setRead` と `markAllRead` が書き、本文の適用時にも使われる記録）から読み戻す
+（`pendingReadIntent` がその選択以降のものだけを数える）ので、どの経路の操作でも同じように反映される。
+トグルも同じ値に結び付いている。`toggleReadSelected` はカーソルの記事を対象に、ボタンの表示と逆の状態へ
+設定するので、この間のタップが前の記事に当たることはなく、2 回目のタップは 1 回目を取り消す。
+
 ## ナビゲーション
 
 `ui/navigation/Navigator.kt` は現在の `Screen`（`Setup` または `Home` の一値——スタックではなく、
@@ -1210,7 +1221,7 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 フラグ — を `ArticleRepository.aliveArticleFlags` に対する1クエリでまとめて再検証し、記事が
 既に存在しないか、フラグがピンの値と一致しなくなったものを外す（選択については更新する）。
 この読み取りをあえて `dbWriteDispatcher` — 各ピン設定箇所（`selectArticle`/`toggleRead`/
-`toggleStar`/`markAllRead`/`markSelectedUnread`）が自身の DB 書き込みを投入するのと同じ直列
+`toggleStar`/`markAllRead`）が自身の DB 書き込みを投入するのと同じ直列
 （`limitedParallelism(1)`）ディスパッチャ — 経由で行っている。そして、これらの各箇所はいずれも
 ピン/選択の状態を更新する**前**に、その書き込みを投入している（後にではない）。ピン/選択の
 フィールドは `MutableStateFlow` なので、ここであるピンを観測できたということは（flow の
