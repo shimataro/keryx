@@ -1311,11 +1311,11 @@ class HomeViewModelTest {
     }
 
     /**
-     * The reader's own "mark as unread" ([HomeViewModel.markSelectedUnread]) made while a
+     * The reader's own "mark as unread" ([HomeViewModel.toggleReadSelected] on a read article) made while a
      * re-selection of the displayed article is still loading wins, just like [HomeViewModel.setRead].
      */
     @Test
-    fun markSelectedUnreadWhileAReselectionIsStillLoadingWins() = runTest {
+    fun toggleReadSelectedToUnreadWhileAReselectionIsStillLoadingWins() = runTest {
         val holding = HoldingDispatcher()
         val vm = newViewModelWithHydrationOn(holding, "a1")
         vm.selectArticle(vm.row("a1"))
@@ -1324,7 +1324,7 @@ class HomeViewModelTest {
         holding.hold()
         vm.selectArticle(vm.row("a1"))
         testScheduler.advanceUntilIdle()
-        vm.markSelectedUnread()
+        vm.toggleReadSelected()
         holding.release()
         testScheduler.advanceUntilIdle()
 
@@ -1452,7 +1452,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         vm.selectArticle(vm.articles.value.first { it.id == "a2" })
         testScheduler.advanceUntilIdle()
-        vm.markSelectedUnread()
+        vm.toggleReadSelected()
         testScheduler.advanceUntilIdle()
         assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
 
@@ -1476,7 +1476,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         vm.selectArticle(vm.articles.value.first { it.id == "a1" })
         testScheduler.advanceUntilIdle()
-        vm.markSelectedUnread()
+        vm.toggleReadSelected()
         testScheduler.advanceUntilIdle()
         assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
 
@@ -1726,7 +1726,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun markSelectedUnreadClearsPinAndUpdatesSelectedState() = runTest {
+    fun toggleReadSelectedOnAReadArticleClearsPinAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -1737,13 +1737,37 @@ class HomeViewModelTest {
         vm.selectArticle(article1.toListRow())
         testScheduler.advanceUntilIdle()
 
-        vm.markSelectedUnread()
+        vm.toggleReadSelected()
         testScheduler.advanceUntilIdle()
 
         assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(0L, vm.selectedArticle.value?.is_read)
         // Pin cleared: a1 is unread again and no longer needs pinning, so it stays visible naturally.
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    /**
+     * The reader toolbar's button shows "mark as read" while the article is unread, and it must be able to
+     * undo its own unread: toggling an unread selection reads it again, in the DB and on screen.
+     */
+    @Test
+    fun toggleReadSelectedOnAnUnreadSelectionMarksItReadAgain() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
     }
 
     @Test
@@ -2642,7 +2666,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         // Flip the selected article back to unread while keeping it selected, so it enters
         // markAllRead() as unread (selecting an article always marks it read immediately).
-        vm.markSelectedUnread()
+        vm.toggleReadSelected()
         testScheduler.advanceUntilIdle()
         assertEquals(0L, vm.selectedArticle.value?.is_read)
 
@@ -3300,7 +3324,7 @@ class HomeViewModelTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
         ftsManagerIndexed(driver)
-        // Use a controllable dispatcher so markSelectedUnread()'s unread write stays queued until
+        // Use a controllable dispatcher so toggleReadSelected()'s unread write stays queued until
         // markAllRead() has already inspected the stale search snapshot.
         val vm = newViewModel(dbWriteDispatcher = StandardTestDispatcher(testScheduler))
         subscribeAll(vm)
@@ -3313,7 +3337,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
 
-        vm.markSelectedUnread()
+        vm.toggleReadSelected()
         // Do not advance: the unread DB write is still queued and _rawSearchResults still reflects
         // the pre-unread snapshot, so markAllRead() must not treat the operation as a no-op.
         vm.markAllRead()

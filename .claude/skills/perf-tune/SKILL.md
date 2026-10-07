@@ -97,7 +97,7 @@ contact with a tempting optimization.
   wrong value to every other device on the next sync.
 - **Optimistic UI must always be paired with the corresponding persisted write.**
   This is the central risk of axis 2. Existing `selectArticle` / `toggleRead` /
-  `toggleStar` / `markSelectedUnread` update UI state first *and* always dispatch
+  `toggleStar` update UI state first *and* always dispatch
   the write on `dbWriteDispatcher`. Any new optimistic display must keep that
   shape and must not swallow write failures. Display without persistence means
   the next sync reverts to the other device's value — the user sees an article

@@ -762,7 +762,7 @@ class HomeViewModel(
 
     /**
      * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
-     * [SelectionReadIntents]. Recorded by [setRead], [markSelectedUnread] and [markAllRead].
+     * [SelectionReadIntents]. Recorded by [setRead] and [markAllRead].
      */
     private val readIntents = SelectionReadIntents()
 
@@ -933,23 +933,6 @@ class HomeViewModel(
     }
 
     /**
-     * Marks the selected article as unread.
-     */
-    fun markSelectedUnread() {
-        val current = _selectedArticle.value ?: return
-        val id = current.id
-        // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
-        // own KDoc for why this order is load-bearing: it is what guarantees a concurrent reconcile
-        // pass can never observe (and revert) this optimistic unread state using DB flags from
-        // before this write has landed.
-        viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsUnread(id) }
-        readIntents.record(id, read = false)
-        // Optimistic: flip to unread in place (no DB read-back).
-        _pinnedReadArticles.update { it - id }
-        _selectedArticle.value = current.copy(is_read = 0L)
-    }
-
-    /**
      * Toggles the read state of an article and persists the change.
      *
      * @param article The article whose read state should be toggled.
@@ -986,6 +969,10 @@ class HomeViewModel(
 
     /**
      * Toggles the read state of the selected article.
+     *
+     * The one implementation behind every route to "mark as read / unread" for the displayed article —
+     * the Article menu's toggle item and the reader toolbar's read/unread button on both UIs — so the
+     * effect is always the opposite of the state the toolbar is showing (both read [selectedArticle]).
      */
     fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
 
@@ -1056,7 +1043,7 @@ class HomeViewModel(
                 .filter { it.article.is_read == 0L }
                 .map { it.article.id }
                 .toMutableList()
-            // The raw search snapshot can lag an optimistic unread change (e.g. markSelectedUnread()
+            // The raw search snapshot can lag an optimistic unread change (e.g. toggleReadSelected()
             // immediately followed by markAllRead()). Include the selected article if it is currently
             // unread so the operation is not treated as a no-op and the article is actually marked read.
             _selectedArticle.value
@@ -1183,7 +1170,7 @@ class HomeViewModel(
      *
      * [_pinnedReadArticles]/[_pinnedUnstarredArticles] intentionally show a value that outruns the
      * DB while their own write is still in flight (see each of [selectArticle]/[toggleRead]/
-     * [toggleStar]/[markAllRead]/[markSelectedUnread]'s own comments) — but nothing here ever
+     * [toggleStar]/[markAllRead]'s own comments) — but nothing here ever
      * re-checks that the DB actually caught up, so a pin that started as "optimistic" could
      * otherwise stay wrong forever once something *external* changes the same article: another
      * device's sync propagating a "mark unread" or a restar, or a soft-delete tombstone. This runs

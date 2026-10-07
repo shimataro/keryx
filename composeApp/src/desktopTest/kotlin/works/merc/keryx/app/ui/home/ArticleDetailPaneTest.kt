@@ -101,6 +101,33 @@ class ArticleDetailPaneTest {
     }
 
     @Test
+    fun readButtonNamesTheActionItPerformsAndFlipsWithTheArticlesReadState() = runDesktopComposeUiTest {
+        var article by mutableStateOf(testArticle(isRead = 1L))
+        var toggles = 0
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = article,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                onToggleRead = { toggles++ },
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+        onNodeWithContentDescription("既読にする").assertDoesNotExist()
+
+        onNodeWithContentDescription("未読に戻す").performClick()
+        assertEquals(1, toggles)
+
+        // The article turned unread: the same button now offers the way back.
+        article = testArticle(isRead = 0L)
+        waitForIdle()
+        onNodeWithContentDescription("未読に戻す").assertDoesNotExist()
+        onNodeWithContentDescription("既読にする").performClick()
+        assertEquals(2, toggles)
+    }
+
+    @Test
     fun copyAndOpenAreDisabledForASelectedArticleWithNoUrl() = runDesktopComposeUiTest {
         setContent {
             ArticleDetailPaneContent(
@@ -730,6 +757,7 @@ private fun testArticle(
     content: String? = "<p>content</p>",
     summary: String? = null,
     isStarred: Long = 0L,
+    isRead: Long = 1L,
     feedId: String = "f1",
 ): Articles = Articles(
     id = id,
@@ -742,7 +770,7 @@ private fun testArticle(
     author = null,
     published_at = 1_754_000_000_000L,
     thumbnail_url = null,
-    is_read = 1L,
+    is_read = isRead,
     read_at = null,
     is_starred = isStarred,
     starred_at = null,

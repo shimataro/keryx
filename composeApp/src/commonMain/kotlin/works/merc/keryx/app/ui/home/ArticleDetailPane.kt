@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -87,6 +88,7 @@ import works.merc.keryx.app.presentation.home.readerContents
 import works.merc.keryx.app.presentation.home.readerPages
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.article_copy_url
+import works.merc.keryx.app.resources.article_mark_as_read
 import works.merc.keryx.app.resources.article_mark_as_unread
 import works.merc.keryx.app.resources.article_no_content
 import works.merc.keryx.app.resources.article_no_title
@@ -199,7 +201,7 @@ fun ArticleDetailPane(
         onOpenInBrowser = onOpenInBrowser,
         onShare = onShare,
         onToggleStar = { vm.toggleStarSelected() },
-        onMarkUnread = { vm.markSelectedUnread() },
+        onToggleRead = { vm.toggleReadSelected() },
         onNavigateUp = onNavigateUp,
         swipeNavigation = swipeNavigation,
         readerPaging = readerPaging,
@@ -239,7 +241,7 @@ internal fun ArticleDetailPaneContent(
     onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
     onShare: ((Articles) -> Unit)? = null,
     onToggleStar: () -> Unit = {},
-    onMarkUnread: () -> Unit = {},
+    onToggleRead: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     readerPaging: ArticleReaderPaging? = null,
@@ -330,7 +332,7 @@ internal fun ArticleDetailPaneContent(
                 feedFaviconUrl = feedFaviconUrl,
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
-                onMarkUnread = onMarkUnread,
+                onToggleRead = onToggleRead,
                 onCopyUrl = { article?.let(onCopyUrl) },
                 onOpenInBrowser = { article?.let(onOpenInBrowser) },
                 onShare = onShare?.let { share -> { article?.let(share) } },
@@ -437,7 +439,7 @@ internal fun ArticleDetailPaneContent(
 }
 
 /**
- * The detail pane's action toolbar. Always renders all its actions — star, mark unread, open in
+ * The detail pane's action toolbar. Always renders all its actions — star, mark read/unread, open in
  * browser, copy URL, and (where the platform has a share sheet, i.e. [onShare] is non-null — a
  * per-platform constant) share — rather than hiding them when [article] is `null` or lacks a usable URL,
  * per the "prefer disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an
@@ -460,7 +462,7 @@ private fun ArticleDetailToolbar(
     feedFaviconUrl: String?,
     showCopied: Boolean,
     onToggleStar: () -> Unit,
-    onMarkUnread: () -> Unit,
+    onToggleRead: () -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
     onShare: (() -> Unit)?,
@@ -468,6 +470,7 @@ private fun ArticleDetailToolbar(
 ) {
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
+    val unread = article?.is_read == 0L
     // Separate rules, shared with every other route: any non-blank URL can be copied or shared, but
     // only an http(s) one is opened.
     val copyEnabled = hasArticle && hasUsableUrl(article.url)
@@ -516,9 +519,17 @@ private fun ArticleDetailToolbar(
                     tint = if (starred) StarredColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val markUnreadTooltip = stringResource(Res.string.article_mark_as_unread)
-            TooltipIconButton(tooltip = markUnreadTooltip, onClick = onMarkUnread, enabled = hasArticle) {
-                KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
+            // Shows the state it would change: a filled primary dot while the article is unread (the same
+            // dot the article list draws), an outline once read. The label is the action a tap performs.
+            val readToggleTooltip = stringResource(
+                if (unread) Res.string.article_mark_as_read else Res.string.article_mark_as_unread,
+            )
+            TooltipIconButton(tooltip = readToggleTooltip, onClick = onToggleRead, enabled = hasArticle) {
+                KeryxIcon(
+                    if (unread) KeryxIcons.CircleFilled else KeryxIcons.Circle,
+                    contentDescription = readToggleTooltip,
+                    tint = if (unread) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                )
             }
             val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
             TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {

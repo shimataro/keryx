@@ -1358,10 +1358,11 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   call site.
 - **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
   cloud sync, settings, folder/tag management, search, notifications, sort,
-  mark-all-read, mark-unread, open-in-browser, back, close) use the
+  mark-all-read, open-in-browser, back, close) use the
   `KeryxIcons.XOutlined` (or bare-name, single-variant) entry. Icons that
   encode persistent state rather than an action — `Star`/`StarBorder`,
-  `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
+  `Circle`/`CircleFilled` (the reader's read/unread toggle: outline once read, a filled
+  primary dot while unread), `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
   since they're meant to read as "on/set" indicators, not as clickable chrome.
   Follow this split for any new icon: ask "is this a button, or a status
   marker?" `KeryxIcons` (`ui/common/KeryxIcons.kt`) is `expect`/`actual`:
@@ -1499,7 +1500,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   own values apply, for the same reason `KeryxRaisedSurface` does.
 - **Icon grouping — `ToolbarIconGroup`** (`ui/common/TooltipIconButton.kt`, expect/actual): related
   toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications, sort/mark-all-read,
-  star/mark-unread, open-in-browser/copy-url) are clustered via `ToolbarIconGroup`, separated from
+  star/read-unread toggle, open-in-browser/copy-url) are clustered via `ToolbarIconGroup`, separated from
   other clusters in the same row by an 8dp `Spacer`. Desktop's `actual` renders the cluster as a
   rounded capsule with the flat surface pattern's tokens (`surfaceContainerHighest` fill +
   `outlineVariant` 1.dp border, `tonalElevation = 0.dp`) — a stand-in for a native grouped-toolbar

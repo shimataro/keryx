@@ -1214,7 +1214,7 @@ cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dro
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
 pinned. The read it does this with is deliberately routed through `dbWriteDispatcher`, the same
 serial (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
-`toggleRead`/`toggleStar`/`markAllRead`/`markSelectedUnread`) dispatches its own DB write to — and
+`toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and
 every one of those call sites dispatches that write *before* updating the pin/selection, never
 after. Since the pin/selection fields are `MutableStateFlow`s, observing a given pin here implies
 (by the flow's memory-visibility guarantee) that the write which justified it was already enqueued

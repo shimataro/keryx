@@ -41,6 +41,7 @@ expect object KeryxIcons {
     val Cloud: DrawableResource
     val ContentCopy: DrawableResource
     val Circle: DrawableResource
+    val CircleFilled: DrawableResource
     val CreateNewFolder: DrawableResource
     val Delete: DrawableResource
     val DeleteSweep: DrawableResource

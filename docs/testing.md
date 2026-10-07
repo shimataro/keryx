@@ -491,10 +491,14 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   with no articles), repeatedly, alternating with articles that do and don't have a body — no part
   of the window (feed list, article list, window frame) flickers, in both light and dark theme.
 - With nothing selected, the placeholder text renders centered on the pane's theme background with
-  no default white flash, and the toolbar above it (star / mark unread / open in browser /
+  no default white flash, and the toolbar above it (star / mark read-unread / open in browser /
   copy URL) is visible but disabled; selecting an article with a URL enables all four, while an
   article with a blank URL leaves the open-in-browser/copy pair visible but disabled rather than
   hiding them. The toolbar's position and height never change between any of these states.
+- With an article selected, press the reader toolbar's read/unread button (hover tooltip "Mark as unread"): the
+  icon turns into a filled primary-colored dot, its tooltip / screen-reader label becomes "Mark as read", and the
+  article's list row shows its unread dot. Press it again: the outline returns and the row reads as read. Check
+  this at a phone width on Android with the reader shown alone, where nothing else on screen changes.
 - Subscribe to a local test feed whose item `<link>` is not http(s) (e.g. `file:///etc/hosts`), and whose
   channel `<link>` (the site URL) is too, then select that article: "Open in Browser" is greyed out in the
   article row's context menu, the reader toolbar, and the menu bar's Article menu (⌘/Ctrl+Shift+O does

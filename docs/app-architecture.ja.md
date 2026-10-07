@@ -1210,7 +1210,7 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 フラグ — を `ArticleRepository.aliveArticleFlags` に対する1クエリでまとめて再検証し、記事が
 既に存在しないか、フラグがピンの値と一致しなくなったものを外す（選択については更新する）。
 この読み取りをあえて `dbWriteDispatcher` — 各ピン設定箇所（`selectArticle`/`toggleRead`/
-`toggleStar`/`markAllRead`/`markSelectedUnread`）が自身の DB 書き込みを投入するのと同じ直列
+`toggleStar`/`markAllRead`）が自身の DB 書き込みを投入するのと同じ直列
 （`limitedParallelism(1)`）ディスパッチャ — 経由で行っている。そして、これらの各箇所はいずれも
 ピン/選択の状態を更新する**前**に、その書き込みを投入している（後にではない）。ピン/選択の
 フィールドは `MutableStateFlow` なので、ここであるピンを観測できたということは（flow の

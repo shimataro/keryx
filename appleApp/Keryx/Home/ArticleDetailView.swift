@@ -142,13 +142,19 @@ struct ArticleDetailView: View {
             .disabled(article == nil)
             .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
 
+            // Shows the state like the star does: a filled accent dot while unread (the article list's own
+            // unread dot), an outline once read; the label names the action a tap performs. The same
+            // `toggleReadSelected` the Article menu calls, so both always do the opposite of what is shown.
+            let unread = article?.is_read == 0
             Button {
-                home.viewModel.markSelectedUnread()
+                home.viewModel.toggleReadSelected()
             } label: {
-                Label(L("article_mark_as_unread"), systemImage: "circle")
+                Label(L(unread ? "article_mark_as_read" : "article_mark_as_unread"), systemImage: unread ? "circle.fill" : "circle")
             }
+            // iOS renders a toolbar icon as a template in the button's tint, so the unread state needs it too.
+            .tint(unread ? .accentColor : nil)
             .disabled(article == nil)
-            .help(L("article_mark_as_unread"))
+            .help(L(unread ? "article_mark_as_read" : "article_mark_as_unread"))
 
             Button {
                 if let article { openInBrowserIfAllowed(article.url) }
