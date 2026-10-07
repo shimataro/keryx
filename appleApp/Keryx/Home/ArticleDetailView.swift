@@ -16,7 +16,6 @@ import UIKit
 /// here is a native `ContentUnavailableView` laid over the WebView. On macOS the WebView itself
 /// stays mounted underneath, so selecting an article never recreates it (and never flashes its
 /// default white background before the first paint).
-
 struct ArticleDetailView: View {
     let home: HomeObservable
     let preferences: PreferencesObservable
