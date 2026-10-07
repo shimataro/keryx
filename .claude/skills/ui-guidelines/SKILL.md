@@ -1363,9 +1363,10 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   mark-all-read, open-in-browser, back, close) use the
   `KeryxIcons.XOutlined` (or bare-name, single-variant) entry. Icons that
   encode persistent state rather than an action — `Star`/`StarBorder`,
-  `Circle`/`CircleFilled` (the reader's read/unread toggle: outline once read, a filled
-  primary dot while unread), `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
+  `Folder`, `ErrorFilled`, `PublicFilled`, `Article` — use the `XFilled` entry,
   since they're meant to read as "on/set" indicators, not as clickable chrome.
+  The reader's read/unread toggle is a state pair of its own: the bare-name `Circle` (outline) once
+  the article is read, and `CircleFilled` (a filled primary dot) while it is unread.
   Follow this split for any new icon: ask "is this a button, or a status
   marker?" `KeryxIcons` (`ui/common/KeryxIcons.kt`) is `expect`/`actual`:
   the desktop `actual` bundles Tabler Icons (MIT) svgs (thin stroke, rounded
