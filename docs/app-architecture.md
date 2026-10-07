@@ -947,6 +947,14 @@ lets `watchArticles`' five branches keep one return type — and its parameter o
 bound to the SELECT column order (guarded by
 `ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField`).
 
+The reader toolbar's read/unread button is drawn from that cursor rather than from `_selectedArticle`,
+which lags it while a body loads: `HomeViewModel.selectedArticleShownUnread` (and its synchronous twin
+`isSelectedArticleShownUnread()`, which the SwiftUI app reads right after a selection so the pushed reader
+does not first draw the previous article's state) is true only for an unread article the cursor points at
+(`isShownUnread`), so the button shows "read" for the incoming article until its body lands. The toggle is
+bound to the same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of
+what the button shows, so a tap during that window can never land on the previous article.
+
 ## Navigation
 
 `ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no

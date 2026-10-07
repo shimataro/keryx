@@ -941,6 +941,13 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 `watchArticles` の5分岐を単一の戻り値型に保っている。パラメータ順は SELECT の列順と位置で
 結び付いている（`ArticleRepositoryTest.articleListRowMapsEveryProjectedColumnToItsOwnField` が担保）。
 
+リーダーツールバーの既読/未読ボタンは、本文の読み込み中に遅れる `_selectedArticle` ではなくこのカーソルから
+描画する。`HomeViewModel.selectedArticleShownUnread`（と、SwiftUI アプリが選択直後に同期的に読む
+`isSelectedArticleShownUnread()`。遷移先のリーダーがまず前の記事の状態を描かないようにするため）は、
+カーソルが指す未読記事のときだけ true になる（`isShownUnread`）ので、本文が届くまでは新しい記事に対して
+ボタンは「既読」を表示する。トグルも同じ値に結び付いている。`toggleReadSelected` はカーソルの記事を対象に、
+ボタンの表示と逆の状態へ設定するので、この間のタップが前の記事に当たることはない。
+
 ## ナビゲーション
 
 `ui/navigation/Navigator.kt` は現在の `Screen`（`Setup` または `Home` の一値——スタックではなく、
