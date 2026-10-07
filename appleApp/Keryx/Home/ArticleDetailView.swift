@@ -137,7 +137,8 @@ struct ArticleDetailView: View {
                 }
             }
             // iOS renders a toolbar icon as a template in the button's tint and ignores the icon's own
-            // `foregroundStyle`, so the starred state needs the tint as well (macOS honors either).
+            // `foregroundStyle`, so the starred state needs the tint as well. macOS is the other way round:
+            // it honors the icon's `foregroundStyle` above and not the tint.
             .tint(article?.is_starred == 1 ? .yellow : nil)
             .disabled(article == nil)
             .help(L(article?.is_starred == 1 ? "article_unstar" : "article_star"))
@@ -149,9 +150,20 @@ struct ArticleDetailView: View {
             Button {
                 home.viewModel.toggleReadSelected()
             } label: {
-                Label(L(unread ? "article_mark_as_read" : "article_mark_as_unread"), systemImage: unread ? "circle.fill" : "circle")
+                Label {
+                    Text(L(unread ? "article_mark_as_read" : "article_mark_as_unread"))
+                } icon: {
+                    // Colored only while unread, like the star: the accent color is the article row's own
+                    // unread dot, otherwise the toolbar's default monochrome applies.
+                    if unread {
+                        Image(systemName: "circle.fill").foregroundStyle(Color.accentColor)
+                    } else {
+                        Image(systemName: "circle")
+                    }
+                }
             }
-            // iOS renders a toolbar icon as a template in the button's tint, so the unread state needs it too.
+            // iOS renders a toolbar icon as a template in the button's tint, so the unread state needs it too
+            // (macOS honors the icon's `foregroundStyle` above instead).
             .tint(unread ? .accentColor : nil)
             .disabled(article == nil)
             .help(L(unread ? "article_mark_as_read" : "article_mark_as_unread"))
