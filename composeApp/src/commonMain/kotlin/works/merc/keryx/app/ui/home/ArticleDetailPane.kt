@@ -121,7 +121,7 @@ private const val COPIED_FEEDBACK_MS = 1500L
 internal const val ARTICLE_READER_TEST_TAG = "article-reader"
 
 /**
- * Displays the selected article and provides actions for starring, marking it unread, opening it in a browser, and copying its URL.
+ * Displays the selected article and provides actions for starring it, toggling its read state, opening it in a browser, and copying its URL.
  *
  * @param vm The view model supplying the selected article and handling article actions.
  * @param onActivated Invoked when the pane is activated.
