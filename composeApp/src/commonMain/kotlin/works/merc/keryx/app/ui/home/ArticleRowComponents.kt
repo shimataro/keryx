@@ -218,13 +218,13 @@ internal fun articleRowMenuEntries(
     val shareEnabled = canShareArticleUrl(article.url)
     return listOfNotNull(
         NativeMenuItem(
-            if (read) strings.markAsUnread else strings.markAsRead,
-            NativeMenuShortcut(Key.U, ctrl = true, shift = true),
-        ) { onSetRead(!read) },
-        NativeMenuItem(
             if (starred) strings.unstar else strings.star,
             NativeMenuShortcut(Key.S, ctrl = true, shift = true),
         ) { onSetStarred(!starred) },
+        NativeMenuItem(
+            if (read) strings.markAsUnread else strings.markAsRead,
+            NativeMenuShortcut(Key.U, ctrl = true, shift = true),
+        ) { onSetRead(!read) },
         NativeMenuSeparator,
         NativeMenuItem(strings.openInBrowser, NativeMenuShortcut(Key.O, ctrl = true, shift = true), enabled = openEnabled) {
             onOpenInBrowser()

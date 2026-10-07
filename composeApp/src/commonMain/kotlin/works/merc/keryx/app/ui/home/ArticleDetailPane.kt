@@ -116,7 +116,7 @@ private const val COPIED_FEEDBACK_MS = 1500L
 internal const val ARTICLE_READER_TEST_TAG = "article-reader"
 
 /**
- * Displays the selected article and provides actions for starring, marking it unread, copying its URL, and opening it in a browser.
+ * Displays the selected article and provides actions for starring, marking it unread, opening it in a browser, and copying its URL.
  *
  * @param vm The view model supplying the selected article and handling article actions.
  * @param onActivated Invoked when the pane is activated.
@@ -437,8 +437,8 @@ internal fun ArticleDetailPaneContent(
 }
 
 /**
- * The detail pane's action toolbar. Always renders all its actions — star, mark unread, copy URL,
- * open in browser, and (where the platform has a share sheet, i.e. [onShare] is non-null — a
+ * The detail pane's action toolbar. Always renders all its actions — star, mark unread, open in
+ * browser, copy URL, and (where the platform has a share sheet, i.e. [onShare] is non-null — a
  * per-platform constant) share — rather than hiding them when [article] is `null` or lacks a usable URL,
  * per the "prefer disabled over hidden" rule in `.claude/skills/ui-guidelines/SKILL.md`: with an
  * unconditional toolbar shape, the reader beneath it (see [ArticleDetailPaneContent]) never has
@@ -520,6 +520,10 @@ private fun ArticleDetailToolbar(
             TooltipIconButton(tooltip = markUnreadTooltip, onClick = onMarkUnread, enabled = hasArticle) {
                 KeryxIcon(KeryxIcons.Circle, contentDescription = markUnreadTooltip)
             }
+            val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
+            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {
+                KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
+            }
             val copyUrlTooltip = stringResource(
                 if (showCopied) Res.string.article_url_copied else Res.string.article_copy_url,
             )
@@ -532,10 +536,6 @@ private fun ArticleDetailToolbar(
                     if (showCopied) KeryxIcons.CheckOutlined else KeryxIcons.ContentCopy,
                     contentDescription = copyUrlTooltip,
                 )
-            }
-            val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
-            TooltipIconButton(tooltip = openInBrowserTooltip, enabled = openEnabled, onClick = onOpenInBrowser) {
-                KeryxIcon(KeryxIcons.PublicOutlined, contentDescription = openInBrowserTooltip)
             }
             if (onShare != null) {
                 val shareTooltip = stringResource(Res.string.article_share)

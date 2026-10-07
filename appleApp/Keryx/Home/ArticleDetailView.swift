@@ -151,6 +151,14 @@ struct ArticleDetailView: View {
             .help(L("article_mark_as_unread"))
 
             Button {
+                if let article { openInBrowserIfAllowed(article.url) }
+            } label: {
+                Label(L("article_open_in_browser"), systemImage: "globe")
+            }
+            .disabled(!openEnabled)
+            .help(L("article_open_in_browser"))
+
+            Button {
                 guard let article else { return }
                 home.copyArticleUrl(url: article.url, articleId: article.id)
             } label: {
@@ -158,14 +166,6 @@ struct ArticleDetailView: View {
             }
             .disabled(!copyEnabled)
             .help(L("article_copy_url"))
-
-            Button {
-                if let article { openInBrowserIfAllowed(article.url) }
-            } label: {
-                Label(L("article_open_in_browser"), systemImage: "globe")
-            }
-            .disabled(!openEnabled)
-            .help(L("article_open_in_browser"))
         }
     }
 }

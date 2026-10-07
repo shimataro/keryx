@@ -923,6 +923,11 @@ feedback from a single shared piece of code that every route calls. A route only
 part lives, with the current examples, is `docs/app-architecture.md`'s "One implementation per
 action". In practice:
 
+- Give an action set **one order and one grouping on every route**: the menu bar, the context menu
+  and the toolbar list the same actions in the same sequence, split at the same boundaries. For an
+  article: star, read/unread │ open in browser, copy URL, share (Android only). The most-used action
+  comes first; related actions sit together (copy and share both hand the URL to something else).
+  Adding or moving an item on one route means changing every route.
 - Route every entry point through **one shared handler** rather than re-implementing the effect
   (and forgetting the feedback) at each call site. Example: what one "copy article URL" does is
   decided by the shared `articleUrlCopyPlan` (`:shared`, used by both UIs); in Compose every route —
@@ -1494,7 +1499,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   own values apply, for the same reason `KeryxRaisedSurface` does.
 - **Icon grouping — `ToolbarIconGroup`** (`ui/common/TooltipIconButton.kt`, expect/actual): related
   toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications, sort/mark-all-read,
-  star/mark-unread, copy-url/open-in-browser) are clustered via `ToolbarIconGroup`, separated from
+  star/mark-unread, open-in-browser/copy-url) are clustered via `ToolbarIconGroup`, separated from
   other clusters in the same row by an 8dp `Spacer`. Desktop's `actual` renders the cluster as a
   rounded capsule with the flat surface pattern's tokens (`surfaceContainerHighest` fill +
   `outlineVariant` 1.dp border, `tonalElevation = 0.dp`) — a stand-in for a native grouped-toolbar

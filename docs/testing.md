@@ -491,9 +491,9 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   with no articles), repeatedly, alternating with articles that do and don't have a body — no part
   of the window (feed list, article list, window frame) flickers, in both light and dark theme.
 - With nothing selected, the placeholder text renders centered on the pane's theme background with
-  no default white flash, and the toolbar above it (star / mark unread / copy URL / open in
-  browser) is visible but disabled; selecting an article with a URL enables all four, while an
-  article with a blank URL leaves the copy/open-in-browser pair visible but disabled rather than
+  no default white flash, and the toolbar above it (star / mark unread / open in browser /
+  copy URL) is visible but disabled; selecting an article with a URL enables all four, while an
+  article with a blank URL leaves the open-in-browser/copy pair visible but disabled rather than
   hiding them. The toolbar's position and height never change between any of these states.
 - Subscribe to a local test feed whose item `<link>` is not http(s) (e.g. `file:///etc/hosts`), and whose
   channel `<link>` (the site URL) is too, then select that article: "Open in Browser" is greyed out in the
