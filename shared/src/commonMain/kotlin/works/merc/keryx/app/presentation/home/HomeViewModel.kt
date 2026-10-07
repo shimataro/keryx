@@ -456,6 +456,9 @@ class HomeViewModel(
         article?.let { a -> feeds.find { it.id == a.feed_id }?.favicon_url }
     }.stateIn(viewModelScope, started, null)
 
+    /** Backing state of [selectionCursorId], kept observable for [selectedArticleShownUnread]. */
+    private val _selectionCursor = MutableStateFlow<String?>(null)
+
     /**
      * The list cursor for keyboard navigation.
      *
@@ -463,7 +466,7 @@ class HomeViewModel(
      * intent; this is updated synchronously instead, which keeps a held arrow key advancing at
      * key-repeat speed and lets a hydration whose selection was cleared (a filter switch) or moved
      * elsewhere recognise it. Which of several selections is the newest is told by
-     * [latestSelectionToken]. Only ever touched on the ViewModel's (main) context, so it needs no
+     * [latestSelectionToken]. Only ever written on the ViewModel's (main) context, so it needs no
      * synchronization.
      */
     private var selectionCursorId: String?
@@ -471,9 +474,6 @@ class HomeViewModel(
         set(value) {
             _selectionCursor.value = value
         }
-
-    /** Backing state of [selectionCursorId], kept observable for [selectedArticleShownUnread]. */
-    private val _selectionCursor = MutableStateFlow<String?>(null)
 
     /**
      * Whether the reader's read/unread button should show the unread state: [selectedArticle] is unread
