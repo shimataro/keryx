@@ -51,4 +51,21 @@ class ReaderReadStateTest {
         assertFalse(isShownUnread(null, cursor = null))
         assertFalse(isShownUnread(article("a1", isRead = 0L), cursor = null))
     }
+
+    @Test
+    fun anUnreadIntentOnTheIncomingArticleIsShownUnreadWhileItsBodyLoads() {
+        // The reader still holds a1 (read); a2 is the cursor and was marked unread before its body arrived.
+        assertTrue(isShownUnread(article("a1", isRead = 1L), cursor = "a2", pendingRead = false))
+    }
+
+    @Test
+    fun aReadIntentOnTheIncomingArticleIsShownRead() {
+        assertFalse(isShownUnread(article("a1", isRead = 1L), cursor = "a2", pendingRead = true))
+    }
+
+    @Test
+    fun onceTheCursorsArticleIsHeldItsOwnStateWinsOverAPendingIntent() {
+        assertFalse(isShownUnread(article("a2", isRead = 1L), cursor = "a2", pendingRead = false))
+        assertTrue(isShownUnread(article("a2", isRead = 0L), cursor = "a2", pendingRead = true))
+    }
 }

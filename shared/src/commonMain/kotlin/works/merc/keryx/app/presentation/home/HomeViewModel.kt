@@ -456,8 +456,21 @@ class HomeViewModel(
         article?.let { a -> feeds.find { it.id == a.feed_id }?.favicon_url }
     }.stateIn(viewModelScope, started, null)
 
+    /**
+     * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
+     * [SelectionReadIntents]. Recorded by [setRead] and [markAllRead].
+     */
+    private val readIntents = SelectionReadIntents()
+
     /** Backing state of [selectionCursorId], kept observable for [selectedArticleShownUnread]. */
     private val _selectionCursor = MutableStateFlow<String?>(null)
+
+    /**
+     * [SelectionReadIntents.currentSeq] as of the selection that put the cursor where it is, so only an intent
+     * made on the cursor's article *after* that selection counts towards [selectedArticleShownUnread]
+     * ([pendingReadIntent]). `Long.MAX_VALUE` — nothing counts — for a cursor not set by [selectArticle].
+     */
+    private val _cursorIntentSeq = MutableStateFlow(Long.MAX_VALUE)
 
     /**
      * The list cursor for keyboard navigation.
@@ -472,15 +485,22 @@ class HomeViewModel(
     private var selectionCursorId: String?
         get() = _selectionCursor.value
         set(value) {
+            // A cursor not set by selectArticle has no selection to count intents from; selectArticle
+            // overrides this right after its own write.
+            _cursorIntentSeq.value = Long.MAX_VALUE
             _selectionCursor.value = value
         }
 
     /**
      * Whether the reader's read/unread button should show the unread state (see [isShownUnread]).
-     * An explicit unread made on the incoming article, or a restored unread article, is shown as soon
-     * as it applies.
+     * An explicit unread made on the incoming article while its body loads (read back from [readIntents], the
+     * same record the hydration applies, so every route that records one is covered), or a restored unread
+     * article, is shown as soon as it applies.
      */
-    val selectedArticleShownUnread: StateFlow<Boolean> = combine(_selectedArticle, _selectionCursor, ::isShownUnread)
+    val selectedArticleShownUnread: StateFlow<Boolean> =
+        combine(_selectedArticle, _selectionCursor, _cursorIntentSeq, readIntents.state) { article, cursor, seq, intents ->
+            isShownUnread(article, cursor, pendingReadIntent(intents, cursor, seq))
+        }
         .stateIn(viewModelScope, started, false)
 
     /**
@@ -490,7 +510,11 @@ class HomeViewModel(
      * asynchronously, so a screen pushed in the same turn as a selection would first draw the stale value
      * and then change it (and animate). Such a caller reads this just after the selection instead.
      */
-    fun isSelectedArticleShownUnread(): Boolean = isShownUnread(_selectedArticle.value, selectionCursorId)
+    fun isSelectedArticleShownUnread(): Boolean = isShownUnread(
+        _selectedArticle.value,
+        selectionCursorId,
+        pendingReadIntent(readIntents.state.value, selectionCursorId, _cursorIntentSeq.value),
+    )
 
     /**
      * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
@@ -785,12 +809,6 @@ class HomeViewModel(
     fun clearArticleContents() = articleContentCache.clear()
 
     /**
-     * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
-     * [SelectionReadIntents]. Recorded by [setRead] and [markAllRead].
-     */
-    private val readIntents = SelectionReadIntents()
-
-    /**
      * Identity of the newest [selectArticle] call: only the hydration holding the latest token may
      * update the reader. Unlike comparing [selectionCursorId] to the article id, this also tells two
      * selections of the *same* article apart, so an older one finishing later cannot overwrite the
@@ -818,6 +836,7 @@ class HomeViewModel(
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
         selectionCursorId = article.id
+        _cursorIntentSeq.value = readIntents.currentSeq
         // Selecting reads the article (its write is already enqueued above), so reselecting the one already
         // on screen shows it read at once rather than once its body has reloaded — otherwise the reader
         // toolbar's read/unread button would start out unread and then flip (which iOS animates).
@@ -1004,8 +1023,9 @@ class HomeViewModel(
      * the Article menu's toggle item and the reader toolbar's read/unread button on both UIs — so the
      * effect is always the opposite of the state the toolbar is showing (see [selectedArticleShownUnread]).
      * That includes the moment a newly selected article's body is still loading: the target is the
-     * article the selection cursor points at, not the previous one [selectedArticle] still holds, so the
-     * tap never lands on a different article than the one the button is drawn for.
+     * article the selection cursor points at, not the previous one [selectedArticle] still holds, and the
+     * state it is shown in includes an intent already made on it (see [readIntents]), so the tap
+     * never lands on a different article than the one the button is drawn for and a second tap undoes the first.
      */
     fun toggleReadSelected() {
         val cursor = selectionCursorId ?: return
