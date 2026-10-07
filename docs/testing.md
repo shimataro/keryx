@@ -499,6 +499,10 @@ enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmatio
   icon turns into a filled primary-colored dot, its tooltip / screen-reader label becomes "Mark as read", and the
   article's list row shows its unread dot. Press it again: the outline returns and the row reads as read. Check
   this at a phone width on Android with the reader shown alone, where nothing else on screen changes.
+  A screen reader also announces the state ("Unread" / "Read") with the button. On the native iOS and macOS
+  apps, step between articles with the keyboard or swipe and check that the button never flickers to the
+  previous article's state while the next one loads, and that pressing it right after the step marks the
+  article now showing, not the one just left.
 - Subscribe to a local test feed whose item `<link>` is not http(s) (e.g. `file:///etc/hosts`), and whose
   channel `<link>` (the site URL) is too, then select that article: "Open in Browser" is greyed out in the
   article row's context menu, the reader toolbar, and the menu bar's Article menu (⌘/Ctrl+Shift+O does
