@@ -597,8 +597,11 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.activity { assignIfChanged(\.activity, v) }
     }
 
+    /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a
+    /// selection can still be queued on the main actor after `selecting` has synced the new one, and would
+    /// otherwise put the previous article's state back for a moment.
     private func observeSelectedArticleShownUnread() async {
-        for await v in viewModel.selectedArticleShownUnread { assignIfChanged(\.selectedArticleShownUnread, v.boolValue) }
+        for await _ in viewModel.selectedArticleShownUnread { syncSelectedArticleShownUnread() }
     }
 
     private func observeCanSyncNow() async {

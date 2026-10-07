@@ -950,7 +950,8 @@ bound to the SELECT column order (guarded by
 The reader toolbar's read/unread button is drawn from that cursor rather than from `_selectedArticle`,
 which lags it while a body loads: `HomeViewModel.selectedArticleShownUnread` (and its synchronous twin
 `isSelectedArticleShownUnread()`, which the SwiftUI app reads right after a selection so the pushed reader
-does not first draw the previous article's state) is true only for an unread article the cursor points at
+does not first draw the previous article's state, and again on each delivery of the flow rather than taking the
+delivered value, which may predate that selection) is true only for an unread article the cursor points at
 (`isShownUnread`), so the button shows "read" for the incoming article until its body lands — unless a
 read/unread has already been made on it in that window, which the button reads back from `SelectionReadIntents`
 (the record `setRead` and `markAllRead` write and the hydration later applies; `pendingReadIntent`, counting

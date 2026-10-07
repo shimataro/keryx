@@ -943,7 +943,8 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 
 リーダーツールバーの既読/未読ボタンは、本文の読み込み中に遅れる `_selectedArticle` ではなくこのカーソルから
 描画する。`HomeViewModel.selectedArticleShownUnread`（と、SwiftUI アプリが選択直後に同期的に読む
-`isSelectedArticleShownUnread()`。遷移先のリーダーがまず前の記事の状態を描かないようにするため）は、
+`isSelectedArticleShownUnread()`。遷移先のリーダーがまず前の記事の状態を描かないようにするため。flow が値を
+届けるたびにも、届いた値（その選択より前のものかもしれない）を使わずにこれを読み直す）は、
 カーソルが指す未読記事のときだけ true になる（`isShownUnread`）ので、本文が届くまでは新しい記事に対して
 ボタンは「既読」を表示する。ただし、その間に既読/未読の操作が行われていれば、ボタンはそれをすぐ表示する。
 その操作は `SelectionReadIntents`（`setRead` と `markAllRead` が書き、本文の適用時にも使われる記録）から読み戻す
