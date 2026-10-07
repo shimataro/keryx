@@ -129,6 +129,21 @@ class AppMenuTreeTest {
         assertEquals(listOf("File", "View", "Article", "Feed", "Help"), root.menus.map { it.label })
     }
 
+    /**
+     * The article row's context menu and the reader toolbar list these actions in this same order
+     * (see `ArticleRowMenuTest`), so the menu bar's order is pinned here to keep the routes from drifting.
+     */
+    @Test
+    fun `the Article menu lists star, read toggle, a separator, then open and copy`() {
+        val items = tree(enabledUi()).menu("Article").items
+
+        assertEquals(
+            listOf("ToggleStar", "ToggleRead", null, "OpenInBrowser", "CopyUrl"),
+            items.map { (it as? AppMenuNode.Item)?.label },
+        )
+        assertEquals(AppMenuNode.Separator, items[2])
+    }
+
     @Test
     fun `enabled flags mirror MenuUiState one to one`() {
         val ui = enabledUi()
