@@ -83,7 +83,7 @@ struct ArticlePagerView: View {
             set: { settledId in
                 guard ReaderPagingKt.settledPageSelects(settledId: settledId, selectedId: selectedId, isSwipeTarget: true),
                       let settledId, let index = pages.indexById[settledId] else { return }
-                home.viewModel.selectArticle(article: pages.rows[index])
+                home.selectArticle(pages.rows[index])
             }
         )
     }

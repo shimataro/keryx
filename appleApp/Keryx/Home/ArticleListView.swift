@@ -373,7 +373,7 @@ struct ArticleListView: View {
             viewModel: home.viewModel,
             onSelect: {
                 focusedPane.wrappedValue = .articleList
-                home.viewModel.selectArticle(article: article.row)
+                home.selectArticle(article.row)
                 onOpenArticle()
             },
             onContextMenuSelect: { selectForContextMenu(article.row) },
@@ -463,7 +463,7 @@ struct ArticleListView: View {
 
     private func selectForContextMenu(_ article: ArticleListRow) {
         if home.selectedArticleId != article.id {
-            home.viewModel.selectArticle(article: article)
+            home.selectArticle(article)
         }
     }
 

@@ -127,6 +127,26 @@ class ArticleDetailPaneTest {
         assertEquals(2, toggles)
     }
 
+    /**
+     * The button follows `shownUnread`, not the article's own flag: while a newly selected article loads, the
+     * pane still holds the previous (unread) one, and the button must already show the read state.
+     */
+    @Test
+    fun readButtonFollowsShownUnreadRatherThanTheArticlesOwnFlag() = runDesktopComposeUiTest {
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(isRead = 0L),
+                shownUnread = false,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+
+        onNodeWithContentDescription("未読に戻す").assertExists()
+        onNodeWithContentDescription("既読にする").assertDoesNotExist()
+    }
+
     @Test
     fun copyAndOpenAreDisabledForASelectedArticleWithNoUrl() = runDesktopComposeUiTest {
         setContent {

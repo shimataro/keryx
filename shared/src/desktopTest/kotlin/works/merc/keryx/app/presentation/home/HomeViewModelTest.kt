@@ -1770,6 +1770,110 @@ class HomeViewModelTest {
         assertEquals(1L, vm.selectedArticle.value?.is_read)
     }
 
+    /** An explicit unread on the displayed article is what the read/unread button shows as unread. */
+    @Test
+    fun selectedArticleShownUnreadFollowsAnExplicitUnreadOnTheSelection() = runTest {
+        val vm = newViewModelWithHydrationOn(HoldingDispatcher(), "a1")
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.selectedArticleShownUnread.value)
+
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.selectedArticleShownUnread.value)
+    }
+
+    /**
+     * While a newly selected article's body is still loading, `selectedArticle` is the previous one; its
+     * unread state must not be shown, or the button flips (and animates on iOS) when the new, read, article
+     * arrives.
+     */
+    @Test
+    fun selectedArticleShownUnreadIsFalseWhileANewSelectionLoads() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1", "a2")
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.selectedArticleShownUnread.value)
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertFalse(vm.selectedArticleShownUnread.value)
+
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertFalse(vm.selectedArticleShownUnread.value)
+    }
+
+    /**
+     * The SwiftUI app reads `isSelectedArticleShownUnread()` right after a selection, because the flow's values
+     * reach it a moment later: the answer must already be right the instant `selectArticle` returns, with no
+     * dispatcher turn in between.
+     */
+    @Test
+    fun isSelectedArticleShownUnreadIsRightTheInstantASelectionIsMade() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1", "a2")
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.isSelectedArticleShownUnread())
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+
+        assertFalse(vm.isSelectedArticleShownUnread())
+    }
+
+    /**
+     * Reopening the article that was just marked unread selects it again: it must show as read from that
+     * instant (the selection reads it), not once its body has reloaded — else the button starts out unread
+     * and then flips.
+     */
+    @Test
+    fun selectedArticleShownUnreadIsFalseAsSoonAsTheSameArticleIsReselected() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1")
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.isSelectedArticleShownUnread())
+
+        holding.hold()
+        vm.selectArticle(vm.row("a1"))
+        assertFalse(vm.isSelectedArticleShownUnread())
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.selectedArticleShownUnread.value)
+
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.selectedArticleShownUnread.value)
+        assertEquals(1L, dbIsRead("a1"))
+    }
+
+    /** A restored article is not re-marked read at startup, so one that is unread is shown as unread. */
+    @Test
+    fun selectedArticleShownUnreadIsTrueForARestoredUnreadArticle() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L)
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastArticleId = "a1"))
+
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(vm.selectedArticleShownUnread.value)
+    }
+
     @Test
     fun toggleStarUpdatesDbAndRefreshesSelectedStateOnlyWhenSelected() = runTest {
         db.insertFeed("f1")

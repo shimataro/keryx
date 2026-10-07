@@ -150,6 +150,7 @@ fun ArticleDetailPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val article by vm.selectedArticle.collectAsState()
+    val shownUnread by vm.selectedArticleShownUnread.collectAsState()
     val feedName by vm.selectedFeedName.collectAsState()
     val feedFaviconUrl by vm.selectedFeedFaviconUrl.collectAsState()
     // Only a touch-primary platform names the feed in each article's byline (see
@@ -195,6 +196,7 @@ fun ArticleDetailPane(
         feedFaviconUrl = feedFaviconUrl,
         feedsById = feedsById,
         modifier = modifier,
+        shownUnread = shownUnread,
         onActivated = onActivated,
         copyPulse = copyPulse,
         onCopyUrl = onCopyUrl,
@@ -235,6 +237,8 @@ internal fun ArticleDetailPaneContent(
     feedFaviconUrl: String? = null,
     feedsById: Map<String, Feeds> = emptyMap(),
     modifier: Modifier = Modifier,
+    /** Whether the read/unread button shows the unread state — see `HomeViewModel.selectedArticleShownUnread`. */
+    shownUnread: Boolean = article?.is_read == 0L,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
     onCopyUrl: (Articles) -> Unit = {},
@@ -332,6 +336,7 @@ internal fun ArticleDetailPaneContent(
                 feedFaviconUrl = feedFaviconUrl,
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
+                unread = shownUnread,
                 onToggleRead = onToggleRead,
                 onCopyUrl = { article?.let(onCopyUrl) },
                 onOpenInBrowser = { article?.let(onOpenInBrowser) },
@@ -462,6 +467,7 @@ private fun ArticleDetailToolbar(
     feedFaviconUrl: String?,
     showCopied: Boolean,
     onToggleStar: () -> Unit,
+    unread: Boolean,
     onToggleRead: () -> Unit,
     onCopyUrl: () -> Unit,
     onOpenInBrowser: () -> Unit,
@@ -470,7 +476,6 @@ private fun ArticleDetailToolbar(
 ) {
     val hasArticle = article != null
     val starred = article?.is_starred == 1L
-    val unread = article?.is_read == 0L
     // Separate rules, shared with every other route: any non-blank URL can be copied or shared, but
     // only an http(s) one is opened.
     val copyEnabled = hasArticle && hasUsableUrl(article.url)

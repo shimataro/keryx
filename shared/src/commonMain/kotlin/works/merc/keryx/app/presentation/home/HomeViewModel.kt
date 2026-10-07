@@ -466,7 +466,39 @@ class HomeViewModel(
      * [latestSelectionToken]. Only ever touched on the ViewModel's (main) context, so it needs no
      * synchronization.
      */
-    private var selectionCursorId: String? = null
+    private var selectionCursorId: String?
+        get() = _selectionCursor.value
+        set(value) {
+            _selectionCursor.value = value
+        }
+
+    /** Backing state of [selectionCursorId], kept observable for [selectedArticleShownUnread]. */
+    private val _selectionCursor = MutableStateFlow<String?>(null)
+
+    /**
+     * Whether the reader's read/unread button should show the unread state: [selectedArticle] is unread
+     * *and* is the article the selection cursor points at.
+     *
+     * [selectedArticle] lags the cursor while a newly selected article's body loads, so for that moment it
+     * is still the previous article. Drawing the previous article's unread state there would flip the
+     * button as soon as the new article (read by its selection) arrives, which iOS animates. Until then the
+     * button shows the state the incoming article will almost always have — read; an explicit unread
+     * made on it, or a restored unread article, is shown as soon as it applies.
+     */
+    val selectedArticleShownUnread: StateFlow<Boolean> = combine(_selectedArticle, _selectionCursor, this::shownUnread)
+        .stateIn(viewModelScope, started, false)
+
+    /**
+     * [selectedArticleShownUnread] right now, read synchronously.
+     *
+     * For a caller that cannot wait for the flow to deliver — the SwiftUI app copies the flow's values
+     * asynchronously, so a screen pushed in the same turn as a selection would first draw the stale value
+     * and then change it (and animate). Such a caller reads this just after the selection instead.
+     */
+    fun isSelectedArticleShownUnread(): Boolean = shownUnread(_selectedArticle.value, selectionCursorId)
+
+    private fun shownUnread(article: Articles?, cursor: String?): Boolean =
+        article != null && article.is_read == 0L && article.id == cursor
 
     /**
      * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
@@ -794,6 +826,12 @@ class HomeViewModel(
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
         selectionCursorId = article.id
+        // Selecting reads the article (its write is already enqueued above), so reselecting the one already
+        // on screen shows it read at once rather than once its body has reloaded — otherwise the reader
+        // toolbar's read/unread button would start out unread and then flip (which iOS animates).
+        if (_selectedArticle.value?.let { it.id == article.id && it.is_read == 0L } == true) {
+            _selectedArticle.update { it?.copy(is_read = 1L) }
+        }
         val token = ++latestSelectionToken
         // Stamped here: the hydration below must only touch the pin within the browsing context the
         // user actually selected in, not whichever one is current when its DB lookup returns.
@@ -972,7 +1010,7 @@ class HomeViewModel(
      *
      * The one implementation behind every route to "mark as read / unread" for the displayed article —
      * the Article menu's toggle item and the reader toolbar's read/unread button on both UIs — so the
-     * effect is always the opposite of the state the toolbar is showing (both read [selectedArticle]).
+     * effect is always the opposite of the state the toolbar is showing (see [selectedArticleShownUnread]).
      */
     fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
 

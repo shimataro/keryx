@@ -93,7 +93,7 @@ struct HomeView: View {
                     debounceSave(&articleListWidthSaveTask) { preferences.controller.setArticleListPaneWidth(width: Double(size.width)) }
                 }
         } detail: {
-            ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane)
+            ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane, isOnScreen: !(sidebarIsTopmost || articleListIsTopmost))
         }
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
@@ -336,7 +336,7 @@ struct HomeView: View {
             // though the field visually sits in the sidebar — matches Compose's own
             // `moveArticleSelectionFromSearchField` (`HomeScreen.kt`).
             case .search: moveArticleSelectionFromSearchField(by: -1)
-            default: home.viewModel.selectPrevious()
+            default: home.selectPreviousArticle()
             }
         case .down:
             if sidebarDialogs.isEditingInline { return .ignored }
@@ -344,12 +344,12 @@ struct HomeView: View {
             case .feedList: moveFeedListSelection(by: 1)
             case .reader: return .ignored
             case .search: moveArticleSelectionFromSearchField(by: 1)
-            default: home.viewModel.selectNext()
+            default: home.selectNextArticle()
             }
         case .nextArticle:
-            home.viewModel.selectNext()
+            home.selectNextArticle()
         case .previousArticle:
-            home.viewModel.selectPrevious()
+            home.selectPreviousArticle()
         case .left:
             switch focusedPane {
             case .articleList: focusedPane = .feedList
@@ -392,7 +392,7 @@ struct HomeView: View {
     /// afterwards. Mirrors Compose's own `moveArticleSelectionFromSearchField` (`HomeScreen.kt`).
     private func moveArticleSelectionFromSearchField(by delta: Int) {
         focusedPane = .articleList
-        if delta < 0 { home.viewModel.selectPrevious() } else { home.viewModel.selectNext() }
+        if delta < 0 { home.selectPreviousArticle() } else { home.selectNextArticle() }
     }
 
     /// Moves the sidebar's own selection by `delta` positions in `buildOrderedFeedListRows`'

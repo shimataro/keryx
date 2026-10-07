@@ -16,10 +16,17 @@ import UIKit
 /// here is a native `ContentUnavailableView` laid over the WebView. On macOS the WebView itself
 /// stays mounted underneath, so selecting an article never recreates it (and never flashes its
 /// default white background before the first paint).
+
 struct ArticleDetailView: View {
     let home: HomeObservable
     let preferences: PreferencesObservable
     var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    /// False while the collapsed (iPhone) stack has the reader popped off screen. Its toolbar is dropped
+    /// then: a navigation bar keeps a hidden column's items as they last were and only applies an update
+    /// once a push back to it has finished, so re-opening the reader for another article would show the
+    /// previous article's buttons through the whole push and then animate them to the new state. Built
+    /// afresh on each push instead, the toolbar starts out in the new article's state.
+    var isOnScreen: Bool = true
 
     @State private var copyConfirmed = false
 
@@ -48,7 +55,7 @@ struct ArticleDetailView: View {
             }
         }
         .focused(focusedPane, equals: .reader)
-        .toolbar { toolbarContent }
+        .toolbar { if isOnScreen { toolbarContent } }
         .onChange(of: home.copyPulse) { _, _ in
             copyConfirmed = true
             #if os(macOS)
@@ -146,7 +153,7 @@ struct ArticleDetailView: View {
             // Shows the state like the star does: a filled accent dot while unread (the article list's own
             // unread dot), an outline once read; the label names the action a tap performs. The same
             // `toggleReadSelected` the Article menu calls, so both always do the opposite of what is shown.
-            let unread = article?.is_read == 0
+            let unread = home.selectedArticleShownUnread
             Button {
                 home.viewModel.toggleReadSelected()
             } label: {
