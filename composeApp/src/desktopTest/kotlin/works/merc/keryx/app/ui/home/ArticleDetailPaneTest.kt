@@ -10,7 +10,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -145,6 +148,29 @@ class ArticleDetailPaneTest {
 
         onNodeWithContentDescription("未読に戻す").assertExists()
         onNodeWithContentDescription("既読にする").assertDoesNotExist()
+    }
+
+    /** The button's own label is the action; its state is exposed separately so a screen reader can say it. */
+    @Test
+    fun readButtonExposesTheArticlesStateToScreenReaders() = runDesktopComposeUiTest {
+        var unread by mutableStateOf(false)
+
+        setContent {
+            ArticleDetailPaneContent(
+                article = testArticle(isRead = 1L),
+                shownUnread = unread,
+                modifier = Modifier.size(PANE_TEST_SIZE),
+                reader = { _, _, _, _ -> Box(Modifier.fillMaxSize()) },
+            )
+        }
+        waitForIdle()
+        onNodeWithContentDescription("未読に戻す")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "既読"))
+
+        unread = true
+        waitForIdle()
+        onNodeWithContentDescription("既読にする")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "未読"))
     }
 
     @Test

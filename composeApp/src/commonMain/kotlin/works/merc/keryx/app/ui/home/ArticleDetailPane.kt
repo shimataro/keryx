@@ -45,6 +45,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,6 +96,8 @@ import works.merc.keryx.app.resources.article_no_title
 import works.merc.keryx.app.resources.article_open_in_browser
 import works.merc.keryx.app.resources.article_share
 import works.merc.keryx.app.resources.article_star
+import works.merc.keryx.app.resources.article_state_read
+import works.merc.keryx.app.resources.article_state_unread
 import works.merc.keryx.app.resources.article_unstar
 import works.merc.keryx.app.resources.article_url_copied
 import works.merc.keryx.app.resources.common_back
@@ -529,7 +532,14 @@ private fun ArticleDetailToolbar(
             val readToggleTooltip = stringResource(
                 if (unread) Res.string.article_mark_as_read else Res.string.article_mark_as_unread,
             )
-            TooltipIconButton(tooltip = readToggleTooltip, onClick = onToggleRead, enabled = hasArticle) {
+            // The label names the action, so the state itself is spoken separately for a screen reader.
+            val readStateText = stringResource(if (unread) Res.string.article_state_unread else Res.string.article_state_read)
+            TooltipIconButton(
+                tooltip = readToggleTooltip,
+                onClick = onToggleRead,
+                modifier = Modifier.semantics { stateDescription = readStateText },
+                enabled = hasArticle,
+            ) {
                 KeryxIcon(
                     if (unread) KeryxIcons.CircleFilled else KeryxIcons.Circle,
                     contentDescription = readToggleTooltip,

@@ -153,11 +153,12 @@ struct ArticleDetailView: View {
             // unread dot), an outline once read; the label names the action a tap performs. The same
             // `toggleReadSelected` the Article menu calls, so both always do the opposite of what is shown.
             let unread = home.selectedArticleShownUnread
+            let readToggleTitle = L(unread ? "article_mark_as_read" : "article_mark_as_unread")
             Button {
                 home.viewModel.toggleReadSelected()
             } label: {
                 Label {
-                    Text(L(unread ? "article_mark_as_read" : "article_mark_as_unread"))
+                    Text(readToggleTitle)
                 } icon: {
                     // Colored only while unread, like the star: the accent color is the article row's own
                     // unread dot, otherwise the toolbar's default monochrome applies.
@@ -172,7 +173,9 @@ struct ArticleDetailView: View {
             // (macOS honors the icon's `foregroundStyle` above instead).
             .tint(unread ? .accentColor : nil)
             .disabled(article == nil)
-            .help(L(unread ? "article_mark_as_read" : "article_mark_as_unread"))
+            .help(readToggleTitle)
+            // The title names the action; the state itself is spoken separately for VoiceOver.
+            .accessibilityValue(L(unread ? "article_state_unread" : "article_state_read"))
 
             Button {
                 if let article { openInBrowserIfAllowed(article.url) }
