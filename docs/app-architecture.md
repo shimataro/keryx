@@ -951,9 +951,12 @@ The reader toolbar's read/unread button is drawn from that cursor rather than fr
 which lags it while a body loads: `HomeViewModel.selectedArticleShownUnread` (and its synchronous twin
 `isSelectedArticleShownUnread()`, which the SwiftUI app reads right after a selection so the pushed reader
 does not first draw the previous article's state) is true only for an unread article the cursor points at
-(`isShownUnread`), so the button shows "read" for the incoming article until its body lands. The toggle is
-bound to the same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of
-what the button shows, so a tap during that window can never land on the previous article.
+(`isShownUnread`), so the button shows "read" for the incoming article until its body lands — unless a
+read/unread has already been made on it in that window, which the button reads back from `SelectionReadIntents`
+(the record `setRead` and `markAllRead` write and the hydration later applies; `pendingReadIntent`, counting
+only intents made after that selection) so it shows at once whichever route made it. The toggle is bound to the
+same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of what the button
+shows, so a tap during that window can never land on the previous article, and a second tap undoes the first.
 
 ## Navigation
 
