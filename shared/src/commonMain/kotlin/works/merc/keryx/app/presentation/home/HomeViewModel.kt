@@ -476,16 +476,11 @@ class HomeViewModel(
         }
 
     /**
-     * Whether the reader's read/unread button should show the unread state: [selectedArticle] is unread
-     * *and* is the article the selection cursor points at.
-     *
-     * [selectedArticle] lags the cursor while a newly selected article's body loads, so for that moment it
-     * is still the previous article. Drawing the previous article's unread state there would flip the
-     * button as soon as the new article (read by its selection) arrives, which iOS animates. Until then the
-     * button shows the state the incoming article will almost always have — read; an explicit unread
-     * made on it, or a restored unread article, is shown as soon as it applies.
+     * Whether the reader's read/unread button should show the unread state (see [isShownUnread]).
+     * An explicit unread made on the incoming article, or a restored unread article, is shown as soon
+     * as it applies.
      */
-    val selectedArticleShownUnread: StateFlow<Boolean> = combine(_selectedArticle, _selectionCursor, this::shownUnread)
+    val selectedArticleShownUnread: StateFlow<Boolean> = combine(_selectedArticle, _selectionCursor, ::isShownUnread)
         .stateIn(viewModelScope, started, false)
 
     /**
@@ -495,10 +490,7 @@ class HomeViewModel(
      * asynchronously, so a screen pushed in the same turn as a selection would first draw the stale value
      * and then change it (and animate). Such a caller reads this just after the selection instead.
      */
-    fun isSelectedArticleShownUnread(): Boolean = shownUnread(_selectedArticle.value, selectionCursorId)
-
-    private fun shownUnread(article: Articles?, cursor: String?): Boolean =
-        article != null && article.is_read == 0L && article.id == cursor
+    fun isSelectedArticleShownUnread(): Boolean = isShownUnread(_selectedArticle.value, selectionCursorId)
 
     /**
      * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
@@ -1011,8 +1003,17 @@ class HomeViewModel(
      * The one implementation behind every route to "mark as read / unread" for the displayed article —
      * the Article menu's toggle item and the reader toolbar's read/unread button on both UIs — so the
      * effect is always the opposite of the state the toolbar is showing (see [selectedArticleShownUnread]).
+     * That includes the moment a newly selected article's body is still loading: the target is the
+     * article the selection cursor points at, not the previous one [selectedArticle] still holds, so the
+     * tap never lands on a different article than the one the button is drawn for.
      */
-    fun toggleReadSelected() = _selectedArticle.value?.let { toggleRead(it.toListRow()) }
+    fun toggleReadSelected() {
+        val cursor = selectionCursorId ?: return
+        val target = currentArticles().firstOrNull { it.id == cursor }
+            ?: _selectedArticle.value?.takeIf { it.id == cursor }?.toListRow()
+            ?: return
+        setRead(target, read = isSelectedArticleShownUnread())
+    }
 
     /**
      * Toggles the starred state of an article.

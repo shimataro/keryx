@@ -1812,6 +1812,35 @@ class HomeViewModelTest {
     }
 
     /**
+     * While a newly selected article's body is still loading, the reader's button is drawn for the incoming
+     * article (shown read), so toggling must act on that article — not on the previous one the reader still
+     * holds. Here the previous article stays unread and the incoming one becomes unread.
+     */
+    @Test
+    fun toggleReadSelectedWhileANewSelectionLoadsActsOnTheIncomingArticle() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1", "a2")
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a1"))
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.selectedArticleShownUnread.value)
+        vm.toggleReadSelected()
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertTrue(vm.selectedArticleShownUnread.value)
+    }
+
+    /**
      * The SwiftUI app reads `isSelectedArticleShownUnread()` right after a selection, because the flow's values
      * reach it a moment later: the answer must already be right the instant `selectArticle` returns, with no
      * dispatcher turn in between.
