@@ -118,6 +118,163 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
 
+  # The SwiftUI macOS app (Developer ID signed, notarized, updated through Sparkle). It runs next to
+  # package-macos (the Compose build) until that job is retired and replaced by this one; until
+  # then deploy-pages does not wait for it, and its files carry a "-swiftui" suffix so they cannot
+  # overwrite package-macos's. While the Apple Developer ID / notarization secrets are not all
+  # configured it only reports what is missing and succeeds, building and uploading nothing — never
+  # an unsigned build. See docs/build.md's "Release (CD)".
+  package-macos-swiftui:
+    name: Package (macOS arm64, SwiftUI)
+    runs-on: macos-26
+    # Notarization alone can take a while; the build itself needs about ten minutes.
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      ARTIFACT_SUFFIX: -swiftui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      # Every step below is gated on this one. An unset secret reaches the script as an empty
+      # string, which counts as missing.
+      - name: Check configuration
+        id: config
+        env:
+          APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: .github/scripts/check-release-config.sh
+
+      # Same tag handling as package-macos: `v0.1.0` -> `0.1.0`, with an optional SemVer-style
+      # pre-release suffix, which also means no .dmg.
+      - name: Resolve version from tag
+        id: version
+        if: steps.config.outputs.configured == 'true'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          tag="$RELEASE_TAG"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Tag '$tag' is not a valid release version (got '$version')."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 25
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        if: steps.config.outputs.configured == 'true'
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install XcodeGen
+        if: steps.config.outputs.configured == 'true'
+        run: brew install xcodegen
+
+      # The certificate goes into a throwaway keychain that is deleted at the end; the profile and
+      # the notarization key are only written to the runner's temp directory.
+      - name: Import signing credentials
+        if: steps.config.outputs.configured == 'true'
+        env:
+          APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$APPLE_DEVELOPER_ID_CERT_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$APPLE_DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          printf '%s' "$APPLE_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.provisioningprofile"
+          printf '%s' "$APPLE_NOTARY_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Build, sign, notarize and package
+        if: steps.config.outputs.configured == 'true'
+        env:
+          # Pinned, not the image default, so a runner image update cannot change the toolchain
+          # (AppIcon.icon needs Xcode 26). Update together with the runner image.
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          IS_PRERELEASE: ${{ steps.version.outputs.is_prerelease }}
+          OUTPUT_DIR: ${{ runner.temp }}/release-assets
+          DERIVED_DATA: ${{ runner.temp }}/DerivedData
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROVISIONING_PROFILE_PATH: ${{ runner.temp }}/profile.provisioningprofile
+          NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_APPLE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_APPLE_CLIENT_ID }}
+        run: |
+          if [ -z "$GOOGLE_DRIVE_APPLE_CLIENT_ID" ]; then
+            echo "::warning::GOOGLE_DRIVE_APPLE_CLIENT_ID is not set; Google Drive will be hidden in this build."
+          fi
+          .github/scripts/package-macos-swiftui.sh
+
+      # Signs the archive with the release EdDSA key; Sparkle clients reject an update whose
+      # signature does not match the SUPublicEDKey in the app they are running.
+      - name: Generate the Sparkle appcast
+        if: steps.config.outputs.configured == 'true'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+          ZIP_PATH: ${{ runner.temp }}/release-assets/Keryx-${{ steps.version.outputs.version }}-macos-arm64${{ env.ARTIFACT_SUFFIX }}.zip
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          OUTPUT_DIR: ${{ runner.temp }}/release-assets
+          DERIVED_DATA: ${{ runner.temp }}/DerivedData
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: .github/scripts/generate-appcast.sh
+
+      # The only step that writes to the release, and it only runs if every step above succeeded.
+      - name: Attach to release
+        if: steps.config.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          ASSETS_DIR: ${{ runner.temp }}/release-assets
+          ZIP_NAME: Keryx-${{ steps.version.outputs.version }}-macos-arm64${{ env.ARTIFACT_SUFFIX }}.zip
+        run: |
+          set -euo pipefail
+          [ -s "$ASSETS_DIR/$ZIP_NAME" ] || { echo "::error::$ZIP_NAME was not produced."; exit 1; }
+          [ -s "$ASSETS_DIR/appcast.xml" ] || { echo "::error::appcast.xml was not produced."; exit 1; }
+          gh release upload "$RELEASE_TAG" "$ASSETS_DIR"/* --clobber
+
+      - name: Remove signing credentials
+        if: always() && steps.config.outputs.configured == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/profile.provisioningprofile" "$RUNNER_TEMP/AuthKey.p8"
+
   package-linux:
     name: Package (Linux ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
