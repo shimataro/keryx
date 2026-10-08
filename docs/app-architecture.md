@@ -1303,6 +1303,21 @@ around.
 - The SwiftUI app ships through **both the Mac App Store and Developer ID** (GitHub Releases +
   Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
   Developer ID build adds Sparkle, which the App Store build must not contain.
+  - **Where Sparkle sits today.** It is linked into the macOS build only (`project.yml`'s package
+    dependency is filtered to macOS, so the iOS build never sees it). `Update/AppUpdater.swift`
+    wraps it for the two controls the app has: the app menu's "Check for Updates…" and the General
+    tab's automatic-check toggle (the setting itself lives in Sparkle's own `UserDefaults`, not in
+    `LocalSettings`). `AppModel` holds it outside the SDK, so the menu item also works on the
+    startup-failure screen — a database that a newer build already migrated is cured by updating.
+  - **It is off until a release key exists.** While `SUPublicEDKey` is empty
+    (`Config/Shared.xcconfig`'s `SPARKLE_PUBLIC_ED_KEY`) the updater never starts, so the app makes
+    no update request and both controls are disabled. The feed is the `appcast.xml` asset of the
+    latest GitHub Release (`SUFeedURL`).
+  - **Sandbox.** The macOS build signs with `Keryx-macOS.entitlements` — the iOS file plus the
+    mach-lookup exception a sandboxed Sparkle needs to reach its installer
+    (`SUEnableInstallerLauncherService` in the Info.plist). Keep the two files' shared entries in
+    step. The macOS build also sets its run path to `Contents/Frameworks`; the default only fits iOS
+    and the app would fail to launch with "Library not loaded: Sparkle.framework".
 - **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
   share the bundle ID (`works.merc.keryx`) and the OPML document types. Launching one through
   LaunchServices (Finder, `open`) while the other is running just activates the running one.
