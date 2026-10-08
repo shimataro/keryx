@@ -1173,17 +1173,10 @@ class HomeViewModel(
             }
             _pinnedReadStates.value = pins
         } else {
-            // Starred: markAllAsRead is a no-op, don't alter read state. A selection still loading
-            // its body keeps the pin selectArticle gave it, just as the selected article keeps its own,
-            // and unread pins are kept for the same reason a re-trim keeps them (see unreadPins).
-            // Applied in one update, reusing existing pin instances, for the same reason as
-            // retrimPinnedReadStates.
-            val cursor = selectionCursorId
-            _pinnedReadStates.update { current ->
-                val pins = current.unreadPins().toMutableMap()
-                if (cursor != null && cursor != selected?.id) current[cursor]?.let { pins[cursor] = it }
-                pins + current.reusingPins(listOfNotNull(selected).associate { it.id to it.toListRow() })
-            }
+            // Starred: markAllAsRead is a no-op, don't alter read state — just the same re-trim every
+            // other "drop what has accumulated" moment runs, which keeps the unread pins and the
+            // selection (or a selection still loading its body) as it does there.
+            retrimPinnedReadStates()
         }
     }
 
