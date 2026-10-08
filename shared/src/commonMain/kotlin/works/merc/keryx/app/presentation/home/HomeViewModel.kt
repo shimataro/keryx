@@ -287,8 +287,8 @@ class HomeViewModel(
     // until the user switches filters, so the list doesn't shift under the user the instant they
     // unstar something. A separate map from _pinnedReadStates (rather than reusing it) because
     // the two have different reset rules: setUnreadOnly's retrimPinnedReadStates() only
-    // re-seeds the read pin, and conflating the two would make an unstarred article's grace period
-    // dependent on read-state bookkeeping it has nothing to do with.
+    // re-seeds the read-state pins, and conflating the two would make an unstarred article's grace
+    // period dependent on read-state bookkeeping it has nothing to do with.
     private val _pinnedUnstarredArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
 
     // Backs the "new articles" pill (ArticleListPane/NewArticlesPill). Declared before
@@ -1210,7 +1210,8 @@ class HomeViewModel(
     }
 
     /**
-     * Re-trims the read pin: keeps every unread pin and the selection's own read pin, drops the rest.
+     * Re-trims the read-state pins: keeps every unread pin and the selection's own read pin, drops
+     * the rest.
      *
      * The selection's pin (and its alive check) is decided before the map is touched, then applied in
      * one [MutableStateFlow.update] so the re-trim composes with a concurrent reconcile pass rather than
@@ -1223,10 +1224,10 @@ class HomeViewModel(
     }
 
     /**
-     * The unread entries of a read pin map. Always kept by a re-trim: an unread pin never keeps a row
-     * on screen by membership (its row passes the unread-only filter on its own is_read == 0), but
-     * until its "mark as unread" write lands the raw query still says read, and dropping it would make
-     * an unread-only list lose the row for that window (see setRead).
+     * The unread pins among a read-state pin map. Always kept by a re-trim: an unread pin never keeps
+     * a row on screen by membership (its row passes the unread-only filter on its own is_read == 0),
+     * but until its "mark as unread" write lands the raw query still says read, and dropping it would
+     * make an unread-only list lose the row for that window (see setRead).
      */
     private fun Map<String, ArticleListRow>.unreadPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 0L }
 

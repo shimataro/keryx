@@ -1217,9 +1217,9 @@ raw query's value otherwise. Under unread-only, a row with a *read* pin is kept 
 the pin alone ("currently unread enough to show"), while a row with an *unread* pin is shown on its
 own resolved `is_read == 0`. Unlike a read pin, an unread pin only corrects a row the raw query still
 returns and never re-adds one it has dropped (say, an article unstarred elsewhere while browsing
-Starred). The read pin holds the *confirmed value in either direction*:
-"mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
-it. Until that write lands the raw query still says "read", so without the pin an unread-only list
+Starred). A read-state pin holds the *confirmed value in either direction* (a read pin or an unread
+pin): "mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than
+removing it. Until that write lands the raw query still says "read", so without the pin an unread-only list
 would have no reason to keep the row. The reader's pager, which pages through `pagerArticles`, would
 then collapse to the selected article and rebuild every page it holds, visibly reloading the open
 article. The starred pin works the same way (`setStarred`). These pins are therefore a deliberately
@@ -1232,9 +1232,9 @@ window the write is in flight for.
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
-pinned. The selection's own read pin is likewise refreshed rather than dropped while its article is
-alive, so an external "mark read" of an article the user just marked unread cannot take the open
-article out of an unread-only list (and the reader's pager). A pin added or replaced after the snapshot was taken is never judged against it (compared
+pinned. The selection's own read-state pin is likewise refreshed rather than dropped while its
+article is alive, so an external "mark read" of an article the user just marked unread cannot take
+the open article out of an unread-only list (and the reader's pager). A pin added or replaced after the snapshot was taken is never judged against it (compared
 by identity): the flags were read before the write that justified that pin was enqueued, so a rapid
 read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB value. The
 read it does this with is deliberately routed through `dbWriteDispatcher`, the same serial
@@ -1257,7 +1257,7 @@ reading (`Single`), so re-selecting the active filter never has to distinguish a
 from an *entrance* into it the way it once did (see "iOS" in "Home's adaptive pane layout" above
 for that removed mechanism). A genuine filter change still clears `_selectedArticle` along with
 both pins on every path that reaches it, which matters for the pins' own sake — left set,
-`HomeViewModel.retrimPinnedReadStates` would simply re-seed the read pin from it the
+`HomeViewModel.retrimPinnedReadStates` would simply re-seed the read-state pins from it the
 next time the user toggles unread-only back on, defeating the reset entirely.
 
 `retrimPinnedReadStates()` re-trims `_pinnedReadStates` down to its unread entries plus
@@ -1266,7 +1266,7 @@ their "mark as unread" write may still be in flight, and dropping one would let 
 lose the row until that write lands. The result is applied in one `update`, keeping each surviving
 pin as the same instance, so a re-trim composes with a reconcile pass still waiting on its flags read
 instead of overwriting its verdicts or posing, to its identity check, as a fresh user write. Every
-call site that runs it is a moment the read pin is expected to have accumulated entries worth
+call site that runs it is a moment the read-state pins are expected to have accumulated entries worth
 dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
