@@ -50,8 +50,13 @@ jobs:
 
       # setup-gradle validates the Gradle wrapper jars by default (`validate-wrappers`), so
       # there is no separate wrapper-validation step.
+      # The cache is disabled in every job of this workflow: what it builds is signed and shipped,
+      # so it must never be assembled from cache entries another run wrote (cache poisoning).
+      # Releases are rare, so the cold build this forces costs little.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       # packageDmg is skipped for a pre-release tag (see package-windows' packageMsi for the same
       # reasoning), so createDistributable — normally pulled in transitively by packageDmg — is
@@ -187,6 +192,8 @@ jobs:
       - name: Set up Gradle
         if: steps.config.outputs.configured == 'true'
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       - name: Install XcodeGen
         if: steps.config.outputs.configured == 'true'
@@ -329,6 +336,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       # :composeApp is an android.kotlin.multiplatform.library (see its `android { compileSdk }`
       # block), so AGP needs ANDROID_HOME to resolve the *configuration* phase alone, even though
@@ -475,6 +484,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       # :composeApp is an android.kotlin.multiplatform.library, so AGP needs ANDROID_HOME to
       # resolve the configuration phase alone, even though this job only ever runs
@@ -582,6 +593,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       # createDistributable must be requested explicitly: packageMsi is not guaranteed to depend
       # on it (unlike packageDmg on macOS), so without it the "Zip non-packaged app image" step
@@ -679,6 +692,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       # `ubuntu-latest` (Ubuntu 24.04) already ships Android SDK Command Line Tools 12.0,
       # Build-tools 37.0.0, Platform-Tools 37.0.1, and SDK Platforms 34-37, so this step
@@ -852,6 +867,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       # Same as package-android: optional on ubuntu-latest, kept against runner-image changes.
       # Configuring :androidApp for the probe below needs the SDK.
