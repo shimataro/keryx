@@ -12,8 +12,9 @@ DEVELOPMENT_TEAM =
 
 // Sparkle's EdDSA public key (macOS only; Info.plist's SUPublicEDKey). Empty keeps the updater
 // switched off: it never starts, so the app makes no update request and the "Check for Updates…"
-// item stays disabled. Fill it in for the release build once the release EdDSA key pair exists
-// (`generate_keys`); the matching private key lives only in the release CI's secrets.
-SPARKLE_PUBLIC_ED_KEY =
+// item stays disabled. It is set for Release builds only, so a Debug build (a developer's own run)
+// never polls the update feed; to try the updater in Debug, set it in Local.xcconfig. The matching
+// private key lives only in the release CI's secrets (`SPARKLE_PRIVATE_KEY`).
+SPARKLE_PUBLIC_ED_KEY[config=Release] = +SWZTvxiCcBSrVag7icSc61j1kg18wcXh6uspKheK9Y=
 
 #include? "../Local.xcconfig"

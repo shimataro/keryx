@@ -312,7 +312,8 @@ jobs:
   build-apple:
     name: Build & Test (macos-latest / SwiftUI)
     runs-on: macos-latest
-    timeout-minutes: 30
+    # About 20 minutes including the Release archive; the rest is headroom.
+    timeout-minutes: 40
     # Job-level so every Gradle invocation here — including the one Scripts/build-shared.sh makes
     # from inside xcodebuild's prebuild phase — sees identical inputs and stays up-to-date instead
     # of re-linking the framework.
@@ -367,6 +368,26 @@ jobs:
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
           xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+
+      # The builds above are Debug, which compiles only the active architecture and never takes
+      # the Release-only settings release.yml's package-macos-swiftui relies on: the x86_64
+      # exclusion (EXCLUDED_ARCHS[sdk=macosx*] — a Release build would otherwise also build an
+      # Intel slice the XCFramework cannot satisfy) and SPARKLE_PUBLIC_ED_KEY[config=Release].
+      # An unsigned archive exercises that path before a release does; signing and notarization
+      # themselves still only run in release.yml.
+      - name: Verify SwiftUI macOS release archive
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/Keryx.xcarchive"
+          cd appleApp
+          xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
+            -archivePath "$archive" CODE_SIGNING_ALLOWED=NO
+          # plutil fails (and so does this step) when the plist or the key is missing.
+          key="$(plutil -extract SUPublicEDKey raw -o - "$archive/Products/Applications/Keryx.app/Contents/Info.plist")"
+          if [ -z "$key" ]; then
+            echo "::error::The Release archive has no SUPublicEDKey; Sparkle would never start in a released build."
+            exit 1
+          fi
 
       - name: Upload test reports
         uses: actions/upload-artifact@v7

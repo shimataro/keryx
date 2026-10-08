@@ -1303,7 +1303,8 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
     「アップデートを確認…」と、一般タブの自動確認トグル（設定そのものは `LocalSettings` ではなく Sparkle 自身の
     `UserDefaults` に置く）。`AppModel` は SDK の外で保持するので、起動失敗画面でもメニュー項目が使える——新しいビルドが
     すでにマイグレーションした DB は、更新すれば解決するため。
-  - **リリース用の鍵ができるまでは無効。** `SUPublicEDKey`（`Config/Shared.xcconfig` の `SPARKLE_PUBLIC_ED_KEY`）が空の間は
+  - **有効なのは Release ビルドのみ。** `Config/Shared.xcconfig` は `SPARKLE_PUBLIC_ED_KEY`（Info.plist の
+    `SUPublicEDKey`）を Release 構成にだけ設定する。これが空の間（Debug ビルド。`Local.xcconfig` で設定した場合を除く）は
     updater を開始しないので、アプリは更新確認のリクエストを一切出さず、2 つの操作はどちらも無効になる。フィードは最新の
     GitHub Release の `appcast.xml` アセット（`SUFeedURL`）。
   - **サンドボックス。** macOS ビルドは `Keryx-macOS.entitlements` で署名する——iOS 用ファイルに、サンドボックス下の Sparkle が
