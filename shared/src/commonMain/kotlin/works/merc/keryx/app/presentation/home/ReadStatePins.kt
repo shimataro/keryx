@@ -6,7 +6,8 @@ package works.merc.keryx.app.presentation.home
  *
  * Compared by identity, not equality: every write that pins a value creates a fresh instance, so a
  * re-pin with the same value is still a write a pass working from [snapshot] knows nothing about.
- * [HomeViewModel]'s reconcile and its read-state re-trim both judge a pin by this rule.
+ * [HomeViewModel]'s reconcile judges a pin by this rule; its read-state re-trim has a rule of its
+ * own ([retrimmedSelectionPin]), which keeps any existing pin whether replaced or not.
  */
 internal fun <T : Any> pinReplacedSince(snapshot: T?, current: T): Boolean = snapshot == null || current !== snapshot
 

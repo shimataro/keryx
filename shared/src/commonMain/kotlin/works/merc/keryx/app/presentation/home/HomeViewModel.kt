@@ -1328,7 +1328,7 @@ class HomeViewModel(
                         val old = readStateSnapshot[id]
                         val current = flags[id]
                         when {
-                            old == null || pinReplacedSince(old, pin) || current?.isRead == old.is_read -> put(id, pin)
+                            pinReplacedSince(old, pin) || current?.isRead == old?.is_read -> put(id, pin)
                             id == selectedId && current != null -> put(id, pin.copy(is_read = current.isRead))
                         }
                     }
