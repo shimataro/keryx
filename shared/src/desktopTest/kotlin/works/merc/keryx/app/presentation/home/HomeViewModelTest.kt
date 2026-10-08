@@ -1757,6 +1757,35 @@ class HomeViewModelTest {
     }
 
     /**
+     * A re-trim that runs while a reconcile pass waits on its flags read must compose with it: the
+     * selection's existing pin is kept as the same instance, so the reconcile still judges it (and
+     * refreshes it to the externally changed value) instead of mistaking a re-created copy for a fresh
+     * user write — which left the row read while the selection showed unread.
+     */
+    @Test
+    fun reTrimDuringAReconcileKeepsTheSelectionsRowAndToolbarInAgreement() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = false, writes = writes)
+        // A read pin the re-trim will drop, so the re-trimmed map differs from the current one (an equal
+        // map would leave the StateFlow, and with it a1's pin instance, untouched).
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+
+        writes.hold()
+        // Another device's sync propagates a "mark unread" of the selection; the reconcile it starts
+        // snapshots a1's read pin and waits on its flags read.
+        db.articlesQueries.updateReadStatus(is_read = 0L, read_at = 200L, updated_at = 200L, id = "a1")
+        testScheduler.advanceUntilIdle()
+        assertTrue(writes.hasQueued())
+        vm.setUnreadOnly(true)
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+        assertEquals(0L, vm.row("a1").is_read)
+    }
+
+    /**
      * An unread pin only corrects a row the raw query still returns; it never re-adds one. An article
      * marked unread under Starred and then unstarred elsewhere must leave the Starred list rather than
      * linger as a row that is neither starred nor in the filter.

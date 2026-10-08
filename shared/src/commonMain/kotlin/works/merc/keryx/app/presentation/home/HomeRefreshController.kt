@@ -30,8 +30,8 @@ import works.merc.keryx.app.domain.SyncTrigger
  * @param scope The ViewModel's scope (Main-confined), where every state write here happens.
  * @param dispatcher Where the blocking work (feed resolution, fetch, sync) runs.
  * @param currentFilter The article list's current selection, read when a pull starts.
- * @param repinSelected Re-trims the ViewModel's pinned read articles down to the current selection,
- *   before a refresh starts and again once it finishes (see `HomeViewModel.retrimmedPinnedReadStates`).
+ * @param repinSelected Re-trims the ViewModel's read-state pins to its unread pins plus the selection,
+ *   before a refresh starts and again once it finishes (see `HomeViewModel.retrimPinnedReadStates`).
  */
 internal class HomeRefreshController(
     private val scope: CoroutineScope,

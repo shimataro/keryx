@@ -286,7 +286,7 @@ class HomeViewModel(
     // Articles unstarred while browsing the Starred filter. Kept visible (with the star cleared)
     // until the user switches filters, so the list doesn't shift under the user the instant they
     // unstar something. A separate map from _pinnedReadStates (rather than reusing it) because
-    // the two have different reset rules: setUnreadOnly's retrimmedPinnedReadStates() only
+    // the two have different reset rules: setUnreadOnly's retrimPinnedReadStates() only
     // re-seeds the read pin, and conflating the two would make an unstarred article's grace period
     // dependent on read-state bookkeeping it has nothing to do with.
     private val _pinnedUnstarredArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
@@ -631,7 +631,7 @@ class HomeViewModel(
      * only is on, and the list currently on screen (search results while searching, the filter's
      * own list otherwise — the same resolution [pagerArticles] uses) has a read row other than the
      * selected one. Pressing the action re-runs the same re-trim [setUnreadOnly] already applies
-     * when turning unread-only on ([retrimmedPinnedReadStates]), so this only decides
+     * when turning unread-only on ([retrimPinnedReadStates]), so this only decides
      * whether that re-trim currently has anything left to do.
      */
     val canHideRead: StateFlow<Boolean> =
@@ -641,7 +641,7 @@ class HomeViewModel(
 
     /** Runs [ArticleListTopBar]'s "hide read" action — see [canHideRead]. */
     fun hideRead() {
-        if (canHideRead.value) _pinnedReadStates.value = retrimmedPinnedReadStates()
+        if (canHideRead.value) retrimPinnedReadStates()
     }
 
     // Requests to move keyboard focus into whichever composable currently owns the search field —
@@ -1176,11 +1176,14 @@ class HomeViewModel(
             // Starred: markAllAsRead is a no-op, don't alter read state. A selection still loading
             // its body keeps the pin selectArticle gave it, just as the selected article keeps its own,
             // and unread pins are kept for the same reason a re-trim keeps them (see unreadPins).
-            val pins = unreadPins().toMutableMap()
+            // Applied in one update, reusing existing pin instances, for the same reason as
+            // retrimPinnedReadStates.
             val cursor = selectionCursorId
-            if (cursor != null && cursor != selected?.id) _pinnedReadStates.value[cursor]?.let { pins[cursor] = it }
-            if (selected != null) pins[selected.id] = selected.toListRow()
-            _pinnedReadStates.value = pins
+            _pinnedReadStates.update { current ->
+                val pins = current.unreadPins().toMutableMap()
+                if (cursor != null && cursor != selected?.id) current[cursor]?.let { pins[cursor] = it }
+                pins + current.reusingPins(listOfNotNull(selected).associate { it.id to it.toListRow() })
+            }
         }
     }
 
@@ -1192,7 +1195,7 @@ class HomeViewModel(
     fun setUnreadOnly(value: Boolean) {
         if (value == unreadOnly.value) return
         if (value) {
-            _pinnedReadStates.value = retrimmedPinnedReadStates()
+            retrimPinnedReadStates()
         }
         when {
             _filter.value == ArticleFilter.Starred -> {
@@ -1209,17 +1212,27 @@ class HomeViewModel(
     /**
      * Re-trims the read pin: keeps every unread pin and the selection's own read pin, drops the rest.
      *
-     * @return [unreadPins] plus [selectedReadPin].
+     * The selection's pin (and its alive check) is decided before the map is touched, then applied in
+     * one [MutableStateFlow.update] so the re-trim composes with a concurrent reconcile pass rather than
+     * overwriting its verdicts — and an existing pin is kept as the same instance, since a re-created
+     * copy would look to that pass's identity check like a fresh user write it must not judge.
      */
-    private fun retrimmedPinnedReadStates(): Map<String, ArticleListRow> = unreadPins() + selectedReadPin()
+    private fun retrimPinnedReadStates() {
+        val selectedPin = selectedReadPin()
+        _pinnedReadStates.update { current -> current.unreadPins() + current.reusingPins(selectedPin) }
+    }
 
     /**
-     * The read pin's unread entries. Always kept by a re-trim: an unread pin never keeps a row on
-     * screen by membership (its row passes the unread-only filter on its own is_read == 0), but until
-     * its "mark as unread" write lands the raw query still says read, and dropping it would make an
-     * unread-only list lose the row for that window (see setRead).
+     * The unread entries of a read pin map. Always kept by a re-trim: an unread pin never keeps a row
+     * on screen by membership (its row passes the unread-only filter on its own is_read == 0), but
+     * until its "mark as unread" write lands the raw query still says read, and dropping it would make
+     * an unread-only list lose the row for that window (see setRead).
      */
-    private fun unreadPins(): Map<String, ArticleListRow> = _pinnedReadStates.value.filterValues { it.is_read == 0L }
+    private fun Map<String, ArticleListRow>.unreadPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 0L }
+
+    /** [pins], each replaced by this map's existing pin for the same id and value, if any (see [retrimPinnedReadStates]). */
+    private fun Map<String, ArticleListRow>.reusingPins(pins: Map<String, ArticleListRow>): Map<String, ArticleListRow> =
+        pins.mapValues { (id, pin) -> this[id]?.takeIf { it.is_read == pin.is_read } ?: pin }
 
     /**
      * Preserves the selected read article for continued display when it remains available.
@@ -1474,7 +1487,7 @@ class HomeViewModel(
      * every manual sync, so rows read during the previous browse don't outlive it.
      */
     private fun repinSelected() {
-        _pinnedReadStates.value = retrimmedPinnedReadStates()
+        retrimPinnedReadStates()
     }
 
     /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
