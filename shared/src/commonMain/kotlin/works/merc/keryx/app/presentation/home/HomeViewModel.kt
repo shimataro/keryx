@@ -1121,7 +1121,9 @@ class HomeViewModel(
         // Under search, exactly the unread rows the update below pins: taken from the pin-resolved
         // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
         // (its re-run is debounced) and would leave such a row pinned read but never written. The
-        // selection is added if unread, in case it is not among the results at all.
+        // selection is added if unread, in case it is not among the results at all. Pins can outrun
+        // the DB, so the write itself skips any id whose row is already read or tombstoned
+        // (updateReadStatusByIds).
         val idsToMark = if (active) {
             (visibleUnread.map { it.id } + listOfNotNull(selected?.takeIf { it.is_read == 0L }?.id)).distinct()
         } else {

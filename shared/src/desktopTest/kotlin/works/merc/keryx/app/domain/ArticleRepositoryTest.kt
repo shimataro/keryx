@@ -635,6 +635,41 @@ class ArticleRepositoryTest {
         }
     }
 
+    /**
+     * The ids can come from optimistic in-memory pins that outrun the DB, so the write itself must
+     * leave a tombstoned or already-read row alone rather than stamp a read event the user never
+     * made (its read_at/updated_at would ride the next sync).
+     */
+    @Test
+    fun markArticlesAsReadLeavesTombstonedAndAlreadyReadRowsUntouched() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("unread", "f1")
+            db.insertArticle("deleted", "f1")
+            driver.stampArticleDeleted("deleted", deletedAt = 100L)
+            db.insertArticle("read", "f1", isRead = 1L)
+            val deletedBefore = db.articlesQueries.getById("deleted").executeAsOne()
+            val readBefore = db.articlesQueries.getById("read").executeAsOne()
+            val repo = newRepo(db, driver, clock = Clock { 500L })
+
+            repo.markArticlesAsRead(listOf("unread", "deleted", "read"))
+
+            val unread = db.articlesQueries.getById("unread").executeAsOne()
+            assertEquals(1L, unread.is_read)
+            assertEquals(500L, unread.read_at)
+            val deleted = db.articlesQueries.getById("deleted").executeAsOne()
+            assertEquals(deletedBefore.is_read, deleted.is_read)
+            assertEquals(deletedBefore.read_at, deleted.read_at)
+            assertEquals(deletedBefore.updated_at, deleted.updated_at)
+            val read = db.articlesQueries.getById("read").executeAsOne()
+            assertEquals(readBefore.read_at, read.read_at)
+            assertEquals(readBefore.updated_at, read.updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun markArticlesAsReadEmptyListDoesNothing() {
         val (driver, db) = inMemoryDb()

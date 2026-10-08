@@ -188,8 +188,11 @@ UPDATE articles SET is_read = ?, read_at = ?, updated_at = ? WHERE id = ?;
 
 -- Marks a batch of articles read in one statement (callers chunk the id list to stay under
 -- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
+-- Guarded like the markAllRead* queries: the ids can come from optimistic in-memory pins that outrun
+-- the DB, so a tombstoned or already-read row is left alone rather than stamped with a read event
+-- (read_at/updated_at) the user never made, which would otherwise ride the next sync.
 updateReadStatusByIds:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ?;
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
 
 updateStarStatus:
 UPDATE articles SET is_starred = ?, starred_at = ?, updated_at = ? WHERE id = ?;
