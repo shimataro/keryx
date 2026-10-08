@@ -1234,6 +1234,14 @@ class HomeViewModel(
         pins.mapValues { (id, pin) -> this[id]?.takeIf { it.is_read == pin.is_read } ?: pin }
 
     /**
+     * The article the user has selected: the cursor while a newer selection is still loading its body
+     * (when [_selectedArticle] is still the one being replaced), the loaded selection otherwise. The one
+     * definition the re-trim and the reconcile both use, so they never protect different articles.
+     * Readable off the main thread, since [selectionCursorId] is backed by a StateFlow.
+     */
+    private fun currentSelectionId(): String? = selectionCursorId ?: _selectedArticle.value?.id
+
+    /**
      * Preserves the selected read article for continued display when it remains available.
      *
      * @return A map containing the selected article — or, while a newer selection is still
@@ -1241,7 +1249,7 @@ class HomeViewModel(
      */
     private fun selectedReadPin(): Map<String, ArticleListRow> {
         val selected = _selectedArticle.value
-        val cursor = selectionCursorId
+        val cursor = currentSelectionId()
         if (cursor != null && cursor != selected?.id) {
             // A newer selection is still loading its body, so [_selectedArticle] is the article
             // being replaced. That selection is the one to keep: its own pin (selectArticle pins a
@@ -1314,7 +1322,7 @@ class HomeViewModel(
                 // the starred pin below — except the selection's own pin, which while its article is
                 // alive is refreshed to the current value instead: under unread-only a dropped unread
                 // pin read externally would take the open article out of the list (and the pager).
-                val selectedId = _selectedArticle.value?.id
+                val selectedId = currentSelectionId()
                 buildMap {
                     pinned.forEach { (id, pin) ->
                         val old = readStateSnapshot[id]

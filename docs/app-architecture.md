@@ -1234,9 +1234,10 @@ window the write is in flight for.
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
-pinned. The selection's own read-state pin is likewise refreshed rather than dropped while its
-article is alive, so an external "mark read" of an article the user just marked unread cannot take
-the open article out of an unread-only list (and the reader's pager). The reconcile's flags read is
+pinned. The selection's own read-state pin (the cursor's, while a newer selection is still loading
+its body) is likewise refreshed rather than dropped while its article is alive, so an external
+"mark read" of an article the user just marked unread cannot take the open article out of an
+unread-only list (and the reader's pager). The reconcile's flags read is
 deliberately routed through `dbWriteDispatcher`, the same serial
 (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
 `toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and

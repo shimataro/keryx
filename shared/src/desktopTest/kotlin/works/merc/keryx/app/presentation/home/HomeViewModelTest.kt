@@ -1795,6 +1795,40 @@ class HomeViewModelTest {
     }
 
     /**
+     * While a newer selection is still loading its body, the reconcile must treat *it* (the cursor) as
+     * the selection, as the re-trim does: its unread pin read externally is refreshed, not dropped, so
+     * the article being opened does not leave the unread-only list.
+     */
+    @Test
+    fun reconcileTreatsASelectionStillLoadingAsTheSelection() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+        vm.setUnreadOnly(true)
+        settle(parking)
+        vm.selectArticle(vm.row("a1"))
+        settle(parking)
+
+        parking.hold()
+        vm.selectArticle(vm.row("a2"))
+        val hydration = parking.parkLast()
+        settle(parking)
+        vm.toggleRead(vm.row("a2"))
+        settle(parking)
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals("a1", vm.selectedArticle.value?.id)
+
+        markReadExternally("a2")
+        settle(parking)
+
+        assertEquals(1L, vm.row("a2").is_read)
+        parking.run(hydration)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals(1L, vm.row("a2").is_read)
+    }
+
+    /**
      * A re-trim that runs while a reconcile pass waits on its flags read must compose with it: the
      * selection's existing pin is kept as the same instance, so the reconcile still judges it (and
      * refreshes it to the externally changed value) instead of mistaking a re-created copy for a fresh
