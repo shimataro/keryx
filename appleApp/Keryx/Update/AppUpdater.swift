@@ -27,15 +27,21 @@ final class AppUpdater {
     let isConfigured: Bool
 
     /// The scheduled-check setting, kept by Sparkle itself (`UserDefaults`); mirrored here so
-    /// SwiftUI sees changes.
+    /// SwiftUI sees changes. Sparkle changes it too (the user's answer to its permission prompt),
+    /// which reaches the mirror through KVO.
     var automaticallyChecksForUpdates: Bool {
-        didSet { controller.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates }
+        didSet {
+            // Skip the KVO echo: writing back would re-fire KVO and reset Sparkle's check schedule.
+            guard controller.updater.automaticallyChecksForUpdates != automaticallyChecksForUpdates else { return }
+            controller.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+        }
     }
 
     @ObservationIgnored private let controller: SPUStandardUpdaterController
     /// Sparkle holds its user-driver delegate weakly.
     @ObservationIgnored private let userDriverDelegate: UserDriverDelegate
     @ObservationIgnored private var canCheckObservation: NSKeyValueObservation?
+    @ObservationIgnored private var automaticChecksObservation: NSKeyValueObservation?
 
     init() {
         let configured = Self.hasPublicKey
@@ -51,6 +57,16 @@ final class AppUpdater {
             [weak self] _, change in
             let value = change.newValue ?? false
             Task { @MainActor in self?.canCheckForUpdates = value }
+        }
+        automaticChecksObservation = controller.updater.observe(\.automaticallyChecksForUpdates, options: [.new]) {
+            [weak self] _, _ in
+            // Re-read rather than use the change's value: by the time this runs, a later toggle may
+            // already have superseded it.
+            Task { @MainActor in
+                guard let self else { return }
+                let current = self.controller.updater.automaticallyChecksForUpdates
+                if self.automaticallyChecksForUpdates != current { self.automaticallyChecksForUpdates = current }
+            }
         }
     }
 
