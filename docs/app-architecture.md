@@ -1213,8 +1213,9 @@ shifting under the user the instant they act on it: selecting an unread article 
 DB asynchronously (`dbWriteDispatcher`), but the row must show as read *now*, and — under
 unread-only — must not simply vanish from the list before the next filter switch. The `articles`
 combine resolves each row's `is_read`/`is_starred` from the pin when present, falling back to the
-raw query's value otherwise, and (under unread-only) treats pinned-read membership itself as
-"currently unread enough to show". The read pin holds the *confirmed value in either direction*:
+raw query's value otherwise. Under unread-only, a row with a *read* pin is kept by its membership in
+the pin alone ("currently unread enough to show"), while a row with an *unread* pin is shown on its
+own resolved `is_read == 0`. The read pin holds the *confirmed value in either direction*:
 "mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
 it. Removing it would leave a window — until that write lands, the raw query still says "read" —
 in which an unread-only list has no reason to keep the row, and the reader's pager (which pages
