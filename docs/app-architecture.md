@@ -1269,9 +1269,10 @@ next time the user toggles unread-only back on, defeating the reset entirely.
 `retrimPinnedReadStates()` re-trims `_pinnedReadStates` down to its unread entries plus
 the current selection (if it is read). Unread entries never keep a row on screen by membership, but
 their "mark as unread" write may still be in flight, and dropping one would let an unread-only list
-lose the row until that write lands. The result is applied in one `update`, keeping each surviving
-pin as the same instance, so a re-trim composes with a reconcile pass still waiting on its flags read
-instead of overwriting its verdicts or posing, to its identity check, as a fresh user write. Every
+lose the row until that write lands. The selection's pin is decided inside one `update`, against the
+map being updated: a pin a reconcile pass refreshed or dropped since keeps that verdict, and an
+unchanged pin stays the same instance rather than posing, to that pass's identity check, as a fresh
+user write. Every
 call site that runs it is a moment the read-state pins are expected to have accumulated entries worth
 dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide

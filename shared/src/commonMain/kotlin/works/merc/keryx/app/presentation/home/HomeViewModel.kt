@@ -1180,8 +1180,9 @@ class HomeViewModel(
         } else {
             // Starred: markAllAsRead is a no-op, don't alter read state — just the same re-trim every
             // other "drop what has accumulated" moment runs, which keeps the unread pins and the
-            // selection (or a selection still loading its body) as it does there.
-            retrimPinnedReadStates()
+            // selection (or a selection still loading its body) as it does there. Without the alive
+            // check, so the button never blocks the main thread on a DB read.
+            retrimPinnedReadStates(verifyAlive = false)
         }
     }
 
@@ -1211,14 +1212,38 @@ class HomeViewModel(
      * Re-trims the read-state pins: keeps every unread pin and the selection's own read pin, drops
      * the rest.
      *
-     * The selection's pin (and its alive check) is decided before the map is touched, then applied in
-     * one [MutableStateFlow.update] so the re-trim composes with a concurrent reconcile pass rather than
-     * overwriting its verdicts — and an existing pin is kept as the same instance, since a re-created
-     * copy would look to that pass's identity check like a fresh user write it must not judge.
+     * The selection's pin is decided against the map the [MutableStateFlow.update] applies to, not
+     * the one read before it, so the re-trim composes with a concurrent reconcile pass: a pin that
+     * pass refreshed or dropped since keeps its verdict, and an unchanged pin is kept as the same
+     * instance, since a re-created copy would look to that pass's identity check like a fresh user
+     * write it must not judge.
+     *
+     * @param verifyAlive Whether to check the selection is still alive first — a blocking DB read on
+     *   the caller's (main) thread. A tombstone a sync merge wrote does not necessarily tick the
+     *   reconcile, so the refresh/sync edges and the user's own re-trims check; mark-all-read under
+     *   Starred, which never did, skips it.
      */
-    private fun retrimPinnedReadStates() {
-        val selectedPin = selectedReadPin()
-        _pinnedReadStates.update { current -> current.unreadPins() + current.reusingPins(selectedPin) }
+    private fun retrimPinnedReadStates(verifyAlive: Boolean = true) {
+        val before = _pinnedReadStates.value
+        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
+        // step re-adds any read-pinned id missing from the repository result, which would put
+        // deleted content back into the visible list.
+        val candidate = selectionReadPinCandidate(before)
+            ?.takeIf { !verifyAlive || it.id in articleRepository.aliveArticleFlags(listOf(it.id)) }
+        _pinnedReadStates.update { current ->
+            val kept = current.unreadPins()
+            if (candidate == null) return@update kept
+            val prior = before[candidate.id]
+            val now = current[candidate.id]
+            when {
+                now == null && prior == null -> kept + (candidate.id to candidate)
+                // Dropped since (an external change or a tombstone): it stays dropped.
+                now == null -> kept
+                // Replaced since (a reconcile refresh, or a user write): its value stands.
+                now !== prior -> kept + (candidate.id to now)
+                else -> kept + (candidate.id to if (now.is_read == candidate.is_read) now else candidate)
+            }
+        }
     }
 
     /**
@@ -1229,10 +1254,6 @@ class HomeViewModel(
      */
     private fun Map<String, ArticleListRow>.unreadPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 0L }
 
-    /** [pins], each replaced by this map's existing pin for the same id and value, if any (see [retrimPinnedReadStates]). */
-    private fun Map<String, ArticleListRow>.reusingPins(pins: Map<String, ArticleListRow>): Map<String, ArticleListRow> =
-        pins.mapValues { (id, pin) -> this[id]?.takeIf { it.is_read == pin.is_read } ?: pin }
-
     /**
      * The article the user has selected: the cursor while a newer selection is still loading its body
      * (when [_selectedArticle] is still the one being replaced), the loaded selection otherwise. The one
@@ -1242,12 +1263,13 @@ class HomeViewModel(
     private fun currentSelectionId(): String? = selectionCursorId ?: _selectedArticle.value?.id
 
     /**
-     * Preserves the selected read article for continued display when it remains available.
+     * The read pin a re-trim keeps for the selection, before its alive check.
      *
-     * @return A map containing the selected article — or, while a newer selection is still
-     *   loading, that selection's own row — if it is read and not deleted; an empty map otherwise.
+     * @param pins The read-state pins the re-trim starts from.
+     * @return The selected article's row — or, while a newer selection is still loading, that
+     *   selection's own pin or listed row — if it is read; null otherwise.
      */
-    private fun selectedReadPin(): Map<String, ArticleListRow> {
+    private fun selectionReadPinCandidate(pins: Map<String, ArticleListRow>): ArticleListRow? {
         val selected = _selectedArticle.value
         val cursor = currentSelectionId()
         if (cursor != null && cursor != selected?.id) {
@@ -1255,19 +1277,10 @@ class HomeViewModel(
             // being replaced. That selection is the one to keep: its own pin (selectArticle pins a
             // row that was unread) or, for a row that was already read, its row as listed — or it
             // disappears from an unread-only list for good, since its hydration never pins.
-            val pending = _pinnedReadStates.value[cursor]
-                ?: currentArticles().firstOrNull { it.id == cursor && it.is_read == 1L }
-                ?: return emptyMap()
-            if (pending.id !in articleRepository.aliveArticleFlags(listOf(pending.id))) return emptyMap()
-            return mapOf(pending.id to pending)
+            return pins[cursor] ?: currentArticles().firstOrNull { it.id == cursor && it.is_read == 1L }
         }
-        if (selected == null || selected.is_read != 1L) return emptyMap()
-        // The selected row may have been tombstoned by a sync merge that landed while it was
-        // selected. Re-pinning it would put deleted content back into the visible list, because the
-        // `articles` merge step re-adds any pinned id missing from the repository result — the same
-        // reason [reconcilePinnedArticlesAndSelection] exists, and the same check it applies.
-        if (selected.id !in articleRepository.aliveArticleFlags(listOf(selected.id))) return emptyMap()
-        return mapOf(selected.id to selected.toListRow())
+        if (selected == null || selected.is_read != 1L) return null
+        return selected.toListRow()
     }
 
     /**
