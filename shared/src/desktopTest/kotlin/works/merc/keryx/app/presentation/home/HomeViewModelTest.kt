@@ -1871,6 +1871,35 @@ class HomeViewModelTest {
     }
 
     /**
+     * The selection's unread pin read externally (another device's sync) is refreshed to read rather
+     * than dropped: under unread-only a dropped pin would take the open article out of the list and the
+     * reader's pager, just as a "mark as unread" write in flight once did.
+     */
+    @Test
+    fun selectionsUnreadPinReadExternallyUnderUnreadOnlyIsRefreshedAndKeepsItListed() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        // Another device's sync propagates a "mark read" for the selection; the write ticks reconcile.
+        db.articlesQueries.updateReadStatus(is_read = 1L, read_at = 200L, updated_at = 200L, id = "a1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.articles.value.single { it.id == "a1" }.is_read)
+        assertEquals(1L, vm.pagerArticles.value.single { it.id == "a1" }.is_read)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
      * Turning unread-only on re-trims the read pin down to the selection; a selection whose "mark as
      * unread" write is still in flight must keep its unread pin there, or the row drops out of the new
      * unread-only list (the raw query still says read) and the reader's pager rebuilds every page.

@@ -1230,7 +1230,9 @@ window the write is in flight for.
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
-pinned. A pin added or replaced after the snapshot was taken is never judged against it (compared
+pinned. The selection's own read pin is likewise refreshed rather than dropped while its article is
+alive, so an external "mark read" of an article the user just marked unread cannot take the open
+article out of an unread-only list (and the reader's pager). A pin added or replaced after the snapshot was taken is never judged against it (compared
 by identity): the flags were read before the write that justified that pin was enqueued, so a rapid
 read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB value. The
 read it does this with is deliberately routed through `dbWriteDispatcher`, the same serial

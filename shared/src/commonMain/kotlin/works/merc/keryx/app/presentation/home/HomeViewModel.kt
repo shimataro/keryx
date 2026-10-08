@@ -1280,10 +1280,19 @@ class HomeViewModel(
                 // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
                 // pin is dropped once the article's current is_read no longer matches the pinned value
                 // (an external "mark unread"/"mark read", or a soft-delete tombstone), the same rule as
-                // the starred pin below.
-                pinned.filterKeys {
-                    val old = readSnapshot[it]
-                    old == null || pinned.getValue(it) !== old || flags[it]?.isRead == old.is_read
+                // the starred pin below — except the selection's own pin, which while its article is
+                // alive is refreshed to the current value instead: under unread-only a dropped unread
+                // pin read externally would take the open article out of the list (and the pager).
+                val selectedId = _selectedArticle.value?.id
+                buildMap {
+                    pinned.forEach { (id, pin) ->
+                        val old = readSnapshot[id]
+                        val current = flags[id]
+                        when {
+                            old == null || pin !== old || current?.isRead == old.is_read -> put(id, pin)
+                            id == selectedId && current != null -> put(id, pin.copy(is_read = current.isRead))
+                        }
+                    }
                 }
             }
         }
