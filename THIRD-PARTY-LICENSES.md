@@ -21,6 +21,11 @@ its respective license.
 | SQLite JDBC | Apache-2.0 | <https://github.com/xerial/sqlite-jdbc> |
 | SQLiter (Apple builds) | Apache-2.0 | <https://github.com/touchlab/SQLiter> |
 | SKIE runtime (Apple builds) | Apache-2.0 | <https://github.com/touchlab/SKIE> |
+| Sparkle (macOS builds) | MIT | <https://github.com/sparkle-project/Sparkle> |
+| bsdiff, bundled in Sparkle | BSD-2-Clause | <http://www.daemonology.net/bsdiff/> |
+| sais-lite, bundled in Sparkle | MIT | <https://sites.google.com/site/yuta256/sais> |
+| ed25519 (orlp), bundled in Sparkle | Zlib | <https://github.com/orlp/ed25519> |
+| SUSignatureVerifier (Mark Hamlin), bundled in Sparkle | BSD-2-Clause | <https://github.com/sparkle-project/Sparkle> |
 | Ktor | Apache-2.0 | <https://github.com/ktorio/ktor> |
 | Ksoup | Apache-2.0 | <https://github.com/fleeksoft/ksoup> |
 | Coil | Apache-2.0 | <https://github.com/coil-kt/coil> |
