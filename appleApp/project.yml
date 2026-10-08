@@ -23,6 +23,11 @@ settings:
     # iosSimulatorArm64 — see docs/app-architecture.md's "Apple targets in :shared"): the
     # XCFramework has no x86_64 simulator slice, so building for it would fail to link.
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    # The same for macOS: the XCFramework has only a macos-arm64 slice, and a Release build (the
+    # release archive) defaults to arm64 + x86_64, whose x86_64 pass cannot import the framework's
+    # Swift module ("cannot find type ..." on every shared type). Debug builds only the active arch,
+    # which is why CI never hit it.
+    EXCLUDED_ARCHS[sdk=macosx*]: x86_64
   configs:
     Debug: {}
     Release: {}
@@ -68,6 +73,9 @@ targets:
         # from the executable; the default run path (@executable_path/Frameworks) only fits iOS.
         # Without this the app dies at launch with "Library not loaded: Sparkle.framework". The
         # debug dylib Xcode splits the app into loads from Contents/MacOS too, hence @loader_path.
+        # Required for notarization (the Developer ID release build); harmless for a local ad-hoc
+        # build. Sparkle and the app are signed with the same identity, so library validation holds.
+        ENABLE_HARDENED_RUNTIME[sdk=macosx*]: YES
         LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]: "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks"
         # -ObjC force-loads every ObjC class/category in the static KeryxShared framework. Dropping
         # it builds, tests and launches fine, but only an empty-database launch was exercised and
