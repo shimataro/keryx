@@ -370,13 +370,11 @@ class HomeViewModel(
                 // longer returns (unstarred, moved out of the folder/tag) must leave rather than linger.
                 // That includes the selection: marked unread after leaving the query, it leaves the list
                 // while the reader keeps showing it.
-                val readPinnedIds = pinnedReadStates.filterValues { it.is_read == 1L }.keys
-                extra = (readPinnedIds + pinnedUnstarred.keys).filter { it !in presentPinnedIds }.map { id ->
+                val missingPinnedIds = (pinnedReadStates.readPins().keys + pinnedUnstarred.keys) - presentPinnedIds
+                extra = missingPinnedIds.map { id ->
+                    // A read-state pin, when there is one, already carries the row's read state.
                     val base = pinnedReadStates[id] ?: pinnedUnstarred.getValue(id)
-                    base.copy(
-                        is_read = pinnedReadStates[id]?.is_read ?: base.is_read,
-                        is_starred = pinnedUnstarred[id]?.is_starred ?: base.is_starred,
-                    )
+                    pinnedUnstarred[id]?.let { base.copy(is_starred = it.is_starred) } ?: base
                 }
             }
             val merged = if (extra.isEmpty()) resolvedList else (resolvedList + extra).sortedWith(
@@ -1160,12 +1158,10 @@ class HomeViewModel(
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
-            val newPins = visibleUnread.associate { article -> article.id to article.copy(is_read = 1L) }.toMutableMap()
-            if (selected != null) {
-                val updatedSelected = selected.copy(is_read = 1L, read_at = nowRead)
-                newPins[selected.id] = updatedSelected.toListRow()
-                _selectedArticle.value = updatedSelected
-            }
+            val updatedSelected = selected?.copy(is_read = 1L, read_at = nowRead)
+            val newPins = visibleUnread.associate { it.id to it.copy(is_read = 1L) } +
+                listOfNotNull(updatedSelected).associate { it.id to it.toListRow() }
+            if (updatedSelected != null) _selectedArticle.value = updatedSelected
             // Applied in one update so it composes with a concurrent reconcile pass rather than writing
             // back a snapshot taken before that pass dropped a pin. The new pins stay fresh instances:
             // they are new writes, which that pass's identity check must not judge.
@@ -1238,6 +1234,12 @@ class HomeViewModel(
      * make an unread-only list lose the row for that window (see setRead).
      */
     private fun Map<String, ArticleListRow>.unreadPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 0L }
+
+    /**
+     * The read pins among a read-state pin map — the only ones that keep a row on screen by
+     * membership, and so the only ones the `articles` combine re-adds a row for.
+     */
+    private fun Map<String, ArticleListRow>.readPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 1L }
 
     /**
      * The article the user has selected: the cursor while a newer selection is still loading its body
