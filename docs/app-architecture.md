@@ -1217,14 +1217,14 @@ raw query's value otherwise. Under unread-only, a row with a *read* pin is kept 
 the pin alone ("currently unread enough to show"), while a row with an *unread* pin is shown on its
 own resolved `is_read == 0`. The read pin holds the *confirmed value in either direction*:
 "mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
-it. Removing it would leave a window — until that write lands, the raw query still says "read" —
-in which an unread-only list has no reason to keep the row, and the reader's pager (which pages
-through `pagerArticles`) would collapse to the selected article and rebuild every page it holds,
-visibly reloading the open article. The starred pin works the same way (`setStarred`). These pins are therefore a deliberately optimistic cache that can
-outrun the DB by design — but nothing about setting one re-checks that the DB actually caught up, so
-without revalidation a pin could hide an external change (another device's sync propagating a "mark
-unread"/restar, or a soft-delete tombstone) forever, not just for the brief window the write is in
-flight for.
+it. Until that write lands the raw query still says "read", so without the pin an unread-only list
+would have no reason to keep the row. The reader's pager, which pages through `pagerArticles`, would
+then collapse to the selected article and rebuild every page it holds, visibly reloading the open
+article. The starred pin works the same way (`setStarred`). These pins are therefore a deliberately
+optimistic cache that can outrun the DB by design — but nothing about setting one re-checks that the
+DB actually caught up, so without revalidation a pin could hide an external change (another device's
+sync propagating a "mark unread"/restar, or a soft-delete tombstone) forever, not just for the brief
+window the write is in flight for.
 
 `HomeViewModel.reconcilePinnedArticlesAndSelection` closes that gap: it runs on every write to `articles` (via
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
@@ -1233,8 +1233,8 @@ selection, refreshing) anything whose article is gone or whose flags no longer m
 pinned. A pin added or replaced after the snapshot was taken is never judged against it (compared
 by identity): the flags were read before the write that justified that pin was enqueued, so a rapid
 read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB value. The
-read it does this with is deliberately routed through `dbWriteDispatcher`, the same
-serial (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
+read it does this with is deliberately routed through `dbWriteDispatcher`, the same serial
+(`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
 `toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and
 every one of those call sites dispatches that write *before* updating the pin/selection, never
 after. Since the pin/selection fields are `MutableStateFlow`s, observing a given pin here implies
@@ -1258,8 +1258,9 @@ next time the user toggles unread-only back on, defeating the reset entirely.
 
 `pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
 selection (if it is read, or carries an unread pin whose "mark as unread" write may still be in
-flight — dropping that pin would let an unread-only list lose the row until the write lands), and every call site that runs it is a moment the read pin is expected
-to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), either side
+flight — dropping that pin would let an unread-only list lose the row until the write lands), and
+every call site that runs it is a moment the read pin is expected to have accumulated entries worth
+dropping: turning unread-only on (`setUnreadOnly`), either side
 of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
