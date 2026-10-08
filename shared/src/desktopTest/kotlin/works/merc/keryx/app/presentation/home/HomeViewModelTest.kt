@@ -1858,6 +1858,34 @@ class HomeViewModelTest {
     }
 
     /**
+     * A row kept on screen only by its read pin (its feed moved out of the folder being viewed) is
+     * drawn from that pin, so starring it must update the pin too — or the row stays unstarred while
+     * the reader shows it starred.
+     */
+    @Test
+    fun starringASelectionKeptOnlyByItsReadPinStarsItsRow() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.moveFeed("f1", null)
+        testScheduler.advanceUntilIdle()
+        // Out of the folder's query, kept by the read pin.
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+
+        vm.toggleStarSelected()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.selectedArticle.value?.is_starred)
+        assertEquals(1L, vm.row("a1").is_starred)
+    }
+
+    /**
      * An unread pin only corrects a row the raw query still returns; it never re-adds one. An article
      * marked unread under Starred and then unstarred elsewhere must leave the Starred list rather than
      * linger as a row that is neither starred nor in the filter.

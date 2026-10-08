@@ -1085,6 +1085,11 @@ class HomeViewModel(
         } else if (starred) {
             _pinnedUnstarredArticles.update { it - article.id }
         }
+        // A row the raw query no longer returns is drawn from its read pin (the `articles` combine's
+        // extra rows), so that pin carries the star too. A fresh instance, as for any user write.
+        _pinnedReadStates.update { pins ->
+            pins[article.id]?.let { pins + (article.id to it.copy(is_starred = if (starred) 1L else 0L)) } ?: pins
+        }
         if (_selectedArticle.value?.id == article.id) {
             _selectedArticle.update { it?.copy(is_starred = if (starred) 1L else 0L) }
         }
