@@ -330,7 +330,15 @@ signed build:
 ```bash
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
+  -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
+
+The Debug builds compile only the active architecture and never take the Release-only settings, so
+the unsigned Release archive is what exercises them before a release does: the macOS x86_64
+exclusion and `SPARKLE_PUBLIC_ED_KEY` (the job also fails if the archived app's `SUPublicEDKey` is
+empty). Signing and notarization still only run in the release job (see "SwiftUI macOS app" under
+"Release (CD)").
 
 `KeryxTests` (Swift Testing, standalone/non-hosted) still runs signed with the CI's ad-hoc identity
 since it produces a `.xctest` bundle rather than a sandboxed app.

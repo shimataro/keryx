@@ -325,7 +325,14 @@ macOS の CI ジョブには Apple ID・チームが無いため、実際に署�
 ```bash
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
+  -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
+
+Debug ビルドはアクティブなアーキテクチャしかコンパイルせず、Release 限定の設定も通らない。そのため、
+それらをリリースより前に通すのは署名なしの Release archive の役目になる：macOS の x86_64 除外と
+`SPARKLE_PUBLIC_ED_KEY`（アーカイブしたアプリの `SUPublicEDKey` が空ならジョブは失敗する）。署名と公証は
+引き続きリリースジョブでのみ行う（「リリース（CD）」の「SwiftUI macOS アプリ」を参照）。
 
 `KeryxTests`（Swift Testing、単体で完結するテストバンドル）は、サンドボックス化されたアプリではなく
 `.xctest` バンドルを生成するだけなので、CI のアドホック ID のまま署名して実行できる。
