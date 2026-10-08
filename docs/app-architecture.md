@@ -1256,7 +1256,8 @@ both pins on every path that reaches it, which matters for the pins' own sake â€
 next time the user toggles unread-only back on, defeating the reset entirely.
 
 `pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
-selection (if it qualifies), and every call site that runs it is a moment the read pin is expected
+selection (if it is read, or carries an unread pin whose "mark as unread" write may still be in
+flight â€” dropping that pin would let an unread-only list lose the row until the write lands), and every call site that runs it is a moment the read pin is expected
 to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), either side
 of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide

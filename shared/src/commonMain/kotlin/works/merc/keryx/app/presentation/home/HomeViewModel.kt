@@ -596,6 +596,8 @@ class HomeViewModel(
                     else -> result
                 }
             }
+            // As in `articles`: a read pin keeps its row by membership, an unread pin's row passes on
+            // its own resolved is_read == 0.
             if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedRead } else merged
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
@@ -1198,10 +1200,11 @@ class HomeViewModel(
     }
 
     /**
-     * Preserves the selected read article for continued display when it remains available.
+     * Preserves the selected article's read pin for continued display when it remains available.
      *
      * @return A map containing the selected article — or, while a newer selection is still
-     *   loading, that selection's own row — if it is read and not deleted; an empty map otherwise.
+     *   loading, that selection's own row — if it is read or already pinned (an unread pin, whose
+     *   "mark as unread" write may still be in flight) and not deleted; an empty map otherwise.
      */
     private fun pinnedReadArticlesKeepingSelected(): Map<String, ArticleListRow> {
         val selected = _selectedArticle.value
@@ -1217,7 +1220,9 @@ class HomeViewModel(
             if (pending.id !in articleRepository.aliveArticleFlags(listOf(pending.id))) return emptyMap()
             return mapOf(pending.id to pending)
         }
-        if (selected == null || selected.is_read != 1L) return emptyMap()
+        // An unread pin is kept as well: until its "mark as unread" write lands the raw query still
+        // says read, and an unread-only list would drop the row for that window (see setRead).
+        if (selected == null || (selected.is_read != 1L && selected.id !in _pinnedReadArticles.value)) return emptyMap()
         // The selected row may have been tombstoned by a sync merge that landed while it was
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same

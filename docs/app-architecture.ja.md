@@ -1253,8 +1253,9 @@ tombstone）を、書き込みが in-flight の短い間だけでなく**永久�
 ユーザーが「未読のみ」を再度 ON にした瞬間に `HomeViewModel.pinnedReadArticlesKeepingSelected`
 がそこから既読ピンを再シードしてしまい、このリセット自体が意味を失ってしまう。
 
-`pinnedReadArticlesKeepingSelected()` は `_pinnedReadArticles` を、選択中の記事（それが対象条件を
-満たす場合のみ）だけに刈り込み直す。これを呼び出す箇所はどれも、既読ピンに削るだけの価値がある
+`pinnedReadArticlesKeepingSelected()` は `_pinnedReadArticles` を、選択中の記事（それが既読であるか、
+「未読にする」の書き込みがまだ反映されていないかもしれない未読ピンを持つ場合のみ——そのピンを捨てると、
+書き込みが反映されるまで未読のみ表示の一覧からその行が消えてしまう）だけに刈り込み直す。これを呼び出す箇所はどれも、既読ピンに削るだけの価値がある
 エントリが溜まっていることが見込まれる瞬間である——「未読のみ」を ON にした瞬間（`setUnreadOnly`）、
 リフレッシュの前後（`HomeRefreshController`）と手動同期の前後（`ManualSync.runs` の各イベント。設定画面から
 始めた同期も含む）、そして記事一覧ツールバーの
