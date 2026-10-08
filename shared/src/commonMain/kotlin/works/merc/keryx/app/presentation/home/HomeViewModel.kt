@@ -1113,22 +1113,6 @@ class HomeViewModel(
         // Without the `active ||` here, marksSelectedRead would say "false" while idsToMark still
         // marked every matched id — leaving the selected article inconsistently unmarked among them.
         val marksSelectedRead = active || filter != ArticleFilter.Starred
-        val idsToMark = if (active) {
-            val resultIds = _rawSearchResults.value.results
-                .filter { it.article.is_read == 0L }
-                .map { it.article.id }
-                .toMutableList()
-            // The raw search snapshot can lag an optimistic unread change (e.g. toggleReadSelected()
-            // immediately followed by markAllRead()). Include the selected article if it is currently
-            // unread so the operation is not treated as a no-op and the article is actually marked read.
-            _selectedArticle.value
-                ?.takeIf { it.is_read == 0L }
-                ?.id
-                ?.let { if (it !in resultIds) resultIds += it }
-            resultIds
-        } else {
-            emptyList()
-        }
         // Everything the optimistic update below needs is read here, *before* the write is
         // dispatched — not after. dbWriteDispatcher is Dispatchers.Unconfined in tests (and could
         // race a real write landing before this reads it in production), so reading `articles`
@@ -1136,6 +1120,15 @@ class HomeViewModel(
         // no unread articles left to pin at all.
         val selected = _selectedArticle.value
         val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
+        // Under search, exactly the unread rows the update below pins: taken from the pin-resolved
+        // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
+        // (its re-run is debounced) and would leave such a row pinned read but never written. The
+        // selection is added if unread, in case it is not among the results at all.
+        val idsToMark = if (active) {
+            (visibleUnread.map { it.id } + listOfNotNull(selected?.takeIf { it.is_read == 0L }?.id)).distinct()
+        } else {
+            emptyList()
+        }
         if (active && idsToMark.isEmpty()) {
             // Nothing in the current search results needs marking read; skip both the DB write and
             // the dependent search refresh.

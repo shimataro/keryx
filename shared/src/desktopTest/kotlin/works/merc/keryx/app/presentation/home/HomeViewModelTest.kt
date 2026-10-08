@@ -2137,6 +2137,36 @@ class HomeViewModelTest {
         assertEquals(0L, vm.row("a2").is_read)
     }
 
+    /**
+     * Under search, mark-all-read writes exactly the unread rows it pins: a row marked unread whose
+     * search snapshot still says read (the re-run has not caught up) is read again, not just pinned.
+     */
+    @Test
+    fun markAllReadUnderSearchMarksARowJustMarkedUnreadBeforeTheSnapshotCatchesUp() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
+        db.insertArticle("other", "f1", title = "Something else", content = "unrelated content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+
+        // No time advances between the two: the search re-run the unread write schedules has not run.
+        vm.toggleRead(vm.searchResults.value.single { it.article.id == "a2" }.article)
+        assertEquals(0L, dbIsRead("a2"))
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(1L, dbIsRead("a2"))
+        // Outside the match: proves this ran the search-scoped mark, not the whole filter's.
+        assertEquals(0L, dbIsRead("other"))
+    }
+
     /** Search results resolve an unread pin too, so a row marked unread shows (as unread) before its write lands. */
     @Test
     fun searchResultsUnderUnreadOnlyShowAnUnreadPinWhileItsWriteIsInFlight() = runTest {
