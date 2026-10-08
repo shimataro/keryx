@@ -881,17 +881,22 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. ジョブ定義は全部で7つ、そのうち並列に走るのは5つ（`package-macos`、`package-linux`、
-   `package-snap`、`package-windows`、`package-android`）——実行数は7つになる。`package-linux` と
+3. ジョブ定義は全部で9つ、そのうち並列に走るのは6つ（`package-macos`、`package-macos-swiftui`、
+   `package-linux`、`package-snap`、`package-windows`、`package-android`）——実行数は8つになる。
+   `package-linux` と
    `package-snap` はそれぞれ `x86_64`/`arm64` の matrix になっているため（前者は
    `ubuntu-latest`/`ubuntu-24.04-arm`、後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは
    先に `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
    *設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは
-   `ubuntu-latest` と違って Android SDK を同梱していないため）。残る2つはこの並列集合には
-   含まれない: `publish-play` は `package-android` にのみ依存し（詳細は後述の該当箇条書き参照）、
-   `deploy-pages` は Snap 以外の4ジョブにゲートされている（合計の実行数は9つ。後述）:
+   `ubuntu-latest` と違って Android SDK を同梱していないため）。残る3つはこの並列集合には
+   含まれない: `attach-fdroid-version`（「F-Droid への公開」参照）と `publish-play`（詳細は後述の該当箇条書き参照）は
+   `package-android` にのみ依存し、`deploy-pages` は Snap と SwiftUI 以外の4ジョブにゲートされている
+   （合計の実行数は11個。後述）:
 
    - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
+   - `package-macos-swiftui`: ネイティブ SwiftUI macOS アプリ用の別ジョブ。Developer ID 署名・公証・Sparkle の
+     appcast を担当する。必要な Secrets が揃うまでは何もせず、`deploy-pages` も待たない——後述の
+     「SwiftUI macOS アプリ」を参照。
    - Linux ランナーで（アーキテクチャごとに、jpackage 用の `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`x86_64`・`arm64` それぞれについて `Keryx-<version>-linux-<arch>.deb` と `Keryx-<version>-linux-<arch>.rpm` に加えて **`Keryx-<version>-linux-<arch>.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。片方のアーキテクチャの失敗（`fail-fast: false`）はもう片方の成果物を道連れにしない。
    - `package-snap` は独立したジョブで、`snapcraft` の失敗が上記 deb/rpm/zip ジョブの成果物を
      道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 系の固定ランナーが必要な
@@ -1110,6 +1115,65 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
 一切必要としない。成果物を実際に配布するワークフロー（`release.yml`、および後述の
 `publish-play.yml`）だけが、この経路の代わりに即座の失敗を選んでいる。
 
+### SwiftUI macOS アプリ（Developer ID・公証・Sparkle）
+
+ネイティブ SwiftUI macOS アプリ（`appleApp/`）は、Compose 版 macOS アプリをビルドする `package-macos` の隣に置いた
+`package-macos-swiftui` ジョブでリリースする。将来は `package-macos` を廃止して、このジョブに置き換える予定:
+Compose 側のジョブを削除し、このジョブを `package-macos` に改名し（`deploy-pages` が待つようになる）、
+`ARTIFACT_SUFFIX` をやめてファイル名を `Keryx-<version>-macos-arm64.{dmg,zip}` に戻し、README の macOS 向けの注記を更新する。
+それまでは 2 つは独立しており、SwiftUI ジョブのファイルには `-swiftui` 接尾辞を付ける
+（`Keryx-<version>-macos-arm64-swiftui.zip`）ので、Compose 版のファイルを置き換えてしまうことはない。
+
+**設定が揃うまでは何も起きない。** ジョブはチェックアウトの直後に `.github/scripts/check-release-config.sh` を実行し、
+下記の Secrets がすべて設定済みで空でないことを要求する。1 つでも欠けていれば、欠けているものの名前を通知に出し、
+ビルドもアップロードもせずに成功で終わる——Secrets を用意する前に切ったリリースには影響せず、未署名のビルドが
+リリースに載ることもない（以降のステップはすべてこの確認でゲートされている）。
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_DEVELOPER_ID_CERT_P12` | 秘密鍵つきの **Developer ID Application** 証明書を `.p12` で書き出して base64 にしたもの（`base64 -i certificate.p12`） |
+| `APPLE_DEVELOPER_ID_CERT_PASSWORD` | `.p12` の書き出し時のパスワード |
+| `APPLE_TEAM_ID` | 10 文字の Team ID |
+| `APPLE_PROVISIONING_PROFILE` | `works.merc.keryx` 用の **Developer ID provisioning profile** を base64 にしたもの。`keychain-access-groups` エンタイトルメントは制限付きで、これを認可するプロファイルが無いと署名済みアプリは起動時に拒否される |
+| `APPLE_NOTARY_KEY` | `notarytool` が使う App Store Connect API キー（`AuthKey_<id>.p8`）の中身 |
+| `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_ISSUER_ID` | そのキーの ID と Issuer ID |
+| `SPARKLE_PRIVATE_KEY` | Sparkle の `generate_keys -x` で書き出したリリース用 EdDSA 秘密鍵。対になる公開鍵は `appleApp/Config/Shared.xcconfig` の `SPARKLE_PUBLIC_ED_KEY` |
+
+`GOOGLE_DRIVE_APPLE_CLIENT_ID` は任意（無いとビルドは Google Drive を隠し、ジョブが警告する——前述の
+「Apple (macOS / iOS)」参照）。`DROPBOX_APP_KEY` と `ONEDRIVE_CLIENT_ID` は他のビルドと同じ Secrets を使う。
+
+設定が揃うと、ジョブは次を行う（スクリプトは `.github/scripts/` にあり、認証情報を除けば手元でも実行できる）:
+
+1. 証明書を使い捨てのキーチェーンに取り込み、プロファイルと公証用キーをランナーの一時ディレクトリに書く
+   （どれも最後に削除する）。
+2. `package-macos-swiftui.sh` を実行する: Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
+   Intel スライスが無いため）、署名（Hardened Runtime、Team ID、Sparkle の補助ツール）を検証し、アプリを公証して staple し、
+   staple 済みのアプリから `.zip` を作る——安定版のタグでは、署名・公証・staple 済みの `.dmg` も作る。公証のログは成功時
+   にも出力する（早めに直すべき警告が載るため）。署名設定は、生成する gitignore 済みの `appleApp/Local.xcconfig` 経由で
+   Xcode に渡す（Swift パッケージのターゲットに波及させないため）。開発者自身の同名ファイルがあると、スクリプトは
+   実行を拒否する。Sparkle の入れ子の補助ツールは、Sparkle の推奨どおり export 時に Xcode が再署名する。署名時に
+   `codesign --deep` を付けないこと。Xcode のバージョンは、ランナーイメージの既定ではなく固定している
+   （`DEVELOPER_DIR`）。ランナーイメージの更新に合わせて更新する。
+3. `generate-appcast.sh` を実行する: Sparkle の `generate_appcast` が `SPARKLE_PRIVATE_KEY` で `.zip` に署名し、
+   `appcast.xml` を書く。
+4. `.zip`・`.dmg`・`appcast.xml` を添付する——ここまでがすべて成功した場合にだけ動く最後のステップで。
+
+**バージョン。** `CFBundleShortVersionString` はタグの版（`0.1.0`、`0.1.0-beta.1`）、`CFBundleVersion` はワークフローの
+実行番号。Sparkle は後者で新旧を判断するため、増え続けてさえいればよい。
+
+**appcast** の項目は 1 つだけ: このリリースの `.zip` を、その GitHub Release のダウンロード URL で指す。アプリは
+`releases/latest/download/appcast.xml`（`SUFeedURL`）から読む。GitHub の「latest」はプレリリースを指さないので、
+利用者に届くのは安定版だけだが、プレリリースにもファイルは付けて、パイプラインの動作確認に使う。過去のリリース分は
+引き継がず、差分更新もチャンネルも作らない。`SPARKLE_PRIVATE_KEY` がアプリに埋め込んだ `SUPublicEDKey` と対応しないと、
+`generate_appcast` は（警告を出して）署名を付けない——全クライアントがその更新を拒否することになる——ので、
+`generate-appcast.sh` はその場合に失敗する。**秘密鍵を失うと、インストール済みのアプリを一切更新できなくなる**ので、
+GitHub 以外にバックアップを持つこと。`SPARKLE_PUBLIC_ED_KEY` は Release ビルドにだけ設定しているので、開発者の
+Debug 実行がフィードを見に行くことはない。
+
+**初回の実行。** Secrets が揃う前は、署名・公証の経路を GitHub 上で試せない。最初はプレリリースのタグで実行して、ログを
+読むこと。そのうえで、更新を端から端まで確認する: 生成した `appcast.xml` にビルドの `SUFeedURL` を向けて、古いビルドから
+更新する。
+
 ### GitHub Release のフラグ
 
 GitHub Release を**プレリリースとしてマークするのは、タグに SemVer のプレリリース接尾辞が付いて
@@ -1268,6 +1332,9 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 検出しない。
 
 ## 署名・公証（将来対応）
+
+> この節は Compose 版 macOS ビルド（`package-macos`）の話。SwiftUI macOS アプリの Developer ID 署名と公証は専用の
+> ジョブが行う。「リリース（CD）」の「SwiftUI macOS アプリ」を参照。
 
 現状、パッケージ成果物は **ad-hoc 署名**（実質未署名）。ローカルでの動作・開発には支障ないが、以下が
 必要になったら **Developer ID Application** で署名する（Apple Developer Program の有償登録が前提）:

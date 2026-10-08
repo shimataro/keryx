@@ -872,17 +872,22 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Seven job definitions in total, five of which (`package-macos`, `package-linux`, `package-snap`,
-   `package-windows`, `package-android`) run in parallel — seven actual runs, since `package-linux`
+3. Nine job definitions in total, six of which (`package-macos`, `package-macos-swiftui`,
+   `package-linux`, `package-snap`, `package-windows`, `package-android`) run in parallel — eight
+   actual runs, since `package-linux`
    and `package-snap` are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
    `ubuntu-24.04`/`ubuntu-24.04-arm` respectively; the arm64 legs run `android-actions/setup-android@v3`
    first, since `:composeApp`'s Android target needs `ANDROID_HOME` merely to configure, and the
    `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all). The remaining
-   two are not part of that parallel set: `publish-play` depends only on `package-android` (see its
-   own bullet below), and `deploy-pages` is gated on the four non-Snap `package-*` jobs
-   (nine actual runs in total; see below):
+   three are not part of that parallel set: `attach-fdroid-version` (see "Publishing to F-Droid")
+   and `publish-play` (see its own bullet below) depend only on `package-android`, and
+   `deploy-pages` is gated on the four non-Snap, non-SwiftUI `package-*` jobs (eleven actual runs
+   in total; see below):
 
    - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
+   - `package-macos-swiftui`, a separate job for the native SwiftUI macOS app: Developer ID signing,
+     notarization and a Sparkle appcast. It does nothing until its secrets are configured, and
+     `deploy-pages` does not wait for it — see "SwiftUI macOS app" below.
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, once per architecture, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-<arch>.deb`, `Keryx-<version>-linux-<arch>.rpm` **and `Keryx-<version>-linux-<arch>.zip`** for `<arch>` in `x86_64`, `arm64`. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). A failure on one architecture's leg (`fail-fast: false`) does not withhold the other's assets.
    - `package-snap`, a separate job (also an `x86_64`/`arm64` matrix, `ubuntu-24.04`/`ubuntu-24.04-arm`)
      so a `snapcraft` failure on either architecture can never block the deb/rpm/zip job above from
@@ -1097,6 +1102,74 @@ So plain `./gradlew build` — in CI or locally — needs no keystore at all; on
 actually distributes the result (`release.yml`, and `publish-play.yml` below) opts into hard
 failure instead.
 
+### SwiftUI macOS app (Developer ID, notarization, Sparkle)
+
+The native SwiftUI macOS app (`appleApp/`) is released by the `package-macos-swiftui` job, next to
+`package-macos`, which still builds the Compose macOS app. The plan is to retire `package-macos` and
+let this job take its place: delete the Compose job, rename this one to `package-macos` (so
+`deploy-pages` waits for it), drop `ARTIFACT_SUFFIX` so the files are named
+`Keryx-<version>-macos-arm64.{dmg,zip}` again, and update the macOS notes in the README. Until then
+the two are independent, and the SwiftUI job's files carry a `-swiftui` suffix
+(`Keryx-<version>-macos-arm64-swiftui.zip`) so they can never replace the Compose build's.
+
+**Nothing happens until it is configured.** Right after checking out, the job runs
+`.github/scripts/check-release-config.sh`, which requires every repository secret below to be set
+and non-empty. If any is missing, the job names the missing ones in a notice and succeeds without
+building or uploading anything: a release cut before the secrets exist is unaffected, and an
+unsigned build can never reach a release. (Every later step is gated on that check.)
+
+| Secret | Content |
+| --- | --- |
+| `APPLE_DEVELOPER_ID_CERT_P12` | The **Developer ID Application** certificate with its private key, exported as `.p12` and base64-encoded (`base64 -i certificate.p12`) |
+| `APPLE_DEVELOPER_ID_CERT_PASSWORD` | The password the `.p12` was exported with |
+| `APPLE_TEAM_ID` | The 10-character Team ID |
+| `APPLE_PROVISIONING_PROFILE` | The **Developer ID provisioning profile** for `works.merc.keryx`, base64-encoded. The `keychain-access-groups` entitlement is restricted: without a profile that authorizes it the signed app is refused at launch |
+| `APPLE_NOTARY_KEY` | The text of an App Store Connect API key (`AuthKey_<id>.p8`) used by `notarytool` |
+| `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_ISSUER_ID` | That key's ID and its issuer ID |
+| `SPARKLE_PRIVATE_KEY` | The release EdDSA private key, as exported by Sparkle's `generate_keys -x`. Its public half is `SPARKLE_PUBLIC_ED_KEY` in `appleApp/Config/Shared.xcconfig` |
+
+`GOOGLE_DRIVE_APPLE_CLIENT_ID` is optional (without it the build hides Google Drive, and the job
+warns — see "Apple (macOS / iOS)" above); `DROPBOX_APP_KEY` and `ONEDRIVE_CLIENT_ID` are the same
+secrets the other builds use.
+
+Once configured, the job (scripts under `.github/scripts/`, which can also be run by hand apart from
+the credentials):
+
+1. Imports the certificate into a throwaway keychain, and writes the profile and the notarization key
+   into the runner's temp directory (all removed at the end).
+2. Runs `package-macos-swiftui.sh`: archives and exports the app with Xcode (Release, arm64 only —
+   the shared framework has no Intel slice), verifies the signatures (hardened runtime, Team ID,
+   Sparkle's helper tools), notarizes and staples the app, and writes the `.zip` made from the stapled
+   app — plus, for a stable tag, a signed, notarized and stapled `.dmg`. The notary log is printed
+   even when notarization succeeds, since it lists warnings worth fixing early. The signing settings
+   reach Xcode through a generated, gitignored `appleApp/Local.xcconfig` (so they do not leak onto
+   Swift package targets), and the script refuses to run if a developer's own one exists.
+   Xcode itself re-signs Sparkle's nested helpers on export, as Sparkle recommends; never add
+   `codesign --deep` when signing. The Xcode version is pinned (`DEVELOPER_DIR`) rather than taken
+   from the runner image's default; update it together with the runner image.
+3. Runs `generate-appcast.sh`: Sparkle's `generate_appcast` signs the `.zip` with `SPARKLE_PRIVATE_KEY`
+   and writes `appcast.xml`.
+4. Attaches the `.zip`, the `.dmg` and `appcast.xml` — in a last step that only runs if everything
+   above succeeded.
+
+**Versions.** `CFBundleShortVersionString` is the tag's version (`0.1.0`, `0.1.0-beta.1`) and
+`CFBundleVersion` is the workflow run number. Sparkle decides what is newer by the latter, so it only
+has to keep increasing.
+
+**The appcast** has a single item: this release's `.zip`, at its GitHub Release download URL. The app
+reads it from `releases/latest/download/appcast.xml` (`SUFeedURL`); GitHub's "latest" never points at
+a pre-release, so only stable releases reach users, but a pre-release gets the file too, to exercise
+the pipeline. Earlier releases are not carried over, and no delta updates or channels are produced.
+`generate_appcast` leaves the signature out (with a warning) when `SPARKLE_PRIVATE_KEY` does not
+match the `SUPublicEDKey` embedded in the app — every client would reject such an update — and
+`generate-appcast.sh` fails in that case. **Losing the private key means no installed copy can be
+updated any more**, so keep a backup outside GitHub. `SPARKLE_PUBLIC_ED_KEY` is set for Release
+builds only, so a developer's Debug run never polls the feed.
+
+**First run.** The signing and notarization path cannot be exercised on GitHub before the secrets
+exist, so run it first with a pre-release tag and read the log. Then check an update end to end:
+point a build's `SUFeedURL` at the produced `appcast.xml` and update from an older build.
+
 ### GitHub Release flags
 
 A GitHub Release is marked **pre-release only when its tag carries a SemVer pre-release suffix**
@@ -1256,6 +1329,9 @@ step catches the most likely regression on every push, but not a new proprietary
 unrelated to Play services.
 
 ## Signing & Notarization (future)
+
+> This section is about the Compose macOS build (`package-macos`). The SwiftUI macOS app is
+> Developer ID signed and notarized by its own job; see "SwiftUI macOS app" under "Release (CD)".
 
 Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This is fine for local development, but the following requires **Developer ID Application** signing (requires paid Apple Developer Program enrollment):
 
