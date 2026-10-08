@@ -1233,16 +1233,10 @@ class HomeViewModel(
         _pinnedReadStates.update { current ->
             val kept = current.unreadPins()
             if (candidate == null) return@update kept
-            val prior = before[candidate.id]
-            val now = current[candidate.id]
-            when {
-                now == null && prior == null -> kept + (candidate.id to candidate)
-                // Dropped since (an external change or a tombstone): it stays dropped.
-                now == null -> kept
-                // Replaced since (a reconcile refresh, or a user write): its value stands.
-                now !== prior -> kept + (candidate.id to now)
-                else -> kept + (candidate.id to if (now.is_read == candidate.is_read) now else candidate)
+            val pin = retrimmedSelectionPin(before[candidate.id], current[candidate.id], candidate) { a, b ->
+                a.is_read == b.is_read
             }
+            if (pin == null) kept else kept + (candidate.id to pin)
         }
     }
 
@@ -1341,7 +1335,7 @@ class HomeViewModel(
                         val old = readStateSnapshot[id]
                         val current = flags[id]
                         when {
-                            old == null || pin !== old || current?.isRead == old.is_read -> put(id, pin)
+                            old == null || pinReplacedSince(old, pin) || current?.isRead == old.is_read -> put(id, pin)
                             id == selectedId && current != null -> put(id, pin.copy(is_read = current.isRead))
                         }
                     }
