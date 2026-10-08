@@ -1234,10 +1234,8 @@ cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dro
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
 pinned. The selection's own read-state pin is likewise refreshed rather than dropped while its
 article is alive, so an external "mark read" of an article the user just marked unread cannot take
-the open article out of an unread-only list (and the reader's pager). A pin added or replaced after the snapshot was taken is never judged against it (compared
-by identity): the flags were read before the write that justified that pin was enqueued, so a rapid
-read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB value. The
-read it does this with is deliberately routed through `dbWriteDispatcher`, the same serial
+the open article out of an unread-only list (and the reader's pager). The reconcile's flags read is
+deliberately routed through `dbWriteDispatcher`, the same serial
 (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
 `toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and
 every one of those call sites dispatches that write *before* updating the pin/selection, never
@@ -1249,6 +1247,11 @@ an external change and drop a pin that is actually still correct. This is a real
 genuine multi-threaded dispatchers (`Dispatchers.Default`), not something the existing single-
 scheduler test suite can reproduce directly — the invariant is enforced by code review and the
 comments at each call site, not a dedicated race test.
+
+The reconcile skips any pin added or replaced after its snapshot (compared by identity). Its flags
+were read before the write that justified such a pin was enqueued, so they have no verdict on it,
+and a rapid read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB
+value.
 
 A same-filter re-selection leaves both pins, the selection, and the cursor untouched
 (`selectFilter`'s early return above) — reasonable now that the article list is always either an
