@@ -1162,16 +1162,16 @@ class HomeViewModel(
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
-            val pins = _pinnedReadStates.value.toMutableMap()
-            visibleUnread.forEach { article ->
-                pins[article.id] = article.copy(is_read = 1L)
-            }
+            val newPins = visibleUnread.associate { article -> article.id to article.copy(is_read = 1L) }.toMutableMap()
             if (selected != null) {
                 val updatedSelected = selected.copy(is_read = 1L, read_at = nowRead)
-                pins[selected.id] = updatedSelected.toListRow()
+                newPins[selected.id] = updatedSelected.toListRow()
                 _selectedArticle.value = updatedSelected
             }
-            _pinnedReadStates.value = pins
+            // Applied in one update so it composes with a concurrent reconcile pass rather than writing
+            // back a snapshot taken before that pass dropped a pin. The new pins stay fresh instances:
+            // they are new writes, which that pass's identity check must not judge.
+            _pinnedReadStates.update { it + newPins }
         } else {
             // Starred: markAllAsRead is a no-op, don't alter read state — just the same re-trim every
             // other "drop what has accumulated" moment runs, which keeps the unread pins and the
