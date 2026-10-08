@@ -379,6 +379,11 @@
     <!-- Apple (SwiftUI) app only — the button that closes the iOS Settings sheet. macOS reaches
          Settings as a window of its own, and Compose's dialog closes through its own controls. -->
     <string name="apple_settings_done">完了</string>
+    <!-- Apple (SwiftUI) app only, macOS only — the Sparkle-driven update controls: the app menu
+         item and the General-tab toggle. Compose has its own update UI (update_* / settings_update_*),
+         and iOS updates through the App Store. -->
+    <string name="apple_menu_check_for_updates">アップデートを確認…</string>
+    <string name="apple_settings_auto_check_updates">アップデートを自動的に確認</string>
     <!-- Apple (SwiftUI) app only — the names of the tag colors, which VoiceOver reads and the iOS
          palette menu shows (Compose's swatches carry no names). Same order as TAG_COLOR_PALETTE. -->
     <string name="apple_tag_color_none">色なし</string>

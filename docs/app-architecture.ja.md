@@ -1298,6 +1298,18 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   残す。Windows・Linux・Android は引き続き Compose アプリを使う。
 - SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
   サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
+  - **Sparkle の現在の位置づけ。** macOS ビルドにのみリンクする（`project.yml` の package 依存は macOS に絞ってあり、iOS
+    ビルドからは見えない）。`Update/AppUpdater.swift` が包み、アプリが持つ 2 つの操作に使う：アプリメニューの
+    「アップデートを確認…」と、一般タブの自動確認トグル（設定そのものは `LocalSettings` ではなく Sparkle 自身の
+    `UserDefaults` に置く）。`AppModel` は SDK の外で保持するので、起動失敗画面でもメニュー項目が使える——新しいビルドが
+    すでにマイグレーションした DB は、更新すれば解決するため。
+  - **リリース用の鍵ができるまでは無効。** `SUPublicEDKey`（`Config/Shared.xcconfig` の `SPARKLE_PUBLIC_ED_KEY`）が空の間は
+    updater を開始しないので、アプリは更新確認のリクエストを一切出さず、2 つの操作はどちらも無効になる。フィードは最新の
+    GitHub Release の `appcast.xml` アセット（`SUFeedURL`）。
+  - **サンドボックス。** macOS ビルドは `Keryx-macOS.entitlements` で署名する——iOS 用ファイルに、サンドボックス下の Sparkle が
+    インストーラーへ到達するための mach-lookup 例外を足したもの（Info.plist の `SUEnableInstallerLauncherService`）。2 つの
+    ファイルに共通する項目は揃えておくこと。macOS ビルドは実行時検索パスも `Contents/Frameworks` に設定している。既定値は
+    iOS にしか合わず、そのままだと「Library not loaded: Sparkle.framework」で起動に失敗する。
 - **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）と OPML の
   ドキュメントタイプを共有する。一方の起動中に LaunchServices（Finder、`open`）経由でもう一方を起動しても、起動中の
   アプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI アプリを検知できないので、

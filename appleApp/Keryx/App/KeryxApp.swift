@@ -60,6 +60,7 @@ struct KeryxApp: App {
                     oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer,
                     settingsNavigation: model.settingsNavigation
                 )
+                .environment(model.updater)
             }
         }
         .windowResizability(.contentSize)

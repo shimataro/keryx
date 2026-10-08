@@ -64,6 +64,11 @@ targets:
         # macOS adds the mach-lookup exception Sparkle's sandboxed installer needs; keep the two
         # files' shared entries in step.
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Keryx/Keryx-macOS.entitlements
+        # A macOS bundle keeps embedded frameworks (Sparkle) in Contents/Frameworks, one level up
+        # from the executable; the default run path (@executable_path/Frameworks) only fits iOS.
+        # Without this the app dies at launch with "Library not loaded: Sparkle.framework". The
+        # debug dylib Xcode splits the app into loads from Contents/MacOS too, hence @loader_path.
+        LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]: "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks"
         # -ObjC force-loads every ObjC class/category in the static KeryxShared framework. Dropping
         # it builds, tests and launches fine, but only an empty-database launch was exercised and
         # no size/startup gain was measured, so it stays until a run through every screen shows

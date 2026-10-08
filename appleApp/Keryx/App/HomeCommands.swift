@@ -37,6 +37,11 @@ struct HomeCommands: Commands {
         CommandGroup(replacing: .appInfo) {
             Button(L("menu_help_about")) { openWindow(id: "about") }
         }
+        // Independent of `state`/`model.home`, so it also shows on the startup-failure screen.
+        CommandGroup(after: .appInfo) {
+            Button(L("apple_menu_check_for_updates")) { model.updater.checkForUpdates() }
+                .disabled(!model.updater.canCheckForUpdates)
+        }
         #endif
 
         CommandGroup(replacing: .newItem) {
