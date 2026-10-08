@@ -1826,7 +1826,9 @@ class HomeViewModelTest {
 
     /**
      * A pin replaced while a reconcile pass is waiting on its DB read is a write that read knows nothing
-     * about, so the pass must not drop it — even though its value disagrees with the (not yet updated) DB.
+     * about, so the pass must not drop it — even though the flags it read disagree with the pin the
+     * snapshot held. Uses a row other than the selection, so the selection's own refresh-on-mismatch rule
+     * cannot keep it either.
      */
     @Test
     fun reconcileKeepsAPinReplacedAfterItsSnapshot() = runTest {
@@ -1840,29 +1842,32 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
         testScheduler.advanceUntilIdle()
-        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        // a2 ends up with a landed unread pin: read, then unread again.
+        vm.toggleRead(vm.articles.value.single { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(vm.articles.value.single { it.id == "a2" })
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
 
         writes.hold()
-        // An article write ticks articleChangeSignal; the reconcile it starts snapshots the read pin
-        // (is_read = 1) and queues its flags read behind nothing but itself.
+        // An external "mark read" ticks articleChangeSignal; the reconcile it starts snapshots a2's
+        // unread pin and queues its flags read, which will see a2 as read.
         db.articlesQueries.updateReadStatus(is_read = 1L, read_at = 100L, updated_at = 100L, id = "a2")
         testScheduler.advanceUntilIdle()
         assertTrue(writes.hasQueued())
-        // The pin is replaced (unread) after that snapshot; park its DB write so the reconcile's
-        // flags read runs first and still sees a1 as read.
-        vm.toggleReadSelected()
-        writes.parkLast()
-        writes.drain()
+        // The user re-reads a2 after that snapshot: its pin is replaced (read), and its write queues
+        // behind the reconcile's flags read.
+        vm.toggleRead(vm.articles.value.single { it.id == "a2" })
         testScheduler.advanceUntilIdle()
-
-        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
-        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+        assertEquals(1L, vm.articles.value.single { it.id == "a2" }.is_read)
 
         writes.release()
         testScheduler.advanceUntilIdle()
 
-        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
-        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+        // The flags (read) disagreed with the snapshot's pin (unread), but the replaced read pin is kept,
+        // so a2 stays listed under unread-only.
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        assertEquals(1L, vm.articles.value.single { it.id == "a2" }.is_read)
     }
 
     /**
