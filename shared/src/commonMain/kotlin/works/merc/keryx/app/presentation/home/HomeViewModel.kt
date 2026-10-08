@@ -1125,12 +1125,11 @@ class HomeViewModel(
         val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
         // Under search, exactly the unread rows the update below pins: taken from the pin-resolved
         // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
-        // (its re-run is debounced) and would leave such a row pinned read but never written. The
-        // selection is added if unread, in case it is not among the results at all. Pins can outrun
-        // the DB, so the write itself skips any id whose row is already read or tombstoned
+        // (its re-run is debounced) and would leave such a row pinned read but never written. Pins
+        // can outrun the DB, so the write itself skips any id whose row is already read or tombstoned
         // (updateReadStatusByIds).
         val idsToMark = if (active) {
-            (visibleUnread.map { it.id } + listOfNotNull(selected?.takeIf { it.is_read == 0L }?.id)).distinct()
+            visibleUnread.map { it.id }.distinct()
         } else {
             emptyList()
         }
@@ -1165,7 +1164,9 @@ class HomeViewModel(
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
-            val updatedSelected = selected?.copy(is_read = 1L, read_at = nowRead)
+            val updatedSelected = selected
+                ?.takeIf { !active || it.id in idsToMark }
+                ?.copy(is_read = 1L, read_at = nowRead)
             val newPins = visibleUnread.associate { it.id to it.copy(is_read = 1L) } +
                 listOfNotNull(updatedSelected).associate { it.id to it.toListRow() }
             if (updatedSelected != null) _selectedArticle.value = updatedSelected

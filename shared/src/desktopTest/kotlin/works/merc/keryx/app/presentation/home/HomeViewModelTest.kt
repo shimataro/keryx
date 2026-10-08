@@ -4071,6 +4071,43 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun markAllReadWhileSearchingDoesNotMarkStaleSelectedArticleOutsideResults() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Something else", content = "other content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        // Make the selected article unread again, then change the query so it falls outside the results.
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        vm.setSearchQuery("other")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a2"), vm.searchResults.value.map { it.article.id })
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        // a2 is the only visible unread match and must be marked read.
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        // a1 is no longer in the search results, so markAllRead must not touch it.
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+    }
+
+    @Test
     fun toggleSortHasNoEffectOnSearchResultsOrdering() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", title = "Zzz Kotlin", content = "kotlin kotlin kotlin filler padding words")
