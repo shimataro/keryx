@@ -1628,7 +1628,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun selectFilterClearsPinnedReadArticlesAndSelection() = runTest {
+    fun selectFilterClearsPinnedReadStatesAndSelection() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -1651,7 +1651,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun selectFilterOnSameFilterKeepsPinnedReadArticlesAndSelection() = runTest {
+    fun selectFilterOnSameFilterKeepsPinnedReadStatesAndSelection() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -2939,7 +2939,7 @@ class HomeViewModelTest {
 
     /**
      * A manual sync started from another route (the cloud-sync settings tab) must re-trim Home's
-     * pinned read rows just like one started from Home's own button: the re-trim follows
+     * read-state pins just like one started from Home's own button: the re-trim follows
      * [ManualSync.runs], not [HomeViewModel.sync].
      */
     @Test
@@ -3903,7 +3903,7 @@ class HomeViewModelTest {
      * result under the new one.
      */
     @Test
-    fun changingSearchQueryKeepsPinnedReadArticles() = runTest {
+    fun changingSearchQueryKeepsPinnedReadStates() = runTest {
         db.insertFeed("f1")
         // a1 matches both queries, a2 only "Kotlin", a3 only "Java".
         db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)

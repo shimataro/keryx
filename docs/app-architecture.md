@@ -65,7 +65,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   `cloudStorageType` changes so a connect made in Setup reaches it; it is also the one
                   ManualSync — `canSyncNow`/`connected`/`disabledByAuth`/`syncNow()`/`runs` — that every "Sync now" route shares:
                   Home's toolbar button and the Feed menu (via `HomeViewModel.sync()`/`canSyncNow`/`cloudConnected`/`syncDisabledByAuth`,
-                  which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
+                  which re-trims its read-state pins on every `runs` edge) as well as the cloud-sync
                   tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
                   leaving file picking to each UI; OpmlOpenHandler (requestOpenedOpmlImport — an `.opml`
