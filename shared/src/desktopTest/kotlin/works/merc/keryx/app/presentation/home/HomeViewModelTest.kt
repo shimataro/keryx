@@ -1995,7 +1995,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun toggleReadSelectedOnAReadArticleClearsPinAndUpdatesSelectedState() = runTest {
+    fun toggleReadSelectedOnAReadArticlePinsItUnreadAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -2011,8 +2011,97 @@ class HomeViewModelTest {
 
         assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(0L, vm.selectedArticle.value?.is_read)
-        // Pin cleared: a1 is unread again and no longer needs pinning, so it stays visible naturally.
+        // Pinned unread (never removed), and unread in the DB too, so it stays visible as unread.
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("a1").is_read)
+    }
+
+    /** hideRead drops the read pins other than the selection's, but keeps an unread pin whose write is in flight. */
+    @Test
+    fun hideReadKeepsAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = true, writes = writes)
+        db.insertArticle("a3", "f1", isRead = 1L, publishedAt = 0L, createdAt = 0L)
+        // a2 read: a hideable row other than the selection.
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.canHideRead.value)
+
+        writes.hold()
+        vm.toggleRead(db.articlesQueries.getById("a3").executeAsOne().toListRow())
+        vm.hideRead()
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertEquals(1L, dbIsRead("a3"))
+        assertEquals(listOf("a1", "a3"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("a3").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1", "a3"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("a3").is_read)
+    }
+
+    /** Under Starred, markAllRead re-trims the read-state pins too, and must keep an in-flight unread pin. */
+    @Test
+    fun markAllReadUnderStarredKeepsAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        writes.hold()
+        vm.toggleRead(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertEquals(1L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+    }
+
+    /** Search results resolve an unread pin too, so a row marked unread shows (as unread) before its write lands. */
+    @Test
+    fun searchResultsUnderUnreadOnlyShowAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
+        ftsManagerIndexed(driver)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+
+        writes.hold()
+        vm.toggleRead(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the search snapshot still has a2 as read.
+        assertEquals(1L, dbIsRead("a2"))
+        assertEquals(0L, vm.searchResults.value.single { it.article.id == "a2" }.article.is_read)
+
+        writes.release()
+        advanceForArticleChangeDebounce()
+
+        assertEquals(0L, vm.searchResults.value.single { it.article.id == "a2" }.article.is_read)
     }
 
     /**
