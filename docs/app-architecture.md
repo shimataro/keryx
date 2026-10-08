@@ -1213,22 +1213,27 @@ shifting under the user the instant they act on it: selecting an unread article 
 DB asynchronously (`dbWriteDispatcher`), but the row must show as read *now*, and — under
 unread-only — must not simply vanish from the list before the next filter switch. The `articles`
 combine resolves each row's `is_read`/`is_starred` from the pin when present, falling back to the
-raw query's value otherwise. Under unread-only, a row with a *read* pin is kept by its membership in
-the pin alone ("currently unread enough to show"), while a row with an *unread* pin is shown on its
-own resolved `is_read == 0`. Unlike a read pin, an unread pin only corrects a row the raw query still
-returns and never re-adds one it has dropped (say, an article unstarred elsewhere while browsing
-Starred). That holds for the selection too, by design: a selected article that has already left the
-filter's query (kept on screen until then by its read pin) leaves the list once it is marked unread,
-while the reader keeps showing it. A read-state pin holds the *confirmed value in either direction* (a read pin or an unread
-pin): "mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than
-removing it. Until that write lands the raw query still says "read", so without the pin an unread-only list
+raw query's value otherwise.
+
+A read-state pin holds the *confirmed value in either direction* — a *read pin* or an *unread pin*:
+"mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
+it. Until that write lands the raw query still says "read", so without the pin an unread-only list
 would have no reason to keep the row. The reader's pager, which pages through `pagerArticles`, would
 then collapse to the selected article and rebuild every page it holds, visibly reloading the open
-article. The starred pin works the same way (`setStarred`). These pins are therefore a deliberately
-optimistic cache that can outrun the DB by design — but nothing about setting one re-checks that the
-DB actually caught up, so without revalidation a pin could hide an external change (another device's
-sync propagating a "mark unread"/restar, or a soft-delete tombstone) forever, not just for the brief
-window the write is in flight for.
+article. The starred pin works the same way (`setStarred`).
+
+Under unread-only, a row with a read pin is kept by its membership in the pin alone ("currently
+unread enough to show"), while a row with an unread pin is shown on its own resolved
+`is_read == 0`. Unlike a read pin, an unread pin only corrects a row the raw query still returns and
+never re-adds one it has dropped (say, an article unstarred elsewhere while browsing Starred). For
+the selection this means, by design, that a selected article which has already left the filter's
+query (kept on screen until then by its read pin) leaves the list once it is marked unread, while
+the reader keeps showing it.
+
+These pins are therefore a deliberately optimistic cache that can outrun the DB by design — but
+nothing about setting one re-checks that the DB actually caught up, so without revalidation a pin
+could hide an external change (another device's sync propagating a "mark unread"/restar, or a
+soft-delete tombstone) forever, not just for the brief window the write is in flight for.
 
 `HomeViewModel.reconcilePinnedArticlesAndSelection` closes that gap: it runs on every write to `articles` (via
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
