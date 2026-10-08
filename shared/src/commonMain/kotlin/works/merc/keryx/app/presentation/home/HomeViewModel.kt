@@ -353,11 +353,11 @@ class HomeViewModel(
                 var resolved: MutableList<ArticleListRow>? = null
                 val presentPinnedIds = HashSet<String>()
                 list.forEachIndexed { index, row ->
-                    val readPin = pinnedReadStates[row.id]
+                    val readStatePin = pinnedReadStates[row.id]
                     val unstarPin = pinnedUnstarred[row.id]
-                    if (readPin == null && unstarPin == null) return@forEachIndexed
+                    if (readStatePin == null && unstarPin == null) return@forEachIndexed
                     presentPinnedIds += row.id
-                    val isRead = readPin?.is_read ?: row.is_read
+                    val isRead = readStatePin?.is_read ?: row.is_read
                     val isStarred = unstarPin?.is_starred ?: row.is_starred
                     if (isRead != row.is_read || isStarred != row.is_starred) {
                         val target = resolved ?: list.toMutableList().also { resolved = it }
@@ -593,13 +593,16 @@ class HomeViewModel(
             // `is_read` from `pinnedReadStates` and `is_starred` from `pinnedUnstarred`, matching the
             // merge in the `articles` flow above.
             val merged = raw.map { result ->
-                val readPin = pinnedReadStates[result.article.id]
+                val readStatePin = pinnedReadStates[result.article.id]
                 val unstarPin = pinnedUnstarred[result.article.id]
                 when {
-                    readPin != null && unstarPin != null -> result.copy(
-                        article = result.article.copy(is_read = readPin.is_read, is_starred = unstarPin.is_starred),
+                    readStatePin != null && unstarPin != null -> result.copy(
+                        article = result.article.copy(
+                            is_read = readStatePin.is_read,
+                            is_starred = unstarPin.is_starred,
+                        ),
                     )
-                    readPin != null -> result.copy(article = result.article.copy(is_read = readPin.is_read))
+                    readStatePin != null -> result.copy(article = result.article.copy(is_read = readStatePin.is_read))
                     unstarPin != null -> result.copy(article = result.article.copy(is_starred = unstarPin.is_starred))
                     else -> result
                 }
@@ -1277,10 +1280,10 @@ class HomeViewModel(
      * below.
      */
     private suspend fun reconcilePinnedArticlesAndSelection() {
-        val readSnapshot = _pinnedReadStates.value
+        val readStateSnapshot = _pinnedReadStates.value
         val unstarredSnapshot = _pinnedUnstarredArticles.value
         val selectedSnapshot = _selectedArticle.value
-        if (readSnapshot.isEmpty() && unstarredSnapshot.isEmpty() && selectedSnapshot == null) return
+        if (readStateSnapshot.isEmpty() && unstarredSnapshot.isEmpty() && selectedSnapshot == null) return
         // Resolved with ONE query covering all three, outside the update lambdas below. Per-pin
         // getById was both an N+1 (each one a full row on its own connection) and inside a CAS retry
         // loop that can re-run it; "mark all read" sizes the read map to the whole visible list, and
@@ -1299,9 +1302,9 @@ class HomeViewModel(
         // executes *after* that write lands, never seeing a stale pre-write value that would
         // otherwise make this function incorrectly drop a still-valid optimistic pin/selection. This
         // is not "same thread, so it's safe" — the two sides run on different dispatchers.
-        val ids = readSnapshot.keys + unstarredSnapshot.keys + listOfNotNull(selectedSnapshot?.id)
+        val ids = readStateSnapshot.keys + unstarredSnapshot.keys + listOfNotNull(selectedSnapshot?.id)
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
-        if (readSnapshot.isNotEmpty()) {
+        if (readStateSnapshot.isNotEmpty()) {
             _pinnedReadStates.update { pinned ->
                 // A pin added or replaced since the snapshot is kept: `flags` was read before the write
                 // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
@@ -1314,7 +1317,7 @@ class HomeViewModel(
                 val selectedId = _selectedArticle.value?.id
                 buildMap {
                     pinned.forEach { (id, pin) ->
-                        val old = readSnapshot[id]
+                        val old = readStateSnapshot[id]
                         val current = flags[id]
                         when {
                             old == null || pin !== old || current?.isRead == old.is_read -> put(id, pin)
@@ -1475,16 +1478,8 @@ class HomeViewModel(
         feedRepository = feedRepository,
         activityCenter = activityCenter,
         currentFilter = { _filter.value },
-        repinSelected = ::repinSelected,
+        retrimPins = ::retrimPinnedReadStates,
     )
-
-    /**
-     * Re-trims the pinned read articles down to the current selection — around every refresh and
-     * every manual sync, so rows read during the previous browse don't outlive it.
-     */
-    private fun repinSelected() {
-        retrimPinnedReadStates()
-    }
 
     /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
     fun refreshFeed(feed: Feeds) = refreshController.refreshFeed(feed)
@@ -1529,7 +1524,7 @@ class HomeViewModel(
         // read until now don't carry into the synced list; after, against the selection as it
         // stands then (it may have changed while the sync ran).
         viewModelScope.launch {
-            manualSync.runs.collect { repinSelected() }
+            manualSync.runs.collect { retrimPinnedReadStates() }
         }
     }
 
