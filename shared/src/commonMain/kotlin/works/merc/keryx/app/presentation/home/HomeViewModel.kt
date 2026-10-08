@@ -1168,8 +1168,9 @@ class HomeViewModel(
             _pinnedReadArticles.value = pins
         } else {
             // Starred: markAllAsRead is a no-op, don't alter read state. A selection still loading
-            // its body keeps the pin selectArticle gave it, just as the selected article keeps its own.
-            val pins = mutableMapOf<String, ArticleListRow>()
+            // its body keeps the pin selectArticle gave it, just as the selected article keeps its own,
+            // and unread pins are kept for the same reason a re-trim keeps them (see unreadPins).
+            val pins = unreadPins().toMutableMap()
             val cursor = selectionCursorId
             if (cursor != null && cursor != selected?.id) _pinnedReadArticles.value[cursor]?.let { pins[cursor] = it }
             if (selected != null) pins[selected.id] = selected.toListRow()
@@ -1200,13 +1201,27 @@ class HomeViewModel(
     }
 
     /**
-     * Preserves the selected article's read pin for continued display when it remains available.
+     * Re-trims the read pin: keeps every unread pin and the selection's own read pin, drops the rest.
+     *
+     * @return [unreadPins] plus [selectedReadPin].
+     */
+    private fun pinnedReadArticlesKeepingSelected(): Map<String, ArticleListRow> = unreadPins() + selectedReadPin()
+
+    /**
+     * The read pin's unread entries. Always kept by a re-trim: an unread pin never keeps a row on
+     * screen by membership (its row passes the unread-only filter on its own is_read == 0), but until
+     * its "mark as unread" write lands the raw query still says read, and dropping it would make an
+     * unread-only list lose the row for that window (see setRead).
+     */
+    private fun unreadPins(): Map<String, ArticleListRow> = _pinnedReadArticles.value.filterValues { it.is_read == 0L }
+
+    /**
+     * Preserves the selected read article for continued display when it remains available.
      *
      * @return A map containing the selected article — or, while a newer selection is still
-     *   loading, that selection's own row — if it is read or already pinned (an unread pin, whose
-     *   "mark as unread" write may still be in flight) and not deleted; an empty map otherwise.
+     *   loading, that selection's own row — if it is read and not deleted; an empty map otherwise.
      */
-    private fun pinnedReadArticlesKeepingSelected(): Map<String, ArticleListRow> {
+    private fun selectedReadPin(): Map<String, ArticleListRow> {
         val selected = _selectedArticle.value
         val cursor = selectionCursorId
         if (cursor != null && cursor != selected?.id) {
@@ -1220,9 +1235,7 @@ class HomeViewModel(
             if (pending.id !in articleRepository.aliveArticleFlags(listOf(pending.id))) return emptyMap()
             return mapOf(pending.id to pending)
         }
-        // An unread pin is kept as well: until its "mark as unread" write lands the raw query still
-        // says read, and an unread-only list would drop the row for that window (see setRead).
-        if (selected == null || (selected.is_read != 1L && selected.id !in _pinnedReadArticles.value)) return emptyMap()
+        if (selected == null || selected.is_read != 1L) return emptyMap()
         // The selected row may have been tombstoned by a sync merge that landed while it was
         // selected. Re-pinning it would put deleted content back into the visible list, because the
         // `articles` merge step re-adds any pinned id missing from the repository result — the same

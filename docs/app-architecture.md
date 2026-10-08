@@ -1258,11 +1258,11 @@ both pins on every path that reaches it, which matters for the pins' own sake �
 `HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read pin from it the
 next time the user toggles unread-only back on, defeating the reset entirely.
 
-`pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
-selection (if it is read, or carries an unread pin whose "mark as unread" write may still be in
-flight — dropping that pin would let an unread-only list lose the row until the write lands), and
-every call site that runs it is a moment the read pin is expected to have accumulated entries worth
-dropping: turning unread-only on (`setUnreadOnly`), either side
+`pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to its unread entries plus
+the current selection (if it is read). Unread entries never keep a row on screen by membership, but
+their "mark as unread" write may still be in flight, and dropping one would let an unread-only list
+lose the row until that write lands. Every call site that runs it is a moment the read pin is
+expected to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), either side
 of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling

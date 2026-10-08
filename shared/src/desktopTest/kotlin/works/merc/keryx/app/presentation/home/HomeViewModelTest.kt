@@ -1900,6 +1900,40 @@ class HomeViewModelTest {
     }
 
     /**
+     * A re-trim keeps every unread pin, not just the selection's: a row other than the selection marked
+     * unread must not drop out of the new unread-only list while its write is still in flight.
+     */
+    @Test
+    fun turningUnreadOnlyOnKeepsAnUnselectedRowsUnreadPinWhileItsWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 1L, publishedAt = 1L, createdAt = 1L)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(false)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        writes.hold()
+        vm.toggleRead(vm.articles.value.single { it.id == "a2" })
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a2" }.is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a2" }.is_read)
+    }
+
+    /**
      * Turning unread-only on re-trims the read pin down to the selection; a selection whose "mark as
      * unread" write is still in flight must keep its unread pin there, or the row drops out of the new
      * unread-only list (the raw query still says read) and the reader's pager rebuilds every page.
