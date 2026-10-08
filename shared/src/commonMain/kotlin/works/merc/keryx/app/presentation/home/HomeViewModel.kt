@@ -281,12 +281,12 @@ class HomeViewModel(
     // read styling) until the user reloads/syncs or switches filters, so the list doesn't shift under
     // the user while reading down an unread list. An unread pin is what keeps the row from dropping out
     // of an unread-only list in the window before its "mark as unread" write lands.
-    private val _pinnedReadArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
+    private val _pinnedReadStates = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
 
     // Articles unstarred while browsing the Starred filter. Kept visible (with the star cleared)
     // until the user switches filters, so the list doesn't shift under the user the instant they
-    // unstar something. A separate map from _pinnedReadArticles (rather than reusing it) because
-    // the two have different reset rules: setUnreadOnly's pinnedReadArticlesKeepingSelected() only
+    // unstar something. A separate map from _pinnedReadStates (rather than reusing it) because
+    // the two have different reset rules: setUnreadOnly's retrimmedPinnedReadStates() only
     // re-seeds the read pin, and conflating the two would make an unstarred article's grace period
     // dependent on read-state bookkeeping it has nothing to do with.
     private val _pinnedUnstarredArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
@@ -330,13 +330,13 @@ class HomeViewModel(
 
     val articles: StateFlow<List<ArticleListRow>> =
         combine(
-            filteredArticles, unreadOnly, _newestFirst, _pinnedReadArticles, _pinnedUnstarredArticles,
-        ) { list, unread, newest, pinnedRead, pinnedUnstarred ->
+            filteredArticles, unreadOnly, _newestFirst, _pinnedReadStates, _pinnedUnstarredArticles,
+        ) { list, unread, newest, pinnedReadStates, pinnedUnstarred ->
             // Nothing pinned is the common case, and then neither a resolved copy nor the id set has
             // a reader — skip building either rather than touching every row on every emission.
             val resolvedList: List<ArticleListRow>
             val extra: List<ArticleListRow>
-            if (pinnedRead.isEmpty() && pinnedUnstarred.isEmpty()) {
+            if (pinnedReadStates.isEmpty() && pinnedUnstarred.isEmpty()) {
                 resolvedList = list
                 extra = emptyList()
             } else {
@@ -353,7 +353,7 @@ class HomeViewModel(
                 var resolved: MutableList<ArticleListRow>? = null
                 val presentPinnedIds = HashSet<String>()
                 list.forEachIndexed { index, row ->
-                    val readPin = pinnedRead[row.id]
+                    val readPin = pinnedReadStates[row.id]
                     val unstarPin = pinnedUnstarred[row.id]
                     if (readPin == null && unstarPin == null) return@forEachIndexed
                     presentPinnedIds += row.id
@@ -365,10 +365,10 @@ class HomeViewModel(
                     }
                 }
                 resolvedList = resolved ?: list
-                extra = (pinnedRead.keys + pinnedUnstarred.keys).filter { it !in presentPinnedIds }.map { id ->
-                    val base = pinnedRead[id] ?: pinnedUnstarred.getValue(id)
+                extra = (pinnedReadStates.keys + pinnedUnstarred.keys).filter { it !in presentPinnedIds }.map { id ->
+                    val base = pinnedReadStates[id] ?: pinnedUnstarred.getValue(id)
                     base.copy(
-                        is_read = pinnedRead[id]?.is_read ?: base.is_read,
+                        is_read = pinnedReadStates[id]?.is_read ?: base.is_read,
                         is_starred = pinnedUnstarred[id]?.is_starred ?: base.is_starred,
                     )
                 }
@@ -383,7 +383,7 @@ class HomeViewModel(
             // unread-only — id membership, not staleness, is what this needs. A row with an unread pin
             // was resolved to is_read == 0 and passes the first clause.
             val filtered = if (unread) {
-                merged.filter { it.is_read == 0L || it.id in pinnedRead }
+                merged.filter { it.is_read == 0L || it.id in pinnedReadStates }
             } else {
                 merged
             }
@@ -520,7 +520,7 @@ class HomeViewModel(
     )
 
     /**
-     * Identity of the current browsing context, bumped whenever the whole pinned-read set is dropped
+     * Identity of the current browsing context, bumped whenever the whole read-state pin set is dropped
      * for a fresh one ([selectFilter], and a query change in [setSearchQuery]).
      *
      * [selectionCursorId] cannot stand in for this: it carries no scope identity, so a selection
@@ -577,15 +577,17 @@ class HomeViewModel(
     // a changed query text means a new search, so leaving a pinned article from the previous
     // query stuck in results that no longer match would be surprising.
     val searchResults: StateFlow<List<ArticleSearchResult>> =
-        combine(_rawSearchResults, unreadOnly, _pinnedReadArticles, _pinnedUnstarredArticles) { snapshot, unread, pinnedRead, pinnedUnstarred ->
+        combine(
+            _rawSearchResults, unreadOnly, _pinnedReadStates, _pinnedUnstarredArticles,
+        ) { snapshot, unread, pinnedReadStates, pinnedUnstarred ->
             val raw = snapshot.results
             // Apply only the optimistic read-state from pinned (never the whole snapshot): other
             // fields — notably is_starred — must come from the fresh re-search, or starring an
             // already-read result would be hidden by the stale pinned copy. Field-wise merge of
-            // `is_read` from `pinnedRead` and `is_starred` from `pinnedUnstarred`, matching the
+            // `is_read` from `pinnedReadStates` and `is_starred` from `pinnedUnstarred`, matching the
             // merge in the `articles` flow above.
             val merged = raw.map { result ->
-                val readPin = pinnedRead[result.article.id]
+                val readPin = pinnedReadStates[result.article.id]
                 val unstarPin = pinnedUnstarred[result.article.id]
                 when {
                     readPin != null && unstarPin != null -> result.copy(
@@ -598,7 +600,7 @@ class HomeViewModel(
             }
             // As in `articles`: a read pin keeps its row by membership, an unread pin's row passes on
             // its own resolved is_read == 0.
-            if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedRead } else merged
+            if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedReadStates } else merged
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
     /**
@@ -625,7 +627,7 @@ class HomeViewModel(
      * only is on, and the list currently on screen (search results while searching, the filter's
      * own list otherwise — the same resolution [pagerArticles] uses) has a read row other than the
      * selected one. Pressing the action re-runs the same re-trim [setUnreadOnly] already applies
-     * when turning unread-only on ([pinnedReadArticlesKeepingSelected]), so this only decides
+     * when turning unread-only on ([retrimmedPinnedReadStates]), so this only decides
      * whether that re-trim currently has anything left to do.
      */
     val canHideRead: StateFlow<Boolean> =
@@ -635,7 +637,7 @@ class HomeViewModel(
 
     /** Runs [ArticleListTopBar]'s "hide read" action — see [canHideRead]. */
     fun hideRead() {
-        if (canHideRead.value) _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        if (canHideRead.value) _pinnedReadStates.value = retrimmedPinnedReadStates()
     }
 
     // Requests to move keyboard focus into whichever composable currently owns the search field —
@@ -720,7 +722,7 @@ class HomeViewModel(
         if (restoredArticle != null) {
             if (restoredArticle.is_read == 1L) {
                 // Keep it visible in an unread-only list, mirroring selectArticle()'s pinning.
-                _pinnedReadArticles.update { it + (restoredArticle.id to restoredArticle.toListRow()) }
+                _pinnedReadStates.update { it + (restoredArticle.id to restoredArticle.toListRow()) }
             }
             _selectedArticle.value = restoredArticle
             // Seed the navigation cursor too, so the first arrow key steps from the restored
@@ -767,7 +769,7 @@ class HomeViewModel(
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null
-        _pinnedReadArticles.value = emptyMap()
+        _pinnedReadStates.value = emptyMap()
         _pinnedUnstarredArticles.value = emptyMap()
         // Cancels any selection whose body is still loading: without this, a hydration in flight
         // across the switch would restore the selection, or take back a pin made under the new
@@ -859,7 +861,7 @@ class HomeViewModel(
         // under a held key.
         val pinnedAtSelect = article.is_read == 0L
         if (pinnedAtSelect) {
-            _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
+            _pinnedReadStates.update { it + (article.id to article.copy(is_read = 1L)) }
         }
         // Read intents recorded after this point override this selection's implicit "read". Begun
         // synchronously and ended in the coroutine's `finally`; UNDISPATCHED runs the body up to its
@@ -896,7 +898,7 @@ class HomeViewModel(
         // restoring it on the next launch. A pin dropped by a browsing-context switch since is not
         // this hydration's to touch.
         if (full == null || full.deleted_at != null) {
-            if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadArticles.update { it - article.id }
+            if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
             // Resume navigating from what is actually on screen, not from the dead article.
             if (selectionCursorId == article.id) selectionCursorId = _selectedArticle.value?.id
             return
@@ -1015,7 +1017,7 @@ class HomeViewModel(
         // lands the raw query still says "read", and an unread-only list that had lost the pin would
         // drop the row for that window — the reader's pager then collapses to the selected article and
         // rebuilds every page it holds, so the open article visibly reloads. Same reasoning as setStarred.
-        _pinnedReadArticles.update { it + (article.id to article.copy(is_read = if (read) 1L else 0L)) }
+        _pinnedReadStates.update { it + (article.id to article.copy(is_read = if (read) 1L else 0L)) }
         if (_selectedArticle.value?.id == article.id) {
             _selectedArticle.update { it?.copy(is_read = if (read) 1L else 0L) }
         }
@@ -1156,7 +1158,7 @@ class HomeViewModel(
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
-            val pins = _pinnedReadArticles.value.toMutableMap()
+            val pins = _pinnedReadStates.value.toMutableMap()
             visibleUnread.forEach { article ->
                 pins[article.id] = article.copy(is_read = 1L)
             }
@@ -1165,16 +1167,16 @@ class HomeViewModel(
                 pins[selected.id] = updatedSelected.toListRow()
                 _selectedArticle.value = updatedSelected
             }
-            _pinnedReadArticles.value = pins
+            _pinnedReadStates.value = pins
         } else {
             // Starred: markAllAsRead is a no-op, don't alter read state. A selection still loading
             // its body keeps the pin selectArticle gave it, just as the selected article keeps its own,
             // and unread pins are kept for the same reason a re-trim keeps them (see unreadPins).
             val pins = unreadPins().toMutableMap()
             val cursor = selectionCursorId
-            if (cursor != null && cursor != selected?.id) _pinnedReadArticles.value[cursor]?.let { pins[cursor] = it }
+            if (cursor != null && cursor != selected?.id) _pinnedReadStates.value[cursor]?.let { pins[cursor] = it }
             if (selected != null) pins[selected.id] = selected.toListRow()
-            _pinnedReadArticles.value = pins
+            _pinnedReadStates.value = pins
         }
     }
 
@@ -1186,7 +1188,7 @@ class HomeViewModel(
     fun setUnreadOnly(value: Boolean) {
         if (value == unreadOnly.value) return
         if (value) {
-            _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+            _pinnedReadStates.value = retrimmedPinnedReadStates()
         }
         when {
             _filter.value == ArticleFilter.Starred -> {
@@ -1205,7 +1207,7 @@ class HomeViewModel(
      *
      * @return [unreadPins] plus [selectedReadPin].
      */
-    private fun pinnedReadArticlesKeepingSelected(): Map<String, ArticleListRow> = unreadPins() + selectedReadPin()
+    private fun retrimmedPinnedReadStates(): Map<String, ArticleListRow> = unreadPins() + selectedReadPin()
 
     /**
      * The read pin's unread entries. Always kept by a re-trim: an unread pin never keeps a row on
@@ -1213,7 +1215,7 @@ class HomeViewModel(
      * its "mark as unread" write lands the raw query still says read, and dropping it would make an
      * unread-only list lose the row for that window (see setRead).
      */
-    private fun unreadPins(): Map<String, ArticleListRow> = _pinnedReadArticles.value.filterValues { it.is_read == 0L }
+    private fun unreadPins(): Map<String, ArticleListRow> = _pinnedReadStates.value.filterValues { it.is_read == 0L }
 
     /**
      * Preserves the selected read article for continued display when it remains available.
@@ -1229,7 +1231,7 @@ class HomeViewModel(
             // being replaced. That selection is the one to keep: its own pin (selectArticle pins a
             // row that was unread) or, for a row that was already read, its row as listed — or it
             // disappears from an unread-only list for good, since its hydration never pins.
-            val pending = _pinnedReadArticles.value[cursor]
+            val pending = _pinnedReadStates.value[cursor]
                 ?: currentArticles().firstOrNull { it.id == cursor && it.is_read == 1L }
                 ?: return emptyMap()
             if (pending.id !in articleRepository.aliveArticleFlags(listOf(pending.id))) return emptyMap()
@@ -1248,7 +1250,7 @@ class HomeViewModel(
      * Revalidates every optimistic pin (and the current selection's cached flags) against the DB's
      * current state, so a pin can never hide an external change forever.
      *
-     * [_pinnedReadArticles]/[_pinnedUnstarredArticles] intentionally show a value that outruns the
+     * [_pinnedReadStates]/[_pinnedUnstarredArticles] intentionally show a value that outruns the
      * DB while their own write is still in flight (see each of [selectArticle]/[toggleRead]/
      * [toggleStar]/[markAllRead]'s own comments) — but nothing here ever
      * re-checks that the DB actually caught up, so a pin that started as "optimistic" could
@@ -1262,7 +1264,7 @@ class HomeViewModel(
      * below.
      */
     private suspend fun reconcilePinnedArticlesAndSelection() {
-        val readSnapshot = _pinnedReadArticles.value
+        val readSnapshot = _pinnedReadStates.value
         val unstarredSnapshot = _pinnedUnstarredArticles.value
         val selectedSnapshot = _selectedArticle.value
         if (readSnapshot.isEmpty() && unstarredSnapshot.isEmpty() && selectedSnapshot == null) return
@@ -1273,7 +1275,7 @@ class HomeViewModel(
         //
         // Read via dbWriteDispatcher, not the `dispatcher` this function itself runs on (see the
         // articleChangeSignal collector in init, below) — deliberately, and this is the ordering
-        // argument every optimistic-update call site above points back to. _pinnedReadArticles/
+        // argument every optimistic-update call site above points back to. _pinnedReadStates/
         // _pinnedUnstarredArticles/_selectedArticle are all MutableStateFlow, so if this function
         // observes a given pin/selection value, the Main-thread write that produced it has already
         // happened (StateFlow's memory-visibility guarantee) — and every call site that sets one of
@@ -1287,7 +1289,7 @@ class HomeViewModel(
         val ids = readSnapshot.keys + unstarredSnapshot.keys + listOfNotNull(selectedSnapshot?.id)
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
         if (readSnapshot.isNotEmpty()) {
-            _pinnedReadArticles.update { pinned ->
+            _pinnedReadStates.update { pinned ->
                 // A pin added or replaced since the snapshot is kept: `flags` was read before the write
                 // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
                 // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
@@ -1343,9 +1345,9 @@ class HomeViewModel(
     /**
      * Updates the search query.
      *
-     * Deliberately does not touch [_pinnedReadArticles] or [browsingEpoch] — unlike a filter
+     * Deliberately does not touch [_pinnedReadStates] or [browsingEpoch] — unlike a filter
      * switch, a query change doesn't start a fresh browsing context, it narrows the *same* one.
-     * `_pinnedReadArticles` is shared between the underlying filter's own list and search results
+     * `_pinnedReadStates` is shared between the underlying filter's own list and search results
      * over it (see [searchResults]' own combine), so clearing it here would drop a just-read
      * article from the filter's list the instant the user types a character into an
      * always-visible field ([PaneLayout.Triple]'s sidebar). [searchResults] never merges a pinned
@@ -1468,7 +1470,7 @@ class HomeViewModel(
      * every manual sync, so rows read during the previous browse don't outlive it.
      */
     private fun repinSelected() {
-        _pinnedReadArticles.value = pinnedReadArticlesKeepingSelected()
+        _pinnedReadStates.value = retrimmedPinnedReadStates()
     }
 
     /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */

@@ -1121,7 +1121,7 @@ class HomeViewModelTest {
     }
 
     /**
-     * The pinned-read set is revalidated on every `articles` write, and "mark all read" sizes it to
+     * The read-state pin set is revalidated on every `articles` write, and "mark all read" sizes it to
      * the whole visible list. Doing that with one `getById` per pin was an N+1 of full-row reads —
      * each on its own connection, inside a `MutableStateFlow.update` CAS lambda that can re-run it.
      * One `id IN (...)` existence query replaces the lot.
@@ -3360,7 +3360,7 @@ class HomeViewModelTest {
     }
 
     /**
-     * The unread-only, sort and pinned-read inputs are pure display transforms over whatever the
+     * The unread-only, sort and read-state pin inputs are pure display transforms over whatever the
      * article-list query returned, so only a filter change may re-execute that query. Guards against
      * putting them back into the `flatMapLatest` key, which made every selection re-run the whole
      * unbounded list query (invisible to behavioral assertions, but O(all articles) per click).

@@ -31,7 +31,7 @@ import works.merc.keryx.app.domain.SyncTrigger
  * @param dispatcher Where the blocking work (feed resolution, fetch, sync) runs.
  * @param currentFilter The article list's current selection, read when a pull starts.
  * @param repinSelected Re-trims the ViewModel's pinned read articles down to the current selection,
- *   before a refresh starts and again once it finishes (see `HomeViewModel.pinnedReadArticlesKeepingSelected`).
+ *   before a refresh starts and again once it finishes (see `HomeViewModel.retrimmedPinnedReadStates`).
  */
 internal class HomeRefreshController(
     private val scope: CoroutineScope,

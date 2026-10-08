@@ -1167,7 +1167,7 @@ show under those scopes; `All`/`Tag`/`Folder` do). See "FTS5 handling" in `sync-
 **Nothing about ending a search restores anything.** Clearing the query (or, at a narrow layout,
 closing the bar) simply switches `ArticleListPane`'s content back to the filter's own list —
 `selectFilter` and `setSearchQuery` are independent of each other (switching filters never touches
-the query; changing the query never touches the filter), and `_pinnedReadArticles` is deliberately
+the query; changing the query never touches the filter), and `_pinnedReadStates` is deliberately
 shared between the filter's own list and its search results rather than cleared on a query change,
 so an article read from inside a search stays visible under unread-only exactly as if it had been
 read from the plain list.
@@ -1208,7 +1208,7 @@ still exists today, at `HomePaneLayout.kt`'s `shouldFlashReturnedArticle`).
 
 ### Optimistic read/star pins
 
-`HomeViewModel._pinnedReadArticles`/`_pinnedUnstarredArticles` are how the article list avoids
+`HomeViewModel._pinnedReadStates`/`_pinnedUnstarredArticles` are how the article list avoids
 shifting under the user the instant they act on it: selecting an unread article marks it read in the
 DB asynchronously (`dbWriteDispatcher`), but the row must show as read *now*, and — under
 unread-only — must not simply vanish from the list before the next filter switch. The `articles`
@@ -1255,10 +1255,10 @@ reading (`Single`), so re-selecting the active filter never has to distinguish a
 from an *entrance* into it the way it once did (see "iOS" in "Home's adaptive pane layout" above
 for that removed mechanism). A genuine filter change still clears `_selectedArticle` along with
 both pins on every path that reaches it, which matters for the pins' own sake — left set,
-`HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read pin from it the
+`HomeViewModel.retrimmedPinnedReadStates` would simply re-seed the read pin from it the
 next time the user toggles unread-only back on, defeating the reset entirely.
 
-`pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to its unread entries plus
+`retrimmedPinnedReadStates()` re-trims `_pinnedReadStates` down to its unread entries plus
 the current selection (if it is read). Unread entries never keep a row on screen by membership, but
 their "mark as unread" write may still be in flight, and dropping one would let an unread-only list
 lose the row until that write lands. Every call site that runs it is a moment the read pin is
@@ -1269,7 +1269,8 @@ read" action (`HomeViewModel.hideRead`) — the one call site the user triggers 
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
 results while searching, the filter's own list otherwise, the same resolution `pagerArticles` uses
-— and the selection), so the action is a no-op once nothing but the selection is left pinned-read.
+— and the selection), so the action is a no-op once no read row other than the selection is left on
+screen.
 
 ## Apple Native Apps (SwiftUI)
 
