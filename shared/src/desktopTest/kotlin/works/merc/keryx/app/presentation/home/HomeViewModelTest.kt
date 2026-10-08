@@ -1929,22 +1929,26 @@ class HomeViewModelTest {
     }
 
     /**
-     * An unread pin is dropped by reconcile once another device (or anything else) reads the article:
-     * the list must then follow the DB (read) instead of showing the stale unread pin forever.
+     * An unselected row's unread pin is dropped by reconcile once another device (or anything else)
+     * reads the article: the list must then follow the DB (read) instead of showing the stale unread
+     * pin forever. (The selection's own pin is refreshed instead — see the test after next.)
      */
     @Test
     fun unreadPinnedArticleReadExternallyIsDroppedByReconcileAndShowsAsRead() = runTest {
         val vm = viewModelWithA1Selected(unreadOnly = false)
-        vm.toggleReadSelected()
+        // a2 ends up with a landed unread pin: read, then unread again.
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(vm.row("a2"))
         testScheduler.advanceUntilIdle()
         // The unread pin is in force and agrees with the DB.
-        assertEquals(0L, dbIsRead("a1"))
-        assertEquals(0L, vm.row("a1").is_read)
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
 
-        markReadExternally("a1")
+        markReadExternally("a2")
         testScheduler.advanceUntilIdle()
 
-        assertEquals(1L, vm.row("a1").is_read)
+        assertEquals(1L, vm.row("a2").is_read)
     }
 
     /**
