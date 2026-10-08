@@ -65,7 +65,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   `cloudStorageType` changes so a connect made in Setup reaches it; it is also the one
                   ManualSync — `canSyncNow`/`connected`/`disabledByAuth`/`syncNow()`/`runs` — that every "Sync now" route shares:
                   Home's toolbar button and the Feed menu (via `HomeViewModel.sync()`/`canSyncNow`/`cloudConnected`/`syncDisabledByAuth`,
-                  which re-trims its pinned read rows on every `runs` edge) as well as the cloud-sync
+                  which re-trims its read-state pins on every `runs` edge) as well as the cloud-sync
                   tab; PreferencesController — typed setters over `LocalSettings`
                   and `global_settings`; OpmlTransfer — building/parsing the OPML document itself,
                   leaving file picking to each UI; OpmlOpenHandler (requestOpenedOpmlImport — an `.opml`
@@ -1167,7 +1167,7 @@ show under those scopes; `All`/`Tag`/`Folder` do). See "FTS5 handling" in `sync-
 **Nothing about ending a search restores anything.** Clearing the query (or, at a narrow layout,
 closing the bar) simply switches `ArticleListPane`'s content back to the filter's own list —
 `selectFilter` and `setSearchQuery` are independent of each other (switching filters never touches
-the query; changing the query never touches the filter), and `_pinnedReadArticles` is deliberately
+the query; changing the query never touches the filter), and `_pinnedReadStates` is deliberately
 shared between the filter's own list and its search results rather than cleared on a query change,
 so an article read from inside a search stays visible under unread-only exactly as if it had been
 read from the plain list.
@@ -1208,24 +1208,43 @@ still exists today, at `HomePaneLayout.kt`'s `shouldFlashReturnedArticle`).
 
 ### Optimistic read/star pins
 
-`HomeViewModel._pinnedReadArticles`/`_pinnedUnstarredArticles` are how the article list avoids
+`HomeViewModel._pinnedReadStates`/`_pinnedUnstarredArticles` are how the article list avoids
 shifting under the user the instant they act on it: selecting an unread article marks it read in the
 DB asynchronously (`dbWriteDispatcher`), but the row must show as read *now*, and — under
 unread-only — must not simply vanish from the list before the next filter switch. The `articles`
 combine resolves each row's `is_read`/`is_starred` from the pin when present, falling back to the
-raw query's value otherwise, and (under unread-only) treats pinned-read membership itself as
-"currently unread enough to show". These pins are therefore a deliberately optimistic cache that can
-outrun the DB by design — but nothing about setting one re-checks that the DB actually caught up, so
-without revalidation a pin could hide an external change (another device's sync propagating a "mark
-unread"/restar, or a soft-delete tombstone) forever, not just for the brief window the write is in
-flight for.
+raw query's value otherwise.
+
+A read-state pin holds the *confirmed value in either direction* — a *read pin* or an *unread pin*:
+"mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
+it. Until that write lands the raw query still says "read", so without the pin an unread-only list
+would have no reason to keep the row. The reader's pager, which pages through `pagerArticles`, would
+then collapse to the selected article and rebuild every page it holds, visibly reloading the open
+article. The starred pin works the same way (`setStarred`).
+
+Under unread-only, a row with a read pin is kept by its membership in the pin alone ("currently
+unread enough to show"), while a row with an unread pin is shown on its own resolved
+`is_read == 0`. Unlike a read pin, an unread pin only corrects a row the raw query still returns and
+never re-adds one it has dropped (say, an article unstarred elsewhere while browsing Starred). For
+the selection this means, by design, that a selected article which has already left the filter's
+query (kept on screen until then by its read pin) leaves the list once it is marked unread, while
+the reader keeps showing it.
+
+These pins are therefore a deliberately optimistic cache that can outrun the DB by design — but
+nothing about setting one re-checks that the DB actually caught up, so without revalidation a pin
+could hide an external change (another device's sync propagating a "mark unread"/restar, or a
+soft-delete tombstone) forever, not just for the brief window the write is in flight for.
 
 `HomeViewModel.reconcilePinnedArticlesAndSelection` closes that gap: it runs on every write to `articles` (via
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
-pinned. The read it does this with is deliberately routed through `dbWriteDispatcher`, the same
-serial (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
+pinned. The selection's own read-state pin (the cursor's, while a newer selection is still loading
+its body) is likewise refreshed rather than dropped while its article is alive, so an external
+"mark read" of an article the user just marked unread cannot take the open article out of an
+unread-only list (and the reader's pager). The reconcile's flags read is
+deliberately routed through `dbWriteDispatcher`, the same serial
+(`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
 `toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and
 every one of those call sites dispatches that write *before* updating the pin/selection, never
 after. Since the pin/selection fields are `MutableStateFlow`s, observing a given pin here implies
@@ -1237,6 +1256,11 @@ genuine multi-threaded dispatchers (`Dispatchers.Default`), not something the ex
 scheduler test suite can reproduce directly — the invariant is enforced by code review and the
 comments at each call site, not a dedicated race test.
 
+The reconcile skips any pin added or replaced after its snapshot (compared by identity). Its flags
+were read before the write that justified such a pin was enqueued, so they have no verdict on it,
+and a rapid read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB
+value.
+
 A same-filter re-selection leaves both pins, the selection, and the cursor untouched
 (`selectFilter`'s early return above) — reasonable now that the article list is always either an
 on-screen pane (`Triple`/`Dual`) or the one pane a narrow layout keeps on screen except while
@@ -1244,19 +1268,27 @@ reading (`Single`), so re-selecting the active filter never has to distinguish a
 from an *entrance* into it the way it once did (see "iOS" in "Home's adaptive pane layout" above
 for that removed mechanism). A genuine filter change still clears `_selectedArticle` along with
 both pins on every path that reaches it, which matters for the pins' own sake — left set,
-`HomeViewModel.pinnedReadArticlesKeepingSelected` would simply re-seed the read pin from it the
+`HomeViewModel.retrimPinnedReadStates` would simply re-seed the read-state pins from it the
 next time the user toggles unread-only back on, defeating the reset entirely.
 
-`pinnedReadArticlesKeepingSelected()` re-trims `_pinnedReadArticles` down to just the current
-selection (if it qualifies), and every call site that runs it is a moment the read pin is expected
-to have accumulated entries worth dropping: turning unread-only on (`setUnreadOnly`), either side
-of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
+`retrimPinnedReadStates()` re-trims `_pinnedReadStates` down to its unread entries plus
+the current selection (if it is read). Unread entries never keep a row on screen by membership, but
+their "mark as unread" write may still be in flight, and dropping one would let an unread-only list
+lose the row until that write lands. The selection's pin is decided inside one `update`, against the
+map being updated, so a re-trim composes with a concurrent reconcile pass. A pin that pass dropped
+since stays dropped, and an existing pin is kept as it is: it is never re-created from the
+selection, which the pass refreshes only after the pin.
+
+Every call site that runs it is a moment the read-state pins are expected to have accumulated
+entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
+(`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
 results while searching, the filter's own list otherwise, the same resolution `pagerArticles` uses
-— and the selection), so the action is a no-op once nothing but the selection is left pinned-read.
+— and the selection), so the action is a no-op once no read row other than the selection is left on
+screen.
 
 ## Apple Native Apps (SwiftUI)
 

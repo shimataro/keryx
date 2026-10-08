@@ -30,8 +30,8 @@ import works.merc.keryx.app.domain.SyncTrigger
  * @param scope The ViewModel's scope (Main-confined), where every state write here happens.
  * @param dispatcher Where the blocking work (feed resolution, fetch, sync) runs.
  * @param currentFilter The article list's current selection, read when a pull starts.
- * @param repinSelected Re-trims the ViewModel's pinned read articles down to the current selection,
- *   before a refresh starts and again once it finishes (see `HomeViewModel.pinnedReadArticlesKeepingSelected`).
+ * @param retrimPins Re-trims the ViewModel's read-state pins to its unread pins plus the selection,
+ *   before a refresh starts and again once it finishes (see `HomeViewModel.retrimPinnedReadStates`).
  */
 internal class HomeRefreshController(
     private val scope: CoroutineScope,
@@ -40,7 +40,7 @@ internal class HomeRefreshController(
     private val feedRepository: FeedRepository,
     private val activityCenter: ActivityCenter,
     private val currentFilter: () -> ArticleFilter,
-    private val repinSelected: () -> Unit,
+    private val retrimPins: () -> Unit,
 ) {
     private val _pullRefreshingFilters = MutableStateFlow<Set<ArticleFilter>>(emptySet())
 
@@ -109,11 +109,11 @@ internal class HomeRefreshController(
      * Main-confined scope, so the re-trims stay confined there too.
      */
     private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
-        repinSelected()
+        retrimPins()
         val outcome = withContext(dispatcher) { runner.runIfIdle(filter, SyncTrigger.MANUAL) }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
-        if (outcome is CycleOutcome.Ran) repinSelected()
+        if (outcome is CycleOutcome.Ran) retrimPins()
         return outcome
     }
 }

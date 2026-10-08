@@ -1121,7 +1121,7 @@ class HomeViewModelTest {
     }
 
     /**
-     * The pinned-read set is revalidated on every `articles` write, and "mark all read" sizes it to
+     * The read-state pin set is revalidated on every `articles` write, and "mark all read" sizes it to
      * the whole visible list. Doing that with one `getById` per pin was an N+1 of full-row reads —
      * each on its own connection, inside a `MutableStateFlow.update` CAS lambda that can re-run it.
      * One `id IN (...)` existence query replaces the lot.
@@ -1628,7 +1628,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun selectFilterClearsPinnedReadArticlesAndSelection() = runTest {
+    fun selectFilterClearsPinnedReadStatesAndSelection() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -1651,7 +1651,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun selectFilterOnSameFilterKeepsPinnedReadArticlesAndSelection() = runTest {
+    fun selectFilterOnSameFilterKeepsPinnedReadStatesAndSelection() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -1725,8 +1725,374 @@ class HomeViewModelTest {
         assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
+    /**
+     * Shared setup for the unread-pin tests below: feed f1 with a1 (newer, unread) and a2 (older,
+     * [a2IsRead]), the All filter with unread-only set to [unreadOnly], and a1 selected — so a1 ends up
+     * read, its read pin's write landed.
+     */
+    private fun TestScope.viewModelWithA1Selected(
+        unreadOnly: Boolean,
+        a2IsRead: Long = 0L,
+        writes: CoroutineDispatcher = Dispatchers.Unconfined,
+    ): HomeViewModel {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = a2IsRead, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(unreadOnly)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(listRow("a1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("a1"))
+        return vm
+    }
+
+    /**
+     * Shared setup for the Starred unread-pin tests below: feed f1 with a1 (newer, unread) and a2
+     * (older, read), both starred, under the Starred filter with unread-only set to [unreadOnly].
+     */
+    private fun TestScope.starredViewModel(
+        unreadOnly: Boolean,
+        writes: CoroutineDispatcher = Dispatchers.Unconfined,
+    ): HomeViewModel {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.setUnreadOnly(unreadOnly)
+        testScheduler.advanceUntilIdle()
+        return vm
+    }
+
+    private fun HomeViewModel.pagerRow(id: String) = pagerArticles.value.single { it.id == id }
+
+    /** The article's current DB row as a list row — e.g. one an unread-only list is not showing. */
+    private fun listRow(id: String) = db.articlesQueries.getById(id).executeAsOne().toListRow()
+
+    /** Simulates another device's sync propagating a "mark read"; the write also ticks reconcile. */
+    private fun markReadExternally(id: String) {
+        db.articlesQueries.updateReadStatus(
+            is_read = 1L, read_at = EXTERNAL_WRITE_AT, updated_at = EXTERNAL_WRITE_AT, id = id,
+        )
+    }
+
+    /** Simulates another device's sync propagating a "mark unread"; the write also ticks reconcile. */
+    private fun markUnreadExternally(id: String) {
+        db.articlesQueries.updateReadStatus(
+            is_read = 0L, read_at = EXTERNAL_WRITE_AT, updated_at = EXTERNAL_WRITE_AT, id = id,
+        )
+    }
+
+    /** Simulates another device's sync propagating an unstar; the write also ticks reconcile. */
+    private fun unstarExternally(id: String) {
+        db.articlesQueries.updateStarStatus(
+            is_starred = 0L, starred_at = EXTERNAL_WRITE_AT, updated_at = EXTERNAL_WRITE_AT, id = id,
+        )
+    }
+
+    /**
+     * While a newer selection is still loading its body, the reconcile must treat *it* (the cursor) as
+     * the selection, as the re-trim does: its unread pin read externally is refreshed, not dropped, so
+     * the article being opened does not leave the unread-only list.
+     */
     @Test
-    fun toggleReadSelectedOnAReadArticleClearsPinAndUpdatesSelectedState() = runTest {
+    fun reconcileTreatsASelectionStillLoadingAsTheSelection() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+        vm.setUnreadOnly(true)
+        settle(parking)
+        vm.selectArticle(vm.row("a1"))
+        settle(parking)
+
+        parking.hold()
+        vm.selectArticle(vm.row("a2"))
+        val hydration = parking.parkLast()
+        settle(parking)
+        vm.toggleRead(vm.row("a2"))
+        settle(parking)
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals("a1", vm.selectedArticle.value?.id)
+
+        markReadExternally("a2")
+        settle(parking)
+
+        assertEquals(1L, vm.row("a2").is_read)
+        parking.run(hydration)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals(1L, vm.row("a2").is_read)
+    }
+
+    /**
+     * A re-trim that runs while a reconcile pass waits on its flags read must compose with it: the
+     * selection's existing pin is kept as the same instance, so the reconcile still judges it (and
+     * refreshes it to the externally changed value) instead of mistaking a re-created copy for a fresh
+     * user write — which left the row read while the selection showed unread.
+     */
+    @Test
+    fun reTrimDuringAReconcileKeepsTheSelectionsRowAndToolbarInAgreement() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = false, writes = writes)
+        // A read pin the re-trim will drop, so the re-trimmed map differs from the current one (an equal
+        // map would leave the StateFlow, and with it a1's pin instance, untouched).
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+
+        writes.hold()
+        // Another device's sync propagates a "mark unread" of the selection; the reconcile it starts
+        // snapshots a1's read pin and waits on its flags read.
+        markUnreadExternally("a1")
+        testScheduler.advanceUntilIdle()
+        assertTrue(writes.hasQueued())
+        vm.setUnreadOnly(true)
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+        assertEquals(0L, vm.row("a1").is_read)
+    }
+
+    /**
+     * A row kept on screen only by its read pin (its feed moved out of the folder being viewed) is
+     * drawn from that pin, so starring it must update the pin too — or the row stays unstarred while
+     * the reader shows it starred.
+     */
+    @Test
+    fun starringASelectionKeptOnlyByItsReadPinStarsItsRow() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        vm.moveFeed("f1", null)
+        testScheduler.advanceUntilIdle()
+        // Out of the folder's query, kept by the read pin.
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+
+        vm.toggleStarSelected()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.selectedArticle.value?.is_starred)
+        assertEquals(1L, vm.row("a1").is_starred)
+    }
+
+    /**
+     * An unread pin only corrects a row the raw query still returns; it never re-adds one. An article
+     * marked unread under Starred and then unstarred elsewhere must leave the Starred list rather than
+     * linger as a row that is neither starred nor in the filter.
+     */
+    @Test
+    fun anUnreadPinDoesNotKeepARowTheFilterNoLongerReturns() = runTest {
+        val vm = starredViewModel(unreadOnly = false)
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a2"))
+
+        unstarExternally("a2")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    /**
+     * Regression guard for the reader reloading every page on "mark as unread": under unread-only the
+     * row must stay in `articles` / `pagerArticles` (as unread) while the unread write is still in flight,
+     * i.e. while the raw query still reports the row as read. Dropping the pin there would collapse the
+     * pager to the selected article and rebuild all of its pages.
+     */
+    @Test
+    fun markingTheSelectionUnreadUnderUnreadOnlyKeepsItListedWhileTheWriteIsInFlight() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = true, writes = writes)
+
+        writes.hold()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertTrue(writes.hasQueued())
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(0L, vm.row("a1").is_read)
+        assertEquals(0L, vm.pagerRow("a1").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals(0L, vm.row("a1").is_read)
+        assertEquals(0L, vm.pagerRow("a1").is_read)
+    }
+
+    /** Rapid read -> unread -> read -> unread toggles with no write landing in between never drop the row. */
+    @Test
+    fun rapidReadUnreadTogglingUnderUnreadOnlyNeverDropsTheSelectionFromTheList() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = true, writes = writes)
+
+        writes.hold()
+        // After the selection's read: unread, read, unread. Each step shows the latest intent at once.
+        val expectedIsRead = listOf(0L, 1L, 0L)
+        for (expected in expectedIsRead) {
+            vm.toggleReadSelected()
+            testScheduler.advanceUntilIdle()
+            assertEquals(expected, vm.row("a1").is_read)
+            assertEquals(expected, vm.pagerRow("a1").is_read)
+        }
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals(0L, vm.row("a1").is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
+     * An unselected row's unread pin is dropped by reconcile once another device (or anything else)
+     * reads the article: the list must then follow the DB (read) instead of showing the stale unread
+     * pin forever. (The selection's own pin is refreshed instead — see the test after next.)
+     */
+    @Test
+    fun unreadPinnedArticleReadExternallyIsDroppedByReconcileAndShowsAsRead() = runTest {
+        val vm = viewModelWithA1Selected(unreadOnly = false)
+        // a2 ends up with a landed unread pin: read, then unread again.
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        // The unread pin is in force and agrees with the DB.
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+
+        markReadExternally("a2")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.row("a2").is_read)
+    }
+
+    /**
+     * A pin replaced while a reconcile pass is waiting on its DB read is a write that read knows nothing
+     * about, so the pass must not drop it — even though the flags it read disagree with the pin the
+     * snapshot held. Uses a row other than the selection, so the selection's own refresh-on-mismatch rule
+     * cannot keep it either.
+     */
+    @Test
+    fun reconcileKeepsAPinReplacedAfterItsSnapshot() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = true, writes = writes)
+        // a2 ends up with a landed unread pin: read, then unread again.
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a2"))
+
+        writes.hold()
+        // The external "mark read" starts a reconcile that snapshots a2's unread pin and queues its flags
+        // read, which will see a2 as read.
+        markReadExternally("a2")
+        testScheduler.advanceUntilIdle()
+        assertTrue(writes.hasQueued())
+        // The user re-reads a2 after that snapshot: its pin is replaced (read), and its write queues
+        // behind the reconcile's flags read.
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, vm.row("a2").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        // The flags (read) disagreed with the snapshot's pin (unread), but the replaced read pin is kept,
+        // so a2 stays listed under unread-only.
+        assertEquals(1L, dbIsRead("a2"))
+        assertEquals(1L, vm.row("a2").is_read)
+    }
+
+    /**
+     * The selection's unread pin read externally (another device's sync) is refreshed to read rather
+     * than dropped: under unread-only a dropped pin would take the open article out of the list and the
+     * reader's pager, just as a "mark as unread" write in flight once did.
+     */
+    @Test
+    fun selectionsUnreadPinReadExternallyUnderUnreadOnlyIsRefreshedAndKeepsItListed() = runTest {
+        val vm = viewModelWithA1Selected(unreadOnly = true)
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a1"))
+
+        markReadExternally("a1")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.row("a1").is_read)
+        assertEquals(1L, vm.pagerRow("a1").is_read)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
+     * A re-trim keeps every unread pin, not just the selection's: a row other than the selection marked
+     * unread must not drop out of the new unread-only list while its write is still in flight.
+     */
+    @Test
+    fun turningUnreadOnlyOnKeepsAnUnselectedRowsUnreadPinWhileItsWriteIsInFlight() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = false, a2IsRead = 1L, writes = writes)
+
+        writes.hold()
+        vm.toggleRead(vm.row("a2"))
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertEquals(1L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+    }
+
+    /**
+     * Turning unread-only on re-trims the read-state pin; the selection's unread pin, whose "mark as
+     * unread" write is still in flight, must survive it, or the row drops out of the new unread-only
+     * list (the raw query still says read) and the reader's pager rebuilds every page.
+     */
+    @Test
+    fun turningUnreadOnlyOnKeepsTheSelectionsUnreadPinWhileItsWriteIsInFlight() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = false, writes = writes)
+
+        writes.hold()
+        vm.toggleReadSelected()
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertTrue(writes.hasQueued())
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(0L, vm.row("a1").is_read)
+        assertEquals(0L, vm.pagerRow("a1").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a1"))
+        assertEquals(0L, vm.row("a1").is_read)
+        assertEquals(0L, vm.pagerRow("a1").is_read)
+    }
+
+    @Test
+    fun toggleReadSelectedOnAReadArticlePinsItUnreadAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L)
         val vm = newViewModel()
@@ -1742,8 +2108,120 @@ class HomeViewModelTest {
 
         assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(0L, vm.selectedArticle.value?.is_read)
-        // Pin cleared: a1 is unread again and no longer needs pinning, so it stays visible naturally.
+        // Pinned unread (never removed), and unread in the DB too, so it stays visible as unread.
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("a1").is_read)
+    }
+
+    /** hideRead drops the read pins other than the selection's, but keeps an unread pin whose write is in flight. */
+    @Test
+    fun hideReadKeepsAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = viewModelWithA1Selected(unreadOnly = true, writes = writes)
+        db.insertArticle("a3", "f1", isRead = 1L, publishedAt = 0L, createdAt = 0L)
+        // a2 read: a hideable row other than the selection.
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.canHideRead.value)
+
+        writes.hold()
+        vm.toggleRead(listRow("a3"))
+        vm.hideRead()
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertEquals(1L, dbIsRead("a3"))
+        assertEquals(listOf("a1", "a3"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("a3").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1", "a3"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("a3").is_read)
+    }
+
+    /** Under Starred, markAllRead re-trims the read-state pins too, and must keep an in-flight unread pin. */
+    @Test
+    fun markAllReadUnderStarredKeepsAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+        val writes = ParkingDispatcher()
+        val vm = starredViewModel(unreadOnly = true, writes = writes)
+        vm.selectArticle(listRow("a1"))
+        testScheduler.advanceUntilIdle()
+
+        writes.hold()
+        vm.toggleRead(listRow("a2"))
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertEquals(1L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, dbIsRead("a2"))
+        assertEquals(0L, vm.row("a2").is_read)
+    }
+
+    /**
+     * Under search, mark-all-read writes exactly the unread rows it pins: a row marked unread whose
+     * search snapshot still says read (the re-run has not caught up) is read again, not just pinned.
+     */
+    @Test
+    fun markAllReadUnderSearchMarksARowJustMarkedUnreadBeforeTheSnapshotCatchesUp() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
+        db.insertArticle("other", "f1", title = "Something else", content = "unrelated content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+
+        // No time advances between the two: the search re-run the unread write schedules has not run.
+        vm.toggleRead(vm.searchResults.value.single { it.article.id == "a2" }.article)
+        assertEquals(0L, dbIsRead("a2"))
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(1L, dbIsRead("a2"))
+        // Outside the match: proves this ran the search-scoped mark, not the whole filter's.
+        assertEquals(0L, dbIsRead("other"))
+    }
+
+    /** Search results resolve an unread pin too, so a row marked unread shows (as unread) before its write lands. */
+    @Test
+    fun searchResultsUnderUnreadOnlyShowAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 1L)
+        ftsManagerIndexed(driver)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+
+        writes.hold()
+        vm.toggleRead(listRow("a2"))
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the search snapshot still has a2 as read.
+        assertEquals(1L, dbIsRead("a2"))
+        assertEquals(0L, vm.searchResults.value.single { it.article.id == "a2" }.article.is_read)
+
+        writes.release()
+        advanceForArticleChangeDebounce()
+
+        assertEquals(0L, vm.searchResults.value.single { it.article.id == "a2" }.article.is_read)
     }
 
     /**
@@ -2489,7 +2967,7 @@ class HomeViewModelTest {
 
     /**
      * A manual sync started from another route (the cloud-sync settings tab) must re-trim Home's
-     * pinned read rows just like one started from Home's own button: the re-trim follows
+     * read-state pins just like one started from Home's own button: the re-trim follows
      * [ManualSync.runs], not [HomeViewModel.sync].
      */
     @Test
@@ -3113,7 +3591,7 @@ class HomeViewModelTest {
     }
 
     /**
-     * The unread-only, sort and pinned-read inputs are pure display transforms over whatever the
+     * The unread-only, sort and read-state pin inputs are pure display transforms over whatever the
      * article-list query returned, so only a filter change may re-execute that query. Guards against
      * putting them back into the `flatMapLatest` key, which made every selection re-run the whole
      * unbounded list query (invisible to behavioral assertions, but O(all articles) per click).
@@ -3453,7 +3931,7 @@ class HomeViewModelTest {
      * result under the new one.
      */
     @Test
-    fun changingSearchQueryKeepsPinnedReadArticles() = runTest {
+    fun changingSearchQueryKeepsPinnedReadStates() = runTest {
         db.insertFeed("f1")
         // a1 matches both queries, a2 only "Kotlin", a3 only "Java".
         db.insertArticle("a1", "f1", title = "Kotlin and Java", content = "kotlin java", isRead = 0L)
@@ -3590,6 +4068,43 @@ class HomeViewModelTest {
 
         assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
         assertEquals(1L, vm.selectedArticle.value?.is_read)
+    }
+
+    @Test
+    fun markAllReadWhileSearchingDoesNotMarkStaleSelectedArticleOutsideResults() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Something else", content = "other content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
+
+        val article1 = db.articlesQueries.getById("a1").executeAsOne()
+        vm.selectArticle(article1.toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        // Make the selected article unread again, then change the query so it falls outside the results.
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        vm.setSearchQuery("other")
+        advanceForSearchDebounce()
+        assertEquals(listOf("a2"), vm.searchResults.value.map { it.article.id })
+        assertEquals("a1", vm.selectedArticle.value?.id)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        // a2 is the only visible unread match and must be marked read.
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_read)
+        // a1 is no longer in the search results, so markAllRead must not touch it.
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
     }
 
     @Test
@@ -5375,3 +5890,6 @@ private class ParkingDispatcher : CoroutineDispatcher() {
         if (!queued) block.run()
     }
 }
+
+/** Timestamp of a simulated external (another device's sync) write in the unread-pin tests. */
+private const val EXTERNAL_WRITE_AT = 200L

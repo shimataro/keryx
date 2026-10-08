@@ -66,7 +66,7 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
   demoted to `FeedInFolderGroup` when its tag is no longer expanded. A feed deleted or a tag
   collapsed under a selection must move it, not orphan it.
 - **A row must not vanish because a background write changed it.** The article being read stays in
-  the list through the optimistic pin caches (`_pinnedReadArticles` / `_pinnedUnstarredArticles`,
+  the list through the optimistic pin caches (`_pinnedReadStates` / `_pinnedUnstarredArticles`,
   reconciled by `reconcilePinnedArticlesAndSelection` off `articleChangeSignal`) even when a refresh
   or sync rewrites `is_read` / `is_starred`. Flag a new list-producing flow, filter, or sort that
   bypasses that reconciliation, and any optimistic write dispatched *after* the state it guards.

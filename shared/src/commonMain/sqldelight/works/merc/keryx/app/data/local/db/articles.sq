@@ -95,8 +95,8 @@ SELECT id, feed_id, title, url, published_at, created_at, is_read, is_starred
 FROM articles WHERE id IN ?;
 
 -- Which of the given ids still have a live row, and their current read/star flags. Used to
--- revalidate the optimistic pinned-read/pinned-unstarred sets in one query instead of one getById
--- per pin (callers chunk to stay under the bound-parameter limit). The column ORDER IS
+-- revalidate HomeViewModel._pinnedReadStates/_pinnedUnstarredArticles in one query instead of one
+-- getById per pin (callers chunk to stay under the bound-parameter limit). The column ORDER IS
 -- LOAD-BEARING the same way the list queries' is (see getListRowsByIds above): is_read/is_starred
 -- are both INTEGER and adjacent, so a swap would compile and silently pass.
 aliveFlagsIn:
@@ -188,8 +188,11 @@ UPDATE articles SET is_read = ?, read_at = ?, updated_at = ? WHERE id = ?;
 
 -- Marks a batch of articles read in one statement (callers chunk the id list to stay under
 -- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
+-- Guarded like the markAllRead* queries: the ids can come from optimistic in-memory pins that outrun
+-- the DB, so a tombstoned or already-read row is left alone rather than stamped with a read event
+-- (read_at/updated_at) the user never made, which would otherwise ride the next sync.
 updateReadStatusByIds:
-UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ?;
+UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
 
 updateStarStatus:
 UPDATE articles SET is_starred = ?, starred_at = ?, updated_at = ? WHERE id = ?;
