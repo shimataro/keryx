@@ -1743,17 +1743,55 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.All)
         vm.setUnreadOnly(unreadOnly)
         testScheduler.advanceUntilIdle()
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        vm.selectArticle(listRow("a1"))
         testScheduler.advanceUntilIdle()
         assertEquals(1L, dbIsRead("a1"))
         return vm
     }
 
+    /**
+     * Shared setup for the Starred unread-pin tests below: feed f1 with a1 (newer, unread) and a2
+     * (older, read), both starred, under the Starred filter with unread-only set to [unreadOnly].
+     */
+    private fun TestScope.starredViewModel(
+        unreadOnly: Boolean,
+        writes: CoroutineDispatcher = Dispatchers.Unconfined,
+    ): HomeViewModel {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.setUnreadOnly(unreadOnly)
+        testScheduler.advanceUntilIdle()
+        return vm
+    }
+
     private fun HomeViewModel.pagerRow(id: String) = pagerArticles.value.single { it.id == id }
+
+    /** The article's current DB row as a list row — e.g. one an unread-only list is not showing. */
+    private fun listRow(id: String) = db.articlesQueries.getById(id).executeAsOne().toListRow()
 
     /** Simulates another device's sync propagating a "mark read"; the write also ticks reconcile. */
     private fun markReadExternally(id: String) {
-        db.articlesQueries.updateReadStatus(is_read = 1L, read_at = 200L, updated_at = 200L, id = id)
+        db.articlesQueries.updateReadStatus(
+            is_read = 1L, read_at = EXTERNAL_WRITE_AT, updated_at = EXTERNAL_WRITE_AT, id = id,
+        )
+    }
+
+    /** Simulates another device's sync propagating a "mark unread"; the write also ticks reconcile. */
+    private fun markUnreadExternally(id: String) {
+        db.articlesQueries.updateReadStatus(
+            is_read = 0L, read_at = EXTERNAL_WRITE_AT, updated_at = EXTERNAL_WRITE_AT, id = id,
+        )
+    }
+
+    /** Simulates another device's sync propagating an unstar; the write also ticks reconcile. */
+    private fun unstarExternally(id: String) {
+        db.articlesQueries.updateStarStatus(
+            is_starred = 0L, starred_at = EXTERNAL_WRITE_AT, updated_at = EXTERNAL_WRITE_AT, id = id,
+        )
     }
 
     /**
@@ -1774,7 +1812,7 @@ class HomeViewModelTest {
         writes.hold()
         // Another device's sync propagates a "mark unread" of the selection; the reconcile it starts
         // snapshots a1's read pin and waits on its flags read.
-        db.articlesQueries.updateReadStatus(is_read = 0L, read_at = 200L, updated_at = 200L, id = "a1")
+        markUnreadExternally("a1")
         testScheduler.advanceUntilIdle()
         assertTrue(writes.hasQueued())
         vm.setUnreadOnly(true)
@@ -1792,19 +1830,12 @@ class HomeViewModelTest {
      */
     @Test
     fun anUnreadPinDoesNotKeepARowTheFilterNoLongerReturns() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
-        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L, publishedAt = 1L, createdAt = 1L)
-        val vm = newViewModel()
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Starred)
-        testScheduler.advanceUntilIdle()
+        val vm = starredViewModel(unreadOnly = false)
         vm.toggleRead(vm.row("a2"))
         testScheduler.advanceUntilIdle()
         assertEquals(0L, dbIsRead("a2"))
 
-        // Another device's sync propagates an unstar of a2.
-        db.articlesQueries.updateStarStatus(is_starred = 0L, starred_at = 200L, updated_at = 200L, id = "a2")
+        unstarExternally("a2")
         testScheduler.advanceUntilIdle()
 
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
@@ -2028,7 +2059,7 @@ class HomeViewModelTest {
         assertTrue(vm.canHideRead.value)
 
         writes.hold()
-        vm.toggleRead(db.articlesQueries.getById("a3").executeAsOne().toListRow())
+        vm.toggleRead(listRow("a3"))
         vm.hideRead()
         testScheduler.advanceUntilIdle()
 
@@ -2047,20 +2078,13 @@ class HomeViewModelTest {
     /** Under Starred, markAllRead re-trims the read-state pins too, and must keep an in-flight unread pin. */
     @Test
     fun markAllReadUnderStarredKeepsAnUnreadPinWhileItsWriteIsInFlight() = runTest {
-        db.insertFeed("f1")
-        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
-        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L, publishedAt = 1L, createdAt = 1L)
         val writes = ParkingDispatcher()
-        val vm = newViewModel(dbWriteDispatcher = writes)
-        subscribeAll(vm)
-        vm.selectFilter(ArticleFilter.Starred)
-        vm.setUnreadOnly(true)
-        testScheduler.advanceUntilIdle()
-        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        val vm = starredViewModel(unreadOnly = true, writes = writes)
+        vm.selectArticle(listRow("a1"))
         testScheduler.advanceUntilIdle()
 
         writes.hold()
-        vm.toggleRead(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        vm.toggleRead(listRow("a2"))
         vm.markAllRead()
         testScheduler.advanceUntilIdle()
 
@@ -2091,7 +2115,7 @@ class HomeViewModelTest {
         assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
 
         writes.hold()
-        vm.toggleRead(db.articlesQueries.getById("a2").executeAsOne().toListRow())
+        vm.toggleRead(listRow("a2"))
         testScheduler.advanceUntilIdle()
 
         // The unread write has not landed: the search snapshot still has a2 as read.
@@ -5733,3 +5757,6 @@ private class ParkingDispatcher : CoroutineDispatcher() {
         if (!queued) block.run()
     }
 }
+
+/** Timestamp of a simulated external (another device's sync) write in the unread-pin tests. */
+private const val EXTERNAL_WRITE_AT = 200L
