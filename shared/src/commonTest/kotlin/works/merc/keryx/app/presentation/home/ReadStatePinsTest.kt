@@ -15,8 +15,6 @@ class ReadStatePinsTest {
     /** Stands in for a pin row: a data class, so two instances can be equal yet distinct. */
     private data class Pin(val isRead: Long)
 
-    private fun sameValue(a: Pin, b: Pin) = a.isRead == b.isRead
-
     @Test
     fun aPinAddedSinceTheSnapshotCountsAsReplaced() {
         assertTrue(pinReplacedSince(null, Pin(1L)))
@@ -36,36 +34,39 @@ class ReadStatePinsTest {
     @Test
     fun withNoPinBeforeOrNowTheCandidateIsAdded() {
         val candidate = Pin(1L)
-        assertSame(candidate, retrimmedSelectionPin(null, null, candidate, ::sameValue))
+        assertSame(candidate, retrimmedSelectionPin(null, null, candidate))
     }
 
     @Test
     fun aPinDroppedSinceStaysDropped() {
-        assertNull(retrimmedSelectionPin(Pin(1L), null, Pin(1L), ::sameValue))
+        assertNull(retrimmedSelectionPin(Pin(1L), null, Pin(1L)))
     }
 
     @Test
     fun aPinReplacedSinceKeepsItsValue() {
         val now = Pin(0L)
-        assertSame(now, retrimmedSelectionPin(Pin(1L), now, Pin(1L), ::sameValue))
+        assertSame(now, retrimmedSelectionPin(Pin(1L), now, Pin(1L)))
     }
 
     @Test
     fun aPinAddedSinceKeepsItsValue() {
         val now = Pin(0L)
-        assertSame(now, retrimmedSelectionPin(null, now, Pin(1L), ::sameValue))
+        assertSame(now, retrimmedSelectionPin(null, now, Pin(1L)))
     }
 
     @Test
     fun anUnchangedPinWithTheCandidatesValueKeepsItsInstance() {
         val pin = Pin(1L)
-        assertSame(pin, retrimmedSelectionPin(pin, pin, Pin(1L), ::sameValue))
+        assertSame(pin, retrimmedSelectionPin(pin, pin, Pin(1L)))
     }
 
+    /**
+     * The candidate comes from the selection, which a concurrent reconcile pass refreshes only after
+     * the pin: an unchanged pin disagreeing with it is the pass's newer verdict, not something to undo.
+     */
     @Test
-    fun anUnchangedPinWithADifferentValueIsReplacedByTheCandidate() {
+    fun anUnchangedPinWithADifferentValueIsKeptOverTheCandidate() {
         val pin = Pin(0L)
-        val candidate = Pin(1L)
-        assertSame(candidate, retrimmedSelectionPin(pin, pin, candidate, ::sameValue))
+        assertSame(pin, retrimmedSelectionPin(pin, pin, Pin(1L)))
     }
 }

@@ -1275,11 +1275,13 @@ next time the user toggles unread-only back on, defeating the reset entirely.
 the current selection (if it is read). Unread entries never keep a row on screen by membership, but
 their "mark as unread" write may still be in flight, and dropping one would let an unread-only list
 lose the row until that write lands. The selection's pin is decided inside one `update`, against the
-map being updated: a pin a reconcile pass refreshed or dropped since keeps that verdict, and an
-unchanged pin stays the same instance rather than posing, to that pass's identity check, as a fresh
-user write. Every
-call site that runs it is a moment the read-state pins are expected to have accumulated entries worth
-dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
+map being updated, so a re-trim composes with a concurrent reconcile pass. A pin that pass dropped
+since stays dropped, and an existing pin is kept as it is: it is never re-created from the
+selection, which the pass refreshes only after the pin.
+
+Every call site that runs it is a moment the read-state pins are expected to have accumulated
+entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
+(`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the article list toolbar's explicit "hide
 read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`

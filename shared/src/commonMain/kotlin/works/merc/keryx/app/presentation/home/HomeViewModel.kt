@@ -1214,9 +1214,9 @@ class HomeViewModel(
      *
      * The selection's pin is decided against the map the [MutableStateFlow.update] applies to, not
      * the one read before it, so the re-trim composes with a concurrent reconcile pass: a pin that
-     * pass refreshed or dropped since keeps its verdict, and an unchanged pin is kept as the same
-     * instance, since a re-created copy would look to that pass's identity check like a fresh user
-     * write it must not judge.
+     * pass dropped since stays dropped, and an existing pin is kept as it is — never re-created from
+     * the selection, which that pass refreshes only after the pin, and whose copy its identity check
+     * would also mistake for a fresh user write (see [retrimmedSelectionPin]).
      *
      * @param verifyAlive Whether to check the selection is still alive first — a blocking DB read on
      *   the caller's (main) thread. A tombstone a sync merge wrote does not necessarily tick the
@@ -1233,9 +1233,7 @@ class HomeViewModel(
         _pinnedReadStates.update { current ->
             val kept = current.unreadPins()
             if (candidate == null) return@update kept
-            val pin = retrimmedSelectionPin(before[candidate.id], current[candidate.id], candidate) { a, b ->
-                a.is_read == b.is_read
-            }
+            val pin = retrimmedSelectionPin(before[candidate.id], current[candidate.id], candidate)
             if (pin == null) kept else kept + (candidate.id to pin)
         }
     }

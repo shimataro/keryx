@@ -16,16 +16,17 @@ internal fun <T : Any> pinReplacedSince(snapshot: T?, current: T): Boolean = sna
  * @param prior The selection's pin in the map the re-trim started from, if any.
  * @param now The selection's pin in the map being updated, if any — a concurrent reconcile pass may
  *   have refreshed or dropped [prior] since.
- * @param candidate The pin the re-trim would keep for the selection.
- * @param sameValue Whether two pins hold the same read state.
+ * @param candidate The pin the re-trim would add for the selection if it has none.
  * @return The pin to keep, or null to leave the selection unpinned.
  */
-internal fun <T : Any> retrimmedSelectionPin(prior: T?, now: T?, candidate: T, sameValue: (T, T) -> Boolean): T? =
+internal fun <T : Any> retrimmedSelectionPin(prior: T?, now: T?, candidate: T): T? =
     when {
-        now == null && prior == null -> candidate
+        // An existing pin always stands, whether replaced since (a reconcile refresh, or a user
+        // write) or unchanged: [candidate] is built from the selection, which a reconcile pass
+        // refreshes only after the pin, so it can be the staler of the two — and every write that
+        // changes the selection's read state re-pins it at the same time anyway.
+        now != null -> now
         // Dropped since (an external change or a tombstone): it stays dropped.
-        now == null -> null
-        // Replaced since (a reconcile refresh, or a user write): its value stands.
-        pinReplacedSince(prior, now) -> now
-        else -> if (sameValue(now, candidate)) now else candidate
+        prior != null -> null
+        else -> candidate
     }
