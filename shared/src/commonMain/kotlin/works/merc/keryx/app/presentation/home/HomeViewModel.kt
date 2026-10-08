@@ -752,7 +752,7 @@ class HomeViewModel(
     }
 
     /**
-     * Selects the active article filter and clears the current article selection and pinned read articles.
+     * Selects the active article filter and clears the current article selection and the read-state pins.
      *
      * Deliberately does not touch [searchQuery] or [searchBarVisible] — search is orthogonal to the
      * filter (see this class's own "Search" section), so switching feeds/folders/tags while
