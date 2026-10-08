@@ -1214,7 +1214,12 @@ DB asynchronously (`dbWriteDispatcher`), but the row must show as read *now*, an
 unread-only — must not simply vanish from the list before the next filter switch. The `articles`
 combine resolves each row's `is_read`/`is_starred` from the pin when present, falling back to the
 raw query's value otherwise, and (under unread-only) treats pinned-read membership itself as
-"currently unread enough to show". These pins are therefore a deliberately optimistic cache that can
+"currently unread enough to show". The read pin holds the *confirmed value in either direction*:
+"mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
+it. Removing it would leave a window — until that write lands, the raw query still says "read" —
+in which an unread-only list has no reason to keep the row, and the reader's pager (which pages
+through `pagerArticles`) would collapse to the selected article and rebuild every page it holds,
+visibly reloading the open article. The starred pin works the same way (`setStarred`). These pins are therefore a deliberately optimistic cache that can
 outrun the DB by design — but nothing about setting one re-checks that the DB actually caught up, so
 without revalidation a pin could hide an external change (another device's sync propagating a "mark
 unread"/restar, or a soft-delete tombstone) forever, not just for the brief window the write is in
@@ -1224,7 +1229,10 @@ flight for.
 an `articleChangeSignal` collector), revalidating every pinned id — and the current selection's own
 cached flags — against `ArticleRepository.aliveArticleFlags` in one query, dropping (or, for the
 selection, refreshing) anything whose article is gone or whose flags no longer match what was
-pinned. The read it does this with is deliberately routed through `dbWriteDispatcher`, the same
+pinned. A pin added or replaced after the snapshot was taken is never judged against it (compared
+by identity): the flags were read before the write that justified that pin was enqueued, so a rapid
+read/unread/read sequence cannot have its newest pin dropped for a not-yet-landed DB value. The
+read it does this with is deliberately routed through `dbWriteDispatcher`, the same
 serial (`limitedParallelism(1)`) dispatcher every pin-setting call site (`selectArticle`/
 `toggleRead`/`toggleStar`/`markAllRead`) dispatches its own DB write to — and
 every one of those call sites dispatches that write *before* updating the pin/selection, never

@@ -275,9 +275,12 @@ class HomeViewModel(
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
     val newestFirst: StateFlow<Boolean> = _newestFirst
 
-    // Articles selected while browsing the current filter that became read as a side effect of
-    // selection. Kept visible (in read styling) until the user reloads/syncs or switches filters,
-    // so the list doesn't shift under the user while reading down an unread list.
+    // Read state the user just set on an article while browsing the current filter: read (as a side
+    // effect of selection, or an explicit "mark as read") or unread (an explicit "mark as unread"). The
+    // pinned value outruns the DB write still in flight, and a read one also keeps the row visible (in
+    // read styling) until the user reloads/syncs or switches filters, so the list doesn't shift under
+    // the user while reading down an unread list. An unread pin is what keeps the row from dropping out
+    // of an unread-only list in the window before its "mark as unread" write lands.
     private val _pinnedReadArticles = MutableStateFlow<Map<String, ArticleListRow>>(emptyMap())
 
     // Articles unstarred while browsing the Starred filter. Kept visible (with the star cleared)
@@ -375,10 +378,10 @@ class HomeViewModel(
                     .thenByDescending { it.created_at }
                     .thenByDescending { it.id }
             )
-            // Independent of the resolution above: every _pinnedReadArticles entry is is_read == 1
-            // by construction (see its declaration), so this OR is what keeps a just-marked-read
-            // article visible for its grace period under unread-only — id membership, not staleness,
-            // is what this needs.
+            // Independent of the resolution above: a row with a read pin was resolved to is_read == 1,
+            // so this OR is what keeps a just-marked-read article visible for its grace period under
+            // unread-only — id membership, not staleness, is what this needs. A row with an unread pin
+            // was resolved to is_read == 0 and passes the first clause.
             val filtered = if (unread) {
                 merged.filter { it.is_read == 0L || it.id in pinnedRead }
             } else {
@@ -1006,11 +1009,11 @@ class HomeViewModel(
             if (read) articleRepository.markAsRead(article.id) else articleRepository.markAsUnread(article.id)
         }
         readIntents.record(article.id, read)
-        if (read) {
-            _pinnedReadArticles.update { it + (article.id to article.copy(is_read = 1L)) }
-        } else {
-            _pinnedReadArticles.update { it - article.id }
-        }
+        // Pinned with its confirmed value either way, never removed for "unread": until the write above
+        // lands the raw query still says "read", and an unread-only list that had lost the pin would
+        // drop the row for that window — the reader's pager then collapses to the selected article and
+        // rebuilds every page it holds, so the open article visibly reloads. Same reasoning as setStarred.
+        _pinnedReadArticles.update { it + (article.id to article.copy(is_read = if (read) 1L else 0L)) }
         if (_selectedArticle.value?.id == article.id) {
             _selectedArticle.update { it?.copy(is_read = if (read) 1L else 0L) }
         }
@@ -1267,12 +1270,16 @@ class HomeViewModel(
         val flags = withContext(dbWriteDispatcher) { articleRepository.aliveArticleFlags(ids) }
         if (readSnapshot.isNotEmpty()) {
             _pinnedReadArticles.update { pinned ->
-                // Keys added since the snapshot are kept: they were just pinned, so `flags` has no
-                // verdict on them. A pin whose article is alive but no longer actually read (an
-                // external "mark unread", or a soft-delete tombstone) is dropped too — this map must
-                // hold only is_read == 1 entries, since the unread-only filter trusts membership
-                // alone (see its own declaration).
-                pinned.filterKeys { it !in readSnapshot || flags[it]?.isRead == 1L }
+                // A pin added or replaced since the snapshot is kept: `flags` was read before the write
+                // that justified it was enqueued, so it has no verdict on it (identity, not equality — a
+                // re-pin with the same value is still a write `flags` knows nothing about). Otherwise a
+                // pin is dropped once the article's current is_read no longer matches the pinned value
+                // (an external "mark unread"/"mark read", or a soft-delete tombstone), the same rule as
+                // the starred pin below.
+                pinned.filterKeys {
+                    val old = readSnapshot[it]
+                    old == null || pinned.getValue(it) !== old || flags[it]?.isRead == old.is_read
+                }
             }
         }
         if (unstarredSnapshot.isNotEmpty()) {

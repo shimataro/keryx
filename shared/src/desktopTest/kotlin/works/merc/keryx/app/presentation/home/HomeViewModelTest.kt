@@ -1725,6 +1725,146 @@ class HomeViewModelTest {
         assertEquals(FeedListRowSelection.FeedInFolderGroup("f1"), vm.selectedRowInstance.value)
     }
 
+    /**
+     * Regression guard for the reader reloading every page on "mark as unread": under unread-only the
+     * row must stay in `articles` / `pagerArticles` (as unread) while the unread write is still in flight,
+     * i.e. while the raw query still reports the row as read. Dropping the pin there would collapse the
+     * pager to the selected article and rebuild all of its pages.
+     */
+    @Test
+    fun markingTheSelectionUnreadUnderUnreadOnlyKeepsItListedWhileTheWriteIsInFlight() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        writes.hold()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+
+        // The unread write has not landed: the DB (and so the raw query) still says read.
+        assertTrue(writes.hasQueued())
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+        assertEquals(0L, vm.pagerArticles.value.single { it.id == "a1" }.is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+        assertEquals(0L, vm.pagerArticles.value.single { it.id == "a1" }.is_read)
+    }
+
+    /** Rapid read -> unread -> read -> unread toggles with no write landing in between never drop the row. */
+    @Test
+    fun rapidReadUnreadTogglingUnderUnreadOnlyNeverDropsTheSelectionFromTheList() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+
+        writes.hold()
+        // After the selection's read: unread, read, unread. Each step shows the latest intent at once.
+        val expectedIsRead = listOf(0L, 1L, 0L)
+        for (expected in expectedIsRead) {
+            vm.toggleReadSelected()
+            testScheduler.advanceUntilIdle()
+            assertEquals(expected, vm.articles.value.single { it.id == "a1" }.is_read)
+            assertEquals(expected, vm.pagerArticles.value.single { it.id == "a1" }.is_read)
+        }
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+        assertEquals(0L, vm.selectedArticle.value?.is_read)
+    }
+
+    /**
+     * An unread pin is dropped by reconcile once another device (or anything else) reads the article:
+     * the list must then follow the DB (read) instead of showing the stale unread pin forever.
+     */
+    @Test
+    fun unreadPinnedArticleReadExternallyIsDroppedByReconcileAndShowsAsRead() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        vm.toggleReadSelected()
+        testScheduler.advanceUntilIdle()
+        // The unread pin is in force and agrees with the DB.
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.first { it.id == "a1" }.is_read)
+
+        // Simulate another device's sync propagating a "mark read" for the unread-pinned article.
+        db.articlesQueries.updateReadStatus(is_read = 1L, read_at = 200L, updated_at = 200L, id = "a1")
+        vm.toggleStar(db.articlesQueries.getById("a2").executeAsOne().toListRow()) // ticks articleChangeSignal
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, vm.articles.value.first { it.id == "a1" }.is_read)
+    }
+
+    /**
+     * A pin replaced while a reconcile pass is waiting on its DB read is a write that read knows nothing
+     * about, so the pass must not drop it — even though its value disagrees with the (not yet updated) DB.
+     */
+    @Test
+    fun reconcileKeepsAPinReplacedAfterItsSnapshot() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val writes = ParkingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+
+        writes.hold()
+        // An article write ticks articleChangeSignal; the reconcile it starts snapshots the read pin
+        // (is_read = 1) and queues its flags read behind nothing but itself.
+        db.articlesQueries.updateReadStatus(is_read = 1L, read_at = 100L, updated_at = 100L, id = "a2")
+        testScheduler.advanceUntilIdle()
+        assertTrue(writes.hasQueued())
+        // The pin is replaced (unread) after that snapshot; park its DB write so the reconcile's
+        // flags read runs first and still sees a1 as read.
+        vm.toggleReadSelected()
+        writes.parkLast()
+        writes.drain()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(0L, vm.articles.value.single { it.id == "a1" }.is_read)
+    }
+
     @Test
     fun toggleReadSelectedOnAReadArticleClearsPinAndUpdatesSelectedState() = runTest {
         db.insertFeed("f1")
