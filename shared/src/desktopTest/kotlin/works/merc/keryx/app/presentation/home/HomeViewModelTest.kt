@@ -1757,6 +1757,31 @@ class HomeViewModelTest {
     }
 
     /**
+     * An unread pin only corrects a row the raw query still returns; it never re-adds one. An article
+     * marked unread under Starred and then unstarred elsewhere must leave the Starred list rather than
+     * linger as a row that is neither starred nor in the filter.
+     */
+    @Test
+    fun anUnreadPinDoesNotKeepARowTheFilterNoLongerReturns() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 1L, isStarred = 1L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        vm.toggleRead(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("a2"))
+
+        // Another device's sync propagates an unstar of a2.
+        db.articlesQueries.updateStarStatus(is_starred = 0L, starred_at = 200L, updated_at = 200L, id = "a2")
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    /**
      * Regression guard for the reader reloading every page on "mark as unread": under unread-only the
      * row must stay in `articles` / `pagerArticles` (as unread) while the unread write is still in flight,
      * i.e. while the raw query still reports the row as read. Dropping the pin there would collapse the

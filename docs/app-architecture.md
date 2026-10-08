@@ -1215,7 +1215,9 @@ unread-only — must not simply vanish from the list before the next filter swit
 combine resolves each row's `is_read`/`is_starred` from the pin when present, falling back to the
 raw query's value otherwise. Under unread-only, a row with a *read* pin is kept by its membership in
 the pin alone ("currently unread enough to show"), while a row with an *unread* pin is shown on its
-own resolved `is_read == 0`. The read pin holds the *confirmed value in either direction*:
+own resolved `is_read == 0`. Unlike a read pin, an unread pin only corrects a row the raw query still
+returns and never re-adds one it has dropped (say, an article unstarred elsewhere while browsing
+Starred). The read pin holds the *confirmed value in either direction*:
 "mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than removing
 it. Until that write lands the raw query still says "read", so without the pin an unread-only list
 would have no reason to keep the row. The reader's pager, which pages through `pagerArticles`, would
