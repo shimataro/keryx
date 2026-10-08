@@ -368,6 +368,8 @@ class HomeViewModel(
                 // An unread pin only corrects a row the raw query still returns — while its write is in
                 // flight the row is still there, as read — and never re-adds one: a row the filter no
                 // longer returns (unstarred, moved out of the folder/tag) must leave rather than linger.
+                // That includes the selection: marked unread after leaving the query, it leaves the list
+                // while the reader keeps showing it.
                 val readPinnedIds = pinnedReadStates.filterValues { it.is_read == 1L }.keys
                 extra = (readPinnedIds + pinnedUnstarred.keys).filter { it !in presentPinnedIds }.map { id ->
                     val base = pinnedReadStates[id] ?: pinnedUnstarred.getValue(id)

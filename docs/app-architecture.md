@@ -1217,7 +1217,9 @@ raw query's value otherwise. Under unread-only, a row with a *read* pin is kept 
 the pin alone ("currently unread enough to show"), while a row with an *unread* pin is shown on its
 own resolved `is_read == 0`. Unlike a read pin, an unread pin only corrects a row the raw query still
 returns and never re-adds one it has dropped (say, an article unstarred elsewhere while browsing
-Starred). A read-state pin holds the *confirmed value in either direction* (a read pin or an unread
+Starred). That holds for the selection too, by design: a selected article that has already left the
+filter's query (kept on screen until then by its read pin) leaves the list once it is marked unread,
+while the reader keeps showing it. A read-state pin holds the *confirmed value in either direction* (a read pin or an unread
 pin): "mark as unread" (`setRead(read = false)`) overwrites it with an unread value rather than
 removing it. Until that write lands the raw query still says "read", so without the pin an unread-only list
 would have no reason to keep the row. The reader's pager, which pages through `pagerArticles`, would
