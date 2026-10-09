@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     private var statusItem: NSStatusItem?
     private weak var mainWindow: NSWindow?
     private var isTerminating = false
+    private var unreadCount: Int64 = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
@@ -97,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     /// Reopens (or activates) the main window when the Dock icon is clicked while none is visible.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if flag {
-            NSApp.setActivationPolicy(.regular)
+            setDockIconVisible(true)
         } else {
             revealMainWindow()
         }
@@ -117,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
 
     private func applyStartMinimizedIfNeeded() {
         guard model?.sdk?.settingsRepository.getLocalSettings().startMinimized == true else { return }
-        NSApp.setActivationPolicy(.accessory)
+        setDockIconVisible(false)
         DispatchQueue.main.async {
             for window in NSApp.windows where window.isAppContentWindow { window.orderOut(nil) }
         }
@@ -128,9 +129,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         // still in `NSApp.windows`, so counting visible windows synchronously here would always
         // find at least one (the one about to close/hide). Only content windows count — see
         // `isAppContentWindow` for why the status-bar window must not.
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
             let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.isAppContentWindow }
-            NSApp.setActivationPolicy(hasVisibleWindow ? .regular : .accessory)
+            self?.setDockIconVisible(hasVisibleWindow)
         }
     }
 
@@ -182,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
             for window in NSApp.windows where window.isAppContentWindow && !window.isAboutWindow {
                 window.orderOut(nil)
             }
-            NSApp.setActivationPolicy(.accessory)
+            setDockIconVisible(false)
         } else {
             revealMainWindow()
         }
@@ -199,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     /// nothing does for a tray click, so the window would come back behind the frontmost app. This
     /// matches desktop's `MacActivationPolicy.setDockIconVisible` (`activateIgnoringOtherApps:`).
     func revealMainWindow() {
-        NSApp.setActivationPolicy(.regular)
+        setDockIconVisible(true)
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.async { [weak self] in
             self?.showMainWindowOrReveal()
@@ -218,12 +219,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     /// Called from `KeryxApp`'s own unread-count observation, kept alive for the app's whole
     /// lifetime (not tied to the main window's own SwiftUI content, which this `AppDelegate`
     /// exists independently of) — see `KeryxApp.swift`'s own `.onChange(of: home.totalUnread)`.
-    ///
+    /// Updates the tray icon and the Dock badge, and keeps the count so `setDockIconVisible` can
+    /// put the badge back on a Dock tile recreated after the count last changed.
+    func updateUnreadIndicators(unreadCount: Int64) {
+        self.unreadCount = unreadCount
+        updateStatusItemAppearance()
+        applyDockBadge()
+    }
+
+    /// Switches the Dock icon (and the Cmd+Tab entry) on or off — the one place the activation
+    /// policy changes. The badge needs re-applying when the icon returns: `NSDockTile` keeps the
+    /// `badgeLabel` last assigned while the app was an accessory and ignores an assignment of that
+    /// same value, but the Dock shows no badge on the tile it shows again — and the count observation
+    /// won't fire for an unchanged count. See `applyDockBadge(forceRefresh:)`.
+    private func setDockIconVisible(_ visible: Bool) {
+        NSApp.setActivationPolicy(visible ? .regular : .accessory)
+        guard visible else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.applyDockBadge(forceRefresh: true)
+        }
+    }
+
+    /// `forceRefresh` clears the label first: assigning the value `badgeLabel` already holds is a
+    /// no-op that never reaches the Dock (measured: with the Dock icon back, re-assigning the same
+    /// count — immediately, after activation, or 0.3 s later — left the tile without a badge, while
+    /// `nil` then the count showed it at once). A plain count change needs no clearing.
+    private func applyDockBadge(forceRefresh: Bool = false) {
+        if forceRefresh { NSApp.dockTile.badgeLabel = nil }
+        NSApp.dockTile.badgeLabel = dockBadgeLabel(unreadCount: unreadCount)
+    }
+
     /// The icon is the app glyph as a *template* image (the HIG's rule for menu bar extras), so the
     /// system tints it for a light/dark menu bar and inverts it while the item is highlighted.
     /// That is why unread is a cut-out dot in the same colour as the glyph — the shape SF Symbols'
     /// own `*.badge` variants use — rather than desktop's red dot, which a template can't carry.
-    func updateStatusItemAppearance(unreadCount: Int64 = 0) {
+    private func updateStatusItemAppearance() {
         let hasUnread = unreadCount > 0
         statusItem?.button?.image = hasUnread ? Self.trayImageUnread : Self.trayImage
         let label = hasUnread ? LF("tray_tooltip_unread", L("app_name"), Int(unreadCount)) : L("app_name")
