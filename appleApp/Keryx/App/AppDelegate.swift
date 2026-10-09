@@ -228,20 +228,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     }
 
     /// Switches the Dock icon (and the Cmd+Tab entry) on or off — the one place the activation
-    /// policy changes. Going Accessory -> Regular recreates the Dock tile from scratch, dropping the
-    /// badge set on the old one (or set while there was no tile at all, during tray residence), and
-    /// the count observation won't fire again for an unchanged count — so the badge is re-applied
-    /// here, a tick later, once the new tile exists. Mirrors desktop's own re-application after
-    /// `MacActivationPolicy.setDockIconVisible(true)` (`main.kt`).
+    /// policy changes. The badge needs re-applying when the icon returns: `NSDockTile` keeps the
+    /// `badgeLabel` last assigned while the app was an accessory and ignores an assignment of that
+    /// same value, but the Dock shows no badge on the tile it shows again — and the count observation
+    /// won't fire for an unchanged count. See `applyDockBadge(forceRefresh:)`.
     private func setDockIconVisible(_ visible: Bool) {
         NSApp.setActivationPolicy(visible ? .regular : .accessory)
         guard visible else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.applyDockBadge()
+            self?.applyDockBadge(forceRefresh: true)
         }
     }
 
-    private func applyDockBadge() {
+    /// `forceRefresh` clears the label first: assigning the value `badgeLabel` already holds is a
+    /// no-op that never reaches the Dock (measured: with the Dock icon back, re-assigning the same
+    /// count — immediately, after activation, or 0.3 s later — left the tile without a badge, while
+    /// `nil` then the count showed it at once). A plain count change needs no clearing.
+    private func applyDockBadge(forceRefresh: Bool = false) {
+        if forceRefresh { NSApp.dockTile.badgeLabel = nil }
         NSApp.dockTile.badgeLabel = dockBadgeLabel(unreadCount: unreadCount)
     }
 
