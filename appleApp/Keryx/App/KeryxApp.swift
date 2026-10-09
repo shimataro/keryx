@@ -86,8 +86,7 @@ struct KeryxApp: App {
                         .modifier(OpmlRequestPresenter(opmlTransfer: opmlTransfer, settingsNavigation: model.settingsNavigation))
                         .modifier(UnreadCountObserver(home: home) { count in
                             #if os(macOS)
-                            updateDockBadge(count)
-                            appDelegate.updateStatusItemAppearance(unreadCount: count)
+                            appDelegate.updateUnreadIndicators(unreadCount: count)
                             #else
                             updateAppIconBadge(unreadCount: count)
                             #endif
@@ -175,10 +174,6 @@ struct KeryxApp: App {
     private func configureAppDelegate() {
         appDelegate.model = model
         appDelegate.showMainWindow = { openWindow(id: "main") }
-    }
-
-    private func updateDockBadge(_ count: Int64) {
-        NSApp.dockTile.badgeLabel = dockBadgeLabel(unreadCount: count)
     }
 
     /// Mirrors `resolveDarkTheme`'s `"light"`/`"dark"`/else (follow system) rule (`KeryxTheme.kt`),
