@@ -82,9 +82,12 @@ local_xcconfig="$app_dir/Local.xcconfig"
   || fail "$local_xcconfig already exists; refusing to overwrite a local signing configuration."
 
 work="$(mktemp -d)"
+installed_profile=""
 cleanup() {
   rm -f "$local_xcconfig"
   rm -rf "$work"
+  # Only a profile this run installed: one that was already there is the developer's own.
+  if [ -n "$installed_profile" ]; then rm -f "$installed_profile"; fi
 }
 trap cleanup EXIT
 
@@ -101,9 +104,15 @@ profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile_p
   || fail "The provisioning profile belongs to a different team than APPLE_TEAM_ID."
 [[ "$profile_name" =~ ^[A-Za-z0-9._\ -]+$ ]] || fail "Unexpected characters in the provisioning profile name."
 [[ "$profile_uuid" =~ ^[0-9A-Fa-f-]+$ ]] || fail "Unexpected provisioning profile UUID."
+# Xcode only loads a macOS profile named <uuid>.provisionprofile (iOS's is .mobileprovision); any
+# other extension is ignored with "No provisioning profile provider found".
 profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+profile_target="$profiles_dir/$profile_uuid.provisionprofile"
 mkdir -p "$profiles_dir"
-cp "$PROVISIONING_PROFILE_PATH" "$profiles_dir/$profile_uuid.provisioningprofile"
+if [ ! -e "$profile_target" ]; then
+  cp "$PROVISIONING_PROFILE_PATH" "$profile_target"
+  installed_profile="$profile_target"
+fi
 
 cat > "$local_xcconfig" <<EOF
 CODE_SIGN_STYLE = Manual
