@@ -16,12 +16,13 @@ private const val VERIFY_TIMEOUT_SECONDS = 30L
  * signature is internally intact (every sealed resource matches its recorded hash), not that the
  * signature belongs to a trusted publisher. A full identity check (`codesign --verify -R
  * "anchor apple generic and certificate leaf[subject.OU] = <team id>"`, or simply `--verify
- * --strict` against a bundle actually signed by a Developer ID certificate and notarized) can't be
- * required yet: current release builds are signed ad-hoc (see
- * [UpdateScriptWriter.macSelfReplace]'s own KDoc on why `xattr -dr` is still needed for the same
- * reason), and an ad-hoc signature has no certificate chain for `-R` to check — every extracted
- * update would fail a Developer-ID check unconditionally. Once releases are signed with a real
- * Developer ID and notarized, this should be tightened to a publisher check; see `SECURITY.md`.
+ * --strict` against a bundle actually signed by a Developer ID certificate and notarized) was never
+ * required: the Compose macOS releases were signed ad-hoc (see [UpdateScriptWriter.macSelfReplace]'s
+ * own KDoc on why `xattr -dr` is needed for the same reason), and an ad-hoc signature has no
+ * certificate chain for `-R` to check. The Compose macOS build is no longer released; the macOS
+ * release is now the Developer ID signed, notarized SwiftUI app, which updates itself through
+ * Sparkle. On macOS this check therefore only guards the one-time move of an installed Compose app
+ * to the SwiftUI app (whose bundle passes it) and internal ad-hoc builds; see `SECURITY.md`.
  */
 internal fun interface CodeSigningVerifier {
     /**

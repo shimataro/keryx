@@ -330,8 +330,8 @@ class DesktopUpdateInstaller internal constructor(
                     !exe.canExecute() -> "Extracted app's launcher isn't executable"
                     plistVersion != expectedVersion -> "Extracted app reports version $plistVersion, expected $expectedVersion"
                     // Self-consistency only — not a publisher/identity check. See CodeSigningVerifier.kt's
-                    // KDoc for why Developer-ID verification (`codesign --verify -R "notarized"`) can't be
-                    // required yet: current releases are ad-hoc signed, which this check already accepts.
+                    // KDoc for why Developer-ID verification (`codesign --verify -R "notarized"`) was never
+                    // required: the Compose macOS releases were ad-hoc signed, which this check accepts.
                     else -> codeSigningVerifier.verify(extractedApp.path)
                 }
             }
