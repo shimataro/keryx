@@ -22,9 +22,8 @@ A local-first, cross-platform RSS reader
 
 ## Supported Platforms
 
-Currently available for Windows, macOS, Linux, and Android. Support for iOS/iPadOS is planned for the future
-— alongside it, today's macOS app is also planned to be rebuilt into a platform-native one, as a separate,
-longer-term effort.
+Currently available for Windows, macOS, Linux, and Android. The macOS app is a native Mac app and needs
+macOS 14 (Sonoma) or later on an Apple Silicon Mac. Support for iOS/iPadOS is planned for the future.
 
 ## Download
 
@@ -32,20 +31,8 @@ Download the latest release from the [Releases page](https://github.com/shimatar
 Linux is available for both x86_64 and arm64.
 
 > [!IMPORTANT]
-> **macOS**: Until an officially signed release is available, downloaded `.dmg` / `.zip` files
-> are blocked by Gatekeeper as unsigned. Before opening the `.dmg` or extracting the `.zip`,
-> clear the quarantine attribute on the downloaded file itself:
->
-> ```bash
-> # .dmg
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.dmg
->
-> # .zip
-> xattr -d com.apple.quarantine ~/Downloads/Keryx-*.zip
-> ```
->
-> Alternatively, right-click the app and choose "Open" instead of double-clicking. See
-> [Signing & Notarization](docs/build.md#signing--notarization-compose-macos-build) for background.
+> **macOS**: the app is signed and notarized by Apple, so it opens like any other downloaded app
+> — no extra steps are needed. It requires macOS 14 or later on an Apple Silicon Mac.
 >
 > **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
 > Windows SmartScreen shows a "Windows protected your PC" warning on first run. Click
@@ -56,14 +43,15 @@ Linux is available for both x86_64 and arm64.
 > you install it from the app you used to open it (e.g. your file manager or browser).
 
 Once Keryx is running, it can check for, download, and install newer releases on its own — from
-the notification bell, the task tray, or Settings → Updates — so the manual steps above are only
-needed for this first install. A file Keryx downloads itself never triggers Gatekeeper's
+the notification bell, the task tray, or Settings → Updates (on macOS, from **Keryx → Check for
+Updates…** in the menu bar, or automatically, as set in Settings → General) — so the manual steps
+above are only needed for this first install. A file Keryx downloads itself never triggers Gatekeeper's
 quarantine warning or Windows SmartScreen's "unsigned file" prompt the way a browser download
 does, since neither is something a browser saved to disk. On Android, the one-time "allow
 installing from this source" permission above still applies, but you only grant it once, not on
 every update afterward.
 
-This applies to a macOS `.app`, a Windows `.msi`/portable install, a Linux portable install, and a
+This applies to the macOS app, a Windows `.msi`/portable install, a Linux portable install, and a
 sideloaded Android `.apk`. A Linux `.deb`/`.rpm` or Snap install, and an Android install from
 Google Play, instead open the release page for you to update through your usual channel (your
 package manager, or Play's own auto-update) — Keryx still tells you a new version exists, just not

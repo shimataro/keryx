@@ -34,13 +34,14 @@ Keryx stores its data in two local files:
   refresh interval, and window layout.
 
 On desktop (macOS, Windows, Linux), both files live in the OS-standard application
-data directory (`~/Library/Application Support/Keryx` on macOS, `%APPDATA%\Keryx`
+data directory (on macOS, inside the app's sandbox container:
+`~/Library/Containers/works.merc.keryx/Data/Library/Application Support/Keryx`; `%APPDATA%\Keryx`
 on Windows, `$XDG_DATA_HOME/Keryx` on Linux). On Android, they live in separate
 app-private storage areas that only Keryx can access — `keryx.db` in the app's
 database directory and `local_settings.json` in its internal files directory —
 neither reachable by other apps, and not accessible to you directly without root.
 
-An OS-level cache directory — `~/Library/Caches/Keryx` on macOS,
+An OS-level cache directory — `~/Library/Containers/works.merc.keryx/Data/Library/Caches/Keryx` on macOS,
 `%LOCALAPPDATA%\Keryx\Cache` on Windows, `$XDG_CACHE_HOME/Keryx` on Linux — stores
 favicon images and the article reader's WebView profile as transient, local
 performance data. On Android, favicon images and the article reader's WebView
@@ -92,12 +93,14 @@ OneDrive (one provider active at a time), here is exactly what happens:
   that no other app can see. For Dropbox, standard file-content scopes are used.
   For OneDrive, the standard Microsoft Graph file storage scope is used and the
   sync file is stored in an app-specific folder within your OneDrive.
-- **Credential storage:** on desktop, access and refresh tokens are stored
-  using your operating system's secure credential storage (Keychain on macOS,
-  Credential Manager on Windows, Secret Service on Linux — inside the Snap
-  package, an encrypted local store keyed by a per-app master secret from your
-  desktop's Secret portal). If the OS store is unavailable, tokens fall back to
-  a local file instead — on macOS and Linux this file's permissions are
+- **Credential storage:** on macOS, access and refresh tokens are stored in the
+  app's own data-protection Keychain and never written to a file — if the
+  Keychain cannot save them, the app tells you, and you connect the account again
+  after a restart. On Windows and Linux, they are stored using your operating
+  system's secure credential storage (Credential Manager on Windows, Secret
+  Service on Linux — inside the Snap package, an encrypted local store keyed by a
+  per-app master secret from your desktop's Secret portal). If the OS store is
+  unavailable, tokens fall back to a local file instead — on Linux this file's permissions are
   explicitly restricted to your own account (`0600`); on Windows, no such
   permission bit is set, and the file instead relies on Windows' own per-user
   ACL inheritance on `%APPDATA%`/`%LOCALAPPDATA%` to keep other accounts out.
@@ -129,7 +132,10 @@ developer:
   `*.githubusercontent.com` when you actually download an update) — so the app can tell you when an
   update is available, and fetch it if you choose to install it. No account information, telemetry, or
   identifiers are sent. On Android, this is skipped entirely when Keryx was installed through Google Play
-  (self-update only makes sense for the GitHub-distributed build).
+  (self-update only makes sense for the GitHub-distributed build). On macOS, the check instead reads
+  the latest release's update feed (`appcast.xml`, from `github.com`) — automatically, unless you turn
+  that off in Settings → General, or when you choose **Check for Updates…** — and downloads the update
+  it lists from `github.com` / `*.githubusercontent.com` only if you choose to install it.
 - **Dropbox, Google Drive, or OneDrive** — only if you've connected cloud sync,
   as described above.
 - **Content an article itself references** — when you open an article, any external
