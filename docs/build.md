@@ -14,7 +14,7 @@
   setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   avoids this requirement.
 
-- **Xcode** (macOS only) for `:shared`'s Apple targets — the `KeryxShared` XCFramework
+- **Xcode** (an Apple Silicon Mac only) for `:shared`'s Apple targets — the `KeryxShared` XCFramework
   (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`, output under
   `shared/build/XCFrameworks/release/`) and its macOS/iOS-simulator tests. Without Xcode (or on
   Linux/Windows) Gradle skips those targets and everything else builds as before.
@@ -318,8 +318,8 @@ signing (`CODE_SIGN_IDENTITY=-`) cannot produce a runnable sandboxed build, even
    next `xcodegen generate` with no other change.
 
 Without a `Local.xcconfig`, `Shared.xcconfig`'s ad-hoc defaults apply, which compile and link but
-cannot codesign a sandboxed binary — fine for CI verification (below), not for a binary you can
-actually launch.
+cannot codesign a sandboxed binary. CI skips signing entirely instead (below); neither yields a
+binary you can launch.
 
 ### CI
 
@@ -330,6 +330,7 @@ signed build:
 ```bash
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
@@ -340,8 +341,8 @@ exclusion and `SPARKLE_PUBLIC_ED_KEY` (the job also fails if the archived app's 
 empty). Signing and notarization still only run in the release job (see "SwiftUI macOS app" under
 "Release (CD)").
 
-`KeryxTests` (Swift Testing, standalone/non-hosted) still runs signed with the CI's ad-hoc identity
-since it produces a `.xctest` bundle rather than a sandboxed app.
+`KeryxTests` (Swift Testing, standalone/non-hosted) runs with the same `CODE_SIGNING_ALLOWED=NO` on
+macOS: it produces a `.xctest` bundle rather than a sandboxed app, so nothing needs signing.
 
 ## Packaging
 
@@ -821,7 +822,7 @@ per platform:
   type, and Android content providers commonly report a plain `.opml` file as
   `application/octet-stream` rather than any XML-flavored type — so MIME matching alone would miss
   most real files. A MIME-based filter (`application/x-opml+xml`, `text/x-opml`, `text/xml`,
-  `application/xml` — the same identifiers the Linux section above already lists) and an
+  `application/xml` — the last two being generic types the Linux entry above deliberately omits) and an
   extension-based fallback filter (`scheme="content"`, `host="*"`, `mimeType="*/*"`,
   `pathPattern=".*\\.opml"`, matching on the `content://` URI's path regardless of the reported MIME
   type) are declared as **two separate intent-filters**, not combined `<data>` tags within one:
@@ -839,8 +840,8 @@ per platform:
   `AndroidOpmlOpen.kt`'s `handleOpmlOpenIfPresent` reads the incoming `content://` `Uri`
   via `ContentResolver` and excludes the `keryx://` OAuth redirect, which shares the same
   `MainActivity`/`ACTION_VIEW` handling through a separate intent-filter. Accepting `text/xml`/
-  `application/xml` means Keryx also appears in the chooser for unrelated XML files — the same
-  trade-off the Linux section's `text/x-opml` fallback already accepts — and malformed input is
+  `application/xml` means Keryx also appears in the chooser for unrelated XML files — a trade-off
+  Linux avoids by not declaring those types — and malformed input is
   handled the same way as the other platforms: the read or `OpmlImporter.import` failure is shown
   as the Data tab's inline import error rather than propagated.
 
@@ -979,8 +980,8 @@ carry a pre-release suffix. For a plain (non-prerelease) tag the two are identic
 builds fall through to the same `"0.0.0"` literal for both. A tag that does not yield a jpackage-compatible
 `MAJOR.MINOR.PATCH[-<pre-release>]` version fails the workflow early with an explicit message.
 
-`macos-latest` runners are arm64, hence the architecture in the artifact name — it leaves room for an x86_64 or
-universal build alongside it later.
+The Compose job's `macos-latest` runners are arm64, hence the architecture in the artifact name — it leaves room
+for an x86_64 or universal build alongside it later.
 
 ### 0.x versions and pre-release tags on macOS
 
@@ -1144,7 +1145,9 @@ Once configured, the job (scripts under `.github/scripts/`, which can also be ru
 the credentials):
 
 1. Imports the certificate into a throwaway keychain, and writes the profile and the notarization key
-   into the runner's temp directory (all removed at the end).
+   into the runner's temp directory (all removed at the end). The script also installs the profile
+   into Xcode's provisioning-profile directory (as `<uuid>.provisionprofile`) and removes it
+   afterwards, unless the same profile was already there.
 2. Runs `package-macos-swiftui.sh`: archives and exports the app with Xcode (Release, arm64 only —
    the shared framework has no Intel slice), verifies the signatures (hardened runtime, Team ID,
    Sparkle's helper tools), notarizes and staples the app, and writes the `.zip` made from the stapled
@@ -1153,8 +1156,9 @@ the credentials):
    reach Xcode through a generated, gitignored `appleApp/Local.xcconfig` (so they do not leak onto
    Swift package targets), and the script refuses to run if a developer's own one exists.
    Xcode itself re-signs Sparkle's nested helpers on export, as Sparkle recommends; never add
-   `codesign --deep` when signing. The Xcode version is pinned (`DEVELOPER_DIR`) rather than taken
-   from the runner image's default; update it together with the runner image.
+   `codesign --deep` when signing. The job runs on a pinned runner image (`macos-26`, not
+   `macos-latest`) with Xcode set through `DEVELOPER_DIR` in `release.yml` (`AppIcon.icon` needs
+   Xcode 26); change both together.
 3. Runs `generate-appcast.sh`: Sparkle's `generate_appcast` signs the `.zip` with `SPARKLE_PRIVATE_KEY`
    and writes `appcast.xml`.
 4. Attaches the `.zip`, the `.dmg` and `appcast.xml` — in a last step that only runs if everything
@@ -1307,9 +1311,10 @@ directly in Play Console if a translated version is ever wanted; neither workflo
 existing release once published.
 
 > [!IMPORTANT]
-> **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
-> [Download](../README.md#download) section for the workaround; "Signing & Notarization" below
-> covers what a permanent fix requires.
+> **The Compose build's released DMG (`package-macos`) is unsigned** (ad-hoc), so Gatekeeper
+> blocks it on open. See the [Download](../README.md#download) section for the workaround;
+> "Signing & Notarization (Compose macOS build)" below covers what a permanent fix requires. The
+> SwiftUI app's DMG is Developer ID signed and notarized (see "SwiftUI macOS app" above).
 
 ### Publishing to F-Droid
 
@@ -1366,11 +1371,11 @@ What must stay true for F-Droid's build to reproduce the release APK:
 `fdroid scanner` finding **zero** problems — in the source and in the built APK — is what a change
 to the dependency graph must preserve. Run it in F-Droid's own `buildserver` image
 (`registry.gitlab.com/fdroid/fdroidserver:buildserver`) after touching `androidApp`, `:androidGms`
-or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services"
+or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services (Linux)"
 step catches the most likely regression on every push, but not a new proprietary dependency
 unrelated to Play services.
 
-## Signing & Notarization (future)
+## Signing & Notarization (Compose macOS build)
 
 > This section is about the Compose macOS build (`package-macos`). The SwiftUI macOS app is
 > Developer ID signed and notarized by its own job; see "SwiftUI macOS app" under "Release (CD)".

@@ -45,7 +45,7 @@ Linux is available for both x86_64 and arm64.
 > ```
 >
 > Alternatively, right-click the app and choose "Open" instead of double-clicking. See
-> [Signing & Notarization](docs/build.md#signing--notarization-future) for background.
+> [Signing & Notarization](docs/build.md#signing--notarization-compose-macos-build) for background.
 >
 > **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
 > Windows SmartScreen shows a "Windows protected your PC" warning on first run. Click

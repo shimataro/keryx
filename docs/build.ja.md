@@ -15,7 +15,7 @@
   [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   のようなデスクトップ限定タスクはこの要件を回避できる。
 
-- **Xcode**（macOS のみ）—— `:shared` の Apple ターゲット、つまり `KeryxShared` XCFramework
+- **Xcode**（Apple Silicon の Mac のみ）—— `:shared` の Apple ターゲット、つまり `KeryxShared` XCFramework
   （`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`。出力は `shared/build/XCFrameworks/release/` 配下）と、その macOS／
   iOS シミュレータ向けテストに必要。Xcode がない場合（または Linux/Windows）は Gradle がそれらのターゲットをスキップし、それ以外は
   従来どおりビルドされる。
@@ -314,8 +314,8 @@ XCFramework の存在を確認し、また `xcodegen generate` はソースと�
    `xcodegen generate` を実行すれば他の変更なしに反映される。
 
 `Local.xcconfig` が無い場合、`Shared.xcconfig` のアドホックな既定値が使われる——これはコンパイルと
-リンクはできるが、サンドボックス化されたバイナリの署名はできない。下記の CI での確認には十分だが、
-実際に起動できるバイナリにはならない。
+リンクはできるが、サンドボックス化されたバイナリの署名はできない。CI は署名自体を省く（下記）。どちらも
+起動できるバイナリにはならない。
 
 ### CI
 
@@ -325,6 +325,7 @@ macOS の CI ジョブには Apple ID・チームが無いため、実際に署�
 ```bash
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
@@ -334,8 +335,8 @@ Debug ビルドはアクティブなアーキテクチャしかコンパイル�
 `SPARKLE_PUBLIC_ED_KEY`（アーカイブしたアプリの `SUPublicEDKey` が空ならジョブは失敗する）。署名と公証は
 引き続きリリースジョブでのみ行う（「リリース（CD）」の「SwiftUI macOS アプリ」を参照）。
 
-`KeryxTests`（Swift Testing、単体で完結するテストバンドル）は、サンドボックス化されたアプリではなく
-`.xctest` バンドルを生成するだけなので、CI のアドホック ID のまま署名して実行できる。
+`KeryxTests`（Swift Testing、単体で完結するテストバンドル）も macOS 上で同じ `CODE_SIGNING_ALLOWED=NO` の
+まま実行する。サンドボックス化されたアプリではなく `.xctest` バンドルを生成するだけなので、署名は要らない。
 
 ## パッケージング
 
@@ -824,8 +825,8 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   標準化された単一の MIME タイプが存在せず、Android のコンテンツプロバイダーは素の `.opml`
   ファイルを XML 系のタイプではなく `application/octet-stream` として報告することが多い —
   そのため MIME だけで絞り込むと実際のファイルの大半を取りこぼす。MIME ベースのフィルター
-  （`application/x-opml+xml` / `text/x-opml` / `text/xml` / `application/xml` — 上記 Linux 節と
-  同じ識別子）と、拡張子ベースのフォールバックフィルター（`scheme="content"` + `host="*"` +
+  （`application/x-opml+xml` / `text/x-opml` に加え、上記 Linux 節では意図的に外している汎用の
+  `text/xml` / `application/xml`）と、拡張子ベースのフォールバックフィルター（`scheme="content"` + `host="*"` +
   `mimeType="*/*"` + `pathPattern=".*\\.opml"`、報告される MIME タイプに関わらず `content://`
   URI のパスで判定する）は、**2つの独立した intent-filter** として宣言している（1つのフィルター内に
   `<data>` タグをまとめてはいない）: Android は同一 `<intent-filter>` 内にある複数の `<data>`
@@ -846,8 +847,8 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   `handleOpmlOpenIfPresent` が着信した `content://` `Uri` を `ContentResolver` 経由で読み取り、
   同じ `MainActivity`/`ACTION_VIEW` の処理を共有するが別の intent-filter を持つ `keryx://` の
   OAuth リダイレクトは除外する。`text/xml`/`application/xml` を受け入れることで、無関係な XML
-  ファイルの「開く」候補にも Keryx が並んでしまうが、これは上記 Linux 節の `text/x-opml`
-  フォールバックが既に受け入れているのと同じトレードオフである。不正な入力の扱いも他プラットフォーム
+  ファイルの「開く」候補にも Keryx が並んでしまう。Linux はこれらを宣言しないことで、このトレードオフを
+  避けている。不正な入力の扱いも他プラットフォーム
   と同様: 読み取りや `OpmlImporter.import` の失敗は伝播させず、データタブのインラインのインポート
   エラーとして表示する。
 
@@ -985,7 +986,7 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 何も変わらない。ローカルビルドは両方とも同じリテラル `"0.0.0"` にフォールバックする。jpackage が受け付けない
 形式（`MAJOR.MINOR.PATCH[-<pre-release>]` 以外）のタグは、ワークフロー冒頭で明示的なメッセージとともに失敗させる。
 
-`macos-latest` ランナーは arm64 のため、成果物名にアーキテクチャを含めている
+Compose 版のジョブが使う `macos-latest` ランナーは arm64 のため、成果物名にアーキテクチャを含めている
 （将来 x86_64 版やユニバーサル版を併置できるようにするため）。
 
 ### macOS における 0.x バージョンとプレリリースタグ
@@ -1152,15 +1153,16 @@ Compose 側のジョブを削除し、このジョブを `package-macos` に改�
 設定が揃うと、ジョブは次を行う（スクリプトは `.github/scripts/` にあり、認証情報を除けば手元でも実行できる）:
 
 1. 証明書を使い捨てのキーチェーンに取り込み、プロファイルと公証用キーをランナーの一時ディレクトリに書く
-   （どれも最後に削除する）。
+   （どれも最後に削除する）。スクリプトはプロファイルを Xcode の provisioning profile ディレクトリにも
+   （`<uuid>.provisionprofile` として）入れ、終了時に削除する（同じものが元からあった場合は残す）。
 2. `package-macos-swiftui.sh` を実行する: Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
    Intel スライスが無いため）、署名（Hardened Runtime、Team ID、Sparkle の補助ツール）を検証し、アプリを公証して staple し、
    staple 済みのアプリから `.zip` を作る——安定版のタグでは、署名・公証・staple 済みの `.dmg` も作る。公証のログは成功時
    にも出力する（早めに直すべき警告が載るため）。署名設定は、生成する gitignore 済みの `appleApp/Local.xcconfig` 経由で
    Xcode に渡す（Swift パッケージのターゲットに波及させないため）。開発者自身の同名ファイルがあると、スクリプトは
    実行を拒否する。Sparkle の入れ子の補助ツールは、Sparkle の推奨どおり export 時に Xcode が再署名する。署名時に
-   `codesign --deep` を付けないこと。Xcode のバージョンは、ランナーイメージの既定ではなく固定している
-   （`DEVELOPER_DIR`）。ランナーイメージの更新に合わせて更新する。
+   `codesign --deep` を付けないこと。ジョブは `macos-latest` ではなく固定のランナーイメージ（`macos-26`）で動き、
+   Xcode は `release.yml` の `DEVELOPER_DIR` で指定している（`AppIcon.icon` に Xcode 26 が必要）。両方を一緒に更新する。
 3. `generate-appcast.sh` を実行する: Sparkle の `generate_appcast` が `SPARKLE_PRIVATE_KEY` で `.zip` に署名し、
    `appcast.xml` を書く。
 4. `.zip`・`.dmg`・`appcast.xml` を添付する——ここまでがすべて成功した場合にだけ動く最後のステップで。
@@ -1304,9 +1306,10 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 直接編集すればよい。どちらのワークフローも、公開済みのリリースには一切手を触れない。
 
 > [!IMPORTANT]
-> **リリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper にブロックされる。回避方法は
-> README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に必要な作業は下記
-> 「署名・公証」を参照。
+> **Compose 版（`package-macos`）としてリリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper に
+> ブロックされる。回避方法は README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に
+> 必要な作業は下記「署名・公証（Compose 版 macOS）」を参照。SwiftUI 版の DMG は Developer ID 署名・公証済み
+> （前述「SwiftUI macOS アプリ」参照）。
 
 ### F-Droid への公開
 
@@ -1360,11 +1363,11 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 `fdroid scanner` の検出が、ソースでもビルドした APK でも**ゼロ**であることが、依存グラフの変更が
 守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の
 `buildserver` イメージ（`registry.gitlab.com/fdroid/fdroidserver:buildserver`）で実行すること。
-`ci.yml` の「Verify the fdroid flavor has no Google Play services」ステップは最もありそうな
+`ci.yml` の「Verify the fdroid flavor has no Google Play services (Linux)」ステップは最もありそうな
 リグレッションを毎 push で検出するが、Play 開発者サービスと無関係な新たなプロプライエタリ依存までは
 検出しない。
 
-## 署名・公証（将来対応）
+## 署名・公証（Compose 版 macOS）
 
 > この節は Compose 版 macOS ビルド（`package-macos`）の話。SwiftUI macOS アプリの Developer ID 署名と公証は専用の
 > ジョブが行う。「リリース（CD）」の「SwiftUI macOS アプリ」を参照。
@@ -1409,7 +1412,8 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 
 Keychain 利用のための特別な entitlement は不要（`get-task-allow` を付けないことだけ担保する。jpackage の
 Developer ID 署名は hardened runtime を付与するため要件を満たす）。トークン保存の仕組みは
-[sync-architecture.ja.md](sync-architecture.ja.md) の「Dropbox 認証 > トークン保存先」を参照。
+[sync-architecture.ja.md](sync-architecture.ja.md) の「クラウド認証（OAuth PKCE + オフラインアクセス）> トークン保存先」を
+参照（Dropbox だけでなく 3 プロバイダすべてを扱う）。
 
 ## 設定メモ
 
