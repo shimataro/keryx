@@ -1208,7 +1208,7 @@ Snap Store、`deploy-pages` など）が動く。そのため、GitHub での初
 
 - Developer ID Application 証明書は **G2 Sub-CA** から発行する。古い認証局は 2027-02-01 に失効し、そこから発行された
   証明書も同時に期限を迎える（Apple の「Replace Developer ID certificates」のヘルプページを参照）。どちらから
-  発行されたかは、証明書の作成時に表示される期限で分かる。
+  発行されたかは、Keychain Access で証明書を開いて発行元（Issuer）を確認する。期限だけでは確定できない。
 - `.p12` には、証明書とその**秘密鍵**の両方が入っている必要がある。使い捨てのキーチェーンに取り込んで、
   `security find-identity -v -p codesigning <keychain>` に出てくれば、署名に使える。
 - provisioning profile に入っている証明書は、`.p12` の証明書と同じものでなければならない（SHA-1 で比較できる）。

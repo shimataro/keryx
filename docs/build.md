@@ -1210,8 +1210,8 @@ fails the job — which is why it is best completed in a rehearsal first.
 
 - Issue the Developer ID Application certificate from the **G2 Sub-CA**. The previous certificate
   authority expires on 2027-02-01 and the certificates it issued expire with it (see Apple's
-  "Replace Developer ID certificates" help page); the expiry shown when the certificate is created
-  tells which one you got.
+  "Replace Developer ID certificates" help page). To tell which one you got, open the certificate in
+  Keychain Access and check its issuer; the expiry date alone does not settle it.
 - The `.p12` must hold both the certificate and its **private key**. Imported into a throwaway
   keychain, it must show up in `security find-identity -v -p codesigning <keychain>` to be usable
   for signing.
