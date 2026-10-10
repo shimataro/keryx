@@ -1174,9 +1174,43 @@ match the `SUPublicEDKey` embedded in the app — every client would reject such
 updated any more**, so keep a backup outside GitHub. `SPARKLE_PUBLIC_ED_KEY` is set for Release
 builds only, so a developer's Debug run never polls the feed.
 
-**First run.** The signing and notarization path cannot be exercised on GitHub before the secrets
-exist, so run it first with a pre-release tag and read the log. Then check an update end to end:
-point a build's `SUFeedURL` at the produced `appcast.xml` and update from an older build.
+**Rehearse locally first.** Publishing a GitHub Release runs every platform's job (the Play upload,
+the Snap Store, `deploy-pages`, …), so check signing and notarization on a Mac before the first run
+on GitHub. The packaging script runs by hand with the same inputs:
+
+- Run it from a fresh clone: the script refuses to run while a developer's own
+  `appleApp/Local.xcconfig` exists. Copy `local.properties` into the clone so the build gets the OAuth
+  client ids.
+- Import the `.p12` into a throwaway keychain and add it to the search list (restore the list and
+  delete the keychain afterwards).
+- Pass the script's inputs as environment variables (listed at the top of
+  `package-macos-swiftui.sh`). When the keychains hold more than one Developer ID Application
+  certificate — an older one is often still in a developer's login keychain — set
+  `SIGNING_IDENTITY` to the SHA-1 of the one to sign with, or the generic name is ambiguous.
+- The app is really submitted to Apple's notary service, but nothing is published.
+
+**A new Apple account's first notarization is slow.** Here the first submission stayed
+`In Progress` for about 35 minutes; the second finished in a few minutes. `NOTARY_TIMEOUT` (default
+`30m`) extends the wait. On a timeout the script prints the submission id: wait for it with
+`xcrun notarytool wait <id>` (same credentials), then run again. Getting that first submission done
+in a local rehearsal keeps it from timing out the job's first run on GitHub (the job has 60 minutes).
+
+**Certificate pitfalls met while setting this up:**
+
+- Issue the Developer ID Application certificate from the **G2 Sub-CA**. The previous authority
+  expires on 2027-02-01, and certificates it issues expire with it; the G2 one issued here expires
+  on 2031-09-17.
+- The `.p12` must hold both the certificate and its **private key**. Imported into a throwaway
+  keychain, it must show up in `security find-identity -v -p codesigning <keychain>` to be usable
+  for signing.
+- The certificate inside the provisioning profile must be the one in the `.p12` (compare their
+  SHA-1).
+- Use an ASCII alphanumeric `.p12` password. Here a 100-character one failed and a 32-character one
+  worked (the cause was not pinned down).
+
+**First run on GitHub.** Then run the job with a pre-release tag and read the log. Finally check an
+update end to end: point a build's `SUFeedURL` at the produced `appcast.xml` and update from an
+older build.
 
 ### GitHub Release flags
 
