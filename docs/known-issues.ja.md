@@ -789,7 +789,7 @@ detach する。同じログに残っているオーファンプロセスの後�
 ### 緩和策
 
 `.github/workflows/ci.yml` の "Verify packaging (macOS)" ステップは `packageDmg` を最大3回まで
-リトライする（Compose 版 macOS ビルドをリリースしていた頃は `release.yml` も同様だった）。
+リトライする。
 ただし失敗ログに実際に `hdiutil` が含まれている場合に限る — それ以外の失敗（本物の
 パッケージング不具合）は1回目でそのまま失敗する。リトライ前に `/Volumes/Keryx*` 配下に残っている
 マウントを強制 detach し、次の試行が別名のマウントポイントに当たらないようにしている。

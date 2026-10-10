@@ -780,8 +780,7 @@ against something (Spotlight/`mdworker`, most likely) still holding the volume o
 
 ### Mitigation
 
-`.github/workflows/ci.yml`'s "Verify packaging (macOS)" step retries `packageDmg` up to 3 times (as
-`release.yml` did while it still released the Compose macOS build), but
+`.github/workflows/ci.yml`'s "Verify packaging (macOS)" step retries `packageDmg` up to 3 times, but
 only when the failure log actually contains `hdiutil` — any other failure (a real packaging
 regression) still fails on the first attempt. Before retrying, any volume still mounted under
 `/Volumes/Keryx*` is force-detached so the next attempt doesn't land on a differently-named mount
