@@ -210,6 +210,12 @@ state, so they can never disagree about what's currently true. **No step ever ru
 check never auto-downloads, and a downloaded file never auto-installs — download and install are
 each a separate, explicit click (Updates tab button, or that menu item).
 
+This is the Compose app's updater. The macOS release is the SwiftUI app, which updates through
+Sparkle instead (see "Distribution and coexistence" in [app-architecture.md](app-architecture.md)).
+On macOS, the `.app` path below — `ditto` extraction, the `codesign` and `Info.plist` checks, App
+Translocation — therefore serves only the one-time move of an installed Compose app to the SwiftUI
+app (whose `.zip` passes those same checks) and internal builds.
+
 - **Which file, and what to do with it.** `UpdateChecker` parses the GitHub release's `assets[]`;
   `domain/UpdateAsset.kt`'s `selectUpdateAsset` picks the one matching this build's install form
   (never an asset GitHub hasn't finished processing, and never one with no verifiable `sha256`

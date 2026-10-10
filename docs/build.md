@@ -883,25 +883,25 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Nine jobs, eleven runs in total:
-   - Six `package-*` jobs have no dependencies and run in parallel: `package-macos`,
-     `package-macos-swiftui`, `package-linux`, `package-snap`, `package-windows` and
-     `package-android`. `package-linux` and `package-snap` are each an `x86_64`/`arm64` matrix
-     (`ubuntu-latest`/`ubuntu-24.04-arm` and `ubuntu-24.04`/`ubuntu-24.04-arm` respectively), so
-     those six jobs make eight runs.
+3. Eight jobs, ten runs in total:
+   - Five `package-*` jobs have no dependencies and run in parallel: `package-macos`,
+     `package-linux`, `package-snap`, `package-windows` and `package-android`. `package-linux` and
+     `package-snap` are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
+     `ubuntu-24.04`/`ubuntu-24.04-arm` respectively), so those five jobs make seven runs.
    - `attach-fdroid-version` (see "Publishing to F-Droid") and `publish-play` (see its own bullet
      below) depend only on `package-android`.
    - `deploy-pages` is gated on `package-macos`, `package-linux`, `package-windows` and
-     `package-android` — not on `package-snap` or `package-macos-swiftui`.
+     `package-android` — not on `package-snap`.
 
    The arm64 matrix legs run `android-actions/setup-android@v3` first, since `:composeApp`'s Android
    target needs `ANDROID_HOME` merely to configure and the `ubuntu-24.04-arm` image — unlike
    `ubuntu-latest` — ships no Android SDK at all. What the jobs do:
 
-   - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
-   - `package-macos-swiftui`, a separate job for the native SwiftUI macOS app: Developer ID signing,
-     notarization and a Sparkle appcast. It does nothing until its secrets are configured, and
-     `deploy-pages` does not wait for it — see "SwiftUI macOS app" below.
+   - `package-macos` builds the native SwiftUI macOS app (`appleApp/`, with Xcode on a macOS
+     runner), Developer ID signed and notarized, and attaches `Keryx-<version>-macos-arm64.dmg`,
+     `Keryx-<version>-macos-arm64.zip` and the Sparkle `appcast.xml`. **For a pre-release tag, no
+     `.dmg` is built; the `.zip` and `appcast.xml` are still attached.** A missing secret fails the
+     job — see "SwiftUI macOS app" below. The Compose macOS app is no longer released.
    - `:composeApp:packageDeb :composeApp:packageRpm` (Linux runner, once per architecture, after installing `fakeroot`/`rpm` for jpackage), attached as `Keryx-<version>-linux-<arch>.deb`, `Keryx-<version>-linux-<arch>.rpm` **and `Keryx-<version>-linux-<arch>.zip`** for `<arch>` in `x86_64`, `arm64`. **For a pre-release tag, `packageDeb`/`packageRpm` are skipped and only the `.zip` is attached** (same reasoning as the Windows MSI case below). A failure on one architecture's leg (`fail-fast: false`) does not withhold the other's assets.
    - `package-snap`, a separate job (also an `x86_64`/`arm64` matrix, `ubuntu-24.04`/`ubuntu-24.04-arm`)
      so a `snapcraft` failure on either architecture can never block the deb/rpm/zip job above from
@@ -972,7 +972,9 @@ Flow:
    **not** `package-snap` — a Store publish delay shouldn't hold back updating the page once every
    other installer is already live.
 
-   The `.zip` files are archives of the non-packaged app bundle/image produced by `:composeApp:createDistributable`, for users who prefer not to use an installer package.
+   The Linux and Windows `.zip` files are archives of the non-packaged app image produced by
+   `:composeApp:createDistributable`, for users who prefer not to use an installer package. The macOS `.zip` is the
+   notarized app itself, and is what the macOS app updates itself from.
 
 The **tag is the single source of truth for the version**. `appVersion` in `shared/build.gradle.kts` and
 `composeApp/build.gradle.kts` (the same resolution, in both) resolves
@@ -985,10 +987,14 @@ carry a pre-release suffix. For a plain (non-prerelease) tag the two are identic
 builds fall through to the same `"0.0.0"` literal for both. A tag that does not yield a jpackage-compatible
 `MAJOR.MINOR.PATCH[-<pre-release>]` version fails the workflow early with an explicit message.
 
-The Compose job's `macos-latest` runners are arm64, hence the architecture in the artifact name — it leaves room
-for an x86_64 or universal build alongside it later.
+The macOS app is built for arm64 only (the shared framework has no Intel slice), hence the architecture in the
+artifact name — it leaves room for an x86_64 or universal build alongside it later.
 
 ### 0.x versions and pre-release tags on macOS
+
+> This section and "Signing & Notarization (Compose macOS build)" below concern the Compose macOS build,
+> which is no longer released: it is still packaged locally and by `ci.yml`'s "Verify packaging (macOS)"
+> step, whose checks keep the Compose app's own in-app updater working.
 
 jpackage refuses a macOS `--app-version` whose first component is `0` (it enforces the CFBundleVersion rule that
 versions start at 1), and it fails `createDistributable` — not just the DMG step — so a `0.x` release would
@@ -1118,19 +1124,17 @@ failure instead.
 
 ### SwiftUI macOS app (Developer ID, notarization, Sparkle)
 
-The native SwiftUI macOS app (`appleApp/`) is released by the `package-macos-swiftui` job, next to
-`package-macos`, which still builds the Compose macOS app. The plan is to retire `package-macos` and
-let this job take its place: delete the Compose job, rename this one to `package-macos` (so
-`deploy-pages` waits for it), drop `ARTIFACT_SUFFIX` so the files are named
-`Keryx-<version>-macos-arm64.{dmg,zip}` again, and update the macOS notes in the README. Until then
-the two are independent, and the SwiftUI job's files carry a `-swiftui` suffix
-(`Keryx-<version>-macos-arm64-swiftui.zip`) so they can never replace the Compose build's.
+The macOS release is the native SwiftUI app (`appleApp/`), built by the `package-macos` job as
+`Keryx-<version>-macos-arm64.{dmg,zip}`. It replaced the Compose macOS app, which is no longer
+released; an installed Compose app's in-app updater picks up the same `.zip` and so replaces itself
+with this app (its data is not carried over — see "Apple Native Apps (SwiftUI)" in
+[app-architecture.md](app-architecture.md)).
 
-**Nothing happens until it is configured.** Right after checking out, the job runs
+**A missing secret fails the release.** Right after checking out, the job runs
 `.github/scripts/check-release-config.sh`, which requires every repository secret below to be set
-and non-empty. If any is missing, the job names the missing ones in a notice and succeeds without
-building or uploading anything: a release cut before the secrets exist is unaffected, and an
-unsigned build can never reach a release. (Every later step is gated on that check.)
+and non-empty. If any is missing, it names the missing ones in an error and the job fails before
+building anything, so `deploy-pages` (which waits for this job) does not run either: a release never
+goes out without its macOS package, and never with an unsigned one.
 
 | Secret | Content |
 | --- | --- |
@@ -1225,7 +1229,7 @@ fails the job — which is why it is best completed in a rehearsal first.
 
 **First run on GitHub.** Finally, cut a pre-release tag: the whole workflow runs (including the
 Play internal/alpha upload and the Snap `edge` channel), but no DMG is built for a pre-release and
-GitHub's "latest" still points at the previous stable release. Read the `package-macos-swiftui`
+GitHub's "latest" still points at the previous stable release. Read the `package-macos`
 log, then check an update end to end: point a build's `SUFeedURL` at the produced `appcast.xml` and
 update from an older build.
 
@@ -1323,12 +1327,6 @@ misleading than a same-language duplicate. Edit a release's notes for a specific
 directly in Play Console if a translated version is ever wanted; neither workflow touches an
 existing release once published.
 
-> [!IMPORTANT]
-> **The Compose build's released DMG (`package-macos`) is unsigned** (ad-hoc), so Gatekeeper
-> blocks it on open. See the [Download](../README.md#download) section for the workaround;
-> "Signing & Notarization (Compose macOS build)" below covers what a permanent fix requires. The
-> SwiftUI app's DMG is Developer ID signed and notarized (see "SwiftUI macOS app" above).
-
 ### Publishing to F-Droid
 
 F-Droid builds the `fdroid` flavor from source itself. It then compares its build with the
@@ -1390,10 +1388,11 @@ unrelated to Play services.
 
 ## Signing & Notarization (Compose macOS build)
 
-> This section is about the Compose macOS build (`package-macos`). The SwiftUI macOS app is
-> Developer ID signed and notarized by its own job; see "SwiftUI macOS app" under "Release (CD)".
+> This section is about the Compose macOS build, which is no longer released. The macOS release is
+> the SwiftUI app, Developer ID signed and notarized by `package-macos`; see "SwiftUI macOS app"
+> under "Release (CD)".
 
-Currently, packaged artifacts are **ad-hoc signed** (effectively unsigned). This is fine for local development, but the following requires **Developer ID Application** signing (requires paid Apple Developer Program enrollment):
+The Compose build's packaged artifacts are **ad-hoc signed** (effectively unsigned). This is fine for local development, but the following requires **Developer ID Application** signing (requires paid Apple Developer Program enrollment):
 
 - Distribution to other Macs (getting past Gatekeeper).
 - Removing Keychain access permission dialogs on macOS (a stable signing identity fixes the ACL).

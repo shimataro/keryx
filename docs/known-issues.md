@@ -89,15 +89,12 @@ JNA `Callback` as the implementation) to act as the notification center's delega
 inherently higher-risk native interop (a mistake here can crash the JVM) and would need several
 real-hardware iterations to get right.
 
-This would very likely become moot rather than worth building, though: `app-architecture.md` notes
-macOS is expected to eventually move to a native SwiftUI implementation (`external-spec.md` §2 — a
-longer-term, not-yet-scheduled direction, alongside Android and iOS not existing as targets yet). A
-native app would use `UNUserNotificationCenterDelegate` through the ordinary app lifecycle — no AWT
-bridge, no deprecated API, no Accessory-policy-specific bridging bug — which is a common, reliably
-working pattern for macOS menu-bar-only (`LSUIElement`) apps. Given that, and given the AWT-based
-version above turned out not to work anyway, building the JNA bridge is deferred indefinitely in
-favor of this note, revisited only if the native SwiftUI port itself keeps being deferred long
-enough that the tray-hidden gap becomes worth closing on its own.
+This has since become moot rather than worth building: the macOS release is now the native SwiftUI
+app (`external-spec.md` §2), and the Compose macOS build this issue affects is no longer released —
+it remains for internal verification only. A native app uses `UNUserNotificationCenterDelegate`
+through the ordinary app lifecycle — no AWT bridge, no deprecated API, no
+Accessory-policy-specific bridging bug. Given that, and given the AWT-based version above turned out
+not to work anyway, the JNA bridge will not be built; this note stays as the record of why.
 
 ## Article list crashes the UI thread during heavy scroll + selection churn
 
@@ -783,8 +780,8 @@ against something (Spotlight/`mdworker`, most likely) still holding the volume o
 
 ### Mitigation
 
-`.github/workflows/ci.yml`'s "Verify packaging (macOS)" step and `.github/workflows/release.yml`'s
-"Package App bundle (+ Dmg for stable releases)" step both retry `packageDmg` up to 3 times, but
+`.github/workflows/ci.yml`'s "Verify packaging (macOS)" step retries `packageDmg` up to 3 times (as
+`release.yml` did while it still released the Compose macOS build), but
 only when the failure log actually contains `hdiutil` — any other failure (a real packaging
 regression) still fails on the first attempt. Before retrying, any volume still mounted under
 `/Volumes/Keryx*` is force-detached so the next attempt doesn't land on a differently-named mount

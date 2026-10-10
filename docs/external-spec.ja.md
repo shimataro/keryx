@@ -16,10 +16,10 @@
 
 | プラットフォーム | 対応 |
 | --- | --- |
-| Windows / macOS / Linux | ✅ Compose Multiplatform（現行） |
+| Windows / Linux | ✅ Compose Multiplatform（現行） |
 | Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照。F-Droid 版は Play 開発者サービスを含まないため Google Drive が一切無く、アプリ内アップデートも無い — §4 と §7 参照） |
 | iOS / iPadOS | 開発中（SwiftUI ネイティブ UI。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照） |
-| macOS（ネイティブ） | 開発中 — ユーザー向けには上記の Compose 版に代わる、ネイティブ SwiftUI 版 macOS アプリ（Apple Silicon）。共有ロジックはすでに対応済み |
+| macOS | ✅ ネイティブ SwiftUI アプリ（現行。Apple Silicon、macOS 14 以降）。ロジックは `:shared` で共有する。Compose 版 macOS ビルドに代わるもので、Compose 版はもうリリースせず内部の確認用としてのみ残す。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照 |
 
 ## 3. 対応フォーマット
 
@@ -94,7 +94,7 @@ Google Play 開発者サービスがインストール済みかつ有効かつ�
 - フィード健全性管理: 301/308 は購読 URL を自動更新（通知）、410 Gone は通知センターに警告、
   連続エラーはフィード一覧にインジケータ表示
 - アプリ内アップデート（リリースページへのリンクだけでなく、ダウンロード＋インストールまで）:
-  対応するのは macOS の `.app`、Windows の MSI インストールまたは portable ZIP、Linux の
+  対応するのは macOS アプリ、Windows の MSI インストールまたは portable ZIP、Linux の
   portable ZIP のみ（deb/rpm インストールや Snap インストール、認識できないインストール形態は
   リリースページを開く従来の挙動にフォールバック）、そして Android のサイドロードインストール（Google Play 経由では
   提供しない——Play が既にアプリ自身を更新してくれるため。F-Droid 経由でも同様で、F-Droid クライアントが
@@ -107,7 +107,9 @@ Google Play 開発者サービスがインストール済みかつ有効かつ�
   インストールも常に個別の明示的なユーザー操作であり、サイレントに／自動でインストールされることはない。ダウンロードしたファイルは
   インストール前に GitHub リリース自身の SHA-256 ダイジェストと照合して検証する。設計の詳細は
   [background-update.ja.md](background-update.ja.md)、この検証が保証すること／しないことは
-  [SECURITY.ja.md](../SECURITY.ja.md) を参照。
+  [SECURITY.ja.md](../SECURITY.ja.md) を参照。macOS アプリは代わりに独自の経路で更新する——アプリメニューの
+  「アップデートを確認…」と、設定 ▸ 一般でオフにできる定期的な自動確認——そして、インストール前にアップデートの
+  EdDSA 署名を検証する（Sparkle。[app-architecture.ja.md](app-architecture.ja.md) の「配布と共存」参照）。
 - 記事一覧・記事ビュー（リーダービュー）。**記事を選択した瞬間に既読**。未読に戻す操作あり。リーダーのツールバーのボタンは既読／未読のトグルで、記事の状態を表示する（未読の間は一覧の未読ドットと同じ塗りの丸）。リーダーだけが表示されていて一覧が見えない状態でも、タップした結果がわかり、元に戻せる。
   リーダーをスワイプして記事間を移動する場合（§9 参照）、「選択した瞬間」とはスワイプが記事の上に
   落ち着いた瞬間を指す——リーダーが次に備えて用意している隣の記事は、読み込まれてはいるが選択されて
@@ -423,7 +425,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
   画像や埋め込みコンテンツも含めて——開く前に、開いたときと同じように取得される。それらが既読に
   なることはない。
 - 各クラウドプロバイダー（Dropbox・Google Drive・OneDrive）のトークンはそれぞれ独立してプラットフォームの
-  セキュアストレージに保存する。desktop: macOS は Keychain（`security` CLI 経由）、Windows/Linux は
+  セキュアストレージに保存する。macOS: アプリのデータ保護キーチェーン（ファイルへのフォールバックなし）。Windows/Linux は
   Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけはデスクトップの Secret portal から
   得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。java-keyring は使わない）——利用不可時は
   データディレクトリのファイルにフォールバック。Android: プロバイダーごとに Android Keystore が保持する
