@@ -91,8 +91,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
   "Narrower widths" has the exact condition), so the button is reachable without the user having to
   find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
-- In-app update (download and install, not just a link to the release page): supported for the
-  macOS app, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
+- In-app update (download and install, not just a link to the release page). The macOS app updates
+  through its own route, described at the end of this item; everywhere else it is supported for
+  a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
   falls back to opening the release page, as does any install form the app can't recognize), and a sideloaded
   Android install (never through Google Play, which already updates the app itself, nor through
   F-Droid, whose client does the same — the F-Droid build omits the feature altogether). Presented from
