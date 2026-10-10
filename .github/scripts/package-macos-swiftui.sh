@@ -26,6 +26,8 @@
 #   NOTARY_KEY_PATH           App Store Connect API key (.p8) for notarytool.
 #   NOTARY_KEY_ID             Its key ID.
 #   NOTARY_ISSUER_ID          Its issuer ID.
+#   NOTARY_TIMEOUT            Optional: how long to wait for each notarization, e.g. 30m (default),
+#                             2h. The first submissions of a new Apple account can take hours.
 #   ARTIFACT_SUFFIX           Optional suffix before the extension; defaults to "-swiftui" so the
 #                             files cannot replace the Compose build's Keryx-<v>-macos-arm64.zip
 #                             until that build is retired (then set it to empty).
@@ -57,6 +59,7 @@ fail() {
 : "${NOTARY_ISSUER_ID:?NOTARY_ISSUER_ID is not set}"
 suffix="${ARTIFACT_SUFFIX--swiftui}"
 signing_identity="${SIGNING_IDENTITY:-Developer ID Application}"
+notary_timeout="${NOTARY_TIMEOUT:-30m}"
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
   || fail "Invalid version: '$VERSION'."
@@ -66,6 +69,7 @@ signing_identity="${SIGNING_IDENTITY:-Developer ID Application}"
 # name or SHA-1 can contain.
 identity_pattern='^[A-Za-z0-9 :().,-]+$'
 [[ "$signing_identity" =~ $identity_pattern ]] || fail "Unexpected characters in SIGNING_IDENTITY."
+[[ "$notary_timeout" =~ ^[1-9][0-9]*[smh]$ ]] || fail "Invalid NOTARY_TIMEOUT: '$notary_timeout' (use e.g. 30m, 2h)."
 [[ "$IS_PRERELEASE" == "true" || "$IS_PRERELEASE" == "false" ]] \
   || fail "IS_PRERELEASE must be true or false."
 [ -s "$PROVISIONING_PROFILE_PATH" ] || fail "Provisioning profile not found: $PROVISIONING_PROFILE_PATH"
@@ -193,20 +197,26 @@ done < <(find "$sparkle" \( -name '*.xpc' -o -name 'Updater.app' -o -name 'Autou
 verify_signed "$sparkle"
 
 # --- Notarize and staple. ---
+notary_auth=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
 notarize() {
   local file="$1" json id status
   json="$work/notary-$(basename "$file").json"
-  # A rejected submission can still exit 0, so judge by the reported status, not the exit code.
-  xcrun notarytool submit "$file" \
-    --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
-    --wait --timeout 30m --output-format json > "$json" || true
-  id="$(plutil -extract id raw -o - "$json" 2>/dev/null || true)"
-  status="$(plutil -extract status raw -o - "$json" 2>/dev/null || true)"
-  [ -n "$id" ] || fail "notarytool returned no submission id for $(basename "$file")."
+  # Submit first and wait separately: the submission id is then known (and printed) before the long
+  # part, so a timeout can be reported and resumed. Submitting fails right here on bad credentials.
+  xcrun notarytool submit "$file" "${notary_auth[@]}" --no-wait --output-format json > "$json"
+  id="$(plutil -extract id raw -o - "$json" 2> /dev/null)" || id=""
+  [[ "$id" =~ ^[0-9A-Fa-f-]{36}$ ]] || fail "notarytool returned no submission id for $(basename "$file")."
+  echo "Submitted $(basename "$file") for notarization: $id"
+  # `wait` exits non-zero on a timeout; the outcome is read from `info` below either way.
+  xcrun notarytool wait "$id" "${notary_auth[@]}" --timeout "$notary_timeout" || true
+  xcrun notarytool info "$id" "${notary_auth[@]}" --output-format json > "$json"
+  status="$(plutil -extract status raw -o - "$json" 2> /dev/null)" || status=""
+  if [ "$status" = "In Progress" ]; then
+    fail "Notarization of $(basename "$file") is still in progress after $notary_timeout (submission $id). The first submissions of a new Apple account can take hours: wait with 'xcrun notarytool wait $id' (same credentials), then run again."
+  fi
   # Always read the log, even on success: it lists warnings worth fixing before they become errors.
-  xcrun notarytool log "$id" \
-    --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
-  [ "$status" = "Accepted" ] || fail "Notarization of $(basename "$file") ended as '$status'."
+  xcrun notarytool log "$id" "${notary_auth[@]}" || true
+  [ "$status" = "Accepted" ] || fail "Notarization of $(basename "$file") ended as '$status' (submission $id)."
 }
 
 echo "Notarizing the app..."
