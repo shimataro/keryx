@@ -80,7 +80,7 @@ identity_pattern='^[A-Za-z0-9 :().,-]+$'
 # history first: a read-only call that fails within seconds if it does not accept the credentials.
 notary_auth=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
 xcrun notarytool history "${notary_auth[@]}" > /dev/null \
-  || fail "Apple's notary service did not accept the notarization credentials; check the API key, its key id and the issuer id."
+  || fail "Apple's notary service could not be reached or did not accept the notarization credentials (see notarytool's error above); check the API key, its key id and the issuer id."
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 app_dir="$root/appleApp"
