@@ -26,7 +26,21 @@ enum UpdateCheckFailure: Equatable {
               error.domain == downloadErrorDomain,
               error.code == downloadErrorCode
         else { return nil }
-        let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
-        return underlying?.domain == NSURLErrorDomain ? .offline : .unavailable
+        return underlyingChain(of: error).contains { $0.domain == NSURLErrorDomain } ? .offline : .unavailable
     }
+
+    /// The errors under `error`, nearest first. Sparkle nests the URL loading error several
+    /// download errors deep, so the immediate underlying error alone does not reveal it.
+    private static func underlyingChain(of error: NSError) -> [NSError] {
+        var chain: [NSError] = []
+        var next = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        while let current = next, chain.count < maxUnderlyingDepth {
+            chain.append(current)
+            next = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return chain
+    }
+
+    /// Bounds the walk in case an error ever lists itself among its own underlying errors.
+    private static let maxUnderlyingDepth = 16
 }

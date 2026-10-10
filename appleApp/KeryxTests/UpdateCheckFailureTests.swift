@@ -24,6 +24,20 @@ struct UpdateCheckFailureTests {
         #expect(failure == .offline)
     }
 
+    /// The shape Sparkle actually reports: the URL loading error sits under several download errors.
+    @Test
+    func unreachableServerNestedUnderDownloadErrorsIsOffline() {
+        let url = NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        let nested = error(code: download, underlying: error(code: download, underlying: error(code: download, underlying: url)))
+        #expect(classify(nested, updateFound: false) == .offline)
+    }
+
+    @Test
+    func notFoundNestedUnderDownloadErrorsIsUnavailable() {
+        let nested = error(code: download, underlying: error(code: download, underlying: error(code: download)))
+        #expect(classify(nested, updateFound: false) == .unavailable)
+    }
+
     @Test
     func serverErrorIsUnavailable() {
         let underlying = NSError(domain: domain, code: download)
