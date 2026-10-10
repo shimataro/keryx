@@ -76,7 +76,7 @@ APIキーが指定されていないクラウドサービスは連携機能が�
 3. "Permissions" で以下をチェック
   - `files.content.write`
   - `files.content.read`
-4. "Settings" 内の "App key" を `local.properties` に指定
+4. "Settings" 内の "App key" を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
 
 ### Google Drive
 
@@ -92,11 +92,14 @@ APIキーが指定されていないクラウドサービスは連携機能が�
 4. メニューの「Google Auth プラットフォーム」→「クライアント」と辿り、クライアントを作成
   - 上部の「クライアントを作成」
   - アプリケーションの種類: 「デスクトップアプリ」
-  - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties` に指定
+  - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
 
-※OAuth2認可後のリダイレクト先はDropboxのように任意に決められないため、 `http://127.0.0.1:<ポート>` のループバックで受ける（アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。
-※フローはPKCE（`code_verifier`）を使うが、**クライアントシークレットは別途必要**。
-※開発中は「オーディエンス」タブで公開ステータスを「テスト」にしてテストユーザーを登録すれば事足りる。
+OAuth2 認可後のリダイレクト先は Dropbox のように任意に決められないため、`http://127.0.0.1:<ポート>` のループバックで受ける（アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。
+フローは PKCE（`code_verifier`）を使うが、**クライアントシークレットも別途必要**。iOS/Android と違い、Google の
+「デスクトップ アプリ」の OAuth クライアントは完全なパブリッククライアントとは扱われず、`client_secret` なしのトークン交換・
+更新は（PKCE の有無にかかわらず）`invalid_request: client_secret is missing` で拒否される。要求するスコープは
+`drive.appdata`（ユーザーの Drive 内のアプリ専用の隠しフォルダー）のみ。開発中は「オーディエンス」タブで公開ステータスを
+「テスト」にして、テストユーザーを登録する。
 
 > [!IMPORTANT]
 > **「テスト」ステータスのままだとリフレッシュトークンが7日で失効する。** OAuth同意画面の公開ステータスを
@@ -122,7 +125,7 @@ APIキーが指定されていないクラウドサービスは連携機能が�
    - 「カスタム リダイレクト URI」に `keryx://oauth2/callback` を追加する。
    - 「パブリック クライアント フローを許可する」を **はい** にする（OneDrive は PKCE パブリッククライアントで、クライアントシークレットは不要）。
 3. 「API のアクセス許可」→「アクセス許可の追加」→「Microsoft Graph」→「委任されたアクセス許可」で **`Files.ReadWrite.AppFolder`** を追加する（ドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する）。リフレッシュトークン用の `offline_access` は実行時に要求する。
-4. 「概要」の「アプリケーション (クライアント) ID」を `local.properties` の `onedrive.client.id` に指定する。
+4. 「概要」の「アプリケーション (クライアント) ID」を `local.properties`（[local.properties.example](../local.properties.example) のコピー）の `onedrive.client.id` に指定する。
 
 OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/callback`、`state` で識別）を再利用するため、追加の OS 登録は不要。**クライアントシークレットは不要**（Google と異なり、Microsoft は「モバイル/デスクトップ」登録を PKCE の完全なパブリッククライアントとして扱う）。同期 DB は OneDrive のアプリ専用フォルダー（`/me/drive/special/approot`）に保存される。Dropbox 同様、macOS では `keryx://` がパッケージ済みアプリへルーティングされるため `./gradlew :composeApp:run` では連携が完了しない。macOS で検証するには `createDistributable` で `Keryx.app` をビルドして起動する。
 
@@ -165,8 +168,8 @@ Google Drive が提供されるのは `GoogleApiAvailability.isGooglePlayService
 宣言だけで `keryx://oauth2/callback` のリダイレクトを受け取れる（`scheme="keryx"`
 `host="oauth2"` の `ACTION_VIEW` インテントフィルター）。そのため、上記デスクトップの
 `./gradlew :composeApp:run` のようなパッケージ済み/未パッケージの区別は無い。エミュレータで
-連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要——それを得る推奨手段が
-Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参照。
+連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要になる。Google Play システムイメージ
+（Chrome 入り）の利用を推奨する。詳細は [setup.ja.md](setup.ja.md) を参照。
 
 ### Apple（macOS / iOS）
 
@@ -391,10 +394,9 @@ KDE Discover）にライセンスやホームページのリンクは表示さ�
 存在しない。そのため `packageDeb` はビルド後処理（`composeApp/build.gradle.kts` の
 `injectDebMetainfo`）も実行する。これは `dpkg-deb -R` でビルド済みの `.deb` を展開し、
 `composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in` のプレースホルダーを置換した内容を
-`usr/share/metainfo/works.merc.keryx.metainfo.xml` として書き込み（`@DESKTOP_ID@` は jpackage が
+`usr/share/metainfo/works.merc.keryx.metainfo.xml` として書き込む（`@DESKTOP_ID@` は jpackage が
 パッケージに入れた実際の `.desktop` ファイル名 — `packageName`/ランチャー名から jpackage が導出する
-ため、決め打ちにせず展開済みペイロードを走査して見つける。ほかに `@VERSION@`、`@DATE@`）、
-`dpkg-deb --build --root-owner-group` で再パックする。同じ finalizer は、同じ `.desktop`
+ため、決め打ちにせず展開済みペイロードを走査して見つける。ほかに `@VERSION@`、`@DATE@`）。同じ finalizer は、同じ `.desktop`
 ファイルの `Comment=` の直後に `Comment[ja]=` 行も追加する（freedesktop.org の Desktop Entry
 Specification が定めるロケール接尾辞キーの慣習に従う）。これにより日本語環境のアプリケーション
 メニューでツールチップがローカライズされる — `snap/gui/keryx.desktop` は jpackage 生成物ではなく
