@@ -646,7 +646,7 @@ JUL のルートロガーに自前の formatter/handler を仕込んでいる。
   services の無い端末と同じ状態になる。この flavor のマニフェスト
   （`androidApp/src/fdroid/AndroidManifest.xml`）は、`works.merc.keryx.SELF_UPDATE_CHECK` の
   meta-data を `false` にして、どのインストーラーが APK を届けたかに関係なくアプリ内アップデート確認を
-  オフにし、`play` と同様に `REQUEST_INSTALL_PACKAGES` も含まない。`ci.yml` はこの 2 点を push のたびに
+  オフにし、`play` と同様に `REQUEST_INSTALL_PACKAGES` も含まない。`ci.yml` はこの 2 点をブランチへの push のたびに
   検証する（マージ後のマニフェストと、この flavor の実行時クラスパスに `com.google.android.gms` /
   `com.google.firebase` / `:androidGms` が無いこと）。
 
@@ -1129,7 +1129,7 @@ GitHub の APK が既にインストールされている端末は、Play から
 来たものとして認識する — Play がそのように再署名しているからであり、AAB がアップロード時に
 まったく別の鍵で署名されていたことは関係ない。
 
-`ci.yml` の通常のビルドジョブは、push のたびに実行され何も公開しない都合上、意図的にこれらの
+`ci.yml` の通常のビルドジョブは、ブランチへの push のたびに実行され何も公開しない都合上、意図的にこれらの
 Secrets を受け取らない。AGP は成果物が実際に使われるかどうかに関わらず `assembleRelease` を
 `:androidApp` のデフォルトの `build` タスクに組み込むが（`bundlePlayRelease` はどの集約
 ライフサイクルタスクにも含まれておらず、だからこそ上記の `release.yml` は明示的に実行している）、
@@ -1381,7 +1381,7 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の
 `buildserver` イメージ（`registry.gitlab.com/fdroid/fdroidserver:buildserver`）で実行すること。
 `ci.yml` の「Verify the fdroid flavor has no Google Play services (Linux)」ステップは最もありそうな
-リグレッションを毎 push で検出するが、Play 開発者サービスと無関係な新たなプロプライエタリ依存までは
+リグレッションをブランチへの push のたびに検出するが、Play 開発者サービスと無関係な新たなプロプライエタリ依存までは
 検出しない。
 
 ## 署名・公証（Compose 版 macOS）
