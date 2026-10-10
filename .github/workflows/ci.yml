@@ -1,7 +1,17 @@
 name: CI
 
+# Branches only: a release tag points at a commit its version branch already ran this on, and a
+# second full run would only compete with release.yml for the same runners.
 on:
-  - push
+  push:
+    branches:
+      - '**'
+
+# A newer push to the same feature branch supersedes the run in progress. Version branches (v*)
+# keep every run, so each integrated commit has its own result and saves its own caches.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/v') }}
 
 permissions:
   contents: read
