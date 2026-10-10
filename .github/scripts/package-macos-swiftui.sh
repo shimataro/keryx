@@ -26,9 +26,15 @@
 #   NOTARY_KEY_PATH           App Store Connect API key (.p8) for notarytool.
 #   NOTARY_KEY_ID             Its key ID.
 #   NOTARY_ISSUER_ID          Its issuer ID.
+#   NOTARY_TIMEOUT            Optional: how long to wait for each notarization, e.g. 30m (default),
+#                             2h. The first submissions of a new Apple account can take hours.
 #   ARTIFACT_SUFFIX           Optional suffix before the extension; defaults to "-swiftui" so the
 #                             files cannot replace the Compose build's Keryx-<v>-macos-arm64.zip
 #                             until that build is retired (then set it to empty).
+#   SIGNING_IDENTITY          Optional name or 40-digit SHA-1 of the certificate to sign with;
+#                             defaults to "Developer ID Application", which is enough when the
+#                             keychain holds a single such certificate (as release.yml's does). Set
+#                             a SHA-1 when more than one matches, e.g. when running this by hand.
 #   OAuth client ids (DROPBOX_APP_KEY, ONEDRIVE_CLIENT_ID, GOOGLE_DRIVE_APPLE_CLIENT_ID) are read
 #   from the environment by the Gradle build that Xcode runs.
 #
@@ -52,11 +58,18 @@ fail() {
 : "${NOTARY_KEY_ID:?NOTARY_KEY_ID is not set}"
 : "${NOTARY_ISSUER_ID:?NOTARY_ISSUER_ID is not set}"
 suffix="${ARTIFACT_SUFFIX--swiftui}"
+signing_identity="${SIGNING_IDENTITY:-Developer ID Application}"
+notary_timeout="${NOTARY_TIMEOUT:-30m}"
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
   || fail "Invalid version: '$VERSION'."
 [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail "Invalid build number: '$BUILD_NUMBER'."
 [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || fail "Invalid Apple team id."
+# The identity is written into an xcconfig and a plist below, so accept only what a certificate
+# name or SHA-1 can contain.
+identity_pattern='^[A-Za-z0-9 :().,-]+$'
+[[ "$signing_identity" =~ $identity_pattern ]] || fail "Unexpected characters in SIGNING_IDENTITY."
+[[ "$notary_timeout" =~ ^[1-9][0-9]*[smh]$ ]] || fail "Invalid NOTARY_TIMEOUT: '$notary_timeout' (use e.g. 30m, 2h)."
 [[ "$IS_PRERELEASE" == "true" || "$IS_PRERELEASE" == "false" ]] \
   || fail "IS_PRERELEASE must be true or false."
 [ -s "$PROVISIONING_PROFILE_PATH" ] || fail "Provisioning profile not found: $PROVISIONING_PROFILE_PATH"
@@ -73,9 +86,12 @@ local_xcconfig="$app_dir/Local.xcconfig"
   || fail "$local_xcconfig already exists; refusing to overwrite a local signing configuration."
 
 work="$(mktemp -d)"
+installed_profile=""
 cleanup() {
   rm -f "$local_xcconfig"
   rm -rf "$work"
+  # Only a profile this run installed: one that was already there is the developer's own.
+  if [ -n "$installed_profile" ]; then rm -f "$installed_profile"; fi
 }
 trap cleanup EXIT
 
@@ -92,13 +108,22 @@ profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile_p
   || fail "The provisioning profile belongs to a different team than APPLE_TEAM_ID."
 [[ "$profile_name" =~ ^[A-Za-z0-9._\ -]+$ ]] || fail "Unexpected characters in the provisioning profile name."
 [[ "$profile_uuid" =~ ^[0-9A-Fa-f-]+$ ]] || fail "Unexpected provisioning profile UUID."
+# Xcode only loads a macOS profile named <uuid>.provisionprofile (iOS's is .mobileprovision); any
+# other extension is ignored with "No provisioning profile provider found".
 profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+profile_target="$profiles_dir/$profile_uuid.provisionprofile"
 mkdir -p "$profiles_dir"
-cp "$PROVISIONING_PROFILE_PATH" "$profiles_dir/$profile_uuid.provisioningprofile"
+if [ ! -e "$profile_target" ]; then
+  cp "$PROVISIONING_PROFILE_PATH" "$profile_target"
+  installed_profile="$profile_target"
+elif ! cmp -s "$PROVISIONING_PROFILE_PATH" "$profile_target"; then
+  # Never overwrite the developer's own file, and never sign with a stale copy of the profile.
+  fail "A different provisioning profile is already installed at $profile_target; remove or replace it and run again."
+fi
 
 cat > "$local_xcconfig" <<EOF
 CODE_SIGN_STYLE = Manual
-CODE_SIGN_IDENTITY = Developer ID Application
+CODE_SIGN_IDENTITY = $signing_identity
 DEVELOPMENT_TEAM = $APPLE_TEAM_ID
 PROVISIONING_PROFILE_SPECIFIER = $profile_name
 EOF
@@ -129,7 +154,7 @@ cat > "$export_options" <<EOF
   <key>method</key><string>developer-id</string>
   <key>teamID</key><string>$APPLE_TEAM_ID</string>
   <key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Developer ID Application</string>
+  <key>signingCertificate</key><string>$signing_identity</string>
   <key>provisioningProfiles</key>
   <dict>
     <key>works.merc.keryx</key><string>$profile_name</string>
@@ -157,8 +182,10 @@ verify_signed() {
     || fail "$target is not signed with a Developer ID Application certificate."
 }
 verify_signed "$app"
-codesign -dv --verbose=4 "$app" 2>&1 | grep -q 'flags=.*(runtime)' \
-  || fail "The app is not signed with the hardened runtime."
+# Captured first: `codesign ... | grep -q` would make grep quit at its match and codesign die of
+# SIGPIPE, which `set -o pipefail` reports as a failure even though the flag is there.
+app_details="$(codesign -dv --verbose=4 "$app" 2>&1)"
+grep -q 'flags=.*(runtime)' <<< "$app_details" || fail "The app is not signed with the hardened runtime."
 codesign --verify --deep --strict "$app" || fail "Deep signature check failed."
 
 # Xcode re-signs Sparkle's helpers on export; confirm none was left with Sparkle's own signature.
@@ -173,20 +200,26 @@ done < <(find "$sparkle" \( -name '*.xpc' -o -name 'Updater.app' -o -name 'Autou
 verify_signed "$sparkle"
 
 # --- Notarize and staple. ---
+notary_auth=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
 notarize() {
   local file="$1" json id status
   json="$work/notary-$(basename "$file").json"
-  # A rejected submission can still exit 0, so judge by the reported status, not the exit code.
-  xcrun notarytool submit "$file" \
-    --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
-    --wait --timeout 30m --output-format json > "$json" || true
-  id="$(plutil -extract id raw -o - "$json" 2>/dev/null || true)"
-  status="$(plutil -extract status raw -o - "$json" 2>/dev/null || true)"
-  [ -n "$id" ] || fail "notarytool returned no submission id for $(basename "$file")."
+  # Submit first and wait separately: the submission id is then known (and printed) before the long
+  # part, so a timeout can be reported and resumed. Submitting fails right here on bad credentials.
+  xcrun notarytool submit "$file" "${notary_auth[@]}" --no-wait --output-format json > "$json"
+  id="$(plutil -extract id raw -o - "$json" 2> /dev/null)" || id=""
+  [[ "$id" =~ ^[0-9A-Fa-f-]{36}$ ]] || fail "notarytool returned no submission id for $(basename "$file")."
+  echo "Submitted $(basename "$file") for notarization: $id"
+  # `wait` exits non-zero on a timeout; the outcome is read from `info` below either way.
+  xcrun notarytool wait "$id" "${notary_auth[@]}" --timeout "$notary_timeout" || true
+  xcrun notarytool info "$id" "${notary_auth[@]}" --output-format json > "$json"
+  status="$(plutil -extract status raw -o - "$json" 2> /dev/null)" || status=""
+  if [ "$status" = "In Progress" ]; then
+    fail "Notarization of $(basename "$file") is still in progress after $notary_timeout (submission $id). The first submissions of a new Apple account can take hours: wait with 'xcrun notarytool wait $id' (same credentials), then run again."
+  fi
   # Always read the log, even on success: it lists warnings worth fixing before they become errors.
-  xcrun notarytool log "$id" \
-    --key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
-  [ "$status" = "Accepted" ] || fail "Notarization of $(basename "$file") ended as '$status'."
+  xcrun notarytool log "$id" "${notary_auth[@]}" || true
+  [ "$status" = "Accepted" ] || fail "Notarization of $(basename "$file") ended as '$status' (submission $id)."
 }
 
 echo "Notarizing the app..."
@@ -208,7 +241,7 @@ if [ "$IS_PRERELEASE" = "false" ]; then
   ln -s /Applications "$staging/Applications"
   dmg_path="$OUTPUT_DIR/$base_name.dmg"
   hdiutil create -volname Keryx -srcfolder "$staging" -ov -format UDZO "$dmg_path"
-  codesign --sign "Developer ID Application" --timestamp "$dmg_path"
+  codesign --sign "$signing_identity" --timestamp "$dmg_path"
   echo "Notarizing the disk image..."
   notarize "$dmg_path"
   xcrun stapler staple "$dmg_path"

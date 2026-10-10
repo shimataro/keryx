@@ -14,7 +14,7 @@
   setup; a desktop-scoped task like `:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   avoids this requirement.
 
-- **Xcode** (macOS only) for `:shared`'s Apple targets — the `KeryxShared` XCFramework
+- **Xcode** (an Apple Silicon Mac only) for `:shared`'s Apple targets — the `KeryxShared` XCFramework
   (`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`, output under
   `shared/build/XCFrameworks/release/`) and its macOS/iOS-simulator tests. Without Xcode (or on
   Linux/Windows) Gradle skips those targets and everything else builds as before.
@@ -24,7 +24,7 @@
   `KeychainTokenStorage.kt`, `RawSqliteConnection.kt`, `DatabaseMerger.apple.kt`, `KeryxSdk.kt`)
   is never compiled under CodeQL's build tracer and gets no CodeQL coverage.
 
-If toolchain auto-download is blocked in a sandbox:
+If a sandbox disables toolchain auto-download, enable it explicitly:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`.
 
 ## Build & Run
@@ -244,14 +244,18 @@ catalog and the resources disagree on keys, plural forms or placeholders.
 `appleApp/project.yml`'s `sources:` list references the generated file directly
 (`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`), so `xcodegen generate` bundles
 whatever `build-shared.sh`'s prebuild step most recently wrote — the file only needs to exist once,
-before the first `xcodegen generate`. **A Swift call site never uses a literal English string as the
+before the first `xcodegen generate`.
+
+**A Swift call site never uses a literal English string as the
 key** the way `Text("Some Label")` ordinarily would: the catalog's own top-level keys are exactly the
 Android resource names (`home_all_feeds`, `common_cancel`, …), so `appleApp/Keryx/Platform/Localized.swift`'s
 `L(_ key: String) -> String` / `LF(_ key: String, _ args: CVarArg...) -> String` resolve a key through
 `String(localized:)` and hand back a plain, already-localized `String` — pass that into whichever
 view initializer takes a bare `String` (`Text(L("home_all_feeds"))`, `.help(L("article_star"))`, an
 `.alert(LF("home_delete_folder_confirm", folder.name), …)` title, etc.), never the `LocalizedStringKey`-taking
-overload, since the key text itself is not meant to be shown. A `<plurals>` whose forms use more than
+overload, since the key text itself is not meant to be shown.
+
+A `<plurals>` whose forms use more than
 one argument (e.g. "%1$d feed added, %2$d failed") is emitted as a **substitution** rather than plain
 plural variations: a plain variation cannot say which argument picks the plural category, and Xcode
 warns "Use an explicit substitution instead". The first argument drives the category, matching the
@@ -318,8 +322,8 @@ signing (`CODE_SIGN_IDENTITY=-`) cannot produce a runnable sandboxed build, even
    next `xcodegen generate` with no other change.
 
 Without a `Local.xcconfig`, `Shared.xcconfig`'s ad-hoc defaults apply, which compile and link but
-cannot codesign a sandboxed binary — fine for CI verification (below), not for a binary you can
-actually launch.
+cannot codesign a sandboxed binary. CI skips signing entirely instead (below); neither yields a
+binary you can launch.
 
 ### CI
 
@@ -330,6 +334,7 @@ signed build:
 ```bash
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
@@ -340,15 +345,14 @@ exclusion and `SPARKLE_PUBLIC_ED_KEY` (the job also fails if the archived app's 
 empty). Signing and notarization still only run in the release job (see "SwiftUI macOS app" under
 "Release (CD)").
 
-`KeryxTests` (Swift Testing, standalone/non-hosted) still runs signed with the CI's ad-hoc identity
-since it produces a `.xctest` bundle rather than a sandboxed app.
+`KeryxTests` (Swift Testing, standalone/non-hosted) runs with the same `CODE_SIGNING_ALLOWED=NO` on
+macOS: it produces a `.xctest` bundle rather than a sandboxed app, so nothing needs signing.
 
 ## Packaging
 
-Created under `composeApp/build/compose/binaries/main` (relative to the repo root, not this file's own
-directory — this is a build-output path, not a doc to link to).
+Artifacts are written under `composeApp/build/compose/binaries/main` (relative to the repository root).
 
-Only the platform matching the execution platform can be built (cross-compilation is not supported).
+Only the package for the host platform can be built; cross-compilation is not supported.
 
 ```bash
 # Execution-platform-dependent run folder
@@ -517,19 +521,20 @@ libsecret failed to resolve, `stage-packages: [libsecret-1-0]` under `parts.kery
 
 `home` is what lets the OPML import/export file picker (`JFileChooser`, see
 `app-architecture.md`) reach non-hidden files anywhere under the user's home directory — but it
-explicitly excludes hidden files and directories, so it could never let the `keryx://` URI scheme
-and `.opml` association self-registration described below
-(`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`) reach the host's
-`~/.local/share/applications` and `~/.config/mimeapps.list`. In the snap they never even reach for
-them: both registrars resolve their targets from `XDG_DATA_HOME` / `XDG_CONFIG_HOME`, and under
-the `gnome` extension those already point into the snap's own writable area (see the next
-paragraph), so the writes *succeed* — into a private directory no host desktop ever reads. Either
-way the self-registration has no effect on the host, and neither outcome crashes (a failure is
-caught and logged as a warning). The Snap build's host-side registration instead comes from
-`snap/gui/keryx.desktop` itself declaring `MimeType=` for both `x-scheme-handler/keryx` and the
-`.opml` MIME types plus an `Exec=keryx %u` field code — the mechanism snapd processes at install time. A `file://` URI that
-some desktop environments hand to `%u` for a local file is normalized back to a plain path in
-`main()` (`normalizeFileUriArg`) before classification.
+explicitly excludes hidden files and directories. The `keryx://` URI scheme and `.opml` association
+self-registration described below (`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`)
+therefore could never reach the host's `~/.local/share/applications` and `~/.config/mimeapps.list`.
+In the snap they do not even try: both registrars resolve their targets from `XDG_DATA_HOME` /
+`XDG_CONFIG_HOME`, which the `gnome` extension already points into the snap's own writable area
+(see the next paragraph), so the writes *succeed* — into a private directory no host desktop ever
+reads. Either way the self-registration has no effect on the host, and nothing crashes (a failure
+is caught and logged as a warning).
+
+The Snap build's host-side registration comes from `snap/gui/keryx.desktop` instead: it declares
+`MimeType=` for both `x-scheme-handler/keryx` and the `.opml` MIME types plus an `Exec=keryx %u`
+field code, which snapd processes at install time. A `file://` URI that some desktop environments
+hand to `%u` for a local file is normalized back to a plain path in `main()`
+(`normalizeFileUriArg`) before classification.
 
 The app also writes its own data (database, settings, lock file, and log file) under
 `~/.local/share`, which the strict `home` plug blocks just the same, so those XDG variables have
@@ -555,8 +560,8 @@ WebKitGTK's nested sandbox (`bwrap`) cannot start inside strict confinement, so
 renderer sandbox for the article reader's WebView only; the snap's own strict confinement
 still isolates the process from the host.
 
-Manual `stage-packages` is down to two entries — the AWT `libxtst6` extension and `libffi8`
-for JNA — because everything else is covered by the `gnome` extension.
+`stage-packages` lists only two entries by hand — `libxtst6` (the X11 XTEST library AWT needs) and
+`libffi8` (for JNA); the `gnome` extension covers the rest.
 
 **WebKitGTK in particular must not be staged.** The `gnome-46-2404` platform snap the extension
 plugs into already ships `libwebkit2gtk-4.1-0` along with the `libjavascriptcoregtk-4.1-0` /
@@ -570,24 +575,22 @@ versions happen to agree), while pulling in WebKitGTK's entire apt dependency cl
 GStreamer's base/good plugin sets, `libicu74`, `libvpx`, `libwoff1`, `libenchant`, … — which by
 itself roughly doubled the size of the `.snap` against the equivalent `.deb`.
 
-`snapcraft pack` also runs a set of built-in linters, and two of its findings are worth
-explaining rather than "fixing":
+`snapcraft pack` also runs built-in linters. One of their findings is worth explaining rather
+than "fixing": the `library` linter only inspects ELF `DT_NEEDED` entries, so it cannot see
+libraries loaded at runtime via `dlopen()`, and it reports the JVM's own runtime libraries
+(`lib/runtime/lib/*.so`, `lib/libapplauncher.so`) as "unused library". These are false positives
+snapcraft's own documentation says not to act on; removing any of them would break the app
+(`libfontmanager.so`, for one, is the JDK's font-rendering library). `snap/snapcraft.yaml`'s
+`lint.ignore` suppresses these specific paths.
 
-- The `library` linter only inspects ELF `DT_NEEDED` entries, so it cannot see libraries
-  loaded at runtime via `dlopen()` — it reports the JVM's own runtime libraries
-  (`lib/runtime/lib/*.so`, `lib/libapplauncher.so`) as "unused library". These are false
-  positives snapcraft's own documentation says not to act on; removing any of them would break
-  the app (`libfontmanager.so` in particular is the file the harfbuzz dependency fix in
-  `0394c79e` was for). `snap/snapcraft.yaml`'s `lint.ignore` suppresses these specific paths.
-- **That suppression also disables the linter's *missing*-dependency detection for the
-  same paths** — the check that previously caught the X11/font gap (`88ceff7e`) and the
-  harfbuzz gap (`0394c79e`). Whenever `stage-packages` or the bundled JDK version changes,
-  comment out the `lint:` block in `snap/snapcraft.yaml` and re-pack once to confirm no new
-  missing-dependency warnings appear, then restore it.
-- The `metadata` linter's "title is missing" finding is real (unlike the library ones) and
-  is fixed by the top-level `title: Keryx` key — the display name shown in the Snap
-  Store / GNOME Software, separate from `snap/gui/keryx.desktop`'s `Name=` used by the
-  desktop shell.
+**That suppression also disables the linter's *missing*-dependency detection for the same
+paths** — the check that once caught missing X11/font and HarfBuzz libraries. Whenever
+`stage-packages` or the bundled JDK version changes, comment out the `lint:` block in
+`snap/snapcraft.yaml` and re-pack once to confirm no new missing-dependency warnings appear, then
+restore it.
+
+The top-level `title: Keryx` is the display name shown in the Snap Store / GNOME Software,
+separate from `snap/gui/keryx.desktop`'s `Name=`, which the desktop shell uses.
 
 **Benign startup log lines under strict confinement.** A few lines that look like errors at
 launch are expected and need no fix, seen especially inside a GPU-less VM guest (e.g. VMware) or
@@ -701,12 +704,12 @@ an environment variable, then `local.properties` — and all four values are req
 incomplete set fails the build immediately rather than falling back to an unsigned/half-signed
 result); see [setup.md](setup.md) for how to generate a keystore for local use:
 
-| `local.properties` key | `-P` property | Environment variable |
+| `-P` property | Environment variable | `local.properties` key |
 | --- | --- | --- |
-| `android.release.keystore.path` | `androidReleaseKeystorePath` | `ANDROID_RELEASE_KEYSTORE_PATH` |
-| `android.release.keystore.password` | `androidReleaseKeystorePassword` | `ANDROID_RELEASE_KEYSTORE_PASSWORD` |
-| `android.release.key.alias` | `androidReleaseKeyAlias` | `ANDROID_RELEASE_KEY_ALIAS` |
-| `android.release.key.password` | `androidReleaseKeyPassword` | `ANDROID_RELEASE_KEY_PASSWORD` |
+| `androidReleaseKeystorePath` | `ANDROID_RELEASE_KEYSTORE_PATH` | `android.release.keystore.path` |
+| `androidReleaseKeystorePassword` | `ANDROID_RELEASE_KEYSTORE_PASSWORD` | `android.release.keystore.password` |
+| `androidReleaseKeyAlias` | `ANDROID_RELEASE_KEY_ALIAS` | `android.release.key.alias` |
+| `androidReleaseKeyPassword` | `ANDROID_RELEASE_KEY_PASSWORD` | `android.release.key.password` |
 
 With none of the three sources set, the build still succeeds but produces an **unsigned** release
 APK (a build warning, no fallback to debug signing) — see "Release (CD)" below for how CI handles
@@ -716,12 +719,12 @@ The `playRelease` variant as a whole — `:androidApp:bundlePlayRelease`'s AAB, 
 `assemblePlayRelease` produces too — additionally accepts a second, **optional** signing identity
 under the same three-source priority — the *upload* key, distinct from the app signing key above:
 
-| `local.properties` key | `-P` property | Environment variable |
+| `-P` property | Environment variable | `local.properties` key |
 | --- | --- | --- |
-| `android.upload.keystore.path` | `androidUploadKeystorePath` | `ANDROID_UPLOAD_KEYSTORE_PATH` |
-| `android.upload.keystore.password` | `androidUploadKeystorePassword` | `ANDROID_UPLOAD_KEYSTORE_PASSWORD` |
-| `android.upload.key.alias` | `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` |
-| `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
+| `androidUploadKeystorePath` | `ANDROID_UPLOAD_KEYSTORE_PATH` | `android.upload.keystore.path` |
+| `androidUploadKeystorePassword` | `ANDROID_UPLOAD_KEYSTORE_PASSWORD` | `android.upload.keystore.password` |
+| `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` | `android.upload.key.alias` |
+| `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` | `android.upload.key.password` |
 
 With none of these four set, `playRelease` simply signs with the app signing key instead — a
 legitimate choice for a local, unpublished build. `release.yml` and `publish-play.yml` require all
@@ -752,8 +755,8 @@ category in the freedesktop.org Desktop Menu Specification, with `News` and `Fee
 registered additional categories. Windows/jpackage has no category concept (its `menuGroup` is only
 the Start Menu folder name), so nothing is set there.
 
-The deb/rpm package now ships a system `.desktop` file (`linux { shortcut = true }`, added for
-AppStream's `<launchable>` — see "Linux package metadata" above), but it still does **not**
+The deb/rpm package ships a system `.desktop` file (`linux { shortcut = true }`, needed for
+AppStream's `<launchable>` — see "Linux package metadata" above) but does **not**
 register the `keryx://` custom URI scheme: jpackage's own `.desktop` template has no `%u` on its
 `Exec` line, so the URI would never reach the process that way regardless. Instead the app
 registers itself on first launch (`LinuxUriSchemeRegistrar`), writing
@@ -821,7 +824,7 @@ per platform:
   type, and Android content providers commonly report a plain `.opml` file as
   `application/octet-stream` rather than any XML-flavored type — so MIME matching alone would miss
   most real files. A MIME-based filter (`application/x-opml+xml`, `text/x-opml`, `text/xml`,
-  `application/xml` — the same identifiers the Linux section above already lists) and an
+  `application/xml` — the last two being generic types the Linux entry above deliberately omits) and an
   extension-based fallback filter (`scheme="content"`, `host="*"`, `mimeType="*/*"`,
   `pathPattern=".*\\.opml"`, matching on the `content://` URI's path regardless of the reported MIME
   type) are declared as **two separate intent-filters**, not combined `<data>` tags within one:
@@ -839,8 +842,8 @@ per platform:
   `AndroidOpmlOpen.kt`'s `handleOpmlOpenIfPresent` reads the incoming `content://` `Uri`
   via `ContentResolver` and excludes the `keryx://` OAuth redirect, which shares the same
   `MainActivity`/`ACTION_VIEW` handling through a separate intent-filter. Accepting `text/xml`/
-  `application/xml` means Keryx also appears in the chooser for unrelated XML files — the same
-  trade-off the Linux section's `text/x-opml` fallback already accepts — and malformed input is
+  `application/xml` means Keryx also appears in the chooser for unrelated XML files — a trade-off
+  Linux avoids by not declaring those types — and malformed input is
   handled the same way as the other platforms: the read or `OpmlImporter.import` failure is shown
   as the Data tab's inline import error rather than propagated.
 
@@ -880,17 +883,20 @@ Flow:
 1. Publish a GitHub Release with a `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer-style
    pre-release suffix (e.g. `v0.1.0`, `v1.2.0-beta.1`).
 2. The workflow triggers on `release: published`, strips the leading `v`, and passes the result as `-PappVersion`.
-3. Nine job definitions in total, six of which (`package-macos`, `package-macos-swiftui`,
-   `package-linux`, `package-snap`, `package-windows`, `package-android`) run in parallel — eight
-   actual runs, since `package-linux`
-   and `package-snap` are each an `x86_64`/`arm64` matrix (`ubuntu-latest`/`ubuntu-24.04-arm` and
-   `ubuntu-24.04`/`ubuntu-24.04-arm` respectively; the arm64 legs run `android-actions/setup-android@v3`
-   first, since `:composeApp`'s Android target needs `ANDROID_HOME` merely to configure, and the
-   `ubuntu-24.04-arm` image — unlike `ubuntu-latest` — ships no Android SDK at all). The remaining
-   three are not part of that parallel set: `attach-fdroid-version` (see "Publishing to F-Droid")
-   and `publish-play` (see its own bullet below) depend only on `package-android`, and
-   `deploy-pages` is gated on the four non-Snap, non-SwiftUI `package-*` jobs (eleven actual runs
-   in total; see below):
+3. Nine jobs, eleven runs in total:
+   - Six `package-*` jobs have no dependencies and run in parallel: `package-macos`,
+     `package-macos-swiftui`, `package-linux`, `package-snap`, `package-windows` and
+     `package-android`. `package-linux` and `package-snap` are each an `x86_64`/`arm64` matrix
+     (`ubuntu-latest`/`ubuntu-24.04-arm` and `ubuntu-24.04`/`ubuntu-24.04-arm` respectively), so
+     those six jobs make eight runs.
+   - `attach-fdroid-version` (see "Publishing to F-Droid") and `publish-play` (see its own bullet
+     below) depend only on `package-android`.
+   - `deploy-pages` is gated on `package-macos`, `package-linux`, `package-windows` and
+     `package-android` — not on `package-snap` or `package-macos-swiftui`.
+
+   The arm64 matrix legs run `android-actions/setup-android@v3` first, since `:composeApp`'s Android
+   target needs `ANDROID_HOME` merely to configure and the `ubuntu-24.04-arm` image — unlike
+   `ubuntu-latest` — ships no Android SDK at all. What the jobs do:
 
    - `:composeApp:createDistributable :composeApp:packageDmg` (macOS runner — `createDistributable` is requested explicitly, alongside `packageDmg`, to still produce the app bundle the `.zip` below is made from), attached as `Keryx-<version>-macos-arm64.dmg` **and `Keryx-<version>-macos-arm64.zip`**. **For a pre-release tag, `packageDmg` is skipped and only `createDistributable` runs, so only the `.zip` is attached** (same reasoning as the Windows MSI case below).
    - `package-macos-swiftui`, a separate job for the native SwiftUI macOS app: Developer ID signing,
@@ -979,8 +985,8 @@ carry a pre-release suffix. For a plain (non-prerelease) tag the two are identic
 builds fall through to the same `"0.0.0"` literal for both. A tag that does not yield a jpackage-compatible
 `MAJOR.MINOR.PATCH[-<pre-release>]` version fails the workflow early with an explicit message.
 
-`macos-latest` runners are arm64, hence the architecture in the artifact name — it leaves room for an x86_64 or
-universal build alongside it later.
+The Compose job's `macos-latest` runners are arm64, hence the architecture in the artifact name — it leaves room
+for an x86_64 or universal build alongside it later.
 
 ### 0.x versions and pre-release tags on macOS
 
@@ -1007,7 +1013,7 @@ why the same `doLast` then **re-signs** the bundle (`resealMacOsBundle`: `codesi
 --preserve-metadata=entitlements,flags,runtime --sign -`), **checks that the re-sign changed nothing about the
 signature but its hashes** (`macSignatureProperties` compares `codesign -dv`'s `flags=` and `hashes=13+N`
 before and after), and finally **verifies** it (`verifyMacOsBundleSeal`: `codesign --verify --strict --deep`),
-failing the build outright at either step.
+failing the build outright at any of them.
 
 `--preserve-metadata` is what makes that middle step pass, and it is load-bearing rather than defensive.
 Compose Desktop signs the app image with its own `default-entitlements.plist` — `allow-jit`,
@@ -1144,7 +1150,9 @@ Once configured, the job (scripts under `.github/scripts/`, which can also be ru
 the credentials):
 
 1. Imports the certificate into a throwaway keychain, and writes the profile and the notarization key
-   into the runner's temp directory (all removed at the end).
+   into the runner's temp directory (all removed at the end). The script also installs the profile
+   into Xcode's provisioning-profile directory (as `<uuid>.provisionprofile`) and removes it
+   afterwards, unless the same profile was already there.
 2. Runs `package-macos-swiftui.sh`: archives and exports the app with Xcode (Release, arm64 only —
    the shared framework has no Intel slice), verifies the signatures (hardened runtime, Team ID,
    Sparkle's helper tools), notarizes and staples the app, and writes the `.zip` made from the stapled
@@ -1153,8 +1161,9 @@ the credentials):
    reach Xcode through a generated, gitignored `appleApp/Local.xcconfig` (so they do not leak onto
    Swift package targets), and the script refuses to run if a developer's own one exists.
    Xcode itself re-signs Sparkle's nested helpers on export, as Sparkle recommends; never add
-   `codesign --deep` when signing. The Xcode version is pinned (`DEVELOPER_DIR`) rather than taken
-   from the runner image's default; update it together with the runner image.
+   `codesign --deep` when signing. The job runs on a pinned runner image (`macos-26`, not
+   `macos-latest`) with Xcode set through `DEVELOPER_DIR` in `release.yml` (`AppIcon.icon` needs
+   Xcode 26); change both together.
 3. Runs `generate-appcast.sh`: Sparkle's `generate_appcast` signs the `.zip` with `SPARKLE_PRIVATE_KEY`
    and writes `appcast.xml`.
 4. Attaches the `.zip`, the `.dmg` and `appcast.xml` — in a last step that only runs if everything
@@ -1174,9 +1183,48 @@ match the `SUPublicEDKey` embedded in the app — every client would reject such
 updated any more**, so keep a backup outside GitHub. `SPARKLE_PUBLIC_ED_KEY` is set for Release
 builds only, so a developer's Debug run never polls the feed.
 
-**First run.** The signing and notarization path cannot be exercised on GitHub before the secrets
-exist, so run it first with a pre-release tag and read the log. Then check an update end to end:
-point a build's `SUFeedURL` at the produced `appcast.xml` and update from an older build.
+**Rehearse locally first.** Publishing a GitHub Release runs every platform's job (the Play upload,
+the Snap Store, `deploy-pages`, …), so check signing and notarization on a Mac before the first run
+on GitHub. The packaging script runs by hand with the same inputs:
+
+- Run it from a fresh clone: the script refuses to run while a developer's own
+  `appleApp/Local.xcconfig` exists. Copy `local.properties` into the clone so the build gets the OAuth
+  client ids.
+- Import the `.p12` into a throwaway keychain and add it to the search list (restore the list and
+  delete the keychain afterwards).
+- Pass the script's inputs as environment variables (listed at the top of
+  `package-macos-swiftui.sh`). When the keychains hold more than one Developer ID Application
+  certificate — an older one is often still in a developer's login keychain — set
+  `SIGNING_IDENTITY` to the SHA-1 of the one to sign with, or the generic name is ambiguous.
+- The app is really submitted to Apple's notary service, but nothing is published.
+
+**A new Apple account's first notarization can be slow.** The first submission can stay
+`In Progress` far longer than later ones (35 minutes in our case, against a few minutes for the
+second). When running by hand, `NOTARY_TIMEOUT` (default `30m`) extends the wait; on a timeout the
+script prints the submission id, so wait for it with `xcrun notarytool wait <id>` (same
+credentials), then run again. The workflow does not set `NOTARY_TIMEOUT`, so each submission there
+(the app, then the DMG for a stable tag) waits at most 30 minutes, and a slower first submission
+fails the job — which is why it is best completed in a rehearsal first.
+
+**Certificate pitfalls:**
+
+- Issue the Developer ID Application certificate from the **G2 Sub-CA**. The previous certificate
+  authority expires on 2027-02-01 and the certificates it issued expire with it (see Apple's
+  "Replace Developer ID certificates" help page). To tell which one you got, open the certificate in
+  Keychain Access and check its issuer; the expiry date alone does not settle it.
+- The `.p12` must hold both the certificate and its **private key**. Imported into a throwaway
+  keychain, it must show up in `security find-identity -v -p codesigning <keychain>` to be usable
+  for signing.
+- The certificate inside the provisioning profile must be the one in the `.p12` (compare their
+  SHA-1).
+- Prefer an ASCII alphanumeric `.p12` password: a 100-character one failed in testing and a
+  32-character one worked (the cause was not pinned down).
+
+**First run on GitHub.** Finally, cut a pre-release tag: the whole workflow runs (including the
+Play internal/alpha upload and the Snap `edge` channel), but no DMG is built for a pre-release and
+GitHub's "latest" still points at the previous stable release. Read the `package-macos-swiftui`
+log, then check an update end to end: point a build's `SUFeedURL` at the produced `appcast.xml` and
+update from an older build.
 
 ### GitHub Release flags
 
@@ -1273,9 +1321,10 @@ directly in Play Console if a translated version is ever wanted; neither workflo
 existing release once published.
 
 > [!IMPORTANT]
-> **The released DMG is unsigned** (ad-hoc), so Gatekeeper blocks it on open. See the
-> [Download](../README.md#download) section for the workaround; "Signing & Notarization" below
-> covers what a permanent fix requires.
+> **The Compose build's released DMG (`package-macos`) is unsigned** (ad-hoc), so Gatekeeper
+> blocks it on open. See the [Download](../README.md#download) section for the workaround;
+> "Signing & Notarization (Compose macOS build)" below covers what a permanent fix requires. The
+> SwiftUI app's DMG is Developer ID signed and notarized (see "SwiftUI macOS app" above).
 
 ### Publishing to F-Droid
 
@@ -1332,11 +1381,11 @@ What must stay true for F-Droid's build to reproduce the release APK:
 `fdroid scanner` finding **zero** problems — in the source and in the built APK — is what a change
 to the dependency graph must preserve. Run it in F-Droid's own `buildserver` image
 (`registry.gitlab.com/fdroid/fdroidserver:buildserver`) after touching `androidApp`, `:androidGms`
-or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services"
+or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services (Linux)"
 step catches the most likely regression on every push, but not a new proprietary dependency
 unrelated to Play services.
 
-## Signing & Notarization (future)
+## Signing & Notarization (Compose macOS build)
 
 > This section is about the Compose macOS build (`package-macos`). The SwiftUI macOS app is
 > Developer ID signed and notarized by its own job; see "SwiftUI macOS app" under "Release (CD)".

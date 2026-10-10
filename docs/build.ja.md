@@ -15,7 +15,7 @@
   [setup.ja.md](setup.ja.md) を参照。`:composeApp:compileKotlinDesktop`/`:shared:desktopTest`/`:composeApp:desktopTest`
   のようなデスクトップ限定タスクはこの要件を回避できる。
 
-- **Xcode**（macOS のみ）—— `:shared` の Apple ターゲット、つまり `KeryxShared` XCFramework
+- **Xcode**（Apple Silicon の Mac のみ）—— `:shared` の Apple ターゲット、つまり `KeryxShared` XCFramework
   （`./gradlew :shared:assembleKeryxSharedReleaseXCFramework`。出力は `shared/build/XCFrameworks/release/` 配下）と、その macOS／
   iOS シミュレータ向けテストに必要。Xcode がない場合（または Linux/Windows）は Gradle がそれらのターゲットをスキップし、それ以外は
   従来どおりビルドされる。
@@ -25,7 +25,7 @@
   `KeychainTokenStorage.kt`、`RawSqliteConnection.kt`、`DatabaseMerger.apple.kt`、`KeryxSdk.kt`）は
   CodeQL のビルドトレーサー下で一度もコンパイルされず、CodeQL の解析対象にならない。
 
-サンドボックス等でツールチェーンの自動ダウンロードが必要な場合:
+サンドボックス等でツールチェーンの自動ダウンロードが無効化されている場合は、明示的に有効にする:
 `./gradlew -Dorg.gradle.java.installations.auto-download=true ...`。
 
 ## ビルド・実行
@@ -66,37 +66,40 @@ APIキーが指定されていないクラウドサービスは連携機能が�
 ### Dropbox
 
 1. [DBX Platform](https://www.dropbox.com/developers/apps/create)で連携先アプリを作成
-  - すでに作成済みの場合は[App Console](https://www.dropbox.com/developers/apps)から検索
-  - "Choose an API": `Scoped access`
-  - "Choose the type of access you need": `App folder`
-  - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
+   - すでに作成済みの場合は[App Console](https://www.dropbox.com/developers/apps)から検索
+   - "Choose an API": `Scoped access`
+   - "Choose the type of access you need": `App folder`
+   - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
 2. "Settings" で以下を設定
-  - "Redirect URIs": `keryx://oauth2/callback`
-  - "Allow public clients (Implicit Grant & PKCE)": `Allow`
+   - "Redirect URIs": `keryx://oauth2/callback`
+   - "Allow public clients (Implicit Grant & PKCE)": `Allow`
 3. "Permissions" で以下をチェック
-  - `files.content.write`
-  - `files.content.read`
-4. "Settings" 内の "App key" を `local.properties` に指定
+   - `files.content.write`
+   - `files.content.read`
+4. "Settings" 内の "App key" を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
 
 ### Google Drive
 
 1. [Google Cloudコンソール](https://console.cloud.google.com)でプロジェクトを作成
 2. メニューの「API とサービス」→「ライブラリ」と辿り、「Google Drive API」を探す
-  - 検索ボックスに "drive" と入れるか、メニューの「カテゴリ」から「ストレージ」で絞り込み
-  - 「有効にする」をクリック
+   - 検索ボックスに "drive" と入れるか、メニューの「カテゴリ」から「ストレージ」で絞り込み
+   - 「有効にする」をクリック
 3. メニューの「Google Auth プラットフォーム」→「データアクセス」と辿る（旧「OAuth 同意画面」から名称・構成が変更された）
-  - 「スコープを追加または削除」をクリック
-  - "Google Drive API" の `.../auth/drive.appdata` をチェック
-  - 「更新」をクリックして選択を確定し、データアクセス画面で「保存」をクリックして反映する
-  - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
+   - 「スコープを追加または削除」をクリック
+   - "Google Drive API" の `.../auth/drive.appdata` をチェック
+   - 「更新」をクリックして選択を確定し、データアクセス画面で「保存」をクリックして反映する
+   - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
 4. メニューの「Google Auth プラットフォーム」→「クライアント」と辿り、クライアントを作成
-  - 上部の「クライアントを作成」
-  - アプリケーションの種類: 「デスクトップアプリ」
-  - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties` に指定
+   - 上部の「クライアントを作成」
+   - アプリケーションの種類: 「デスクトップアプリ」
+   - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
 
-※OAuth2認可後のリダイレクト先はDropboxのように任意に決められないため、 `http://127.0.0.1:<ポート>` のループバックで受ける（アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。
-※フローはPKCE（`code_verifier`）を使うが、**クライアントシークレットは別途必要**。
-※開発中は「オーディエンス」タブで公開ステータスを「テスト」にしてテストユーザーを登録すれば事足りる。
+OAuth2 認可後のリダイレクト先は Dropbox のように任意に決められないため、`http://127.0.0.1:<ポート>` のループバックで受ける（アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。
+フローは PKCE（`code_verifier`）を使うが、**クライアントシークレットも別途必要**。iOS/Android と違い、Google の
+「デスクトップ アプリ」の OAuth クライアントは完全なパブリッククライアントとは扱われず、`client_secret` なしのトークン交換・
+更新は（PKCE の有無にかかわらず）`invalid_request: client_secret is missing` で拒否される。要求するスコープは
+`drive.appdata`（ユーザーの Drive 内のアプリ専用の隠しフォルダー）のみ。開発中は「オーディエンス」タブで公開ステータスを
+「テスト」にして、テストユーザーを登録する。
 
 > [!IMPORTANT]
 > **「テスト」ステータスのままだとリフレッシュトークンが7日で失効する。** OAuth同意画面の公開ステータスを
@@ -122,7 +125,7 @@ APIキーが指定されていないクラウドサービスは連携機能が�
    - 「カスタム リダイレクト URI」に `keryx://oauth2/callback` を追加する。
    - 「パブリック クライアント フローを許可する」を **はい** にする（OneDrive は PKCE パブリッククライアントで、クライアントシークレットは不要）。
 3. 「API のアクセス許可」→「アクセス許可の追加」→「Microsoft Graph」→「委任されたアクセス許可」で **`Files.ReadWrite.AppFolder`** を追加する（ドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する）。リフレッシュトークン用の `offline_access` は実行時に要求する。
-4. 「概要」の「アプリケーション (クライアント) ID」を `local.properties` の `onedrive.client.id` に指定する。
+4. 「概要」の「アプリケーション (クライアント) ID」を `local.properties`（[local.properties.example](../local.properties.example) のコピー）の `onedrive.client.id` に指定する。
 
 OneDrive は Dropbox と同じカスタム URI スキーム（`keryx://oauth2/callback`、`state` で識別）を再利用するため、追加の OS 登録は不要。**クライアントシークレットは不要**（Google と異なり、Microsoft は「モバイル/デスクトップ」登録を PKCE の完全なパブリッククライアントとして扱う）。同期 DB は OneDrive のアプリ専用フォルダー（`/me/drive/special/approot`）に保存される。Dropbox 同様、macOS では `keryx://` がパッケージ済みアプリへルーティングされるため `./gradlew :composeApp:run` では連携が完了しない。macOS で検証するには `createDistributable` で `Keryx.app` をビルドして起動する。
 
@@ -165,8 +168,8 @@ Google Drive が提供されるのは `GoogleApiAvailability.isGooglePlayService
 宣言だけで `keryx://oauth2/callback` のリダイレクトを受け取れる（`scheme="keryx"`
 `host="oauth2"` の `ACTION_VIEW` インテントフィルター）。そのため、上記デスクトップの
 `./gradlew :composeApp:run` のようなパッケージ済み/未パッケージの区別は無い。エミュレータで
-連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要——それを得る推奨手段が
-Google Play イメージ（Chrome 入り）— [setup.ja.md](setup.ja.md) を参照。
+連携を検証するには、OAuth フローを完了させる実用的なブラウザーが必要になる。Google Play システムイメージ
+（Chrome 入り）の利用を推奨する。詳細は [setup.ja.md](setup.ja.md) を参照。
 
 ### Apple（macOS / iOS）
 
@@ -240,7 +243,9 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 `appleApp/project.yml` の `sources:` は生成済みファイル
 （`../composeApp/build/generated/stringCatalog/Localizable.xcstrings`）を直接参照するので、
 `xcodegen generate` は `build-shared.sh` の prebuild ステップが最後に書き出した内容をそのまま
-取り込む——このファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。**Swift の
+取り込む——このファイルは最初の `xcodegen generate` より前に一度存在してさえいればよい。
+
+**Swift の
 呼び出し側は、通常の `Text("Some Label")` のように英語のリテラル文字列をキーとして使うことはない**：
 このカタログのトップレベルキーは Android のリソース名そのもの（`home_all_feeds`、`common_cancel` など）
 なので、`appleApp/Keryx/Platform/Localized.swift` の `L(_ key: String) -> String` /
@@ -248,7 +253,9 @@ SwiftUI アプリは Xcode の String Catalog でローカライズする。こ�
 ローカライズ済みの素の `String` を返す——これを `String` を受け取る側の初期化子に渡す
 （`Text(L("home_all_feeds"))`、`.help(L("article_star"))`、`.alert(LF("home_delete_folder_confirm",
 folder.name), …)` のタイトルなど）のであって、`LocalizedStringKey` を受け取る側のオーバーロードには
-渡さない——キーの文字列そのものを表示する意図ではないため。複数の引数を使う `<plurals>`
+渡さない——キーの文字列そのものを表示する意図ではないため。
+
+複数の引数を使う `<plurals>`
 （例：「%1$d feed added, %2$d failed」）は、素の plural バリエーションではなく **substitution** として出力する：
 素のバリエーションではどの引数が複数形カテゴリを決めるのか判別できず、Xcode が
 「Use an explicit substitution instead」と警告するため。カテゴリを決めるのは第 1 引数で、Android の
@@ -314,8 +321,8 @@ XCFramework の存在を確認し、また `xcodegen generate` はソースと�
    `xcodegen generate` を実行すれば他の変更なしに反映される。
 
 `Local.xcconfig` が無い場合、`Shared.xcconfig` のアドホックな既定値が使われる——これはコンパイルと
-リンクはできるが、サンドボックス化されたバイナリの署名はできない。下記の CI での確認には十分だが、
-実際に起動できるバイナリにはならない。
+リンクはできるが、サンドボックス化されたバイナリの署名はできない。CI は署名自体を省く（下記）。どちらも
+起動できるバイナリにはならない。
 
 ### CI
 
@@ -325,6 +332,7 @@ macOS の CI ジョブには Apple ID・チームが無いため、実際に署�
 ```bash
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
@@ -334,15 +342,14 @@ Debug ビルドはアクティブなアーキテクチャしかコンパイル�
 `SPARKLE_PUBLIC_ED_KEY`（アーカイブしたアプリの `SUPublicEDKey` が空ならジョブは失敗する）。署名と公証は
 引き続きリリースジョブでのみ行う（「リリース（CD）」の「SwiftUI macOS アプリ」を参照）。
 
-`KeryxTests`（Swift Testing、単体で完結するテストバンドル）は、サンドボックス化されたアプリではなく
-`.xctest` バンドルを生成するだけなので、CI のアドホック ID のまま署名して実行できる。
+`KeryxTests`（Swift Testing、単体で完結するテストバンドル）も macOS 上で同じ `CODE_SIGNING_ALLOWED=NO` の
+まま実行する。サンドボックス化されたアプリではなく `.xctest` バンドルを生成するだけなので、署名は要らない。
 
 ## パッケージング
 
-`composeApp/build/compose/binaries/main`（リポジトリルートからの相対パス。このファイル自身の
-ディレクトリからではない——ビルド成果物のパスであり、リンクを張る対象のドキュメントではない）以下に作成される
+成果物は `composeApp/build/compose/binaries/main`（リポジトリルートからの相対パス）以下に作成される。
 
-実行するプラットフォームで動くもののみ作成可（クロスコンパイル不可）
+ビルドできるのは実行中のプラットフォーム向けのパッケージのみで、クロスコンパイルはできない。
 
 ```bash
 # 実行プラットフォーム依存の実行フォルダ
@@ -364,7 +371,7 @@ Debug ビルドはアクティブなアーキテクチャしかコンパイル�
 `nativeDistributions` では、jpackage 自身の Linux 既定値では誤った値・空になってしまうメタデータと、
 Compose の DSL に対応プロパティが一切無いフィールドを 1 つ設定している。
 
-- `vendor = "Mercury Works"` — 発行元としての人格。アプリ自体の表示名である `appName`（"Keryx"）とは
+- `vendor = "Mercury Works"` — 発行元としての名義。アプリ自体の表示名である `appName`（"Keryx"）とは
   別に保持する。rpm の `Vendor:` タグと Windows インストーラーの発行元（Publisher）表示に出る。
 - `linux { rpmLicenseType = "MIT" }` — 未設定だと jpackage 自身の既定値であるリテラル `Unknown` が
   rpm の `License:` タグにそのまま入る。
@@ -390,10 +397,9 @@ KDE Discover）にライセンスやホームページのリンクは表示さ�
 存在しない。そのため `packageDeb` はビルド後処理（`composeApp/build.gradle.kts` の
 `injectDebMetainfo`）も実行する。これは `dpkg-deb -R` でビルド済みの `.deb` を展開し、
 `composeApp/packaging/linux/works.merc.keryx.metainfo.xml.in` のプレースホルダーを置換した内容を
-`usr/share/metainfo/works.merc.keryx.metainfo.xml` として書き込み（`@DESKTOP_ID@` は jpackage が
+`usr/share/metainfo/works.merc.keryx.metainfo.xml` として書き込む（`@DESKTOP_ID@` は jpackage が
 パッケージに入れた実際の `.desktop` ファイル名 — `packageName`/ランチャー名から jpackage が導出する
-ため、決め打ちにせず展開済みペイロードを走査して見つける。ほかに `@VERSION@`、`@DATE@`）、
-`dpkg-deb --build --root-owner-group` で再パックする。同じ finalizer は、同じ `.desktop`
+ため、決め打ちにせず展開済みペイロードを走査して見つける。ほかに `@VERSION@`、`@DATE@`）。同じ finalizer は、同じ `.desktop`
 ファイルの `Comment=` の直後に `Comment[ja]=` 行も追加する（freedesktop.org の Desktop Entry
 Specification が定めるロケール接尾辞キーの慣習に従う）。これにより日本語環境のアプリケーション
 メニューでツールチップがローカライズされる — `snap/gui/keryx.desktop` は jpackage 生成物ではなく
@@ -509,19 +515,21 @@ snapd のポリシー上自動接続されないうえ、Snapcraft のレビュ�
 `home`は、OPMLインポート/エクスポートのファイル選択ダイアログ（`JFileChooser`、
 `app-architecture.md`参照）がユーザーのホームディレクトリ配下の非隠しファイルへ
 アクセスするためのものである — ただし隠しファイル・隠しディレクトリへのアクセスは
-明示的に除外されるため、後述の`keryx://` URIスキームと`.opml`関連付けの自己登録
+明示的に除外される。そのため、後述の`keryx://` URIスキームと`.opml`関連付けの自己登録
 （`LinuxUriSchemeRegistrar`/`LinuxOpmlAssociationRegistrar`）がホスト側の
 `~/.local/share/applications`や`~/.config/mimeapps.list`へ届くことは、そもそもあり得ない。
-さらにsnap内ではそれらのパスに手を伸ばすことすらない — 両レジストラは書き込み先を
-`XDG_DATA_HOME` / `XDG_CONFIG_HOME`から解決しており、`gnome`拡張機能の下ではこれらが
-snap自身の書き込み可能領域を指しているため（次の段落を参照）、書き込みは**成功する** —
+snap内ではそれらのパスに手を伸ばすことすらない — 両レジストラは書き込み先を
+`XDG_DATA_HOME` / `XDG_CONFIG_HOME`から解決しており、`gnome`拡張機能がこれらをsnap自身の
+書き込み可能領域へ向けているため（次の段落を参照）、書き込みは**成功する** —
 ただしホストのデスクトップが決して読まないプライベートディレクトリに対して、である。
-いずれにせよ自己登録はホストに対して何の効果も持たず、どちらの経路でもクラッシュはしない
-（失敗した場合は警告としてログに記録されるだけである）。Snap版のホスト側登録は代わりに
-`snap/gui/keryx.desktop`自体が`x-scheme-handler/keryx`と`.opml`のMIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`という
-フィールドコードを宣言することで行っている — これはsnapdがインストール時に処理する仕組みである。
-一部のデスクトップ環境がローカルファイルを`%u`経由で`file://` URIとして渡してくる場合に備え、
-`main()`内で分類前にプレーンなパスへ正規化している（`normalizeFileUriArg`）。
+いずれにせよ自己登録はホストに対して何の効果も持たず、クラッシュもしない
+（失敗した場合は警告としてログに記録されるだけである）。
+
+Snap版のホスト側登録は、代わりに`snap/gui/keryx.desktop`が担う。`x-scheme-handler/keryx`と`.opml`の
+MIMEタイプ両方に対する`MimeType=`と`Exec=keryx %u`というフィールドコードを宣言しており、
+snapdがインストール時にそれを処理する。一部のデスクトップ環境がローカルファイルを`%u`経由で
+`file://` URIとして渡してくる場合に備え、`main()`内で分類前にプレーンなパスへ正規化している
+（`normalizeFileUriArg`）。
 
 アプリ自身のデータ（データベース、設定、ロックファイル、ログファイル）も `~/.local/share`
 配下に書き込むが、これも strict confinement 下の `home` プラグではブロックされるため、
@@ -549,8 +557,8 @@ WebKitGTK のネストされたサンドボックス（`bwrap`）は strict conf
 WebView のレンダラーサンドボックスのみを無効化するものであり、スナップ自身の strict confinement
 によるプロセスのホストからの分離は維持される。
 
-`stage-packages` に手動で列挙するパッケージは 2 つだけ — AWT で必要な `libxtst6` と JNA 用の
-`libffi8` — で、その他はすべて `gnome` 拡張機能でカバーされる。
+`stage-packages` に手動で列挙するのは `libxtst6`（AWT が必要とする X11 の XTEST ライブラリ）と
+`libffi8`（JNA 用）の 2 つだけで、残りは `gnome` 拡張機能がカバーする。
 
 **特に WebKitGTK はステージしてはならない。** 拡張機能が接続する `gnome-46-2404`
 プラットフォームスナップは、`libwebkit2gtk-4.1-0` とその依存である
@@ -565,24 +573,21 @@ WebView のレンダラーサンドボックスのみを無効化するもので
 （GStreamer の base/good プラグイン群、`libicu74`、`libvpx`、`libwoff1`、`libenchant` …）を
 まるごと引き込む。これだけで `.snap` のサイズが同等の `.deb` の約 2 倍に膨らんでいた。
 
-`snapcraft pack` は組み込みの linter 群も実行するが、その指摘のうち2件は「修正」ではなく
-説明が必要なものである。
+`snapcraft pack` は組み込みの linter 群も実行する。その指摘のうち 1 つは、「修正」ではなく説明が必要なものである:
+`library` linter は ELF の `DT_NEEDED` エントリしか見ないため、実行時に `dlopen()` でロードされる
+ライブラリを検出できず、JVM 自身のランタイムライブラリ（`lib/runtime/lib/*.so`、
+`lib/libapplauncher.so`）を「未使用ライブラリ」として報告する。これらは snapcraft 自身のドキュメントが
+「対応するな」と明記している false positive であり、削除すればアプリが壊れる（たとえば
+`libfontmanager.so` は JDK のフォント描画ライブラリである）。`snap/snapcraft.yaml` の `lint.ignore` で
+これらのパスを個別に抑制している。
 
-- `library` linter は ELF の `DT_NEEDED` エントリしか見ないため、実行時に `dlopen()` で
-  ロードされるライブラリを検出できない。JVM 自身のランタイムライブラリ
-  （`lib/runtime/lib/*.so`、`lib/libapplauncher.so`）が「未使用ライブラリ」として報告される。
-  これらは snapcraft 自身のドキュメントが「対応するな」と明記している
-  false positive であり、削除すればアプリが壊れる（`libfontmanager.so` は特に、
-  `0394c79e` で harfbuzz 依存を追加した当のファイルである）。
-  `snap/snapcraft.yaml` の `lint.ignore` でこれらのパスを個別に抑制している。
-- **この抑制は、同じパスに対する「不足依存」の検出も同時に無効化してしまう** —
-  以前 X11/フォント不足（`88ceff7e`）と harfbuzz 不足（`0394c79e`）を発見したのは、
-  まさにこのチェックである。`stage-packages` やバンドルする JDK のバージョンを変更した際は、
-  `snap/snapcraft.yaml` の `lint:` ブロックを一時的にコメントアウトして一度再パックし、
-  新たな不足依存の警告が出ないことを確認してから元に戻すこと。
-- `metadata` linter の「title が未設定」という指摘は（library の警告と異なり）実在の不備であり、
-  トップレベルの `title: Keryx` キーで解消している。これは Snap Store / GNOME Software に
-  表示される表示名であり、デスクトップシェルが使う `snap/gui/keryx.desktop` の `Name=` とは別物。
+**この抑制は、同じパスに対する「不足依存」の検出も同時に無効化してしまう** — 以前 X11・フォント・
+HarfBuzz のライブラリの不足を発見したのは、まさにこのチェックである。`stage-packages` やバンドルする
+JDK のバージョンを変更した際は、`snap/snapcraft.yaml` の `lint:` ブロックを一時的にコメントアウトして
+一度再パックし、新たな不足依存の警告が出ないことを確認してから元に戻すこと。
+
+トップレベルの `title: Keryx` は Snap Store / GNOME Software に表示される表示名で、デスクトップシェルが使う
+`snap/gui/keryx.desktop` の `Name=` とは別物。
 
 **strict confinement 下で起動時に見える無害なログ行。** 一見エラーに見えても対応不要な行がいくつか
 あり、特に GPU の無い VM ゲスト（VMware など）や、サンドボックスから GL スタックへ到達できない
@@ -699,12 +704,12 @@ APK が入っている端末では `installGithubDebug` がダウングレード
 未署名/半端な署名結果へフォールバックせず即座にビルド失敗する）。ローカル用のキーストア
 生成方法は [setup.ja.md](setup.ja.md) を参照:
 
-| `local.properties` のキー | `-P` プロパティ | 環境変数 |
+| `-P` プロパティ | 環境変数 | `local.properties` のキー |
 | --- | --- | --- |
-| `android.release.keystore.path` | `androidReleaseKeystorePath` | `ANDROID_RELEASE_KEYSTORE_PATH` |
-| `android.release.keystore.password` | `androidReleaseKeystorePassword` | `ANDROID_RELEASE_KEYSTORE_PASSWORD` |
-| `android.release.key.alias` | `androidReleaseKeyAlias` | `ANDROID_RELEASE_KEY_ALIAS` |
-| `android.release.key.password` | `androidReleaseKeyPassword` | `ANDROID_RELEASE_KEY_PASSWORD` |
+| `androidReleaseKeystorePath` | `ANDROID_RELEASE_KEYSTORE_PATH` | `android.release.keystore.path` |
+| `androidReleaseKeystorePassword` | `ANDROID_RELEASE_KEYSTORE_PASSWORD` | `android.release.keystore.password` |
+| `androidReleaseKeyAlias` | `ANDROID_RELEASE_KEY_ALIAS` | `android.release.key.alias` |
+| `androidReleaseKeyPassword` | `ANDROID_RELEASE_KEY_PASSWORD` | `android.release.key.password` |
 
 3 つのソースのどれも未設定の場合、ビルド自体は成功するが release APK は**未署名**になる
 （ビルド警告のみで、debug 署名へのフォールバックは無い）— CI での署名の扱いは後述の
@@ -714,12 +719,12 @@ APK が入っている端末では `installGithubDebug` がダウングレード
 `assemblePlayRelease` が出す APK も —— は、同じ 3 段の優先順で 2 つ目の**任意**の署名情報も
 受け付ける — 上記のアプリ署名鍵とは別の**アップロード鍵**である:
 
-| `local.properties` のキー | `-P` プロパティ | 環境変数 |
+| `-P` プロパティ | 環境変数 | `local.properties` のキー |
 | --- | --- | --- |
-| `android.upload.keystore.path` | `androidUploadKeystorePath` | `ANDROID_UPLOAD_KEYSTORE_PATH` |
-| `android.upload.keystore.password` | `androidUploadKeystorePassword` | `ANDROID_UPLOAD_KEYSTORE_PASSWORD` |
-| `android.upload.key.alias` | `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` |
-| `android.upload.key.password` | `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` |
+| `androidUploadKeystorePath` | `ANDROID_UPLOAD_KEYSTORE_PATH` | `android.upload.keystore.path` |
+| `androidUploadKeystorePassword` | `ANDROID_UPLOAD_KEYSTORE_PASSWORD` | `android.upload.keystore.password` |
+| `androidUploadKeyAlias` | `ANDROID_UPLOAD_KEY_ALIAS` | `android.upload.key.alias` |
+| `androidUploadKeyPassword` | `ANDROID_UPLOAD_KEY_PASSWORD` | `android.upload.key.password` |
 
 この 4 つがどれも未設定なら、`playRelease` は単純にアプリ署名鍵で署名する —
 ローカルの未公開ビルドとしては正当な選択である。`release.yml` と `publish-play.yml` は
@@ -752,9 +757,9 @@ macOS は `appCategory = "public.app-category.news"`（`LSApplicationCategoryTyp
 カテゴリーの概念自体が無い（`menuGroup` はスタートメニューのフォルダ名でしかない）ため、
 Windows 側は何も設定していない。
 
-deb/rpm パッケージは現在システム側の `.desktop` ファイルを同梱している（`linux { shortcut = true }`。
-AppStream の `<launchable>` のために追加した — 上記「Linux パッケージのメタデータ」参照）が、それでも
-`keryx://` カスタム URI スキームは**登録されない**: jpackage 自身の `.desktop` テンプレートの `Exec` 行には
+deb/rpm パッケージはシステム側の `.desktop` ファイルを同梱している（`linux { shortcut = true }`。
+AppStream の `<launchable>` に必要 — 上記「Linux パッケージのメタデータ」参照）が、
+`keryx://` カスタム URI スキームは**登録しない**: jpackage 自身の `.desktop` テンプレートの `Exec` 行には
 そもそも `%u` が付かないため、この経路では URI がプロセスに届かないからである。代わりにアプリが初回起動時に
 自身を登録し（`LinuxUriSchemeRegistrar`）、
 `$XDG_DATA_HOME/applications/keryx-url-handler.desktop`（既定 `~/.local/share/applications`）と
@@ -824,8 +829,8 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   標準化された単一の MIME タイプが存在せず、Android のコンテンツプロバイダーは素の `.opml`
   ファイルを XML 系のタイプではなく `application/octet-stream` として報告することが多い —
   そのため MIME だけで絞り込むと実際のファイルの大半を取りこぼす。MIME ベースのフィルター
-  （`application/x-opml+xml` / `text/x-opml` / `text/xml` / `application/xml` — 上記 Linux 節と
-  同じ識別子）と、拡張子ベースのフォールバックフィルター（`scheme="content"` + `host="*"` +
+  （`application/x-opml+xml` / `text/x-opml` に加え、上記 Linux 節では意図的に外している汎用の
+  `text/xml` / `application/xml`）と、拡張子ベースのフォールバックフィルター（`scheme="content"` + `host="*"` +
   `mimeType="*/*"` + `pathPattern=".*\\.opml"`、報告される MIME タイプに関わらず `content://`
   URI のパスで判定する）は、**2つの独立した intent-filter** として宣言している（1つのフィルター内に
   `<data>` タグをまとめてはいない）: Android は同一 `<intent-filter>` 内にある複数の `<data>`
@@ -846,8 +851,8 @@ AppStream の `<launchable>` のために追加した — 上記「Linux パッ�
   `handleOpmlOpenIfPresent` が着信した `content://` `Uri` を `ContentResolver` 経由で読み取り、
   同じ `MainActivity`/`ACTION_VIEW` の処理を共有するが別の intent-filter を持つ `keryx://` の
   OAuth リダイレクトは除外する。`text/xml`/`application/xml` を受け入れることで、無関係な XML
-  ファイルの「開く」候補にも Keryx が並んでしまうが、これは上記 Linux 節の `text/x-opml`
-  フォールバックが既に受け入れているのと同じトレードオフである。不正な入力の扱いも他プラットフォーム
+  ファイルの「開く」候補にも Keryx が並んでしまう。Linux はこれらを宣言しないことで、このトレードオフを
+  避けている。不正な入力の扱いも他プラットフォーム
   と同様: 読み取りや `OpmlImporter.import` の失敗は伝播させず、データタブのインラインのインポート
   エラーとして表示する。
 
@@ -888,17 +893,19 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. ジョブ定義は全部で9つ、そのうち並列に走るのは6つ（`package-macos`、`package-macos-swiftui`、
-   `package-linux`、`package-snap`、`package-windows`、`package-android`）——実行数は8つになる。
-   `package-linux` と
-   `package-snap` はそれぞれ `x86_64`/`arm64` の matrix になっているため（前者は
-   `ubuntu-latest`/`ubuntu-24.04-arm`、後者は `ubuntu-24.04`/`ubuntu-24.04-arm`。arm64 側のジョブは
-   先に `android-actions/setup-android@v3` を実行する — `:composeApp` の Android ターゲットは
-   *設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは
-   `ubuntu-latest` と違って Android SDK を同梱していないため）。残る3つはこの並列集合には
-   含まれない: `attach-fdroid-version`（「F-Droid への公開」参照）と `publish-play`（詳細は後述の該当箇条書き参照）は
-   `package-android` にのみ依存し、`deploy-pages` は Snap と SwiftUI 以外の4ジョブにゲートされている
-   （合計の実行数は11個。後述）:
+3. ジョブは 9 つ、実行は合計 11 回:
+   - 依存関係のない 6 つの `package-*` ジョブが並列に走る: `package-macos`、`package-macos-swiftui`、
+     `package-linux`、`package-snap`、`package-windows`、`package-android`。`package-linux` と `package-snap` は
+     それぞれ `x86_64`/`arm64` の matrix（前者は `ubuntu-latest`/`ubuntu-24.04-arm`、後者は
+     `ubuntu-24.04`/`ubuntu-24.04-arm`）なので、この 6 ジョブで 8 回の実行になる。
+   - `attach-fdroid-version`（「F-Droid への公開」参照）と `publish-play`（詳細は後述の該当箇条書き参照）は
+     `package-android` にのみ依存する。
+   - `deploy-pages` は `package-macos`、`package-linux`、`package-windows`、`package-android` にゲートされ、
+     `package-snap` と `package-macos-swiftui` は待たない。
+
+   arm64 側の matrix のジョブは先に `android-actions/setup-android@v3` を実行する — `:composeApp` の Android
+   ターゲットは*設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは `ubuntu-latest` と
+   違って Android SDK を同梱していないため。各ジョブの中身:
 
    - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
    - `package-macos-swiftui`: ネイティブ SwiftUI macOS アプリ用の別ジョブ。Developer ID 署名・公証・Sparkle の
@@ -985,7 +992,7 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 何も変わらない。ローカルビルドは両方とも同じリテラル `"0.0.0"` にフォールバックする。jpackage が受け付けない
 形式（`MAJOR.MINOR.PATCH[-<pre-release>]` 以外）のタグは、ワークフロー冒頭で明示的なメッセージとともに失敗させる。
 
-`macos-latest` ランナーは arm64 のため、成果物名にアーキテクチャを含めている
+Compose 版のジョブが使う `macos-latest` ランナーは arm64 のため、成果物名にアーキテクチャを含めている
 （将来 x86_64 版やユニバーサル版を併置できるようにするため）。
 
 ### macOS における 0.x バージョンとプレリリースタグ
@@ -1152,15 +1159,16 @@ Compose 側のジョブを削除し、このジョブを `package-macos` に改�
 設定が揃うと、ジョブは次を行う（スクリプトは `.github/scripts/` にあり、認証情報を除けば手元でも実行できる）:
 
 1. 証明書を使い捨てのキーチェーンに取り込み、プロファイルと公証用キーをランナーの一時ディレクトリに書く
-   （どれも最後に削除する）。
+   （どれも最後に削除する）。スクリプトはプロファイルを Xcode の provisioning profile ディレクトリにも
+   （`<uuid>.provisionprofile` として）入れ、終了時に削除する（同じものが元からあった場合は残す）。
 2. `package-macos-swiftui.sh` を実行する: Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
    Intel スライスが無いため）、署名（Hardened Runtime、Team ID、Sparkle の補助ツール）を検証し、アプリを公証して staple し、
    staple 済みのアプリから `.zip` を作る——安定版のタグでは、署名・公証・staple 済みの `.dmg` も作る。公証のログは成功時
    にも出力する（早めに直すべき警告が載るため）。署名設定は、生成する gitignore 済みの `appleApp/Local.xcconfig` 経由で
    Xcode に渡す（Swift パッケージのターゲットに波及させないため）。開発者自身の同名ファイルがあると、スクリプトは
    実行を拒否する。Sparkle の入れ子の補助ツールは、Sparkle の推奨どおり export 時に Xcode が再署名する。署名時に
-   `codesign --deep` を付けないこと。Xcode のバージョンは、ランナーイメージの既定ではなく固定している
-   （`DEVELOPER_DIR`）。ランナーイメージの更新に合わせて更新する。
+   `codesign --deep` を付けないこと。ジョブは `macos-latest` ではなく固定のランナーイメージ（`macos-26`）で動き、
+   Xcode は `release.yml` の `DEVELOPER_DIR` で指定している（`AppIcon.icon` に Xcode 26 が必要）。両方を一緒に更新する。
 3. `generate-appcast.sh` を実行する: Sparkle の `generate_appcast` が `SPARKLE_PRIVATE_KEY` で `.zip` に署名し、
    `appcast.xml` を書く。
 4. `.zip`・`.dmg`・`appcast.xml` を添付する——ここまでがすべて成功した場合にだけ動く最後のステップで。
@@ -1177,9 +1185,40 @@ Compose 側のジョブを削除し、このジョブを `package-macos` に改�
 GitHub 以外にバックアップを持つこと。`SPARKLE_PUBLIC_ED_KEY` は Release ビルドにだけ設定しているので、開発者の
 Debug 実行がフィードを見に行くことはない。
 
-**初回の実行。** Secrets が揃う前は、署名・公証の経路を GitHub 上で試せない。最初はプレリリースのタグで実行して、ログを
-読むこと。そのうえで、更新を端から端まで確認する: 生成した `appcast.xml` にビルドの `SUFeedURL` を向けて、古いビルドから
-更新する。
+**最初は手元でリハーサルする。** GitHub で Release を公開すると、全プラットフォームのジョブ（Play へのアップロード、
+Snap Store、`deploy-pages` など）が動く。そのため、GitHub での初回の実行より前に、署名と公証を Mac の手元で確認する。
+パッケージング用のスクリプトは、同じ入力で手作業でも実行できる:
+
+- 新しい clone で実行する: 開発者自身の `appleApp/Local.xcconfig` があると、スクリプトは実行を拒否する。ビルドに OAuth の
+  クライアント ID が入るよう、`local.properties` をクローンにコピーする。
+- `.p12` を使い捨てのキーチェーンに取り込み、検索リストに追加する（終わったら検索リストを元に戻し、キーチェーンを削除する）。
+- スクリプトの入力（`package-macos-swiftui.sh` の冒頭に一覧がある）を環境変数で渡す。キーチェーンに Developer ID
+  Application 証明書が複数あるとき（開発者のログインキーチェーンには、古い証明書が残っていることが多い）は、
+  `SIGNING_IDENTITY` に、署名に使う証明書の SHA-1 を指定する。指定しないと、汎用の名前では曖昧になる。
+- アプリは実際に Apple の公証サービスへ送られるが、何も公開されない。
+
+**新しい Apple アカウントの最初の公証は、時間がかかることがある。** 最初の送信は、以降の送信よりずっと長く
+`In Progress` のままになることがある（今回は約 35 分。2 回目は数分で終わった）。手作業で実行するときは
+`NOTARY_TIMEOUT`（既定は `30m`）で待ち時間を延ばせる。時間切れのときはスクリプトが送信 ID を表示するので、
+`xcrun notarytool wait <id>`（同じ認証情報で）で待ってから、もう一度実行する。ワークフローは `NOTARY_TIMEOUT` を
+渡さないため、そこでは各送信（アプリ、安定版では続けて DMG）の待ち時間は最大 30 分で、これより遅い最初の送信は
+ジョブを失敗させる——だから先にリハーサルで済ませておくのがよい。
+
+**証明書まわりの注意点:**
+
+- Developer ID Application 証明書は **G2 Sub-CA** から発行する。古い認証局は 2027-02-01 に失効し、そこから発行された
+  証明書も同時に期限を迎える（Apple の「Replace Developer ID certificates」のヘルプページを参照）。どちらから
+  発行されたかは、Keychain Access で証明書を開いて発行元（Issuer）を確認する。期限だけでは確定できない。
+- `.p12` には、証明書とその**秘密鍵**の両方が入っている必要がある。使い捨てのキーチェーンに取り込んで、
+  `security find-identity -v -p codesigning <keychain>` に出てくれば、署名に使える。
+- provisioning profile に入っている証明書は、`.p12` の証明書と同じものでなければならない（SHA-1 で比較できる）。
+- `.p12` のパスワードは、ASCII の英数字にするのがよい。100 文字のパスワードでは失敗し、32 文字では成功した
+  （原因は特定できていない）。
+
+**GitHub での初回の実行。** 最後に、プレリリースのタグを切る。ワークフロー全体が動く（Play の internal/alpha への
+アップロードと Snap の `edge` チャンネルも含む）が、プレリリースでは DMG は作られず、GitHub の「latest」も前の
+安定版のままである。`package-macos-swiftui` のログを読み、そのあと更新を端から端まで確認する: 生成した
+`appcast.xml` にビルドの `SUFeedURL` を向けて、古いビルドから更新する。
 
 ### GitHub Release のフラグ
 
@@ -1278,9 +1317,10 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 直接編集すればよい。どちらのワークフローも、公開済みのリリースには一切手を触れない。
 
 > [!IMPORTANT]
-> **リリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper にブロックされる。回避方法は
-> README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に必要な作業は下記
-> 「署名・公証」を参照。
+> **Compose 版（`package-macos`）としてリリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper に
+> ブロックされる。回避方法は README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に
+> 必要な作業は下記「署名・公証（Compose 版 macOS）」を参照。SwiftUI 版の DMG は Developer ID 署名・公証済み
+> （前述「SwiftUI macOS アプリ」参照）。
 
 ### F-Droid への公開
 
@@ -1334,11 +1374,11 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 `fdroid scanner` の検出が、ソースでもビルドした APK でも**ゼロ**であることが、依存グラフの変更が
 守るべき条件である。`androidApp`、`:androidGms`、Android の依存関係を触った後は、F-Droid 自身の
 `buildserver` イメージ（`registry.gitlab.com/fdroid/fdroidserver:buildserver`）で実行すること。
-`ci.yml` の「Verify the fdroid flavor has no Google Play services」ステップは最もありそうな
+`ci.yml` の「Verify the fdroid flavor has no Google Play services (Linux)」ステップは最もありそうな
 リグレッションを毎 push で検出するが、Play 開発者サービスと無関係な新たなプロプライエタリ依存までは
 検出しない。
 
-## 署名・公証（将来対応）
+## 署名・公証（Compose 版 macOS）
 
 > この節は Compose 版 macOS ビルド（`package-macos`）の話。SwiftUI macOS アプリの Developer ID 署名と公証は専用の
 > ジョブが行う。「リリース（CD）」の「SwiftUI macOS アプリ」を参照。
@@ -1383,7 +1423,8 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 
 Keychain 利用のための特別な entitlement は不要（`get-task-allow` を付けないことだけ担保する。jpackage の
 Developer ID 署名は hardened runtime を付与するため要件を満たす）。トークン保存の仕組みは
-[sync-architecture.ja.md](sync-architecture.ja.md) の「Dropbox 認証 > トークン保存先」を参照。
+[sync-architecture.ja.md](sync-architecture.ja.md) の「クラウド認証（OAuth PKCE + オフラインアクセス）> トークン保存先」を
+参照（Dropbox だけでなく 3 プロバイダすべてを扱う）。
 
 ## 設定メモ
 
