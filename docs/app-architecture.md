@@ -1316,6 +1316,11 @@ around.
     tab's automatic-check toggle (the setting itself lives in Sparkle's own `UserDefaults`, not in
     `LocalSettings`). `AppModel` holds it outside the SDK, so the menu item also works on the
     startup-failure screen — a database that a newer build already migrated is cured by updating.
+    It builds `SPUUpdater` itself, with a user driver that is Sparkle's standard one except for one
+    message: when a check the user started cannot read the feed (a 404 in the window after a release
+    is published and before its macOS job attaches `appcast.xml`, or being offline), it says so and
+    what to do (`UpdateCheckFailure`), instead of Sparkle's generic error. A scheduled check shows
+    nothing on failure — Sparkle only reports errors to a user who knows a check is running.
   - **It is on in Release builds only.** `Config/Shared.xcconfig` sets `SPARKLE_PUBLIC_ED_KEY`
     (the Info.plist's `SUPublicEDKey`) for the Release configuration alone. While it is empty — a
     Debug build, unless `Local.xcconfig` sets it — the updater never starts, so the app makes no
