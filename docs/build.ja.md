@@ -1149,7 +1149,7 @@ Compose 側のジョブを削除し、このジョブを `package-macos` に改�
 | `APPLE_DEVELOPER_ID_CERT_PASSWORD` | `.p12` の書き出し時のパスワード |
 | `APPLE_TEAM_ID` | 10 文字の Team ID |
 | `APPLE_PROVISIONING_PROFILE` | `works.merc.keryx` 用の **Developer ID provisioning profile** を base64 にしたもの。`keychain-access-groups` エンタイトルメントは制限付きで、これを認可するプロファイルが無いと署名済みアプリは起動時に拒否される |
-| `APPLE_NOTARY_KEY` | `notarytool` が使う App Store Connect API キー（`AuthKey_<id>.p8`）の中身 |
+| `APPLE_NOTARY_KEY` | `notarytool` が使う App Store Connect API キー（`AuthKey_<id>.p8`）の中身。登録の際に改行が失われていたり（スペースや CRLF が混ざっていたり）しても、ジョブが復元する。秘密鍵として読めない値は、ジョブがすぐに失敗し、その形（内容ではなく）を示す |
 | `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_ISSUER_ID` | そのキーの ID と Issuer ID |
 | `SPARKLE_PRIVATE_KEY` | Sparkle の `generate_keys -x` で書き出したリリース用 EdDSA 秘密鍵。対になる公開鍵は `appleApp/Config/Shared.xcconfig` の `SPARKLE_PUBLIC_ED_KEY` |
 
@@ -1160,8 +1160,10 @@ Compose 側のジョブを削除し、このジョブを `package-macos` に改�
 
 1. 証明書を使い捨てのキーチェーンに取り込み、プロファイルと公証用キーをランナーの一時ディレクトリに書く
    （どれも最後に削除する）。スクリプトはプロファイルを Xcode の provisioning profile ディレクトリにも
-   （`<uuid>.provisionprofile` として）入れ、終了時に削除する（同じものが元からあった場合は残す）。
-2. `package-macos-swiftui.sh` を実行する: Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
+   （`<uuid>.provisionprofile` として）入れ、終了時に削除する（同じものが元からあった場合は残す）。公証用キーは、
+   base64 の本体から組み立て直し（`prepare-notary-key.sh`）、秘密鍵として読めることを確認する。
+2. `package-macos-swiftui.sh` を実行する。まず Apple の公証サービスに提出履歴を問い合わせる——読み取りだけの呼び出しで、
+   キー、Key ID、Issuer ID のどれかが誤っていると、ビルドの後ではなく数秒で失敗する。そのあと、Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
    Intel スライスが無いため）、署名（Hardened Runtime、Team ID、Sparkle の補助ツール）を検証し、アプリを公証して staple し、
    staple 済みのアプリから `.zip` を作る——安定版のタグでは、署名・公証・staple 済みの `.dmg` も作る。公証のログは成功時
    にも出力する（早めに直すべき警告が載るため）。署名設定は、生成する gitignore 済みの `appleApp/Local.xcconfig` 経由で

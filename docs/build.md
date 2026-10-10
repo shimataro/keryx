@@ -1138,7 +1138,7 @@ unsigned build can never reach a release. (Every later step is gated on that che
 | `APPLE_DEVELOPER_ID_CERT_PASSWORD` | The password the `.p12` was exported with |
 | `APPLE_TEAM_ID` | The 10-character Team ID |
 | `APPLE_PROVISIONING_PROFILE` | The **Developer ID provisioning profile** for `works.merc.keryx`, base64-encoded. The `keychain-access-groups` entitlement is restricted: without a profile that authorizes it the signed app is refused at launch |
-| `APPLE_NOTARY_KEY` | The text of an App Store Connect API key (`AuthKey_<id>.p8`) used by `notarytool` |
+| `APPLE_NOTARY_KEY` | The text of an App Store Connect API key (`AuthKey_<id>.p8`) used by `notarytool`. Lost line breaks are restored; a value that is not a private key fails the job at once (the log shows its shape, never its content) |
 | `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_ISSUER_ID` | That key's ID and its issuer ID |
 | `SPARKLE_PRIVATE_KEY` | The release EdDSA private key, as exported by Sparkle's `generate_keys -x`. Its public half is `SPARKLE_PUBLIC_ED_KEY` in `appleApp/Config/Shared.xcconfig` |
 
@@ -1152,8 +1152,11 @@ the credentials):
 1. Imports the certificate into a throwaway keychain, and writes the profile and the notarization key
    into the runner's temp directory (all removed at the end). The script also installs the profile
    into Xcode's provisioning-profile directory (as `<uuid>.provisionprofile`) and removes it
-   afterwards, unless the same profile was already there.
-2. Runs `package-macos-swiftui.sh`: archives and exports the app with Xcode (Release, arm64 only —
+   afterwards, unless the same profile was already there. The notarization key is rebuilt from its
+   base64 body (`prepare-notary-key.sh`) and checked to parse as a private key.
+2. Runs `package-macos-swiftui.sh`. It first asks Apple's notary service for the submission history —
+   a read-only call that fails within seconds if the key, its key id or the issuer id is wrong, rather
+   than after the build. Then it archives and exports the app with Xcode (Release, arm64 only —
    the shared framework has no Intel slice), verifies the signatures (hardened runtime, Team ID,
    Sparkle's helper tools), notarizes and staples the app, and writes the `.zip` made from the stapled
    app — plus, for a stable tag, a signed, notarized and stapled `.dmg`. The notary log is printed
