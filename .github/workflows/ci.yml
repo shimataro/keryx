@@ -8,9 +8,11 @@ on:
       - '**'
 
 # A newer push to the same feature branch supersedes the run in progress. Version branches (v*)
-# keep every run, so each integrated commit has its own result and saves its own caches.
+# keep every run, so each integrated commit has its own result and saves its own caches: each v*
+# run gets a group of its own, because a shared group holds only one pending run and a newer push
+# would replace it even with cancel-in-progress off.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ startsWith(github.ref, 'refs/heads/v') && format('ci-{0}-{1}', github.ref, github.run_id) || format('ci-{0}', github.ref) }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/v') }}
 
 permissions:
