@@ -116,6 +116,9 @@ mkdir -p "$profiles_dir"
 if [ ! -e "$profile_target" ]; then
   cp "$PROVISIONING_PROFILE_PATH" "$profile_target"
   installed_profile="$profile_target"
+elif ! cmp -s "$PROVISIONING_PROFILE_PATH" "$profile_target"; then
+  # Never overwrite the developer's own file, and never sign with a stale copy of the profile.
+  fail "A different provisioning profile is already installed at $profile_target; remove or replace it and run again."
 fi
 
 cat > "$local_xcconfig" <<EOF
