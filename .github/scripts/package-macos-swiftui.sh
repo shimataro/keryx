@@ -29,6 +29,10 @@
 #   ARTIFACT_SUFFIX           Optional suffix before the extension; defaults to "-swiftui" so the
 #                             files cannot replace the Compose build's Keryx-<v>-macos-arm64.zip
 #                             until that build is retired (then set it to empty).
+#   SIGNING_IDENTITY          Optional name or 40-digit SHA-1 of the certificate to sign with;
+#                             defaults to "Developer ID Application", which is enough when the
+#                             keychain holds a single such certificate (as release.yml's does). Set
+#                             a SHA-1 when more than one matches, e.g. when running this by hand.
 #   OAuth client ids (DROPBOX_APP_KEY, ONEDRIVE_CLIENT_ID, GOOGLE_DRIVE_APPLE_CLIENT_ID) are read
 #   from the environment by the Gradle build that Xcode runs.
 #
@@ -52,11 +56,16 @@ fail() {
 : "${NOTARY_KEY_ID:?NOTARY_KEY_ID is not set}"
 : "${NOTARY_ISSUER_ID:?NOTARY_ISSUER_ID is not set}"
 suffix="${ARTIFACT_SUFFIX--swiftui}"
+signing_identity="${SIGNING_IDENTITY:-Developer ID Application}"
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
   || fail "Invalid version: '$VERSION'."
 [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail "Invalid build number: '$BUILD_NUMBER'."
 [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || fail "Invalid Apple team id."
+# The identity is written into an xcconfig and a plist below, so accept only what a certificate
+# name or SHA-1 can contain.
+identity_pattern='^[A-Za-z0-9 :().,-]+$'
+[[ "$signing_identity" =~ $identity_pattern ]] || fail "Unexpected characters in SIGNING_IDENTITY."
 [[ "$IS_PRERELEASE" == "true" || "$IS_PRERELEASE" == "false" ]] \
   || fail "IS_PRERELEASE must be true or false."
 [ -s "$PROVISIONING_PROFILE_PATH" ] || fail "Provisioning profile not found: $PROVISIONING_PROFILE_PATH"
@@ -98,7 +107,7 @@ cp "$PROVISIONING_PROFILE_PATH" "$profiles_dir/$profile_uuid.provisioningprofile
 
 cat > "$local_xcconfig" <<EOF
 CODE_SIGN_STYLE = Manual
-CODE_SIGN_IDENTITY = Developer ID Application
+CODE_SIGN_IDENTITY = $signing_identity
 DEVELOPMENT_TEAM = $APPLE_TEAM_ID
 PROVISIONING_PROFILE_SPECIFIER = $profile_name
 EOF
@@ -129,7 +138,7 @@ cat > "$export_options" <<EOF
   <key>method</key><string>developer-id</string>
   <key>teamID</key><string>$APPLE_TEAM_ID</string>
   <key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Developer ID Application</string>
+  <key>signingCertificate</key><string>$signing_identity</string>
   <key>provisioningProfiles</key>
   <dict>
     <key>works.merc.keryx</key><string>$profile_name</string>
@@ -208,7 +217,7 @@ if [ "$IS_PRERELEASE" = "false" ]; then
   ln -s /Applications "$staging/Applications"
   dmg_path="$OUTPUT_DIR/$base_name.dmg"
   hdiutil create -volname Keryx -srcfolder "$staging" -ov -format UDZO "$dmg_path"
-  codesign --sign "Developer ID Application" --timestamp "$dmg_path"
+  codesign --sign "$signing_identity" --timestamp "$dmg_path"
   echo "Notarizing the disk image..."
   notarize "$dmg_path"
   xcrun stapler staple "$dmg_path"
