@@ -368,6 +368,9 @@ jobs:
       # libs.versions.toml, i.e. the Kotlin and SKIE versions) and the Xcode version, whose SDK and
       # linker the link uses. Exact matches only — no restore-keys — since a framework built from
       # different sources would let a change to shared/ pass here without ever being linked.
+      # The key is evaluated after the test step above, and hashFiles ignores .gitignore, so it lists
+      # shared/'s tracked inputs only — hashing shared/** would pick up the tests' output under
+      # shared/build/ and change the key on every run.
       - name: Resolve Xcode version
         id: xcode
         run: echo "version=$(xcodebuild -version | tr '\n' ' ' | tr -s ' ' '-' | sed 's/-$//')" >> "$GITHUB_OUTPUT"
@@ -377,7 +380,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: shared/build/XCFrameworks/release/KeryxShared.xcframework
-          key: keryx-xcframework-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('shared/**', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', 'gradle/**') }}
+          key: keryx-xcframework-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('shared/src/**', 'shared/build.gradle.kts', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', 'gradle/**') }}
 
       - name: Verify Apple framework
         env:
