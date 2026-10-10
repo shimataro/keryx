@@ -135,10 +135,11 @@ private final class KeryxUserDriver: SPUStandardUserDriver {
     /// standard driver shows `localizedDescription` as the title and, when present,
     /// `localizedRecoverySuggestion` as the body.
     private static func localized(_ error: any Error, updateFound: Bool) -> any Error {
-        assert(UpdateCheckFailure.sparkleErrorDomain == SUSparkleErrorDomain)
-        assert(UpdateCheckFailure.sparkleDownloadErrorCode == Int(SUError.downloadError.rawValue))
         let nsError = error as NSError
-        guard let failure = UpdateCheckFailure.classify(nsError, updateFound: updateFound) else { return error }
+        guard let failure = UpdateCheckFailure.classify(
+            nsError, updateFound: updateFound,
+            downloadErrorDomain: SUSparkleErrorDomain, downloadErrorCode: Int(SUError.downloadError.rawValue)
+        ) else { return error }
         var info = nsError.userInfo
         info[NSLocalizedDescriptionKey] = L("apple_update_check_failed_title")
         info[NSLocalizedRecoverySuggestionErrorKey] = switch failure {

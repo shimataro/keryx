@@ -12,20 +12,19 @@ enum UpdateCheckFailure: Equatable {
     /// build has not attached its `appcast.xml` yet, or whose macOS job failed.
     case unavailable
 
-    /// Mirrors `SUSparkleErrorDomain` and `SUDownloadError` from Sparkle's `SUErrors.h`;
-    /// `AppUpdater` asserts that they still match.
-    static let sparkleErrorDomain = "SUSparkleErrorDomain"
-    static let sparkleDownloadErrorCode = 2001
-
     /// Classifies `error`, or returns nil when Sparkle's own message should stand.
+    /// `downloadErrorDomain`/`downloadErrorCode` are Sparkle's `SUSparkleErrorDomain` and
+    /// `SUDownloadError`, passed in by `AppUpdater` so this file needs no Sparkle import.
     ///
     /// Only a download error before any update was found qualifies: once one has been found, the
     /// same error code means the update file itself failed to download, which this message would
     /// misdescribe.
-    static func classify(_ error: NSError, updateFound: Bool) -> UpdateCheckFailure? {
+    static func classify(
+        _ error: NSError, updateFound: Bool, downloadErrorDomain: String, downloadErrorCode: Int
+    ) -> UpdateCheckFailure? {
         guard !updateFound,
-              error.domain == sparkleErrorDomain,
-              error.code == sparkleDownloadErrorCode
+              error.domain == downloadErrorDomain,
+              error.code == downloadErrorCode
         else { return nil }
         let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
         return underlying?.domain == NSURLErrorDomain ? .offline : .unavailable
