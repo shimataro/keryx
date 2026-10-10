@@ -777,8 +777,8 @@ Execution failed for task ':composeApp:packageDmg' (registered by plugin 'org.je
 - **`packageDmg` の CI ステップ自体の変更でもない** — このステップは #71 で導入されて以降安定
   している。
 - **同一ランナー上での `packageDmg` の同時実行でもない。** GitHub Actions のランナーは使い捨ての
-  VM であり、push を直列化/キャンセルする `concurrency:` グループも存在しないため、別の実行と
-  ディスクを共有して残留マウントが生じることはあり得ない。
+  VM であるため、`ci.yml` の `concurrency:` 設定で並行して走る実行（v* の任意の 2 実行、別ブランチの
+  実行）同士でもディスクは共有されず、別の実行によって残留マウントが生じることはあり得ない。
 
 jpackage は DMG 生成時にスクラッチのディスクイメージをマウントし、アプリバンドルをコピーしてから
 detach する。同じログに残っているオーファンプロセスの後始末（`Terminate orphan process: pid
