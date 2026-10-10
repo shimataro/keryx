@@ -16,10 +16,10 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 
 | Platform | Support |
 | --- | --- |
-| Windows / macOS / Linux | ✅ Compose Multiplatform (current) |
+| Windows / Linux | ✅ Compose Multiplatform (current) |
 | Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md); the F-Droid build contains no Play services and so has no Google Drive at all, and no in-app update — see §4 and §7) |
 | iOS / iPadOS | In development (native SwiftUI UI, sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md)) |
-| macOS (native) | In development — a native SwiftUI macOS app (Apple Silicon) that replaces the Compose one above for users; the shared logic is already built for it |
+| macOS | ✅ Native SwiftUI app (current; Apple Silicon, macOS 14 or later), sharing its logic via `:shared`. It replaced the Compose macOS build, which is no longer released and remains for internal verification only; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md) |
 
 ## 3. Supported Formats
 
@@ -91,8 +91,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
   "Narrower widths" has the exact condition), so the button is reachable without the user having to
   find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
-- In-app update (download and install, not just a link to the release page): supported for a macOS
-  `.app`, a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
+- In-app update (download and install, not just a link to the release page). The macOS app updates
+  through its own route, described at the end of this item; everywhere else it is supported for
+  a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
   falls back to opening the release page, as does any install form the app can't recognize), and a sideloaded
   Android install (never through Google Play, which already updates the app itself, nor through
   F-Droid, whose client does the same — the F-Droid build omits the feature altogether). Presented from
@@ -106,7 +107,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   silently or automatically. The downloaded file is verified against the GitHub release's own
   SHA-256 digest before anything is installed. See [background-update.md](background-update.md)
   for the full design and [SECURITY.md](../SECURITY.md) for what that verification does and does
-  not guarantee.
+  not guarantee. The macOS app updates through its own route instead — the app menu's "Check for
+  Updates…", plus a periodic automatic check that Settings ▸ General can turn off — with the
+  update's EdDSA signature verified before it is installed (Sparkle; see "Distribution and
+  coexistence" in [app-architecture.md](app-architecture.md)).
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available, and the reader toolbar's button for it is a read/unread toggle that shows the article's state (a filled dot while it is unread, like the article list's own unread dot) — so a tap on a reader shown alone, with the list out of sight, is visibly acknowledged and can be undone. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
 - **Unread-only deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the unread-only toggle (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected — and running it never turns unread-only off.
 - **New articles that land beyond the current scroll position, toward the list's fresh end, surface
@@ -440,7 +444,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
   content — including any images or embedded content they contain — is fetched before they are
   opened, exactly as it would be on opening them. Nothing about them is marked read.
 - Each cloud provider's token (Dropbox, Google Drive, OneDrive) is stored separately in platform secure storage.
-  On desktop: Keychain on macOS (via the `security` CLI), Credential Manager / Secret Service on Windows/Linux via
+  On macOS: the app's data-protection Keychain, with no file fallback. On Windows/Linux: Credential Manager / Secret Service via
   java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
   desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
   unavailable. On Android: an AES-256/GCM key held in the Android Keystore, per provider. See

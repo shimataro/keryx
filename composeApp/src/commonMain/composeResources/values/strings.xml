@@ -395,6 +395,9 @@
          and iOS updates through the App Store. -->
     <string name="apple_menu_check_for_updates">Check for Updates…</string>
     <string name="apple_settings_auto_check_updates">Automatically check for updates</string>
+    <string name="apple_update_check_failed_title">Couldn’t check for updates</string>
+    <string name="apple_update_check_failed_unavailable">A new version may be getting ready. Try again in a little while.</string>
+    <string name="apple_update_check_failed_offline">Check your internet connection and try again.</string>
     <!-- Apple (SwiftUI) app only — the names of the tag colors, which VoiceOver reads and the iOS
          palette menu shows (Compose's swatches carry no names). Same order as TAG_COLOR_PALETTE. -->
     <string name="apple_tag_color_none">No color</string>

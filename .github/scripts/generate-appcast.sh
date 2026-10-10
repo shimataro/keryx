@@ -7,7 +7,7 @@
 # attached to the release alongside the archive. Only this release's archive goes in: earlier
 # releases are not carried over, and no delta updates or channels are produced.
 #
-# Used by release.yml's package-macos-swiftui job. See docs/build.md's "Release (CD)".
+# Used by release.yml's package-macos job. See docs/build.md's "Release (CD)".
 #
 # Inputs (environment variables):
 #   ZIP_PATH            Path to the notarized, stapled `.zip` of Keryx.app to publish.

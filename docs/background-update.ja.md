@@ -208,6 +208,11 @@ Downloading → Verifying → Ready → Installing`、そして `Checking`/`Down
 トールも、それぞれ個別の明示的なクリックである（Updates タブのボタン、あるいはそのメニュー
 項目）。
 
+これは Compose アプリの更新機構である。macOS のリリースは SwiftUI アプリで、こちらは代わりに Sparkle で更新する
+（[app-architecture.ja.md](app-architecture.ja.md) の「配布と共存」参照）。そのため macOS では、以下の `.app` の
+経路——`ditto` での展開、`codesign` と `Info.plist` の検査、App Translocation——が関わるのは、インストール済みの
+Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプリの `.zip` は同じ検査を通る）と、内部用のビルドだけである。
+
 - **どのファイルを、どうするか。** `UpdateChecker` が GitHub リリースの `assets[]` をパースし、
   `domain/UpdateAsset.kt` の `selectUpdateAsset` がこのビルドのインストール形態に合致するものを
   1 つ選ぶ（GitHub がまだ処理を終えていないアセットや、検証可能な `sha256` digest を持たない

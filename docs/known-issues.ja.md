@@ -87,15 +87,11 @@ JNA ベースの Objective-C ブリッジで直接操作する必要がある �
 `Callback` を実装として渡す）、これは本質的にリスクの高いネイティブ相互運用であり
 （実装を誤ると JVM がクラッシュしうる）、実機での検証を何度も繰り返す必要がある。
 
-もっとも、これは着手する価値より先に不要になる可能性が高い。`app-architecture.md` によれば macOS は
-将来的にネイティブ SwiftUI 実装へ移行することが想定されている（`external-spec.md` §2 — Android や iOS
-自体がまだターゲットとして存在しない現状では、より長期の未確定な方向性）。ネイティブアプリであれば
-通常のアプリライフサイクルを通じて `UNUserNotificationCenterDelegate` を使うことになり — AWT の
-ブリッジも非推奨 API も、Accessory ポリシー固有のブリッジ不具合も存在しない — これは macOS の
-メニューバー常駐（`LSUIElement`）アプリでよく使われる、確実に動作するパターンである。それを踏まえ、
-また上記の AWT ベースの実装が結局動かなかったことも踏まえ、
-上記の JNA ブリッジの実装は当面見送り、この記録にとどめる。ネイティブ SwiftUI 移行そのものがさらに
-先送りされ続け、この回避策のギャップを個別に埋める価値が出てくるまでは。
+その後、これは着手する価値より先に不要になった。macOS のリリースはネイティブ SwiftUI アプリになり
+（`external-spec.md` §2）、この問題が起きる Compose 版 macOS ビルドはもうリリースしていない——内部の確認用として
+残るだけである。ネイティブアプリは通常のアプリライフサイクルを通じて `UNUserNotificationCenterDelegate` を使い——
+AWT のブリッジも非推奨 API も、Accessory ポリシー固有のブリッジ不具合も存在しない。それを踏まえ、また上記の
+AWT ベースの実装が結局動かなかったことも踏まえ、JNA ブリッジは実装しない。この記録はその理由として残す。
 
 ## 記事一覧の激しいスクロールと選択変更が重なると UI スレッドが落ちる
 
@@ -792,9 +788,9 @@ detach する。同じログに残っているオーファンプロセスの後�
 
 ### 緩和策
 
-`.github/workflows/ci.yml` の "Verify packaging (macOS)" ステップと `.github/workflows/release.yml`
-の "Package App bundle (+ Dmg for stable releases)" ステップは、どちらも `packageDmg` を最大3回まで
-リトライする。ただし失敗ログに実際に `hdiutil` が含まれている場合に限る — それ以外の失敗（本物の
+`.github/workflows/ci.yml` の "Verify packaging (macOS)" ステップは `packageDmg` を最大3回まで
+リトライする。
+ただし失敗ログに実際に `hdiutil` が含まれている場合に限る — それ以外の失敗（本物の
 パッケージング不具合）は1回目でそのまま失敗する。リトライ前に `/Volumes/Keryx*` 配下に残っている
 マウントを強制 detach し、次の試行が別名のマウントポイントに当たらないようにしている。
 

@@ -11,7 +11,7 @@
 # Only the shape of the value is reported on failure (line count, whether the markers are present,
 # its length), never any of its content.
 #
-# Used by release.yml's package-macos-swiftui job. See docs/build.md's "Release (CD)".
+# Used by release.yml's package-macos job. See docs/build.md's "Release (CD)".
 #
 # Usage: APPLE_NOTARY_KEY=<secret> prepare-notary-key.sh <output path>
 #

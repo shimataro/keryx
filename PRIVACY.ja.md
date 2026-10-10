@@ -35,14 +35,15 @@ Keryx は以下の 2 つのローカルファイルにデータを保存しま�
   デバイスローカル設定。
 
 デスクトップ（macOS・Windows・Linux）では、両ファイルとも OS 標準のアプリデータ
-ディレクトリ（macOS: `~/Library/Application Support/Keryx`、Windows:
+ディレクトリ（macOS: アプリのサンドボックスコンテナ内の
+`~/Library/Containers/works.merc.keryx/Data/Library/Application Support/Keryx`、Windows:
 `%APPDATA%\Keryx`、Linux: `$XDG_DATA_HOME/Keryx`）に置かれます。Android では、
 Keryx だけがアクセスできるアプリ専用の領域に別々に保存されます — `keryx.db` は
 アプリのデータベース用ディレクトリに、`local_settings.json` はアプリの内部ファイル
 用ディレクトリに置かれ、いずれも他のアプリからはアクセスできず、root 権限なしに
 ユーザー自身が直接触ることもできません。
 
-OS 標準のキャッシュディレクトリ（macOS: `~/Library/Caches/Keryx`、Windows:
+OS 標準のキャッシュディレクトリ（macOS: `~/Library/Containers/works.merc.keryx/Data/Library/Caches/Keryx`、Windows:
 `%LOCALAPPDATA%\Keryx\Cache`、Linux: `$XDG_CACHE_HOME/Keryx`）には、購読フィードの
 favicon 画像と記事表示に使う WebView のプロファイルが、単なる表示高速化のための
 一時データとして保存されます。Android では、favicon 画像と記事表示に使う WebView
@@ -94,11 +95,13 @@ Android の OS 標準機能「バックアップ」（`allowBackup`）が Keryx 
   ファイルとしてアップロードされます。Google Drive の場合、これは `drive.appdata`
   スコープ（通常の Google Drive 画面には表示されず、他のアプリからも見えない、
   アプリ専用の隠しフォルダー）に書き込まれます。Dropbox の場合は標準的なファイルコンテンツスコープを使用します。OneDrive の場合は Microsoft Graph のファイルストレージスコープを使用し、OneDrive 内のアプリ専用フォルダーに保存されます。
-- **認証情報の保存**: デスクトップでは、アクセストークン・リフレッシュトークンは
-  OS のセキュアストレージ（macOS: Keychain、Windows: Credential Manager、Linux:
+- **認証情報の保存**: macOS では、アクセストークン・リフレッシュトークンはアプリ専用の
+  データ保護キーチェーンに保存され、ファイルに書き出されることはありません——キーチェーンに
+  保存できなかった場合はアプリが知らせ、再起動後にアカウントを接続し直すことになります。
+  Windows と Linux では、OS のセキュアストレージ（Windows: Credential Manager、Linux:
   Secret Service。Snap 版では、デスクトップの Secret portal から得たアプリ専用の
   マスターシークレットで暗号化されたローカルストア）に保存されます。OS のストレージが
-  利用できない場合は、ローカルファイルへフォールバックします——macOS と Linux では
+  利用できない場合は、ローカルファイルへフォールバックします——Linux では
   このファイルのアクセス権限を自分のアカウントのみに明示的に制限します（`0600`）が、
   Windows ではそのような権限ビットは設定されず、代わりに `%APPDATA%`/`%LOCALAPPDATA%`
   に対する Windows 自体のユーザーごとの ACL 継承によって他のアカウントからのアクセス
@@ -129,7 +132,11 @@ Keryx が通信する相手は、使用している機能に直接関係する�
   ダウンロードする際は `github.com` および `*.githubusercontent.com`） — アップデートの有無を
   通知し、インストールを選んだ場合はその取得のために使用します。アカウント情報・テレメトリ・
   識別子は一切送信しません。Android で Google Play からインストールされた場合、この確認は
-  行われません（自己更新チェックは GitHub 配布版にのみ意味があるためです）。
+  行われません（自己更新チェックは GitHub 配布版にのみ意味があるためです）。macOS では代わりに、
+  最新リリースのアップデートフィード（`appcast.xml`、`github.com` から）を読みます——設定の「一般」で
+  オフにしない限り自動的に、または「アップデートを確認…」を選んだときに——そして、インストールを
+  選んだ場合にのみ、そこに示されたアップデートを `github.com` / `*.githubusercontent.com` から
+  ダウンロードします。
 - **Dropbox / Google Drive / OneDrive** — クラウド同期を接続している場合のみ、
   上記のとおりです。
 - **記事自体が参照するコンテンツ** — 記事を開くと、その本文の HTML が埋め込む外部

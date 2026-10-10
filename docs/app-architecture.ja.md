@@ -312,8 +312,8 @@ Play 開発者サービスの無い端末とまったく同じ状態で、UI は
 自前で駆動する（SQLDelight の JVM ドライバはスキーマバージョンを自動追跡しないため）。
 
 `user_version` が `KeryxDatabase.Schema.version` より**新しい**場合は、より新しいビルドがファイルをマイグレーション
-したことを意味する（下記「Apple ネイティブアプリ（SwiftUI）」— SwiftUI アプリと内部用の Compose macOS ビルドは同じ
-データディレクトリを共有しうる — または、新しいリリースの上に古いリリースを入れ直した場合）。desktop の `actual` は
+したことを意味する（新しいリリースの上に古いリリースを入れ直した場合や、より新しい開発ビルドを同じデータディレクトリで
+動かした場合。サンドボックス化された SwiftUI アプリがこれを共有することはない——下記「Apple ネイティブアプリ（SwiftUI）」参照）。desktop の `actual` は
 何も書き込む前にこれを拒否する：`requireSupportedSchemaVersion`（`data/local/DatabaseSchemaGuard.kt`）が
 `DatabaseTooNewException` を投げる。`main.kt` は Koin の起動直後にドライバを先に開くので、この失敗は 1 回だけ、
 ローカライズされたメッセージボックス（`DatabaseTooNewDialog.kt`）として表示され、その後アプリは終了する。Android には
@@ -1294,8 +1294,14 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
 
 ### 配布と共存
 
-- **macOS でユーザーに配布するのは SwiftUI アプリのみ。** Compose Multiplatform の macOS ビルドは内部の動作確認用としてリポジトリに
-  残す。Windows・Linux・Android は引き続き Compose アプリを使う。
+- **macOS でユーザーに配布するのは SwiftUI アプリのみ。** GitHub Release の macOS 向けアセット
+  （`Keryx-<version>-macos-arm64.{dmg,zip}`、`release.yml` の `package-macos` ジョブ）は SwiftUI アプリである。
+  Compose Multiplatform の macOS ビルドはもうリリースせず、手元と CI での確認用としてのみリポジトリに残す。
+  Windows・Linux・Android は引き続き Compose アプリを使う。
+- **インストール済みの Compose 版 macOS アプリは、自身のアプリ内アップデートで SwiftUI アプリへ移る。** 同じ `.zip` を
+  取得し（アセット名は変わっておらず、バンドルは Compose 版の更新機構の検査を通る——
+  [background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）、SwiftUI アプリへ自分自身を置き換える。
+  以降は Sparkle で更新する。データは元の場所に残り、引き継がれない（下記「両者はデータを共有しない」参照）。
 - SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
   サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
   - **Sparkle の現在の位置づけ。** macOS ビルドにのみリンクする（`project.yml` の package 依存は macOS に絞ってあり、iOS
@@ -1303,6 +1309,10 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
     「アップデートを確認…」と、一般タブの自動確認トグル（設定そのものは `LocalSettings` ではなく Sparkle 自身の
     `UserDefaults` に置く）。`AppModel` は SDK の外で保持するので、起動失敗画面でもメニュー項目が使える——新しいビルドが
     すでにマイグレーションした DB は、更新すれば解決するため。
+    `SPUUpdater` は自前で作り、ユーザードライバーは Sparkle の標準のものを 1 つのメッセージだけ差し替える：ユーザーが始めた
+    確認でフィードを読めなかったとき（リリース公開後、macOS ジョブが `appcast.xml` を添付するまでの間の 404、またはオフライン）に、
+    Sparkle の汎用のエラーではなく、何が起きたかとすべきこと（`UpdateCheckFailure`）を示す。定期的な確認は失敗しても何も表示しない
+    ——Sparkle は、確認が動いていることをユーザーが知っているときだけエラーを報告するため。
   - **有効なのは Release ビルドのみ。** `Config/Shared.xcconfig` は `SPARKLE_PUBLIC_ED_KEY`（Info.plist の
     `SUPublicEDKey`）を Release 構成にだけ設定する。これが空の間（Debug ビルド。`Local.xcconfig` で設定した場合を除く）は
     updater を開始しないので、アプリは更新確認のリクエストを一切出さず、2 つの操作はどちらも無効になる。フィードは最新の

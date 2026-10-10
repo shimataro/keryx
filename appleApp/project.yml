@@ -175,6 +175,7 @@ targets:
       - path: Keryx/Bridge/OpmlTransferObservable.swift
       - path: Keryx/Platform/Localized.swift
       - path: Keryx/Platform/DockBadge.swift
+      - path: Keryx/Update/UpdateCheckFailure.swift
       - path: Keryx/Platform/AppIconBadge.swift
       - path: Keryx/Platform/BackgroundRefreshDate.swift
       - path: Keryx/Bridge/ArticleRowModel.swift

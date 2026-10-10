@@ -893,24 +893,25 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 1. `vMAJOR.MINOR.PATCH` 形式のタグ（例: `v0.1.0`）で GitHub Release を公開する。SemVer 風の
    プレリリース接尾辞を任意で付けられる（例: `v1.2.0-beta.1`）。
 2. `release: published` で起動し、先頭の `v` を除去して `-PappVersion` に渡す。
-3. ジョブは 9 つ、実行は合計 11 回:
-   - 依存関係のない 6 つの `package-*` ジョブが並列に走る: `package-macos`、`package-macos-swiftui`、
-     `package-linux`、`package-snap`、`package-windows`、`package-android`。`package-linux` と `package-snap` は
+3. ジョブは 8 つ、実行は合計 10 回:
+   - 依存関係のない 5 つの `package-*` ジョブが並列に走る: `package-macos`、`package-linux`、`package-snap`、
+     `package-windows`、`package-android`。`package-linux` と `package-snap` は
      それぞれ `x86_64`/`arm64` の matrix（前者は `ubuntu-latest`/`ubuntu-24.04-arm`、後者は
-     `ubuntu-24.04`/`ubuntu-24.04-arm`）なので、この 6 ジョブで 8 回の実行になる。
+     `ubuntu-24.04`/`ubuntu-24.04-arm`）なので、この 5 ジョブで 7 回の実行になる。
    - `attach-fdroid-version`（「F-Droid への公開」参照）と `publish-play`（詳細は後述の該当箇条書き参照）は
      `package-android` にのみ依存する。
    - `deploy-pages` は `package-macos`、`package-linux`、`package-windows`、`package-android` にゲートされ、
-     `package-snap` と `package-macos-swiftui` は待たない。
+     `package-snap` は待たない。
 
    arm64 側の matrix のジョブは先に `android-actions/setup-android@v3` を実行する — `:composeApp` の Android
    ターゲットは*設定フェーズ*だけでも `ANDROID_HOME` を要求し、`ubuntu-24.04-arm` イメージは `ubuntu-latest` と
    違って Android SDK を同梱していないため。各ジョブの中身:
 
-   - macOS ランナーで `:composeApp:createDistributable :composeApp:packageDmg` を実行し（下の `.zip` の元になるアプリバンドルを確実に作るため `createDistributable` を `packageDmg` と並べて明示的に要求している）、`Keryx-<version>-macos-arm64.dmg` に加えて **`Keryx-<version>-macos-arm64.zip`** としても添付する。**プレリリースタグの場合は `packageDmg` をスキップし `createDistributable` のみ実行するため、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。
-   - `package-macos-swiftui`: ネイティブ SwiftUI macOS アプリ用の別ジョブ。Developer ID 署名・公証・Sparkle の
-     appcast を担当する。必要な Secrets が揃うまでは何もせず、`deploy-pages` も待たない——後述の
-     「SwiftUI macOS アプリ」を参照。
+   - `package-macos` は、ネイティブ SwiftUI macOS アプリ（`appleApp/`）を macOS ランナー上の Xcode でビルドし、
+     Developer ID 署名・公証したうえで、`Keryx-<version>-macos-arm64.dmg`、`Keryx-<version>-macos-arm64.zip`、
+     Sparkle の `appcast.xml` を添付する。**プレリリースタグの場合は `.dmg` を作らず、`.zip` と `appcast.xml` だけを
+     添付する。** Secrets が欠けているとジョブは失敗する——後述の「SwiftUI macOS アプリ」を参照。Compose 版 macOS
+     アプリはもうリリースしない。
    - Linux ランナーで（アーキテクチャごとに、jpackage 用の `fakeroot`/`rpm` をインストールした上で）`:composeApp:packageDeb :composeApp:packageRpm` を実行し、`x86_64`・`arm64` それぞれについて `Keryx-<version>-linux-<arch>.deb` と `Keryx-<version>-linux-<arch>.rpm` に加えて **`Keryx-<version>-linux-<arch>.zip`** としても添付する。**プレリリースタグの場合は `packageDeb`/`packageRpm` をスキップし、`.zip` のみを添付する**（後述の Windows MSI と同じ理由）。片方のアーキテクチャの失敗（`fail-fast: false`）はもう片方の成果物を道連れにしない。
    - `package-snap` は独立したジョブで、`snapcraft` の失敗が上記 deb/rpm/zip ジョブの成果物を
      道連れにしないようにしてある（`ubuntu-latest` ではなく `ubuntu-24.04` 系の固定ランナーが必要な
@@ -980,7 +981,9 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
    意図的に `package-snap` は待たない——Store 公開が多少遅れても、他のインストーラーが
    揃っていればページ更新は止めるべきではないため。
 
-   `.zip` ファイルは `:composeApp:createDistributable` が出力する、インストーラ不要のアプリバンドル／イメージを圧縮したものである。パッケージを経由せずに使いたいユーザー向け。
+   Linux と Windows の `.zip` ファイルは `:composeApp:createDistributable` が出力する、インストーラ不要のアプリイメージを
+   圧縮したものである。パッケージを経由せずに使いたいユーザー向け。macOS の `.zip` は公証済みのアプリそのもので、
+   macOS アプリの自己更新もこれを使う。
 
 **バージョンはタグを正とする**。`shared/build.gradle.kts` と `composeApp/build.gradle.kts`（どちらも同じ解決順）の `appVersion` は
 `-PappVersion` > 環境変数 `APP_VERSION` > ファイル内のリテラル、の順に解決し、`BuildConfig.VERSION`
@@ -992,10 +995,14 @@ docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable .github/script
 何も変わらない。ローカルビルドは両方とも同じリテラル `"0.0.0"` にフォールバックする。jpackage が受け付けない
 形式（`MAJOR.MINOR.PATCH[-<pre-release>]` 以外）のタグは、ワークフロー冒頭で明示的なメッセージとともに失敗させる。
 
-Compose 版のジョブが使う `macos-latest` ランナーは arm64 のため、成果物名にアーキテクチャを含めている
-（将来 x86_64 版やユニバーサル版を併置できるようにするため）。
+macOS アプリは arm64 専用でビルドする（共有フレームワークに Intel 向けのスライスが無い）ため、成果物名に
+アーキテクチャを含めている（将来 x86_64 版やユニバーサル版を併置できるようにするため）。
 
 ### macOS における 0.x バージョンとプレリリースタグ
+
+> この節と後述の「署名・公証（Compose 版 macOS）」は、もうリリースしていない Compose 版 macOS ビルドの話。
+> 手元と `ci.yml` の「Verify packaging (macOS)」ステップでは引き続きパッケージしており、その確認が Compose 版
+> 自身のアプリ内アップデートを動く状態に保っている。
 
 jpackage は macOS 向けの `--app-version` の先頭要素が `0` のものを受け付けない
 （バージョンは 1 から始まるという CFBundleVersion の規則を強制するため）。しかも失敗するのは
@@ -1131,17 +1138,16 @@ Secrets を受け取らない。AGP は成果物が実際に使われるかど�
 
 ### SwiftUI macOS アプリ（Developer ID・公証・Sparkle）
 
-ネイティブ SwiftUI macOS アプリ（`appleApp/`）は、Compose 版 macOS アプリをビルドする `package-macos` の隣に置いた
-`package-macos-swiftui` ジョブでリリースする。将来は `package-macos` を廃止して、このジョブに置き換える予定:
-Compose 側のジョブを削除し、このジョブを `package-macos` に改名し（`deploy-pages` が待つようになる）、
-`ARTIFACT_SUFFIX` をやめてファイル名を `Keryx-<version>-macos-arm64.{dmg,zip}` に戻し、README の macOS 向けの注記を更新する。
-それまでは 2 つは独立しており、SwiftUI ジョブのファイルには `-swiftui` 接尾辞を付ける
-（`Keryx-<version>-macos-arm64-swiftui.zip`）ので、Compose 版のファイルを置き換えてしまうことはない。
+macOS のリリースはネイティブ SwiftUI アプリ（`appleApp/`）で、`package-macos` ジョブが
+`Keryx-<version>-macos-arm64.{dmg,zip}` としてビルドする。これは Compose 版 macOS アプリを置き換えたもので、
+Compose 版はもうリリースしない。インストール済みの Compose 版のアプリ内アップデートは同じ `.zip` を取得するため、
+このアプリへ自分自身を置き換える（データは引き継がれない——[app-architecture.ja.md](app-architecture.ja.md) の
+「Apple ネイティブアプリ（SwiftUI）」を参照）。
 
-**設定が揃うまでは何も起きない。** ジョブはチェックアウトの直後に `.github/scripts/check-release-config.sh` を実行し、
-下記の Secrets がすべて設定済みで空でないことを要求する。1 つでも欠けていれば、欠けているものの名前を通知に出し、
-ビルドもアップロードもせずに成功で終わる——Secrets を用意する前に切ったリリースには影響せず、未署名のビルドが
-リリースに載ることもない（以降のステップはすべてこの確認でゲートされている）。
+**Secrets が欠けているとリリースは失敗する。** ジョブはチェックアウトの直後に `.github/scripts/check-release-config.sh` を実行し、
+下記の Secrets がすべて設定済みで空でないことを要求する。1 つでも欠けていれば、欠けているものの名前をエラーに出し、
+何もビルドせずにジョブが失敗する。このジョブを待つ `deploy-pages` も動かないため、macOS のパッケージが無いまま、
+あるいは未署名のパッケージでリリースが出ることはない。
 
 | Secret | 内容 |
 | --- | --- |
@@ -1219,7 +1225,7 @@ Snap Store、`deploy-pages` など）が動く。そのため、GitHub での初
 
 **GitHub での初回の実行。** 最後に、プレリリースのタグを切る。ワークフロー全体が動く（Play の internal/alpha への
 アップロードと Snap の `edge` チャンネルも含む）が、プレリリースでは DMG は作られず、GitHub の「latest」も前の
-安定版のままである。`package-macos-swiftui` のログを読み、そのあと更新を端から端まで確認する: 生成した
+安定版のままである。`package-macos` のログを読み、そのあと更新を端から端まで確認する: 生成した
 `appcast.xml` にビルドの `SUFeedURL` を向けて、古いビルドから更新する。
 
 ### GitHub Release のフラグ
@@ -1318,12 +1324,6 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 重複よりも誤解を招く。翻訳版が欲しくなった場合は、公開後に Play Console 上で該当リリースのノートを
 直接編集すればよい。どちらのワークフローも、公開済みのリリースには一切手を触れない。
 
-> [!IMPORTANT]
-> **Compose 版（`package-macos`）としてリリースされる DMG は未署名**（ad-hoc）のため、開く際に Gatekeeper に
-> ブロックされる。回避方法は README の[ダウンロード](../README.ja.md#ダウンロード)節を参照。恒久的な解消に
-> 必要な作業は下記「署名・公証（Compose 版 macOS）」を参照。SwiftUI 版の DMG は Developer ID 署名・公証済み
-> （前述「SwiftUI macOS アプリ」参照）。
-
 ### F-Droid への公開
 
 F-Droid は `fdroid` flavor をソースから自分でビルドする。そのうえで、`release.yml` がリリースに添付する
@@ -1382,10 +1382,10 @@ F-Droid のビルドがリリースの APK を再現できるために保たな�
 
 ## 署名・公証（Compose 版 macOS）
 
-> この節は Compose 版 macOS ビルド（`package-macos`）の話。SwiftUI macOS アプリの Developer ID 署名と公証は専用の
-> ジョブが行う。「リリース（CD）」の「SwiftUI macOS アプリ」を参照。
+> この節は、もうリリースしていない Compose 版 macOS ビルドの話。macOS のリリースは SwiftUI アプリで、
+> `package-macos` が Developer ID 署名と公証を行う。「リリース（CD）」の「SwiftUI macOS アプリ」を参照。
 
-現状、パッケージ成果物は **ad-hoc 署名**（実質未署名）。ローカルでの動作・開発には支障ないが、以下が
+Compose 版のパッケージ成果物は **ad-hoc 署名**（実質未署名）。ローカルでの動作・開発には支障ないが、以下が
 必要になったら **Developer ID Application** で署名する（Apple Developer Program の有償登録が前提）:
 
 - 他 Mac への配布（Gatekeeper を通す）。

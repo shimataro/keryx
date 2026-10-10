@@ -6,138 +6,17 @@ on:
       - published
 
 jobs:
+  # The native SwiftUI macOS app: Developer ID signed, notarized, and updated through Sparkle (the
+  # appcast.xml attached here is its update feed). It fails rather than ship anything unsigned when
+  # an Apple Developer ID, notarization or Sparkle secret is missing. See docs/build.md's
+  # "Release (CD)".
   package-macos:
     name: Package (macOS arm64)
-    runs-on: macos-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.release.tag_name }}
-          persist-credentials: false
-
-      # The tag is the single source of truth for the released version: `v0.1.0` -> `0.1.0`.
-      # An optional SemVer-style pre-release suffix (`-beta.1`, `-rc.2`, ...) is accepted here for
-      # BuildConfig.VERSION / display purposes, but composeApp/build.gradle.kts strips it before
-      # the numeric-only value reaches jpackage's packageVersion (MAJOR.MINOR.PATCH required).
-      - name: Resolve version from tag
-        id: version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          tag="$RELEASE_TAG"
-          version="${tag#v}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
-            echo "::error::Tag '$tag' does not yield a jpackage-compatible version (got '$version')."
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$version" == *-* ]]; then
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up JDK 25
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '25'
-
-      # setup-gradle validates the Gradle wrapper jars by default (`validate-wrappers`), so
-      # there is no separate wrapper-validation step.
-      # The cache is disabled in every job of this workflow: what it builds is signed and shipped,
-      # so it must never be assembled from cache entries another run wrote (cache poisoning).
-      # Releases are rare, so the cold build this forces costs little.
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-disabled: true
-
-      # packageDmg is skipped for a pre-release tag (see package-windows' packageMsi for the same
-      # reasoning), so createDistributable — normally pulled in transitively by packageDmg — is
-      # requested explicitly to still produce the app bundle for the "Zip non-packaged app bundle"
-      # step below. It's run as its own invocation (rather than alongside packageDmg in one
-      # gradlew call) so the retry loop below only re-runs the DMG task, not this one.
-      - name: Package App bundle (+ Dmg for stable releases)
-        shell: bash
-        run: |
-          ./gradlew :composeApp:createDistributable -PappVersion=${{ steps.version.outputs.version }}
-          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
-            # See ci.yml's "Verify packaging (macOS)" step for why this retries only an
-            # hdiutil-caused failure.
-            for attempt in 1 2 3; do
-              log="$RUNNER_TEMP/packageDmg-$attempt.log"
-              if ./gradlew :composeApp:packageDmg -PappVersion=${{ steps.version.outputs.version }} 2>&1 | tee "$log"; then
-                break
-              fi
-              if [ "$attempt" = 3 ] || ! grep -q hdiutil "$log"; then
-                exit 1
-              fi
-              echo "::warning::packageDmg hit a transient hdiutil failure (attempt $attempt); retrying."
-              for volume in /Volumes/Keryx*; do
-                if [ -d "$volume" ]; then hdiutil detach "$volume" -force || true; fi
-              done
-              sleep 5
-            done
-          fi
-        env:
-          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-          GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
-          GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
-          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
-
-      # macos-latest runners are arm64, so the artifact name records the architecture to leave
-      # room for an x86_64 (or universal) build alongside it later.
-      - name: Rename artifact
-        id: artifact
-        if: steps.version.outputs.is_prerelease != 'true'
-        run: |
-          src=$(find composeApp/build/compose/binaries/main/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
-          if [ -z "$src" ]; then
-            echo "::error::No DMG produced under composeApp/build/compose/binaries/main/dmg."
-            exit 1
-          fi
-          dest="Keryx-${{ steps.version.outputs.version }}-macos-arm64.dmg"
-          mv "$src" "$dest"
-          echo "path=$dest" >> "$GITHUB_OUTPUT"
-
-      - name: Zip non-packaged app bundle
-        run: |
-          src="composeApp/build/compose/binaries/main/app/Keryx.app"
-          dest="Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip"
-          (cd "$(dirname "$src")" && zip -ry "$OLDPWD/$dest" "$(basename "$src")")
-
-      - name: Attach to release
-        run: |
-          assets=("Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip")
-          if [ "${{ steps.version.outputs.is_prerelease }}" != "true" ]; then
-            assets+=("${{ steps.artifact.outputs.path }}")
-          fi
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-
-  # The SwiftUI macOS app (Developer ID signed, notarized, updated through Sparkle). It runs next to
-  # package-macos (the Compose build) until that job is retired and replaced by this one; until
-  # then deploy-pages does not wait for it, and its files carry a "-swiftui" suffix so they cannot
-  # overwrite package-macos's. While the Apple Developer ID / notarization secrets are not all
-  # configured it only reports what is missing and succeeds, building and uploading nothing — never
-  # an unsigned build. See docs/build.md's "Release (CD)".
-  package-macos-swiftui:
-    name: Package (macOS arm64, SwiftUI)
     runs-on: macos-26
     # Notarization alone can take a while; the build itself needs about ten minutes.
     timeout-minutes: 60
     permissions:
       contents: write
-    env:
-      ARTIFACT_SUFFIX: -swiftui
 
     steps:
       - name: Checkout
@@ -146,10 +25,9 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
 
-      # Every step below is gated on this one. An unset secret reaches the script as an empty
-      # string, which counts as missing.
+      # Fails the job, naming each missing secret, before anything is built. An unset secret
+      # reaches the script as an empty string, which counts as missing.
       - name: Check configuration
-        id: config
         env:
           APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
           APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
@@ -161,11 +39,10 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: .github/scripts/check-release-config.sh
 
-      # Same tag handling as package-macos: `v0.1.0` -> `0.1.0`, with an optional SemVer-style
+      # Same tag handling as the other package jobs: `v0.1.0` -> `0.1.0`, with an optional SemVer-style
       # pre-release suffix, which also means no .dmg.
       - name: Resolve version from tag
         id: version
-        if: steps.config.outputs.configured == 'true'
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -183,26 +60,22 @@ jobs:
           fi
 
       - name: Set up JDK 25
-        if: steps.config.outputs.configured == 'true'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
 
       - name: Set up Gradle
-        if: steps.config.outputs.configured == 'true'
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-disabled: true
 
       - name: Install XcodeGen
-        if: steps.config.outputs.configured == 'true'
         run: brew install xcodegen
 
       # The certificate goes into a throwaway keychain that is deleted at the end; the profile and
       # the notarization key are only written to the runner's temp directory.
       - name: Import signing credentials
-        if: steps.config.outputs.configured == 'true'
         env:
           APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
           APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
@@ -224,7 +97,6 @@ jobs:
           .github/scripts/prepare-notary-key.sh "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Build, sign, notarize and package
-        if: steps.config.outputs.configured == 'true'
         env:
           # Pinned, not the image default, so a runner image update cannot change the toolchain
           # (AppIcon.icon needs Xcode 26). Update together with the runner image.
@@ -251,10 +123,9 @@ jobs:
       # Signs the archive with the release EdDSA key; Sparkle clients reject an update whose
       # signature does not match the SUPublicEDKey in the app they are running.
       - name: Generate the Sparkle appcast
-        if: steps.config.outputs.configured == 'true'
         env:
           DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-          ZIP_PATH: ${{ runner.temp }}/release-assets/Keryx-${{ steps.version.outputs.version }}-macos-arm64${{ env.ARTIFACT_SUFFIX }}.zip
+          ZIP_PATH: ${{ runner.temp }}/release-assets/Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           OUTPUT_DIR: ${{ runner.temp }}/release-assets
           DERIVED_DATA: ${{ runner.temp }}/DerivedData
@@ -263,12 +134,11 @@ jobs:
 
       # The only step that writes to the release, and it only runs if every step above succeeded.
       - name: Attach to release
-        if: steps.config.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           ASSETS_DIR: ${{ runner.temp }}/release-assets
-          ZIP_NAME: Keryx-${{ steps.version.outputs.version }}-macos-arm64${{ env.ARTIFACT_SUFFIX }}.zip
+          ZIP_NAME: Keryx-${{ steps.version.outputs.version }}-macos-arm64.zip
         run: |
           set -euo pipefail
           [ -s "$ASSETS_DIR/$ZIP_NAME" ] || { echo "::error::$ZIP_NAME was not produced."; exit 1; }
@@ -276,7 +146,7 @@ jobs:
           gh release upload "$RELEASE_TAG" "$ASSETS_DIR"/* --clobber
 
       - name: Remove signing credentials
-        if: always() && steps.config.outputs.configured == 'true'
+        if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
           rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/profile.provisioningprofile" "$RUNNER_TEMP/AuthKey.p8"

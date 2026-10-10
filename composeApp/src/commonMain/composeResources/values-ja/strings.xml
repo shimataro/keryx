@@ -384,6 +384,9 @@
          and iOS updates through the App Store. -->
     <string name="apple_menu_check_for_updates">アップデートを確認…</string>
     <string name="apple_settings_auto_check_updates">アップデートを自動的に確認</string>
+    <string name="apple_update_check_failed_title">アップデートを確認できませんでした</string>
+    <string name="apple_update_check_failed_unavailable">新しいバージョンを準備中の可能性があります。しばらくしてから、もう一度お試しください。</string>
+    <string name="apple_update_check_failed_offline">インターネット接続を確認してから、もう一度お試しください。</string>
     <!-- Apple (SwiftUI) app only — the names of the tag colors, which VoiceOver reads and the iOS
          palette menu shows (Compose's swatches carry no names). Same order as TAG_COLOR_PALETTE. -->
     <string name="apple_tag_color_none">色なし</string>

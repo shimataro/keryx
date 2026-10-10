@@ -26,7 +26,9 @@ internal object UpdateScriptWriter {
      *
      * `xattr -dr` deliberately stays, even though the update was downloaded by this process (via
      * Ktor, not Finder/Safari) rather than a route that reliably applies `com.apple.quarantine`
-     * itself: current release builds are signed ad-hoc, not with a Developer ID + notarization, so
+     * itself: the Compose macOS builds are signed ad-hoc, not with a Developer ID + notarization
+     * (the macOS release is now the notarized SwiftUI app, which this script installs only once, in
+     * place of an installed Compose app — a notarized bundle is unaffected by the strip), so
      * if the flag *were* present on the extracted bundle for any reason (a future download path
      * that does apply it, or an OS mechanism this script's author didn't anticipate), an ad-hoc
      * signature gives Gatekeeper nothing to clear it against — the relaunch would be blocked or

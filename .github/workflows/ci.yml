@@ -370,7 +370,7 @@ jobs:
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 
       # The builds above are Debug, which compiles only the active architecture and never takes
-      # the Release-only settings release.yml's package-macos-swiftui relies on: the x86_64
+      # the Release-only settings release.yml's package-macos job relies on: the x86_64
       # exclusion (EXCLUDED_ARCHS[sdk=macosx*] — a Release build would otherwise also build an
       # Intel slice the XCFramework cannot satisfy) and SPARKLE_PUBLIC_ED_KEY[config=Release].
       # An unsigned archive exercises that path before a release does; signing and notarization

@@ -91,17 +91,26 @@ Keryx is designed to minimize its attack surface:
   developer controls; the app talks only to the feeds you subscribe to, an allowlisted GitHub host for
   update checks/downloads (see below), and, if you opt in, directly to Dropbox, Google Drive, or OneDrive.
 - **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
-  platform's secure credential storage: on desktop, Keychain on macOS, Credential Manager on Windows,
-  Secret Service on Linux (inside the Snap package, an encrypted local store keyed by a per-app master
-  secret from your desktop's Secret portal), falling back to a local file only when the OS store is
-  unavailable — on macOS and Linux this fallback file's permissions are restricted to your own
-  account (`0600`); on Windows no such permission bit is set, and Windows' own per-user ACL
-  inheritance on `%APPDATA%`/`%LOCALAPPDATA%` is what keeps other accounts out instead; on Android,
-  an AES-256/GCM key held in the Android Keystore, per provider.
+  platform's secure credential storage: on macOS, the app's own data-protection Keychain, with no
+  fallback to a file (if a token cannot be saved there, the app tells you, and the account has to be
+  connected again after a restart); on Windows, Credential Manager, and on Linux, Secret Service
+  (inside the Snap package, an encrypted local store keyed by a per-app master secret from your
+  desktop's Secret portal), falling back to a local file only when the OS store is unavailable — on
+  Linux this fallback file's permissions are restricted to your own account (`0600`); on Windows no
+  such permission bit is set, and Windows' own per-user ACL inheritance on
+  `%APPDATA%`/`%LOCALAPPDATA%` is what keeps other accounts out instead; on Android, an AES-256/GCM
+  key held in the Android Keystore, per provider.
 - **OAuth** uses the authorization-code flow with PKCE, performed directly between
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
   unless you explicitly enable cloud sync.
+- **The macOS app is signed with a Developer ID certificate and notarized by Apple**, and runs in
+  the App Sandbox with the Hardened Runtime. Its updates come from an update feed attached to each
+  GitHub release (the Sparkle framework): before installing one, the app checks the archive's EdDSA
+  signature against the public key built into the app, so an update is accepted only if it was
+  signed with the release signing key — a compromised GitHub account alone cannot substitute one.
+  The bullets below describe the in-app updater of the other builds (Windows, Linux, Android, and
+  the earlier non-native macOS app, which last uses it to replace itself with the native one).
 - **In-app update downloads are verified, but not authenticated to a publisher
   identity.** When Keryx offers to download and install an update in-app (see
   `docs/background-update.md`'s "In-App Update" for which platforms/install forms
@@ -119,21 +128,20 @@ Keryx is designed to minimize its attack surface:
   guarantee (e.g. a detached minisign/cosign signature published alongside each
   release, with the verifying public key embedded in the app) is a considered
   future improvement, not yet implemented.
-- **On macOS, an extracted update also passes a code-signature self-consistency
-  check** (`codesign --verify --strict --deep`) before it is swapped into place —
+- **In the earlier non-native macOS app, an extracted update also passes a code-signature
+  self-consistency check** (`codesign --verify --strict --deep`) before it is swapped into place —
   this catches an extracted bundle whose signed contents were altered or
   corrupted after signing, independent of the digest check above. It is **not** a
-  publisher-identity check: current release builds are signed ad-hoc rather than
-  with a Developer ID certificate and notarized, so there is no certificate chain
-  to verify the signer against (`codesign --verify -R "anchor apple generic and
-  certificate leaf[subject.OU] = <team id>"` would reject every ad-hoc-signed
-  release unconditionally, including legitimate ones). Tightening this to an
-  actual publisher check is planned once releases are signed with a real
-  Developer ID and notarized. For the same ad-hoc-signing reason, the self-replace
+  publisher-identity check: that app was signed ad-hoc, and its updater was written to accept
+  ad-hoc-signed releases, so it does not require a certificate chain to verify the signer against
+  (`codesign --verify -R "anchor apple generic and certificate leaf[subject.OU] = <team id>"` would
+  have rejected every ad-hoc-signed release unconditionally, including legitimate ones). The
+  release it installs now is the Developer ID signed, notarized native app, which then updates
+  itself as described above. For the same ad-hoc-signing reason, the self-replace
   script also strips any `com.apple.quarantine` flag from the new bundle before
   relaunching it — an ad-hoc signature gives Gatekeeper nothing to clear a
   quarantine flag against, so leaving one in place could block the relaunch.
-- **The macOS bundle is unpacked with `ditto`, not in process.** A signed bundle's
+- **That macOS updater unpacks the bundle with `ditto`, not in process.** A signed bundle's
   `CodeResources` seals the symbolic links in its bundled JDK *as links*, and
   `java.util.zip` cannot tell a stored link from a regular file — so an in-process
   extraction flattens them and the check above rejects the result. Extraction

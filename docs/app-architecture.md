@@ -324,8 +324,8 @@ routes onto it, and only then add the new route.
 `expect class DatabaseDriverFactory { fun create(): SqlDriver }` in `commonMain`. The desktop `actual` creates a `JdbcSqliteDriver`, checks `PRAGMA user_version`, and manually drives `KeryxDatabase.Schema` create / migrate (because SQLDelight's JVM driver does not auto-track schema version).
 
 A `user_version` **newer** than `KeryxDatabase.Schema.version` means a newer build migrated the file
-(see "Apple Native Apps (SwiftUI)" below — the SwiftUI app and the internal Compose macOS build can
-share one data directory — or an older release reinstalled over a newer one). The desktop `actual`
+(an older release reinstalled over a newer one, or a newer development build run against the same data
+directory; the sandboxed SwiftUI app never shares it — see "Apple Native Apps (SwiftUI)" below). The desktop `actual`
 refuses it before writing anything: `requireSupportedSchemaVersion` (`data/local/DatabaseSchemaGuard.kt`)
 throws `DatabaseTooNewException`, and `main.kt` opens the driver eagerly right after Koin starts so
 the failure surfaces once, as a localized message box (`DatabaseTooNewDialog.kt`), before the app
@@ -1298,8 +1298,15 @@ around.
 
 ### Distribution and coexistence
 
-- **Only the SwiftUI app is distributed to users on macOS.** The Compose Multiplatform macOS build
-  stays in the repo for internal verification; Windows, Linux and Android keep the Compose app.
+- **Only the SwiftUI app is distributed to users on macOS.** The GitHub Release's macOS assets
+  (`Keryx-<version>-macos-arm64.{dmg,zip}`, `release.yml`'s `package-macos` job) are the SwiftUI app;
+  the Compose Multiplatform macOS build is no longer released and stays in the repo for local and CI
+  verification only. Windows, Linux and Android keep the Compose app.
+- **An installed Compose macOS app moves to the SwiftUI app through its own in-app updater.** It
+  picks up the same `.zip` (the asset name did not change, and the bundle passes the Compose
+  updater's checks — see "In-App Update" in [background-update.md](background-update.md)) and
+  replaces itself with the SwiftUI app, which then updates through Sparkle. Its data is left where it
+  was and not carried over (see "The two apps do not share data" below).
 - The SwiftUI app ships through **both the Mac App Store and Developer ID** (GitHub Releases +
   Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
   Developer ID build adds Sparkle, which the App Store build must not contain.
@@ -1309,6 +1316,11 @@ around.
     tab's automatic-check toggle (the setting itself lives in Sparkle's own `UserDefaults`, not in
     `LocalSettings`). `AppModel` holds it outside the SDK, so the menu item also works on the
     startup-failure screen — a database that a newer build already migrated is cured by updating.
+    It builds `SPUUpdater` itself, with a user driver that is Sparkle's standard one except for one
+    message: when a check the user started cannot read the feed (a 404 in the window after a release
+    is published and before its macOS job attaches `appcast.xml`, or being offline), it says so and
+    what to do (`UpdateCheckFailure`), instead of Sparkle's generic error. A scheduled check shows
+    nothing on failure — Sparkle only reports errors to a user who knows a check is running.
   - **It is on in Release builds only.** `Config/Shared.xcconfig` sets `SPARKLE_PUBLIC_ED_KEY`
     (the Info.plist's `SUPublicEDKey`) for the Release configuration alone. While it is empty — a
     Debug build, unless `Local.xcconfig` sets it — the updater never starts, so the app makes no
