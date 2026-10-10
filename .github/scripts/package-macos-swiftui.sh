@@ -75,6 +75,13 @@ identity_pattern='^[A-Za-z0-9 :().,-]+$'
 [ -s "$PROVISIONING_PROFILE_PATH" ] || fail "Provisioning profile not found: $PROVISIONING_PROFILE_PATH"
 [ -s "$NOTARY_KEY_PATH" ] || fail "Notary API key not found: $NOTARY_KEY_PATH"
 
+# A bad notarization credential (a damaged key, a wrong key id or issuer) would otherwise only show
+# when the app is submitted, after the 15 minute build. Ask the notary service for the submission
+# history first: a read-only call that fails within seconds if it does not accept the credentials.
+notary_auth=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
+xcrun notarytool history "${notary_auth[@]}" > /dev/null \
+  || fail "Apple's notary service did not accept the notarization credentials; check the API key, its key id and the issuer id."
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 app_dir="$root/appleApp"
 local_xcconfig="$app_dir/Local.xcconfig"
@@ -200,7 +207,6 @@ done < <(find "$sparkle" \( -name '*.xpc' -o -name 'Updater.app' -o -name 'Autou
 verify_signed "$sparkle"
 
 # --- Notarize and staple. ---
-notary_auth=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
 notarize() {
   local file="$1" json id status
   json="$work/notary-$(basename "$file").json"
