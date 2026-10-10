@@ -175,8 +175,10 @@ verify_signed() {
     || fail "$target is not signed with a Developer ID Application certificate."
 }
 verify_signed "$app"
-codesign -dv --verbose=4 "$app" 2>&1 | grep -q 'flags=.*(runtime)' \
-  || fail "The app is not signed with the hardened runtime."
+# Captured first: `codesign ... | grep -q` would make grep quit at its match and codesign die of
+# SIGPIPE, which `set -o pipefail` reports as a failure even though the flag is there.
+app_details="$(codesign -dv --verbose=4 "$app" 2>&1)"
+grep -q 'flags=.*(runtime)' <<< "$app_details" || fail "The app is not signed with the hardened runtime."
 codesign --verify --deep --strict "$app" || fail "Deep signature check failed."
 
 # Xcode re-signs Sparkle's helpers on export; confirm none was left with Sparkle's own signature.
