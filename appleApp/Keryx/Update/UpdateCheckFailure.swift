@@ -9,7 +9,8 @@ enum UpdateCheckFailure: Equatable {
     /// The device could not reach the server (offline, DNS, timeout).
     case offline
     /// The server answered with an error, typically a 404: a release just published whose macOS
-    /// build has not attached its `appcast.xml` yet, or whose macOS job failed.
+    /// build has not attached its `appcast.xml` yet, or whose macOS job failed. A URL loading error
+    /// other than a connectivity one (a bad server response, say) lands here too.
     case unavailable
 
     /// Classifies `error`, or returns nil when Sparkle's own message should stand.
@@ -26,7 +27,10 @@ enum UpdateCheckFailure: Equatable {
               error.domain == downloadErrorDomain,
               error.code == downloadErrorCode
         else { return nil }
-        return underlyingChain(of: error).contains { $0.domain == NSURLErrorDomain } ? .offline : .unavailable
+        let unreachable = underlyingChain(of: error).contains {
+            $0.domain == NSURLErrorDomain && offlineURLErrorCodes.contains($0.code)
+        }
+        return unreachable ? .offline : .unavailable
     }
 
     /// The errors under `error`, nearest first. Sparkle nests the URL loading error several
@@ -40,6 +44,19 @@ enum UpdateCheckFailure: Equatable {
         }
         return chain
     }
+
+    /// The URL loading errors that mean the server could not be reached at all. Any other one (a bad
+    /// server response, a TLS failure) is not something checking the connection would fix.
+    private static let offlineURLErrorCodes: Set<Int> = [
+        NSURLErrorNotConnectedToInternet,
+        NSURLErrorCannotFindHost,
+        NSURLErrorCannotConnectToHost,
+        NSURLErrorNetworkConnectionLost,
+        NSURLErrorDNSLookupFailed,
+        NSURLErrorTimedOut,
+        NSURLErrorInternationalRoamingOff,
+        NSURLErrorDataNotAllowed,
+    ]
 
     /// Bounds the walk in case an error ever lists itself among its own underlying errors.
     private static let maxUnderlyingDepth = 16

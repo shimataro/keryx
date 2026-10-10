@@ -33,6 +33,21 @@ struct UpdateCheckFailureTests {
     }
 
     @Test
+    func timeoutNestedUnderDownloadErrorsIsOffline() {
+        let url = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+        let nested = error(code: download, underlying: error(code: download, underlying: url))
+        #expect(classify(nested, updateFound: false) == .offline)
+    }
+
+    /// A URL loading error that is not about connectivity: checking the connection would not help.
+    @Test
+    func badServerResponseNestedUnderDownloadErrorsIsUnavailable() {
+        let url = NSError(domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse)
+        let nested = error(code: download, underlying: error(code: download, underlying: url))
+        #expect(classify(nested, updateFound: false) == .unavailable)
+    }
+
+    @Test
     func notFoundNestedUnderDownloadErrorsIsUnavailable() {
         let nested = error(code: download, underlying: error(code: download, underlying: error(code: download)))
         #expect(classify(nested, updateFound: false) == .unavailable)
