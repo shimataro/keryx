@@ -76,7 +76,7 @@ identity_pattern='^[A-Za-z0-9 :().,-]+$'
 [ -s "$NOTARY_KEY_PATH" ] || fail "Notary API key not found: $NOTARY_KEY_PATH"
 
 # A bad notarization credential (a damaged key, a wrong key id or issuer) would otherwise only show
-# when the app is submitted, after the 15 minute build. Ask the notary service for the submission
+# when the app is submitted, after the build. Ask the notary service for the submission
 # history first: a read-only call that fails within seconds if it does not accept the credentials.
 notary_auth=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
 xcrun notarytool history "${notary_auth[@]}" > /dev/null \
