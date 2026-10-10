@@ -1138,7 +1138,7 @@ unsigned build can never reach a release. (Every later step is gated on that che
 | `APPLE_DEVELOPER_ID_CERT_PASSWORD` | The password the `.p12` was exported with |
 | `APPLE_TEAM_ID` | The 10-character Team ID |
 | `APPLE_PROVISIONING_PROFILE` | The **Developer ID provisioning profile** for `works.merc.keryx`, base64-encoded. The `keychain-access-groups` entitlement is restricted: without a profile that authorizes it the signed app is refused at launch |
-| `APPLE_NOTARY_KEY` | The text of an App Store Connect API key (`AuthKey_<id>.p8`) used by `notarytool`. Lost line breaks are restored; a value that is not a private key fails the job at once (the log shows its shape, never its content) |
+| `APPLE_NOTARY_KEY` | The text of an App Store Connect API key (`AuthKey_<id>.p8`) used by `notarytool`. Lost line breaks (and stray spaces or CRLFs) are restored; a value that is not a private key fails the job at once (the log shows its shape, never its content) |
 | `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_ISSUER_ID` | That key's ID and its issuer ID |
 | `SPARKLE_PRIVATE_KEY` | The release EdDSA private key, as exported by Sparkle's `generate_keys -x`. Its public half is `SPARKLE_PUBLIC_ED_KEY` in `appleApp/Config/Shared.xcconfig` |
 
