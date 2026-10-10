@@ -66,33 +66,33 @@ APIキーが指定されていないクラウドサービスは連携機能が�
 ### Dropbox
 
 1. [DBX Platform](https://www.dropbox.com/developers/apps/create)で連携先アプリを作成
-  - すでに作成済みの場合は[App Console](https://www.dropbox.com/developers/apps)から検索
-  - "Choose an API": `Scoped access`
-  - "Choose the type of access you need": `App folder`
-  - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
+   - すでに作成済みの場合は[App Console](https://www.dropbox.com/developers/apps)から検索
+   - "Choose an API": `Scoped access`
+   - "Choose the type of access you need": `App folder`
+   - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
 2. "Settings" で以下を設定
-  - "Redirect URIs": `keryx://oauth2/callback`
-  - "Allow public clients (Implicit Grant & PKCE)": `Allow`
+   - "Redirect URIs": `keryx://oauth2/callback`
+   - "Allow public clients (Implicit Grant & PKCE)": `Allow`
 3. "Permissions" で以下をチェック
-  - `files.content.write`
-  - `files.content.read`
+   - `files.content.write`
+   - `files.content.read`
 4. "Settings" 内の "App key" を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
 
 ### Google Drive
 
 1. [Google Cloudコンソール](https://console.cloud.google.com)でプロジェクトを作成
 2. メニューの「API とサービス」→「ライブラリ」と辿り、「Google Drive API」を探す
-  - 検索ボックスに "drive" と入れるか、メニューの「カテゴリ」から「ストレージ」で絞り込み
-  - 「有効にする」をクリック
+   - 検索ボックスに "drive" と入れるか、メニューの「カテゴリ」から「ストレージ」で絞り込み
+   - 「有効にする」をクリック
 3. メニューの「Google Auth プラットフォーム」→「データアクセス」と辿る（旧「OAuth 同意画面」から名称・構成が変更された）
-  - 「スコープを追加または削除」をクリック
-  - "Google Drive API" の `.../auth/drive.appdata` をチェック
-  - 「更新」をクリックして選択を確定し、データアクセス画面で「保存」をクリックして反映する
-  - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
+   - 「スコープを追加または削除」をクリック
+   - "Google Drive API" の `.../auth/drive.appdata` をチェック
+   - 「更新」をクリックして選択を確定し、データアクセス画面で「保存」をクリックして反映する
+   - これはドライブ内の任意のファイルではなく、アプリ専用フォルダーへのみアクセスを許可する
 4. メニューの「Google Auth プラットフォーム」→「クライアント」と辿り、クライアントを作成
-  - 上部の「クライアントを作成」
-  - アプリケーションの種類: 「デスクトップアプリ」
-  - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
+   - 上部の「クライアントを作成」
+   - アプリケーションの種類: 「デスクトップアプリ」
+   - 同画面内の「クライアント ID」と「クライアント シークレット」を `local.properties`（[local.properties.example](../local.properties.example) のコピー）に指定
 
 OAuth2 認可後のリダイレクト先は Dropbox のように任意に決められないため、`http://127.0.0.1:<ポート>` のループバックで受ける（アプリ側は `LoopbackRedirectTransport` で一時 HTTP サーバーを立てて受信する）。
 フローは PKCE（`code_verifier`）を使うが、**クライアントシークレットも別途必要**。iOS/Android と違い、Google の
