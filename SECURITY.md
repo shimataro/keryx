@@ -112,7 +112,7 @@ Keryx is designed to minimize its attack surface:
   The bullets below describe the in-app updater of the other builds (Windows, Linux, Android, and
   the earlier non-native macOS app, which last uses it to replace itself with the native one).
 - **In-app update downloads are verified, but not authenticated to a publisher
-  identity** (Windows, Linux, Android, and the earlier non-native macOS app). When Keryx offers to download and install an update in-app (see
+  identity.** When Keryx offers to download and install an update in-app (see
   `docs/background-update.md`'s "In-App Update" for which platforms/install forms
   this applies to), the downloaded file is checked against the SHA-256 digest the
   GitHub Releases API itself reports for that asset before anything is installed,
