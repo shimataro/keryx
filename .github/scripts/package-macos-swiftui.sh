@@ -2,15 +2,15 @@
 # Builds, signs (Developer ID), notarizes and packages the SwiftUI macOS app for a GitHub Release.
 #
 # Produces, in OUTPUT_DIR:
-#   Keryx-<version>-macos-arm64<suffix>.zip   the stapled Keryx.app (what Sparkle updates from)
-#   Keryx-<version>-macos-arm64<suffix>.dmg   a stapled disk image (stable releases only)
+#   Keryx-<version>-macos-arm64.zip   the stapled Keryx.app (what Sparkle updates from)
+#   Keryx-<version>-macos-arm64.dmg   a stapled disk image (stable releases only)
 #
 # Nothing is written to the GitHub Release here: release.yml uploads the files afterwards, and only
 # if every step below succeeded. The build is archived and exported through Xcode, which also
 # re-signs Sparkle's nested helpers and XPC services (Sparkle's documented, recommended route), so
 # this script only verifies them. Do not add `codesign --deep` to a signing step.
 #
-# Used by release.yml's package-macos-swiftui job. See docs/build.md's "Release (CD)".
+# Used by release.yml's package-macos job. See docs/build.md's "Release (CD)".
 #
 # Inputs (environment variables):
 #   VERSION                   Release version without the leading "v", e.g. 0.1.0 or 0.1.0-beta.1
@@ -28,9 +28,6 @@
 #   NOTARY_ISSUER_ID          Its issuer ID.
 #   NOTARY_TIMEOUT            Optional: how long to wait for each notarization, e.g. 30m (default),
 #                             2h. The first submissions of a new Apple account can take hours.
-#   ARTIFACT_SUFFIX           Optional suffix before the extension; defaults to "-swiftui" so the
-#                             files cannot replace the Compose build's Keryx-<v>-macos-arm64.zip
-#                             until that build is retired (then set it to empty).
 #   SIGNING_IDENTITY          Optional name or 40-digit SHA-1 of the certificate to sign with;
 #                             defaults to "Developer ID Application", which is enough when the
 #                             keychain holds a single such certificate (as release.yml's does). Set
@@ -57,7 +54,6 @@ fail() {
 : "${NOTARY_KEY_PATH:?NOTARY_KEY_PATH is not set}"
 : "${NOTARY_KEY_ID:?NOTARY_KEY_ID is not set}"
 : "${NOTARY_ISSUER_ID:?NOTARY_ISSUER_ID is not set}"
-suffix="${ARTIFACT_SUFFIX--swiftui}"
 signing_identity="${SIGNING_IDENTITY:-Developer ID Application}"
 notary_timeout="${NOTARY_TIMEOUT:-30m}"
 
@@ -103,7 +99,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$OUTPUT_DIR"
-base_name="Keryx-$VERSION-macos-arm64$suffix"
+base_name="Keryx-$VERSION-macos-arm64"
 
 # --- Provisioning profile: install it and read the name Xcode needs to select it. ---
 profile_plist="$work/profile.plist"
