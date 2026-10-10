@@ -300,7 +300,11 @@ XCFramework の Debug 版は配線しておらず、どの構成でビルドし�
 XCFramework の存在を確認し、また `xcodegen generate` はソースとして列挙された String Catalog が
 存在しないと実行を拒否するため、先に
 `./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog` を
-一度実行しておく必要がある（CI も同様）。
+一度実行しておく必要がある（CI も同様）。CI はさらに `KERYX_SKIP_SHARED_BUILD=1` を設定し、
+prebuild スクリプトに Gradle を実行させず、両方の出力が存在することの確認だけをさせる。CI は
+`shared/` に変更がなければ XCFramework をキャッシュから復元するが、復元したフレームワークには
+Gradle のタスク履歴がないため、そのままでは prebuild の Gradle 実行が全スライスをリンクし直してしまう。
+ローカルビルドとリリースビルドでは設定しない。
 `dependencies:`（フレームワークリンク）を `FRAMEWORK_SEARCH_PATHS` や Kotlin/Native の
 `embedAndSignAppleFrameworkForXcode` の代わりに使う理由、`KeryxTests` が単体で完結する
 （アプリに寄生しない）テストバンドルである理由は、

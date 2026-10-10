@@ -303,7 +303,11 @@ every configuration links Release. On a clean checkout, though, Xcode checks tha
 XCFramework exists while planning the build — before the prebuild script has run — and
 `xcodegen generate` refuses to run while the String Catalog it lists as a source is missing, so run
 `./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog` once
-first (CI does the same). See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
+first (CI does the same). CI then sets `KERYX_SKIP_SHARED_BUILD=1`, which makes the prebuild
+script only check that both outputs exist instead of running Gradle: CI restores the XCFramework
+from its cache when `shared/` is unchanged, and such a restored framework has no Gradle task
+history, so the prebuild's Gradle run would otherwise relink every slice. Leave it unset for local
+and release builds. See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
 Xcode project" for why the dependency is wired through `dependencies:` (framework linking) rather
 than `FRAMEWORK_SEARCH_PATHS` or Kotlin/Native's `embedAndSignAppleFrameworkForXcode`, and why
 `KeryxTests` is a standalone (non-hosted) test bundle.

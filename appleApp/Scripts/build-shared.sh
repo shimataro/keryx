@@ -4,6 +4,25 @@
 # against them. See docs/build.md's "Building the SwiftUI app" for the full explanation.
 set -eu
 
+REPO_ROOT="$(cd "$SRCROOT/.." && pwd)"
+
+# CI builds (or restores from its cache) both outputs before running xcodebuild, and sets this to
+# keep them as they are: a framework restored from the cache has no Gradle task history, so the
+# Gradle run below would relink every Kotlin/Native slice (~10 min) instead of being up-to-date.
+# Never set for a release build or a local one.
+if [ "${KERYX_SKIP_SHARED_BUILD:-}" = "1" ]; then
+    for output in \
+        "$REPO_ROOT/shared/build/XCFrameworks/release/KeryxShared.xcframework" \
+        "$REPO_ROOT/composeApp/build/generated/stringCatalog/Localizable.xcstrings"; do
+        if [ ! -e "$output" ]; then
+            echo "error: KERYX_SKIP_SHARED_BUILD=1 but $output does not exist. Build it with ./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog first." >&2
+            exit 1
+        fi
+    done
+    echo "KERYX_SKIP_SHARED_BUILD=1: using the existing KeryxShared XCFramework and String Catalog."
+    exit 0
+fi
+
 # Xcode's build-phase scripts run with a minimal environment (no ~/.zshrc/.zprofile), so a
 # JAVA_HOME set only in the developer's shell profile is not visible here — resolve one
 # explicitly rather than assuming it's inherited.
@@ -26,7 +45,6 @@ if [ -z "${JAVA_HOME:-}" ]; then
 fi
 export JAVA_HOME
 
-REPO_ROOT="$(cd "$SRCROOT/.." && pwd)"
 cd "$REPO_ROOT"
 
 # Always the Release Kotlin/Native framework variant, regardless of Xcode's own Debug/Release
