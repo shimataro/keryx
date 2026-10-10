@@ -221,8 +221,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
           printf '%s' "$APPLE_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.provisioningprofile"
-          printf '%s' "$APPLE_NOTARY_KEY" > "$RUNNER_TEMP/AuthKey.p8"
-          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          .github/scripts/prepare-notary-key.sh "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Build, sign, notarize and package
         if: steps.config.outputs.configured == 'true'
