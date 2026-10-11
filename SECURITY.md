@@ -87,8 +87,8 @@ The following are **out of scope**:
 
 Keryx is designed to minimize its attack surface:
 
-- **No accounts and no developer-operated server.** There is no backend the
-  developer controls; the app talks only to the feeds you subscribe to, an allowlisted GitHub host for
+- **No accounts and no developer-operated server.** The app talks only
+  to the feeds you subscribe to, an allowlisted GitHub host for
   update checks/downloads (see below), and, if you opt in, directly to Dropbox, OneDrive, or Google Drive.
 - **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
   platform's secure credential storage: on macOS, the app's own data-protection Keychain, with no
