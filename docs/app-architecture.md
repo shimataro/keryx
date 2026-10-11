@@ -1475,11 +1475,13 @@ no separate iOS target to keep in sync.
   the top-level page (a script-built link, `target="_top"`, `target="_blank"`), opens in the external
   browser through `openInBrowserIfAllowed` (http/https only); a top-level navigation nobody clicked
   (`location`, meta refresh) is cancelled, even when it targets one of the article's links. A click a
-  script synthesizes (`a.click()`, a dispatched `click` event) never counts as a click: WebKit reports
-  it as `.linkActivated` just like a person's, so `ArticleWebView` installs a user script, in its own
-  content world and in every frame, that cancels any link activation whose event is not trusted —
-  otherwise a feed body or an embed could open any page externally (or launch another app) as soon
-  as an article is shown or merely preloaded for a swipe. JavaScript stays enabled (see "A feed body's own JavaScript
+  script synthesizes (`a.click()`, a dispatched `click` event) is not meant to count as a click: WebKit
+  reports it as `.linkActivated` just like a person's, so `ArticleWebView` installs a user script, in
+  its own content world and in every frame, that cancels any link activation whose event is not
+  trusted — otherwise a feed body or an embed could open any page externally (or launch another app)
+  as soon as an article is shown or merely preloaded for a swipe. The guard has a known gap (an anchor
+  inside a closed shadow root); see "A feed body's own JavaScript runs inside the article reader" in
+  [known-issues.md](known-issues.md). JavaScript stays enabled (see "A feed body's own JavaScript
   runs inside the article reader" in [known-issues.md](known-issues.md)). This keeps the app from
   being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
   access. The Compose readers do not apply the main-frame rule.

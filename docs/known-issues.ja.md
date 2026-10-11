@@ -632,8 +632,11 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 SwiftUI アプリのリーダー（`ReaderNavigationGate`）は、さらにブラウザ化することを拒む：スクリプトは動くが、
 ページ全体を置き換える遷移はその場では読み込まない——クリックによるものは外部ブラウザで開き（http/https のみ）、
 クリックを伴わない最上位の遷移（`location = …`、meta refresh）は破棄し、iframe の中の埋め込み自身の遷移だけを
-読み込む。スクリプトが合成したクリック（`a.click()`）はページ内で取り消すので、ユーザーがクリックしない限り
-スクリプトが外部でページを開くことはできない。Compose のリーダー（デスクトップ・Android）は独自のリンク横取りのままで、この規則は持たない。Apple の
+読み込む。スクリプトが合成したクリック（`a.click()`）はページ内で取り消すので、通常のケースは防げる。ただし
+完全ではない：このガードは `window` 上でイベントの `composedPath()` からリンクを探すため、*closed* な shadow
+root の中のアンカー（`composedPath()` に現れない）や、shadow root 内で dispatch された composed でない
+クリック（`window` まで届かない）ではリンクが起動し得る。WebKit はそれをユーザーのクリックとして報告するので、
+誰もクリックしていないのにページが外部ブラウザで開く（http/https のみ）。Compose のリーダー（デスクトップ・Android）は独自のリンク横取りのままで、この規則は持たない。Apple の
 年齢制限は、任意のページをアプリ内で閲覧できることを「無制限の Web アクセス」（16+）とみなすので、
 これで SwiftUI アプリはその対象外になる。
 
@@ -644,6 +647,13 @@ SwiftUI アプリのリーダー（`ReaderNavigationGate`）は、さらにブ�
 `isJavaScriptEnabled = false` にする（SNS 埋め込みは埋め込みコード自身が持つ `<blockquote>`
 フォールバックに退化する）か、本文を `<iframe sandbox srcdoc>` に隔離してリーダーの文書に
 一切到達できないようにする。
+
+SwiftUI リーダーの shadow DOM の穴に限れば、`WKNavigationAction` にはユーザーのクリックとスクリプトのクリックを
+区別する公開 API がないので、イベントの経路から推測するのをやめ、本物のユーザー操作を記録する方式にする：ページ内
+スクリプトが信頼された `click`/`pointerup`/キーイベントのたびにネイティブ側へ報告し（`WKScriptMessageHandler`）、
+`ReaderNavigationGate` は、その報告が新しく（約1秒以内）未使用のときに限り `.mainFrameClick` を外部で開く。
+代償として、DOM のクリックを伴わない操作——iOS の長押し「リンクを開く」、macOS のコンテキストメニューの
+「リンクを開く」——まで取り消されないか、実機で確認する必要がある。
 
 ## Linux arm64: 記事リーダーのネイティブ WebView バイナリが存在せず、ウインドウがフリーズする
 
