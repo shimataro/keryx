@@ -58,6 +58,12 @@ targets:
       - path: ../composeApp/src/commonMain/composeResources/drawable/tray_icon.png
         buildPhase: resources
         destinationFilters: [macOS]
+      # The cloud providers' own logos, shared with the Compose build the same way (see
+      # Platform/CloudBrand.swift). Loaded by file name, so no asset-catalog copy exists to drift.
+      - path: ../composeApp/src/commonMain/composeResources/drawable/dropbox.png
+        buildPhase: resources
+      - path: ../composeApp/src/commonMain/composeResources/drawable/google_drive.png
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: works.merc.keryx
