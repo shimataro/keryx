@@ -117,3 +117,6 @@ no auto-launch.
   manifest's UserDefaults reason `CA92.1` (the app's own data) does not cover. If App Store Connect
   enforces required-reason declarations for the macOS upload, drop that read (use the 0.5 s default,
   as iOS does) rather than declaring a reason that does not fit.
+- [ ] Mac App Store build only: extend [`TERMS.md`](../../TERMS.md) / `TERMS.ja.md` to cover macOS —
+  their **Applies to** line and the "If you got Keryx from Apple's App Store" section name only
+  iOS / iPadOS — and update their effective date.
