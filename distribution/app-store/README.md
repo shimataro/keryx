@@ -47,7 +47,7 @@ Holder, App Manager or Admin role.
 | Field | Value | Notes (from Apple's [App information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information) reference) |
 | --- | --- | --- |
 | Platforms | iOS, macOS | |
-| Name | `Keryx` | 2–30 characters; editable until the app is submitted for review |
+| Name | `Keryx: RSS Reader` (Japanese: `Keryx: RSSリーダー`) | 2–30 characters; editable until the app is submitted for review and, after that, while the version's status allows it. `Keryx` alone was refused ("the name is already in use" — no public app has it, so it is a private or reserved record); the home-screen name stays `Keryx` (`CFBundleDisplayName`), which is a separate setting |
 | Primary language | English (U.S.) | The fallback for metadata a locale doesn't provide; changeable at any time. Japanese is added as a localization |
 | Bundle ID | `works.merc.keryx` | Must match the Xcode project; can't be changed after a build is uploaded |
 | SKU | `keryx` | An internal tracking ID, not shown to customers; letters, numbers, hyphens, periods and underscores, not starting with a hyphen, period or underscore; **can't be changed once the app is added** |
