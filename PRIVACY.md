@@ -52,7 +52,8 @@ folder inside the app's container), which the OS may clear under storage pressur
 directory above; see "Data retention & deletion" below for how to remove it
 yourself.
 
-None of this data is transmitted anywhere unless you opt into cloud sync (below).
+Keryx itself does not transmit this data anywhere unless you opt into cloud sync (below).
+Backups made by your device's operating system, described next, are separate from Keryx.
 
 ### Automatic backups (Android)
 
