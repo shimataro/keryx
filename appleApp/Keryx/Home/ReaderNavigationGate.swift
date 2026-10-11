@@ -13,6 +13,12 @@ import Foundation
 /// article reader" in `docs/known-issues.md` for what that does not catch).
 @MainActor
 final class ReaderNavigationGate {
+    /// The base URL the reader passes to `loadHTMLString`. Deliberately `nil` (the document is
+    /// `about:blank`), so that WebKit's report of the programmatic load itself is recognizable as such
+    /// rather than looking like a navigation to the article's own URL. Relative URLs still resolve
+    /// through the `<base href>` `wrapArticleHtml` emits, matching the Compose desktop reader.
+    static let documentBaseURL: URL? = nil
+
     enum Decision: Equatable {
         /// A click that would replace the top-level page: open `url` in the external browser, and
         /// cancel the navigation.

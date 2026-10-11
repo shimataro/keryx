@@ -25,7 +25,7 @@ struct ArticleWebView {
         guard html != coordinator.loadedHtml else { return }
         coordinator.loadedHtml = html
         coordinator.gate.beginDocumentLoad()
-        coordinator.documentNavigation = webView.loadHTMLString(html, baseURL: ArticleNavigationPolicy.documentBaseURL)
+        coordinator.documentNavigation = webView.loadHTMLString(html, baseURL: ReaderNavigationGate.documentBaseURL)
     }
 
     /// Cancels a link activation no person caused — a feed body's or an embed's script calling

@@ -7,7 +7,7 @@ struct ReaderNavigationGateTests {
     private let articleUrl = URL(string: "https://example.com/posts/1")!
     private let embedUrl = URL(string: "https://platform.twitter.com/embed/Tweet.html")!
     private let otherSiteUrl = URL(string: "https://other.example.org/landing")!
-    private let documentUrl = ArticleNavigationPolicy.documentBaseURL ?? URL(string: "about:blank")!
+    private let documentUrl = URL(string: "about:blank")!
 
     // MARK: - Kind
 
