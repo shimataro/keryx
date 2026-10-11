@@ -13,7 +13,7 @@ listing/
 │   ├── subtitle.txt          # ≤ 30 characters
 │   ├── promotional-text.txt  # ≤ 170 characters
 │   ├── description.txt       # ≤ 4000 characters
-│   └── keywords.txt          # ≤ 100 characters, comma-separated
+│   └── keywords.txt          # ≤ 100 bytes (UTF-8), comma-separated
 └── ja/
     └── (same five files)
 ```
