@@ -33,14 +33,27 @@ fail() {
 # Print a value from a plist, or nothing when the key path does not exist. plutil reports a missing
 # key on stdout rather than stderr, so its output is used only when it succeeds.
 plist_extract() {
-    # $1 format, $2 plist, $3 key path
-    local out
-    if out="$(plutil -extract "$3" "$1" -o - "$2" 2>/dev/null)"; then
+    local format="$1" plist="$2" key="$3" out
+    if out="$(plutil -extract "$key" "$format" -o - "$plist" 2>/dev/null)"; then
         printf '%s' "$out"
     fi
 }
 read_raw() { plist_extract raw "$1" "$2"; }
 read_json() { plist_extract json "$1" "$2"; }
+
+# Succeeds when the manifest declares the required-reason API `category` with `reason` among its
+# reasons.
+has_api_reason() {
+    local manifest="$1" category="$2" reason="$3" count i reasons
+    count="$(read_raw "$manifest" NSPrivacyAccessedAPITypes)"
+    for ((i = 0; i < ${count:-0}; i++)); do
+        [ "$(read_raw "$manifest" "NSPrivacyAccessedAPITypes.$i.NSPrivacyAccessedAPIType")" = "$category" ] ||
+            continue
+        reasons="$(read_json "$manifest" "NSPrivacyAccessedAPITypes.$i.NSPrivacyAccessedAPITypeReasons")"
+        [[ "$reasons" == *"\"$reason\""* ]] && return 0
+    done
+    return 1
+}
 
 # Privacy manifest: no tracking, and every required-reason API category the binary uses declared
 # with the reason Keryx uses it for (ITMS-91053).
@@ -49,28 +62,14 @@ if [ ! -f "$manifest" ]; then
 else
     [ "$(read_raw "$manifest" NSPrivacyTracking)" = "false" ] ||
         fail "$platform: NSPrivacyTracking must be false"
-    count="$(read_raw "$manifest" NSPrivacyAccessedAPITypes)"
-    declared=""
-    for ((i = 0; i < ${count:-0}; i++)); do
-        type="$(read_raw "$manifest" "NSPrivacyAccessedAPITypes.$i.NSPrivacyAccessedAPIType")"
-        reasons="$(read_json "$manifest" "NSPrivacyAccessedAPITypes.$i.NSPrivacyAccessedAPITypeReasons")"
-        declared+="$type $reasons"$'\n'
-    done
-    for expected in \
-        "NSPrivacyAccessedAPICategoryUserDefaults CA92.1" \
-        "NSPrivacyAccessedAPICategoryFileTimestamp C617.1" \
-        "NSPrivacyAccessedAPICategoryDiskSpace E174.1"; do
-        category="${expected% *}"
-        reason="${expected#* }"
-        found=0
-        while IFS= read -r entry; do
-            if [[ "$entry" == "$category "* && "$entry" == *"\"$reason\""* ]]; then
-                found=1
-            fi
-        done <<<"$declared"
-        [ "$found" = 1 ] ||
+    while read -r category reason; do
+        has_api_reason "$manifest" "$category" "$reason" ||
             fail "$platform: PrivacyInfo.xcprivacy does not declare $category with reason $reason"
-    done
+    done <<'EXPECTED'
+NSPrivacyAccessedAPICategoryUserDefaults CA92.1
+NSPrivacyAccessedAPICategoryFileTimestamp C617.1
+NSPrivacyAccessedAPICategoryDiskSpace E174.1
+EXPECTED
 fi
 
 # ATS: feeds the user subscribes to may be plain http://. NSAllowsArbitraryLoadsInWebContent must
@@ -84,7 +83,8 @@ fi
 [ "$(read_raw "$info" ITSAppUsesNonExemptEncryption)" = "false" ] ||
     fail "$platform: ITSAppUsesNonExemptEncryption must be false"
 
-# iPad multitasking needs all four orientations (ITMS-90474).
+# iPad multitasking needs all four orientations (ITMS-90474). Deliberately a copy of project.yml's
+# list rather than read from it, so the check stays independent of what it checks.
 if [ "$platform" = "iOS" ]; then
     ipad="$(read_json "$info" "UISupportedInterfaceOrientations~ipad")"
     for orientation in Portrait PortraitUpsideDown LandscapeLeft LandscapeRight; do

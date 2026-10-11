@@ -92,6 +92,7 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         # iPad multitasking requires all four orientations (App Store Connect rejects the upload
         # otherwise, ITMS-90474); iPhone gets the three that make sense on a phone.
+        # Scripts/verify-store-requirements.sh checks the built app for the same iPad list.
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
     dependencies:
