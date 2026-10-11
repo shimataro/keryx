@@ -49,8 +49,8 @@ final class ReaderNavigationGate {
     }
 
     /// Whether the reader's own `loadHTMLString` navigation is in flight. Only then is a top-level
-    /// `about:blank` (see `ArticleNavigationPolicy.documentBaseURL`) the document itself; at any other
-    /// time it is a script replacing the page.
+    /// `about:blank` (the blank document `loadHTMLString` produces with a `nil` base URL) the document
+    /// itself; at any other time it is a script replacing the page.
     private var awaitingDocumentLoad = false
 
     /// Marks the start of the reader's own document load; call right before `loadHTMLString`.
@@ -81,6 +81,6 @@ final class ReaderNavigationGate {
     private func isDocumentLoad(_ url: URL?, kind: Kind) -> Bool {
         guard awaitingDocumentLoad, kind == .mainFrameOther else { return false }
         guard let url else { return true }
-        return url == ArticleNavigationPolicy.documentBaseURL || url.absoluteString == "about:blank"
+        return url.absoluteString == "about:blank"
     }
 }
