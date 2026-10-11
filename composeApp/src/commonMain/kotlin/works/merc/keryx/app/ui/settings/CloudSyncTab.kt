@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.settings
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,11 +29,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
+import works.merc.keryx.app.ui.common.CloudBrandMark
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.IconButtonKind
@@ -46,10 +45,7 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
-import works.merc.keryx.app.resources.dropbox
 import works.merc.keryx.app.resources.menu_feed_sync_now
-import works.merc.keryx.app.resources.google_drive
-import works.merc.keryx.app.resources.onedrive
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_abort_connect_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_disconnect_confirm_body
@@ -258,13 +254,6 @@ private fun SyncNowButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** Brand icon for a cloud provider's connection row. */
-private fun CloudStorageType.brandIcon(): DrawableResource = when (this) {
-    CloudStorageType.DROPBOX -> Res.drawable.dropbox
-    CloudStorageType.GOOGLE_DRIVE -> Res.drawable.google_drive
-    CloudStorageType.ONEDRIVE -> Res.drawable.onedrive
-}
-
 /**
  * Brand name for a cloud provider's connection row. Deliberately a hardcoded literal, not a
  * string resource — these are untranslated product names.
@@ -469,11 +458,7 @@ internal fun CloudProviderRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Image(
-                    painter = painterResource(type.brandIcon()),
-                    contentDescription = null,
-                    modifier = Modifier.size(CLOUD_ROW_ICON_SIZE),
-                )
+                CloudBrandMark(type, Modifier.size(CLOUD_ROW_ICON_SIZE))
                 Text(
                     type.brandLabel(),
                     style = MaterialTheme.typography.bodyMedium,

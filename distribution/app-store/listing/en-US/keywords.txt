@@ -1,1 +1,1 @@
-rss,atom,feed,reader,news,newsreader,opml,offline,subscribe,blog,articles,search,folders,tags,sync
+atom,feed,news,newsreader,opml,offline,subscribe,blog,folders,tags,sync,unread,starred,aggregator

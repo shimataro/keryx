@@ -26,7 +26,7 @@ Two metadata rules (App Review Guidelines 2.3.7 and 2.3.10) shape the text:
 - **Describe the Apple app only.** No other platform, store or download source is named — the Play
   listing's "Android" / "Google Play services" / "GitHub for update checks" lines are deliberately
   absent.
-- **No third-party brand in the keywords.** Dropbox / Google Drive / OneDrive appear in the
+- **No third-party brand in the keywords.** Dropbox / OneDrive / Google Drive appear in the
   description only to name the services a user may connect, with a non-affiliation line.
 
 ## URLs
@@ -36,6 +36,22 @@ Two metadata rules (App Review Guidelines 2.3.7 and 2.3.10) shape the text:
 | Support URL | <https://github.com/shimataro/keryx/issues> |
 | Marketing URL | <https://keryx.merc.works/> (Japanese: <https://keryx.merc.works/ja/>) |
 | Privacy Policy URL | <https://keryx.merc.works/privacy> (Japanese: <https://keryx.merc.works/ja/privacy>) |
+
+## App record (App Store Connect ▸ Apps ▸ New App)
+
+One record covers iOS and macOS: all platforms in a record share the bundle ID, and each platform gets its
+own page of metadata ([Add a new app](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app)).
+The Account Holder must have signed the latest agreement, and the person adding the app needs the Account
+Holder, App Manager or Admin role.
+
+| Field | Value | Notes (from Apple's [App information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information) reference) |
+| --- | --- | --- |
+| Platforms | iOS, macOS | |
+| Name | `Keryx: RSS Reader` (Japanese: `Keryx: RSSリーダー`) | 2–30 characters; editable until the app is submitted for review and, after that, while the version's status allows it. `Keryx` alone was refused ("the name is already in use" — no public app has it, so it is a private or reserved record); the home-screen name stays `Keryx` (`CFBundleDisplayName`), which is a separate setting |
+| Primary language | English (U.S.) | The fallback for metadata a locale doesn't provide; changeable at any time. Japanese is added as a localization |
+| Bundle ID | `works.merc.keryx` | Must match the Xcode project; can't be changed after a build is uploaded |
+| SKU | `keryx` | An internal tracking ID, not shown to customers; letters, numbers, hyphens, periods and underscores, not starting with a hyphen, period or underscore; **can't be changed once the app is added** |
+| User access | Full Access | Every user on the team can see the app (Limited Access would restrict it to chosen users) |
 
 ## Answers to App Store Connect questions
 
@@ -67,7 +83,7 @@ to sign in to. Everything can be reviewed without any account:
 2. Add a feed with the "+" button, e.g. https://www.apple.com/newsroom/rss-feed.rss
 3. Select an article to read it; use the toolbar to star it or open it in the browser.
 
-Cloud sync (Dropbox / Google Drive / OneDrive) is optional and needs the reviewer's own account at
+Cloud sync (Dropbox / OneDrive / Google Drive) is optional and needs the reviewer's own account at
 that provider. Sign-in happens in the system web authentication sheet (ASWebAuthenticationSession);
 Keryx never sees the password, and tokens are kept in the Keychain.
 
@@ -94,9 +110,14 @@ no auto-launch.
   [`TERMS.md`](../../TERMS.md) now cover iOS / iPadOS, the website copies live outside this repo.
 - [ ] Check that <https://keryx.merc.works/> does not push other platforms' downloads in a way that
   would make the App Store listing look like it promotes them (guideline 2.3.10).
-- [ ] Confirm the Dropbox, Google (Drive) and Microsoft (OneDrive) logos in
-  `appleApp/Keryx/Resources/Assets.xcassets` follow each company's current brand guidelines, and add
-  the attribution they ask for to `THIRD-PARTY-LICENSES.md` if any.
+- [x] Brand logos (guideline 5.2.1): checked against each company's terms on 2026-10-11. Dropbox and
+  Google Drive show the providers' own unmodified, untinted logo files (`composeApp/.../drawable/dropbox.png`
+  from Dropbox's Brand Partner Toolkit, `google_drive.png` from developers.google.com/drive/branding), and
+  the description carries Google's requested attribution. Microsoft licenses its logos and icons separately
+  (<https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general>), so OneDrive is named
+  in text only and shows a generic cloud icon, in every build. Dropbox's and Google's terms are their developer
+  branding guides (<https://www.dropbox.com/developers/reference/branding-guide>,
+  <https://developers.google.com/drive/branding>); recheck them if a logo is ever replaced.
 - [ ] Decide the marketing version (`MARKETING_VERSION` in `appleApp/project.yml` is `0.1.0`; a 0.x
   number can read as pre-release software to a reviewer, guideline 2.2).
 - [ ] Verify the example feed in the review notes still resolves.

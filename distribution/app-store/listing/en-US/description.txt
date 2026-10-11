@@ -4,7 +4,7 @@ Keryx is a local-first RSS reader. By default, all of your data lives on your de
 
 FEATURES
 
-• Sync through your own cloud storage (Dropbox, Google Drive, or OneDrive) — no account with Keryx itself, ever
+• Sync through your own cloud storage (Dropbox, OneDrive, or Google Drive) — no account with Keryx itself, ever
 • Local-first: works fully offline, with no sync required
 • Fast local full-text search across article titles and content
 • Organize feeds with tags (cross-cutting labels) and folders (hierarchical grouping)
@@ -18,8 +18,8 @@ PRIVACY
 
 Keryx has no user accounts and no server operated by its developer. There is nothing to sign up for, and nothing that its developer's own infrastructure ever receives. The app includes no analytics, telemetry, crash reporting, advertising, or tracking of any kind.
 
-Keryx talks only to servers directly relevant to what you're doing: the feeds you subscribe to (and their favicons) and — only if you connect one — Dropbox, Google Drive, or OneDrive for sync. The one exception is an article's own content: the images, videos and embeds it references are loaded from their original hosts when you open it. Nothing else.
+Keryx talks only to servers directly relevant to what you're doing: the feeds you subscribe to (and their favicons) and — only if you connect one — Dropbox, OneDrive, or Google Drive for sync. The one exception is an article's own content: the images, videos and embeds it references are loaded from their original hosts when you open it. Nothing else.
 
-Dropbox, Google Drive, and OneDrive are trademarks of their respective owners; Keryx is not affiliated with or endorsed by them.
+Dropbox, OneDrive, and Google Drive are trademarks of their respective owners; Keryx is not affiliated with or endorsed by them. Google Drive is a trademark of Google Inc. Use of this trademark is subject to Google Permissions.
 
 Learn more, including the full privacy policy, at https://keryx.merc.works
