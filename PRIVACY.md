@@ -180,9 +180,10 @@ contacted.
   directly, use uninstall, or Android Settings → Apps → Keryx → Storage → Clear
   storage (this also clears the app's cache). On iOS and iPadOS, delete the app (this
   removes its container and cache); because iOS may keep Keychain items after an app is
-  deleted, disconnect cloud sync in Settings first so the tokens are removed (and, for
-  Dropbox and Google Drive, revoked). OneDrive offers no way for the app to revoke them, so
-  for OneDrive also remove Keryx's access from your Microsoft account's app permissions.
+  deleted, disconnect cloud sync in Settings first: Keryx then attempts to remove the stored
+  tokens and, for Dropbox and Google Drive, to revoke them. If either step fails — and always
+  for OneDrive, which offers no way for the app to revoke its token — remove Keryx's access
+  from the provider account's app permissions (for OneDrive, your Microsoft account's).
 - See "Optional cloud sync" above for how to remove data from your cloud storage
   account.
 
