@@ -1422,6 +1422,15 @@ copy of each provider's scheme. The session's callback URL is handed to `handleO
 exactly like an OS-routed `keryx://` redirect would be; desktop and Android are unaffected
 (`AuthorizationLauncher` defaults to opening the system browser, their existing behavior).
 
+**App Transport Security.** The SwiftUI app's Info.plist sets `NSAppTransportSecurity` →
+`NSAllowsArbitraryLoads` (`appleApp/project.yml`). Feed URLs are chosen by the user and some servers
+only offer plain `http://`; `external-spec.md` §10 says an explicit `http://` is honored, and
+without the exception the Darwin engine (feeds), the favicon fetch and the reader's `WKWebView`
+(images, embeds) would all fail with `-1022`. `NSAllowsArbitraryLoadsInWebContent` is deliberately
+**not** set as well: on iOS 10+/macOS 10.12+ its presence makes the OS ignore
+`NSAllowsArbitraryLoads`. App Review requires a justification for this key; the review notes live in
+`distribution/app-store/`. Keryx's own traffic (cloud sync, OAuth) stays HTTPS-only in code.
+
 ### The `appleApp/` Xcode project
 
 `appleApp/` holds the SwiftUI app, sitting beside `composeApp/`/`androidApp/`. The `.xcodeproj` is
@@ -1454,6 +1463,27 @@ no separate iOS target to keep in sync.
   committed config. CI has no team available, so it builds with `CODE_SIGNING_ALLOWED=NO` instead —
   this compiles and links but never codesigns, so it verifies the build only, not a runnable
   sandboxed app (see `docs/testing.md`).
+- **Where About lives.** macOS shows it as the app menu's About window (`App/AboutView.swift`); iOS has
+  no such menu, so Settings carries an About row (`Settings/AboutSettingsPage.swift`) — the version plus
+  the website, project page, contact, terms, privacy policy and licenses links, which App Review
+  expects to be reachable inside the app (guideline 5.1.1(i)). Both read the one link list in
+  `App/AboutLinks.swift`. It is a page local to the iOS `SettingsView`, not a `SettingsNavigation.Tab`:
+  no notification routes to it and the macOS tab bar has no About tab.
+- **The SwiftUI reader never navigates the page itself.** `Home/ReaderNavigationGate.swift` answers
+  every `WKWebView` navigation: the document's own load and an iframe's own navigation (script-based
+  SNS embeds) load in place, whatever URL they target; any click that would replace the top-level
+  page (a link in the article, a script-built link, `target="_top"`, `target="_blank"`) opens in the
+  external browser through `openInBrowserIfAllowed` (http/https only); a top-level navigation nobody clicked
+  (`location`, meta refresh) is cancelled, even when it targets one of the article's links. A click a
+  script synthesizes (`a.click()`, a dispatched `click` event) is not meant to count as a click: WebKit
+  reports it as `.linkActivated` just like a person's, so `ArticleWebView` installs a user script, in
+  its own content world and in every frame, that cancels any link activation whose event is not
+  trusted — otherwise a feed body or an embed could open any page externally (or launch another app)
+  as soon as an article is shown or merely preloaded for a swipe. JavaScript stays enabled, and the
+  guard has a known gap (an anchor inside a closed shadow root); see "A feed body's own JavaScript
+  runs inside the article reader" in [known-issues.md](known-issues.md). This keeps the app from
+  being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
+  access. The Compose readers do not apply the main-frame rule.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path

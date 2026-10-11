@@ -2,7 +2,7 @@
 
 [日本語](TERMS.ja.md)
 
-**Effective date:** 2026-09-20 · **Applies to:** Keryx (desktop and Android)
+**Effective date:** 2026-10-11 · **Applies to:** Keryx (desktop, Android, and iOS / iPadOS)
 
 These Terms of Service ("Terms") govern your use of Keryx, a free, open-source,
 local-first RSS reader. Please read them together with the
@@ -54,6 +54,29 @@ The Dropbox, OneDrive, and Google Drive names and logos are trademarks of their
 respective owners (Dropbox, Inc.; Microsoft Corporation; Google LLC). They are used
 here solely to identify the corresponding service you may choose to connect, and
 their use does not imply endorsement, sponsorship, or affiliation.
+
+## If you got Keryx from Apple's App Store
+
+If you downloaded Keryx from Apple's App Store (iOS, iPadOS), these Terms are between you and the
+developer only, not Apple, and the following also apply:
+
+- Apple is not responsible for Keryx or its content, and has no obligation to provide maintenance
+  or support for it.
+- If Keryx fails to conform to any applicable warranty, you may notify Apple, which will refund the
+  purchase price if there is one (Keryx is free); to the maximum extent permitted by law, Apple has
+  no other warranty obligation for Keryx.
+- The developer, not Apple, is responsible for addressing any claim relating to Keryx or your use
+  of it, including product liability claims, claims that it fails to meet a legal or regulatory
+  requirement, and consumer-protection claims, and for any third-party claim that Keryx or your use
+  of it infringes intellectual property rights.
+- You represent that you are not located in a country subject to a U.S. Government embargo or
+  designated a "terrorist supporting" country, and that you are not on any U.S. Government list of
+  prohibited or restricted parties.
+- Apple and its subsidiaries are third-party beneficiaries of these Terms, and once you accept them
+  Apple will have the right (and be deemed to have accepted the right) to enforce them against you.
+- Apple's Licensed Application End User License Agreement applies to your use of the App Store
+  copy of Keryx in addition to these Terms; if the two conflict on a matter between you and Apple,
+  Apple's agreement prevails. The MIT License of the source code is unaffected.
 
 ## No warranty
 

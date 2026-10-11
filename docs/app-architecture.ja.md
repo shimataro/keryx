@@ -1397,6 +1397,15 @@ Swift 側が各プロバイダーのスキームを別途ハードコードす�
 ルーティングする `keryx://` リダイレクトとまったく同じように `handleOAuthRedirect` に渡す。デスクトップと
 Android は影響を受けない（`AuthorizationLauncher` の既定はシステムのブラウザを開く、従来どおりの動作）。
 
+**App Transport Security。** SwiftUI アプリの Info.plist は `NSAppTransportSecurity` →
+`NSAllowsArbitraryLoads` を設定する（`appleApp/project.yml`）。フィードの URL は利用者が選ぶもので、
+サーバーによっては平文の `http://` しか提供しない。`external-spec.ja.md` §10 は明示された `http://` を
+尊重すると定めており、この例外がないと Darwin エンジン（フィード）、favicon の取得、リーダーの
+`WKWebView`（画像・埋め込み）がいずれも `-1022` で失敗する。`NSAllowsArbitraryLoadsInWebContent` は
+あえて**併記しない**：iOS 10 以降／macOS 10.12 以降では、このキーが存在すると OS が
+`NSAllowsArbitraryLoads` を無視するため。このキーには App Review で理由の説明が必要で、審査メモは
+`distribution/app-store/` に置く。Keryx 自身の通信（クラウド同期・OAuth）は、コード上は HTTPS のみのまま。
+
 ### `appleApp/` の Xcode プロジェクト
 
 `appleApp/` は SwiftUI アプリを収め、`composeApp/`/`androidApp/` と並んで置かれている。`.xcodeproj` は
@@ -1429,6 +1438,25 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   `CODE_SIGNING_ALLOWED=NO` でビルドする——これはコンパイルとリンクは行うがコード署名は一切行わないので、
   ビルドが通ることだけを確認し、実行可能なサンドボックスアプリまでは確認しない（`docs/testing.ja.md`
   参照）。
+- **About の置き場所。** macOS はアプリメニューの About ウィンドウ（`App/AboutView.swift`）で表示する。iOS には
+  そのメニューがないので、設定に About の行（`Settings/AboutSettingsPage.swift`）を置く——バージョンと、Web サイト・
+  プロジェクトページ・連絡先・利用規約・プライバシーポリシー・ライセンスへのリンク（App Review はアプリ内から
+  辿れることを求める。ガイドライン 5.1.1(i)）。どちらも `App/AboutLinks.swift` の 1 つのリンク一覧を読む。
+  `SettingsNavigation.Tab` ではなく iOS の `SettingsView` 内に閉じたページにしてある：通知がここへ誘導することは
+  なく、macOS のタブバーには About タブがないため。
+- **SwiftUI のリーダーはページ自身を遷移させない。** `Home/ReaderNavigationGate.swift` が `WKWebView` の
+  遷移をすべて判定する：文書自身の読み込みと iframe 自身の遷移（script 型の SNS 埋め込み）はその場で読み込む。
+  iframe の遷移は宛先の URL を問わない。ページ全体を置き換えるクリック（記事内のリンク、スクリプトが作った
+  リンク、`target="_top"`、`target="_blank"`）は `openInBrowserIfAllowed` で外部ブラウザに渡す（http/https のみ）。クリックを伴わない
+  最上位の遷移（`location`、meta refresh）は、記事のリンクへの遷移であってもキャンセルする。スクリプトが
+  合成したクリック（`a.click()` や dispatch された `click` イベント）はクリックとみなさない方針：WebKit はこれを
+  人のクリックと同じ `.linkActivated` として報告するため、`ArticleWebView` が独自の content world で全フレームに
+  ユーザースクリプトを入れ、信頼されていない（`isTrusted` でない）イベントによるリンクの起動を取り消す。
+  これがないと、フィード本文や埋め込みのスクリプトが、記事を表示しただけで（スワイプ用に先読みされただけでも）
+  任意のページを外部で開いたり、別のアプリを起動したりできてしまう。JavaScript は有効のままで、このガードには
+  既知の穴（closed な shadow root 内のアンカー）がある：known-issues.ja.md の
+  「フィード本文のスクリプトが記事リーダー内で実行される」を参照。これでアプリがアプリ内ブラウザにならず、Apple の
+  年齢制限の質問票で「無制限の Web アクセス」とみなされない。Compose のリーダーにはメインフレームの規則を適用しない。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS

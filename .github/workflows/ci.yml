@@ -411,8 +411,12 @@ jobs:
           cd appleApp
           xcodegen generate
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
-          xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+          # -derivedDataPath pins where the iOS Keryx.app lands, for the check below.
+          xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd-ios" \
+            CODE_SIGNING_ALLOWED=NO build
           xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+          # The Info.plist and privacy-manifest settings that App Store upload and review depend on (see docs/build.md, "App Store submission materials").
+          Scripts/verify-store-requirements.sh "$RUNNER_TEMP/dd-ios/Build/Products/Debug-iphonesimulator/Keryx.app"
 
       # The builds above are Debug, which compiles only the active architecture and never takes
       # the Release-only settings release.yml's package-macos job relies on: the x86_64
@@ -433,6 +437,7 @@ jobs:
             echo "::error::The Release archive has no SUPublicEDKey; Sparkle would never start in a released build."
             exit 1
           fi
+          Scripts/verify-store-requirements.sh "$archive/Products/Applications/Keryx.app"
 
       - name: Upload test reports
         uses: actions/upload-artifact@v7

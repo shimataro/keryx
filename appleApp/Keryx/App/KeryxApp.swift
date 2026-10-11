@@ -125,10 +125,13 @@ struct KeryxApp: App {
             applyAppearance(mode)
         }
         #endif
-        // Requested at startup (if already on) and the moment it's switched on — never
-        // unconditionally at every launch — matching desktop's own gate (`App.kt:69-72`).
-        .onChange(of: model.preferences?.notificationEnabled, initial: true) { _, enabled in
-            if enabled == true { OsNotificationPoster.requestAuthorization() }
+        // Requested once the setting is on and first-run Setup is over (so the system prompt does not
+        // pop up over the Setup screen), and again the moment it's switched on — never
+        // unconditionally at every launch. See `shouldRequestNotificationAuthorization`.
+        .onChange(of: shouldRequestNotificationAuthorization(
+            enabled: model.preferences?.notificationEnabled, needsSetup: model.needsSetup
+        ), initial: true) { _, shouldRequest in
+            if shouldRequest { OsNotificationPoster.requestAuthorization() }
         }
         #if os(iOS)
         // iOS runs its maintenance once the scene first becomes active (not from `AppModel.init`,

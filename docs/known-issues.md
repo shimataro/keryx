@@ -626,6 +626,23 @@ ordinary case, but only for the declarations they list: a property none of them 
 chrome, since the body follows the reader's `<style>` block). The trade is intentional: turning
 JavaScript off would also take script-based SNS embeds with it.
 
+The SwiftUI app's reader (`ReaderNavigationGate`) additionally refuses to become a browser: scripts
+still run, but a navigation that would replace the whole page never loads in place — a click on it
+opens in the external browser (http/https only), a top-level navigation nobody clicked (`location = …`,
+a meta refresh) is dropped, and only an embed's own navigation inside an iframe loads. A click a script
+synthesizes (`a.click()`, a cancelable dispatched `click`) is cancelled in the page itself. It is not
+airtight, in two ways. `preventDefault` does nothing on a non-cancelable event, so a script
+dispatching `new MouseEvent('click', {bubbles: true})` at a link still activates it. And the guard
+finds the link through the event's `composedPath()` on `window`, treating any element with an `href`
+or `xlink:href` attribute as one (so SVG and MathML anchors count, not only HTML's `<a>` and
+`<area>`), so an anchor inside a *closed* shadow root (which `composedPath()` omits) or a
+non-composed click dispatched inside a shadow root (which never reaches `window`) can also activate
+the link. WebKit reports each of these as a user click — the page opens in the external browser
+(http/https only) without anyone clicking. The Compose
+readers (desktop, Android) keep their own link interception and do not have this rule. Apple's age
+rating counts in-app browsing of arbitrary pages as "unrestricted web access" (16+), which this keeps
+the SwiftUI app clear of.
+
 ### What a real fix would need
 
 Treating the body as untrusted markup rather than only containing its effects — stripping
@@ -633,6 +650,14 @@ Treating the body as untrusted markup rather than only containing its effects �
 and setting `isJavaScriptEnabled = false` (SNS embeds then degrade to the `<blockquote>` fallback
 their own embed code ships), or isolating the body in an `<iframe sandbox srcdoc>` so it cannot
 reach the reader's document at all.
+
+For the shadow-DOM gap in the SwiftUI reader specifically, `WKNavigationAction` has no public way to
+tell a user's click from a script's, so the fix is to record genuine user activation instead of
+inferring it from the event path: the in-page script reports each trusted `click`/`pointerup`/key
+event to the native side (a `WKScriptMessageHandler`), and `ReaderNavigationGate` opens a
+`.mainFrameClick` externally only while such a report is fresh (about a second old) and unused. The
+cost is that actions with no DOM click — iOS's long-press "Open Link", macOS's context-menu "Open
+Link" — must be checked on a device so they are not cancelled too.
 
 ## Linux on arm64: the article reader has no native web-view binary, and the window freezes
 

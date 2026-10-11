@@ -90,6 +90,11 @@ targets:
         LOCALIZED_STRING_SWIFTUI_SUPPORT: NO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # iPad multitasking requires all four orientations (App Store Connect rejects the upload
+        # otherwise, ITMS-90474); iPhone gets the three that make sense on a phone.
+        # Scripts/verify-store-requirements.sh checks the built app for the same iPad list.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
     dependencies:
       - framework: ../shared/build/XCFrameworks/release/KeryxShared.xcframework
         embed: false
@@ -99,6 +104,14 @@ targets:
     info:
       path: Generated-Info.plist
       properties:
+        # Feeds and their images are fetched from servers the user chooses, some of which only
+        # serve plain http:// (external-spec §10 honors an explicit http:// URL). The arbitrary-loads
+        # exception covers URLSession (feeds, favicons) and the reader's WKWebView alike; do NOT add
+        # NSAllowsArbitraryLoadsInWebContent, which would make iOS 10+/macOS 10.12+ ignore this key.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # Only HTTPS and hashing (CommonCrypto/Security) — exempt from export documentation.
+        ITSAppUsesNonExemptEncryption: false
         # iOS-only keys (macOS ignores them): the periodic background refresh, see
         # Platform/BackgroundRefresh.swift.
         UIBackgroundModes: [fetch]
@@ -162,7 +175,6 @@ targets:
     # inside Keryx.app. Revisit if a test genuinely needs the running app.
     sources:
       - path: KeryxTests
-      - path: Keryx/Home/ArticleNavigationPolicy.swift
       - path: Keryx/Home/ReaderNavigationGate.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/CompactSidebarSelection.swift
@@ -178,6 +190,7 @@ targets:
       - path: Keryx/Update/UpdateCheckFailure.swift
       - path: Keryx/Platform/AppIconBadge.swift
       - path: Keryx/Platform/BackgroundRefreshDate.swift
+      - path: Keryx/Platform/NotificationAuthorizationPolicy.swift
       - path: Keryx/Bridge/ArticleRowModel.swift
       - path: Keryx/Bridge/ArticleUrlCopy.swift
       - path: Keryx/Bridge/TransientToastState.swift
