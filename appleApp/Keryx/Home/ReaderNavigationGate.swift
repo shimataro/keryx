@@ -14,8 +14,10 @@ import Foundation
 /// The reader is not a browser: a navigation that would replace the whole page is never shown in it.
 /// Only an embed's own navigation inside an iframe loads in place, so script-based SNS embeds keep
 /// working; anything that would swap the top-level page opens externally (a click) or is dropped (no
-/// click). Navigating freely inside the app would also make it an "unrestricted web access" browser
-/// for App Store age-rating purposes.
+/// click — even to one of the article's own links). Navigating freely inside the app would also make
+/// it an "unrestricted web access" browser for App Store age-rating purposes. A "click" a script
+/// synthesizes never reaches this gate: `ArticleWebView` cancels it in the page, since WebKit reports
+/// it as `.linkActivated` exactly like a person's.
 @MainActor
 final class ReaderNavigationGate {
     enum Decision: Equatable {
@@ -112,6 +114,8 @@ final class ReaderNavigationGate {
 
     private static func decision(url: URL?, kind: Kind, outboundLinks: Set<String>) -> Decision {
         if isDocumentLoad(url) { return .allow }
+        // Nobody clicked: never open anything, even a URL that is one of the article's own links.
+        if kind == .mainFrameOther { return .cancel }
         if let url, ArticleNavigationPolicy.isOutboundClick(url: url, outboundLinks: outboundLinks) {
             return .openInBrowser(url)
         }

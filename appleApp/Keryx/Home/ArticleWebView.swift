@@ -7,7 +7,8 @@ import WebKit
 /// either the article's own URL or one of the links `extractLinks` found inside the body is
 /// treated as a genuine click-through and opened in the external browser; so is any click that would
 /// replace the top-level page, while a top-level navigation nobody clicked is dropped. Only an SNS
-/// embed's own navigation inside an iframe loads in place (see `ReaderNavigationGate`).
+/// embed's own navigation inside an iframe loads in place (see `ReaderNavigationGate`). A click a
+/// script synthesizes never navigates at all (`syntheticClickGuard`).
 ///
 /// `outboundLinks` is `nil` while the document's links are still being extracted (the document is
 /// shown before that finishes — see `ReaderPageView.rebuildDocument`); `ReaderNavigationGate` holds
@@ -34,6 +35,38 @@ struct ArticleWebView {
         guard html != coordinator.loadedHtml else { return }
         coordinator.loadedHtml = html
         webView.loadHTMLString(html, baseURL: ArticleNavigationPolicy.documentBaseURL)
+    }
+
+    /// Cancels a link activation no person caused — a feed body's or an embed's script calling
+    /// `a.click()` or dispatching a synthetic click — in every frame. WebKit reports such a click as
+    /// `.linkActivated` just like a real one, so without this a script could open any page in the
+    /// external browser (or another app) the moment an article is shown, or merely preloaded for a
+    /// swipe. It runs in its own content world, before any page script, so the page can neither
+    /// remove the listener nor replace the `preventDefault` it calls.
+    @MainActor
+    private static let syntheticClickGuard = WKUserScript(
+        source: """
+            (() => {
+              const preventDefault = Event.prototype.preventDefault;
+              window.addEventListener('click', (event) => {
+                if (event.isTrusted) return;
+                for (const node of event.composedPath()) {
+                  if (node instanceof Element && node.matches('a[href], area[href]')) {
+                    preventDefault.call(event);
+                    return;
+                  }
+                }
+              }, true);
+            })();
+            """,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: false,
+        in: .defaultClient
+    )
+
+    @MainActor
+    private static func installSyntheticClickGuard(on webView: WKWebView) {
+        webView.configuration.userContentController.addUserScript(syntheticClickGuard)
     }
 
     @MainActor
@@ -75,7 +108,9 @@ struct ArticleWebView {
 #if os(macOS)
 extension ArticleWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
-        WKWebView()
+        let webView = WKWebView()
+        Self.installSyntheticClickGuard(on: webView)
+        return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
@@ -90,6 +125,7 @@ extension ArticleWebView: NSViewRepresentable {
 extension ArticleWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let webView = ReaderWebViewWarmUp.takeWarmedWebView() ?? WKWebView()
+        Self.installSyntheticClickGuard(on: webView)
         // Transparent until the first document paints, so a page whose body is still loading shows
         // the reader's own background (`ReaderPageView`) rather than WebKit's default white — the
         // document itself paints the same background once loaded.

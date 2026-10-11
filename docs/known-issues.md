@@ -629,7 +629,9 @@ JavaScript off would also take script-based SNS embeds with it.
 The SwiftUI app's reader (`ReaderNavigationGate`) additionally refuses to become a browser: scripts
 still run, but a navigation that would replace the whole page never loads in place — a click on it
 opens in the external browser (http/https only), a top-level navigation nobody clicked (`location = …`,
-a meta refresh) is dropped, and only an embed's own navigation inside an iframe loads. The Compose
+a meta refresh) is dropped, and only an embed's own navigation inside an iframe loads. A click a script
+synthesizes (`a.click()`) is cancelled in the page itself, so a script cannot open a page externally
+without the user clicking. The Compose
 readers (desktop, Android) keep their own link interception and do not have this rule. Apple's age
 rating counts in-app browsing of arbitrary pages as "unrestricted web access" (16+), which this keeps
 the SwiftUI app clear of.

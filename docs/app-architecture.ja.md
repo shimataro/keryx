@@ -1448,7 +1448,12 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   遷移をすべて判定する：文書自身の読み込みと iframe 自身の遷移（script 型の SNS 埋め込み）はその場で読み込む。
   記事のリンクのクリック、およびページ全体を置き換えるクリック（スクリプトが作ったリンク、`target="_top"`、
   `target="_blank"`）は `openInBrowserIfAllowed` で外部ブラウザに渡す（http/https のみ）。クリックを伴わない
-  最上位の遷移（`location`、meta refresh）はキャンセルする。JavaScript は有効のまま（known-issues.ja.md の
+  最上位の遷移（`location`、meta refresh）は、記事のリンクへの遷移であってもキャンセルする。スクリプトが
+  合成したクリック（`a.click()` や dispatch された `click` イベント）はクリックとみなさない：WebKit はこれを
+  人のクリックと同じ `.linkActivated` として報告するため、`ArticleWebView` が独自の content world で全フレームに
+  ユーザースクリプトを入れ、信頼されていない（`isTrusted` でない）イベントによるリンクの起動を取り消す。
+  これがないと、フィード本文や埋め込みのスクリプトが、記事を表示しただけで（スワイプ用に先読みされただけでも）
+  任意のページを外部で開いたり、別のアプリを起動したりできてしまう。JavaScript は有効のまま（known-issues.ja.md の
   「フィード本文のスクリプトが記事リーダー内で実行される」を参照）。これでアプリがアプリ内ブラウザにならず、Apple の
   年齢制限の質問票で「無制限の Web アクセス」とみなされない。Compose のリーダーにはメインフレームの規則を適用しない。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:

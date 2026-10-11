@@ -177,6 +177,18 @@ struct ReaderNavigationGateTests {
     }
 
     @Test
+    func aTopLevelNavigationNobodyClickedIsDroppedEvenToAnArticleLink() {
+        let gate = ReaderNavigationGate()
+        gate.update(documentID: "doc", outboundLinks: links)
+        let recorder = Recorder()
+
+        // `location = <one of the article's links>`: still nobody asked for the browser.
+        gate.decide(url: articleUrl, kind: .mainFrameOther, recorder.handler())
+
+        #expect(recorder.decisions == [.cancel])
+    }
+
+    @Test
     func anEmbedsOwnNavigationInsideAnIframeStillLoads() {
         let gate = ReaderNavigationGate()
         gate.update(documentID: "doc", outboundLinks: links)
