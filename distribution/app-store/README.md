@@ -108,3 +108,8 @@ no auto-launch.
   the "Check for Updates…" menu item and automatic-check toggle, and the `mach-lookup` temporary
   exception in `Keryx-macOS.entitlements` (guideline 2.4.5(vii)). When that lands, also note in
   [`PRIVACY.md`](../../PRIVACY.md) that the Mac App Store build never contacts GitHub.
+- [ ] Mac App Store build only: `springLoadingDelay` (`appleApp/Keryx/Home/FeedListDropPresentation.swift`)
+  reads the system's spring-loading preference from the global defaults domain, which the privacy
+  manifest's UserDefaults reason `CA92.1` (the app's own data) does not cover. If App Store Connect
+  enforces required-reason declarations for the macOS upload, drop that read (use the 0.5 s default,
+  as iOS does) rather than declaring a reason that does not fit.

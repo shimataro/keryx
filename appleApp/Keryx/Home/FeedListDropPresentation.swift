@@ -110,12 +110,15 @@ func feedListInsertTarget(
 /// read from the global defaults domain: `nil` when spring-loading is turned off, otherwise the
 /// configured hover delay before a collapsed folder opens mid-drag. Neither key is written until
 /// the user changes the setting, so an absent key means the system default (enabled, 0.5 s). iOS
-/// has no such setting, so it always gets that default.
+/// has no such setting, so it always gets that default without reading anything: these keys are
+/// written by the system, not the app, which the privacy manifest's UserDefaults reason (CA92.1)
+/// does not cover. macOS still reads them — see the Mac App Store item in
+/// `distribution/app-store/README.md`.
 ///
 /// - Parameter lookup: Reads one defaults key — injectable because every `UserDefaults` instance,
 ///   even a throwaway suite, also searches the global domain this reads, so a test could not
 ///   otherwise isolate itself from the machine's own setting.
-func springLoadingDelay(lookup: (String) -> Any? = { UserDefaults.standard.object(forKey: $0) }) -> Duration? {
+func springLoadingDelay(lookup: (String) -> Any? = systemSpringLoadingDefault) -> Duration? {
     if let enabled = lookup("com.apple.springing.enabled") as? Bool, !enabled {
         return nil
     }
@@ -123,4 +126,13 @@ func springLoadingDelay(lookup: (String) -> Any? = { UserDefaults.standard.objec
     let raw = lookup("com.apple.springing.delay")
     let seconds = (raw as? NSNumber)?.doubleValue ?? (raw as? String).flatMap(Double.init) ?? 0.5
     return .milliseconds(Int((seconds * 1000).rounded()))
+}
+
+/// `springLoadingDelay`'s default lookup: the global defaults domain on macOS, nothing on iOS.
+private func systemSpringLoadingDefault(_ key: String) -> Any? {
+    #if os(macOS)
+    UserDefaults.standard.object(forKey: key)
+    #else
+    nil
+    #endif
 }
