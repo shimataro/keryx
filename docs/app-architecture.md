@@ -392,7 +392,7 @@ each actual opens the copy through differs (JDBC vs. requery's bundled SQLite), 
 
 ### CloudSession / SyncRepository
 
-`CloudSession` provides the current `CloudStorage` (Dropbox / Google Drive / OneDrive on desktop;
+`CloudSession` provides the current `CloudStorage` (Dropbox / OneDrive / Google Drive on desktop;
 the same three on Android, with Google Drive present only where Play services is) and handles
 automatic access-token refresh — except for Android's Google Drive, whose tokens belong to Play
 services rather than to this app, so its provider supplies them itself via

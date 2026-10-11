@@ -10,7 +10,7 @@ RSS reader, Kotlin Multiplatform / Compose Multiplatform).
 ## Project overview
 
 - Local-first, no account required, multi-device sync via the user's own cloud
-  storage (Dropbox / Google Drive / OneDrive — one connected at a time)
+  storage (Dropbox / OneDrive / Google Drive — one connected at a time)
 - Target now: desktop (Windows/macOS/Linux) via Compose Multiplatform. Android/iOS later.
 - State management: androidx.lifecycle ViewModel + Koin, DB: SQLDelight (SQLite, FTS5),
   HTTP: Ktor, i18n: Compose Resources, HTML/XML parsing: ksoup.

@@ -446,7 +446,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 「変更がないときの転送スキップ」参照）は `SyncRepositoryTest` がエンドツーエンドで押さえているが、
 それは `CloudStorage` の Fake に対してのみである。各実プロバイダがメタデータ取得**および自身の書き込み
 レスポンス**から実際に使えるリビジョンを返すことは MockEngine のテストでは証明できないので、接続済みの
-各プロバイダ（Dropbox / Google Drive / OneDrive）ごとに1回、手動で確認する:
+各プロバイダ（Dropbox / OneDrive / Google Drive）ごとに1回、手動で確認する:
 
 - 同期した直後に、双方とも何も変更せずもう一度同期する: DB を転送せずに完了すること。ログに
   `Sync: nothing changed locally or remotely; skipping transfer` が出て、プロバイダ側の履歴にも
@@ -462,7 +462,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
   ダイジェストは前の接続のものであるため）。
 
 クラウドデータの破損からの復旧は実際のクラウド接続がエンドツーエンドで必要なため、接続済みの
-各プロバイダ（Dropbox / Google Drive / OneDrive）ごとに1回、手動で確認する:
+各プロバイダ（Dropbox / OneDrive / Google Drive）ごとに1回、手動で確認する:
 
 - クラウド上の `keryx.db.gz` を任意の非 gzip ファイルに置き換えて同期する: ベル通知に
   「同期データをリセット」（`ResetCloudData`）が出る。実行すると、プロバイダのアプリフォルダに

@@ -17,7 +17,7 @@ Keryx をダウンロード・インストール・利用することにより�
 
 Keryx は無料のソフトウェアです。アカウント登録も、利用料金も、開発者が運営する
 サーバーもありません。端末上でローカルに動作し、任意でユーザー自身が管理する
-クラウドストレージアカウント（Dropbox / Google Drive / OneDrive——Android では Google Drive の
+クラウドストレージアカウント（Dropbox / OneDrive / Google Drive——Android では Google Drive の
 利用に Google Play services の導入・有効化・最新化が必要です）を通じてデータを
 同期できます。詳細は[プライバシーポリシー](PRIVACY.ja.md)を参照してください。
 
@@ -42,16 +42,16 @@ Keryx を利用するには、あなたに適用される法律のもとで、�
 ものです。開発者はそれらのコンテンツを審査・管理・保証するものではなく、内容に
 ついて責任を負いません。
 
-## 任意のサードパーティサービス（Dropbox / Google Drive / OneDrive）
+## 任意のサードパーティサービス（Dropbox / OneDrive / Google Drive）
 
-クラウド同期を有効にした場合、接続先プロバイダー（Dropbox / Google / Microsoft）
+クラウド同期を有効にした場合、接続先プロバイダー（Dropbox / Microsoft / Google）
 自身の利用規約にも従うことになります。開発者はこれらのサービスの当事者ではなく、
 運営もしておらず、その可用性や動作について管理する立場にありません。同期される
 データの詳細は[プライバシーポリシー](PRIVACY.ja.md)のクラウド同期に関する節を
 参照してください。
 
-Dropbox・Google Drive・OneDrive の名称およびロゴは、それぞれの権利者（Dropbox,
-Inc.、Google LLC、Microsoft Corporation）の商標です。これらは接続先として選択
+Dropbox・OneDrive・Google Drive の名称およびロゴは、それぞれの権利者（Dropbox,
+Inc.、Microsoft Corporation、Google LLC）の商標です。これらは接続先として選択
 できるサービスを識別する目的でのみ使用しており、各社による推奨・後援・提携関係
 を示すものではありません。
 

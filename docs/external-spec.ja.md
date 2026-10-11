@@ -10,7 +10,7 @@
 
 - シンプル・スタイリッシュ・高速な UI/UX
 - ローカルファースト（アカウント不要、データは手元に）
-- クラウドストレージ（Dropbox / Google Drive / OneDrive）経由でのデバイス間同期
+- クラウドストレージ（Dropbox / OneDrive / Google Drive）経由でのデバイス間同期
 
 ## 2. 対応プラットフォーム
 
@@ -27,7 +27,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 4. 同期方式
 
-- Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / Google Drive / OneDrive）を同期バスとして
+- Keryx へのアカウント登録なし。ユーザー自身のクラウドストレージ（Dropbox / OneDrive / Google Drive）を同期バスとして
   利用する。有効な接続は常に 1 つで、どのプロバイダーを使うかはユーザーが選択・切替する（同時接続はしない）。
 - 同期ファイルは `keryx.db` の `VACUUM INTO` スナップショットを gzip 圧縮したもの（ローカル専用の
   `articles_fts` 検索索引・4 つの `idx_articles_*` インデックス・`sync_state` テーブルを除く）——
@@ -74,7 +74,7 @@ RSS 2.0 / Atom 1.0（RSS 1.0/RDF も緩く解釈）。JSON Feed は α 以降。
 
 ## 6. セットアップフロー
 
-初回起動でローカルのみ / クラウド同期（Dropbox・Google Drive・OneDrive。Android では Google Drive は
+初回起動でローカルのみ / クラウド同期（Dropbox・OneDrive・Google Drive。Android では Google Drive は
 Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末でのみ表示される、§4 参照）を選択する。クラウド選択時は OAuth 認証後、クラウドに既存データがあれば初回同期で自動的に
 マージ（インポート）される。
 
@@ -416,7 +416,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 
 - 開発者が運営するサーバーはなく、アカウント登録も不要。Keryx が通信するのは利用中の機能に直接
   関係するサーバーのみ（購読中の各フィードとその favicon、更新チェック/ダウンロード用の
-  GitHub、接続している場合のみ Dropbox / Google Drive / OneDrive）で、常に端末から直接行う——
+  GitHub、接続している場合のみ Dropbox / OneDrive / Google Drive）で、常に端末から直接行う——
   完全な一覧は [PRIVACY.ja.md](../PRIVACY.ja.md)「アプリが行う通信」を参照。
   Keryx 自身の通信（クラウド同期・更新チェック・
   更新ダウンロード）は常に HTTPS を使用する。購読フィードは、URL が明示的に `http://` である場合
@@ -425,7 +425,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
   出ている記事の両隣をスワイプで移動できるよう用意しておく（§9）ため、それらの本文は——含まれる
   画像や埋め込みコンテンツも含めて——開く前に、開いたときと同じように取得される。それらが既読に
   なることはない。
-- 各クラウドプロバイダー（Dropbox・Google Drive・OneDrive）のトークンはそれぞれ独立してプラットフォームの
+- 各クラウドプロバイダー（Dropbox・OneDrive・Google Drive）のトークンはそれぞれ独立してプラットフォームの
   セキュアストレージに保存する。macOS: アプリのデータ保護キーチェーン（ファイルへのフォールバックなし）。Windows/Linux は
   Credential Manager / Secret Service（java-keyring 経由）、Snap 版だけはデスクトップの Secret portal から
   得たアプリ専用の鍵で暗号化されたローカルストア（libsecret 経由。java-keyring は使わない）——利用不可時は
@@ -442,7 +442,7 @@ Linux は Look & Feel が解決したフォント、次にデスクトップの�
 | HTTP | Ktor client（desktop は CIO、Android は OkHttp） |
 | RSS/HTML/XML パース | ksoup |
 | シリアライズ / 日時 | kotlinx-serialization / kotlinx-datetime |
-| クラウド同期 | Ktor + Dropbox / Google Drive / OneDrive（Microsoft Graph）REST API（OAuth PKCE + リフレッシュトークン） |
+| クラウド同期 | Ktor + Dropbox / OneDrive（Microsoft Graph）/ Google Drive REST API（OAuth PKCE + リフレッシュトークン） |
 | i18n | Compose Resources |
 | テスト | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
 | ビルド | Gradle 9.7.1（Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / JDK 25 toolchain） |

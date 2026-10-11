@@ -412,7 +412,7 @@ The parallel feed refresh's core concurrency (overlapping fetches + complete per
 - "Refresh all" over many feeds: articles still appear incrementally (feed by feed) rather than all at once at the end, and the final list order is stable.
 - Feed error / 301·308 URL-change / 410 Gone notifications still fire, and missing favicons still fill in after a refresh.
 
-The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-architecture.md](sync-architecture.md)) is covered end to end by `SyncRepositoryTest`, but only against the `CloudStorage` fake — that each real provider actually returns a usable revision from its metadata call *and* from its own write response is not something a MockEngine test can prove. Confirm by hand, once per connected provider (Dropbox / Google Drive / OneDrive):
+The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-architecture.md](sync-architecture.md)) is covered end to end by `SyncRepositoryTest`, but only against the `CloudStorage` fake — that each real provider actually returns a usable revision from its metadata call *and* from its own write response is not something a MockEngine test can prove. Confirm by hand, once per connected provider (Dropbox / OneDrive / Google Drive):
 
 - Sync, then sync again immediately with nothing changed on either side: the second sync completes without transferring the database. The app log shows `Sync: nothing changed locally or remotely; skipping transfer`, and the provider's own activity/version history shows no new revision.
 - Repeat that idle sync several times (or just leave the app running across a few background intervals) and confirm it never starts uploading again on its own — a provider whose write response omitted the revision would silently re-download and re-upload every cycle instead.
@@ -420,7 +420,7 @@ The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-archite
 - Change something on a *second* device, then sync on the first: the download happens and the change appears — the skip must not hide another device's writes.
 - Reconnect the account (disconnect → connect) and confirm the first sync afterwards still works: the stored revision/digest belong to the previous connection.
 
-Cloud-data corruption recovery needs a real cloud connection end to end, so confirm by hand, once per connected provider (Dropbox / Google Drive / OneDrive):
+Cloud-data corruption recovery needs a real cloud connection end to end, so confirm by hand, once per connected provider (Dropbox / OneDrive / Google Drive):
 
 - Replace the cloud `keryx.db.gz` with an arbitrary non-gzip file, then sync: the bell notification offers "同期データをリセット" (`ResetCloudData`). Running it leaves a `keryx-YYYYMMDD-HHMMSS.db.gz.bak` archive in the provider's app folder alongside a freshly re-created `keryx.db.gz` — the old file is not simply deleted.
 - Download `keryx.db.gz`, decompress it, then relax its `feeds` table's `UNIQUE(url)` constraint (SQLite has no `ALTER TABLE ... DROP CONSTRAINT`; recreate the table without it and copy the existing rows across) so a duplicate `url` can actually be inserted, then add a `feeds` row whose `url` duplicates an existing one (only reachable this way — the app's own schema, and the app itself, never produce this), re-compress, re-upload, then sync: the same `ResetCloudData` notification appears — confirms constraint-violating cloud data is treated the same as outright corruption.

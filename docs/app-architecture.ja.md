@@ -388,7 +388,7 @@ drop テーブルとして渡している。
 
 ### CloudSession / SyncRepository
 
-`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / Google Drive / OneDrive、Android も
+`CloudSession` が現在の `CloudStorage`（デスクトップは Dropbox / OneDrive / Google Drive、Android も
 同じ 3 つだが Google Drive は Play 開発者サービスのある端末のみ）を提供し、アクセストークンの自動
 リフレッシュを担う。ただし Android の Google Drive だけは例外で、トークンを所有するのは本アプリでは
 なく Play 開発者サービスであるため、プロバイダ自身が `CloudSession.Provider.accessTokenProvider` で

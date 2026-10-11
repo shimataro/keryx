@@ -77,7 +77,7 @@ The following are **out of scope**:
 - Vulnerabilities in third-party dependencies — please report those upstream to
   the respective project (see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
   You may still let us know so we can bump the dependency.
-- Vulnerabilities in Dropbox, Google Drive, OneDrive, or the operating system's own
+- Vulnerabilities in Dropbox, OneDrive, Google Drive, or the operating system's own
   credential storage (including the Android Keystore) — report those to the respective vendor.
 - Issues that require a device already compromised by an attacker with local
   access or elevated privileges.
@@ -89,7 +89,7 @@ Keryx is designed to minimize its attack surface:
 
 - **No accounts and no developer-operated server.** There is no backend the
   developer controls; the app talks only to the feeds you subscribe to, an allowlisted GitHub host for
-  update checks/downloads (see below), and, if you opt in, directly to Dropbox, Google Drive, or OneDrive.
+  update checks/downloads (see below), and, if you opt in, directly to Dropbox, OneDrive, or Google Drive.
 - **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
   platform's secure credential storage: on macOS, the app's own data-protection Keychain, with no
   fallback to a file (if a token cannot be saved there, the app tells you, and the account has to be

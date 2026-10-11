@@ -533,7 +533,7 @@ self-replace 成果物の掃除——を足すだけで、残りは `runStartupM
 
 1. キャッシュ削除（`cleanUpArticleCacheIfDue`。前回から 24 時間以上経過時）。
 2. クラウドプロバイダーに接続済みなら初回同期（`SyncRepository.sync(SyncTrigger.AUTOMATIC)`）——
-   デスクトップは Dropbox / Google Drive / OneDrive、Android も同じ 3 種（ただし Google Drive は
+   デスクトップは Dropbox / OneDrive / Google Drive、Android も同じ 3 種（ただし Google Drive は
    Play 開発者サービスが利用できる環境のみ）。起動時であっても前述の
    `SyncTrigger.AUTOMATIC` のゲートを迂回するわけではなく、`autoSyncSuspended` が真の間は、
    この呼び出しでダウンロードもマージもアップロードも行われない。
