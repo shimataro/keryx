@@ -181,9 +181,10 @@ contacted.
   storage (this also clears the app's cache). On iOS and iPadOS, delete the app (this
   removes its container and cache); because iOS may keep Keychain items after an app is
   deleted, disconnect cloud sync in Settings first: Keryx then attempts to remove the stored
-  tokens and, for Dropbox and Google Drive, to revoke them. If either step fails — and always
-  for OneDrive, which offers no way for the app to revoke its token — remove Keryx's access
-  from the provider account's app permissions (for OneDrive, your Microsoft account's).
+  tokens and, for Dropbox and Google Drive, to revoke them. Keryx cannot confirm that either
+  step worked (an expired token, for one, cannot be revoked), so to be certain, also remove
+  Keryx's access from the provider account's app permissions — always for OneDrive, which offers
+  no way for the app to revoke its token (use your Microsoft account's).
 - See "Optional cloud sync" above for how to remove data from your cloud storage
   account.
 
