@@ -127,6 +127,27 @@ struct ReaderNavigationGateTests {
         #expect(second.decisions == [.cancel])
     }
 
+    // MARK: - Kind
+
+    @Test
+    func aNavigationInsideAnIframeIsASubframeWhateverStartedIt() {
+        #expect(ReaderNavigationGate.Kind(targetIsMainFrame: false, isLinkActivated: true) == .subframe)
+        #expect(ReaderNavigationGate.Kind(targetIsMainFrame: false, isLinkActivated: false) == .subframe)
+    }
+
+    @Test
+    func aLinkClickTargetingTheMainFrameOrANewWindowIsAMainFrameClick() {
+        #expect(ReaderNavigationGate.Kind(targetIsMainFrame: true, isLinkActivated: true) == .mainFrameClick)
+        // `target="_blank"`: no target frame.
+        #expect(ReaderNavigationGate.Kind(targetIsMainFrame: nil, isLinkActivated: true) == .mainFrameClick)
+    }
+
+    @Test
+    func anyOtherMainFrameOrNewWindowNavigationIsMainFrameOther() {
+        #expect(ReaderNavigationGate.Kind(targetIsMainFrame: true, isLinkActivated: false) == .mainFrameOther)
+        #expect(ReaderNavigationGate.Kind(targetIsMainFrame: nil, isLinkActivated: false) == .mainFrameOther)
+    }
+
     // MARK: - Top-level navigations
 
     private let otherSiteUrl = URL(string: "https://other.example.org/landing")!

@@ -38,6 +38,18 @@ final class ReaderNavigationGate {
         /// A top-level navigation nobody clicked: a script setting `location`, a meta refresh, a
         /// form submission, a reload.
         case mainFrameOther
+
+        /// Reduces a `WKNavigationAction`: `targetIsMainFrame` is its `targetFrame?.isMainFrame`
+        /// (`nil` for no target frame — `target="_blank"`, `window.open` — which counts as the main
+        /// frame, since it would open a new top-level page), `isLinkActivated` whether its
+        /// `navigationType` is `.linkActivated`.
+        init(targetIsMainFrame: Bool?, isLinkActivated: Bool) {
+            if targetIsMainFrame == false {
+                self = .subframe
+            } else {
+                self = isLinkActivated ? .mainFrameClick : .mainFrameOther
+            }
+        }
     }
 
     typealias DecisionHandler = @MainActor (Decision) -> Void

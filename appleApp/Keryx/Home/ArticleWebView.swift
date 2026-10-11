@@ -52,11 +52,10 @@ struct ArticleWebView {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            // No target frame (`target="_blank"`, `window.open`) counts as the main frame: it would
-            // open a new top-level page.
-            let kind: ReaderNavigationGate.Kind = navigationAction.targetFrame?.isMainFrame == false
-                ? .subframe
-                : (navigationAction.navigationType == .linkActivated ? .mainFrameClick : .mainFrameOther)
+            let kind = ReaderNavigationGate.Kind(
+                targetIsMainFrame: navigationAction.targetFrame?.isMainFrame,
+                isLinkActivated: navigationAction.navigationType == .linkActivated
+            )
             gate.decide(url: navigationAction.request.url, kind: kind) { decision in
                 switch decision {
                 case let .openInBrowser(url):
