@@ -106,8 +106,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
     target — bitmap assets (`app_icon.png`, `dropbox.png`, `google_drive.png`, the tray PNGs) are unaffected)
     The cloud providers' marks are the exception to "icons are VectorDrawable XML": `dropbox.png` and
-    `google_drive.png` are the providers' own official logos, byte for byte (Dropbox's "Glyph" from its Brand
-    Partner Toolkit, Google Drive's 2026 color logo from developers.google.com/drive/branding, both 128 px),
+    `google_drive.png` are the providers' own official logos, pixel for pixel (Dropbox's "Glyph" from its Brand
+    Partner Toolkit, recompressed losslessly with `optipng`; Google Drive's 2026 color logo from
+    developers.google.com/drive/branding; both 128 px),
     because both providers allow only their approved files, unmodified and untinted. They are PNGs because PNG is
     the one format Compose (every target) and the Apple app (`project.yml` references the same files in place) both
     read directly. OneDrive has no logo file: Microsoft licenses its logos and icons separately, so its row shows

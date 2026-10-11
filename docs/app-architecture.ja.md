@@ -96,8 +96,8 @@
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
     *ベクター*形式——ビットマップ資産（`app_icon.png`、`dropbox.png`、`google_drive.png`、トレイの PNG 群）は対象外）
     クラウド連携先のマークは「アイコンは VectorDrawable XML」の例外で、`dropbox.png` と `google_drive.png` は各社の
-    公式ロゴそのもの（Dropbox は Brand Partner Toolkit の「Glyph」、Google Drive は developers.google.com/drive/branding の
-    2026 年版カラーロゴ。どちらも 128 px）。両社とも、承認済みのファイルを改変・着色せずに使うことだけを認めているため。
+    公式ロゴと画素単位で同一（Dropbox は Brand Partner Toolkit の「Glyph」を `optipng` で可逆に再圧縮したもの、
+    Google Drive は developers.google.com/drive/branding の 2026 年版カラーロゴ。どちらも 128 px）。両社とも、承認済みのファイルを改変・着色せずに使うことだけを認めているため。
     PNG にしているのは、Compose（全ターゲット）と Apple アプリ（`project.yml` が同じファイルをその場で参照する）の
     どちらも直接読める唯一の形式だから。OneDrive にはロゴのファイルがない: Microsoft はロゴとアイコンを別途ライセンス
     しているため、OneDrive の行は汎用の雲アイコンと文字の「OneDrive」で表す。マークを選ぶ場所は
