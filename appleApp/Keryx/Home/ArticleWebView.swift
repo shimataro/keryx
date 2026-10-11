@@ -23,9 +23,8 @@ struct ArticleWebView {
         // SwiftUI calls update on every re-evaluation; reloading an unchanged document would reset
         // the scroll position.
         guard html != coordinator.loadedHtml else { return }
-        coordinator.loadedHtml = html
-        coordinator.gate.beginDocumentLoad()
-        coordinator.documentNavigation = webView.loadHTMLString(html, baseURL: ReaderNavigationGate.documentBaseURL)
+        coordinator.reloadedHtml = nil
+        coordinator.load(html, in: webView)
     }
 
     /// Cancels a link activation no person caused — a feed body's or an embed's script calling
@@ -68,11 +67,32 @@ struct ArticleWebView {
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
         var loadedHtml: String?
+        /// The document `load` last retried after a foreign commit replaced it, so a page that keeps
+        /// replacing itself is retried once rather than forever.
+        var reloadedHtml: String?
         /// The navigation `loadHTMLString` started for the current document, so only its commit or
         /// failure ends the gate's wait (another WebView load, or a superseded one, must not).
         var documentNavigation: WKNavigation?
 
+        /// Loads `html` as the reader's document. The gate cannot tell a previous article's script
+        /// navigating to `about:blank` from this load while it is in flight, so `didCommit` reloads
+        /// the document if such a navigation replaced it.
+        func load(_ html: String, in webView: WKWebView) {
+            loadedHtml = html
+            gate.beginDocumentLoad()
+            documentNavigation = webView.loadHTMLString(html, baseURL: ReaderNavigationGate.documentBaseURL)
+            // No navigation was started, so nothing will ever end the wait.
+            if documentNavigation == nil { gate.endDocumentLoad() }
+        }
+
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            if navigation !== documentNavigation, let html = loadedHtml, reloadedHtml != html {
+                // Something other than our document committed (a script's `about:blank` slipped
+                // through while the load was in flight), so the article is gone: put it back.
+                reloadedHtml = html
+                load(html, in: webView)
+                return
+            }
             endDocumentLoad(of: navigation)
         }
 
