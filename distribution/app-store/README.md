@@ -37,6 +37,22 @@ Two metadata rules (App Review Guidelines 2.3.7 and 2.3.10) shape the text:
 | Marketing URL | <https://keryx.merc.works/> (Japanese: <https://keryx.merc.works/ja/>) |
 | Privacy Policy URL | <https://keryx.merc.works/privacy> (Japanese: <https://keryx.merc.works/ja/privacy>) |
 
+## App record (App Store Connect ▸ Apps ▸ New App)
+
+One record covers iOS and macOS: all platforms in a record share the bundle ID, and each platform gets its
+own page of metadata ([Add a new app](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app)).
+The Account Holder must have signed the latest agreement, and the person adding the app needs the Account
+Holder, App Manager or Admin role.
+
+| Field | Value | Notes (from Apple's [App information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information) reference) |
+| --- | --- | --- |
+| Platforms | iOS, macOS | |
+| Name | `Keryx` | 2–30 characters; editable until the app is submitted for review |
+| Primary language | English (U.S.) | The fallback for metadata a locale doesn't provide; changeable at any time. Japanese is added as a localization |
+| Bundle ID | `works.merc.keryx` | Must match the Xcode project; can't be changed after a build is uploaded |
+| SKU | `keryx` | An internal tracking ID, not shown to customers; letters, numbers, hyphens, periods and underscores, not starting with a hyphen, period or underscore; **can't be changed once the app is added** |
+| User access | Full Access | Every user on the team can see the app (Limited Access would restrict it to chosen users) |
+
 ## Answers to App Store Connect questions
 
 - **App Privacy ("nutrition label"): Data Not Collected.** There is no developer server, no
