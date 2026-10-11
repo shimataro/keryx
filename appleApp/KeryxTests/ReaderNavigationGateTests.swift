@@ -63,6 +63,7 @@ struct ReaderNavigationGateTests {
     func theDocumentsOwnLoadIsNeverHeld() {
         let gate = ReaderNavigationGate()
         gate.update(documentID: "doc", outboundLinks: nil)
+        gate.beginDocumentLoad()
         let own = Recorder(), missing = Recorder()
 
         gate.decide(url: documentUrl, kind: .mainFrameOther, own.handler())
@@ -218,13 +219,53 @@ struct ReaderNavigationGateTests {
     }
 
     @Test
-    func theDocumentsOwnLoadIsAllowedWhateverItsKind() {
+    func theDocumentsOwnLoadIsAllowedWhileItIsInFlight() {
+        let gate = ReaderNavigationGate()
+        gate.update(documentID: "doc", outboundLinks: links)
+        gate.beginDocumentLoad()
+        let recorder = Recorder()
+
+        gate.decide(url: documentUrl, kind: .mainFrameOther, recorder.handler())
+
+        #expect(recorder.decisions == [.allow])
+    }
+
+    @Test
+    func aLaterScriptNavigationToBlankIsDropped() {
+        let gate = ReaderNavigationGate()
+        gate.update(documentID: "doc", outboundLinks: links)
+        gate.beginDocumentLoad()
+        gate.endDocumentLoad()
+        let recorder = Recorder()
+
+        // `location = "about:blank"` after the document committed would blank the article.
+        gate.decide(url: documentUrl, kind: .mainFrameOther, recorder.handler())
+
+        #expect(recorder.decisions == [.cancel])
+    }
+
+    @Test
+    func blankIsDroppedWhenNoDocumentLoadWasAnnounced() {
         let gate = ReaderNavigationGate()
         gate.update(documentID: "doc", outboundLinks: links)
         let recorder = Recorder()
 
         gate.decide(url: documentUrl, kind: .mainFrameOther, recorder.handler())
 
-        #expect(recorder.decisions == [.allow])
+        #expect(recorder.decisions == [.cancel])
+    }
+
+    @Test
+    func aClickIsNeverTakenForTheDocumentLoadEvenWhileOneIsInFlight() {
+        let gate = ReaderNavigationGate()
+        gate.update(documentID: "doc", outboundLinks: links)
+        gate.beginDocumentLoad()
+        let recorder = Recorder()
+
+        gate.decide(url: documentUrl, kind: .mainFrameClick, recorder.handler())
+
+        // Not allowed in place; the click is handed to the external-browser path, which refuses a
+        // non-http(s) URL.
+        #expect(recorder.decisions == [.openInBrowser(documentUrl)])
     }
 }

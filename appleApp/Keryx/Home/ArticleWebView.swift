@@ -34,7 +34,8 @@ struct ArticleWebView {
         // the scroll position.
         guard html != coordinator.loadedHtml else { return }
         coordinator.loadedHtml = html
-        webView.loadHTMLString(html, baseURL: ArticleNavigationPolicy.documentBaseURL)
+        coordinator.gate.beginDocumentLoad()
+        coordinator.documentNavigation = webView.loadHTMLString(html, baseURL: ArticleNavigationPolicy.documentBaseURL)
     }
 
     /// Cancels a link activation no person caused — a feed body's or an embed's script calling
@@ -79,6 +80,23 @@ struct ArticleWebView {
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
         var loadedHtml: String?
+        /// The navigation `loadHTMLString` started for the current document, so only its commit or
+        /// failure ends the gate's wait (another WebView load, or a superseded one, must not).
+        var documentNavigation: WKNavigation?
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            endDocumentLoad(of: navigation)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            endDocumentLoad(of: navigation)
+        }
+
+        private func endDocumentLoad(of navigation: WKNavigation?) {
+            guard let navigation, navigation === documentNavigation else { return }
+            gate.endDocumentLoad()
+            documentNavigation = nil
+        }
 
         func webView(
             _ webView: WKWebView,

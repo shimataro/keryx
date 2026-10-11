@@ -60,6 +60,9 @@ final class ReaderNavigationGate {
     /// `nil` while the current document's links are still being extracted.
     private(set) var outboundLinks: Set<String>? = []
     private var pending: [(url: URL?, kind: Kind, handler: DecisionHandler)] = []
+    /// Whether the reader's own `loadHTMLString` navigation is in flight. Only then is a top-level
+    /// `about:blank` the document itself; at any other time it is a script replacing the page.
+    private var awaitingDocumentLoad = false
 
     /// How many decisions are currently held (for tests).
     var pendingCount: Int { pending.count }
@@ -82,19 +85,30 @@ final class ReaderNavigationGate {
         let held = pending
         pending = []
         for decision in held {
-            decision.handler(Self.decision(url: decision.url, kind: decision.kind, outboundLinks: links))
+            decision.handler(self.decision(url: decision.url, kind: decision.kind, outboundLinks: links))
         }
+    }
+
+    /// Marks the start of the reader's own document load; call right before `loadHTMLString`.
+    func beginDocumentLoad() {
+        awaitingDocumentLoad = true
+    }
+
+    /// Marks the document load as committed or failed, so a later `about:blank` is no longer taken
+    /// for it.
+    func endDocumentLoad() {
+        awaitingDocumentLoad = false
     }
 
     /// Decides a navigation to `url` (of `kind`) now if the link set is known, or holds it until it is.
     ///
     /// The document's own `loadHTMLString` navigation (`about:blank`, see
-    /// `ArticleNavigationPolicy.documentBaseURL`) is never held — holding it would keep the document
+    /// `ArticleNavigationPolicy.documentBaseURL`, announced by `beginDocumentLoad`) is never held — holding it would keep the document
     /// from loading until its links were extracted, the very wait this gate exists to remove.
     func decide(url: URL?, kind: Kind, _ handler: @escaping DecisionHandler) {
         if let links = outboundLinks {
-            handler(Self.decision(url: url, kind: kind, outboundLinks: links))
-        } else if Self.isDocumentLoad(url) {
+            handler(decision(url: url, kind: kind, outboundLinks: links))
+        } else if isDocumentLoad(url, kind: kind) {
             handler(.allow)
         } else {
             pending.append((url, kind, handler))
@@ -112,8 +126,8 @@ final class ReaderNavigationGate {
         for entry in held { entry.handler(decision) }
     }
 
-    private static func decision(url: URL?, kind: Kind, outboundLinks: Set<String>) -> Decision {
-        if isDocumentLoad(url) { return .allow }
+    private func decision(url: URL?, kind: Kind, outboundLinks: Set<String>) -> Decision {
+        if isDocumentLoad(url, kind: kind) { return .allow }
         // Nobody clicked: never open anything, even a URL that is one of the article's own links.
         if kind == .mainFrameOther { return .cancel }
         if let url, ArticleNavigationPolicy.isOutboundClick(url: url, outboundLinks: outboundLinks) {
@@ -126,7 +140,11 @@ final class ReaderNavigationGate {
         }
     }
 
-    private static func isDocumentLoad(_ url: URL?) -> Bool {
+    /// The reader's own load: a nobody-clicked top-level navigation to the blank base URL while
+    /// `loadHTMLString` is in flight. A script setting `location = "about:blank"` later, or a click on
+    /// such a link, is not it.
+    private func isDocumentLoad(_ url: URL?, kind: Kind) -> Bool {
+        guard awaitingDocumentLoad, kind == .mainFrameOther else { return false }
         guard let url else { return true }
         return url == ArticleNavigationPolicy.documentBaseURL || url.absoluteString == "about:blank"
     }
