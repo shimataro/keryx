@@ -122,6 +122,10 @@ targets:
         # Platform/BackgroundRefresh.swift.
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [works.merc.keryx.refresh]
+        # An opened .opml is read once, in place, through a coordinated read (App/AppModel.swift's
+        # importOpenedOpml), so iOS needn't copy it into the app's Inbox first. Declaring it also
+        # answers upload validation's ITMS-90737 for the CFBundleDocumentTypes below.
+        LSSupportsOpeningDocumentsInPlace: true
         # macOS-only Sparkle keys (iOS ignores them). SPARKLE_PUBLIC_ED_KEY comes from
         # Config/Shared.xcconfig; while it is empty the updater stays off (Update/AppUpdater.swift).
         SUFeedURL: https://github.com/shimataro/keryx/releases/latest/download/appcast.xml

@@ -1744,7 +1744,9 @@ without the startup sequence (see [background-update.md](background-update.md)).
 `importOpenedOpml(xml)` wraps `presentation/settings/OpmlOpenHandler.kt`'s `requestOpenedOpmlImport`,
 for a document the app was opened with (`null` when it could not be read; mirrors desktop's/Android's
 own ".opml file association" handling): it only requests the import, which Settings ▸ Data carries out
-once Home shows it.
+once Home shows it. The Apple app opens such a document in place (`LSSupportsOpeningDocumentsInPlace`), so
+`AppModel.importOpenedOpml(url:)` reads the original file — which may live in iCloud Drive and not be
+downloaded yet — through `NSFileCoordinator` before handing its text over.
 `completeConnect(type, tokens)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:

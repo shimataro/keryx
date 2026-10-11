@@ -154,6 +154,19 @@ final class AppModel {
         // requiring it to return `true` here silently dropped every normal file-association open.
         let didStartAccessing = url.startAccessingSecurityScopedResource()
         defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
-        sdk.importOpenedOpml(xml: try? String(contentsOf: url, encoding: .utf8))
+        sdk.importOpenedOpml(xml: Self.readCoordinated(url))
+    }
+
+    /// Reads a document opened in place (`LSSupportsOpeningDocumentsInPlace`): iOS hands over the
+    /// original file — possibly in iCloud Drive or another file provider, possibly not downloaded
+    /// yet — so the read goes through file coordination, which waits for the provider to make the
+    /// file available, as Apple requires for in-place documents. `nil` when it can't be read.
+    private static func readCoordinated(_ url: URL) -> String? {
+        var coordinationError: NSError?
+        var text: String?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readURL in
+            text = try? String(contentsOf: readURL, encoding: .utf8)
+        }
+        return text
     }
 }
