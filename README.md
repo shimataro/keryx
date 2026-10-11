@@ -76,8 +76,8 @@ by installing it itself there.
   - [ ] iPadOS
 - Cloud storage support
   - [x] [Dropbox](https://www.dropbox.com/)
-  - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
+  - [x] [Google Drive](https://drive.google.com/)
 - Multilingual UI
   - [x] English
   - [x] Japanese

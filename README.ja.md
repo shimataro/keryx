@@ -75,8 +75,8 @@ Google Play 経由の Android インストールについては、代わりに�
   - [ ] iPadOS
 - 対応クラウドストレージ
   - [x] [Dropbox](https://www.dropbox.com/)
-  - [x] [Google Drive](https://drive.google.com/)
   - [x] [OneDrive](https://onedrive.live.com/)
+  - [x] [Google Drive](https://drive.google.com/)
 - 多言語対応
   - [x] 英語
   - [x] 日本語
