@@ -166,9 +166,9 @@ Android には計装テストスイートが 3 つある。CI に組み込まれ
 
 | スイート | タスク | 対象 | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ 毎プッシュ（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | 実際のバンドル SQLite に対する `DatabaseMerger`/`DatabaseSnapshot` | ✓ ブランチへの push ごと（`android-instrumented-test` ジョブ。下の行と同じエミュレータ上） |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | 他に置き場のない `androidMain` 専用ロジック（SAF の書き込み、Keystore のトークン保存、同意画面リクエストのスロット） | ✗ ローカルのみ |
-| `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ 毎プッシュ |
+| `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI（長押しジェスチャ、検索バー） | ✓ ブランチへの push ごと |
 
 どちらも実機または起動中のエミュレータが必要 — AVD（`<name>`）の作り方は
 [setup.ja.md](setup.ja.md) を参照:
@@ -208,7 +208,7 @@ meta-data、Play 開発者サービスをリンクするかどうかだけであ
 
 「`github`/`play` の **release** マニフェストの違いがその権限*だけ*である」こと —— そして `fdroid` が
 その権限も、`SELF_UPDATE_CHECK` のオプトアウト以外のものも持たないこと —— 自体は、`ci.yml` の
-「Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)」ステップが毎 push で検証している。
+「Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)」ステップがブランチへの push のたびに検証している。
 `:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest`/`processFdroidReleaseManifest`
 を実行し、**マージ後の**マニフェスト 3 つを grep するので、flavor のソースセットではなく AGP が実際に生成したものに対する
 アサーションになる。マージ後であることが重要で、どちらの flavor の `AndroidManifest.xml` も変えずに
@@ -227,7 +227,7 @@ Google Play に弾かれるケースである。このチェックはマニフ�
 AGP の `build` ライフサイクルは `androidTest` ソースセットに対して静的解析タスクの
 `lintAnalyzeDebugAndroidTest` のみを実行し、`compileDebugAndroidTestKotlin` /
 `assembleDebugAndroidTest` は実行しない。ただし `.github/workflows/ci.yml` の
-`android-instrumented-test` ジョブがプッシュごとにこのスイートを実行している。
+`android-instrumented-test` ジョブがブランチへの push ごとにこのスイートを実行している。
 
 プロジェクト全体で見ると——
 

@@ -145,9 +145,9 @@ into CI:
 
 | Suite | Task | Covers | CI |
 | --- | --- | --- | --- |
-| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every push (`android-instrumented-test` job, same emulator as the row below) |
+| `shared/src/androidDeviceTest/` | `:shared:connectedAndroidDeviceTest` | `DatabaseMerger`/`DatabaseSnapshot` against the real bundled SQLite | ✓ every branch push (`android-instrumented-test` job, same emulator as the row below) |
 | `composeApp/src/androidDeviceTest/` | `:composeApp:connectedAndroidDeviceTest` | The `androidMain`-only logic that has nowhere else to live (SAF writes, Keystore token storage, the consent-screen request slot) | ✗ local only |
-| `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every push |
+| `androidApp/src/androidTest/` | `:androidApp:connectedGithubDebugAndroidTest` | Compose UI (long-press gesture, search bar) | ✓ every branch push |
 
 Both need a connected device or a running emulator — see [setup.md](setup.md) for how to create an
 AVD (`<name>` below):
@@ -185,7 +185,7 @@ sole remaining debug variant.
 
 That the `github`/`play` **release** manifests differ only in that permission — and that `fdroid`
 carries neither it nor anything but the `SELF_UPDATE_CHECK` opt-out — is itself checked on every
-push, by `ci.yml`'s "Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
+branch push, by `ci.yml`'s "Verify REQUEST_INSTALL_PACKAGES is github-only (Linux)" step: it runs
 `:androidApp:processGithubReleaseManifest`/`processPlayReleaseManifest`/`processFdroidReleaseManifest`
 and greps the three **merged** manifests, so the assertion holds against what AGP actually produces rather than against the flavor
 source sets. Merged output is what matters here — a transitive library manifest could reintroduce
@@ -202,7 +202,7 @@ the same command and a `grep`; the `github` classpath must show them, the `fdroi
 Like `androidDeviceTest`, this is not part of `./gradlew build` — AGP's `build` lifecycle for an
 application module only runs `lintAnalyzeDebugAndroidTest` (static analysis) on the `androidTest`
 source set, not `compileDebugAndroidTestKotlin`/`assembleDebugAndroidTest`. A dedicated
-`android-instrumented-test` job in `.github/workflows/ci.yml` runs this suite on every push.
+`android-instrumented-test` job in `.github/workflows/ci.yml` runs this suite on every branch push.
 
 Project-wide, this is on top of the two Android suites above:
 

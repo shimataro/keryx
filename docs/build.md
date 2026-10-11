@@ -303,7 +303,11 @@ every configuration links Release. On a clean checkout, though, Xcode checks tha
 XCFramework exists while planning the build — before the prebuild script has run — and
 `xcodegen generate` refuses to run while the String Catalog it lists as a source is missing, so run
 `./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog` once
-first (CI does the same). See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
+first (CI does the same). CI then sets `KERYX_SKIP_SHARED_BUILD=1`, which makes the prebuild
+script only check that both outputs exist instead of running Gradle: CI restores the XCFramework
+from its cache when `shared/` is unchanged, and such a restored framework has no Gradle task
+history, so the prebuild's Gradle run would otherwise relink every slice. Leave it unset for local
+and release builds. See [app-architecture.md](app-architecture.md)'s "The `appleApp/`
 Xcode project" for why the dependency is wired through `dependencies:` (framework linking) rather
 than `FRAMEWORK_SEARCH_PATHS` or Kotlin/Native's `embedAndSignAppleFrameworkForXcode`, and why
 `KeryxTests` is a standalone (non-hosted) test bundle.
@@ -642,8 +646,8 @@ and `fdroid`, same `applicationId`:
   (`androidApp/src/fdroid/AndroidManifest.xml`) also carries the `works.merc.keryx.SELF_UPDATE_CHECK`
   meta-data set to `false`, which turns the in-app update check off whichever installer delivered
   the APK, and omits `REQUEST_INSTALL_PACKAGES` like `play` does. `ci.yml` checks both facts on
-  every push (merged manifest, and that the flavor's runtime classpath holds no `com.google.android.gms`
-  / `com.google.firebase` / `:androidGms`).
+  every branch push (merged manifest, and that the flavor's runtime classpath holds no
+  `com.google.android.gms` / `com.google.firebase` / `:androidGms`).
 
 `composeApp` (a KMP library module) has no flavor dimension of its own and is consumed identically
 by every flavor — which is exactly why `:androidGms` has to be a module of its own: a Play services
@@ -1112,7 +1116,7 @@ Play re-signed it that way — never mind that the AAB was uploaded signed with 
 entirely.
 
 `ci.yml`'s ordinary build job never receives these secrets — deliberately, since it runs on every
-push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
+branch push and never publishes anything. AGP wires `assembleRelease` into `:androidApp`'s default
 `build` task regardless of whether the artifact is ever consumed (`bundlePlayRelease` is not part of any
 aggregate lifecycle task, which is why `release.yml` above invokes it explicitly), but
 `androidApp/build.gradle.kts`'s `signingConfigs` block treats a completely unconfigured signing
@@ -1383,7 +1387,7 @@ What must stay true for F-Droid's build to reproduce the release APK:
 to the dependency graph must preserve. Run it in F-Droid's own `buildserver` image
 (`registry.gitlab.com/fdroid/fdroidserver:buildserver`) after touching `androidApp`, `:androidGms`
 or the Android dependencies; `ci.yml`'s "Verify the fdroid flavor has no Google Play services (Linux)"
-step catches the most likely regression on every push, but not a new proprietary dependency
+step catches the most likely regression on every branch push, but not a new proprietary dependency
 unrelated to Play services.
 
 ## Signing & Notarization (Compose macOS build)

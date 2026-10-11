@@ -770,8 +770,8 @@ docs-only commit (`docs/build.md` / `docs/build.ja.md`).
 - **Not a change to the `packageDmg` CI step itself** — that step has been stable since it was
   introduced in #71.
 - **Not concurrent `packageDmg` runs on the same runner.** GitHub Actions runners are single-use
-  VMs and no `concurrency:` group serializes/cancels pushes, so a stale mount can't come from a
-  second run sharing the same disk.
+  VMs, so even runs that `ci.yml`'s `concurrency:` setting lets overlap (any two v* runs, or runs
+  on different branches) never share a disk, and a stale mount can't come from a second run.
 
 jpackage builds a DMG by mounting a scratch disk image, copying the app bundle in, and detaching it
 again; the orphan-process cleanup in the same log (`Terminate orphan process: pid (diskimages-help)`)

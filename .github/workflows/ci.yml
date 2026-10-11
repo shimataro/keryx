@@ -1,7 +1,19 @@
 name: CI
 
+# Branches only: a release tag points at a commit its version branch already ran this on, and a
+# second full run would only compete with release.yml for the same runners.
 on:
-  - push
+  push:
+    branches:
+      - '**'
+
+# A newer push to the same feature branch supersedes the run in progress. Version branches (v*)
+# keep every run, so each integrated commit has its own result and saves its own caches: each v*
+# run gets a group of its own, because a shared group holds only one pending run and a newer push
+# would replace it even with cancel-in-progress off.
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/heads/v') && format('ci-{0}-{1}', github.ref, github.run_id) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/v') }}
 
 permissions:
   contents: read
@@ -320,6 +332,11 @@ jobs:
     env:
       DROPBOX_APP_KEY: ""
       ONEDRIVE_CLIENT_ID: ""
+      # "Verify Apple framework" below always leaves the XCFramework and the String Catalog in
+      # place before any xcodebuild run, so Scripts/build-shared.sh's prebuild only checks they
+      # exist. Without this, a framework restored from the cache below (which has no Gradle task
+      # history) would be relinked from scratch by the prebuild's own Gradle run.
+      KERYX_SKIP_SHARED_BUILD: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -345,9 +362,37 @@ jobs:
       # there — and before `xcodegen generate`, which otherwise generates the project without the
       # framework reference. The String Catalog project.yml lists as a source is generated here
       # too, since `xcodegen generate` refuses a missing source path outright. The prebuild's own
-      # Gradle run is then up-to-date.
+      # Gradle run is then skipped (KERYX_SKIP_SHARED_BUILD above).
+      #
+      # Linking the three release slices takes about 10 minutes and Kotlin/Native link tasks never
+      # come from the Gradle build cache, so the XCFramework itself is cached, keyed on everything
+      # that goes into it: shared/'s sources, the root build configuration (gradle/ includes
+      # libs.versions.toml, i.e. the Kotlin and SKIE versions) and the Xcode version, whose SDK and
+      # linker the link uses. Exact matches only — no restore-keys — since a framework built from
+      # different sources would let a change to shared/ pass here without ever being linked.
+      # The key is evaluated after the test step above, and hashFiles ignores .gitignore, so it lists
+      # shared/'s tracked inputs only — hashing shared/** would pick up the tests' output under
+      # shared/build/ and change the key on every run.
+      - name: Resolve Xcode version
+        id: xcode
+        run: echo "version=$(xcodebuild -version | tr '\n' ' ' | tr -s ' ' '-' | sed 's/-$//')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Apple framework cache
+        id: xcframework-cache
+        uses: actions/cache@v6
+        with:
+          path: shared/build/XCFrameworks/release/KeryxShared.xcframework
+          key: keryx-xcframework-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('shared/src/**', 'shared/build.gradle.kts', 'build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', 'gradle/**') }}
+
       - name: Verify Apple framework
-        run: ./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog --no-configuration-cache
+        env:
+          CACHE_HIT: ${{ steps.xcframework-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = "true" ]; then
+            ./gradlew :composeApp:generateStringCatalog --no-configuration-cache
+          else
+            ./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog --no-configuration-cache
+          fi
 
       # Builds the appleApp/ SwiftUI project (XcodeGen-generated from project.yml; the
       # .xcodeproj itself is never committed — see .gitignore) for macOS and iOS Simulator, and
