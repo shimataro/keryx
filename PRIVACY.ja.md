@@ -66,9 +66,9 @@ Android の OS 標準機能「バックアップ」（`allowBackup`）が Keryx 
 無効にできます（設定画面の場所は端末や Android のバージョンによって
 異なります）。
 
-## クラウド同期（任意・Dropbox / Google Drive / OneDrive）
+## クラウド同期（任意・Dropbox / OneDrive / Google Drive）
 
-クラウド同期は既定で無効です。Dropbox / Google Drive / OneDrive のいずれか一方
+クラウド同期は既定で無効です。Dropbox / OneDrive / Google Drive のいずれか一方
 （同時に両方は接続しません）を接続した場合、実際に行われることは以下のとおりです。
 
 - **対応状況**: デスクトップでは3つとも利用できます。Android では Dropbox と
@@ -91,7 +91,7 @@ Android の OS 標準機能「バックアップ」（`allowBackup`）が Keryx 
   認証情報、ローカル全文検索インデックス。これらは各デバイスにそれぞれ独立して
   留まります。
 - **アップロードされるもの**: 検索インデックスを除いたローカルデータベースの
-  スナップショットのコピーが、ユーザー自身の Dropbox / Google Drive / OneDrive 上の
+  スナップショットのコピーが、ユーザー自身の Dropbox / OneDrive / Google Drive 上の
   ファイルとしてアップロードされます。Google Drive の場合、これは `drive.appdata`
   スコープ（通常の Google Drive 画面には表示されず、他のアプリからも見えない、
   アプリ専用の隠しフォルダー）に書き込まれます。Dropbox の場合は標準的なファイルコンテンツスコープを使用します。OneDrive の場合は Microsoft Graph のファイルストレージスコープを使用し、OneDrive 内のアプリ専用フォルダーに保存されます。
@@ -109,12 +109,12 @@ Android の OS 標準機能「バックアップ」（`allowBackup`）が Keryx 
   Keystore が保持する鍵でトークンを暗号化した上でアプリ専用領域のファイルに
   保存し、このファイルは Android の自動バックアップ・機種変更時のデータ移行の
   いずれからも明示的に除外されています。トークンが送信される先は、同期処理に
-  必要な範囲で Dropbox / Google / Microsoft 自身の API のみです。
-- データがユーザーの Dropbox / Google Drive / OneDrive アカウントに置かれた後は、各
+  必要な範囲で Dropbox / Microsoft / Google 自身の API のみです。
+- データがユーザーの Dropbox / OneDrive / Google Drive アカウントに置かれた後は、各
   プロバイダー自身のプライバシーポリシー・利用規約の対象となります。Keryx は
   そこに書き込んだ同期ファイル以上のアクセス・関与を持ちません。
 - 設定画面でクラウド同期を解除すると、以降の同期は即座に停止します。ただし、
-  すでに Dropbox / Google Drive / OneDrive 上にアップロード済みの同期ファイルが自動的に
+  すでに Dropbox / OneDrive / Google Drive 上にアップロード済みの同期ファイルが自動的に
   削除されるわけではありません。削除したい場合は、各クラウドストレージ側で
   ユーザー自身が削除してください。
 
@@ -137,7 +137,7 @@ Keryx が通信する相手は、使用している機能に直接関係する�
   オフにしない限り自動的に、または「アップデートを確認…」を選んだときに——そして、インストールを
   選んだ場合にのみ、そこに示されたアップデートを `github.com` / `*.githubusercontent.com` から
   ダウンロードします。
-- **Dropbox / Google Drive / OneDrive** — クラウド同期を接続している場合のみ、
+- **Dropbox / OneDrive / Google Drive** — クラウド同期を接続している場合のみ、
   上記のとおりです。
 - **記事自体が参照するコンテンツ** — 記事を開くと、その本文の HTML が埋め込む外部
   リソース(画像・動画・SNS 埋め込み・iframe)は、通常の Web ページと同様に、記事

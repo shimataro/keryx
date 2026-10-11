@@ -3,14 +3,15 @@ package works.merc.keryx.app.core
 /**
  * Cloud storage backends the app can support. `id` is persisted in local settings.
  *
- * Declaration order is the UI display order (Dropbox first, Google Drive second) —
- * iterate [entries]/[CloudStorageAvailability.available] rather than relying on any
- * map iteration order for display.
+ * Declaration order is the UI display order — iterate [entries]/[CloudStorageAvailability.available]
+ * rather than relying on any map iteration order for display. Backends offered by every build come
+ * first and Google Drive, the one hidden on some builds/devices (see [CloudStorageAvailability]),
+ * comes last, so hiding it never shifts the position of the others.
  */
 enum class CloudStorageType(val id: String) {
     DROPBOX("dropbox"),
-    GOOGLE_DRIVE("google_drive"),
     ONEDRIVE("onedrive"),
+    GOOGLE_DRIVE("google_drive"),
     ;
 
     companion object {
@@ -45,7 +46,7 @@ internal fun availableCloudStorageTypes(
 ): List<CloudStorageType> = CloudStorageType.entries.filter {
     when (it) {
         CloudStorageType.DROPBOX -> dropbox
-        CloudStorageType.GOOGLE_DRIVE -> googleDrive
         CloudStorageType.ONEDRIVE -> oneDrive
+        CloudStorageType.GOOGLE_DRIVE -> googleDrive
     }
 }

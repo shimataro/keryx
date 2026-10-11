@@ -18,11 +18,13 @@ class CloudStorageAvailabilityTest {
     }
 
     @Test
-    fun preservesCloudStorageTypeDeclarationOrderWhenAllAvailable() {
-        // The UI display order is CloudStorageType's own declaration order — pin it so a future
-        // reordering of the enum (or of this filter) is caught here rather than only visually.
+    fun listsAlwaysOfferedBackendsBeforeGoogleDriveWhenAllAvailable() {
+        // The UI display order is CloudStorageType's own declaration order. Pin it with an explicit
+        // list (comparing against `entries` would follow any reordering of the enum): Google Drive,
+        // the only backend hidden on some builds/devices, comes last so hiding it never shifts the
+        // others.
         assertEquals(
-            CloudStorageType.entries,
+            listOf(CloudStorageType.DROPBOX, CloudStorageType.ONEDRIVE, CloudStorageType.GOOGLE_DRIVE),
             availableCloudStorageTypes(dropbox = true, googleDrive = true, oneDrive = true),
         )
     }

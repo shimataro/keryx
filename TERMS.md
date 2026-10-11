@@ -17,7 +17,7 @@ agree, please don't use the app.
 
 Keryx is free software: no account, no subscription fee, and no server operated by
 the developer. It runs locally on your device and optionally syncs your data through
-a cloud storage account you control (Dropbox, Google Drive, or OneDrive — on Android, Google
+a cloud storage account you control (Dropbox, OneDrive, or Google Drive — on Android, Google
 Drive requires Google Play services to be installed, enabled, and up to date) — see the
 [Privacy Policy](PRIVACY.md) for details on what that involves.
 
@@ -42,16 +42,16 @@ in the app are fetched directly from the third-party sources you subscribe to. T
 developer does not review, control, or endorse that content and is not responsible
 for it.
 
-## Optional third-party services (Dropbox / Google Drive / OneDrive)
+## Optional third-party services (Dropbox / OneDrive / Google Drive)
 
 If you enable cloud sync, you are also bound by the terms of service of the provider
-you connect (Dropbox, Google, or Microsoft, respectively). The developer is not a
+you connect (Dropbox, Microsoft, or Google, respectively). The developer is not a
 party to those services, does not operate them, and has no control over their
 availability or behavior. See the [Privacy Policy](PRIVACY.md)'s cloud sync section
 for what data is involved.
 
-The Dropbox, Google Drive, and OneDrive names and logos are trademarks of their
-respective owners (Dropbox, Inc.; Google LLC; Microsoft Corporation). They are used
+The Dropbox, OneDrive, and Google Drive names and logos are trademarks of their
+respective owners (Dropbox, Inc.; Microsoft Corporation; Google LLC). They are used
 here solely to identify the corresponding service you may choose to connect, and
 their use does not imply endorsement, sponsorship, or affiliation.
 
