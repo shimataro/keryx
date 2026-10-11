@@ -100,8 +100,12 @@ no auto-launch.
 - [ ] Decide the marketing version (`MARKETING_VERSION` in `appleApp/project.yml` is `0.1.0`; a 0.x
   number can read as pre-release software to a reviewer, guideline 2.2).
 - [ ] Verify the example feed in the review notes still resolves.
+- [ ] If [`PRIVACY.md`](../../PRIVACY.md)'s effective date has changed since the last submission,
+  re-check the App Privacy answer, the age-rating answers and the review notes above against it —
+  App Store Connect keeps the old answers and will not notice the policy moved.
 - [ ] Screenshots for iPhone, iPad and Mac (the required sizes change with App Store Connect).
-- [ ] Build with Xcode 26 or later (the minimum SDK for uploads since 2026-04-28), then run
+- [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
+  2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first — then run
   **Validate App** in Organizer: it must report no ITMS-90474 (orientations) and no ITMS-91053
   (privacy manifest) problems. This needs the team's signing identity.
 - [ ] Mac App Store build only: remove the self-updater first — Sparkle, its `SU*` Info.plist keys,
