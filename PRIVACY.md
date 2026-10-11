@@ -2,7 +2,7 @@
 
 [日本語](PRIVACY.ja.md)
 
-**Effective date:** 2026-09-20 · **Applies to:** Keryx (desktop and Android)
+**Effective date:** 2026-10-11 · **Applies to:** Keryx (desktop, Android, and iOS / iPadOS)
 
 Keryx is a local-first RSS reader. This document explains, plainly and completely,
 what data the app handles and where it goes. Keryx is open source — every claim
@@ -39,14 +39,16 @@ data directory (on macOS, inside the app's sandbox container:
 on Windows, `$XDG_DATA_HOME/Keryx` on Linux). On Android, they live in separate
 app-private storage areas that only Keryx can access — `keryx.db` in the app's
 database directory and `local_settings.json` in its internal files directory —
-neither reachable by other apps, and not accessible to you directly without root.
+neither reachable by other apps, and not accessible to you directly without root. On iOS and
+iPadOS, they live in the app's own sandbox container (the Application Support folder inside it), which
+only Keryx can access.
 
 An OS-level cache directory — `~/Library/Containers/works.merc.keryx/Data/Library/Caches/Keryx` on macOS,
 `%LOCALAPPDATA%\Keryx\Cache` on Windows, `$XDG_CACHE_HOME/Keryx` on Linux — stores
 favicon images and the article reader's WebView profile as transient, local
 performance data. On Android, favicon images and the article reader's WebView
-profile live in the app's own private cache area instead, which the OS may clear
-under storage pressure. Either way, this is separate from the application data
+profile live in the app's own private cache area instead (on iOS and iPadOS, the Caches
+folder inside the app's container), which the OS may clear under storage pressure. Either way, this is separate from the application data
 directory above; see "Data retention & deletion" below for how to remove it
 yourself.
 
@@ -62,6 +64,13 @@ Your cloud-sync credentials (below) are explicitly excluded from both. You can t
 this off for Keryx at any time from your device's Android backup settings (the
 exact menu path varies by device and Android version).
 
+### Device backups (iOS and iPadOS)
+
+Like any iOS app's data, Keryx's files are included in your device backups — to your own iCloud
+account, or to your computer — which are channels Keryx's developer has no access to. Keryx does
+not exclude its files from them. Your cloud-sync tokens (below) are kept in the Keychain and are
+not shared through iCloud Keychain; an encrypted device backup may restore them to a new device.
+
 ## Optional cloud sync (Dropbox / OneDrive / Google Drive)
 
 Cloud sync is off by default. If you choose to connect Dropbox, OneDrive, or
@@ -72,7 +81,8 @@ Google Drive (one provider active at a time), here is exactly what happens:
   Google Play services installed, enabled, and up to date (Google's OAuth policy
   for mobile apps rules out reusing the desktop client's redirect-based flow, so
   Android reaches Google Drive through Play services' own authorization API
-  instead — see below).
+  instead — see below). On iOS, iPadOS and macOS, Dropbox and OneDrive are always
+  available and Google Drive uses Google's own client type for Apple apps (see below).
 - **Authentication** uses OAuth 2.0 with PKCE for Dropbox and OneDrive, performed
   **directly between your device and Dropbox's or Microsoft's own servers** — Keryx
   has no server in the middle of this exchange at any point (not for login, not for
@@ -80,7 +90,10 @@ Google Drive (one provider active at a time), here is exactly what happens:
   uses Play services' own `AuthorizationClient`, which likewise runs directly between
   your device and Google, hands out a short-lived access token, and involves neither
   a Keryx-operated server nor a stored refresh token. On desktop, Google Drive uses
-  the same direct OAuth 2.0 PKCE flow as Dropbox and OneDrive.
+  the same direct OAuth 2.0 PKCE flow as Dropbox and OneDrive. On iOS, iPadOS and macOS (the
+  native app), all three providers use that same direct PKCE flow — Google Drive with Google's
+  client type for Apple apps, which needs no client secret — carried out in the system's secure
+  sign-in sheet (`ASWebAuthenticationSession`), so Keryx never sees your password.
 - **What syncs:** your feed subscriptions, folders, tags, cached articles
   (read/starred status included), and global app settings.
 - **What never syncs:** device-local settings (`local_settings.json`), your OAuth
@@ -93,7 +106,7 @@ Google Drive (one provider active at a time), here is exactly what happens:
   that no other app can see. For Dropbox, standard file-content scopes are used.
   For OneDrive, the standard Microsoft Graph file storage scope is used and the
   sync file is stored in an app-specific folder within your OneDrive.
-- **Credential storage:** on macOS, access and refresh tokens are stored in the
+- **Credential storage:** on macOS and on iOS / iPadOS, access and refresh tokens are stored in the
   app's own data-protection Keychain and never written to a file — if the
   Keychain cannot save them, the app tells you, and you connect the account again
   after a restart. On Windows and Linux, they are stored using your operating
@@ -126,13 +139,16 @@ developer:
 
 - **The feeds you subscribe to** — the app fetches each feed's URL periodically (or
   on manual refresh) to check for new articles, using conditional requests so
-  unchanged feeds transfer no content.
+  unchanged feeds transfer no content. On iOS and iPadOS, iOS decides when the app may refresh feeds in
+  the background (at roughly the interval you set in Settings, if the system allows it); new-article
+  notifications are created on the device itself and no push-notification service is involved.
 - **Each feed's own site/favicon** — to display a small site icon next to the feed.
 - **GitHub** (`api.github.com` for an unauthenticated, anonymous release check; `github.com` and
   `*.githubusercontent.com` when you actually download an update) — so the app can tell you when an
   update is available, and fetch it if you choose to install it. No account information, telemetry, or
   identifiers are sent. On Android, this is skipped entirely when Keryx was installed through Google Play
-  (self-update only makes sense for the GitHub-distributed build). On macOS, the check instead reads
+  (self-update only makes sense for the GitHub-distributed build); on iOS and iPadOS, Keryx never contacts
+  GitHub at all — the App Store delivers updates. On macOS, the check instead reads
   the latest release's update feed (`appcast.xml`, from `github.com`) — automatically, unless you turn
   that off in Settings → General, or when you choose **Check for Updates…** — and downloads the update
   it lists from `github.com` / `*.githubusercontent.com` only if you choose to install it.
@@ -161,7 +177,9 @@ contacted.
   favicon cache and the article reader's WebView data), or simply uninstall the app.
   On Android, since these files live in app-private storage you cannot reach
   directly, use uninstall, or Android Settings → Apps → Keryx → Storage → Clear
-  storage (this also clears the app's cache).
+  storage (this also clears the app's cache). On iOS and iPadOS, delete the app (this
+  removes its container and cache); because iOS may keep Keychain items after an app is
+  deleted, disconnect cloud sync in Settings first so the tokens are revoked and removed.
 - See "Optional cloud sync" above for how to remove data from your cloud storage
   account.
 
