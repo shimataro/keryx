@@ -632,9 +632,11 @@ Android で `https://alfalfalfa.com/articles/11110022.html` を開くと、1〜2
 SwiftUI アプリのリーダー（`ReaderNavigationGate`）は、さらにブラウザ化することを拒む：スクリプトは動くが、
 ページ全体を置き換える遷移はその場では読み込まない——クリックによるものは外部ブラウザで開き（http/https のみ）、
 クリックを伴わない最上位の遷移（`location = …`、meta refresh）は破棄し、iframe の中の埋め込み自身の遷移だけを
-読み込む。スクリプトが合成したクリック（`a.click()`）はページ内で取り消すので、通常のケースは防げる。ただし
-完全ではない：このガードは `window` 上でイベントの `composedPath()` からリンクを探すため、*closed* な shadow
-root の中のアンカー（`composedPath()` に現れない）や、shadow root 内で dispatch された composed でない
+読み込む。スクリプトが合成したクリック（`a.click()` や cancelable な dispatch）はページ内で取り消す。ただし完全では
+ない：cancelable でないイベントには `preventDefault` が効かないため、`new MouseEvent('click', {bubbles: true})` を
+リンクに dispatch するスクリプトにはリンクを起動され得る。さらに、このガードは `window` 上でイベントの `composedPath()` からリンクを探す（`href` または
+`xlink:href` 属性を持つ要素はすべてリンクとみなすので、HTML の `<a>` / `<area>` だけでなく SVG や MathML の
+アンカーも対象）ため、*closed* な shadow root の中のアンカー（`composedPath()` に現れない）や、shadow root 内で dispatch された composed でない
 クリック（`window` まで届かない）ではリンクが起動し得る。WebKit はそれをユーザーのクリックとして報告するので、
 誰もクリックしていないのにページが外部ブラウザで開く（http/https のみ）。Compose のリーダー（デスクトップ・Android）は独自のリンク横取りのままで、この規則は持たない。Apple の
 年齢制限は、任意のページをアプリ内で閲覧できることを「無制限の Web アクセス」（16+）とみなすので、

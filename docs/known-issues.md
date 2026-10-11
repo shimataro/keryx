@@ -630,11 +630,15 @@ The SwiftUI app's reader (`ReaderNavigationGate`) additionally refuses to become
 still run, but a navigation that would replace the whole page never loads in place — a click on it
 opens in the external browser (http/https only), a top-level navigation nobody clicked (`location = …`,
 a meta refresh) is dropped, and only an embed's own navigation inside an iframe loads. A click a script
-synthesizes (`a.click()`) is cancelled in the page itself, which stops the ordinary case. It is not
-airtight: the guard finds the link through the event's `composedPath()` on `window`, so an anchor
-inside a *closed* shadow root (which `composedPath()` omits) or a non-composed click dispatched inside
-a shadow root (which never reaches `window`) can still activate the link, and WebKit then reports it as
-a user click — the page opens in the external browser (http/https only) without anyone clicking. The Compose
+synthesizes (`a.click()`, a cancelable dispatched `click`) is cancelled in the page itself. It is not
+airtight, in two ways. `preventDefault` does nothing on a non-cancelable event, so a script
+dispatching `new MouseEvent('click', {bubbles: true})` at a link still activates it. And the guard
+finds the link through the event's `composedPath()` on `window`, treating any element with an `href`
+or `xlink:href` attribute as one (so SVG and MathML anchors count, not only HTML's `<a>` and
+`<area>`), so an anchor inside a *closed* shadow root (which `composedPath()` omits) or a
+non-composed click dispatched inside a shadow root (which never reaches `window`) can also activate
+the link. WebKit reports each of these as a user click — the page opens in the external browser
+(http/https only) without anyone clicking. The Compose
 readers (desktop, Android) keep their own link interception and do not have this rule. Apple's age
 rating counts in-app browsing of arbitrary pages as "unrestricted web access" (16+), which this keeps
 the SwiftUI app clear of.

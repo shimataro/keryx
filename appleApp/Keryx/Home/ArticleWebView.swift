@@ -32,8 +32,11 @@ struct ArticleWebView {
     /// `a.click()` or dispatching a synthetic click — in every frame. WebKit reports such a click as
     /// `.linkActivated` just like a real one, so without this a script could open any page in the
     /// external browser (or another app) the moment an article is shown, or merely preloaded for a
-    /// swipe. It runs in its own content world, before any page script, so the page can neither
-    /// remove the listener nor replace the `preventDefault` it calls.
+    /// swipe. Any element carrying `href` or `xlink:href` counts as a link, so SVG and MathML anchors
+    /// are covered along with HTML's `<a>` / `<area>`. It runs in its own content world, before any
+    /// page script, so the page can neither remove the listener nor replace the `preventDefault` it
+    /// calls. `preventDefault` is a no-op on a non-cancelable event, which this therefore cannot stop
+    /// (see the same known-issues entry).
     @MainActor
     private static let syntheticClickGuard = WKUserScript(
         source: """
@@ -42,7 +45,8 @@ struct ArticleWebView {
               window.addEventListener('click', (event) => {
                 if (event.isTrusted) return;
                 for (const node of event.composedPath()) {
-                  if (node instanceof Element && node.matches('a[href], area[href]')) {
+                  if (node instanceof Element && (node.hasAttribute('href')
+                      || node.hasAttributeNS('http://www.w3.org/1999/xlink', 'href'))) {
                     preventDefault.call(event);
                     return;
                   }
