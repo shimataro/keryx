@@ -7,9 +7,9 @@ read/starred status, and articles to follow you between your phone and your desk
 FEATURES
 
 • Multi-device sync via your own cloud storage (Dropbox, Google Drive, or
-  OneDrive) — no account with Keryx itself, ever. On Android, Google Drive sync
-  requires Google Play services; devices without it can still sync via Dropbox
-  or OneDrive.
+  Microsoft OneDrive) — no account with Keryx itself, ever. On Android, Google
+  Drive sync requires Google Play services; devices without it can still sync
+  via Dropbox or OneDrive.
 • Local-first: works fully offline, with no sync required
 • Fast local full-text search across article titles and content
 • Organize feeds with tags (cross-cutting labels) and folders (hierarchical

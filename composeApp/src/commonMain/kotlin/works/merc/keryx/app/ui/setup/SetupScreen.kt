@@ -4,12 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
@@ -35,7 +32,6 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.presentation.setup.SetupController
 import works.merc.keryx.app.presentation.setup.SetupPhase
-import works.merc.keryx.app.ui.common.CloudBrandMark
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
@@ -57,7 +53,7 @@ import works.merc.keryx.app.resources.setup_local_only
 import works.merc.keryx.app.resources.setup_onedrive
 import works.merc.keryx.app.resources.setup_title
 
-/** Setup card title for a cloud provider; its mark is [CloudBrandMark]. */
+/** Setup card title for a cloud provider. */
 private fun CloudStorageType.setupTitle(): StringResource = when (this) {
     CloudStorageType.DROPBOX -> Res.string.setup_dropbox
     CloudStorageType.GOOGLE_DRIVE -> Res.string.setup_google_drive
@@ -146,11 +142,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                                 enabled = enabled,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CloudBrandMark(type, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(type.setupTitle()))
-                                }
+                                Text(stringResource(type.setupTitle()))
                             }
                             if (index != vm.availableCloudTypes.lastIndex) {
                                 Spacer(Modifier.height(8.dp))

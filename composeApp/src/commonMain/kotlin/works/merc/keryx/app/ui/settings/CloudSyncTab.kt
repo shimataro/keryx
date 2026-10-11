@@ -33,7 +33,6 @@ import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
-import works.merc.keryx.app.ui.common.CloudBrandMark
 import works.merc.keryx.app.ui.common.FlatButton
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.IconButtonKind
@@ -310,8 +309,7 @@ private fun ProviderActionButton(
     busy: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
 ) {
-    // 18dp for desktop's labelled buttons; CLOUD_ROW_ICON_SIZE for icon-only buttons, to match
-    // the row's own brand mark.
+    // 18dp for desktop's labelled buttons; CLOUD_ROW_ICON_SIZE for icon-only buttons.
     val glyphSize = if (iconOnly) CLOUD_ROW_ICON_SIZE else 18.dp
     val glyph: @Composable () -> Unit = {
         if (busy) {
@@ -345,7 +343,7 @@ private fun ProviderActionButton(
     }
 }
 
-/** Fixed size for the provider brand icon and action glyphs in icon-only mode. */
+/** Fixed size for the action glyphs (and their busy spinner) in icon-only mode. */
 private val CLOUD_ROW_ICON_SIZE = 20.dp
 
 /** Top padding above the connected row's status slot content (spinner+phase, "disconnecting…",
@@ -458,7 +456,6 @@ internal fun CloudProviderRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CloudBrandMark(type, Modifier.size(CLOUD_ROW_ICON_SIZE))
                 Text(
                     type.brandLabel(),
                     style = MaterialTheme.typography.bodyMedium,
@@ -560,7 +557,7 @@ internal fun CloudProviderRow(
         Box(Modifier.height(statusSlotHeight)) {
             when {
                 statusText != null -> Row(
-                    modifier = Modifier.padding(start = 28.dp, top = CLOUD_STATUS_SLOT_TOP_PADDING),
+                    modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     SmallSpinner(size = 12.dp, color = contentColor)
@@ -577,7 +574,7 @@ internal fun CloudProviderRow(
                     stringResource(Res.string.settings_last_synced, lastSyncedAtText),
                     style = MaterialTheme.typography.labelSmall,
                     color = contentColor.copy(alpha = 0.8f),
-                    modifier = Modifier.padding(start = 28.dp, top = CLOUD_STATUS_SLOT_TOP_PADDING),
+                    modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
                 )
             }
         }
@@ -590,7 +587,7 @@ internal fun CloudProviderRow(
                 it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 28.dp, bottom = 4.dp),
+                modifier = Modifier.padding(bottom = 4.dp),
             )
         }
     }

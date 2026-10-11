@@ -1,7 +1,7 @@
 AntiFeatures:
   NonFreeNet:
-    en-US: Optional sync via Dropbox or OneDrive.
-    ja-JP: Dropbox / OneDrive による任意の同期。
+    en-US: Optional sync via Dropbox or Microsoft OneDrive.
+    ja-JP: Dropbox / Microsoft OneDrive による任意の同期。
 Categories:
   - Reading
 License: MIT

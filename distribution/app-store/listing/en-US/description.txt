@@ -4,7 +4,7 @@ Keryx is a local-first RSS reader. By default, all of your data lives on your de
 
 FEATURES
 
-• Sync through your own cloud storage (Dropbox, OneDrive, or Google Drive) — no account with Keryx itself, ever
+• Sync through your own cloud storage (Dropbox, Microsoft OneDrive, or Google Drive) — no account with Keryx itself, ever
 • Local-first: works fully offline, with no sync required
 • Fast local full-text search across article titles and content
 • Organize feeds with tags (cross-cutting labels) and folders (hierarchical grouping)

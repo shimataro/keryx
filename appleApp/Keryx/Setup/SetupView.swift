@@ -44,17 +44,8 @@ struct SetupView: View {
                             Button {
                                 setup.controller.connect(type: type) { onDone() }
                             } label: {
-                                Label {
-                                    Text(L(providerKey(type)))
-                                } icon: {
-                                    type.brandIcon
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 18, height: 18)
-                                        // Decorative: the button's own text names the provider.
-                                        .accessibilityHidden(true)
-                                }
-                                .frame(maxWidth: .infinity)
+                                Text(L(providerKey(type)))
+                                    .frame(maxWidth: .infinity)
                             }
                         }
                     }

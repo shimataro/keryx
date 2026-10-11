@@ -110,18 +110,12 @@ struct CloudSyncSettingsTab: View {
         }
     }
 
-    /// Brand icon and name leading, actions trailing, with the status and error lines stacked
+    /// The provider's name leading, actions trailing, with the status and error lines stacked
     /// beneath. The name truncates to one line so the buttons always keep their intrinsic width —
     /// the same split as Compose's own `CloudProviderRow`.
     private func row(for type: CloudStorageType) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: CloudSyncRowMetrics.iconSpacing) {
-                type.brandIcon
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: CloudSyncRowMetrics.iconSize, height: CloudSyncRowMetrics.iconSize)
-                    // Decorative: the name beside it is what VoiceOver reads.
-                    .accessibilityHidden(true)
+            HStack(spacing: CloudSyncRowMetrics.rowSpacing) {
                 Text(type.brandLabel)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -321,13 +315,11 @@ struct CloudSyncSettingsTab: View {
 /// (Android's own `CloudProviderRow` has the same breathing room), than in the macOS `GroupBox`.
 private enum CloudSyncRowMetrics {
     #if os(iOS)
-    static let iconSize: CGFloat = 28
-    static let iconSpacing: CGFloat = 12
+    static let rowSpacing: CGFloat = 12
     static let actionSpacing: CGFloat = 4
     static let verticalPadding: CGFloat = 8
     #else
-    static let iconSize: CGFloat = 20
-    static let iconSpacing: CGFloat = 8
+    static let rowSpacing: CGFloat = 8
     static let actionSpacing: CGFloat = 8
     static let verticalPadding: CGFloat = 6
     #endif
