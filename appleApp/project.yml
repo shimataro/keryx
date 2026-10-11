@@ -103,6 +103,14 @@ targets:
     info:
       path: Generated-Info.plist
       properties:
+        # Feeds and their images are fetched from servers the user chooses, some of which only
+        # serve plain http:// (external-spec §10 honors an explicit http:// URL). The arbitrary-loads
+        # exception covers URLSession (feeds, favicons) and the reader's WKWebView alike; do NOT add
+        # NSAllowsArbitraryLoadsInWebContent, which would make iOS 10+/macOS 10.12+ ignore this key.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # Only HTTPS and hashing (CommonCrypto/Security) — exempt from export documentation.
+        ITSAppUsesNonExemptEncryption: false
         # iOS-only keys (macOS ignores them): the periodic background refresh, see
         # Platform/BackgroundRefresh.swift.
         UIBackgroundModes: [fetch]

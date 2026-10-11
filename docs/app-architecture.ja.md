@@ -1397,6 +1397,15 @@ Swift 側が各プロバイダーのスキームを別途ハードコードす�
 ルーティングする `keryx://` リダイレクトとまったく同じように `handleOAuthRedirect` に渡す。デスクトップと
 Android は影響を受けない（`AuthorizationLauncher` の既定はシステムのブラウザを開く、従来どおりの動作）。
 
+**App Transport Security。** SwiftUI アプリの Info.plist は `NSAppTransportSecurity` →
+`NSAllowsArbitraryLoads` を設定する（`appleApp/project.yml`）。フィードの URL は利用者が選ぶもので、
+サーバーによっては平文の `http://` しか提供しない。`external-spec.ja.md` §10 は明示された `http://` を
+尊重すると定めており、この例外がないと Darwin エンジン（フィード）、favicon の取得、リーダーの
+`WKWebView`（画像・埋め込み）がいずれも `-1022` で失敗する。`NSAllowsArbitraryLoadsInWebContent` は
+あえて**併記しない**：iOS 10 以降／macOS 10.12 以降では、このキーが存在すると OS が
+`NSAllowsArbitraryLoads` を無視するため。このキーには App Review で理由の説明が必要で、審査メモは
+`distribution/app-store/` に置く。Keryx 自身の通信（クラウド同期・OAuth）は、コード上は HTTPS のみのまま。
+
 ### `appleApp/` の Xcode プロジェクト
 
 `appleApp/` は SwiftUI アプリを収め、`composeApp/`/`androidApp/` と並んで置かれている。`.xcodeproj` は

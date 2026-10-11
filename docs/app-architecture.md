@@ -1422,6 +1422,15 @@ copy of each provider's scheme. The session's callback URL is handed to `handleO
 exactly like an OS-routed `keryx://` redirect would be; desktop and Android are unaffected
 (`AuthorizationLauncher` defaults to opening the system browser, their existing behavior).
 
+**App Transport Security.** The SwiftUI app's Info.plist sets `NSAppTransportSecurity` →
+`NSAllowsArbitraryLoads` (`appleApp/project.yml`). Feed URLs are chosen by the user and some servers
+only offer plain `http://`; `external-spec.md` §10 says an explicit `http://` is honored, and
+without the exception the Darwin engine (feeds), the favicon fetch and the reader's `WKWebView`
+(images, embeds) would all fail with `-1022`. `NSAllowsArbitraryLoadsInWebContent` is deliberately
+**not** set as well: on iOS 10+/macOS 10.12+ its presence makes the OS ignore
+`NSAllowsArbitraryLoads`. App Review requires a justification for this key; the review notes live in
+`distribution/app-store/`. Keryx's own traffic (cloud sync, OAuth) stays HTTPS-only in code.
+
 ### The `appleApp/` Xcode project
 
 `appleApp/` holds the SwiftUI app, sitting beside `composeApp/`/`androidApp/`. The `.xcodeproj` is
