@@ -352,6 +352,12 @@ empty). Signing and notarization still only run in the release job (see "SwiftUI
 `KeryxTests` (Swift Testing, standalone/non-hosted) runs with the same `CODE_SIGNING_ALLOWED=NO` on
 macOS: it produces a `.xctest` bundle rather than a sandboxed app, so nothing needs signing.
 
+### App Store submission materials
+
+The listing copy, App Store Connect answers, review notes and the pre-submission checklist for the
+iOS / Mac App Store builds live in [`distribution/app-store/`](../distribution/app-store/README.md).
+They are drafts to copy by hand; no build reads them.
+
 ## Packaging
 
 Artifacts are written under `composeApp/build/compose/binaries/main` (relative to the repository root).
