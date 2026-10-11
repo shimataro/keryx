@@ -6,7 +6,7 @@ Keryx はローカルファースト・クロスプラットフォームな RSS 
 
 特徴
 
-• マルチデバイス同期は自分のクラウドストレージ経由（Dropbox / Google Drive / OneDrive）
+• マルチデバイス同期は自分のクラウドストレージ経由（Dropbox / Google Drive / Microsoft OneDrive）
   — Keryx 自体のアカウント登録は一切不要。Android で Google Drive を使うには Google Play
   開発者サービスが必要ですが、それが無い端末でも Dropbox・OneDrive で同期できます
 • ローカルファースト: 同期機能を使わなくても完全にオフラインで動作

@@ -110,14 +110,14 @@ no auto-launch.
   [`TERMS.md`](../../TERMS.md) now cover iOS / iPadOS, the website copies live outside this repo.
 - [ ] Check that <https://keryx.merc.works/> does not push other platforms' downloads in a way that
   would make the App Store listing look like it promotes them (guideline 2.3.10).
-- [x] Brand logos (guideline 5.2.1): checked against each company's terms on 2026-10-11. Dropbox and
-  Google Drive show the providers' own unmodified, untinted logo files (`composeApp/.../drawable/dropbox.png`
-  from Dropbox's Brand Partner Toolkit, `google_drive.png` from developers.google.com/drive/branding), and
-  the description carries Google's requested attribution. Microsoft licenses its logos and icons separately
-  (<https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general>), so OneDrive is named
-  in text only and shows a generic cloud icon, in every build. Dropbox's and Google's terms are their developer
-  branding guides (<https://www.dropbox.com/developers/reference/branding-guide>,
-  <https://developers.google.com/drive/branding>); recheck them if a logo is ever replaced.
+- [x] Brand names (guideline 5.2.1): checked against each company's terms on 2026-10-11. The app shows no
+  provider logo or icon anywhere — Dropbox, OneDrive and Google Drive are named in text only, which all three
+  allow without a license. Microsoft requires a trademark license for its Microsoft 365 app icons, OneDrive's
+  included, and asks third-party marketing to put "Microsoft" before the app name on first mention
+  ([Microsoft 365 Trademark Guidelines, June 2026](https://cdn-dynmedia-1.microsoft.com/is/content/microsoftcorp/microsoft/mscle/documents/presentations/FY27_Microsoft_365_trademark_guidelines.pdf)),
+  so every store listing says "Microsoft OneDrive" the first time. Google asks for the full name "Google Drive"
+  and a trademark attribution in the description, which both descriptions carry
+  (<https://developers.google.com/drive/branding>).
 - [ ] Decide the marketing version (`MARKETING_VERSION` in `appleApp/project.yml` is `0.1.0`; a 0.x
   number can read as pre-release software to a reviewer, guideline 2.2).
 - [ ] Verify the example feed in the review notes still resolves.
