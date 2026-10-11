@@ -10,15 +10,34 @@ import Foundation
 /// answered only once the set lands (`update`), with exactly the verdict it would have got had the
 /// set been known all along. A held decision the document never resolves — it was replaced, or the
 /// reader went away — is answered `.cancel` (`update` with a new document, `discardPending`).
+///
+/// The reader is not a browser: a navigation that would replace the whole page is never shown in it.
+/// Only an embed's own navigation inside an iframe loads in place, so script-based SNS embeds keep
+/// working; anything that would swap the top-level page opens externally (a click) or is dropped (no
+/// click). Navigating freely inside the app would also make it an "unrestricted web access" browser
+/// for App Store age-rating purposes.
 @MainActor
 final class ReaderNavigationGate {
     enum Decision: Equatable {
         /// A genuine outbound click: open `url` in the external browser, and cancel the navigation.
         case openInBrowser(URL)
-        /// Anything else (an SNS embed's own navigation): let it load inside the reader.
+        /// The document's own load, or an embed's navigation inside an iframe: let it load in the reader.
         case allow
         /// The document the navigation belonged to is gone.
         case cancel
+    }
+
+    /// What kind of navigation WebKit reported, reduced to what the policy needs (and free of WebKit
+    /// so the test bundle can build one).
+    enum Kind: Equatable {
+        /// Inside an iframe — an embed doing its own thing.
+        case subframe
+        /// A user click that would replace the top-level page. Includes a navigation with no target
+        /// frame (`target="_blank"`, `window.open`), which would otherwise open a new page.
+        case mainFrameClick
+        /// A top-level navigation nobody clicked: a script setting `location`, a meta refresh, a
+        /// form submission, a reload.
+        case mainFrameOther
     }
 
     typealias DecisionHandler = @MainActor (Decision) -> Void
@@ -26,7 +45,7 @@ final class ReaderNavigationGate {
     private var documentID: String?
     /// `nil` while the current document's links are still being extracted.
     private(set) var outboundLinks: Set<String>? = []
-    private var pending: [(url: URL?, handler: DecisionHandler)] = []
+    private var pending: [(url: URL?, kind: Kind, handler: DecisionHandler)] = []
 
     /// How many decisions are currently held (for tests).
     var pendingCount: Int { pending.count }
@@ -49,22 +68,22 @@ final class ReaderNavigationGate {
         let held = pending
         pending = []
         for decision in held {
-            decision.handler(Self.decision(url: decision.url, outboundLinks: links))
+            decision.handler(Self.decision(url: decision.url, kind: decision.kind, outboundLinks: links))
         }
     }
 
-    /// Decides a navigation to `url` now if the link set is known, or holds it until it is.
+    /// Decides a navigation to `url` (of `kind`) now if the link set is known, or holds it until it is.
     ///
     /// The document's own `loadHTMLString` navigation (`about:blank`, see
     /// `ArticleNavigationPolicy.documentBaseURL`) is never held — holding it would keep the document
     /// from loading until its links were extracted, the very wait this gate exists to remove.
-    func decide(url: URL?, _ handler: @escaping DecisionHandler) {
+    func decide(url: URL?, kind: Kind, _ handler: @escaping DecisionHandler) {
         if let links = outboundLinks {
-            handler(Self.decision(url: url, outboundLinks: links))
+            handler(Self.decision(url: url, kind: kind, outboundLinks: links))
         } else if Self.isDocumentLoad(url) {
-            handler(Self.decision(url: url, outboundLinks: []))
+            handler(.allow)
         } else {
-            pending.append((url, handler))
+            pending.append((url, kind, handler))
         }
     }
 
@@ -79,11 +98,16 @@ final class ReaderNavigationGate {
         for entry in held { entry.handler(decision) }
     }
 
-    private static func decision(url: URL?, outboundLinks: Set<String>) -> Decision {
+    private static func decision(url: URL?, kind: Kind, outboundLinks: Set<String>) -> Decision {
+        if isDocumentLoad(url) { return .allow }
         if let url, ArticleNavigationPolicy.isOutboundClick(url: url, outboundLinks: outboundLinks) {
             return .openInBrowser(url)
         }
-        return .allow
+        switch kind {
+        case .subframe: return .allow
+        case .mainFrameClick: return url.map(Decision.openInBrowser) ?? .cancel
+        case .mainFrameOther: return .cancel
+        }
     }
 
     private static func isDocumentLoad(_ url: URL?) -> Bool {

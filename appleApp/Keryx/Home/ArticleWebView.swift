@@ -5,8 +5,9 @@ import WebKit
 /// `docs/app-architecture.md`. Loads pre-wrapped HTML (never raw article `content` — see
 /// `ArticleWebViewHtml.kt`) and gates outbound navigation: only a request whose target URL is
 /// either the article's own URL or one of the links `extractLinks` found inside the body is
-/// treated as a genuine click-through and opened in the external browser; everything else (an SNS
-/// embed's own internal navigation) is left to load inside the WebView untouched.
+/// treated as a genuine click-through and opened in the external browser; so is any click that would
+/// replace the top-level page, while a top-level navigation nobody clicked is dropped. Only an SNS
+/// embed's own navigation inside an iframe loads in place (see `ReaderNavigationGate`).
 ///
 /// `outboundLinks` is `nil` while the document's links are still being extracted (the document is
 /// shown before that finishes — see `ReaderPageView.rebuildDocument`); `ReaderNavigationGate` holds
@@ -51,10 +52,16 @@ struct ArticleWebView {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            gate.decide(url: navigationAction.request.url) { decision in
+            // No target frame (`target="_blank"`, `window.open`) counts as the main frame: it would
+            // open a new top-level page.
+            let kind: ReaderNavigationGate.Kind = navigationAction.targetFrame?.isMainFrame == false
+                ? .subframe
+                : (navigationAction.navigationType == .linkActivated ? .mainFrameClick : .mainFrameOther)
+            gate.decide(url: navigationAction.request.url, kind: kind) { decision in
                 switch decision {
                 case let .openInBrowser(url):
-                    openInBrowser(url.absoluteString)
+                    // The URL comes from the feed: only http(s) is ever handed to the OS.
+                    openInBrowserIfAllowed(url.absoluteString)
                     decisionHandler(.cancel)
                 case .allow:
                     decisionHandler(.allow)

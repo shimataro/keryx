@@ -1469,6 +1469,15 @@ no separate iOS target to keep in sync.
   expects to be reachable inside the app (guideline 5.1.1(i)). Both read the one link list in
   `App/AboutLinks.swift`. It is a page local to the iOS `SettingsView`, not a `SettingsNavigation.Tab`:
   no notification routes to it and the macOS tab bar has no About tab.
+- **The SwiftUI reader never navigates the page itself.** `Home/ReaderNavigationGate.swift` answers
+  every `WKWebView` navigation: the document's own load and an iframe's own navigation (script-based
+  SNS embeds) load in place; a click on one of the article's links, or any click that would replace
+  the top-level page (a script-built link, `target="_top"`, `target="_blank"`), opens in the external
+  browser through `openInBrowserIfAllowed` (http/https only); a top-level navigation nobody clicked
+  (`location`, meta refresh) is cancelled. JavaScript stays enabled (see "A feed body's own JavaScript
+  runs inside the article reader" in [known-issues.md](known-issues.md)). This keeps the app from
+  being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
+  access. The Compose readers do not apply the main-frame rule.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path

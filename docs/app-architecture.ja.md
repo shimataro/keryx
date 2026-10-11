@@ -1444,6 +1444,13 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   辿れることを求める。ガイドライン 5.1.1(i)）。どちらも `App/AboutLinks.swift` の 1 つのリンク一覧を読む。
   `SettingsNavigation.Tab` ではなく iOS の `SettingsView` 内に閉じたページにしてある：通知がここへ誘導することは
   なく、macOS のタブバーには About タブがないため。
+- **SwiftUI のリーダーはページ自身を遷移させない。** `Home/ReaderNavigationGate.swift` が `WKWebView` の
+  遷移をすべて判定する：文書自身の読み込みと iframe 自身の遷移（script 型の SNS 埋め込み）はその場で読み込む。
+  記事のリンクのクリック、およびページ全体を置き換えるクリック（スクリプトが作ったリンク、`target="_top"`、
+  `target="_blank"`）は `openInBrowserIfAllowed` で外部ブラウザに渡す（http/https のみ）。クリックを伴わない
+  最上位の遷移（`location`、meta refresh）はキャンセルする。JavaScript は有効のまま（known-issues.ja.md の
+  「フィード本文のスクリプトが記事リーダー内で実行される」を参照）。これでアプリがアプリ内ブラウザにならず、Apple の
+  年齢制限の質問票で「無制限の Web アクセス」とみなされない。Compose のリーダーにはメインフレームの規則を適用しない。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS
