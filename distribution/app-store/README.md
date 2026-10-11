@@ -103,6 +103,11 @@ no auto-launch.
 - [ ] If [`PRIVACY.md`](../../PRIVACY.md)'s effective date has changed since the last submission,
   re-check the App Privacy answer, the age-rating answers and the review notes above against it —
   App Store Connect keeps the old answers and will not notice the policy moved.
+- [ ] Build the archive with the Dropbox, OneDrive and Google Drive (Apple) keys set — `dropbox.app.key`,
+  `onedrive.client.id` and `googledrive.apple.client.id` in `local.properties`, or the matching
+  environment variables (see [`docs/build.md`](../../docs/build.md)). A provider whose key is empty is
+  hidden, which would contradict the listing and the review notes: check that Settings ▸ Cloud sync
+  offers all three.
 - [ ] Screenshots for iPhone, iPad and Mac (the required sizes change with App Store Connect).
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
   2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first — then run
