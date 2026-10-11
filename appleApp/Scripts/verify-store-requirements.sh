@@ -72,12 +72,14 @@ NSPrivacyAccessedAPICategoryDiskSpace E174.1
 EXPECTED
 fi
 
-# ATS: feeds the user subscribes to may be plain http://. NSAllowsArbitraryLoadsInWebContent must
-# stay absent, since its presence makes the OS ignore NSAllowsArbitraryLoads.
+# ATS: feeds the user subscribes to may be plain http://. These three keys must stay absent, since
+# the presence of any one makes the OS ignore NSAllowsArbitraryLoads (iOS 10 / macOS 10.12 and later).
 [ "$(read_raw "$info" NSAppTransportSecurity.NSAllowsArbitraryLoads)" = "true" ] ||
     fail "$platform: NSAppTransportSecurity.NSAllowsArbitraryLoads must be true"
-[ -z "$(read_raw "$info" NSAppTransportSecurity.NSAllowsArbitraryLoadsInWebContent)" ] ||
-    fail "$platform: NSAppTransportSecurity.NSAllowsArbitraryLoadsInWebContent must not be set"
+for key in NSAllowsArbitraryLoadsInWebContent NSAllowsArbitraryLoadsForMedia NSAllowsLocalNetworking; do
+    [ -z "$(read_raw "$info" "NSAppTransportSecurity.$key")" ] ||
+        fail "$platform: NSAppTransportSecurity.$key must not be set"
+done
 
 # Export compliance: HTTPS and hashing only, so the per-upload question is answered here.
 [ "$(read_raw "$info" ITSAppUsesNonExemptEncryption)" = "false" ] ||
