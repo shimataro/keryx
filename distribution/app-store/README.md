@@ -78,7 +78,7 @@ served only over plain http:// and cannot be upgraded by us. An explicit http://
 
 The article reader shows the article's own HTML in a WKWebView. It is not a browser: any navigation
 that would replace the page is opened in the external browser (http/https only) when the user clicked
-it, or dropped otherwise; a click synthesized by a script is ignored.
+it, or dropped otherwise.
 
 iOS: background refresh (BGAppRefreshTask) only fetches the user's subscribed feeds; new-article
 notifications are local, and the permission is requested after Setup.
