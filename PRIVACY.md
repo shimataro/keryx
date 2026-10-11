@@ -12,8 +12,7 @@ below can be verified directly against the source code at
 ## Overview
 
 - Keryx has **no user accounts** and **no server operated by the developer**. There
-  is nothing to sign up for, and no backend that Keryx's developer controls ever
-  receives your data.
+  is nothing to sign up for, and Keryx never sends your data to its developer.
 - All of your data — subscriptions, articles, read/starred status, tags, folders,
   settings — lives in a local database on your device, unless you explicitly turn
   on cloud sync.

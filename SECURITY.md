@@ -87,9 +87,11 @@ The following are **out of scope**:
 
 Keryx is designed to minimize its attack surface:
 
-- **No accounts and no developer-operated server.** There is no backend the
-  developer controls; the app talks only to the feeds you subscribe to, an allowlisted GitHub host for
-  update checks/downloads (see below), and, if you opt in, directly to Dropbox, OneDrive, or Google Drive.
+- **No accounts and no developer-operated server.** The app itself contacts only
+  the feeds you subscribe to (and their sites, for favicons), an allowlisted GitHub host for
+  update checks/downloads (see below), and, if you opt in, Dropbox, OneDrive, or Google Drive directly.
+  An article you open may additionally load images and other embedded content from the hosts its
+  own HTML references, as any web page would — see [PRIVACY.md](PRIVACY.md#network-requests-this-app-makes).
 - **Cloud credentials** (OAuth access / refresh tokens, one per connected provider) are stored in the
   platform's secure credential storage: on macOS, the app's own data-protection Keychain, with no
   fallback to a file (if a token cannot be saved there, the app tells you, and the account has to be
