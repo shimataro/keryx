@@ -1446,8 +1446,8 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   なく、macOS のタブバーには About タブがないため。
 - **SwiftUI のリーダーはページ自身を遷移させない。** `Home/ReaderNavigationGate.swift` が `WKWebView` の
   遷移をすべて判定する：文書自身の読み込みと iframe 自身の遷移（script 型の SNS 埋め込み）はその場で読み込む。
-  記事のリンクのクリック、およびページ全体を置き換えるクリック（スクリプトが作ったリンク、`target="_top"`、
-  `target="_blank"`）は `openInBrowserIfAllowed` で外部ブラウザに渡す（http/https のみ）。クリックを伴わない
+  iframe の遷移は宛先の URL を問わない。ページ全体を置き換えるクリック（記事内のリンク、スクリプトが作った
+  リンク、`target="_top"`、`target="_blank"`）は `openInBrowserIfAllowed` で外部ブラウザに渡す（http/https のみ）。クリックを伴わない
   最上位の遷移（`location`、meta refresh）は、記事のリンクへの遷移であってもキャンセルする。スクリプトが
   合成したクリック（`a.click()` や dispatch された `click` イベント）はクリックとみなさない方針：WebKit はこれを
   人のクリックと同じ `.linkActivated` として報告するため、`ArticleWebView` が独自の content world で全フレームに

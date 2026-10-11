@@ -6,127 +6,8 @@ import Testing
 struct ReaderNavigationGateTests {
     private let articleUrl = URL(string: "https://example.com/posts/1")!
     private let embedUrl = URL(string: "https://platform.twitter.com/embed/Tweet.html")!
+    private let otherSiteUrl = URL(string: "https://other.example.org/landing")!
     private let documentUrl = ArticleNavigationPolicy.documentBaseURL ?? URL(string: "about:blank")!
-    private var links: Set<String> { [articleUrl.absoluteString] }
-
-    /// Records every decision a handler is given, so a test can check both the verdict and that
-    /// each handler was answered exactly once.
-    private final class Recorder {
-        var decisions: [ReaderNavigationGate.Decision] = []
-        @MainActor
-        func handler() -> ReaderNavigationGate.DecisionHandler { { self.decisions.append($0) } }
-    }
-
-    @Test
-    func decidesAtOnceWhenLinksAreKnown() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        let outbound = Recorder(), embed = Recorder()
-
-        gate.decide(url: articleUrl, kind: .mainFrameClick, outbound.handler())
-        gate.decide(url: embedUrl, kind: .subframe, embed.handler())
-
-        #expect(outbound.decisions == [.openInBrowser(articleUrl)])
-        #expect(embed.decisions == [.allow])
-        #expect(gate.pendingCount == 0)
-    }
-
-    @Test
-    func holdsAClickUntilTheLinksResolveThenOpensItExternally() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: nil)
-        let recorder = Recorder()
-
-        gate.decide(url: articleUrl, kind: .mainFrameClick, recorder.handler())
-        // Never allowed in the meantime: that would open the article's link inside the reader.
-        #expect(recorder.decisions.isEmpty)
-        #expect(gate.pendingCount == 1)
-
-        gate.update(documentID: "doc", outboundLinks: links)
-        #expect(recorder.decisions == [.openInBrowser(articleUrl)])
-        #expect(gate.pendingCount == 0)
-    }
-
-    @Test
-    func aHeldEmbedNavigationIsAllowedOnceTheLinksResolve() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: nil)
-        let recorder = Recorder()
-
-        gate.decide(url: embedUrl, kind: .subframe, recorder.handler())
-        gate.update(documentID: "doc", outboundLinks: links)
-
-        #expect(recorder.decisions == [.allow])
-    }
-
-    @Test
-    func theDocumentsOwnLoadIsNeverHeld() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: nil)
-        gate.beginDocumentLoad()
-        let own = Recorder(), missing = Recorder()
-
-        gate.decide(url: documentUrl, kind: .mainFrameOther, own.handler())
-        gate.decide(url: nil, kind: .mainFrameOther, missing.handler())
-
-        #expect(own.decisions == [.allow])
-        #expect(missing.decisions == [.allow])
-        #expect(gate.pendingCount == 0)
-    }
-
-    @Test
-    func switchingDocumentCancelsWhatThePreviousOneLeftHeld() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "old", outboundLinks: nil)
-        let recorder = Recorder()
-        gate.decide(url: articleUrl, kind: .mainFrameClick, recorder.handler())
-
-        // Even though the new document's links would count it as outbound.
-        gate.update(documentID: "new", outboundLinks: links)
-
-        #expect(recorder.decisions == [.cancel])
-        #expect(gate.pendingCount == 0)
-    }
-
-    @Test
-    func switchingToAnUnresolvedDocumentStillCancels() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "old", outboundLinks: nil)
-        let recorder = Recorder()
-        gate.decide(url: articleUrl, kind: .mainFrameClick, recorder.handler())
-
-        gate.update(documentID: "new", outboundLinks: nil)
-
-        #expect(recorder.decisions == [.cancel])
-        #expect(gate.outboundLinks == nil)
-    }
-
-    @Test
-    func anUnresolvedReportForTheSameDocumentKeepsItsResolvedLinks() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        gate.update(documentID: "doc", outboundLinks: nil)
-        let recorder = Recorder()
-
-        gate.decide(url: articleUrl, kind: .mainFrameClick, recorder.handler())
-
-        #expect(recorder.decisions == [.openInBrowser(articleUrl)])
-    }
-
-    @Test
-    func discardingCancelsEveryHeldDecisionOnce() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: nil)
-        let first = Recorder(), second = Recorder()
-        gate.decide(url: articleUrl, kind: .mainFrameClick, first.handler())
-        gate.decide(url: embedUrl, kind: .subframe, second.handler())
-
-        gate.discardPending()
-        gate.update(documentID: "doc", outboundLinks: links)
-
-        #expect(first.decisions == [.cancel])
-        #expect(second.decisions == [.cancel])
-    }
 
     // MARK: - Kind
 
@@ -151,121 +32,75 @@ struct ReaderNavigationGateTests {
 
     // MARK: - Top-level navigations
 
-    private let otherSiteUrl = URL(string: "https://other.example.org/landing")!
-
     @Test
     func aClickThatWouldReplaceThePageOpensExternally() {
         let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        let recorder = Recorder()
 
-        // A script-built link, or an iframe's `target="_top"` link: not among the extracted links.
-        gate.decide(url: otherSiteUrl, kind: .mainFrameClick, recorder.handler())
-
-        #expect(recorder.decisions == [.openInBrowser(otherSiteUrl)])
+        // One of the article's own links, or a script-built link / an iframe's `target="_top"` link.
+        #expect(gate.decide(url: articleUrl, kind: .mainFrameClick) == .openInBrowser(articleUrl))
+        #expect(gate.decide(url: otherSiteUrl, kind: .mainFrameClick) == .openInBrowser(otherSiteUrl))
     }
 
     @Test
-    func aTopLevelNavigationNobodyClickedIsDropped() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        let recorder = Recorder()
-
-        // `location = …` or a meta refresh: the article stays on screen.
-        gate.decide(url: otherSiteUrl, kind: .mainFrameOther, recorder.handler())
-
-        #expect(recorder.decisions == [.cancel])
+    func aClickWithNoUrlIsDropped() {
+        #expect(ReaderNavigationGate().decide(url: nil, kind: .mainFrameClick) == .cancel)
     }
 
     @Test
     func aTopLevelNavigationNobodyClickedIsDroppedEvenToAnArticleLink() {
         let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        let recorder = Recorder()
 
-        // `location = <one of the article's links>`: still nobody asked for the browser.
-        gate.decide(url: articleUrl, kind: .mainFrameOther, recorder.handler())
-
-        #expect(recorder.decisions == [.cancel])
+        // `location = …` or a meta refresh: nobody asked for the browser, and the article stays.
+        #expect(gate.decide(url: otherSiteUrl, kind: .mainFrameOther) == .cancel)
+        #expect(gate.decide(url: articleUrl, kind: .mainFrameOther) == .cancel)
     }
+
+    // MARK: - Iframes
 
     @Test
     func anEmbedsOwnNavigationInsideAnIframeStillLoads() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        let recorder = Recorder()
-
-        gate.decide(url: otherSiteUrl, kind: .subframe, recorder.handler())
-
-        #expect(recorder.decisions == [.allow])
+        #expect(ReaderNavigationGate().decide(url: embedUrl, kind: .subframe) == .allow)
     }
 
     @Test
-    func aHeldTopLevelNavigationGetsItsVerdictOnceTheLinksResolve() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: nil)
-        let clicked = Recorder(), scripted = Recorder(), embed = Recorder()
-
-        gate.decide(url: otherSiteUrl, kind: .mainFrameClick, clicked.handler())
-        gate.decide(url: otherSiteUrl, kind: .mainFrameOther, scripted.handler())
-        gate.decide(url: otherSiteUrl, kind: .subframe, embed.handler())
-        #expect(gate.pendingCount == 3)
-
-        gate.update(documentID: "doc", outboundLinks: links)
-
-        #expect(clicked.decisions == [.openInBrowser(otherSiteUrl)])
-        #expect(scripted.decisions == [.cancel])
-        #expect(embed.decisions == [.allow])
+    func anIframeNavigatingToTheArticlesUrlLoadsInPlaceInsteadOfOpeningTheBrowser() {
+        // An iframe pointed at an article link used to be mistaken for a click on it.
+        #expect(ReaderNavigationGate().decide(url: articleUrl, kind: .subframe) == .allow)
     }
+
+    // MARK: - The document's own load
 
     @Test
     func theDocumentsOwnLoadIsAllowedWhileItIsInFlight() {
         let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
         gate.beginDocumentLoad()
-        let recorder = Recorder()
 
-        gate.decide(url: documentUrl, kind: .mainFrameOther, recorder.handler())
-
-        #expect(recorder.decisions == [.allow])
+        #expect(gate.decide(url: documentUrl, kind: .mainFrameOther) == .allow)
+        #expect(gate.decide(url: nil, kind: .mainFrameOther) == .allow)
     }
 
     @Test
     func aLaterScriptNavigationToBlankIsDropped() {
         let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
         gate.beginDocumentLoad()
         gate.endDocumentLoad()
-        let recorder = Recorder()
 
         // `location = "about:blank"` after the document committed would blank the article.
-        gate.decide(url: documentUrl, kind: .mainFrameOther, recorder.handler())
-
-        #expect(recorder.decisions == [.cancel])
+        #expect(gate.decide(url: documentUrl, kind: .mainFrameOther) == .cancel)
     }
 
     @Test
     func blankIsDroppedWhenNoDocumentLoadWasAnnounced() {
-        let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
-        let recorder = Recorder()
-
-        gate.decide(url: documentUrl, kind: .mainFrameOther, recorder.handler())
-
-        #expect(recorder.decisions == [.cancel])
+        #expect(ReaderNavigationGate().decide(url: documentUrl, kind: .mainFrameOther) == .cancel)
     }
 
     @Test
     func aClickIsNeverTakenForTheDocumentLoadEvenWhileOneIsInFlight() {
         let gate = ReaderNavigationGate()
-        gate.update(documentID: "doc", outboundLinks: links)
         gate.beginDocumentLoad()
-        let recorder = Recorder()
-
-        gate.decide(url: documentUrl, kind: .mainFrameClick, recorder.handler())
 
         // Not allowed in place; the click is handed to the external-browser path, which refuses a
         // non-http(s) URL.
-        #expect(recorder.decisions == [.openInBrowser(documentUrl)])
+        #expect(gate.decide(url: documentUrl, kind: .mainFrameClick) == .openInBrowser(documentUrl))
     }
 }

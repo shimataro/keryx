@@ -1471,9 +1471,9 @@ no separate iOS target to keep in sync.
   no notification routes to it and the macOS tab bar has no About tab.
 - **The SwiftUI reader never navigates the page itself.** `Home/ReaderNavigationGate.swift` answers
   every `WKWebView` navigation: the document's own load and an iframe's own navigation (script-based
-  SNS embeds) load in place; a click on one of the article's links, or any click that would replace
-  the top-level page (a script-built link, `target="_top"`, `target="_blank"`), opens in the external
-  browser through `openInBrowserIfAllowed` (http/https only); a top-level navigation nobody clicked
+  SNS embeds) load in place, whatever URL they target; any click that would replace the top-level
+  page (a link in the article, a script-built link, `target="_top"`, `target="_blank"`) opens in the
+  external browser through `openInBrowserIfAllowed` (http/https only); a top-level navigation nobody clicked
   (`location`, meta refresh) is cancelled, even when it targets one of the article's links. A click a
   script synthesizes (`a.click()`, a dispatched `click` event) is not meant to count as a click: WebKit
   reports it as `.linkActivated` just like a person's, so `ArticleWebView` installs a user script, in

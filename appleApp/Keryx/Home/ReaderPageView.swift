@@ -23,9 +23,9 @@ struct ReaderPageView: View {
     let preferences: PreferencesObservable
 
     @Environment(\.colorScheme) private var colorScheme
-    /// The page's current document and its outbound-link set, built by `rebuildDocument()` off the
-    /// main thread. Held here rather than recomputed in `body`: building it means wrapping the whole
-    /// article body and parsing it with ksoup, far too heavy to repeat on every body evaluation — and
+    /// The page's current document, built by `rebuildDocument()` off the main thread. Held here
+    /// rather than recomputed in `body`: building it means wrapping the whole article body, far too
+    /// heavy to repeat on every body evaluation — and
     /// a single selection re-evaluates `body` several times (`selectedFeedName`/`selectedFeedFaviconUrl`
     /// arrive as flows of their own). Mirrors Compose's own `remember`/`LaunchedEffect` memoization
     /// (`ArticleDetailPane.kt`).
@@ -36,7 +36,7 @@ struct ReaderPageView: View {
     private static let rebuildDebounce: Duration = .milliseconds(75)
 
     var body: some View {
-        ArticleWebView(html: document.html, outboundLinks: document.outboundLinks)
+        ArticleWebView(html: document.html)
             #if os(iOS)
             // Shows through the WebView until its first document paints (see `ArticleWebView`).
             .background(.background)
@@ -62,10 +62,6 @@ struct ReaderPageView: View {
     /// The inputs are flattened to plain values here, on the main actor, and the document itself is
     /// built by `ReaderDocument.build` off it. Until that finishes the previous document stays on
     /// screen; a rebuild superseded by a newer key is cancelled by `.task(id:)` and discarded.
-    ///
-    /// The document is shown as soon as its HTML is ready; its outbound links are extracted
-    /// afterwards (unless the previous document already had the same body's), with `ArticleWebView`
-    /// holding any click made in between.
     private func rebuildDocument() async {
         #if os(iOS)
         // A pager page whose body is still loading shows only the reader's background rather than
@@ -78,13 +74,9 @@ struct ReaderPageView: View {
             do { try await Task.sleep(for: Self.rebuildDebounce) } catch { return }
         }
         let inputs = readerDocumentInputs()
-        let built = await ReaderDocument.build(inputs, reusingLinksOf: document)
+        let built = await ReaderDocument.build(inputs)
         guard !Task.isCancelled else { return }
         document = built
-        guard built.outboundLinks == nil, let source = built.linkSource else { return }
-        let links = await ReaderDocument.extractOutboundLinks(source)
-        guard !Task.isCancelled else { return }
-        document = built.withOutboundLinks(links)
     }
 
     private func readerDocumentInputs() -> ReaderDocumentInputs {
@@ -101,11 +93,6 @@ struct ReaderPageView: View {
             meta: meta,
             metaIconUrl: feedFaviconUrl,
             url: row.url,
-            // Only an http(s) article URL counts as an outbound link — the same rule as Open in
-            // Browser (`canOpenInBrowser`); a `keryx://`-scheme or empty URL
-            // must not be added, since WebKit would then treat a click that happens to normalize
-            // to the same string as "open externally" instead of loading it in the reader.
-            urlIsOutbound: ArticleListModelKt.isHttpOrHttpsUrl(url: row.url),
             openInBrowserTooltip: L("article_open_in_browser")
         )
         return ReaderDocumentInputs(

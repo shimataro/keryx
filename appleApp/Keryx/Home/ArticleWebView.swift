@@ -3,19 +3,12 @@ import WebKit
 
 /// Wraps `WKWebView` for the article reader — see "Article Reader (native WebView)" in
 /// `docs/app-architecture.md`. Loads pre-wrapped HTML (never raw article `content` — see
-/// `ArticleWebViewHtml.kt`) and gates outbound navigation: only a request whose target URL is
-/// either the article's own URL or one of the links `extractLinks` found inside the body is
-/// treated as a genuine click-through and opened in the external browser; so is any click that would
-/// replace the top-level page, while a top-level navigation nobody clicked is dropped. Only an SNS
+/// `ArticleWebViewHtml.kt`) and gates navigation: a click that would replace the top-level page is
+/// opened in the external browser, while a top-level navigation nobody clicked is dropped. Only an SNS
 /// embed's own navigation inside an iframe loads in place (see `ReaderNavigationGate`). A click a
-/// script synthesizes never navigates at all (`syntheticClickGuard`).
-///
-/// `outboundLinks` is `nil` while the document's links are still being extracted (the document is
-/// shown before that finishes — see `ReaderPageView.rebuildDocument`); `ReaderNavigationGate` holds
-/// any navigation arriving in that window rather than letting it load in the reader.
+/// script synthesizes is cancelled in the page (`syntheticClickGuard`).
 struct ArticleWebView {
     let html: String
-    let outboundLinks: Set<String>?
 
     @MainActor
     func makeCoordinator() -> Coordinator {
@@ -27,9 +20,6 @@ struct ArticleWebView {
         webView.navigationDelegate = coordinator
         // An empty document is `ReaderDocument.empty`, held only until the first real one is built.
         guard !html.isEmpty else { return }
-        // Before the load below, so a click the previous document left held is cancelled rather
-        // than answered with this document's links.
-        coordinator.gate.update(documentID: html, outboundLinks: outboundLinks)
         // SwiftUI calls update on every re-evaluation; reloading an unchanged document would reset
         // the scroll position.
         guard html != coordinator.loadedHtml else { return }
@@ -71,12 +61,6 @@ struct ArticleWebView {
     }
 
     @MainActor
-    private static func dismantle(coordinator: Coordinator) {
-        // WebKit requires every decision handler to be called exactly once.
-        coordinator.gate.discardPending()
-    }
-
-    @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
         var loadedHtml: String?
@@ -107,17 +91,15 @@ struct ArticleWebView {
                 targetIsMainFrame: navigationAction.targetFrame?.isMainFrame,
                 isLinkActivated: navigationAction.navigationType == .linkActivated
             )
-            gate.decide(url: navigationAction.request.url, kind: kind) { decision in
-                switch decision {
-                case let .openInBrowser(url):
-                    // The URL comes from the feed: only http(s) is ever handed to the OS.
-                    openInBrowserIfAllowed(url.absoluteString)
-                    decisionHandler(.cancel)
-                case .allow:
-                    decisionHandler(.allow)
-                case .cancel:
-                    decisionHandler(.cancel)
-                }
+            switch gate.decide(url: navigationAction.request.url, kind: kind) {
+            case let .openInBrowser(url):
+                // The URL comes from the feed: only http(s) is ever handed to the OS.
+                openInBrowserIfAllowed(url.absoluteString)
+                decisionHandler(.cancel)
+            case .allow:
+                decisionHandler(.allow)
+            case .cancel:
+                decisionHandler(.cancel)
             }
         }
     }
@@ -133,10 +115,6 @@ extension ArticleWebView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         configure(webView, coordinator: context.coordinator)
-    }
-
-    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
-        dismantle(coordinator: coordinator)
     }
 }
 #else
@@ -155,10 +133,6 @@ extension ArticleWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         configure(webView, coordinator: context.coordinator)
-    }
-
-    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        dismantle(coordinator: coordinator)
     }
 }
 
