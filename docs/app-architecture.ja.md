@@ -1438,6 +1438,12 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   `CODE_SIGNING_ALLOWED=NO` でビルドする——これはコンパイルとリンクは行うがコード署名は一切行わないので、
   ビルドが通ることだけを確認し、実行可能なサンドボックスアプリまでは確認しない（`docs/testing.ja.md`
   参照）。
+- **About の置き場所。** macOS はアプリメニューの About ウィンドウ（`App/AboutView.swift`）で表示する。iOS には
+  そのメニューがないので、設定に About の行（`Settings/AboutSettingsPage.swift`）を置く——バージョンと、Web サイト・
+  プロジェクトページ・連絡先・利用規約・プライバシーポリシー・ライセンスへのリンク（App Review はアプリ内から
+  辿れることを求める。ガイドライン 5.1.1(i)）。どちらも `App/AboutLinks.swift` の 1 つのリンク一覧を読む。
+  `SettingsNavigation.Tab` ではなく iOS の `SettingsView` 内に閉じたページにしてある：通知がここへ誘導することは
+  なく、macOS のタブバーには About タブがないため。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS

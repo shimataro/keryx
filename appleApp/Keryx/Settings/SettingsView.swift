@@ -17,6 +17,9 @@ struct SettingsView: View {
     /// The pushed tab, if any — seeded from `settingsNavigation.selectedTab` each time the sheet opens.
     @State private var path: [String] = []
 
+    /// The pushed About page's id in `path` — local to this view, see the About row in `body`.
+    private static let aboutPageId = "about"
+
     /// iOS's own Settings shape: a list of the sections, each pushed as a page of its own, in a sheet
     /// closed by Done — rather than macOS's tabbed window.
     var body: some View {
@@ -29,6 +32,9 @@ struct SettingsView: View {
                     sectionLink(SettingsNavigation.Tab.cloudSync, titleKey: "settings_cloud_sync", systemImage: "cloud")
                 }
                 sectionLink(SettingsNavigation.Tab.data, titleKey: "settings_tab_data", systemImage: "cylinder.split.1x2")
+                // Not a `SettingsNavigation.Tab`: no notification routes here, and the macOS tab bar has no
+                // About tab (it uses the app menu's About window).
+                sectionLink(Self.aboutPageId, titleKey: "menu_help_about", systemImage: "info.circle")
             }
             .navigationTitle(L("settings_title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -65,6 +71,9 @@ struct SettingsView: View {
         case SettingsNavigation.Tab.data:
             DataSettingsTab(preferences: preferences, opmlTransfer: opmlTransfer)
                 .navigationTitle(L("settings_tab_data"))
+        case Self.aboutPageId:
+            AboutSettingsPage()
+                .navigationTitle(L("menu_help_about"))
         default:
             GeneralSettingsTab(preferences: preferences)
                 .navigationTitle(L("settings_tab_general"))

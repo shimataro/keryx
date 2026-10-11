@@ -1463,6 +1463,12 @@ no separate iOS target to keep in sync.
   committed config. CI has no team available, so it builds with `CODE_SIGNING_ALLOWED=NO` instead —
   this compiles and links but never codesigns, so it verifies the build only, not a runnable
   sandboxed app (see `docs/testing.md`).
+- **Where About lives.** macOS shows it as the app menu's About window (`App/AboutView.swift`); iOS has
+  no such menu, so Settings carries an About row (`Settings/AboutSettingsPage.swift`) — the version plus
+  the website, project page, contact, terms, privacy policy and licenses links, which App Review
+  expects to be reachable inside the app (guideline 5.1.1(i)). Both read the one link list in
+  `App/AboutLinks.swift`. It is a page local to the iOS `SettingsView`, not a `SettingsNavigation.Tab`:
+  no notification routes to it and the macOS tab bar has no About tab.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
