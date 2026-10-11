@@ -90,6 +90,10 @@ targets:
         LOCALIZED_STRING_SWIFTUI_SUPPORT: NO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # iPad multitasking requires all four orientations (App Store Connect rejects the upload
+        # otherwise, ITMS-90474); iPhone gets the three that make sense on a phone.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
     dependencies:
       - framework: ../shared/build/XCFrameworks/release/KeryxShared.xcframework
         embed: false
