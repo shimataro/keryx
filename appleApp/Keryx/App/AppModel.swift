@@ -146,14 +146,37 @@ final class AppModel {
     /// see `KeryxSdk.importOpenedOpml`'s own doc. A file that can't be read is still requested (as
     /// `nil`), so the failure is shown on the Data tab rather than silently dropped. Home's
     /// `OpmlRequestPresenter` then shows Settings, so a file opened during Setup waits until Setup is
-    /// done.
+    /// done. The file is read off the main actor (`readOpenedDocument`) — waiting for a download must
+    /// not freeze the UI — and its text (or `nil`) is handed to the SDK back on the main actor.
     func importOpenedOpml(url: URL) {
         guard let sdk else { return }
+        Task { sdk.importOpenedOpml(xml: await Self.readOpenedDocument(url)) }
+    }
+
+    /// Reads an opened document off the main actor, keeping its security-scoped access active until
+    /// the read has finished.
+    @concurrent
+    private nonisolated static func readOpenedDocument(_ url: URL) async -> String? {
         // Ignores the boolean result: LaunchServices delivering a document this way already grants
         // the access `.fileImporter`'s own security-scoped URLs need `startAccessing…` to unlock, so
         // requiring it to return `true` here silently dropped every normal file-association open.
         let didStartAccessing = url.startAccessingSecurityScopedResource()
         defer { if didStartAccessing { url.stopAccessingSecurityScopedResource() } }
-        sdk.importOpenedOpml(xml: try? String(contentsOf: url, encoding: .utf8))
+        return readCoordinated(url)
+    }
+
+    /// Reads a document opened in place (`LSSupportsOpeningDocumentsInPlace`): iOS hands over the
+    /// original file — possibly in iCloud Drive or another file provider, possibly not downloaded
+    /// yet — so the read goes through file coordination, which waits for the provider to make the
+    /// file available, as Apple requires for in-place documents. `nil` when it can't be read.
+    /// That wait blocks the calling thread, so this is only ever called off the main actor
+    /// (`readOpenedDocument`).
+    private nonisolated static func readCoordinated(_ url: URL) -> String? {
+        var coordinationError: NSError?
+        var text: String?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readURL in
+            text = try? String(contentsOf: readURL, encoding: .utf8)
+        }
+        return text
     }
 }
