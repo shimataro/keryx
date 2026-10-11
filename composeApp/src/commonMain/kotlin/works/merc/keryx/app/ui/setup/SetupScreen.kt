@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -29,24 +28,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.presentation.setup.SetupController
 import works.merc.keryx.app.presentation.setup.SetupPhase
+import works.merc.keryx.app.ui.common.CloudBrandMark
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_abort
 import works.merc.keryx.app.resources.common_cancel
-import works.merc.keryx.app.resources.dropbox
-import works.merc.keryx.app.resources.google_drive
-import works.merc.keryx.app.resources.onedrive
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_body
 import works.merc.keryx.app.resources.setup_abort_connect_confirm_title
 import works.merc.keryx.app.resources.setup_auth_failed
@@ -62,19 +57,11 @@ import works.merc.keryx.app.resources.setup_local_only
 import works.merc.keryx.app.resources.setup_onedrive
 import works.merc.keryx.app.resources.setup_title
 
-/** Setup card title + brand icon for a cloud provider. */
-private class CloudSetupOption(
-    val title: StringResource,
-    val icon: DrawableResource,
-)
-
-private fun CloudStorageType.setupOption(): CloudSetupOption = when (this) {
-    CloudStorageType.DROPBOX ->
-        CloudSetupOption(Res.string.setup_dropbox, Res.drawable.dropbox)
-    CloudStorageType.GOOGLE_DRIVE ->
-        CloudSetupOption(Res.string.setup_google_drive, Res.drawable.google_drive)
-    CloudStorageType.ONEDRIVE ->
-        CloudSetupOption(Res.string.setup_onedrive, Res.drawable.onedrive)
+/** Setup card title for a cloud provider; its mark is [CloudBrandMark]. */
+private fun CloudStorageType.setupTitle(): StringResource = when (this) {
+    CloudStorageType.DROPBOX -> Res.string.setup_dropbox
+    CloudStorageType.GOOGLE_DRIVE -> Res.string.setup_google_drive
+    CloudStorageType.ONEDRIVE -> Res.string.setup_onedrive
 }
 
 @Composable
@@ -154,20 +141,15 @@ fun SetupScreen(onComplete: () -> Unit) {
                         )
                         Spacer(Modifier.height(12.dp))
                         vm.availableCloudTypes.forEachIndexed { index, type ->
-                            val option = type.setupOption()
                             FlatTonalButton(
                                 onClick = { vm.connect(type, onComplete) },
                                 enabled = enabled,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Image(
-                                        painter = painterResource(option.icon),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
+                                    CloudBrandMark(type, Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(option.title))
+                                    Text(stringResource(type.setupTitle()))
                                 }
                             }
                             if (index != vm.availableCloudTypes.lastIndex) {

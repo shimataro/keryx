@@ -104,7 +104,16 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     (Japanese, same key set), drawable/ (icons are Android Vector Drawable XML,
     not SVG — Compose Multiplatform's SVG decoder is desktop/iOS-only and crashes on Android at
     runtime; VectorDrawable XML is the one *vector* format `painterResource` renders on every
-    target — bitmap assets (`app_icon.png`, `onedrive.png`, the tray PNGs) are unaffected)
+    target — bitmap assets (`app_icon.png`, `dropbox.png`, `google_drive.png`, the tray PNGs) are unaffected)
+    The cloud providers' marks are the exception to "icons are VectorDrawable XML": `dropbox.png` and
+    `google_drive.png` are the providers' own official logos, byte for byte (Dropbox's "Glyph" from its Brand
+    Partner Toolkit, Google Drive's 2026 color logo from developers.google.com/drive/branding, both 128 px),
+    because both providers allow only their approved files, unmodified and untinted. They are PNGs because PNG is
+    the one format Compose (every target) and the Apple app (`project.yml` references the same files in place) both
+    read directly. OneDrive has no logo file: Microsoft licenses its logos and icons separately, so its row shows
+    the generic cloud icon and the name "OneDrive" in text. `ui/common/CloudBrandMark.kt` is the single place
+    that picks the mark, for Setup and Settings ▸ Cloud sync alike; the Apple app does the same in
+    `Platform/CloudBrand.swift`.
   jvmCommonMain/kotlin/…/  actuals shared by desktop and Android, needing no platform API either
     target lacks: Gzip, Sha1, Sha256, SecureRandom (secureRandomBytes), ContentDigest, FileTokenStorage,
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app

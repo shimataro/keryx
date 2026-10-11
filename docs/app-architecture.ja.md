@@ -94,7 +94,15 @@
     values-ja/strings.xml（日本語、同じキー集合）, drawable/（アイコンは SVG ではなく Android
     Vector Drawable XML — Compose Multiplatform の SVG デコーダはデスクトップ/iOS 専用で Android では
     実行時にクラッシュするため。VectorDrawable XML は `painterResource` が全ターゲットで描画できる唯一の
-    *ベクター*形式——ビットマップ資産（`app_icon.png`、`onedrive.png`、トレイの PNG 群）は対象外）
+    *ベクター*形式——ビットマップ資産（`app_icon.png`、`dropbox.png`、`google_drive.png`、トレイの PNG 群）は対象外）
+    クラウド連携先のマークは「アイコンは VectorDrawable XML」の例外で、`dropbox.png` と `google_drive.png` は各社の
+    公式ロゴそのもの（Dropbox は Brand Partner Toolkit の「Glyph」、Google Drive は developers.google.com/drive/branding の
+    2026 年版カラーロゴ。どちらも 128 px）。両社とも、承認済みのファイルを改変・着色せずに使うことだけを認めているため。
+    PNG にしているのは、Compose（全ターゲット）と Apple アプリ（`project.yml` が同じファイルをその場で参照する）の
+    どちらも直接読める唯一の形式だから。OneDrive にはロゴのファイルがない: Microsoft はロゴとアイコンを別途ライセンス
+    しているため、OneDrive の行は汎用の雲アイコンと文字の「OneDrive」で表す。マークを選ぶ場所は
+    `ui/common/CloudBrandMark.kt` の 1 か所で、セットアップと設定 ▸ クラウド同期の両方が使う。Apple アプリは
+    `Platform/CloudBrand.swift` で同じ振り分けをする。
   jvmCommonMain/kotlin/…/  デスクトップと Android の両方が共有する actual（どちらのプラットフォーム
     API にも依存しない）: Gzip, Sha1, Sha256, SecureRandom（secureRandomBytes）, ContentDigest, FileTokenStorage,
     AppInfo（共有生成 BuildConfig を読むだけ）, FileSystemExtras,
