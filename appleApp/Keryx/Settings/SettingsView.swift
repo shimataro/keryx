@@ -40,6 +40,10 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: String.self) { tab in
                 tabContent(tab)
+                    // Explicit, not inherited from the root: a page pushed through the initial `path`
+                    // (an opened .opml, a notification) appears before the root, inherits no mode, and
+                    // would otherwise draw a large title over its first row.
+                    .navigationBarTitleDisplayMode(.inline)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
