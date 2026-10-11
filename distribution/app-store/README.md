@@ -26,7 +26,7 @@ Two metadata rules (App Review Guidelines 2.3.7 and 2.3.10) shape the text:
 - **Describe the Apple app only.** No other platform, store or download source is named — the Play
   listing's "Android" / "Google Play services" / "GitHub for update checks" lines are deliberately
   absent.
-- **No third-party brand in the keywords.** Dropbox / Google Drive / OneDrive appear in the
+- **No third-party brand in the keywords.** Dropbox / OneDrive / Google Drive appear in the
   description only to name the services a user may connect, with a non-affiliation line.
 
 ## URLs
@@ -67,7 +67,7 @@ to sign in to. Everything can be reviewed without any account:
 2. Add a feed with the "+" button, e.g. https://www.apple.com/newsroom/rss-feed.rss
 3. Select an article to read it; use the toolbar to star it or open it in the browser.
 
-Cloud sync (Dropbox / Google Drive / OneDrive) is optional and needs the reviewer's own account at
+Cloud sync (Dropbox / OneDrive / Google Drive) is optional and needs the reviewer's own account at
 that provider. Sign-in happens in the system web authentication sheet (ASWebAuthenticationSession);
 Keryx never sees the password, and tokens are kept in the Keychain.
 
@@ -94,9 +94,14 @@ no auto-launch.
   [`TERMS.md`](../../TERMS.md) now cover iOS / iPadOS, the website copies live outside this repo.
 - [ ] Check that <https://keryx.merc.works/> does not push other platforms' downloads in a way that
   would make the App Store listing look like it promotes them (guideline 2.3.10).
-- [ ] Confirm the Dropbox, Google (Drive) and Microsoft (OneDrive) logos in
-  `appleApp/Keryx/Resources/Assets.xcassets` follow each company's current brand guidelines, and add
-  the attribution they ask for to `THIRD-PARTY-LICENSES.md` if any.
+- [x] Brand logos (guideline 5.2.1): checked against each company's terms on 2026-10-11. Dropbox and
+  Google Drive show the providers' own unmodified, untinted logo files (`composeApp/.../drawable/dropbox.png`
+  from Dropbox's Brand Partner Toolkit, `google_drive.png` from developers.google.com/drive/branding), and
+  the description carries Google's requested attribution. Microsoft licenses its logos and icons separately
+  (<https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general>), so OneDrive is named
+  in text only and shows a generic cloud icon, in every build. Dropbox's and Google's terms are their developer
+  branding guides (<https://www.dropbox.com/developers/reference/branding-guide>,
+  <https://developers.google.com/drive/branding>); recheck them if a logo is ever replaced.
 - [ ] Decide the marketing version (`MARKETING_VERSION` in `appleApp/project.yml` is `0.1.0`; a 0.x
   number can read as pre-release software to a reviewer, guideline 2.2).
 - [ ] Verify the example feed in the review notes still resolves.
