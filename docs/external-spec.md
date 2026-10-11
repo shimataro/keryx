@@ -10,7 +10,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 
 - Simple, stylish, high-speed UI/UX
 - Local-first (no account required, data stays on the device)
-- Cross-device sync via cloud storage (Dropbox / Google Drive / OneDrive)
+- Cross-device sync via cloud storage (Dropbox / OneDrive / Google Drive)
 
 ## 2. Supported Platforms
 
@@ -27,7 +27,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 
 ## 4. Sync Method
 
-- No account registration in Keryx. The user's own cloud storage (Dropbox / Google Drive / OneDrive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
+- No account registration in Keryx. The user's own cloud storage (Dropbox / OneDrive / Google Drive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
 - The sync file is a gzip-compressed `VACUUM INTO` snapshot of `keryx.db` (excluding the local-only
   `articles_fts` search index, the four `idx_articles_*` indexes, and the `sync_state` table) — see
   [sync-architecture.md](sync-architecture.md).
@@ -73,7 +73,7 @@ Details are in [sync-architecture.md](sync-architecture.md).
 
 ## 6. Setup Flow
 
-On first launch, choose local-only / cloud sync (Dropbox / Google Drive / OneDrive — on Android,
+On first launch, choose local-only / cloud sync (Dropbox / OneDrive / Google Drive — on Android,
 Google Drive appears only where Google Play services is installed, enabled and up to date, see §4). When cloud is selected, after OAuth authentication, if existing
 data exists in the cloud it is automatically merged (imported) during the initial sync.
 
@@ -434,7 +434,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 - No server operated by the developer, no account registration required. Keryx contacts only
   servers directly relevant to the feature in use (each subscribed feed and its favicon, GitHub
-  for update checks/downloads, and — only if connected — Dropbox/Google Drive/OneDrive), always
+  for update checks/downloads, and — only if connected — Dropbox/OneDrive/Google Drive), always
   straight from the device; see [PRIVACY.md](../PRIVACY.md)'s "Network requests this app makes"
   for the full list. Keryx's own communication
   (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched
@@ -443,7 +443,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
   reader keeps the articles either side of the one on screen ready to swipe to (§9), so their
   content — including any images or embedded content they contain — is fetched before they are
   opened, exactly as it would be on opening them. Nothing about them is marked read.
-- Each cloud provider's token (Dropbox, Google Drive, OneDrive) is stored separately in platform secure storage.
+- Each cloud provider's token (Dropbox, OneDrive, Google Drive) is stored separately in platform secure storage.
   On macOS: the app's data-protection Keychain, with no file fallback. On Windows/Linux: Credential Manager / Secret Service via
   java-keyring, or, inside the Snap package specifically, a local store encrypted with a per-app key from the
   desktop's Secret portal (via libsecret, not java-keyring) — falling back to a file in the data directory when
@@ -460,7 +460,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 | HTTP | Ktor client (CIO on desktop, OkHttp on Android) |
 | RSS/HTML/XML parsing | ksoup |
 | Serialization / datetime | kotlinx-serialization / kotlinx-datetime |
-| Cloud sync | Ktor + Dropbox / Google Drive / OneDrive (Microsoft Graph) REST API (OAuth PKCE + refresh token) |
+| Cloud sync | Ktor + Dropbox / OneDrive (Microsoft Graph) / Google Drive REST API (OAuth PKCE + refresh token) |
 | i18n | Compose Resources |
 | Testing | kotlin-test + kotlinx-coroutines-test + Ktor MockEngine |
 | Build | Gradle 9.7.1 (Kotlin 2.4.10 / Compose Multiplatform 1.11.1 / JDK 25 toolchain) |

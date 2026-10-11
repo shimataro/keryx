@@ -530,7 +530,7 @@ its own KDoc for why):
 
 1. Cache cleanup (`cleanUpArticleCacheIfDue`, if 24+ hours since last run).
 2. If a cloud provider is connected, initial sync (`SyncRepository.sync(SyncTrigger.AUTOMATIC)`) —
-   Dropbox / Google Drive / OneDrive on desktop; on Android the same three, with Google Drive
+   Dropbox / OneDrive / Google Drive on desktop; on Android the same three, with Google Drive
    only where Play services is available. Startup doesn't bypass the `SyncTrigger.AUTOMATIC` gate
    described above either: while `autoSyncSuspended` is true, this call downloads, merges and
    uploads nothing.

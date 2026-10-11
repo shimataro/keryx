@@ -62,10 +62,10 @@ Your cloud-sync credentials (below) are explicitly excluded from both. You can t
 this off for Keryx at any time from your device's Android backup settings (the
 exact menu path varies by device and Android version).
 
-## Optional cloud sync (Dropbox / Google Drive / OneDrive)
+## Optional cloud sync (Dropbox / OneDrive / Google Drive)
 
-Cloud sync is off by default. If you choose to connect Dropbox, Google Drive, or
-OneDrive (one provider active at a time), here is exactly what happens:
+Cloud sync is off by default. If you choose to connect Dropbox, OneDrive, or
+Google Drive (one provider active at a time), here is exactly what happens:
 
 - **Availability:** all three providers are supported on desktop. On Android, Dropbox
   and OneDrive are always available; Google Drive is available on any device with
@@ -87,8 +87,8 @@ OneDrive (one provider active at a time), here is exactly what happens:
   credentials, and the local full-text search index. These stay on each device
   independently.
 - **What gets uploaded:** a snapshot copy of your local database (with the search
-  index removed) is uploaded to a file in your own Dropbox, Google Drive, or
-  OneDrive. For Google Drive, this is written to the `drive.appdata` scope — a
+  index removed) is uploaded to a file in your own Dropbox, OneDrive, or
+  Google Drive. For Google Drive, this is written to the `drive.appdata` scope — a
   hidden, app-only folder that does not appear in your regular Google Drive and
   that no other app can see. For Dropbox, standard file-content scopes are used.
   For OneDrive, the standard Microsoft Graph file storage scope is used and the
@@ -108,14 +108,14 @@ OneDrive (one provider active at a time), here is exactly what happens:
   Android Keystore before being written to a file in the app's private
   storage; this file is explicitly excluded from Android's automatic backup
   and device transfer. Tokens are never sent anywhere except directly to
-  Dropbox's, Google's, or Microsoft's own API, as required to perform the
+  Dropbox's, Microsoft's, or Google's own API, as required to perform the
   sync you requested.
-- Once your data is in your Dropbox, Google Drive, or OneDrive account, it is
+- Once your data is in your Dropbox, OneDrive, or Google Drive account, it is
   subject to that provider's own privacy policy and terms — Keryx has no further
   access to or control over it beyond the sync file it wrote.
 - Disconnecting cloud sync in Settings stops future syncing immediately. It does
-  not retroactively delete the sync file already sitting in your Dropbox, Google
-  Drive, or OneDrive — you can remove that yourself from your cloud storage
+  not retroactively delete the sync file already sitting in your Dropbox, OneDrive,
+  or Google Drive — you can remove that yourself from your cloud storage
   account if you wish.
 
 ## Network requests this app makes
@@ -136,7 +136,7 @@ developer:
   the latest release's update feed (`appcast.xml`, from `github.com`) — automatically, unless you turn
   that off in Settings → General, or when you choose **Check for Updates…** — and downloads the update
   it lists from `github.com` / `*.githubusercontent.com` only if you choose to install it.
-- **Dropbox, Google Drive, or OneDrive** — only if you've connected cloud sync,
+- **Dropbox, OneDrive, or Google Drive** — only if you've connected cloud sync,
   as described above.
 - **Content an article itself references** — when you open an article, any external
   resources its own HTML embeds (images, videos, social-media embeds, iframes) are
