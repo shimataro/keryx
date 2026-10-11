@@ -1746,7 +1746,8 @@ for a document the app was opened with (`null` when it could not be read; mirror
 own ".opml file association" handling): it only requests the import, which Settings ▸ Data carries out
 once Home shows it. The Apple app opens such a document in place (`LSSupportsOpeningDocumentsInPlace`), so
 `AppModel.importOpenedOpml(url:)` reads the original file — which may live in iCloud Drive and not be
-downloaded yet — through `NSFileCoordinator` before handing its text over.
+downloaded yet — through `NSFileCoordinator` before handing its text over. The read runs off the main actor,
+so waiting for that download never freezes the UI.
 `completeConnect(type, tokens)` and `tearDownConnection(type)` are
 `suspend` wrappers around `domain/CloudConnectionService.kt` — the ordering every UI's
 connect/disconnect must follow, shared with the Compose settings and setup screens:

@@ -1691,7 +1691,8 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 （読めなかった場合は `null`。デスクトップ版・Android 版自身の「`.opml` ファイル関連付け」の扱いと同じ）。
 インポートを要求するだけで、Home がそれを表示したときに設定 ▸ データが実行する。Apple アプリはこうした文書を
 その場で開く（`LSSupportsOpeningDocumentsInPlace`）ため、`AppModel.importOpenedOpml(url:)` は元のファイル（iCloud Drive 上の
-未ダウンロードのものもありうる）を `NSFileCoordinator` で読んでから、その内容を渡す。`completeConnect(type, tokens)` と
+未ダウンロードのものもありうる）を `NSFileCoordinator` で読んでから、その内容を渡す。この読み取りはメインアクター外で行うため、
+ダウンロード待ちで UI が止まることはない。`completeConnect(type, tokens)` と
 `tearDownConnection(type)` は、`domain/CloudConnectionService.kt`
 （どの UI の接続・切断も従うべき順序を保持し、Compose の設定画面・セットアップ画面とも共有している）を包む
 `suspend` 関数：`completeConnect` はトークンを保存し、プロバイダーを選択し、同期を始める前にローカル設定を
