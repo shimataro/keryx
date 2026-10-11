@@ -355,6 +355,11 @@ iOS / Mac App Store 版の掲載文、App Store Connect への回答、審査メ
 [`distribution/app-store/`](../distribution/app-store/README.md) にある。手でコピーするための下書きで、
 ビルドからは参照されない。
 
+これらの資料が前提とするビルド設定は CI が守る。`appleApp/Scripts/verify-store-requirements.sh <Keryx.app>` は、
+ビルドしたアプリにプライバシーマニフェストの Required Reason API の宣言、ATS の例外（`NSAllowsArbitraryLoads`。
+`NSAllowsArbitraryLoadsInWebContent` は無いこと）、`ITSAppUsesNonExemptEncryption = NO`、（iOS では）iPad の 4 方向が
+そろっていなければ失敗する。`build-apple` ジョブが、iOS シミュレーター向けのビルドと macOS の Release アーカイブに対して実行する。
+
 ## パッケージング
 
 成果物は `composeApp/build/compose/binaries/main`（リポジトリルートからの相対パス）以下に作成される。

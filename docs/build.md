@@ -358,6 +358,12 @@ The listing copy, App Store Connect answers, review notes and the pre-submission
 iOS / Mac App Store builds live in [`distribution/app-store/`](../distribution/app-store/README.md).
 They are drafts to copy by hand; no build reads them.
 
+CI guards the build settings those materials rely on: `appleApp/Scripts/verify-store-requirements.sh <Keryx.app>`
+fails when the built app lacks the privacy manifest's required-reason declarations, the ATS exception
+(`NSAllowsArbitraryLoads`, with `NSAllowsArbitraryLoadsInWebContent` absent), `ITSAppUsesNonExemptEncryption = NO`, or
+(iOS) the four iPad orientations. The `build-apple` job runs it on the iOS Simulator build and on the macOS Release
+archive.
+
 ## Packaging
 
 Artifacts are written under `composeApp/build/compose/binaries/main` (relative to the repository root).
