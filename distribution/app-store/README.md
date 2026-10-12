@@ -16,6 +16,8 @@ listing/
 │   └── keywords.txt          # ≤ 100 bytes (UTF-8), comma-separated
 └── ja/
     └── (same five files)
+screenshots/
+└── <en-US|ja>/<iphone|ipad>/{1,2,3}.png   # see "Screenshots" below
 ```
 
 Content derives from [`README.md`](../../README.md) and [`PRIVACY.md`](../../PRIVACY.md) (and their
@@ -103,6 +105,41 @@ notifications continue; "Quit" in the menu bar item or Cmd+Q quits it. There is 
 no auto-launch.
 ```
 
+## Screenshots
+
+Three per device class and locale, uploaded under App Store Connect's 6.9-inch iPhone and 13-inch iPad
+slots (smaller sizes are scaled from these). Taken in the iOS Simulator with the app's own data, in the
+same order as the Android set (`fastlane/README.md`):
+
+| File | iPhone 17 Pro Max (1320×2868) | iPad Pro 13-inch (M5) (2752×2064 landscape, 2064×2752 portrait) |
+| --- | --- | --- |
+| `1.png` | Article list | Three panes, landscape, with the picture of the day open |
+| `2.png` | Reader (an English featured article) | Three panes, landscape, with a featured article open |
+| `3.png` | Feed list with folders and tags | Three panes, portrait |
+
+To retake them:
+
+- Build the app for the simulator, create one simulator per device class, `simctl erase` it, install the
+  app, and write `{"notificationEnabled":false}` to `Library/Application Support/Keryx/local_settings.json`
+  in its data container (the file's presence marks Setup as done and nothing asks for notification
+  permission). Set the language and region with `-AppleLanguages "(ja)" -AppleLocale ja_JP` when launching.
+- Import an OPML with `simctl openurl <device> file://<path>.opml`. Use only feeds whose content is safe in a
+  store listing and avoid commercial news sites, as for Android. The current set — en-US: NASA and English
+  Wikipedia (featured articles, picture of the day); ja: JAXA press releases, NAOJ news and Japanese
+  Wikipedia (featured articles), plus the two English Wikipedia feeds for the reader shots, because the
+  simulator's web view draws Japanese text as empty boxes (Safari does too; the app is unaffected). Put
+  the feeds in folders and give them tags so the feed list shows both. Open articles by their title rather
+  than by position, and check every headline and every opened article (text and picture) in the shots:
+  Wikipedia's daily picks change every day and can be unsuitable (violence, third-party products).
+- Freeze the status bar with `simctl status_bar <device> override --time 9:41 --batteryState charged
+  --batteryLevel 100 --wifiBars 3 --cellularBars 4 --cellularMode active`, drive the app with a throwaway
+  XCUITest target that calls `XCUIScreen.main.screenshot()` (not committed — add it to `project.yml` with
+  `platform: auto` and `supportedDestinations: [iOS]`, then restore `project.yml`), and wait about 40 s after
+  launch so the feeds and their favicons have loaded. A landscape iPad screenshot is stored in portrait pixels
+  with an EXIF orientation tag, so viewers show it upright but App Store Connect may not; turn the pixels with
+  `sips -r 270` (the step below strips the tag).
+- Shrink every file losslessly with `optipng -o7 -strip all` before committing.
+
 ## Before submitting
 
 - [ ] Publish the updated privacy policy and terms on <https://keryx.merc.works/privacy> and
@@ -118,8 +155,10 @@ no auto-launch.
   so every store listing says "Microsoft OneDrive" the first time. Google asks for the full name "Google Drive"
   and a trademark attribution in the description, which both descriptions carry
   (<https://developers.google.com/drive/branding>).
-- [ ] Decide the marketing version (`MARKETING_VERSION` in `appleApp/project.yml` is `0.1.0`; a 0.x
-  number can read as pre-release software to a reviewer, guideline 2.2).
+- [x] Marketing version: the same number as the GitHub release (0.26.0 for the first App Store build), passed at
+  archive time as `MARKETING_VERSION` — not the `0.1.0` left in `appleApp/project.yml`, which no release uses —
+  with `CURRENT_PROJECT_VERSION` raised for every upload of the same version. Set the App Store Connect
+  version to the same number before uploading.
 - [ ] Verify the example feed in the review notes still resolves.
 - [ ] If [`PRIVACY.md`](../../PRIVACY.md)'s effective date has changed since the last submission,
   re-check the App Privacy answer, the age-rating answers and the review notes above against it —
@@ -129,7 +168,8 @@ no auto-launch.
   environment variables (see [`docs/build.md`](../../docs/build.md)). A provider whose key is empty is
   hidden, which would contradict the listing and the review notes: check that Settings ▸ Cloud sync
   offers all three.
-- [ ] Screenshots for iPhone, iPad and Mac (the required sizes change with App Store Connect).
+- [ ] Screenshots: iPhone and iPad are in `screenshots/` (see above); the Mac ones come with the Mac App Store
+  build. The required sizes change with App Store Connect.
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
   2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first — then run
   **Validate App** in Organizer: it must report no ITMS-90474 (orientations) and no ITMS-91053
