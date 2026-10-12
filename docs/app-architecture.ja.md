@@ -1363,7 +1363,9 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 - **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、ペイン幅）、キーボードイベントの処理（各 UI は
   自分のキーイベントを共有のショートカット対応表 `presentation/home/HomeShortcuts.kt` に対応付ける）、ウィンドウの復元、すべての描画。
   検索バーの表示状態は、UI が共有状態に設定する入力（クエリの結果を表示するかどうかを決める）であり、UI が所有する状態ではない。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
-  これらを担い、Compose アプリは独自の実装を持ち続ける。
+  これらを担い、Compose アプリは独自の実装を持ち続ける。ペイン幅は各プラットフォームの入力方法に合わせる。macOS アプリは、デスクトップと同じく、
+  境界をドラッグした幅を保存して次回に復元する。iPad アプリは、Android のタッチ向けレイアウトと同じく、毎回既定の幅を求めて何も保存せず、
+  各列の最小幅を下回らないように画面へ収めるのは `NavigationSplitView` に任せる。
 - Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
 - **ローカライズ済みテキストは UI 層で解決し、共有コードでは決して解決しない。** 共有コードはメッセージ ID と引数を出力する。
   Compose アプリは Compose Resources で、SwiftUI アプリは同じ `strings.xml` から生成した String Catalog で解決するので、2 つの

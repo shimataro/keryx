@@ -1383,7 +1383,10 @@ platform:
   window restoration, and all rendering. Search-bar visibility is an input the UI sets on the shared
   state (it decides whether a query is showing results), not state it owns. SwiftUI covers these
   with `NavigationSplitView`, `@FocusState`, `@SceneStorage` and its own window restoration; the
-  Compose app keeps its own implementations.
+  Compose app keeps its own implementations. Pane widths follow each platform's input: the macOS app
+  saves the widths the dividers are dragged to and restores them, like desktop, while the iPad app,
+  like Android's touch layouts, asks for the default widths every time and saves nothing, leaving
+  `NavigationSplitView` to fit them into the screen without going below each column's minimum.
 - Swift observes the shared state holders' `StateFlow`s through a thin `@Observable` adapter.
 - **Localized text is resolved in the UI layer, never in shared code.** Shared code emits
   message IDs plus arguments. The Compose app resolves them through Compose Resources, and the
