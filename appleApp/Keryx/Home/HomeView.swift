@@ -14,8 +14,10 @@ struct HomeView: View {
     let preferences: PreferencesObservable
 
     @FocusState private var focusedPane: HomeFocusedPane?
+    #if os(macOS)
     @State private var feedListWidthSaveTask: Task<Void, Never>?
     @State private var articleListWidthSaveTask: Task<Void, Never>?
+    #endif
     @State private var initialFocusApplied = false
     /// The column shown while the split view is collapsed into a single stack (iPhone, compact
     /// width). Driven explicitly rather than left to the sidebar `List`'s own selection: an article
@@ -53,6 +55,28 @@ struct HomeView: View {
     @State private var returnFlashId: String?
     private static let returnFlashFadeSeconds = 0.35
 
+    /// The ideal widths of the sidebar and article list columns. macOS restores the widths the user
+    /// last dragged the dividers to. iOS asks for the defaults every time, as Android's touch layouts
+    /// do, and leaves the split view to fit them into the screen without going below each column's
+    /// minimum: there the only width a column ever reported was 0 from the first layout pass, which,
+    /// clamped to the minimum and saved, pinned both columns at their minimums for good.
+    private var idealFeedListWidth: CGFloat {
+        #if os(macOS)
+        CGFloat(preferences.feedListPaneWidth)
+        #else
+        CGFloat(ConstantsKt.FEED_LIST_PANE_WIDTH_DEFAULT)
+        #endif
+    }
+
+    /// See `idealFeedListWidth`.
+    private var idealArticleListWidth: CGFloat {
+        #if os(macOS)
+        CGFloat(preferences.articleListPaneWidth)
+        #else
+        CGFloat(ConstantsKt.ARTICLE_LIST_PANE_WIDTH_DEFAULT)
+        #endif
+    }
+
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $compactColumn) {
             FeedListView(
@@ -65,13 +89,16 @@ struct HomeView: View {
             )
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.FEED_LIST_PANE_MIN_WIDTH),
-                    ideal: CGFloat(preferences.feedListPaneWidth),
+                    ideal: idealFeedListWidth,
                     max: CGFloat(ConstantsKt.FEED_LIST_PANE_MAX_WIDTH)
                 )
+                #if os(macOS)
                 .onSizeChanged { size in
                     // TODO: Replace onSizeChanged with .onGeometryChange when deployment target is macOS 15+.
+                    guard size.width > 0 else { return }
                     debounceSave(&feedListWidthSaveTask) { preferences.controller.setFeedListPaneWidth(width: Double(size.width)) }
                 }
+                #endif
         } content: {
             ArticleListView(
                 home: home,
@@ -85,13 +112,16 @@ struct HomeView: View {
             )
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
-                    ideal: CGFloat(preferences.articleListPaneWidth),
+                    ideal: idealArticleListWidth,
                     max: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MAX_WIDTH)
                 )
+                #if os(macOS)
                 .onSizeChanged { size in
                     // TODO: Replace onSizeChanged with .onGeometryChange when deployment target is macOS 15+.
+                    guard size.width > 0 else { return }
                     debounceSave(&articleListWidthSaveTask) { preferences.controller.setArticleListPaneWidth(width: Double(size.width)) }
                 }
+                #endif
         } detail: {
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane, isOnScreen: !(sidebarIsTopmost || articleListIsTopmost))
         }
@@ -166,6 +196,7 @@ struct HomeView: View {
         }
     }
 
+    #if os(macOS)
     /// A debounced save — cancels any pending save for the same pane and starts a fresh one, so
     /// only the width the divider settles on for `PANE_WIDTH_PERSIST_DEBOUNCE_MS` actually gets
     /// written, matching Compose's own `HomeLayoutViewModel` (`debounce(PANE_WIDTH_PERSIST_DEBOUNCE_MS)`).
@@ -177,6 +208,7 @@ struct HomeView: View {
             save()
         }
     }
+    #endif
 
     /// Compose's own `HomePane` names (`FeedList`/`ArticleList`/`ArticleDetail`) — the raw values
     /// `lastFocusedPane` is stored as, shared with desktop's `HomeLayoutViewModel`. `.search` has no
