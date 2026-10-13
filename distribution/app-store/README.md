@@ -168,8 +168,10 @@ To retake them:
   environment variables (see [`docs/build.md`](../../docs/build.md)). A provider whose key is empty is
   hidden, which would contradict the listing and the review notes: check that Settings ▸ Cloud sync
   offers all three.
-- [ ] Screenshots: iPhone and iPad are in `screenshots/` (see above); the Mac ones come with the Mac App Store
-  build. The required sizes change with App Store Connect.
+- [ ] Screenshots: iPhone and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: they are
+  listing assets, not part of the Mac App Store build, so take them when that build is ready, keep them in
+  `screenshots/<en-US|ja>/mac/`, and upload them under the version's App Previews and Screenshots ▸ macOS in
+  App Store Connect. The required sizes change with App Store Connect.
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
   2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first — then run
   **Validate App** in Organizer: it must report no ITMS-90474 (orientations) and no ITMS-91053
