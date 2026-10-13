@@ -135,9 +135,12 @@ To retake them:
   --batteryLevel 100 --wifiBars 3 --cellularBars 4 --cellularMode active`, drive the app with a throwaway
   XCUITest target that calls `XCUIScreen.main.screenshot()` (not committed — add it to `project.yml` with
   `platform: auto` and `supportedDestinations: [iOS]`, then restore `project.yml`), and wait about 40 s after
-  launch so the feeds and their favicons have loaded. A landscape iPad screenshot is stored in portrait pixels
-  with an EXIF orientation tag, so viewers show it upright but App Store Connect may not; turn the pixels with
-  `sips -r 270` (the step below strips the tag).
+  launch so the feeds and their favicons have loaded.
+- Check each raw landscape iPad capture with `sips -g pixelWidth -g pixelHeight -g orientation`. So far the
+  simulator has stored it in portrait pixels (2064×2752) with an EXIF orientation tag, which viewers show
+  upright but App Store Connect may not; only then turn the pixels with `sips -r 270` (the next step strips
+  the tag) and check the result is upright. Leave a capture already in landscape pixels as it is, and never
+  rotate the files in `screenshots/` — they are already turned and stripped.
 - Shrink every file losslessly with `optipng -o7 -strip all` before committing.
 
 ## Before submitting
