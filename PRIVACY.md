@@ -207,8 +207,8 @@ network request.
 
 ## Children's privacy
 
-Keryx does not collect personal data from anyone, including children. No age
-verification is performed or required.
+Keryx does not collect personal data from anyone. No age verification is performed
+or required.
 
 ## Changes to this policy
 
