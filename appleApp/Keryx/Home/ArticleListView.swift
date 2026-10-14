@@ -47,6 +47,15 @@ struct ArticleListView: View {
     @State private var didShowFirstRows = false
     /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
     @State private var emptyListHeaderHeight: CGFloat = 0
+    /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
+    /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
+    /// hung under the navigation bar, and after its first pull that control leaves the list resting
+    /// tens of points short of the top (the top inset shrinks back but the offset does not follow).
+    /// A list built once its column is in the navigation stack gets the control inside it and rests
+    /// at the top. Rebuilding as the push starts is too early (the control still goes under the
+    /// bar); rebuilding on window attachment happens before the list can be touched, so nothing
+    /// the reader did is lost.
+    @State private var attachedToWindow = false
     #endif
 
     /// The rows on screen: the search results while a search is active, else the filter's own list.
@@ -91,7 +100,9 @@ struct ArticleListView: View {
                 // lighter way to detach and re-attach the action. The rebuilt list starts at the top,
                 // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
                 // made a row touched next jump for a moment.
-                withNewArticlesPill(content.id(remountGeneration)) { scrollToFreshEnd(proxy) }
+                withNewArticlesPill(content.id(ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow))) {
+                    scrollToFreshEnd(proxy)
+                }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
                     // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
                     // vs. `NewArticlesPill`'s own "fresh end"). `initial: false` keeps the first
@@ -122,6 +133,14 @@ struct ArticleListView: View {
             #endif
         }
         #if os(iOS)
+        // Outside the rebuilt `content`, so a rebuild does not attach a fresh probe and fire again.
+        .background {
+            WindowAttachmentProbe {
+                guard !attachedToWindow else { return }
+                // After the current update: the probe reports from inside UIKit's own layout pass.
+                Task { @MainActor in attachedToWindow = true }
+            }
+        }
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
@@ -570,6 +589,12 @@ private struct PullToRefreshModifier: ViewModifier {
 }
 
 #if os(iOS)
+/// What `ArticleListView` rebuilds its list on — see `remountGeneration` and `attachedToWindow`.
+private struct ListIdentity: Hashable {
+    let remountGeneration: Int
+    let attachedToWindow: Bool
+}
+
 /// The article list's on-screen rows and its pending visible-row report. A plain class held in
 /// `@State` rather than `@State` values of their own: every row scrolling in or out writes to it,
 /// and nothing here is drawn, so those writes must not invalidate the list's body.
