@@ -1467,9 +1467,10 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   バックグラウンドにある間（リンクから開いた外部ブラウザが前面にある間など）に `WKWebView` の WebContent
   プロセスを終了させることがあり、そのままではリーダーが白紙になる。`ArticleWebView` の
   `webViewWebContentProcessDidTerminate` が保持している HTML を読み込み直す（スクロール位置はプロセスとともに
-  失われるため先頭から）。`Home/ReaderProcessRecovery.swift` はこの再読み込みを commit 1回につき1度だけ許す：
-  読み込み直した文書が commit する前に再びプロセスが落ちたら、リーダーはそこで止めて文書を忘れるので、
-  ループせず、記事をもう一度表示したときに改めて読み込まれる。
+  失われるため先頭から）。`Home/ReaderProcessRecovery.swift` はこの再読み込みを文書1つにつき1度だけ許す：
+  再びプロセスが落ちたら（読み込み直した文書の commit の前でも後でも。WebContent を落とすページでもループしない）、
+  リーダーはそこで止めて文書を忘れるので、記事をもう一度表示したときに改めて読み込まれる。新しい再読み込みの
+  機会が得られるのは、別の文書に替わったときだけ。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS

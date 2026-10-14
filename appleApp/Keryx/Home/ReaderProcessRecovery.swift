@@ -5,27 +5,30 @@ import Foundation
 ///
 /// iOS may kill that process while the app is in the background (e.g. while the external browser a
 /// link opened is in front), leaving the `WKWebView` blank. The reader then reloads the document it
-/// holds, but only once per commit: a document that takes the process down again before it even
-/// commits is not retried, so a page that crashes WebContent cannot loop forever.
+/// holds, but only once per document: a second termination gives up rather than reloading again,
+/// even if the reload committed in between, so a page that takes WebContent down (before or after
+/// committing) cannot loop forever. Only a different document earns a new reload.
 @MainActor
 final class ReaderProcessRecovery {
-    /// Whether a reload after a termination is waiting for its document to commit.
-    private var awaitingCommit = false
-
-    /// Called when the WebContent process was terminated: whether to reload the document.
-    func shouldReloadAfterTermination() -> Bool {
-        guard !awaitingCommit else { return false }
-        awaitingCommit = true
-        return true
+    enum TerminationAction: Equatable {
+        /// Load the held document again.
+        case reload
+        /// Leave the reader blank: this document already had its reload.
+        case giveUp
     }
 
-    /// The reader's own document committed: the process is serving it again.
-    func documentCommitted() {
-        awaitingCommit = false
+    /// Whether the current document has already been reloaded after a termination.
+    private var reloadSpent = false
+
+    /// Called when the WebContent process was terminated: what to do with the held document.
+    func processTerminated() -> TerminationAction {
+        guard !reloadSpent else { return .giveUp }
+        reloadSpent = true
+        return .reload
     }
 
     /// The reader is about to load a document because its content changed, not to recover.
     func documentReplaced() {
-        awaitingCommit = false
+        reloadSpent = false
     }
 }

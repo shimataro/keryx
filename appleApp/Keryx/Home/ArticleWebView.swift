@@ -95,7 +95,6 @@ struct ArticleWebView {
                 load(html, in: webView)
                 return
             }
-            if navigation === documentNavigation { recovery.documentCommitted() }
             endDocumentLoad(of: navigation)
         }
 
@@ -118,10 +117,11 @@ struct ArticleWebView {
             documentNavigation = nil
             reloadedHtml = nil
             guard let html = loadedHtml else { return }
-            if recovery.shouldReloadAfterTermination() {
+            switch recovery.processTerminated() {
+            case .reload:
                 load(html, in: webView)
-            } else {
-                // It went down again before even committing: stop here, and let the next update
+            case .giveUp:
+                // It went down again after its one reload: stop here, and let the next update
                 // (showing the article again) load it afresh rather than skip it as already loaded.
                 loadedHtml = nil
             }

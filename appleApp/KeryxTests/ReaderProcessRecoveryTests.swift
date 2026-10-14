@@ -6,29 +6,32 @@ struct ReaderProcessRecoveryTests {
     @Test
     func theFirstTerminationReloadsTheDocument() {
         let recovery = ReaderProcessRecovery()
-        #expect(recovery.shouldReloadAfterTermination())
+        #expect(recovery.processTerminated() == .reload)
     }
 
     @Test
-    func aTerminationBeforeTheReloadCommitsDoesNotReloadAgain() {
+    func aSecondTerminationGivesUpEvenAfterTheReloadCommitted() {
         let recovery = ReaderProcessRecovery()
-        _ = recovery.shouldReloadAfterTermination()
-        #expect(!recovery.shouldReloadAfterTermination())
-    }
-
-    @Test
-    func aTerminationAfterTheReloadCommittedReloadsAgain() {
-        let recovery = ReaderProcessRecovery()
-        _ = recovery.shouldReloadAfterTermination()
-        recovery.documentCommitted()
-        #expect(recovery.shouldReloadAfterTermination())
+        _ = recovery.processTerminated()
+        #expect(recovery.processTerminated() == .giveUp)
+        #expect(recovery.processTerminated() == .giveUp)
     }
 
     @Test
     func loadingAnotherDocumentReloadsOnTheNextTermination() {
         let recovery = ReaderProcessRecovery()
-        _ = recovery.shouldReloadAfterTermination()
+        _ = recovery.processTerminated()
         recovery.documentReplaced()
-        #expect(recovery.shouldReloadAfterTermination())
+        #expect(recovery.processTerminated() == .reload)
+    }
+
+    @Test
+    func loadingAnotherDocumentAfterGivingUpReloadsOnTheNextTermination() {
+        let recovery = ReaderProcessRecovery()
+        _ = recovery.processTerminated()
+        _ = recovery.processTerminated()
+        recovery.documentReplaced()
+        #expect(recovery.processTerminated() == .reload)
+        #expect(recovery.processTerminated() == .giveUp)
     }
 }
