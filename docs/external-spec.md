@@ -392,7 +392,9 @@ and syncing nothing. The gesture works on an empty list too (e.g. "unread only" 
 but is disabled while search results are showing — pulling a result list isn't a request to refresh
 the feeds behind it — and while there are no feeds at all. As with Refresh All, a
 pull is followed by a cloud sync when one is connected, and the indicator stays up until that sync
-has finished too, not just the feed fetches. A pull made while a refresh or sync is already running (a
+has finished too, not just the feed fetches. On iOS, where the system starts the refresh the moment
+the pull crosses its threshold (with the finger still down), the indicator also stays up for at least
+about a second, so a refresh that finishes almost at once still shows it spinning. A pull made while a refresh or sync is already running (a
 background refresh, say) starts nothing new; the indicator simply stays up until the running one
 finishes. On Android, the same refresh is also reachable without the gesture, wherever the gesture
 itself is available: as a TalkBack custom action on the list ("Refresh this list"), and from a

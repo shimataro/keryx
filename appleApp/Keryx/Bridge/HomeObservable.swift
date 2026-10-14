@@ -247,8 +247,9 @@ final class HomeObservable: ObservableAssignment {
 
     /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including
     /// the sync that follows it, or a refresh/sync already in flight — has finished, so a
-    /// `.refreshable` indicator stays up exactly as long as Compose's own `pullRefreshing` does
-    /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`.
+    /// `.refreshable` indicator stays up as long as Compose's own `pullRefreshing` does
+    /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`, and
+    /// for at least `PullRefreshHold.defaultMinimum`.
     func pullToRefresh() async {
         await awaitPull(of: filter) { viewModel.pullToRefresh() }
     }
@@ -261,9 +262,11 @@ final class HomeObservable: ObservableAssignment {
 
     private func awaitPull(of filter: ArticleFilter, start: () -> Void) async {
         let filter = filter as AnyObject
-        start()
-        for await pending in viewModel.pullRefreshingFilters {
-            if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+        await PullRefreshHold.run {
+            start()
+            for await pending in viewModel.pullRefreshingFilters {
+                if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+            }
         }
     }
 
