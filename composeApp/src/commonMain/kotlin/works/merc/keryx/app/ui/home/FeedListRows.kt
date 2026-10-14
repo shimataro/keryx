@@ -26,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -55,6 +57,7 @@ import works.merc.keryx.app.resources.home_move_to_folder
 import works.merc.keryx.app.resources.home_new_folder
 import works.merc.keryx.app.resources.home_new_tag
 import works.merc.keryx.app.resources.home_no_folder
+import works.merc.keryx.app.resources.home_feed_refreshing
 import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_rename_feed
@@ -144,7 +147,9 @@ internal fun FolderGroupHeader(
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
     isBeingDragged: Boolean = false,
+    refreshing: Boolean = false,
 ) {
+    val refreshingStateLabel = stringResource(Res.string.home_feed_refreshing)
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
     val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folder.id)
@@ -216,7 +221,8 @@ internal fun FolderGroupHeader(
                 ),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = FEED_LIST_ROW_START_PADDING, end = 8.dp),
+            .padding(start = FEED_LIST_ROW_START_PADDING, end = 8.dp)
+            .semantics { if (refreshing) stateDescription = refreshingStateLabel },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompositionLocalProvider(
@@ -231,13 +237,15 @@ internal fun FolderGroupHeader(
                 Modifier.weight(1f).padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                KeryxIcon(
-                    KeryxIcons.Folder,
-                    contentDescription = null,
-                    tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
-                        ?: MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(FEED_LIST_MARKER_SLOT),
-                )
+                RefreshingMarkerSlot(refreshing) {
+                    KeryxIcon(
+                        KeryxIcons.Folder,
+                        contentDescription = null,
+                        tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
+                            ?: MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(FEED_LIST_MARKER_SLOT),
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
                 // Same weighted slot either way, so the chevron/folder icon on the left and the
                 // count badge on the right never move when editing starts or ends.
@@ -387,8 +395,10 @@ internal fun FeedRow(
     isBeingDragged: Boolean = false,
     onCreateNewFolderForFeed: () -> Unit = {},
     onCreateNewTagForFeed: () -> Unit = {},
+    refreshing: Boolean = false,
 ) {
     val refreshLabel = stringResource(Res.string.home_refresh)
+    val refreshingStateLabel = stringResource(Res.string.home_feed_refreshing)
     val assignTagsLabel = stringResource(Res.string.home_assign_tags)
     val renameFeedLabel = stringResource(Res.string.home_rename_feed)
     val moveToFolderLabel = stringResource(Res.string.home_move_to_folder)
@@ -479,10 +489,11 @@ internal fun FeedRow(
                 decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
             )
             .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = if (indented) feedRowIndent() else FEED_LIST_ROW_START_PADDING, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = if (indented) feedRowIndent() else FEED_LIST_ROW_START_PADDING, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .semantics { if (refreshing) stateDescription = refreshingStateLabel },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FeedAvatar(feed.displayTitle(), feed.favicon_url)
+        RefreshingMarkerSlot(refreshing) { FeedAvatar(feed.displayTitle(), feed.favicon_url) }
         Spacer(Modifier.width(12.dp))
         // Same weighted slot either way, so the favicon on the left and the error indicator /
         // count badge on the right never move when editing starts or ends. A blank value is

@@ -28,6 +28,7 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_move_down
 import works.merc.keryx.app.resources.home_move_up
 import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.KeryxIcons
 
 // Small leaf composables used to build the rows of FeedListPane (feed avatar + unread-count badge).
@@ -52,6 +53,33 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
         )
     }
 }
+
+/**
+ * The feed list's leading marker slot (a feed's avatar, a folder's icon), showing a small spinner in
+ * place of [marker] while [refreshing]. The slot keeps its [FEED_LIST_MARKER_SLOT] size either way,
+ * so the title beside it never moves; the spinner itself is drawn smaller than the slot, since a
+ * full-diameter ring reads heavier than a favicon of the same size.
+ *
+ * @param refreshing Whether the row's feed (or, for a collapsed folder, one of its feeds) is being refreshed.
+ * @param marker The marker shown when not refreshing.
+ */
+@Composable
+internal fun RefreshingMarkerSlot(refreshing: Boolean, marker: @Composable () -> Unit) {
+    Box(Modifier.size(FEED_LIST_MARKER_SLOT), contentAlignment = Alignment.Center) {
+        if (refreshing) {
+            SmallSpinner(
+                size = REFRESHING_SPINNER_SIZE,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                strokeWidth = REFRESHING_SPINNER_STROKE,
+            )
+        } else {
+            marker()
+        }
+    }
+}
+
+private val REFRESHING_SPINNER_SIZE = 12.dp
+private val REFRESHING_SPINNER_STROKE = 1.5.dp
 
 /**
  * Displays a circular avatar containing the first character of the title.
