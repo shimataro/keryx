@@ -105,6 +105,7 @@ struct KeryxApp: App {
             appDelegate.revealMainWindow()
             #endif
         }
+        #if os(macOS)
         // Applies the in-app theme setting to every SwiftUI-rendered surface — Settings/About
         // scenes read it independently through their own environment inheritance. The preferences
         // themselves are observed by `AppModel` for the app's whole lifetime, so this takes effect
@@ -112,7 +113,16 @@ struct KeryxApp: App {
         // `preferredColorScheme` does not reach: native menus, and any AppKit chrome outside this
         // scene's own view tree.
         .preferredColorScheme(colorScheme(for: model.preferences?.themeMode))
+        #endif
         #if os(iOS)
+        // iOS applies the in-app theme as a window-level `overrideUserInterfaceStyle` instead of
+        // `.preferredColorScheme`: the latter reaches a presented sheet only when the sheet opens, so
+        // the open Settings sheet kept its old appearance after the theme was switched from it. The
+        // window override reaches every view controller in the window, presented ones included, the
+        // moment it changes.
+        .onChange(of: model.preferences?.themeMode, initial: true) { _, mode in
+            applyAppearance(mode)
+        }
         .sheet(isPresented: Binding(
             get: { model.settingsNavigation.isSheetPresented },
             set: { model.settingsNavigation.isSheetPresented = $0 }
@@ -156,6 +166,20 @@ struct KeryxApp: App {
         BackgroundRefresh.schedule(refreshIntervalMinutes: minutes)
     }
 
+    /// Mirrors `resolveDarkTheme`'s `"light"`/`"dark"`/else (follow system) rule (`KeryxTheme.kt`),
+    /// applied to every window of every connected scene (an iPad can have several); a scene
+    /// connected later applies it from its own `mainContent`'s `initial: true` change handler.
+    private func applyAppearance(_ mode: String?) {
+        let style: UIUserInterfaceStyle = switch mode {
+        case "light": .light
+        case "dark": .dark
+        default: .unspecified
+        }
+        for window in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+
     /// The iOS counterpart of the macOS `Settings` scene above, presented from the sidebar's gear
     /// button or a bell row's `ShowSettingsTab` (`SettingsNavigation.isSheetPresented`).
     @ViewBuilder
@@ -167,8 +191,9 @@ struct KeryxApp: App {
                 oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer,
                 settingsNavigation: model.settingsNavigation
             )
-            // The sheet is presented outside the view tree `.preferredColorScheme` above applies to.
-            .preferredColorScheme(colorScheme(for: preferences.themeMode))
+            // No `.preferredColorScheme` of its own: the sheet inherits the window's
+            // `overrideUserInterfaceStyle` (`applyAppearance`), which also follows a theme change
+            // made while the sheet is open.
         }
     }
     #endif
@@ -188,7 +213,6 @@ struct KeryxApp: App {
         default: NSApp.appearance = nil
         }
     }
-    #endif
 
     /// Mirrors `resolveDarkTheme`'s same rule for SwiftUI's own `.preferredColorScheme` — `nil`
     /// leaves the system setting in charge.
@@ -199,6 +223,7 @@ struct KeryxApp: App {
         default: return nil
         }
     }
+    #endif
 }
 
 /// Reports `home.totalUnread` (the Dock badge and the menu bar status item on macOS, the app icon
