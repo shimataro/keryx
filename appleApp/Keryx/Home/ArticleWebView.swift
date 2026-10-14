@@ -120,6 +120,11 @@ struct ArticleWebView {
 
         private func endDocumentLoad(of navigation: WKNavigation?) {
             guard let navigation, navigation === documentNavigation else { return }
+            abandonDocumentLoad()
+        }
+
+        /// Ends the gate's wait for the document load in flight, if any.
+        private func abandonDocumentLoad() {
             gate.endDocumentLoad()
             documentNavigation = nil
         }
@@ -129,8 +134,7 @@ struct ArticleWebView {
         /// not bring the document back (its URL is `about:blank`, and the gate cancels it anyway), so
         /// the held HTML is loaded again.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            gate.endDocumentLoad()
-            documentNavigation = nil
+            abandonDocumentLoad()
             reloadedHtml = nil
             guard let html = loadedHtml else { return }
             switch recovery.processTerminated() {
