@@ -20,7 +20,7 @@ struct ArticleListView: View {
     /// plain button rather than a `List` selection, so nothing navigates to the reader by itself.
     let onOpenArticle: () -> Void
     /// Bumped by `HomeView` each time a phone-width split view brings this list forward from the
-    /// sidebar; every change rebuilds `content` (see the `.onChange` for it in `body`). Unused on macOS.
+    /// sidebar; every change rebuilds `content` (see its `.id` in `body`). Unused on macOS.
     let remountGeneration: Int
 
     /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
@@ -83,21 +83,15 @@ struct ArticleListView: View {
             }
             #else
             ScrollViewReader { proxy in
+                // Rebuilt whenever a phone-width split view brings this list forward from the
+                // sidebar. SwiftUI hangs a `.refreshable` list's refresh control from the navigation
+                // bar and drops it once the column is popped, but never re-attaches it to the list it
+                // keeps: the pull still refreshes, with no spinner (seen on iOS 27). A rebuilt list
+                // gets a fresh control. `EnvironmentValues.refresh` is read-only, so there is no
+                // lighter way to detach and re-attach the action. The rebuilt list starts at the top,
+                // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
+                // made a row touched next jump for a moment.
                 withNewArticlesPill(content.id(remountGeneration)) { scrollToFreshEnd(proxy) }
-                    // Rebuilt whenever a phone-width split view brings this list forward from the
-                    // sidebar. SwiftUI hangs a `.refreshable` list's refresh control from the
-                    // navigation bar and drops it once the column is popped, but never re-attaches it
-                    // to the list it keeps: the pull still refreshes, with no spinner (seen on iOS 27). A
-                    // rebuilt list gets a fresh control. `EnvironmentValues.refresh` is read-only, so
-                    // there is no lighter way to detach and re-attach the action. The rebuild starts
-                    // at the top, so it is scrolled back to the row that was topmost.
-                    .onChange(of: remountGeneration) { _, _ in
-                        guard let id = visibleRows.topmostId, displayed.indexById[id] != nil else { return }
-                        Task {
-                            await Task.yield()
-                            proxy.scrollTo(id, anchor: .top)
-                        }
-                    }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
                     // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
                     // vs. `NewArticlesPill`'s own "fresh end"). `initial: false` keeps the first
@@ -468,9 +462,6 @@ struct ArticleListView: View {
                 listHeader
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(uiColor: .systemBackground))
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: {
-                        visibleRows.headerBottom = $0
-                    }
                     .listRowInsets(EdgeInsets())
                     .foregroundStyle(.primary)
             }
@@ -483,17 +474,6 @@ struct ArticleListView: View {
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
         rowView(article, selectedId: selectedId, paneFocused: paneFocused)
             .equatable()
-            // `onAppear` also fires for rows hidden behind the translucent navigation bar and the
-            // pinned header, so the row the reader actually sees on top is tracked separately.
-            .onGeometryChange(for: Bool.self) { [visibleRows] in
-                $0.frame(in: .global).maxY > visibleRows.headerBottom
-            } action: { isBelowHeader in
-                if isBelowHeader {
-                    visibleRows.belowHeaderIds.insert(article.id)
-                } else {
-                    visibleRows.belowHeaderIds.remove(article.id)
-                }
-            }
             // No horizontal inset of our own: the List's own row padding already supplies the
             // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
             // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
@@ -505,7 +485,6 @@ struct ArticleListView: View {
             }
             .onDisappear {
                 visibleRows.appearedIds.remove(article.id)
-                visibleRows.belowHeaderIds.remove(article.id)
                 scheduleReportVisible()
             }
     }
@@ -523,10 +502,6 @@ struct ArticleListView: View {
                 .compactMap { id in indexById[id].map { (index: $0, id: id) } }
                 .sorted { $0.index < $1.index }
                 .map(\.id)
-            // Kept across the list going off screen, when every row disappears at once.
-            if let first = ordered.first(where: visibleRows.belowHeaderIds.contains) {
-                visibleRows.topmostId = first
-            }
             reportVisible(ordered)
         }
     }
@@ -604,12 +579,5 @@ private final class VisibleRowTracker {
     /// Rapid `onAppear`/`onDisappear` pairs from scrolling are coalesced into a single report after
     /// a short delay — mirroring Compose's `snapshotFlow { ... }.distinctUntilChanged()` behaviour.
     var reportTask: Task<Void, Never>?
-    /// The topmost row last seen on screen, which a rebuilt list scrolls back to — see `remountGeneration`.
-    var topmostId: String?
-    /// The pinned header's bottom edge, in global coordinates.
-    var headerBottom: CGFloat = 0
-    /// Rows showing at least partly below the pinned header — the ones not hidden behind it or the
-    /// navigation bar.
-    var belowHeaderIds: Set<String> = []
 }
 #endif
