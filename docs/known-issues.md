@@ -822,14 +822,19 @@ short of GitHub or the JDK addressing it upstream.
 
 **Status**: worked around, not fixed — external (SwiftUI) defect. At a phone width,
 `HomeView` rebuilds the article list each time the collapsed split view brings it forward from the
-sidebar (`ArticleListView.remountGeneration`). The cost is that the rebuilt list is scrolled back to
-the top of the row that was topmost, not to the exact pixel offset.
+sidebar (`ArticleListView.remountGeneration`), and the list rebuilds itself once more when it is first
+put into a window (`ArticleListView.attachedToWindow`). The cost is that a list brought back from the
+sidebar starts at the top rather than where it was scrolled to — as NetNewsWire's article list does
+on the same route.
 
 ### Symptom
 
 On an iPhone (confirmed on the iOS 27 simulator), pull the article list to refresh, wait for it to finish, go
 back to the feed list, and pick the same item again. Pulling the list now refreshes and syncs as
 usual, but no spinner appears; the list is simply pulled down and springs back.
+
+A related symptom has the same origin: the first pull after launch left the list resting tens of
+points short of the top (its header half under the navigation bar), about three times in five.
 
 ### Diagnosis
 
@@ -839,6 +844,15 @@ navigation bar, outside the list's own `UICollectionView`. On the first pull it 
 After the column has been popped and pushed again, no refresh control exists anywhere in the
 hierarchy, yet `HomeObservable.pullToRefresh()` still runs. SwiftUI keeps the same list (the same
 selection means no identity change) and never re-attaches the control it dropped.
+
+The list a phone-width split view pushes for the first time also has its control under the navigation
+bar, and that is where the related symptom comes from: when the control finishes, the top content
+inset shrinks from 176 to 116 but the offset settles at about −58 to −76 instead of −116. A list built
+once its column is in the navigation stack gets the control inside its own `UICollectionView`, and
+there the offset follows the inset. Both kinds of list are the navigation bar's tracked content
+scroll view (`contentScrollView(for: .top)`), so the bar's own scroll-edge behavior is unaffected.
+The symptom appeared with 920876d3, which let the list reach up under the navigation bar; it does
+not occur at `bc680237`.
 
 ### Ruled out
 
@@ -851,16 +865,28 @@ selection means no identity change) and never re-attaches the control it dropped
   removed and restored without changing the list's identity.
 - **Returning from the reader.** The control survives that route, so the list is not rebuilt there and
   keeps its exact position and the return flash.
+- **The pinned header or `.contentMargins(.top, 0)`** (both from 920876d3) for the first-pull offset.
+  Without the margin it still occurs, and with the header as an ordinary first row the list still
+  rests short of the top.
+- **Rebuilding as the first push starts** (when `compactColumn` changes). The column is not in a
+  window yet, and the rebuilt list still gets its control under the navigation bar.
+- **Rebuilding a fixed 500 ms after the first push.** It works, but resets a list the reader has
+  already started scrolling.
+- **Scrolling a rebuilt list back to the row that was topmost.** A `scrollTo` right after the rebuild,
+  with the topmost row tracked through `onGeometryChange`, made a touched row jump for a moment when
+  the list was then scrolled. Starting at the top avoids it.
 
 ### The workaround
 
 `HomeView` bumps `articleListRemountGeneration` when `compactColumn` goes from `.sidebar` to
-`.content` at a compact width; `ArticleListView` applies it as the content's `.id`, so the rebuilt
-list gets a fresh control. It then scrolls to `VisibleRowTracker.topmostId` with `anchor: .top`. That
-row is the first one at least partly below the pinned header, tracked with `onGeometryChange`,
-because `onAppear` also fires for rows hidden behind the translucent navigation bar and the header.
+`.content` at a compact width; `ArticleListView` applies it as part of the content's `.id`, so the
+rebuilt list gets a fresh control. The other part is `attachedToWindow`, set once when
+`WindowAttachmentProbe` (outside the rebuilt content) first reports being put into a window — as the
+first push starts showing the column, before the list can be touched.
 
 ### What a real fix would need
 
-A SwiftUI fix that re-attaches the control when the column comes back. Once that ships for every
-supported iOS version, drop `remountGeneration` and the topmost-row tracking.
+A SwiftUI fix that re-attaches the control when the column comes back, and settles the offset with
+the inset when a control under the navigation bar finishes. Once those ship for every supported iOS
+version, drop `remountGeneration`, `attachedToWindow` and `WindowAttachmentProbe`, so the list keeps
+its scroll position again.
