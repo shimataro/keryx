@@ -66,14 +66,6 @@ struct ArticleListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            #if os(iOS)
-            // Names the selection being shown (and, during a search, the one being narrowed). Not a
-            // navigation title: see `ArticleListHeader`. A scrolling list carries it inside itself
-            // instead — see `contentCarriesHeader`.
-            if !contentCarriesHeader {
-                listHeader
-            }
-            #endif
             #if os(macOS)
             // `ArticleTableView` does its own scrolling: back to the top on a filter switch, to an
             // off-screen selection, and to the fresh end for the pill.
@@ -291,30 +283,38 @@ struct ArticleListView: View {
     // MARK: - Content / empty states
 
     #if os(iOS)
+    /// Names the selection being shown (and, during a search, the one being narrowed). Not a
+    /// navigation title: see `ArticleListHeader`. Each state of `content` places it itself: a
+    /// scrolling list (`articleList`, `noArticlesView`) carries it inside itself, since SwiftUI hangs
+    /// a `.refreshable` list's refresh control from the navigation bar, and a header between the two
+    /// leaves the control overlapping the header and flickering in and out as the list is pulled
+    /// (iOS 26); every other state goes through `headed`.
     private var listHeader: some View {
         ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
     }
-
-    /// Whether `content` is a scrolling list (`articleList`, or `noArticlesView`) — mirrors the
-    /// branches of `content` and `searchContent`. Such a list carries `ArticleListHeader` inside
-    /// itself rather than below it: SwiftUI hangs a `.refreshable` list's refresh control from the
-    /// navigation bar, and a header between the two leaves the control overlapping the header and
-    /// flickering in and out as the list is pulled (iOS 26).
-    private var contentCarriesHeader: Bool {
-        guard home.hasFeeds else { return false }
-        if home.searchActive { return home.searchQueryHasTerms && home.hasSearchResults }
-        return true
-    }
     #endif
+
+    /// A state of `content` that does not scroll, with `listHeader` above it on iOS.
+    @ViewBuilder
+    private func headed(_ state: some View) -> some View {
+        #if os(iOS)
+        VStack(spacing: 0) {
+            listHeader
+            state
+        }
+        #else
+        state
+        #endif
+    }
 
     @ViewBuilder
     private var content: some View {
         if !home.hasFeeds {
-            ContentUnavailableView {
+            headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
-            }
+            })
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
@@ -357,14 +357,14 @@ struct ArticleListView: View {
     @ViewBuilder
     private var searchContent: some View {
         if !home.searchQueryHasTerms {
-            ContentUnavailableView(
+            headed(ContentUnavailableView(
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"
-            )
+            ))
         } else if home.searching && !home.hasSearchResults {
-            Color.clear
+            headed(Color.clear)
         } else if !home.hasSearchResults {
-            noSearchResultsView
+            headed(noSearchResultsView)
         } else {
             articleList
         }
