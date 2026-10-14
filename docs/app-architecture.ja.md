@@ -1463,6 +1463,13 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   既知の穴（closed な shadow root 内のアンカー）がある：known-issues.ja.md の
   「フィード本文のスクリプトが記事リーダー内で実行される」を参照。これでアプリがアプリ内ブラウザにならず、Apple の
   年齢制限の質問票で「無制限の Web アクセス」とみなされない。Compose のリーダーにはメインフレームの規則を適用しない。
+- **SwiftUI のリーダーは WebKit のコンテンツプロセスが落ちたら文書を読み込み直す。** iOS はアプリが
+  バックグラウンドにある間（リンクから開いた外部ブラウザが前面にある間など）に `WKWebView` の WebContent
+  プロセスを終了させることがあり、そのままではリーダーが白紙になる。`ArticleWebView` の
+  `webViewWebContentProcessDidTerminate` が保持している HTML を読み込み直す（スクロール位置はプロセスとともに
+  失われるため先頭から）。`Home/ReaderProcessRecovery.swift` はこの再読み込みを commit 1回につき1度だけ許す：
+  読み込み直した文書が commit する前に再びプロセスが落ちたら、リーダーはそこで止めて文書を忘れるので、
+  ループせず、記事をもう一度表示したときに改めて読み込まれる。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS

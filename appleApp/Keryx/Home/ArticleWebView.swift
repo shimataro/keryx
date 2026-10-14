@@ -24,6 +24,7 @@ struct ArticleWebView {
         // the scroll position.
         guard html != coordinator.loadedHtml else { return }
         coordinator.reloadedHtml = nil
+        coordinator.recovery.documentReplaced()
         coordinator.load(html, in: webView)
     }
 
@@ -66,6 +67,7 @@ struct ArticleWebView {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
+        let recovery = ReaderProcessRecovery()
         var loadedHtml: String?
         /// The document `load` last retried after a foreign commit replaced it, so a page that keeps
         /// replacing itself is retried once rather than forever.
@@ -93,6 +95,7 @@ struct ArticleWebView {
                 load(html, in: webView)
                 return
             }
+            if navigation === documentNavigation { recovery.documentCommitted() }
             endDocumentLoad(of: navigation)
         }
 
@@ -104,6 +107,24 @@ struct ArticleWebView {
             guard let navigation, navigation === documentNavigation else { return }
             gate.endDocumentLoad()
             documentNavigation = nil
+        }
+
+        /// iOS may kill WebKit's WebContent process while the app is in the background (the
+        /// external browser a link opened is in front, say), leaving the view blank. `reload()` would
+        /// not bring the document back (its URL is `about:blank`, and the gate cancels it anyway), so
+        /// the held HTML is loaded again.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            gate.endDocumentLoad()
+            documentNavigation = nil
+            reloadedHtml = nil
+            guard let html = loadedHtml else { return }
+            if recovery.shouldReloadAfterTermination() {
+                load(html, in: webView)
+            } else {
+                // It went down again before even committing: stop here, and let the next update
+                // (showing the article again) load it afresh rather than skip it as already loaded.
+                loadedHtml = nil
+            }
         }
 
         func webView(
