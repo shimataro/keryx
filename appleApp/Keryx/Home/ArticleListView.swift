@@ -42,6 +42,8 @@ struct ArticleListView: View {
     @State private var visibleRows = VisibleRowTracker()
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
+    /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
+    @State private var emptyListHeaderHeight: CGFloat = 0
     #endif
 
     /// The rows on screen: the search results while a search is active, else the filter's own list.
@@ -66,8 +68,11 @@ struct ArticleListView: View {
         VStack(spacing: 0) {
             #if os(iOS)
             // Names the selection being shown (and, during a search, the one being narrowed). Not a
-            // navigation title: see `ArticleListHeader`.
-            ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+            // navigation title: see `ArticleListHeader`. A scrolling list carries it inside itself
+            // instead — see `contentCarriesHeader`.
+            if !contentCarriesHeader {
+                listHeader
+            }
             #endif
             #if os(macOS)
             // `ArticleTableView` does its own scrolling: back to the top on a filter switch, to an
@@ -285,6 +290,23 @@ struct ArticleListView: View {
 
     // MARK: - Content / empty states
 
+    #if os(iOS)
+    private var listHeader: some View {
+        ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+    }
+
+    /// Whether `content` is a scrolling list (`articleList`, or `noArticlesView`) — mirrors the
+    /// branches of `content` and `searchContent`. Such a list carries `ArticleListHeader` inside
+    /// itself rather than below it: SwiftUI hangs a `.refreshable` list's refresh control from the
+    /// navigation bar, and a header between the two leaves the control overlapping the header and
+    /// flickering in and out as the list is pulled (iOS 26).
+    private var contentCarriesHeader: Bool {
+        guard home.hasFeeds else { return false }
+        if home.searchActive { return home.searchQueryHasTerms && home.hasSearchResults }
+        return true
+    }
+    #endif
+
     @ViewBuilder
     private var content: some View {
         if !home.hasFeeds {
@@ -311,7 +333,14 @@ struct ArticleListView: View {
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
-                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
+                VStack(spacing: 0) {
+                    listHeader
+                        .onSizeChanged { emptyListHeaderHeight = $0.height }
+                    emptyState.frame(
+                        width: geometry.size.width,
+                        height: max(0, geometry.size.height - emptyListHeaderHeight)
+                    )
+                }
             }
             .modifier(PullToRefreshModifier(home: home))
         }
@@ -412,24 +441,41 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-        return List(displayedRows) { article in
-            rowView(article, selectedId: selectedId, paneFocused: paneFocused)
-                .equatable()
-                // No horizontal inset of our own: the List's own row padding already supplies the
-                // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
-                // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
-                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                .listRowSeparator(.hidden)
-                .onAppear {
-                    visibleRows.appearedIds.insert(article.id)
-                    scheduleReportVisible()
+        return List {
+            Section {
+                ForEach(displayedRows) { article in
+                    articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
                 }
-                .onDisappear {
-                    visibleRows.appearedIds.remove(article.id)
-                    scheduleReportVisible()
-                }
+            } header: {
+                // Pinned while the rows scroll, so it needs the list's own opaque background.
+                listHeader
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(uiColor: .systemBackground))
+                    .listRowInsets(EdgeInsets())
+                    .foregroundStyle(.primary)
+            }
         }
         .listStyle(.plain)
+        // No extra gap above the header, so it sits where it does over an empty list.
+        .contentMargins(.top, 0, for: .scrollContent)
+    }
+
+    private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
+        rowView(article, selectedId: selectedId, paneFocused: paneFocused)
+            .equatable()
+            // No horizontal inset of our own: the List's own row padding already supplies the
+            // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
+            // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
+            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+            .listRowSeparator(.hidden)
+            .onAppear {
+                visibleRows.appearedIds.insert(article.id)
+                scheduleReportVisible()
+            }
+            .onDisappear {
+                visibleRows.appearedIds.remove(article.id)
+                scheduleReportVisible()
+            }
     }
 
     /// Schedules a debounced report of visible article ids. Rapid `onAppear`/`onDisappear` pairs
