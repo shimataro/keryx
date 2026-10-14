@@ -18,7 +18,12 @@ enum PullRefreshHold {
         let clock = ContinuousClock()
         let start = clock.now
         await work()
-        let remaining = minimum - (clock.now - start)
-        if remaining > .zero { try? await Task.sleep(for: remaining) }
+        let wait = remaining(after: clock.now - start, minimum: minimum)
+        if wait > .zero { try? await Task.sleep(for: wait) }
+    }
+
+    /// How much of `minimum` is left once `elapsed` has passed — never negative.
+    static func remaining(after elapsed: Duration, minimum: Duration) -> Duration {
+        max(minimum - elapsed, .zero)
     }
 }
