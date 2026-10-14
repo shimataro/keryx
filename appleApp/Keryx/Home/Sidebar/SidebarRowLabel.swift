@@ -8,6 +8,8 @@ struct SidebarRowLabel<IconPopover: View>: View {
     let icon: SidebarRowIcon
     var isErroring = false
     var isGone = false
+    /// Shows a small spinner in the icon's place, keeping the icon's own size so the title never moves.
+    var isRefreshing = false
     #if os(macOS)
     /// Replaces the title while the row is being renamed in place (macOS only: iOS renames in a sheet).
     var editor: InlineRenameField?
@@ -52,7 +54,12 @@ struct SidebarRowLabel<IconPopover: View>: View {
             }
         } icon: {
             iconView
+                .opacity(isRefreshing ? 0 : 1)
+                .overlay {
+                    if isRefreshing { RefreshingSpinner() }
+                }
         }
+        .accessibilityValue(isRefreshing ? L("home_feed_refreshing") : "")
     }
 
     @ViewBuilder
@@ -91,11 +98,12 @@ extension SidebarRowLabel where IconPopover == EmptyView {
         icon: SidebarRowIcon,
         isErroring: Bool = false,
         isGone: Bool = false,
+        isRefreshing: Bool = false,
         onIconTap: (() -> Void)? = nil,
         symbolTint: Color? = nil
     ) {
         self.init(
-            title: title, icon: icon, isErroring: isErroring, isGone: isGone,
+            title: title, icon: icon, isErroring: isErroring, isGone: isGone, isRefreshing: isRefreshing,
             onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
         )
     }
@@ -106,14 +114,28 @@ extension SidebarRowLabel where IconPopover == EmptyView {
         icon: SidebarRowIcon,
         isErroring: Bool = false,
         isGone: Bool = false,
+        isRefreshing: Bool = false,
         editor: InlineRenameField?,
         onIconTap: (() -> Void)? = nil,
         symbolTint: Color? = nil
     ) {
         self.init(
-            title: title, icon: icon, isErroring: isErroring, isGone: isGone, editor: editor,
+            title: title, icon: icon, isErroring: isErroring, isGone: isGone, isRefreshing: isRefreshing, editor: editor,
             onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
         )
     }
     #endif
+}
+
+/// The spinner a refreshing row shows in its icon's place — drawn smaller than the icon, since a
+/// full-size ring reads heavier than a favicon of the same size.
+private struct RefreshingSpinner: View {
+    var body: some View {
+        #if os(macOS)
+        ProgressView().controlSize(.mini)
+        #else
+        // iOS's ProgressView has one fixed size (about 20pt); scaled to about 12pt.
+        ProgressView().scaleEffect(0.6)
+        #endif
+    }
 }

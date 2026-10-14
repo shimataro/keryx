@@ -150,6 +150,10 @@ final class HomeObservable: ObservableAssignment {
     /// because of the sign-in (true implies `canSyncNow` is false).
     private(set) var syncDisabledByAuth: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
+    /// `HomeViewModel.refreshingFeedIds` — the feeds whose sidebar row shows the refreshing indicator.
+    private(set) var refreshingFeedIds: Set<String> = []
+    /// `HomeViewModel.refreshingFolderIds` — the collapsed folders whose row shows it.
+    private(set) var refreshingFolderIds: Set<String> = []
 
     /// Bumped by every copy of the displayed article's URL (`copyArticleUrl`, shared by the reader's
     /// own button, the menu bar's / keyboard's Copy URL command and the article row's context menu)
@@ -354,6 +358,8 @@ final class HomeObservable: ObservableAssignment {
         async let t33: () = observeSelectedArticleShownUnread()
         async let t34: () = observeArticleListBody()
         async let t35: () = observeArticleListHasRows()
+        async let t37: () = observeRefreshingFeedIds()
+        async let t38: () = observeRefreshingFolderIds()
         #if os(iOS)
         async let t36: () = observeManualRefreshStatus()
         #endif
@@ -361,7 +367,7 @@ final class HomeObservable: ObservableAssignment {
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
-            t31, t32, t33, t34, t35
+            t31, t32, t33, t34, t35, t37, t38
         )
         #if os(iOS)
         await t36
@@ -689,6 +695,14 @@ final class HomeObservable: ObservableAssignment {
         }
     }
     #endif
+
+    private func observeRefreshingFeedIds() async {
+        for await v in viewModel.refreshingFeedIds { assignIfChanged(\.refreshingFeedIds, v) }
+    }
+
+    private func observeRefreshingFolderIds() async {
+        for await v in viewModel.refreshingFolderIds { assignIfChanged(\.refreshingFolderIds, v) }
+    }
 
     /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a
     /// selection can still be queued on the main actor after `selecting` has synced the new one, and would
