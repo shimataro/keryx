@@ -24,6 +24,9 @@ struct HomeView: View {
     /// row is a plain button, which never navigates by itself, and re-tapping the current sidebar row
     /// is no selection change at all. The system writes it back on a back button / edge swipe.
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
+    /// Bumped each time a phone-width split view brings the article list forward from the sidebar —
+    /// see `ArticleListView.remountGeneration`.
+    @State private var articleListRemountGeneration = 0
     #if os(macOS)
     @State private var contextMenuSelectionTracker = ContextMenuSelectionTracker()
     #else
@@ -108,7 +111,8 @@ struct HomeView: View {
                 focusedPane: $focusedPane,
                 articleListIsTopmost: articleListIsTopmost,
                 returnFlashId: returnFlashId,
-                onOpenArticle: { compactColumn = .detail }
+                onOpenArticle: { compactColumn = .detail },
+                remountGeneration: articleListRemountGeneration
             )
                 .navigationSplitViewColumnWidth(
                     min: CGFloat(ConstantsKt.ARTICLE_LIST_PANE_MIN_WIDTH),
@@ -127,6 +131,11 @@ struct HomeView: View {
         }
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
+            #if os(iOS)
+            if horizontalSizeClass == .compact, old == .sidebar, new == .content {
+                articleListRemountGeneration += 1
+            }
+            #endif
             guard old == .detail, new == .content, articleListIsTopmost,
                   let id = home.selectedArticleId else { return }
             flashReturnedRow(id)
