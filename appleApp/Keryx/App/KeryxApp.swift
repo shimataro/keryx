@@ -39,6 +39,11 @@ struct KeryxApp: App {
         #else
         WindowGroup(id: "main") {
             mainContent
+                // iOS applies the in-app theme as the window's `overrideUserInterfaceStyle` instead
+                // of `.preferredColorScheme`: the latter reaches a presented sheet only when the
+                // sheet opens, so the open Settings sheet kept its old appearance after the theme
+                // was switched from it.
+                .background(WindowInterfaceStyle(style: interfaceStyle(for: model.preferences?.themeMode)))
         }
         // The OS wakes the app for this (see `BackgroundRefresh`); it cancels the closure at the
         // end of its time slot, which cancels the shared refresh with it.
@@ -115,14 +120,6 @@ struct KeryxApp: App {
         .preferredColorScheme(colorScheme(for: model.preferences?.themeMode))
         #endif
         #if os(iOS)
-        // iOS applies the in-app theme as a window-level `overrideUserInterfaceStyle` instead of
-        // `.preferredColorScheme`: the latter reaches a presented sheet only when the sheet opens, so
-        // the open Settings sheet kept its old appearance after the theme was switched from it. The
-        // window override reaches every view controller in the window, presented ones included, the
-        // moment it changes.
-        .onChange(of: model.preferences?.themeMode, initial: true) { _, mode in
-            applyAppearance(mode)
-        }
         .sheet(isPresented: Binding(
             get: { model.settingsNavigation.isSheetPresented },
             set: { model.settingsNavigation.isSheetPresented = $0 }
@@ -166,17 +163,14 @@ struct KeryxApp: App {
         BackgroundRefresh.schedule(refreshIntervalMinutes: minutes)
     }
 
-    /// Mirrors `resolveDarkTheme`'s `"light"`/`"dark"`/else (follow system) rule (`KeryxTheme.kt`),
-    /// applied to every window of every connected scene (an iPad can have several); a scene
-    /// connected later applies it from its own `mainContent`'s `initial: true` change handler.
-    private func applyAppearance(_ mode: String?) {
-        let style: UIUserInterfaceStyle = switch mode {
+    /// Mirrors `resolveDarkTheme`'s `"light"`/`"dark"`/else (follow system) rule (`KeryxTheme.kt`)
+    /// for the window override `WindowInterfaceStyle` applies — `.unspecified` leaves the system
+    /// setting in charge.
+    private func interfaceStyle(for mode: String?) -> UIUserInterfaceStyle {
+        switch mode {
         case "light": .light
         case "dark": .dark
         default: .unspecified
-        }
-        for window in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
-            window.overrideUserInterfaceStyle = style
         }
     }
 
@@ -192,7 +186,7 @@ struct KeryxApp: App {
                 settingsNavigation: model.settingsNavigation
             )
             // No `.preferredColorScheme` of its own: the sheet inherits the window's
-            // `overrideUserInterfaceStyle` (`applyAppearance`), which also follows a theme change
+            // `overrideUserInterfaceStyle` (`WindowInterfaceStyle`), which also follows a theme change
             // made while the sheet is open.
         }
     }
