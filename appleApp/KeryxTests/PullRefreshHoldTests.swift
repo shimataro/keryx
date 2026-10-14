@@ -26,6 +26,17 @@ struct PullRefreshHoldTests {
     }
 
     @Test
+    func cancellationSkipsTheHold() async {
+        let longMinimum: Duration = .seconds(10)
+        let elapsed = await clock.measure {
+            let hold = Task { await PullRefreshHold.run(minimum: longMinimum) {} }
+            hold.cancel()
+            await hold.value
+        }
+        #expect(elapsed < longMinimum / 2)
+    }
+
+    @Test
     func instantWorkWaitsOutTheWholeMinimum() {
         #expect(PullRefreshHold.remaining(after: .zero, minimum: minimum) == minimum)
     }
