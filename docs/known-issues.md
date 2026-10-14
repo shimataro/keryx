@@ -817,3 +817,50 @@ There is no app-side lever here — the mount/detach is entirely inside jpackage
 assembly, and the race is a property of the CI runner's environment (Spotlight indexing a freshly
 mounted volume), not of anything this app configures. A retry is the only available mitigation
 short of GitHub or the JDK addressing it upstream.
+
+## iOS: the article list's pull-to-refresh spinner is missing after returning from the sidebar
+
+**Status**: worked around, not fixed — external (SwiftUI) defect. At a phone width,
+`HomeView` rebuilds the article list each time the collapsed split view brings it forward from the
+sidebar (`ArticleListView.remountGeneration`). The cost is that the rebuilt list is scrolled back to
+the top of the row that was topmost, not to the exact pixel offset.
+
+### Symptom
+
+On an iPhone (confirmed on the iOS 27 simulator), pull the article list to refresh, wait for it to finish, go
+back to the feed list, and pick the same item again. Pulling the list now refreshes and syncs as
+usual, but no spinner appears; the list is simply pulled down and springs back.
+
+### Diagnosis
+
+Temporary logging walked every window's view hierarchy 300 ms into each pull. SwiftUI hosts a
+`.refreshable` list's control as a `PlatformRefreshControlProxy` in a container just under the
+navigation bar, outside the list's own `UICollectionView`. On the first pull it is there, spinning.
+After the column has been popped and pushed again, no refresh control exists anywhere in the
+hierarchy, yet `HomeObservable.pullToRefresh()` still runs. SwiftUI keeps the same list (the same
+selection means no identity change) and never re-attaches the control it dropped.
+
+### Ruled out
+
+- **A view drawn over the control** (the layering bug fixed for the sidebar's `UIRefreshControl` in
+  `SidebarCollectionView.swift`). The control is absent, not hidden.
+- **A stale control state** (alpha, hidden, frame). The same reason.
+- **A recent regression.** It reproduces at `bc680237` (before the list carried its own header) and at
+  `ad022bbe` (before `PullRefreshHold`), so it predates both.
+- **Re-attaching only the action.** `EnvironmentValues.refresh` is read-only, so the action cannot be
+  removed and restored without changing the list's identity.
+- **Returning from the reader.** The control survives that route, so the list is not rebuilt there and
+  keeps its exact position and the return flash.
+
+### The workaround
+
+`HomeView` bumps `articleListRemountGeneration` when `compactColumn` goes from `.sidebar` to
+`.content` at a compact width; `ArticleListView` applies it as the content's `.id`, so the rebuilt
+list gets a fresh control. It then scrolls to `VisibleRowTracker.topmostId` with `anchor: .top`. That
+row is the first one at least partly below the pinned header, tracked with `onGeometryChange`,
+because `onAppear` also fires for rows hidden behind the translucent navigation bar and the header.
+
+### What a real fix would need
+
+A SwiftUI fix that re-attaches the control when the column comes back. Once that ships for every
+supported iOS version, drop `remountGeneration` and the topmost-row tracking.
