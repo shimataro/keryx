@@ -34,4 +34,31 @@ struct ReaderProcessRecoveryTests {
         #expect(recovery.processTerminated() == .reload)
         #expect(recovery.processTerminated() == .giveUp)
     }
+
+    @Test
+    func becomingActiveAfterGivingUpLoadsTheDocumentAgainWithAFreshReload() {
+        let recovery = ReaderProcessRecovery()
+        _ = recovery.processTerminated()
+        _ = recovery.processTerminated()
+        #expect(recovery.appBecameActive())
+        #expect(recovery.processTerminated() == .reload)
+        #expect(recovery.processTerminated() == .giveUp)
+    }
+
+    @Test
+    func becomingActiveWithoutGivingUpLoadsNothingButRestoresTheReload() {
+        let recovery = ReaderProcessRecovery()
+        _ = recovery.processTerminated()
+        #expect(!recovery.appBecameActive())
+        #expect(recovery.processTerminated() == .reload)
+    }
+
+    @Test
+    func becomingActiveTwiceLoadsTheDocumentGivenUpOnOnlyOnce() {
+        let recovery = ReaderProcessRecovery()
+        _ = recovery.processTerminated()
+        _ = recovery.processTerminated()
+        _ = recovery.appBecameActive()
+        #expect(!recovery.appBecameActive())
+    }
 }

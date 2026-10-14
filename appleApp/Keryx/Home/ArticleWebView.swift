@@ -75,12 +75,28 @@ struct ArticleWebView {
         /// The navigation `loadHTMLString` started for the current document, so only its commit or
         /// failure ends the gate's wait (another WebView load, or a superseded one, must not).
         var documentNavigation: WKNavigation?
+        /// The view `load` last loaded into, so a document given up on can be loaded again when the
+        /// app becomes active.
+        private weak var webView: WKWebView?
+
+        override init() {
+            super.init()
+            #if os(macOS)
+            let didBecomeActive = NSApplication.didBecomeActiveNotification
+            #else
+            let didBecomeActive = UIApplication.didBecomeActiveNotification
+            #endif
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(appDidBecomeActive), name: didBecomeActive, object: nil
+            )
+        }
 
         /// Loads `html` as the reader's document. The gate cannot tell a previous article's script
         /// navigating to `about:blank` from this load while it is in flight, so `didCommit` reloads
         /// the document if such a navigation replaced it.
         func load(_ html: String, in webView: WKWebView) {
             loadedHtml = html
+            self.webView = webView
             gate.beginDocumentLoad()
             documentNavigation = webView.loadHTMLString(html, baseURL: ReaderNavigationGate.documentBaseURL)
             // No navigation was started, so nothing will ever end the wait.
@@ -121,10 +137,17 @@ struct ArticleWebView {
             case .reload:
                 load(html, in: webView)
             case .giveUp:
-                // It went down again after its one reload: stop here, and let the next update
-                // (showing the article again) load it afresh rather than skip it as already loaded.
-                loadedHtml = nil
+                // It went down again after its one reload: stop here. `loadedHtml` is kept, so an
+                // update with the same document still skips it; `appDidBecomeActive` tries once more.
+                break
             }
+        }
+
+        /// The usual termination happens while the app is in the background, and the one reload may
+        /// have died with it: coming back loads a document given up on once more.
+        @objc private func appDidBecomeActive() {
+            guard recovery.appBecameActive(), let html = loadedHtml, let webView else { return }
+            load(html, in: webView)
         }
 
         func webView(

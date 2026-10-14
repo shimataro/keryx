@@ -1497,8 +1497,10 @@ no separate iOS target to keep in sync.
   `webViewWebContentProcessDidTerminate` loads the HTML it holds again (from the top; the scroll
   position died with the process). `Home/ReaderProcessRecovery.swift` allows one such reload per
   document: if the process dies again — before or after the reloaded document commits, so a page
-  that crashes WebContent cannot loop — the reader stops and forgets the document, so showing the
-  article again loads it afresh. Only a different document earns a new reload.
+  that crashes WebContent cannot loop — the reader gives up and stays blank. A different document,
+  or the app becoming active again, earns a new reload, and a document given up on is loaded once
+  more at that activation: the usual termination happens in the background, where the one reload
+  may die too, and the reader must not still be blank when the user comes back.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
