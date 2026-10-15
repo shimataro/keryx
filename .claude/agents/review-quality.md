@@ -46,6 +46,17 @@ text — as production code. A test-only target is never `Not applicable` for yo
 - **Magic numbers and strings**: a literal that carries meaning should be a named constant —
   `core/Constants.kt` for cross-cutting ones.
 - **Deep nesting**: prefer early returns and `when` over stacked `if`s.
+- **Least surprise for the caller**: code should do what its name and signature promise.
+  - A name that contradicts the behavior — a `get*` / `is*` / `has*` / `load*` / `find*` that writes,
+    notifies, launches work, or mutates its argument.
+  - A function that reads like a query but has a side effect.
+  - An inverted Boolean parameter (`skip = false`, `noX = true`) or a bare Boolean at the call site
+    where a named argument or an enum would say what it means.
+  - A default argument value the caller would not guess.
+  - The same name meaning different things in different files.
+
+  `Low` normally; `Medium` when the surprise invites a real misuse (a caller treating a writing
+  function as a pure read).
 - **Non-idiomatic Kotlin**: a manual loop where a scope function or collection operation reads
   better, a nullable that should be a sealed type, `!!`, a mutable field that could be a `val`,
   redundant type arguments, unnecessary `lateinit`.

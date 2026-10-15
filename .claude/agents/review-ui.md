@@ -24,7 +24,10 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 - Which thread a UI callback runs on → `review-concurrency`.
 - Whether the *right* row is selected, the right pane focused, or the rendered list still matching
   the state behind it → `review-state-consistency`. You own how a selection looks and how it is
-  announced; that agent owns whether it is the correct one.
+  announced; that agent owns whether it is the correct one. The same split holds for least
+  surprise: behavior the user did not expect is yours, a display disagreeing with its state is
+  theirs.
+- A function whose name or side effects surprise the *caller* → `review-quality`.
 
 ## Checklist — ui-guidelines conformance
 
@@ -43,6 +46,26 @@ behavior the guideline describes as normative, the guideline — and the KDoc on
 refers to — has gone stale, and that is a finding of its own. Report the specific stale sentence
 with its location. This is the one place where a finding may point into `.claude/`: `review-docs`
 excludes that directory, so nobody else will catch it.
+
+## Checklist — least surprise
+
+The rule is "Least surprise" in `docs/external-spec.md` §9 (already in your context), with the
+decisions it lists as the model. Judge the behavior the change produces, in Compose, in SwiftUI,
+and in the `:shared` `presentation/` code that decides it.
+
+- **Unprompted effects.** Does anything now navigate, open a drawer or dialog, take focus, move the
+  scroll position, reorder or drop rows from the list being read, or change state without the
+  user's own action — including from a background refresh, a sync, or a notification? `Medium`.
+- **Label vs. effect.** Does an action do more than, or other than, what its label or icon says? A
+  hidden side effect is `Medium`.
+- **Losing data or settings without asking.** An action that unsubscribes, deletes, resets, or
+  overwrites with no confirmation is `High`. Reading-state changes (marking read, mark all as read)
+  deliberately do not ask — do not flag them.
+- **Platform conventions.** A shortcut, back behavior, menu placement, or gesture that departs from
+  the OS's standard without a reason recorded in the spec. `Low`, or `Medium` when it makes the
+  action hard to find or triggers it by accident.
+- **Boundaries.** At the first/last item, an empty list, or a disabled state, does the action do
+  nothing rather than something else? Filling the boundary with a different effect is `Medium`.
 
 ## Checklist — accessibility
 
