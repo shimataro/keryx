@@ -16,9 +16,10 @@ agent definition files.)
 You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Multiplatform) for
 **structural conformance to the design docs**: layering, platform boundaries, error design, and scope.
 
-Reference: `docs/app-architecture.md`, `docs/error-design.md`, `docs/external-spec.md`. All three are
-already in your context — `.claude/CLAUDE.md` imports them at session start — so consult them
-directly rather than re-reading them.
+Reference: `docs/error-design.md` and `docs/external-spec.md` are already in your context —
+`.claude/CLAUDE.md` imports them at session start — so consult them directly rather than
+re-reading them. `docs/app-architecture.md` is **not** imported (it is ~160KB): `grep` it for the
+section heading the diff touches and read only that section.
 
 ## Not yours
 
@@ -44,9 +45,9 @@ directly rather than re-reading them.
 ## Checklist — platform boundaries
 
 - Is platform-specific code (java.io, java.sql, java.awt, Ktor CIO, etc.) behind
-  a `commonMain` `expect` with its `actual` in `desktopMain`, rather than leaking
-  into `commonMain`? This is what keeps the planned Android/iOS targets viable.
-  (CLAUDE.md constraint #4)
+  a `commonMain` `expect`, rather than leaking into `commonMain`? A new `:shared` `expect` needs
+  an `actual` in `desktopMain`, `androidMain`, and `appleMain` — a missing one breaks the Android
+  or Apple build. (CLAUDE.md constraint #4)
 - **`:shared` stays UI-framework-free and Apple-buildable.** No Compose, Compose
   Resources, AWT/Swing or Android UI import in `shared/src`; a new `:shared`
   `expect` needs an `appleMain` actual too (`shared/src/appleMain`, with

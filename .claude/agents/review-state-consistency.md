@@ -20,7 +20,7 @@ me something that isn't true" — a highlight on a row that is not on screen, an
 while it is being read, a focus ring on two panes at once.
 
 `docs/app-architecture.md` records most of the invariants below and the bugs that produced them,
-but it is **not** in your context and is ~62KB — **do not read it whole**. Once you have
+but it is **not** in your context and is ~160KB — **do not read it whole**. Once you have
 established that the diff touches this perspective at all, `grep` for the "Home's adaptive pane
 layout" and "Optimistic read/star pins" headings and read only those sections.
 
@@ -86,8 +86,8 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
   `lastFilter`, `lastArticleId`, `lastFocusedPane`, `lastUnreadOnly*`, `lastNewestFirst`, and the
   scroll positions are read back next launch. A new key needs a default and a decode path, and a
   saved `HomePane` a narrow layout cannot show must be clamped (`initialPaneFor`), not restored.
-- **Scoped state must stay scoped.** "Unread only" is per-scope (`_unreadOnly`, `_unreadOnlyStarred`,
-  `_unreadOnlySearch`), selected by `HomeViewModel.searchActive`/the current filter — flag a new
+- **Scoped state must stay scoped.** "Unread only" is per-scope (`_unreadOnly`, `_unreadOnlyStarred`),
+  selected by `HomeViewModel.searchActive`/the current filter — flag a new
   per-scope toggle collapsed onto one shared field. Search itself is orthogonal to `ArticleFilter`
   (there is no `Search` case, and no filter/selection is ever displaced by starting one — see
   `app-architecture.md`'s "Search is orthogonal to `ArticleFilter`"), so there is no browsing-context

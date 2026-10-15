@@ -70,9 +70,9 @@ responsibility instead of extracted subviews. Match the surrounding Swift files'
 
 - Is all source code — comments, KDoc, log/exception messages, non-UI string
   literals — in English? Non-English here is a finding. Exceptions: UI-facing
-  strings still go through Compose Resources and stay Japanese; and test
-  assertions matching real rendered UI text may legitimately contain the
-  Japanese string being asserted against. (CLAUDE.md constraint #9)
+  strings go through Compose Resources and are localized there (English is the
+  default, plus Japanese); and test assertions matching real rendered UI text may
+  legitimately contain the localized (e.g. Japanese) string being asserted against. (CLAUDE.md constraint #9)
 
 ## Restraint
 

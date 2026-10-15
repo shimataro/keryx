@@ -69,7 +69,7 @@ and in the `:shared` `presentation/` code that decides it.
 
 ## Checklist — accessibility
 
-The codebase is thin here today (`Modifier.semantics` is unused; roughly half of the
+The codebase is uneven here (`Modifier.semantics` is used in places, but many
 `contentDescription` values are `null`), so treat a new interactive element as an opportunity, not as
 conforming to precedent.
 
@@ -84,12 +84,14 @@ conforming to precedent.
 
 ## Checklist — known-issue regressions
 
-`docs/known-issues.md` records eleven defects, ten of them OS-dependent UI problems: window flicker
-on first selection, dialogs opening at the wrong size or position, Linux modeless dialogs collapsing,
-the Windows WebView freeze, context-menu placement and label overlap, row hit areas at boundaries,
-drag cursors under Wayland, and a UI-thread crash from selection churn.
+`docs/known-issues.md` records defects deliberately left unfixed. The UI-relevant ones: a macOS
+notification click not restoring a tray-hidden window, the article list crashing the UI thread
+under heavy scroll + selection churn, a click at a row's exact edge selecting the neighbour (macOS),
+the GNOME tray menu briefly showing a stale label, a feed body's own JavaScript running in the
+reader, and Linux arm64 having no native web view. (The rest are SQLite busy, CI-only, and
+packaging issues.) Its `##` headings are the index.
 
-**Do not read the whole file** — it is ~80KB. Identify which area the diff touches, `grep` for that
+**Do not read the whole file** — it is ~50KB. Identify which area the diff touches, `grep` for that
 section heading, and read only that section. Then ask whether the change re-enters the cause the
 section describes. In particular:
 

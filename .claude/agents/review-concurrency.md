@@ -30,7 +30,10 @@ they survive testing and reach users as intermittent freezes, corrupted state, o
 ## Checklist — concurrency
 
 - **Mutex coverage.** Production mutexes today: `FtsManager.indexWriteMutex`,
-  `FeedRepository.subscribePlacementMutex`, `SyncRepository.mutex`, `OpmlImporter.mutex`. Does a new
+  `FeedRepository.subscribePlacementMutex`, `SyncRepository.mutex`, `OpmlImporter.mutex`,
+  `CloudSession.tokenLifecycleMutex`, `UpdateRepository`'s `mutex` / `checkMutex` /
+  `notificationMutex`, `ReleaseFeedSource.cacheMutex`, and Android's process-wide
+  `startupMaintenanceMutex` (`AndroidStartupTasks.kt`). Does a new
   path that mutates the same state take the same lock? `indexMissing()` and `rebuildIndex()` must
   stay mutually exclusive.
 - **The SQLite driver opens a fresh connection per statement.** Anything relying on connection-scoped
