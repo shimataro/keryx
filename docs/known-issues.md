@@ -829,12 +829,15 @@ on the same route.
 
 ### Symptom
 
-On an iPhone (confirmed on the iOS 27 simulator), pull the article list to refresh, wait for it to finish, go
-back to the feed list, and pick the same item again. Pulling the list now refreshes and syncs as
+On an iPhone, pull the article list to refresh, wait for it to finish, go back to the feed list, and
+pick the same item again. Pulling the list now refreshes and syncs as
 usual, but no spinner appears; the list is simply pulled down and springs back.
 
 A related symptom has the same origin: the first pull after launch left the list resting tens of
 points short of the top (its header half under the navigation bar), about three times in five.
+
+Both were diagnosed on the iOS 27 simulator with Xcode 27; that is where they were last seen, not a
+range they are known to be limited to. See "Re-checking after an iOS or Xcode update" below.
 
 ### Diagnosis
 
@@ -879,14 +882,29 @@ not occur at `bc680237`.
 ### The workaround
 
 `HomeView` bumps `articleListRemountGeneration` when `compactColumn` goes from `.sidebar` to
-`.content` at a compact width; `ArticleListView` applies it as part of the content's `.id`, so the
-rebuilt list gets a fresh control. The other part is `attachedToWindow`, set once when
-`WindowAttachmentProbe` (outside the rebuilt content) first reports being put into a window — as the
-first push starts showing the column, before the list can be touched.
+`.content` at a compact width (the condition is `ArticleListRemount`, covered by `KeryxTests`);
+`ArticleListView` applies it as part of the content's `.id`, so the rebuilt list gets a fresh
+control. The other part is `attachedToWindow`, set once when `WindowAttachmentProbe` (outside the
+rebuilt content) first reports being put into a window — as the first push starts showing the
+column, before the list can be touched.
 
 ### What a real fix would need
 
 A SwiftUI fix that re-attaches the control when the column comes back, and settles the offset with
 the inset when a control under the navigation bar finishes. Once those ship for every supported iOS
-version, drop `remountGeneration`, `attachedToWindow` and `WindowAttachmentProbe`, so the list keeps
-its scroll position again.
+version, drop `remountGeneration`, `attachedToWindow`, `WindowAttachmentProbe` and
+`ArticleListRemount`, so the list keeps its scroll position again.
+
+### Re-checking after an iOS or Xcode update
+
+Run this after raising the minimum iOS version or moving to a new Xcode, rather than trusting the
+version above indefinitely. Remove `ListIdentity` from the `.id` in `ArticleListView.body` (leaving
+the probe and the generation in place), build, and on an iPhone simulator check both symptoms:
+
+1. Pull the article list, go back to the feed list, pick the same item, and pull again: does the
+   spinner appear?
+2. Launch, pull the article list once, and let the refresh finish, five times over: does the list
+   always come back to rest at the top, its header fully below the navigation bar?
+
+If both hold on every supported iOS version, remove the workaround as above and delete this entry.
+If either fails, restore the `.id` and update the version this entry was last seen on.
