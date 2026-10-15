@@ -93,6 +93,21 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
   `app-architecture.md`'s "Search is orthogonal to `ArticleFilter`"), so there is no browsing-context
   snapshot to keep in sync here any more; flag any new code that tries to reintroduce one.
 
+## Checklist — shared presentation and the SwiftUI bridge
+
+`shared/src/commonMain/.../presentation/**` (`HomeViewModel`, the `*Controller`s) is the state both
+UIs render, so a change there is yours even when no composable changed.
+
+- **The bridge mirrors, it does not derive.** `appleApp/Keryx/Bridge/*Observable.swift` copies each
+  `StateFlow` into an `@Observable` field with `for await`. A Swift field computed from two mirrored
+  flows, or one written by the view as well as by the flow, can disagree with the ViewModel — the
+  value belongs in `presentation/` as one flow.
+- **Every exposed flow is mirrored.** A `StateFlow` the Compose app reads but the bridge never
+  subscribes to leaves SwiftUI showing its initial value forever.
+- **SwiftUI-local state** (`@State`, `@SceneStorage`, a selection binding) must follow the same rules
+  as `remember` / `rememberSaveable` above: a selection held only in a view must be reconciled
+  when the ViewModel's selection changes underneath it.
+
 ## Investigation
 
     grep -rn "keyboardPaneFor\|visiblePanes\|feedListIsDrawer\|focusedPane\|drawerState" <changed files>

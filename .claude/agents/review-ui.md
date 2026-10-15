@@ -88,6 +88,22 @@ section describes. In particular:
   Japanese characters alone no longer finds every case.
 - User-facing strings exist outside `ui/` too: `domain/NotificationMessages.kt` is the one most often
   missed.
+- `androidApp/src/main/res/values/strings.xml` is the one deliberate exception: it holds only the
+  launcher label `app_name`, which the OS reads before Compose Resources can load. Any other key
+  added there is a finding.
+
+## Checklist — SwiftUI app (`appleApp/`)
+
+- **No hardcoded user-facing text in Swift.** Text comes from the String Catalog, which is
+  *generated* from the Compose `strings.xml` files (`./gradlew :composeApp:generateStringCatalog`).
+  A hand-edited or committed `.xcstrings`, or a key used from Swift that is missing from
+  `values/strings.xml`, is a finding (CLAUDE.md constraint #3).
+- Does a new control carry an accessibility label, and does a state change announce itself to
+  VoiceOver where the Compose app relies on a visual cue (see `Platform/VoiceOverAnnouncement.swift`)?
+- Does the change follow the native idiom described in `docs/external-spec.md` §9 (search placement,
+  pull-to-refresh, toolbar contents per width) rather than copying the Compose layout?
+- Keyboard shortcuts (`.keyboardShortcut`, `HomeCommands.swift`, `HomeKeyboard.swift`): does a new
+  one collide with an existing one, and is it reachable on iPad with a hardware keyboard?
 
 ## Investigation
 

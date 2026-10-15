@@ -56,6 +56,22 @@ they survive testing and reach users as intermittent freezes, corrupted state, o
 - **Latest-wins where it matters.** Selection hydration and similar user-driven async loads must not
   let a slow earlier result overwrite a newer one.
 
+## Checklist — SwiftUI app (`appleApp/`)
+
+- **Flow subscriptions end with their owner.** Each `for await` over a SKIE-bridged `StateFlow`
+  (`Bridge/*Observable.swift`) runs inside a `Task`. That task must be cancelled when the observable
+  or view goes away (`.task {}` does this; a stored `Task` needs an explicit `cancel()`), or the
+  Kotlin collector keeps running.
+- **Main-actor ownership.** `@Observable` state the views read is written on the main actor. A
+  Kotlin suspend call awaited from Swift resumes off the main actor unless the caller is
+  `@MainActor`; a write after it on another executor is a finding.
+- **Shutdown order.** `AppModel` owns `KeryxSdk`; Swift tasks still awaiting it must be cancelled
+  before `KeryxSdk.close` (see the Kotlin/Native item above).
+- **Background refresh** (`.backgroundTask(.appRefresh(...))` in `App/KeryxApp.swift`, scheduled by
+  `Platform/BackgroundRefresh.swift`): the OS signals expiry by cancelling that Swift task, so the
+  shared refresh awaited inside it must stop on cancellation instead of running past the
+  deadline, and the next request must be rescheduled on every path.
+
 ## Checklist — resource lifecycle
 
 - Is every `CoroutineScope`, `Job`, listener, `HttpClient`, D-Bus connection, WebView, watcher, and

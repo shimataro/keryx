@@ -50,6 +50,11 @@ text — as production code. A test-only target is never `Not applicable` for yo
   better, a nullable that should be a sealed type, `!!`, a mutable field that could be a `val`,
   redundant type arguments, unnecessary `lateinit`.
 
+**Swift is in scope too.** The SwiftUI app under `appleApp/` gets the same checklist. Read
+non-idiomatic Kotlin as non-idiomatic Swift there: force unwraps (`!`, `try!`), `var` where `let`
+does, manual loops where `map` / `filter` read better, and a view body grown past one
+responsibility instead of extracted subviews. Match the surrounding Swift files' idiom.
+
 ## Checklist — source language
 
 - Is all source code — comments, KDoc, log/exception messages, non-UI string

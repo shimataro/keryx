@@ -20,7 +20,10 @@ eleven-agent review affordable.
 
 Judge this from the **changed files**, not from whether production behavior changed. Test code,
 build scripts, and resources are code: if your perspective covers them (`review-quality` and
-`review-verification` cover test code), a target that changes only them is still yours. When the
+`review-verification` cover test code), a target that changes only them is still yours. The same
+holds for the SwiftUI app's Swift sources under `appleApp/` and for platform configuration
+(`AndroidManifest.xml`, entitlements, `PrivacyInfo.xcprivacy`, `project.yml`, CI and packaging
+scripts): each agent file's "SwiftUI app" or configuration items say which of them are yours. When the
 orchestrator launched you, it already saw a reason to; return `Not applicable` only when you can
 name why none of the changed lines fall under your checklist.
 

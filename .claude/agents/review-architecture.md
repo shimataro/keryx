@@ -60,6 +60,22 @@ directly rather than re-reading them.
   `DatabaseMerger` is the model: `MergeFailureClassifier` / `MergeSchema` are pure commonMain, and the
   desktop `actual` only speaks to the SQLite driver.
 
+## Checklist — SwiftUI app and the `:shared` API
+
+- Does Swift code re-implement a decision that the Compose app takes from `:shared` (an enablement
+  rule, a filter, a validation, the text an error maps to)? Every route in the SwiftUI app should
+  call the same shared predicate or controller (constraint #10). Swift should hold only the
+  platform-side execution: windows, menus, clipboard, toasts, and VoiceOver.
+- `shared/src/appleMain/.../sdk/KeryxSdk.kt` is the public surface of the framework. Does a change
+  expose a Kotlin type SKIE cannot bridge cleanly (a generic interface, a default argument the
+  Swift side relies on, a `suspend` function without a cancellation story), or leak a
+  `data`/`domain` type that Swift should not see?
+- `core/` and `di/` are cross-cutting: a new dependency direction (`core` → `domain`, a module
+  binding an implementation from the wrong layer) is a layering finding.
+- Entry points (`composeApp/src/desktopMain/.../main.kt`, `StartupTasks.kt`, `AndroidStartupTasks.kt`,
+  `FeedRefreshWorker.kt`, `androidApp/.../MainActivity.kt`) should orchestrate shared code, not hold
+  logic that the other platforms then need a second copy of.
+
 ## Checklist — error design
 
 - Are external exceptions converted to `KeryxException` subclasses at the

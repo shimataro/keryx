@@ -82,13 +82,22 @@ Report a specific stale sentence with its location, not "the docs may need updat
   added or removed too. This applies equally to bundled non-Gradle assets (e.g. the icon set under
   `composeResources/`). Test-only dependencies are excluded. It is the single source of truth behind
   the About dialog's Open Source Licenses link. (CLAUDE.md constraint #8)
+- **Repo-root policy pages move in ja/en pairs too**: `README`, `SECURITY`, `PRIVACY`, and `TERMS`
+  each have a `.ja.md` twin.
+- **`PRIVACY.md` matches the app.** Its "Network requests this app makes" list must cover every
+  host the code contacts, and `appleApp/Keryx/Resources/PrivacyInfo.xcprivacy` must declare the same
+  data use. A new endpoint, or a new data type collected, without a matching line is a finding.
+- **Store listings** (`fastlane/metadata/**`, `distribution/**`) describe features the shipped app
+  actually has, on that platform, with ja/en saying the same thing.
+- **Bundled icons**: an icon added to or removed from `composeResources/drawable*` from a
+  third-party set must still be covered by that set's row in `THIRD-PARTY-LICENSES.md`.
 - **`README.md` is user-facing only.** It must not mention frameworks, languages, libraries, or
   directory structure. If a technical detail has crept in, that is a finding: it belongs in `docs/`
   with a user-facing summary and link in the README.
 
 ## Checklist — prose quality
 
-Applies to `docs/*.md` and `*.ja.md`, `README.md`, `THIRD-PARTY-LICENSES.md`, and the user-facing
+Applies to `docs/*.md` and `*.ja.md`, the repo-root `*.md` pages, the store listings, and the user-facing
 strings in `values/strings.xml` (English) and `values-ja/strings.xml` (Japanese).
 
 - Sentences that are hard to parse on one read: buried subject, stacked modifiers, a pronoun with no
