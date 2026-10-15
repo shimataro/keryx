@@ -396,7 +396,9 @@ has finished too, not just the feed fetches. On iOS, where the system starts the
 the pull crosses its threshold (with the finger still down), the indicator also stays up for at least
 about a second, so a refresh that finishes almost at once still shows it spinning.
 A pull made while a refresh or sync is already running (a background refresh, say) starts nothing
-new; the indicator simply stays up until the running one finishes.
+new; the indicator simply stays up until the running one finishes. Selecting another item in the
+feed list while a pull's indicator is up leaves no indicator over the newly selected list, since
+that list is not the one being refreshed; the refresh itself carries on.
 On Android, the same refresh is also reachable without the gesture, wherever the gesture itself is
 available: as a TalkBack custom action on the list ("Refresh this list"), and from a
 physical keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width
