@@ -125,8 +125,10 @@ section describes. In particular:
 
 - **No hardcoded user-facing text in Swift.** Text comes from the String Catalog, which is
   *generated* from the Compose `strings.xml` files (`./gradlew :composeApp:generateStringCatalog`).
-  A hand-edited or committed `.xcstrings`, or a key used from Swift that is missing from
-  `values/strings.xml`, is a finding (CLAUDE.md constraint #3).
+  Swift reads it only through `L("key")` / `LF("key", …)` (`Platform/Localized.swift`), whose
+  argument is a resource key, never display text. A hand-edited or committed `.xcstrings`, a
+  `Text("…")` / `Label("…")` with a literal display string, or a key passed to `L` / `LF` that is
+  missing from `values/strings.xml`, is a finding (CLAUDE.md constraint #3).
 - Does a new control carry an accessibility label, and does a state change announce itself to
   VoiceOver where the Compose app relies on a visual cue (see `Platform/VoiceOverAnnouncement.swift`)?
 - Does the change follow the native idiom described in `docs/external-spec.md` §9 (search placement,
