@@ -49,7 +49,7 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   than one job (e.g. a ViewModel that also formats display strings, a
   Repository method that both fetches and persists unrelated state) is a split
   candidate even if it isn't long. Natural candidates: `ui/home/FeedListPane.kt`,
-  `ui/settings/SettingsDialog.kt`, `desktopMain/main.kt`,
+  `desktopMain/main.kt`,
   `ui/common/KeryxDialogs.desktop.kt`, `presentation/home/HomeViewModel.kt` (examples, not
   a mandate — split only where it improves clarity).
 - **Ambiguous ownership** → logic sitting in the wrong layer relative to
@@ -177,11 +177,12 @@ or invoke the **`build` skill**:
 ./gradlew :shared:desktopTest :composeApp:desktopTest
 ```
 
-Record the baseline **from this run itself**, not from the `527` literal in
-`docs/testing.md` (which drifts): capture both the passing **count** and the
-**set of test identities** (class + method names) from the Gradle test report
-(`composeApp/build/test-results/desktopTest/*.xml`, or the HTML report under
-`composeApp/build/reports/tests/desktopTest/`). This recorded set is the oracle
+Record the baseline **from this run itself**, never from a count written in a doc:
+capture both the passing **count** and the **set of test identities** (class + method
+names) from the Gradle test reports of **both** modules
+(`shared/build/test-results/desktopTest/*.xml` and
+`composeApp/build/test-results/desktopTest/*.xml`, or the HTML reports under each
+module's `build/reports/tests/desktopTest/`). This recorded set is the oracle
 checked in Step 4. If the baseline is **red**, stop and report — never refactor
 on top of failing tests.
 
@@ -301,7 +302,8 @@ affected docs and **update the stale references in place**:
 
 **Doc edits follow the doc's own language.** `.claude/CLAUDE.md` and `docs/*.md`
 files other than `docs/*.ja.md` are English (source code stays English too, #9).
-Only `docs/*.ja.md` files are Japanese. **Do NOT edit `README.md` or
+Only `docs/*.ja.md` files are Japanese. Every `docs/X.md` you edit has a `docs/X.ja.md`
+twin: update it in the same step (`.claude/rules/docs-translation.md`). **Do NOT edit `README.md` or
 `docs/external-spec.md`**
 — behavior is unchanged and `README.md` is user-facing only (see
 `.claude/CLAUDE.md` "Documentation"). This is a targeted pass, not a full re-read
