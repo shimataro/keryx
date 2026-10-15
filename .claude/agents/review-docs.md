@@ -111,6 +111,26 @@ strings in `values/strings.xml` (English) and `values-ja/strings.xml` (Japanese)
 
 Prose findings are `Low` unless the text is actively wrong about behavior, which makes them `Medium`.
 
+## Checklist — error messages
+
+The rule is "Error Message Wording" in `docs/error-design.md` (already in your context). Apply it to
+every error text the diff adds or changes in `values/strings.xml` and `values-ja/strings.xml` — keys
+reached from `errorMessage(ErrorKind)`, `notificationText` / `infoDialogText`, and any `*_error` /
+`*_failed` key.
+
+- Does the message say **why** it happened and **what the user can do next**? Read it together with
+  the control shown beside it (a button, a link, the notification's next action) before judging
+  the text alone incomplete — check the call site.
+- A message that only states the failure ("Import failed", "〜できません", "An error occurred") with
+  no next step anywhere in its presentation is a `Medium` finding.
+- Technical detail in the text — an HTTP status code, an exception name, an internal term — is a
+  `Medium` finding.
+- ja and en give the same cause and the same next step.
+
+In the **Suggestion**, propose the replacement wording in both locales. When the message cannot say
+why because one `ErrorKind` covers several causes, say so; the category split itself is
+`review-architecture`'s.
+
 ## Checklist — stale and historical content
 
 A design doc records the current spec; it is not a changelog. Content whose only job is to describe

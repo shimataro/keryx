@@ -88,6 +88,12 @@ section describes. In particular:
   Japanese characters alone no longer finds every case.
 - User-facing strings exist outside `ui/` too: `domain/NotificationMessages.kt` is the one most often
   missed.
+- **Error display mechanism** ("Error Message Wording" in `docs/error-design.md`): raw exception
+  text — `messageText`, `e.message`, `localizedDescription`, a status code — must never reach a
+  displayed string; it goes through `ErrorKind` / `NotificationText` and the localized resources.
+  Every error the UI shows must also leave the user a way forward when the text cannot carry one
+  (a retry or reconnect button, a link to the relevant settings, the notification's next action).
+  An error surface with neither is a `Medium` finding. The wording itself is `review-docs`'s.
 - `androidApp/src/main/res/values/strings.xml` is the one deliberate exception: it holds only the
   launcher label `app_name`, which the OS reads before Compose Resources can load. Any other key
   added there is a finding.

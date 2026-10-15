@@ -83,6 +83,10 @@ directly rather than re-reading them.
 - Are unexpected fatal errors swallowed by `Result<T>` when they should throw?
 - Does a notification kept in the bell carry a next action (`AppNotificationAction`), and is its text
   built through `NotificationMessages` rather than hardcoded?
+- Is a new or changed `ErrorKind` / `NotificationText` fine-grained enough for the UI to say why the
+  error happened and what to do ("Error Message Wording" in `docs/error-design.md`)? One category
+  that merges causes needing different next steps (an unreachable host vs. a 404 vs. a parse
+  failure) is a finding; a new exception mapped to an existing catch-all kind is the common case.
 
 ## Checklist — scope
 
