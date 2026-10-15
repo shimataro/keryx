@@ -187,6 +187,7 @@ targets:
       - path: Keryx/Home/PullToRefreshAvailability.swift
       - path: Keryx/Home/PullRefreshHold.swift
       - path: Keryx/Home/AbandonableRefresh.swift
+      - path: Keryx/Home/ArticleListRemount.swift
       - path: Keryx/Home/FeedListDropPresentation.swift
       - path: Keryx/Home/SidebarDialogState.swift
       - path: Keryx/Settings/SettingsNavigation.swift

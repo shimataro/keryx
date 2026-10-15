@@ -132,7 +132,11 @@ struct HomeView: View {
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
             #if os(iOS)
-            if horizontalSizeClass == .compact, old == .sidebar, new == .content {
+            if ArticleListRemount.isNeeded(
+                isCompact: horizontalSizeClass == .compact,
+                from: HomeView.compactSearchColumn(old),
+                to: HomeView.compactSearchColumn(new)
+            ) {
                 articleListRemountGeneration += 1
             }
             #endif
