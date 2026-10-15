@@ -212,7 +212,10 @@ article detail) + keyboard navigation, adapting down to fewer simultaneous panes
 
 - **Nothing happens unprompted.** Without the user's own action, the app does not navigate, open a
   drawer or dialog, take focus, move the scroll position, reorder or remove items from the list being
-  read, or change state. This holds for background work and notifications too.
+  read, or change the user's own selection, filters or settings. This holds for background work and
+  notifications too. Data arriving in the background — a refresh's new articles, a cloud sync bringing
+  in what was done on another device — is not such a change, but it lands without disturbing what the
+  user is doing (new articles surface as a pill rather than shifting the list, §7).
 - **An action does what its label or icon says**, with no hidden side effect alongside.
 - **An action that loses data or settings asks first** — unsubscribing, deleting a folder or tag,
   resetting the cloud sync data, overwriting a file. An action that only changes reading state (marking
