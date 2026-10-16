@@ -54,19 +54,31 @@ Paths follow `.coderabbit.yaml`'s `path_instructions` conventions.
 
 | Changed path | Perspectives |
 | --- | --- |
-| any Kotlin file changed at all | security, quality, verification |
-| `shared/src/**/domain/**`, `shared/src/**/data/**`, `composeApp/src/**/*ViewModel.kt` | architecture, data-integrity, concurrency, performance, docs |
-| `**/domain/MergeSql.kt`, `**/domain/SyncRepository.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/DatabaseSnapshot*.kt`, `{shared,composeApp}/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
+| any Kotlin or Swift file changed at all | security, quality, verification |
+| `shared/src/**/domain/**`, `shared/src/**/data/**`, `androidGms/src/**/data/**`, `composeApp/src/**/*ViewModel.kt` | architecture, data-integrity, concurrency, performance, docs |
+| `shared/src/**/presentation/**` | architecture, concurrency, performance, docs |
+| `shared/src/**/core/**`, `{shared,composeApp}/src/**/di/**` | architecture, docs |
+| `shared/src/appleMain/**/sdk/**` | architecture, concurrency, docs |
+| `composeApp/src/{desktopMain,androidMain}/kotlin/**`, `androidApp/src/*/kotlin/**` | architecture, concurrency, security |
+| `**/domain/MergeSql.kt`, `**/domain/SyncRepository.kt`, `**/platform/DatabaseMerger*.kt`, `**/platform/DatabaseSnapshot*.kt`, `{shared,composeApp,androidGms}/src/**/data/cloud/**`, `**/Fts*.kt`, `**/CloudFileTransfer*.kt`, `**/Gzip*.kt` | sync-merge |
 | `shared/src/**/sqldelight/**/*.sq`, `**/*.sqm`, `**/domain/MergeSchema.kt`, `**/DatabaseDriverFactory*.kt` | data-integrity, sync-merge, verification, docs |
-| `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml` | ui, docs |
-| `composeApp/src/**/ui/**`, `composeApp/src/**/*ViewModel.kt`, `**/data/local/LocalSettings.kt` | state-consistency |
-| a diff that adds or changes **user-visible text** — judged by content, not path: a new `Res.string.`, `getString(`, `stringResource(`, or a literal reaching a display path. `**/domain/NotificationMessages.kt` is the one outside `ui/` that gets missed | ui |
+| `composeApp/src/**/ui/**`, `composeApp/src/**/tray/**`, `composeApp/src/**/appmenu/**`, `**/platform/NativeMenu*.kt`, `**/composeResources/values*/strings.xml`, `androidApp/src/**/res/values*/strings.xml` | ui, docs |
+| `shared/src/**/presentation/**` (user-facing behavior is decided here — least surprise) | ui |
+| `appleApp/Keryx/**/*.swift` | architecture, concurrency, ui, docs |
+| `composeApp/src/**/ui/**`, `composeApp/src/**/*ViewModel.kt`, `shared/src/**/presentation/**`, `**/data/local/LocalSettings.kt`, `appleApp/Keryx/{App,Bridge,Home,Settings,Setup,Update}/**` | state-consistency |
+| a diff that adds or changes **user-visible text** — judged by content, not path: a new `Res.string.`, `getString(`, `stringResource(`, in Swift `L("…")` / `LF("…", …)` (`Platform/Localized.swift` — the app's only lookup idiom), or a literal reaching a display path (a Compose `Text` or a SwiftUI `Text("…")`). `**/domain/NotificationMessages.kt` is the one outside `ui/` that gets missed | ui |
 | `shared/src/commonMain/**` or `composeApp/src/commonMain/**` gaining a platform API (`java.io`, `java.awt`, `java.sql`, `javax.swing`, Ktor CIO) | architecture |
 | `{shared,composeApp}/src/**/platform/**` | architecture, concurrency, docs |
-| `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md` | docs |
-| `gradle/libs.versions.toml`, `**/build.gradle.kts` | docs, verification, security |
+| `appleApp/project.yml`, `appleApp/**/*.xcconfig*`, `**/*.entitlements`, `appleApp/Scripts/**` | security, verification |
+| `**/PrivacyInfo.xcprivacy` | security, verification, docs |
+| `androidApp/src/**/AndroidManifest.xml`, `androidApp/src/**/res/xml/**` | security, verification |
+| `docs/**`, `*.md` at the repo root (`README*`, `SECURITY*`, `PRIVACY*`, `TERMS*`, `THIRD-PARTY-LICENSES.md`) | docs |
+| `fastlane/**`, `distribution/**` (store listings) | docs |
+| `**/composeResources/drawable*/**` (bundled third-party icons — license attribution) | docs |
+| `gradle/libs.versions.toml`, `**/build.gradle.kts`, `settings.gradle.kts`, `gradle.properties`, `gradle/*.properties`, `gradle/wrapper/**`, `gradlew*`, `local.properties.example` | docs, verification, security |
 | `.github/workflows/**` | verification |
-| `{shared,composeApp}/src/{commonTest,desktopTest}/**`, `testing/src/**` | verification |
+| `.github/scripts/**`, `design/**/*.sh`, `snap/**`, `composeApp/packaging/**` | verification, security |
+| `{shared,composeApp}/src/*Test/**`, `androidApp/src/androidTest/**`, `androidGms/src/test/**`, `appleApp/KeryxTests/**`, `testing/src/**` | verification |
 
 `docs` is a candidate on code changes, not only doc changes: the commonest drift is code moving
 while `app-architecture.md` / `db-schema.md` / `sync-architecture.md` keep describing the old shape.
@@ -76,8 +88,16 @@ Step 2b keeps it only when the docs actually mention what changed.
 between a ViewModel and the composable that reads it, and a diff touching only one of the two is
 the common case. On a styling- or string-only diff it returns `Not applicable` in one line.
 
+`state-consistency` covers `shared/src/**/presentation/**` and the SwiftUI app's state-holding
+directories for the same reason: `HomeViewModel` and the shared controllers are the state both UIs
+render, and `appleApp/Keryx/Bridge/` is where SwiftUI mirrors it.
+
 **No row matches.** If a changed path matches no row above — most notably `.claude/**`, which owns
-no row here on purpose — treat it as unchecked, not as a clean pass.
+no row here on purpose — treat it as unchecked, not as a clean pass. The other paths left out on
+purpose are editor/tool config (`.coderabbit.yaml`, `.editorconfig`, `.markdownlint.yaml`,
+`.gitignore`, `keryx.code-workspace`), `LICENSE`, and the project's own artwork and theming (`design/**/*.svg`,
+`composeApp/icons/**`, `appleApp/**/Resources/**`, `{androidApp,composeApp}/src/**/res/{drawable,mipmap}*/**`, `androidApp/src/**/res/values*/themes.xml`),
+which needs no attribution. They are still listed as `Unchecked`.
 
 - When the target contains **both matched and unmatched paths**, launch specialists for the matched
   paths normally. In the report, list the unmatched paths explicitly under "Run summary" as
@@ -103,28 +123,29 @@ specialists do that.
 
 Apply these whole-file rules first:
 
-- A Kotlin file whose changed lines are **only** comments, KDoc, blank lines, or reordered imports
-  contributes no candidate except Code quality (which still checks that source text is English).
-- A test file (`{shared,composeApp}/src/{commonTest,desktopTest}/**`, `testing/src/**`) contributes
-  no candidate except Verification and Code quality, whatever else the target changes. Its lines are
-  not signals for any other perspective in the table below.
+- A Kotlin or Swift file whose changed lines are **only** comments, KDoc / doc comments, blank
+  lines, or reordered imports contributes no candidate except Code quality (which still checks that
+  source text is English).
+- A test file (any path in step 2a's test row) contributes no candidate except Verification and
+  Code quality, whatever else the target changes. Its lines are not signals for any other
+  perspective in the table below.
 
 Then keep each remaining candidate only if the changed lines (`+` or `-`) of the files that
 produced it show one of its signals:
 
 | Perspective | Keep when the changed lines show |
 | --- | --- |
-| Security | HTTP clients, redirects, request construction; an `http://` literal; tokens, secrets, credentials, OAuth / PKCE / `state`; raw SQL strings; `File` / `Path` built from a variable; `Log.*` / logger calls or `throw` with a message; any change to `gradle/libs.versions.toml` or `**/build.gradle.kts`. A fixed `https://` link passed to the browser is not a signal |
+| Security | HTTP clients, redirects, request construction; an `http://` literal; tokens, secrets, credentials, OAuth / PKCE / `state`; raw SQL strings; `File` / `Path` built from a variable; `Log.*` / logger calls or `throw` with a message; any change to `gradle/libs.versions.toml` or `**/build.gradle.kts`. In Swift: `URLSession`, `ASWebAuthenticationSession`, Keychain (`SecItem*`), `os_log` / `Logger`. Any change to a manifest, entitlements, `PrivacyInfo.xcprivacy`, `*.xcconfig`, `project.yml`, a Gradle properties/wrapper file, or a CI / packaging script. A fixed `https://` link passed to the browser is not a signal |
 | Data integrity | `.sq` / `.sqm` changes; query write calls (`insert` / `update` / `upsert` / `delete` / `softDelete` / `mark*`); `transaction`; `*_updated_at`, `deleted_at`, `read_at`, `starred_at`; `IdGenerator`; `LocalSettings`; token storage format; OPML |
 | Sync & merge | always kept — its 2a rows are already narrow |
-| Concurrency | `launch`, `async`, `withContext`, `Dispatchers`, `Mutex` / `withLock`, `synchronized`, `Flow` / `stateIn` / `shareIn`, `CoroutineScope`, `Job`, `Thread`, `SwingUtilities` / `EventQueue`, `close()` / `use {`, `runBlocking`; or any change under `platform/**` |
-| Architecture | added or changed `import`s; `expect` / `actual`; a new file; `Result`, `KeryxException`, `NotificationCenter`, `AppNotification` |
+| Concurrency | `launch`, `async`, `withContext`, `Dispatchers`, `Mutex` / `withLock`, `synchronized`, `Flow` / `stateIn` / `shareIn`, `CoroutineScope`, `Job`, `Thread`, `SwingUtilities` / `EventQueue`, `close()` / `use {`, `runBlocking`; or any change under `platform/**`. In Swift: `Task {`, `for await`, `@MainActor`, `actor`, `async` / `await`, `.cancel()`, `DispatchQueue` |
+| Architecture | added or changed `import`s; `expect` / `actual`; a new file; `Result`, `KeryxException`, `ErrorKind`, `NotificationText`, `NotificationCenter`, `AppNotification`; in Swift, a branch or computation over shared state (a decision that may belong in `:shared` `presentation/`), or a call into `KeryxSdk` |
 | Performance | SQL text or query calls; loops and collection pipelines; `Flow` operators; `remember` / `LaunchedEffect` / `derivedStateOf` / `key(` inside composables; network transfer (download, upload, request headers) |
-| UI / i18n | always kept — its 2a rows already require Compose or user-visible text |
-| State vs. display | a ViewModel's exposed `StateFlow` / state fields; selection, filter, focus, pane, or scroll state; `remember` / `rememberSaveable`. A diff that changes only styling (colors, padding, shapes, `Modifier` sizing) or only string resources is dropped |
-| Code quality | any changed Kotlin line, comments included |
-| Verification | any changed Kotlin line other than comments / imports; tests; `.sq` / `.sqm`; `composeResources`; `.github/workflows/**`; Gradle files |
-| Documentation | always kept when `docs/**`, `README.md`, `THIRD-PARTY-LICENSES.md`, a `strings.xml` (wording quality), or `gradle/libs.versions.toml` (license-table sync) changed. Otherwise, grep `docs/**` and `README.md` for each changed file's base name and for each public identifier the diff adds, removes, or renames (class, function, constant, table, column, settings key), and also for one or two distinctive terms naming the behavior the changed lines alter (a feature or setting name, a state or error kind, user-visible wording) — docs often describe behavior without naming the file or class; keep it only on a hit |
+| UI / i18n | always kept for its Compose, `strings.xml`, and user-visible-text rows. A Swift file is kept only when its changed lines touch a `View` body, `Text` / `Label` / `Button`, an accessibility modifier, an `L(` / `LF(` lookup, or a `.keyboardShortcut` / `.commands`. A `presentation/**` file is kept only when its changed lines touch a user-action handler (`select*` / `toggle*` / `mark*` / `delete*` / `open*` / `navigate*`) or focus / scroll / drawer / dialog state |
+| State vs. display | a ViewModel's exposed `StateFlow` / state fields; selection, filter, focus, pane, or scroll state; `remember` / `rememberSaveable`; in Swift, `@Observable` fields, `@State` / `@Binding` / `@SceneStorage`, or a `for await` that mirrors a `StateFlow`. A diff that changes only styling (colors, padding, shapes, `Modifier` sizing) or only string resources is dropped |
+| Code quality | any changed Kotlin or Swift line, comments included |
+| Verification | any changed Kotlin or Swift line other than comments / imports; tests; `.sq` / `.sqm`; `composeResources`; `.github/**`; Gradle files; `project.yml` / `*.xcconfig` / entitlements / `PrivacyInfo.xcprivacy` / `appleApp/Scripts/**`; a manifest or `res/xml/**`; `snap/**` or `composeApp/packaging/**` |
+| Documentation | always kept when `docs/**`, a repo-root `*.md`, a `strings.xml` (wording quality), `gradle/libs.versions.toml` or `composeResources/drawable*/**` (license-table sync), `PrivacyInfo.xcprivacy` (against `PRIVACY.md`), or a store listing under `fastlane/**` / `distribution/**` changed — and when the changed lines touch error messaging: `ErrorKind`, `NotificationText`, `InfoDialogText`, `errorMessage(`, `userMessage(`, or a string key containing `error` / `failed`. Otherwise, grep `docs/**` and `README.md` for each changed file's base name and for each public identifier the diff adds, removes, or renames (class, function, constant, table, column, settings key), and also for one or two distinctive terms naming the behavior the changed lines alter (a feature or setting name, a state or error kind, user-visible wording) — docs often describe behavior without naming the file or class; keep it only on a hit |
 
 Two safeguards:
 

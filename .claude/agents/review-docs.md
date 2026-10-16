@@ -82,13 +82,22 @@ Report a specific stale sentence with its location, not "the docs may need updat
   added or removed too. This applies equally to bundled non-Gradle assets (e.g. the icon set under
   `composeResources/`). Test-only dependencies are excluded. It is the single source of truth behind
   the About dialog's Open Source Licenses link. (CLAUDE.md constraint #8)
+- **Repo-root policy pages move in ja/en pairs too**: `README`, `SECURITY`, `PRIVACY`, and `TERMS`
+  each have a `.ja.md` twin.
+- **`PRIVACY.md` matches the app.** Its "Network requests this app makes" list must cover every
+  host the code contacts, and `appleApp/Keryx/Resources/PrivacyInfo.xcprivacy` must declare the same
+  data use. A new endpoint, or a new data type collected, without a matching line is a finding.
+- **Store listings** (`fastlane/metadata/**`, `distribution/**`) describe features the shipped app
+  actually has, on that platform, with ja/en saying the same thing.
+- **Bundled icons**: an icon added to or removed from `composeResources/drawable*` from a
+  third-party set must still be covered by that set's row in `THIRD-PARTY-LICENSES.md`.
 - **`README.md` is user-facing only.** It must not mention frameworks, languages, libraries, or
   directory structure. If a technical detail has crept in, that is a finding: it belongs in `docs/`
   with a user-facing summary and link in the README.
 
 ## Checklist — prose quality
 
-Applies to `docs/*.md` and `*.ja.md`, `README.md`, `THIRD-PARTY-LICENSES.md`, and the user-facing
+Applies to `docs/*.md` and `*.ja.md`, the repo-root `*.md` pages, the store listings, and the user-facing
 strings in `values/strings.xml` (English) and `values-ja/strings.xml` (Japanese).
 
 - Sentences that are hard to parse on one read: buried subject, stacked modifiers, a pronoun with no
@@ -101,6 +110,26 @@ strings in `values/strings.xml` (English) and `values-ja/strings.xml` (Japanese)
   Japanese and the English say the same thing at the same register?
 
 Prose findings are `Low` unless the text is actively wrong about behavior, which makes them `Medium`.
+
+## Checklist — error messages
+
+The rule is "Error Message Wording" in `docs/error-design.md` (already in your context). Apply it to
+every error text the diff adds or changes in `values/strings.xml` and `values-ja/strings.xml` — keys
+reached from `errorMessage(ErrorKind)`, `notificationText` / `infoDialogText`, and any `*_error` /
+`*_failed` key.
+
+- Does the message say **why** it happened and **what the user can do next**? Read it together with
+  the control shown beside it (a button, a link, the notification's next action) before judging
+  the text alone incomplete — check the call site.
+- A message that only states the failure ("Import failed", "〜できません", "An error occurred") with
+  no next step anywhere in its presentation is a `Medium` finding.
+- Technical detail in the text — an HTTP status code, an exception name, an internal term — is a
+  `Medium` finding.
+- ja and en give the same cause and the same next step.
+
+In the **Suggestion**, propose the replacement wording in both locales. When the message cannot say
+why because one `ErrorKind` covers several causes, say so; the category split itself is
+`review-architecture`'s.
 
 ## Checklist — stale and historical content
 

@@ -20,7 +20,10 @@ eleven-agent review affordable.
 
 Judge this from the **changed files**, not from whether production behavior changed. Test code,
 build scripts, and resources are code: if your perspective covers them (`review-quality` and
-`review-verification` cover test code), a target that changes only them is still yours. When the
+`review-verification` cover test code), a target that changes only them is still yours. The same
+holds for the SwiftUI app's Swift sources under `appleApp/` and for platform configuration
+(`AndroidManifest.xml`, entitlements, `PrivacyInfo.xcprivacy`, `project.yml`, CI and packaging
+scripts): each agent file's "SwiftUI app" or configuration items say which of them are yours. When the
 orchestrator launched you, it already saw a reason to; return `Not applicable` only when you can
 name why none of the changed lines fall under your checklist.
 
@@ -37,6 +40,8 @@ report. The boundaries that are easiest to get wrong:
 | Oversized file or function, dead code, duplication, naming | `review-quality` | `review-architecture` reports layer violations only |
 | A user-facing string not going through Compose Resources; a key missing from one locale | `review-ui` | — |
 | The quality of the wording itself (ja / en) | `review-docs` | `review-ui` checks the mechanism, not the prose |
+| Behavior that surprises the user (unprompted effects, label vs. effect, unconfirmed data loss, platform conventions) | `review-ui` | `review-state-consistency` owns a display that disagrees with its state; `review-quality` owns a name or side effect that surprises the caller |
+| An error message's content — does it say why and what to do | `review-docs` | `review-ui` owns raw exception text reaching the screen and an error surface with no way forward; `review-architecture` owns an `ErrorKind` too coarse to explain |
 | The row that is highlighted, the pane that is focused, or the list that is rendered disagreeing with the state behind it | `review-state-consistency` | `review-ui` owns the selection's colors, shape, and accessibility semantics — not which row is the correct one |
 | A displayed value going stale only because a slower async result landed last | `review-concurrency` | `review-state-consistency` takes the deterministic divergences: a value derived twice, a hardcoded flag, a non-saveable `remember` |
 | What the screen shows for a row vs. what the ViewModel holds for it | `review-state-consistency` | `review-data-integrity` owns the row in the database; it does not review what is rendered from it |

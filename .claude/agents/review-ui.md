@@ -24,7 +24,10 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 - Which thread a UI callback runs on → `review-concurrency`.
 - Whether the *right* row is selected, the right pane focused, or the rendered list still matching
   the state behind it → `review-state-consistency`. You own how a selection looks and how it is
-  announced; that agent owns whether it is the correct one.
+  announced; that agent owns whether it is the correct one. The same split holds for least
+  surprise: behavior the user did not expect is yours, a display disagreeing with its state is
+  theirs.
+- A function whose name or side effects surprise the *caller* → `review-quality`.
 
 ## Checklist — ui-guidelines conformance
 
@@ -44,9 +47,29 @@ refers to — has gone stale, and that is a finding of its own. Report the speci
 with its location. This is the one place where a finding may point into `.claude/`: `review-docs`
 excludes that directory, so nobody else will catch it.
 
+## Checklist — least surprise
+
+The rule is "Least surprise" in `docs/external-spec.md` §9 (already in your context), with the
+decisions it lists as the model. Judge the behavior the change produces, in Compose, in SwiftUI,
+and in the `:shared` `presentation/` code that decides it.
+
+- **Unprompted effects.** Does anything now navigate, open a drawer or dialog, take focus, move the
+  scroll position, reorder or drop rows from the list being read, or change state without the
+  user's own action — including from a background refresh, a sync, or a notification? `Medium`.
+- **Label vs. effect.** Does an action do more than, or other than, what its label or icon says? A
+  hidden side effect is `Medium`.
+- **Losing data or settings without asking.** An action that unsubscribes, deletes, resets, or
+  overwrites with no confirmation is `High`. Reading-state changes (marking read, mark all as read)
+  deliberately do not ask — do not flag them.
+- **Platform conventions.** A shortcut, back behavior, menu placement, or gesture that departs from
+  the OS's standard without a reason recorded in the spec. `Low`, or `Medium` when it makes the
+  action hard to find or triggers it by accident.
+- **Boundaries.** At the first/last item, an empty list, or a disabled state, does the action do
+  nothing rather than something else? Filling the boundary with a different effect is `Medium`.
+
 ## Checklist — accessibility
 
-The codebase is thin here today (`Modifier.semantics` is unused; roughly half of the
+The codebase is uneven here (`Modifier.semantics` is used in places, but many
 `contentDescription` values are `null`), so treat a new interactive element as an opportunity, not as
 conforming to precedent.
 
@@ -61,12 +84,14 @@ conforming to precedent.
 
 ## Checklist — known-issue regressions
 
-`docs/known-issues.md` records eleven defects, ten of them OS-dependent UI problems: window flicker
-on first selection, dialogs opening at the wrong size or position, Linux modeless dialogs collapsing,
-the Windows WebView freeze, context-menu placement and label overlap, row hit areas at boundaries,
-drag cursors under Wayland, and a UI-thread crash from selection churn.
+`docs/known-issues.md` records defects deliberately left unfixed. The UI-relevant ones: a macOS
+notification click not restoring a tray-hidden window, the article list crashing the UI thread
+under heavy scroll + selection churn, a click at a row's exact edge selecting the neighbour (macOS),
+the GNOME tray menu briefly showing a stale label, a feed body's own JavaScript running in the
+reader, and Linux arm64 having no native web view. (The rest are SQLite busy, CI-only, and
+packaging issues.) Its `##` headings are the index.
 
-**Do not read the whole file** — it is ~80KB. Identify which area the diff touches, `grep` for that
+**Do not read the whole file** — it is ~50KB. Identify which area the diff touches, `grep` for that
 section heading, and read only that section. Then ask whether the change re-enters the cause the
 section describes. In particular:
 
@@ -88,6 +113,30 @@ section describes. In particular:
   Japanese characters alone no longer finds every case.
 - User-facing strings exist outside `ui/` too: `domain/NotificationMessages.kt` is the one most often
   missed.
+- **Error display mechanism** ("Error Message Wording" in `docs/error-design.md`): raw exception
+  text — `messageText`, `e.message`, `localizedDescription`, a status code — must never reach a
+  displayed string; it goes through `ErrorKind` / `NotificationText` and the localized resources.
+  Every error the UI shows must also leave the user a way forward when the text cannot carry one
+  (a retry or reconnect button, a link to the relevant settings, the notification's next action).
+  An error surface with neither is a `Medium` finding. The wording itself is `review-docs`'s.
+- `androidApp/src/main/res/values/strings.xml` is the one deliberate exception: it holds only the
+  launcher label `app_name`, which the OS reads before Compose Resources can load. Any other key
+  added there is a finding.
+
+## Checklist — SwiftUI app (`appleApp/`)
+
+- **No hardcoded user-facing text in Swift.** Text comes from the String Catalog, which is
+  *generated* from the Compose `strings.xml` files (`./gradlew :composeApp:generateStringCatalog`).
+  Swift reads it only through `L("key")` / `LF("key", …)` (`Platform/Localized.swift`), whose
+  argument is a resource key, never display text. A hand-edited or committed `.xcstrings`, a
+  `Text("…")` / `Label("…")` with a literal display string, or a key passed to `L` / `LF` that is
+  missing from `values/strings.xml`, is a finding (CLAUDE.md constraint #3).
+- Does a new control carry an accessibility label, and does a state change announce itself to
+  VoiceOver where the Compose app relies on a visual cue (see `Platform/VoiceOverAnnouncement.swift`)?
+- Does the change follow the native idiom described in `docs/external-spec.md` §9 (search placement,
+  pull-to-refresh, toolbar contents per width) rather than copying the Compose layout?
+- Keyboard shortcuts (`.keyboardShortcut`, `HomeCommands.swift`, `HomeKeyboard.swift`): does a new
+  one collide with an existing one, and is it reachable on iPad with a hardware keyboard?
 
 ## Investigation
 

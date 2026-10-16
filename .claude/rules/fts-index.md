@@ -5,7 +5,9 @@ paths:
   - "**/DatabaseSnapshot*.kt"      # VACUUM INTO snapshot drops articles_fts on the copy side
   - "**/SyncRepository.kt"         # indexMissing() after merge
   - "**/FeedRepository.kt"         # indexMissing() after refresh
-  - "**/StartupTasks.kt"           # desktop orchestration that calls maybeRebuildFtsIndex
+  - "**/StartupTasks.kt"           # desktop startup orchestration (maybeRebuildFtsIndex via runStartupMaintenance)
+  - "**/BackgroundRefreshLoop.kt"  # calls maybeRebuildFtsIndex on each background cycle
+  - "**/FeedRefreshWorker.kt"      # Android WorkManager wakeup, calls maybeRebuildFtsIndex
   - "**/StartupMaintenanceTasks.kt" # maybeRebuildFtsIndex itself (daily idle heal, commonMain)
   - "**/main.kt"                   # ensureIndexed() called at startup, before application {}
   - "**/KeryxApplication.kt"       # ensureIndexedIfTableAbsent() called on every Android process start
@@ -25,7 +27,8 @@ which is O(all indexed text) and would block/zero-out concurrent searches. The
 whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
 (`maybeRebuildFtsIndex` in commonMain's `domain/StartupMaintenanceTasks.kt`, gated on
 `lastFtsRebuiltAt` + `ActivityCenter` idle — no sync, no feed refresh, and no
-refresh-then-sync cycle (`refreshCycleRunning`) in flight — called from desktop's `StartupTasks.kt`),
+refresh-then-sync cycle (`refreshCycleRunning`) in flight — reached at startup through `runStartupMaintenance` (desktop's `StartupTasks.kt`,
+`AndroidStartupTasks.kt`), and from `BackgroundRefreshLoop` and Android's `FeedRefreshWorker`),
 which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
 run and backfills any missing rows. Android's `KeryxApplication.onCreate` calls the
 cheaper `FtsManager.ensureIndexedIfTableAbsent()` instead — it also runs on every

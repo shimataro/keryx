@@ -29,6 +29,18 @@ Run Keryx KMP's standard build flow in sequence.
    ./gradlew :composeApp:run
    ```
    (Blocks until the window closes — only run when asked to verify UI manually.)
+5. **Apple targets — on a Mac only, when the change touches `shared/src/apple*`,
+   `:shared` `commonMain`/`commonTest` code (which also compiles for Kotlin/Native), or
+   `appleApp/`.** Steps 2–3 run on the JVM and never compile the Apple targets:
+   ```bash
+   ./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test
+   ```
+   and, when `appleApp/` changed (run `cd appleApp && xcodegen generate` first if
+   `project.yml` changed):
+   ```bash
+   xcodebuild -scheme Keryx -destination 'platform=macOS' test
+   ```
+   Off a Mac, skip this step and say so in the report rather than reporting it as passed.
 
 ## Notes
 
@@ -43,9 +55,10 @@ Run Keryx KMP's standard build flow in sequence.
   Dropbox (`dropboxAppKey` / `DROPBOX_APP_KEY` / `dropbox.app.key`), Google Drive
   (client id **and** secret), OneDrive (`onedrive.client.id`). An empty key hides
   that provider from the UI entirely — it is a feature, not a build failure.
-  The Google Drive keys are **desktop-only**: Android goes through Play services'
-  `AuthorizationClient`, so its availability there is a runtime check for Play
-  services on the device, not a build-time key. See
+  The Google Drive client id + secret are for desktop; the Apple app has its own
+  client id (`googleDriveAppleClientId` / `GOOGLE_DRIVE_APPLE_CLIENT_ID`). Android has
+  no Google Drive key at all: it goes through Play services' `AuthorizationClient`, so
+  its availability there is a runtime check for Play services on the device. See
   `docs/build.md` for how to obtain each one; `local.properties.example` lists the
   exact property names.
 

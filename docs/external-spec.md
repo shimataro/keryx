@@ -206,6 +206,38 @@ versions. Light / dark / system support. 3-pane layout (feed list / article list
 article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
 (see below).
 
+### Least surprise
+
+**The app does what the user expects, and nothing the user did not ask for.**
+
+- **Nothing happens unprompted.** Without the user's own action, the app does not navigate, open a
+  drawer or dialog, take focus, move the scroll position, reorder or remove items from the list being
+  read, or change the user's own selection, filters or settings. This holds for background work and
+  notifications too. Data arriving in the background — a refresh's new articles, a cloud sync bringing
+  in what was done on another device — is not such a change, but it lands without disturbing what the
+  user is doing (new articles surface as a pill rather than shifting the list, §7).
+- **An action does what its label or icon says**, with no hidden side effect alongside.
+- **An action that loses data or settings asks first** — unsubscribing, deleting a folder or tag,
+  resetting the cloud sync data, overwriting a file. An action that only changes reading state (marking
+  read, including "Mark all as read") deliberately does not ask.
+- **Platform conventions win.** Shortcuts, back, menu placement, and gestures follow the OS's own
+  standard (see the start of this section); a deliberate departure records its reason in this document.
+- **The same action behaves the same from every route** — see "Actions with more than one route" below.
+- **At a boundary, nothing happens** — doing nothing is not filled in with a different effect.
+
+Decisions already made on this principle, as the model to follow:
+
+- Unread-only does not hide an article the instant it becomes read, so the list does not shift under
+  the reader (§7).
+- "Open in browser" stays visible but disabled for a link it cannot open, rather than disappearing (§7).
+- The keyboard-focus outline appears only once a hardware key has been pressed (below).
+- A swipe is ignored for a moment after scrolling, so a flick meant to scroll does not change the
+  article (below).
+- J/K at the first or last article do nothing, rather than re-selecting it and marking it read again
+  (below).
+- A notification's "show feed" action does not open the narrow layout's drawer
+  (`ShowFeedDetail` in [error-design.md](error-design.md)).
+
 ### Actions with more than one route
 
 **An action reachable by more than one route — a toolbar button, the application menu, a context
