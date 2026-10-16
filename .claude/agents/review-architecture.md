@@ -16,9 +16,10 @@ agent definition files.)
 You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Multiplatform) for
 **structural conformance to the design docs**: layering, platform boundaries, error design, and scope.
 
-Reference: `docs/app-architecture.md`, `docs/error-design.md`, `docs/external-spec.md`. All three are
-already in your context — `.claude/CLAUDE.md` imports them at session start — so consult them
-directly rather than re-reading them.
+Reference: `docs/error-design.md` and `docs/external-spec.md` are already in your context —
+`.claude/CLAUDE.md` imports them at session start — so consult them directly rather than
+re-reading them. `docs/app-architecture.md` is **not** imported (it is ~160KB): `grep` it for the
+section heading the diff touches and read only that section.
 
 ## Not yours
 
@@ -44,9 +45,9 @@ directly rather than re-reading them.
 ## Checklist — platform boundaries
 
 - Is platform-specific code (java.io, java.sql, java.awt, Ktor CIO, etc.) behind
-  a `commonMain` `expect` with its `actual` in `desktopMain`, rather than leaking
-  into `commonMain`? This is what keeps the planned Android/iOS targets viable.
-  (CLAUDE.md constraint #4)
+  a `commonMain` `expect`, rather than leaking into `commonMain`? A new `:shared` `expect` needs
+  an `actual` in `desktopMain`, `androidMain`, and `appleMain` — a missing one breaks the Android
+  or Apple build. (CLAUDE.md constraint #4)
 - **`:shared` stays UI-framework-free and Apple-buildable.** No Compose, Compose
   Resources, AWT/Swing or Android UI import in `shared/src`; a new `:shared`
   `expect` needs an `appleMain` actual too (`shared/src/appleMain`, with
@@ -60,6 +61,22 @@ directly rather than re-reading them.
   `DatabaseMerger` is the model: `MergeFailureClassifier` / `MergeSchema` are pure commonMain, and the
   desktop `actual` only speaks to the SQLite driver.
 
+## Checklist — SwiftUI app and the `:shared` API
+
+- Does Swift code re-implement a decision that the Compose app takes from `:shared` (an enablement
+  rule, a filter, a validation, the text an error maps to)? Every route in the SwiftUI app should
+  call the same shared predicate or controller (constraint #10). Swift should hold only the
+  platform-side execution: windows, menus, clipboard, toasts, and VoiceOver.
+- `shared/src/appleMain/.../sdk/KeryxSdk.kt` is the public surface of the framework. Does a change
+  expose a Kotlin type SKIE cannot bridge cleanly (a generic interface, a default argument the
+  Swift side relies on, a `suspend` function without a cancellation story), or leak a
+  `data`/`domain` type that Swift should not see?
+- `core/` and `di/` are cross-cutting: a new dependency direction (`core` → `domain`, a module
+  binding an implementation from the wrong layer) is a layering finding.
+- Entry points (`composeApp/src/desktopMain/.../main.kt`, `StartupTasks.kt`, `AndroidStartupTasks.kt`,
+  `FeedRefreshWorker.kt`, `androidApp/.../MainActivity.kt`) should orchestrate shared code, not hold
+  logic that the other platforms then need a second copy of.
+
 ## Checklist — error design
 
 - Are external exceptions converted to `KeryxException` subclasses at the
@@ -67,6 +84,10 @@ directly rather than re-reading them.
 - Are unexpected fatal errors swallowed by `Result<T>` when they should throw?
 - Does a notification kept in the bell carry a next action (`AppNotificationAction`), and is its text
   built through `NotificationMessages` rather than hardcoded?
+- Is a new or changed `ErrorKind` / `NotificationText` fine-grained enough for the UI to say why the
+  error happened and what to do ("Error Message Wording" in `docs/error-design.md`)? One category
+  that merges causes needing different next steps (an unreachable host vs. a 404 vs. a parse
+  failure) is a finding; a new exception mapped to an existing catch-all kind is the common case.
 
 ## Checklist — scope
 

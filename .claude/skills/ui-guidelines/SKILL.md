@@ -266,8 +266,8 @@ unconsumed one when the bar closes before any field consumed it.
 
 **Closing the expanded search bar.** `ui/home/HomePaneLayout.kt`'s `homeBackAction(layout, depth,
 searchBarOpen)` is where `HomeScreen`'s `goBack()` and `BackHandler` resolve whether a back action
-means `ExitSearch` (closes the bar via `setSearchBarVisible(false)`) or the ordinary `PopPane` —
-`ExitSearch` applies wherever the article list is actually visible (`Single`'s own depth, every
+means `CloseSearchBar` (closes the bar via `setSearchBarVisible(false)`) or the ordinary `PopPane` —
+`CloseSearchBar` applies wherever the article list is actually visible (`Single`'s own depth, every
 depth at `Dual`) and never at `PaneLayout.Triple` (the field stays permanently in `FeedListPane`'s
 sidebar there, with no bar to close, and back navigation is disabled at every depth regardless).
 The search query itself is never cleared by any of this — it survives on the field exactly as it

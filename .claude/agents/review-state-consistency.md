@@ -20,7 +20,7 @@ me something that isn't true" — a highlight on a row that is not on screen, an
 while it is being read, a focus ring on two panes at once.
 
 `docs/app-architecture.md` records most of the invariants below and the bugs that produced them,
-but it is **not** in your context and is ~62KB — **do not read it whole**. Once you have
+but it is **not** in your context and is ~160KB — **do not read it whole**. Once you have
 established that the diff touches this perspective at all, `grep` for the "Home's adaptive pane
 layout" and "Optimistic read/star pins" headings and read only those sections.
 
@@ -86,12 +86,27 @@ layout" and "Optimistic read/star pins" headings and read only those sections.
   `lastFilter`, `lastArticleId`, `lastFocusedPane`, `lastUnreadOnly*`, `lastNewestFirst`, and the
   scroll positions are read back next launch. A new key needs a default and a decode path, and a
   saved `HomePane` a narrow layout cannot show must be clamped (`initialPaneFor`), not restored.
-- **Scoped state must stay scoped.** "Unread only" is per-scope (`_unreadOnly`, `_unreadOnlyStarred`,
-  `_unreadOnlySearch`), selected by `HomeViewModel.searchActive`/the current filter — flag a new
+- **Scoped state must stay scoped.** "Unread only" is per-scope (`_unreadOnly`, `_unreadOnlyStarred`),
+  selected by `HomeViewModel.searchActive`/the current filter — flag a new
   per-scope toggle collapsed onto one shared field. Search itself is orthogonal to `ArticleFilter`
   (there is no `Search` case, and no filter/selection is ever displaced by starting one — see
   `app-architecture.md`'s "Search is orthogonal to `ArticleFilter`"), so there is no browsing-context
   snapshot to keep in sync here any more; flag any new code that tries to reintroduce one.
+
+## Checklist — shared presentation and the SwiftUI bridge
+
+`shared/src/commonMain/.../presentation/**` (`HomeViewModel`, the `*Controller`s) is the state both
+UIs render, so a change there is yours even when no composable changed.
+
+- **The bridge mirrors, it does not derive.** `appleApp/Keryx/Bridge/*Observable.swift` copies each
+  `StateFlow` into an `@Observable` field with `for await`. A Swift field computed from two mirrored
+  flows, or one written by the view as well as by the flow, can disagree with the ViewModel — the
+  value belongs in `presentation/` as one flow.
+- **Every exposed flow is mirrored.** A `StateFlow` the Compose app reads but the bridge never
+  subscribes to leaves SwiftUI showing its initial value forever.
+- **SwiftUI-local state** (`@State`, `@SceneStorage`, a selection binding) must follow the same rules
+  as `remember` / `rememberSaveable` above: a selection held only in a view must be reconciled
+  when the ViewModel's selection changes underneath it.
 
 ## Investigation
 

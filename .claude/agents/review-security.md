@@ -60,6 +60,37 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 - Do file paths come from `AppDirs`, not remote input? No feed/OPML-derived name
   should reach the filesystem as a path; sync temp files must be cleaned up.
 
+## Checklist — SwiftUI app (`appleApp/`)
+
+- Does the OAuth sign-in (`Platform/OAuthSessionCoordinator.swift`, `ASWebAuthenticationSession`)
+  hand the callback URL to the shared flow unaltered, so `state` is still verified there, and keep
+  the auth code and tokens out of `print` / `os_log` / `Logger` and out of any error text shown?
+- Does anything on the Swift side persist a token outside the shared `KeychainTokenStorage`
+  (`UserDefaults`, a file, `@AppStorage`)? That is a finding.
+- Does a Swift `URLSession` / `WKWebView` load stay HTTPS, and does the reader keep remote content
+  from navigating the web view to a non-`http(s)` scheme?
+
+## Checklist — platform and build configuration
+
+- **Entitlements** (`*.entitlements`) and **`project.yml`**: is every capability added actually
+  needed (network client/server, file access, keychain groups, background modes)? A broader
+  sandbox exception than the feature needs is a finding.
+- **`PrivacyInfo.xcprivacy`**: does a newly used required-reason API or newly collected data type
+  appear there? A missing declaration fails App Store review; `PRIVACY.md` must agree with it.
+- **`AndroidManifest.xml`**: is a new component `exported` only when an outside app must reach it,
+  with an intent filter no wider than the feature (the `keryx://` OAuth callback, the share
+  target, the `.opml` open)? Is `android:allowBackup` / `fullBackupContent` /
+  `dataExtractionRules` still in place?
+- **`res/xml/backup_rules.xml` and `data_extraction_rules.xml`** must keep excluding every token
+  file (`.<provider>_tokens.enc` / `.json`). A new provider or token file name missing from either
+  is a High finding: the token leaves the device in a backup.
+- **CI and packaging scripts** (`.github/scripts/**`, `appleApp/Scripts/**`, `snap/**`,
+  `composeApp/packaging/**`): secrets come from the environment, are never `echo`ed or written into
+  an artifact, and temporary key files are deleted. A Snap `plugs` / confinement change is a
+  security boundary change.
+- **`gradle.properties`, `gradle/wrapper/**`**: a wrapper distribution URL or checksum change, or a
+  property that disables verification, needs a reason.
+
 ## Do NOT flag these — they are deliberate
 
 - Google Drive's OAuth requires `client_secret` even with PKCE (Desktop-app client).
