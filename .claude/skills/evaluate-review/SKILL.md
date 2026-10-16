@@ -473,7 +473,10 @@ For each comment in `associated_comments`, in order:
    repo's standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including
    adding/updating tests where constraint #7 applies). Then run `./gradlew build` (or the
    narrowest relevant test target, e.g. `:shared:desktopTest --tests "..."` / `:composeApp:desktopTest --tests "..."`, when that is
-   clearly sufficient to cover the change) to verify before committing.
+   clearly sufficient to cover the change) to verify before committing. When the fix touches
+   `shared/src/apple*` or `appleApp/`, also run `./gradlew :shared:macosArm64Test` and, for
+   `appleApp/`, `xcodebuild -scheme Keryx -destination 'platform=macOS' test` — the JVM build
+   never compiles those. Off a Mac, treat that as unverified: do not commit it.
    - If verification fails: confirm via `git status`/`git diff` that only this comment's
      intended changes are present before reverting, so a revert cannot destroy pre-existing
      work in the same file; then do not commit. Note the failure (with the reason) for the

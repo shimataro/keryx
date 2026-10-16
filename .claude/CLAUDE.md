@@ -3,8 +3,9 @@
 A cross-platform RSS reader (Kotlin Multiplatform / Compose Multiplatform).
 Local-first, Dropbox / OneDrive / Google Drive sync, no account required.
 
-It targets desktop (Windows/macOS/Linux) via Compose Multiplatform first, with
-mobile (Android/iOS) targets planned for later.
+Windows, Linux and Android run the Compose Multiplatform UI; macOS runs a native
+SwiftUI app that shares its logic through `:shared`, and the iOS SwiftUI app is in
+development (see `docs/external-spec.md` §2).
 
 ## Working language
 
@@ -27,9 +28,9 @@ themselves stay in English regardless (see constraint #9 below).
 - @../docs/error-design.md — Error design & Result type
 - @../docs/db-schema.md — DB schema & local_settings
 
-**Read on demand** — these are deliberately *not* imported (they would cost ~43k tokens
-every session). Read the relevant one before doing that kind of work; don't work from
-memory:
+**Read on demand** — these are deliberately *not* imported (together they are well over
+100k tokens, so importing them would cost that every session). Read the relevant one before
+doing that kind of work; don't work from memory:
 
 - `docs/sync-architecture.md` — **read before changing sync, merge SQL, or cloud storage.**
   `.claude/rules/sync-merge.md` auto-loads on those files and points back here.
@@ -160,8 +161,12 @@ shared/src/                      # UI-framework-free (also consumed by the Apple
 │   └── di/         # sharedModule + updateModule, HttpClientFactory
 ├── commonMain/sqldelight/       # .sq schema + queries
 ├── jvmCommonMain/, desktopMain/, androidMain/   # actuals for the expects above
-├── commonTest/                  # pure + MockEngine (Ktor) tests
-└── desktopTest/                 # SQLDelight (in-memory / file) DB tests
+├── appleMain/                   # Apple actuals + sdk/KeryxSdk.kt (the framework's Swift-facing API)
+├── macosMain/, iosMain/         # AppKit / UIKit differences within the Apple actuals
+├── commonTest/                  # pure + MockEngine (Ktor) tests (also run on Kotlin/Native)
+├── desktopTest/                 # SQLDelight (in-memory / file) DB tests
+├── appleTest/, macosTest/       # Apple-actual tests (Keychain: macosTest)
+└── androidDeviceTest/           # instrumented tests (run on CI's emulator)
 composeApp/src/                  # Compose UI for desktop + Android (depends on :shared)
 ├── commonMain/kotlin/works/merc/keryx/app/
 │   ├── ui/         # Compose screens + Compose-side ViewModels + theme + i18n
@@ -169,18 +174,26 @@ composeApp/src/                  # Compose UI for desktop + Android (depends on 
 │   └── di/         # appModule + expect platformModule
 ├── commonMain/composeResources/ # values/ (English, default) + values-ja/ strings.xml (i18n), drawable (tray icons)
 ├── desktopMain/kotlin/…/        # main.kt, tray, app menu, token storages, update installer
-└── commonTest/, desktopTest/    # UI + ViewModel tests
+├── androidMain/kotlin/…/        # Android startup, WorkManager refresh, Keystore token storage, OAuth/share/OPML intents
+├── commonTest/, desktopTest/    # UI + ViewModel tests
+└── androidDeviceTest/           # instrumented tests (not yet run on CI)
 androidApp/src/                  # Android application: manifest, MainActivity, KeryxApplication; flavors github / play / fdroid
+                                 #   (gms/ is the source dir github + play share to reach androidGms)
 androidGms/src/                  # Google Play services code (Google Drive on Android); github + play flavors only, never fdroid
 testing/src/                     # test-only helpers (DbTestSupport, fakes) for both modules
 appleApp/                        # SwiftUI app (macOS + iOS), consumes :shared as KeryxShared.xcframework
 ├── project.yml                  # XcodeGen source of truth — Keryx.xcodeproj is generated, never committed
-├── Scripts/                     # build-shared.sh (prebuild: assembles the XCFramework + string catalog)
+├── Scripts/                     # build-shared.sh (prebuild: assembles the XCFramework + string catalog),
+│                                #   verify-store-requirements.sh
 ├── Config/                      # Shared.xcconfig (+ gitignored Local.xcconfig for real signing team)
 ├── Keryx/
 │   ├── App/        # KeryxApp, AppModel (owns KeryxSdk), startup-failure view
 │   ├── Bridge/     # StateFlow -> @Observable adapters
-│   └── Home/       # SwiftUI screens
+│   ├── Home/       # SwiftUI screens (feed list, article list, reader)
+│   ├── Settings/, Setup/  # settings tabs, first-run setup
+│   ├── Platform/   # L()/LF() string lookup, OAuth session, background refresh, badges, VoiceOver
+│   ├── Update/     # Sparkle updater (macOS)
+│   └── Resources/  # assets, app icon, PrivacyInfo.xcprivacy
 └── KeryxTests/                  # Swift Testing, standalone (non-hosted) bundle
 ```
 

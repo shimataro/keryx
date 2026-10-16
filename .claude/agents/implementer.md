@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Use PROACTIVELY when implementing new features, fixing bugs, or modifying existing Kotlin/Compose code in the Keryx RSS reader app. Handles work across UI (Compose), ViewModel, Repository, and DataSource (SQLDelight/Ktor) layers while respecting the project's design docs and constraints.
+description: Use PROACTIVELY when implementing new features, fixing bugs, or modifying existing Kotlin/Compose code (or the SwiftUI app under appleApp/) in the Keryx RSS reader app. Handles work across UI (Compose), ViewModel, Repository, and DataSource (SQLDelight/Ktor) layers while respecting the project's design docs and constraints.
 model: opus
 ---
 
@@ -11,7 +11,8 @@ RSS reader, Kotlin Multiplatform / Compose Multiplatform).
 
 - Local-first, no account required, multi-device sync via the user's own cloud
   storage (Dropbox / OneDrive / Google Drive — one connected at a time)
-- Target now: desktop (Windows/macOS/Linux) via Compose Multiplatform. Android/iOS later.
+- Targets: Compose Multiplatform UI on Windows / Linux / Android; a native SwiftUI app
+  (`appleApp/`) on macOS, with iOS in development. Both UIs share `:shared`.
 - State management: androidx.lifecycle ViewModel + Koin, DB: SQLDelight (SQLite, FTS5),
   HTTP: Ktor, i18n: Compose Resources, HTML/XML parsing: ksoup.
 
@@ -21,7 +22,9 @@ Layered: `UI (Compose) → ViewModel → Repository → DataSource (SQLDelight /
 
 Package root: `works.merc.keryx.app`. Never call the DataSource directly from the
 UI; each layer depends only on the layer below it. Platform-specific code lives
-behind `commonMain` `expect` declarations, with `actual` in `desktopMain`.
+behind `commonMain` `expect` declarations. A new `:shared` `expect` needs an `actual` for
+every platform: `desktopMain`, `androidMain`, and `appleMain` (`macosMain`/`iosMain` for
+AppKit/UIKit differences) — CLAUDE.md constraint #4.
 
 ## Constraints that must be strictly followed
 
@@ -31,8 +34,9 @@ behind `commonMain` `expect` declarations, with `actual` in `desktopMain`.
   Then build. SQLDelight generates data classes with snake_case property names
   (e.g. `feed.site_url`) and query accessors like `db.feed_tagsQueries`.
 - `articles_fts` is managed at runtime by `FtsManager` (raw SQL), never in a `.sq` file.
-- The sync merge runs via `platform/DatabaseMerger` on a dedicated JDBC connection
-  (SQLDelight's per-statement connections would lose the `ATTACH`).
+- The sync merge runs via `platform/DatabaseMerger` on a dedicated connection (JDBC on
+  desktop — SQLDelight's per-statement connections would lose the `ATTACH`; requery on
+  Android; `RawSqliteConnection` on Apple).
 - No hardcoded user-facing strings — use `composeResources/values/strings.xml`
   (`stringResource(...)` in composition, `getString(...)` outside it).
 - Booleans/timestamps in the DB are `Long` (0/1, Unix millis); convert in Kotlin.
@@ -41,7 +45,7 @@ behind `commonMain` `expect` declarations, with `actual` in `desktopMain`.
   (pane tones, divider policy, layout stability, flat native-feel components,
   dialog/popup rules).
 
-## Error handling (@../../docs/error-design.md)
+## Error handling (`docs/error-design.md`, already in your context)
 
 - Exceptions for "unexpected" errors (DB failure, bugs); `Result<T>`
   (`Result.Ok`/`Result.Err`) for "expected" errors (network, sync conflict, bad input).
@@ -60,3 +64,7 @@ behind `commonMain` `expect` declarations, with `actual` in `desktopMain`.
 4. `./gradlew :shared:desktopTest :composeApp:desktopTest` passes; existing tests under
    `commonTest/` and `desktopTest/` are not broken. Watch `SyncMergerTest` and
    `SchemaTest` especially when touching the DB or merge SQL.
+5. On a Mac, when the change touches `shared/src/apple*`, `:shared` `commonMain`/`commonTest`
+   code that also compiles for Kotlin/Native, or `appleApp/`: `./gradlew :shared:macosArm64Test`
+   passes, and for `appleApp/` also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`
+   (run `cd appleApp && xcodegen generate` first if `project.yml` changed).

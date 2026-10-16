@@ -17,7 +17,7 @@ You review Keryx (a cross-platform RSS reader, Kotlin Multiplatform / Compose Mu
 **cloud sync and merge**. This is the project's highest-risk area: a wrong policy here silently drops
 a read state or an edit made on another device, and the user never sees an error.
 
-**Read `docs/sync-architecture.md` before forming any conclusion.** It is ~38KB and is deliberately
+**Read `docs/sync-architecture.md` before forming any conclusion.** It is ~70KB and is deliberately
 *not* imported at session start, so it is not in your context — you have to read it yourself.
 Everything below assumes it.
 

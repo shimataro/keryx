@@ -68,6 +68,30 @@ with its own resources: the Compose app in `ui/i18n/` (`notificationText` / `res
 new-articles OS notification, posted from background work with no UI to hand it to: its text still comes
 from the `NotificationMessages` interface (just `newArticles(count)`), which each UI implements.
 
+## Error Message Wording
+
+An error message exists to get the user unstuck, so it is written for someone who knows nothing of
+the implementation. This applies to every error text a user can see — inline errors, dialogs, the
+notification center, snackbars/toasts, tooltips — in both locales and both UIs.
+
+- **Say why it happened and what to do next, briefly.** "Sign-in expired — reconnect in Settings"
+  (`home_sync_auth_failed`) and "Check your internet connection and try again."
+  (`apple_update_check_failed_offline`) are the model.
+- **A message that only states the failure is not allowed** — "Import failed", "Couldn't X",
+  "An error occurred" leave the user with nothing to do.
+- **When the cause is unknown, still give a next step** (try again later, check the connection,
+  check the URL).
+- **No technical detail.** HTTP status codes, exception class names, and raw exception text
+  (`messageText`, `localizedDescription`) never reach the screen; they belong in the log.
+- **A message is judged together with the control beside it.** A Reconnect button, a
+  notification's next action (see below), or a link to the relevant settings can be the "what to
+  do" part, so the text itself may then be shorter.
+- **The category must be fine-grained enough to explain.** One `ErrorKind` / `NotificationText`
+  that covers causes needing different next steps leaves the UI unable to say why; split it rather
+  than writing a vaguer message.
+
+Status labels that are not messages (a notification's level, such as "Error") are out of scope.
+
 ## Notification Center (`domain/NotificationCenter`)
 
 - The notification center (history, manually dismissed) is the primary channel. Desktop has **no in-app snackbar** —

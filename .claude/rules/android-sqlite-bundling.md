@@ -29,8 +29,8 @@ selection confined to a single seam (DI, or inside `DatabaseDriverFactory.androi
 be swapped without touching `DatabaseMerger`, `DatabaseSnapshot`, `FtsManager`, or any SQL —
 none of them care which factory produced the `SqlDriver`.
 
-`DatabaseMerger.android.kt`/`DatabaseSnapshot.android.kt` are now real implementations (Dropbox/
-OneDrive cloud sync), not stubs — both open their own dedicated
+`DatabaseMerger.android.kt`/`DatabaseSnapshot.android.kt` are now real implementations (Dropbox /
+OneDrive, plus Google Drive in the github and play flavors), not stubs — both open their own dedicated
 `io.requery.android.database.sqlite.SQLiteDatabase` connection directly (mirroring the desktop
 actual's dedicated JDBC connection), so the exit-criteria swap in step 3 below only has to change
 `DatabaseDriverFactory.android.kt`'s factory choice and the low-level open/error-handler calls in
@@ -66,5 +66,4 @@ dashboard, or Google's official Android version distribution data), drop the bun
    onward, well below the API 34 floor this migration requires anyway.
 6. Confirm the APK shrinks — the bundled library's per-ABI native `.so` files go away.
 
-Treat this as its own follow-up task once the Android port has shipped, not something to fold
-into the initial Android work.
+Treat this as its own follow-up task, not something to fold into unrelated Android work.
