@@ -49,6 +49,8 @@ final class HomeObservable: ObservableAssignment {
     private(set) var starredUnreadCount: Int64 = 0
 
     private(set) var filter: ArticleFilter = ArticleFilterAll()
+    /// The article list's pull in flight — see `pullToRefresh()`.
+    @ObservationIgnored private let articleListPull = AbandonableRefresh()
     private(set) var selectedRowInstance: FeedListRowSelection = FeedListRowSelectionAll()
     private(set) var collapsedFolderIds: Set<String> = []
     private(set) var expandedTagIds: Set<String> = []
@@ -247,10 +249,14 @@ final class HomeObservable: ObservableAssignment {
 
     /// Starts a pull-to-refresh of the current selection's feeds and returns once it — including
     /// the sync that follows it, or a refresh/sync already in flight — has finished, so a
-    /// `.refreshable` indicator stays up exactly as long as Compose's own `pullRefreshing` does
-    /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`.
+    /// `.refreshable` indicator stays up as long as Compose's own `pullRefreshing` does
+    /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`, and
+    /// for at least `PullRefreshHold.defaultMinimum`.
+    ///
+    /// Selecting another filter meanwhile ends the wait (`assignFilter`): the list on screen is then
+    /// that filter's, which this refresh is not for.
     func pullToRefresh() async {
-        await awaitPull(of: filter) { viewModel.pullToRefresh() }
+        await articleListPull.run { await self.awaitPull(of: self.filter) { self.viewModel.pullToRefresh() } }
     }
 
     /// The iOS sidebar's pull: every feed, whatever the article list shows. Held up like
@@ -261,9 +267,11 @@ final class HomeObservable: ObservableAssignment {
 
     private func awaitPull(of filter: ArticleFilter, start: () -> Void) async {
         let filter = filter as AnyObject
-        start()
-        for await pending in viewModel.pullRefreshingFilters {
-            if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+        await PullRefreshHold.run {
+            start()
+            for await pending in viewModel.pullRefreshingFilters {
+                if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+            }
         }
     }
 
@@ -394,6 +402,7 @@ final class HomeObservable: ObservableAssignment {
     private func assignFilter(_ v: ArticleFilter) -> Bool {
         guard !articleFiltersEqual(filter, v) else { return false }
         filter = v
+        articleListPull.abandon()
         return true
     }
 

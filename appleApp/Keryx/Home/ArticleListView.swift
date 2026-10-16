@@ -19,6 +19,9 @@ struct ArticleListView: View {
     /// Pushes the reader when the split view is collapsed (iPhone); a no-op otherwise. A row is a
     /// plain button rather than a `List` selection, so nothing navigates to the reader by itself.
     let onOpenArticle: () -> Void
+    /// Bumped by `HomeView` each time a phone-width split view brings this list forward from the
+    /// sidebar; every change rebuilds `content` (see its `.id` in `body`). Unused on macOS.
+    let remountGeneration: Int
 
     /// The selection is drawn strongly only while this window is key (AppKit's own rule for a
     /// source list's selection), on top of the article list holding the pane focus.
@@ -42,6 +45,17 @@ struct ArticleListView: View {
     @State private var visibleRows = VisibleRowTracker()
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
+    /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
+    @State private var emptyListHeaderHeight: CGFloat = 0
+    /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
+    /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
+    /// hung under the navigation bar, and after its first pull that control leaves the list resting
+    /// tens of points short of the top (the top inset shrinks back but the offset does not follow).
+    /// A list built once its column is in the navigation stack gets the control inside it and rests
+    /// at the top. Rebuilding as the push starts is too early (the control still goes under the
+    /// bar); rebuilding on window attachment happens before the list can be touched, so nothing
+    /// the reader did is lost.
+    @State private var attachedToWindow = false
     #endif
 
     /// The rows on screen: the search results while a search is active, else the filter's own list.
@@ -64,11 +78,6 @@ struct ArticleListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            #if os(iOS)
-            // Names the selection being shown (and, during a search, the one being narrowed). Not a
-            // navigation title: see `ArticleListHeader`.
-            ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
-            #endif
             #if os(macOS)
             // `ArticleTableView` does its own scrolling: back to the top on a filter switch, to an
             // off-screen selection, and to the fresh end for the pill.
@@ -83,7 +92,17 @@ struct ArticleListView: View {
             }
             #else
             ScrollViewReader { proxy in
-                withNewArticlesPill(content) { scrollToFreshEnd(proxy) }
+                // Rebuilt whenever a phone-width split view brings this list forward from the
+                // sidebar. SwiftUI hangs a `.refreshable` list's refresh control from the navigation
+                // bar and drops it once the column is popped, but never re-attaches it to the list it
+                // keeps: the pull still refreshes, with no spinner (seen on iOS 27). A rebuilt list
+                // gets a fresh control. `EnvironmentValues.refresh` is read-only, so there is no
+                // lighter way to detach and re-attach the action. The rebuilt list starts at the top,
+                // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
+                // made a row touched next jump for a moment.
+                withNewArticlesPill(content.id(ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow))) {
+                    scrollToFreshEnd(proxy)
+                }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
                     // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
                     // vs. `NewArticlesPill`'s own "fresh end"). `initial: false` keeps the first
@@ -114,6 +133,14 @@ struct ArticleListView: View {
             #endif
         }
         #if os(iOS)
+        // Outside the rebuilt `content`, so a rebuild does not attach a fresh probe and fire again.
+        .background {
+            WindowAttachmentProbe {
+                guard !attachedToWindow else { return }
+                // After the current update: the probe reports from inside UIKit's own layout pass.
+                Task { @MainActor in attachedToWindow = true }
+            }
+        }
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
@@ -285,14 +312,39 @@ struct ArticleListView: View {
 
     // MARK: - Content / empty states
 
+    #if os(iOS)
+    /// Names the selection being shown (and, during a search, the one being narrowed). Not a
+    /// navigation title: see `ArticleListHeader`. Each state of `content` places it itself: a
+    /// scrolling list (`articleList`, `noArticlesView`) carries it inside itself, since SwiftUI hangs
+    /// a `.refreshable` list's refresh control from the navigation bar, and a header between the two
+    /// leaves the control overlapping the header and flickering in and out as the list is pulled
+    /// (iOS 26); every other state goes through `headed`.
+    private var listHeader: some View {
+        ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+    }
+    #endif
+
+    /// A state of `content` that does not scroll, with `listHeader` above it on iOS.
+    @ViewBuilder
+    private func headed(_ state: some View) -> some View {
+        #if os(iOS)
+        VStack(spacing: 0) {
+            listHeader
+            state
+        }
+        #else
+        state
+        #endif
+    }
+
     @ViewBuilder
     private var content: some View {
         if !home.hasFeeds {
-            ContentUnavailableView {
+            headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
-            }
+            })
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
@@ -311,7 +363,14 @@ struct ArticleListView: View {
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
-                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
+                VStack(spacing: 0) {
+                    listHeader
+                        .onSizeChanged { emptyListHeaderHeight = $0.height }
+                    emptyState.frame(
+                        width: geometry.size.width,
+                        height: max(0, geometry.size.height - emptyListHeaderHeight)
+                    )
+                }
             }
             .modifier(PullToRefreshModifier(home: home))
         }
@@ -328,14 +387,14 @@ struct ArticleListView: View {
     @ViewBuilder
     private var searchContent: some View {
         if !home.searchQueryHasTerms {
-            ContentUnavailableView(
+            headed(ContentUnavailableView(
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"
-            )
+            ))
         } else if home.searching && !home.hasSearchResults {
-            Color.clear
+            headed(Color.clear)
         } else if !home.hasSearchResults {
-            noSearchResultsView
+            headed(noSearchResultsView)
         } else {
             articleList
         }
@@ -412,24 +471,41 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-        return List(displayedRows) { article in
-            rowView(article, selectedId: selectedId, paneFocused: paneFocused)
-                .equatable()
-                // No horizontal inset of our own: the List's own row padding already supplies the
-                // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
-                // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
-                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                .listRowSeparator(.hidden)
-                .onAppear {
-                    visibleRows.appearedIds.insert(article.id)
-                    scheduleReportVisible()
+        return List {
+            Section {
+                ForEach(displayedRows) { article in
+                    articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
                 }
-                .onDisappear {
-                    visibleRows.appearedIds.remove(article.id)
-                    scheduleReportVisible()
-                }
+            } header: {
+                // Pinned while the rows scroll, so it needs the list's own opaque background.
+                listHeader
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(uiColor: .systemBackground))
+                    .listRowInsets(EdgeInsets())
+                    .foregroundStyle(.primary)
+            }
         }
         .listStyle(.plain)
+        // No extra gap above the header, so it sits where it does over an empty list.
+        .contentMargins(.top, 0, for: .scrollContent)
+    }
+
+    private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
+        rowView(article, selectedId: selectedId, paneFocused: paneFocused)
+            .equatable()
+            // No horizontal inset of our own: the List's own row padding already supplies the
+            // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
+            // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
+            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+            .listRowSeparator(.hidden)
+            .onAppear {
+                visibleRows.appearedIds.insert(article.id)
+                scheduleReportVisible()
+            }
+            .onDisappear {
+                visibleRows.appearedIds.remove(article.id)
+                scheduleReportVisible()
+            }
     }
 
     /// Schedules a debounced report of visible article ids. Rapid `onAppear`/`onDisappear` pairs
@@ -513,6 +589,12 @@ private struct PullToRefreshModifier: ViewModifier {
 }
 
 #if os(iOS)
+/// What `ArticleListView` rebuilds its list on — see `remountGeneration` and `attachedToWindow`.
+private struct ListIdentity: Hashable {
+    let remountGeneration: Int
+    let attachedToWindow: Bool
+}
+
 /// The article list's on-screen rows and its pending visible-row report. A plain class held in
 /// `@State` rather than `@State` values of their own: every row scrolling in or out writes to it,
 /// and nothing here is drawn, so those writes must not invalidate the list's body.
