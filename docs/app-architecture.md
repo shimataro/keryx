@@ -1491,6 +1491,16 @@ no separate iOS target to keep in sync.
   runs inside the article reader" in [known-issues.md](known-issues.md). This keeps the app from
   being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
   access. The Compose readers do not apply the main-frame rule.
+- **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
+  the `WKWebView`'s WebContent process while the app is in the background — while the external
+  browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s
+  `webViewWebContentProcessDidTerminate` loads the HTML it holds again (from the top; the scroll
+  position died with the process). `Home/ReaderProcessRecovery.swift` allows one such reload per
+  document: if the process dies again — before or after the reloaded document commits, so a page
+  that crashes WebContent cannot loop — the reader gives up and stays blank. A different document,
+  or the app becoming active again, earns a new reload, and a document given up on is loaded once
+  more at that activation: the usual termination happens in the background, where the one reload
+  may die too, and the reader must not still be blank when the user comes back.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
