@@ -271,9 +271,10 @@ or invoke the **`build` skill**:
 ```
 
 Record the baseline **from this run itself**: both the passing count and the set
-of test identities (class + method) from
-`composeApp/build/test-results/desktopTest/*.xml` (or the HTML report under
-`composeApp/build/reports/tests/desktopTest/`). Do not take a count from any doc.
+of test identities (class + method) from the reports of **both** modules —
+`shared/build/test-results/desktopTest/*.xml` and
+`composeApp/build/test-results/desktopTest/*.xml` (or the HTML reports under each
+module's `build/reports/tests/desktopTest/`). Do not take a count from any doc.
 If the baseline is **red**, stop and report — never optimize on top of failing
 tests.
 

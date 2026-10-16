@@ -206,6 +206,38 @@ versions. Light / dark / system support. 3-pane layout (feed list / article list
 article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
 (see below).
 
+### Least surprise
+
+**The app does what the user expects, and nothing the user did not ask for.**
+
+- **Nothing happens unprompted.** Without the user's own action, the app does not navigate, open a
+  drawer or dialog, take focus, move the scroll position, reorder or remove items from the list being
+  read, or change the user's own selection, filters or settings. This holds for background work and
+  notifications too. Data arriving in the background — a refresh's new articles, a cloud sync bringing
+  in what was done on another device — is not such a change, but it lands without disturbing what the
+  user is doing (new articles surface as a pill rather than shifting the list, §7).
+- **An action does what its label or icon says**, with no hidden side effect alongside.
+- **An action that loses data or settings asks first** — unsubscribing, deleting a folder or tag,
+  resetting the cloud sync data, overwriting a file. An action that only changes reading state (marking
+  read, including "Mark all as read") deliberately does not ask.
+- **Platform conventions win.** Shortcuts, back, menu placement, and gestures follow the OS's own
+  standard (see the start of this section); a deliberate departure records its reason in this document.
+- **The same action behaves the same from every route** — see "Actions with more than one route" below.
+- **At a boundary, nothing happens** — doing nothing is not filled in with a different effect.
+
+Decisions already made on this principle, as the model to follow:
+
+- Unread-only does not hide an article the instant it becomes read, so the list does not shift under
+  the reader (§7).
+- "Open in browser" stays visible but disabled for a link it cannot open, rather than disappearing (§7).
+- The keyboard-focus outline appears only once a hardware key has been pressed (below).
+- A swipe is ignored for a moment after scrolling, so a flick meant to scroll does not change the
+  article (below).
+- J/K at the first or last article do nothing, rather than re-selecting it and marking it read again
+  (below).
+- A notification's "show feed" action does not open the narrow layout's drawer
+  (`ShowFeedDetail` in [error-design.md](error-design.md)).
+
 ### Actions with more than one route
 
 **An action reachable by more than one route — a toolbar button, the application menu, a context
@@ -392,10 +424,15 @@ and syncing nothing. The gesture works on an empty list too (e.g. "unread only" 
 but is disabled while search results are showing — pulling a result list isn't a request to refresh
 the feeds behind it — and while there are no feeds at all. As with Refresh All, a
 pull is followed by a cloud sync when one is connected, and the indicator stays up until that sync
-has finished too, not just the feed fetches. A pull made while a refresh or sync is already running (a
-background refresh, say) starts nothing new; the indicator simply stays up until the running one
-finishes. On Android, the same refresh is also reachable without the gesture, wherever the gesture
-itself is available: as a TalkBack custom action on the list ("Refresh this list"), and from a
+has finished too, not just the feed fetches. On iOS, where the system starts the refresh the moment
+the pull crosses its threshold (with the finger still down), the indicator also stays up for at least
+about a second, so a refresh that finishes almost at once still shows it spinning.
+A pull made while a refresh or sync is already running (a background refresh, say) starts nothing
+new; the indicator simply stays up until the running one finishes. Selecting another item in the
+feed list while a pull's indicator is up leaves no indicator over the newly selected list, since
+that list is not the one being refreshed; the refresh itself carries on.
+On Android, the same refresh is also reachable without the gesture, wherever the gesture itself is
+available: as a TalkBack custom action on the list ("Refresh this list"), and from a
 physical keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width
 screen shows the reader alone, and not while the feed-list drawer covers the list. On desktop the
 same chord is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a
