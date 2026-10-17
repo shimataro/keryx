@@ -1375,6 +1375,10 @@ Inputs:
 | `version` | App Store version, x.y.z — the GitHub release this will become |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
 
+Run the first one with `submit` off: nothing but a real run exercises the build, the upload and the
+App Store Connect calls, and with it off a mistake stops before review. Check the version and its
+build in App Store Connect, then submit it there (or run again with `submit` on).
+
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
 from `ref`):
 
