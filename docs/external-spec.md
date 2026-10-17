@@ -450,15 +450,21 @@ refreshed, and it leaves the bar's limited room to the other actions. Android's 
 no pull — it is a modal navigation surface laid over the article list, and keeps its refresh button
 in its header. Neither does the macOS sidebar, which keeps its toolbar button.
 
-With no Refresh All button to spin, iOS shows a refresh or sync in the toolbar's status area instead
-— the centre of the bottom bar, where Mail says "Checking for Mail…" — in both the sidebar and the
-article list: a small spinner with "Checking for new articles…" or "Syncing…", whatever started it
-(a pull, ⌘R, the refresh at launch, a background refresh, an automatic sync). Once shown, it stays
-for at least about two seconds, so a refresh that finds nothing new and ends almost at once is still
-noticed; longer work clears it as soon as it ends. Idle shows nothing
-there, not a last-updated time, so the bar leaves the room to the list. The status is never drawn
-as a pull indicator started by the app itself, which would pull the list down unasked, and VoiceOver
-is not told when it changes.
+With no Refresh All button to spin, iOS shows a feed refresh in the toolbar's status area instead
+— the centre of the bottom bar, where Mail says "Checking for Mail…" and then "Updated Just Now" —
+in both the sidebar and the article list. While new articles are being checked for, whatever started
+it (a pull, ⌘R, the refresh at launch, a background refresh), it shows a small spinner with "Checking
+for new articles…", and keeps it through the cloud sync that follows, as the pull's own indicator
+does. Once that is done it shows the result for about two and a half seconds, without the spinner:
+"N new articles", "No new articles", or — when every feed failed, most likely offline — "Couldn't
+check for new articles. Check your connection." behind a warning symbol, so a failure reads as one at
+a glance without relying on its color. That failure also stays in the notification center, whose
+entry explains what to do. A sync on its own (the sync button, or the automatic sync after reading)
+never shows there: its button's spinning icon is its feedback, and an automatic sync is not worth
+interrupting anyone over. Idle shows nothing there, not a last-updated time, so the bar leaves the
+room to the list. The count covers the feeds just fetched; articles a sync brought in from another
+device are not counted. The status is never drawn as a pull indicator started by the app itself,
+which would pull the list down unasked, and VoiceOver is not told when it changes.
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

@@ -138,6 +138,7 @@ Status labels that are not messages (a notification's level, such as "Error") ar
 | `ShowFeedDetail(feedId)` | Feed gone (410) / URL changed (301/308) | Selects that feed in the feed list (same as clicking it there). At a narrow width the feed list is a modal navigation drawer rather than a pane, and opening it unprompted would be a surprising side effect of a background notification, so this advances to that feed's article list without touching the drawer — see `ui/home/HomePaneLayout.kt`'s `paneForFeedDetail` |
 | `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`); a new-version notification when an in-app update path applies here (`updates`) | Opens the settings dialog on that tab (on Android, directly on that category's screen rather than the category list). The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason, and — when that reason is an authentication failure (`SyncRepository.lastSyncAuthFailed`) — offers the connected provider a **reconnect** action in place of its reset-sync-data one; the `updates` tab auto-checks for an update when opened |
 | `ShowInfoDialog(detail)` | macOS translocated warning | Shows an explanatory dialog (cause + fix) without navigating |
+| `ShowInfoDialog(detail)` | A feed refresh in which every feed it covered failed (`RefreshCycleRunner`, via `reportRefreshOutcome`) — most likely offline. Coalesced, so a refresh that keeps failing stays one entry | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save left the tokens in the plaintext file (`CloudSession`) — `TokenStorage.save()` returned `TokenSaveOutcome.PLAINTEXT_FILE`, because the OS secure credential store was unreachable or (Android) because a secure write succeeded but a stale plaintext copy could not be deleted | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save persisted nothing (`CloudSession`) — neither the secure store nor the plaintext fallback file accepted the write (`TokenSaveOutcome.NOT_PERSISTED`), so the account has to be connected again after a restart | Shows an explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |
@@ -152,8 +153,8 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 
 | Error | Auto-retry | Notification Center |
 | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅ |
-| `FeedParseException` | ❌ | ✅ |
+| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅\*\*\* |
+| `FeedParseException` | ❌ | ✅\*\*\* |
 | `CloudStorageException` | ✅\*\* | ✅ |
 | `SyncConflictException` | ✅ (internal) | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
@@ -167,6 +168,10 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 \*\* Within one `sync()` call, `repeat(SYNC_MAX_RETRY)` re-loops only on `SyncConflictException`; any other error
 (including `CloudStorageException`) returns immediately. "Auto-retry" here means the next scheduled sync attempt,
 not an in-loop retry.
+
+\*\*\* Not one entry per failed feed — the feed list already flags each failing feed. The bell gets a single
+coalesced `NotificationText.RefreshFailed` warning only when a refresh's every feed failed (see the next-action table
+above); a refresh where some feeds still succeeded adds nothing.
 
 ## Constants (`core/Constants.kt`, excerpt)
 
