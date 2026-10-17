@@ -1,0 +1,255 @@
+name: Publish iOS app to the App Store
+
+# Builds the SwiftUI app for iOS from `ref` (a commit already on a version branch), uploads it to
+# App Store Connect, attaches it to the App Store version `version` and submits that version for
+# review (see docs/build.md's "Publishing to the App Store").
+#
+# Run by hand, before the release is tagged: App Store review comes first, so a rejection that
+# needs a code change is fixed on v0 and submitted again under the same version. Once the version
+# is approved, tag the commit this run reports in its summary as v<version> and publish the GitHub
+# Release; release.yml does nothing for the App Store. The version is always set to a manual
+# release, so an approved build waits in App Store Connect until someone releases it there.
+#
+# Running it again for the same version is safe: each run uploads a new build number and replaces
+# the build attached to the version.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to build (must be on a version branch)"
+        required: true
+        type: string
+        default: v0
+      version:
+        description: "App Store version, x.y.z (the GitHub release this will become)"
+        required: true
+        type: string
+      submit:
+        description: "Submit for review (off: upload and attach the build only)"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Build numbers are read from App Store Connect before the build, so two runs at once could pick
+# the same one.
+concurrency:
+  group: publish-app-store
+  cancel-in-progress: false
+
+jobs:
+  # Runs none of `ref`'s code — only git and gh — so the build job below never holds a token that
+  # can write to the repository. Its branch checks keep unmerged code from being built and signed
+  # by mistake; they are not enforcement, since a run started from a branch whose copy of this
+  # workflow drops them skips them too (see docs/build.md's "Publishing to the App Store").
+  prepare:
+    name: Check ref & generate release notes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # generate-notes (the "What's New" text) needs write access to contents.
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      notes: ${{ steps.notes.outputs.notes }}
+
+    steps:
+      # This workflow and the scripts in .publish-tools come from the branch the run was started
+      # from ("Use workflow from"), not from `ref`.
+      - name: Check the workflow's own branch
+        run: |
+          if ! [[ "$GITHUB_REF" =~ ^refs/heads/v[0-9]+$ ]]; then
+            echo "::error::Started from $GITHUB_REF. Start the workflow from a version branch such as v0 (\"Use workflow from\"): this workflow and its scripts come from that branch."
+            exit 1
+          fi
+
+      - name: Check version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' is not an App Store version (x.y.z, no pre-release suffix)."
+            exit 1
+          fi
+
+      # Full history, so the commit can be checked against every version branch.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check that ref is on a version branch
+        id: source
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          # Exactly v<number>: a glob such as v[0-9]* would also take v0-wip.
+          if ! git branch -r --contains "$sha" --format='%(refname:short)' | grep -Eq '^origin/v[0-9]+$'; then
+            echo "::error::'$REF' ($sha) is not on a version branch such as v0. Only merged code is built with the App Store keys: merge it into a version branch first, then run again."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # Generated here rather than in the build job, which has no write access. The release is only
+      # cut after approval, so the notes come from generate-notes for the commit, not from it.
+      - name: Generate release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          body=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="v$VERSION" -f target_commitish="$SOURCE_SHA" --jq .body)
+          delimiter="EOF_$(openssl rand -hex 16)"
+          { echo "notes<<$delimiter"; printf '%s\n' "$body"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build, upload & submit (${{ inputs.version }})
+    needs: prepare
+    runs-on: macos-26
+    # The build takes about fifteen minutes; App Store Connect's processing of the upload is waited
+    # for up to 45 more.
+    timeout-minutes: 90
+
+    steps:
+      # The commit `prepare` checked, not `ref` again, which could have moved since.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      # The scripts come from this workflow's own ref, not from `ref`, which may predate them.
+      # Checked out after the checkout above, since that one cleans the workspace.
+      - name: Checkout publish scripts
+        uses: actions/checkout@v7
+        with:
+          path: .publish-tools
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # Fails the job, naming each missing secret, before anything is built. The OAuth ids are
+      # required too: a build without one hides that provider, contradicting the listing.
+      # APPLE_NOTARY_ISSUER_ID is the team's issuer ID, shared by every App Store Connect API key,
+      # so the App Store key uses it as well.
+      - name: Check configuration
+        env:
+          APPLE_DISTRIBUTION_CERT_P12: ${{ secrets.APPLE_DISTRIBUTION_CERT_P12 }}
+          APPLE_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERT_PASSWORD }}
+          APPLE_APP_STORE_PROVISIONING_PROFILE: ${{ secrets.APPLE_APP_STORE_PROVISIONING_PROFILE }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_APPLE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_APPLE_CLIENT_ID }}
+        run: >
+          .publish-tools/.github/scripts/check-release-config.sh "The iOS App Store build"
+          APPLE_DISTRIBUTION_CERT_P12 APPLE_DISTRIBUTION_CERT_PASSWORD
+          APPLE_APP_STORE_PROVISIONING_PROFILE APPLE_TEAM_ID APP_STORE_CONNECT_KEY
+          APP_STORE_CONNECT_KEY_ID APPLE_NOTARY_ISSUER_ID DROPBOX_APP_KEY ONEDRIVE_CLIENT_ID
+          GOOGLE_DRIVE_APPLE_CLIENT_ID
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      # The cache is disabled: the build is signed and shipped, so it must never be assembled from
+      # cache entries another run wrote (cache poisoning) — see release.yml.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The certificate goes into a throwaway keychain that is deleted at the end; the profile and
+      # the API key are only written to the runner's temp directory.
+      - name: Import signing credentials
+        env:
+          APPLE_DISTRIBUTION_CERT_P12: ${{ secrets.APPLE_DISTRIBUTION_CERT_P12 }}
+          APPLE_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERT_PASSWORD }}
+          APPLE_APP_STORE_PROVISIONING_PROFILE: ${{ secrets.APPLE_APP_STORE_PROVISIONING_PROFILE }}
+          APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$APP_STORE_CONNECT_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APP_STORE_CONNECT_KEY_ID is not a key ID."; exit 1; }
+          keychain="$RUNNER_TEMP/app-store.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$APPLE_DISTRIBUTION_CERT_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$APPLE_DISTRIBUTION_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          printf '%s' "$APPLE_APP_STORE_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          mkdir -p "$RUNNER_TEMP/private_keys"
+          .publish-tools/.github/scripts/prepare-api-key.sh APP_STORE_CONNECT_KEY \
+            "$RUNNER_TEMP/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8"
+
+      - name: Pick the build number
+        id: build
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+          VERSION: ${{ inputs.version }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          ASC_KEY_PATH="$RUNNER_TEMP/private_keys/AuthKey_$ASC_KEY_ID.p8" \
+            .publish-tools/.github/scripts/app-store-connect.sh next-build-number
+
+      - name: Build, sign, validate and upload
+        env:
+          # Pinned, not the image default, so a runner image update cannot change the toolchain
+          # (AppIcon.icon needs Xcode 26). Keep in step with release.yml, and raise it when App
+          # Store Connect starts requiring a newer Xcode.
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+          REPO_ROOT: ${{ github.workspace }}
+          VERSION: ${{ inputs.version }}
+          BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
+          DERIVED_DATA: ${{ runner.temp }}/DerivedData
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROVISIONING_PROFILE_PATH: ${{ runner.temp }}/profile.mobileprovision
+          ASC_KEY_DIR: ${{ runner.temp }}/private_keys
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_APPLE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_APPLE_CLIENT_ID }}
+        run: .publish-tools/.github/scripts/package-ios-app-store.sh
+
+      - name: Attach the build and submit for review
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+          VERSION: ${{ inputs.version }}
+          BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
+          SUBMIT: ${{ inputs.submit }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+          RELEASE_NOTES_BODY: ${{ needs.prepare.outputs.notes }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          ASC_KEY_PATH="$RUNNER_TEMP/private_keys/AuthKey_$ASC_KEY_ID.p8" \
+            .publish-tools/.github/scripts/app-store-connect.sh submit
+
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-store.keychain-db" || true
+          rm -rf "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/private_keys"

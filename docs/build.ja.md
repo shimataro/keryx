@@ -886,10 +886,11 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
 （フリーズはしない — ブロック構造・インライン装飾・画像を再現し、本物のブラウザエンジンが要る
 コンテンツは外部で開くボタンになる）。
 
-**ワークフローの lint。** 本節で扱うものの大半（`release.yml`、`publish-play.yml`、`.github/scripts/`）は
-リリース時にしか動かないため、`.github/workflows/lint-workflows.yml` が `.github/**` に触れる push の
-たびに静的検査する: `.github/scripts/*.sh` に対する `shellcheck`（`ubuntu-latest` に同梱）と、全
-ワークフローに対する `actionlint` — 未定義の `inputs`/`matrix`/`needs` 参照、action に存在しない入力、
+**ワークフローの lint。** 本節で扱うものの大半（`release.yml`、`publish-play.yml`、`publish-app-store.yml`、
+`.github/scripts/`）はリリースやストアへの提出のときにしか動かないため、
+`.github/workflows/lint-workflows.yml` が `.github/**` に触れる push のたびに静的検査する:
+`.github/scripts/*.sh` に対する `shellcheck`（`ubuntu-latest` に同梱）と、全ワークフローに対する
+`actionlint` — 未定義の `inputs`/`matrix`/`needs` 参照、action に存在しない入力、
 式の型エラー、そして各 `run:` ブロックの shellcheck 検査。ただし `steps.<id>.outputs.<name>` の綴り
 誤りは検出できない（ステップの出力は実行時に `$GITHUB_OUTPUT` 経由で書かれるため）。actionlint は
 ランナーに同梱されていないので、ワークフローはバージョン固定のリリース tarball をダウンロードし、
@@ -1159,9 +1160,10 @@ Compose 版はもうリリースしない。インストール済みの Compose 
 このアプリへ自分自身を置き換える（データは引き継がれない——[app-architecture.ja.md](app-architecture.ja.md) の
 「Apple ネイティブアプリ（SwiftUI）」を参照）。
 
-**Secrets が欠けているとリリースは失敗する。** ジョブはチェックアウトの直後に `.github/scripts/check-release-config.sh` を実行し、
-下記の Secrets がすべて設定済みで空でないことを要求する。1 つでも欠けていれば、欠けているものの名前をエラーに出し、
-何もビルドせずにジョブが失敗する。このジョブを待つ `deploy-pages` も動かないため、macOS のパッケージが無いまま、
+**Secrets が欠けているとリリースは失敗する。** ジョブはチェックアウトの直後に、下記の Secrets の名前を渡して
+`.github/scripts/check-release-config.sh` を実行する。スクリプトは渡された Secrets がすべて設定済みで空でないことを
+要求する（App Store のワークフローも自分の一覧を渡して呼ぶ——「App Store への公開」を参照）。1 つでも欠けていれば、
+欠けているものの名前をエラーに出し、何もビルドせずにジョブが失敗する。このジョブを待つ `deploy-pages` も動かないため、macOS のパッケージが無いまま、
 あるいは未署名のパッケージでリリースが出ることはない。
 
 | Secret | 内容 |
@@ -1182,7 +1184,7 @@ Compose 版はもうリリースしない。インストール済みの Compose 
 1. 証明書を使い捨てのキーチェーンに取り込み、プロファイルと公証用キーをランナーの一時ディレクトリに書く
    （どれも最後に削除する）。スクリプトはプロファイルを Xcode の provisioning profile ディレクトリにも
    （`<uuid>.provisionprofile` として）入れ、終了時に削除する（同じものが元からあった場合は残す）。公証用キーは、
-   base64 の本体から組み立て直し（`prepare-notary-key.sh`）、秘密鍵として読めることを確認する。
+   base64 の本体から組み立て直し（`prepare-api-key.sh`）、秘密鍵として読めることを確認する。
 2. `package-macos-swiftui.sh` を実行する。まず Apple の公証サービスに提出履歴を問い合わせる——読み取りだけの呼び出しで、
    キー、Key ID、Issuer ID のどれかが誤っていると、ビルドの後ではなく数秒で失敗する。そのあと、Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
    Intel スライスが無いため）、署名（Hardened Runtime、Team ID、Sparkle の補助ツール）を検証し、アプリを公証して staple し、
@@ -1338,6 +1340,110 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 省略すると、そのロケールが最後に持っていたテキストを Play が黙って引き継いでしまい、同一言語の
 重複よりも誤解を招く。翻訳版が欲しくなった場合は、公開後に Play Console 上で該当リリースのノートを
 直接編集すればよい。どちらのワークフローも、公開済みのリリースには一切手を触れない。
+
+### App Store への公開
+
+iOS アプリは `.github/workflows/publish-app-store.yml` を手動で実行して App Store の審査に出す
+（Actions → "Publish iOS app to the App Store" → Run workflow）。`release.yml` は App Store には何もしない。
+Mac App Store は対象外である。そのビルドでは、先に自己アップデーターを取り除く必要がある
+（[`distribution/app-store/README.md`](../distribution/app-store/README.md) を参照）。
+
+**審査が先、tag は後。** ワークフローはリリースの tag ではなく、ブランチまたはコミット（`ref`、既定は `v0`）を、
+`version` で指定した App Store のバージョン（x.y.z。App Store のバージョンにはプレリリースの接尾辞を付けられないため、
+プレリリースは提出しない）としてビルドする。実行を始めるブランチ（"Use workflow from"。ワークフローとその
+スクリプトはここから取る）と `ref` のどちらも、バージョンブランチ（`v0` など）上になければならない: ビルドは署名用の
+証明書と App Manager キーがある環境で動くため、フィーチャーブランチやプルリクエストから始めた実行や、それらを
+ビルドしようとする実行は、何もビルドしないうちに拒否する。コードの修正が必要な却下は、`v0` で直して同じ
+バージョンのまま出し直す。
+承認されたら:
+
+1. 実行のジョブサマリーに出たコミットに `v<version>` の tag を付けて GitHub Release を公開する。これで、ほかの
+   プラットフォーム向けの `release.yml` がいつもどおり動く。
+2. App Store Connect でそのバージョンを公開する。ワークフローは常に「手動で公開」に設定するので、承認された
+   ビルドが勝手に公開されることはない。
+
+入力:
+
+| 入力 | 意味 |
+| --- | --- |
+| `ref` | ビルドするブランチ、tag、またはコミット（既定は `v0`）。バージョンブランチ上にあること |
+| `version` | App Store のバージョン（x.y.z）。これがそのまま GitHub のリリースになる |
+| `submit` | オン（既定）: 審査に提出する。オフ: ビルドのアップロードと関連付けだけを行い、提出は App Store Connect で行う |
+
+最初の 1 回は `submit` をオフにして実行すること: ビルド、アップロード、App Store Connect の API 呼び出しを確かめる
+方法は本番の実行しかなく、オフなら誤りがあっても審査の手前で止まる。App Store Connect でバージョンとそのビルドを
+確認してから、そこで提出する（または `submit` をオンにしてもう一度実行する）。
+
+**1 回の実行で行うこと**（スクリプトは `.github/scripts/` にあり、`ref` ではなくワークフロー自身の ref から取る）:
+
+1. `ref` のコードを一切実行しない最初のジョブが、`ref` がバージョンブランチ上にあることを確認し、そのコミットに
+   対する GitHub のリリースノートを生成する（後述の「新機能」に使う）。ビルドするジョブは、そのコミットをそのまま
+   チェックアウトする。
+2. 下記の Secrets がすべて設定されているかを確認し（`check-release-config.sh`）、証明書を使い捨てのキーチェーンに
+   取り込み、プロファイルと API キーをランナーの一時ディレクトリに書く（どれも最後に削除する）。
+3. `app-store-connect.sh next-build-number` がビルド番号を決める: そのバージョンについて App Store Connect にある
+   最大のビルド番号に 1 を足したもの（ワークフローの実行番号はワークフローごとに 1 から数え直すため使わない）。
+   API キーが拒否された場合や、審査中のバージョンまたは承認済みで未公開のバージョンがある場合（そのあいだ
+   App Store Connect はほかのバージョンを受け付けない）も、ビルドの前にここで即座に失敗する。
+4. `package-ios-app-store.sh` が手動署名でアプリを archive・export し（Release、`generic/platform=iOS`、
+   `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` は入力から設定）、export したアプリを
+   `verify-store-requirements.sh` と署名（Team ID、Apple Distribution）で確認し、`altool --validate-app` を
+   実行してからアップロードする。
+5. `app-store-connect.sh submit` が、App Store Connect でのビルドの処理が終わるのを待ち（最長 45 分）、iOS の
+   App Store バージョンをそのビルドに向ける: `version` という名前のバージョンが編集可能ならそれを、なければ
+   編集可能な唯一のバージョン（App Store Connect では 1 つしか持てない）を `version` に改名して、それもなければ
+   新しく作って使う。それまで関連付けられていたビルドは置き換わる。「新機能」は、すでに公開したバージョンが
+   ある場合にだけ入れる（App Store Connect では、アプリの最初のバージョンにこの欄がない）。文面は最初のジョブが
+   生成したリリースノートを Play のリリースノートと同じ形に整えたもので、すべてのローカライズに
+   英語のまま書く。`submit` がオンなら、続けてバージョンを審査の提出物に加えて提出する。
+6. バージョン、ビルド番号、ビルドしたコミットをジョブサマリーに書く。
+
+同じバージョンで何度実行してもよい。実行のたびに新しいビルド番号でアップロードし、関連付けたビルドを置き換える。
+
+**却下されたとき:**
+
+- メタデータだけの問題（説明文、スクリーンショット、審査メモ）: App Store Connect で直してそこから再提出する。
+  新しいビルドは要らない。
+- コードの修正が必要な場合: `v0` で直し、同じ `version` でワークフローをもう一度実行する。App Store Connect が
+  提出物を「未解決の問題」の状態にしている場合、その提出物にこのバージョンがすでに入っていれば再提出する。
+  入っていなければ、先に App Store Connect でその項目を解決するか取り除くよう求めて止まる（その状態の提出物には
+  新しい項目を加えられない）。
+
+**初回のセットアップ:**
+
+1. App Store Connect → ユーザとアクセス → 統合 → App Store Connect API で、**App Manager** 権限のチームキーを作り
+   （審査への提出に必要。Developer では足りない）、`.p8` をダウンロードする。公証用のキーとは分けておくと、
+   どちらか一方だけを取り消せる。
+2. Xcode → Settings → Accounts → Manage Certificates → + → **Apple Distribution** で証明書を作り、秘密鍵ごと
+   `.p12` に書き出す。Xcode の自動署名が使うクラウド管理の証明書は書き出せない。
+3. developer.apple.com → Profiles で、その証明書を使う `works.merc.keryx` 向けの iOS **App Store Connect** 配布用
+   プロファイルを作り（例: "Keryx iOS App Store"。スクリプトが名前に受け付けるのは英数字、空白、`.`、`_`、`-`）、
+   `.mobileprovision` をダウンロードする。
+4. リポジトリの Secrets を設定する:
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_DISTRIBUTION_CERT_P12` | Apple Distribution 証明書（秘密鍵つき）の `.p12` を base64 にしたもの（`base64 -i certificate.p12`） |
+| `APPLE_DISTRIBUTION_CERT_PASSWORD` | `.p12` を書き出したときのパスワード |
+| `APPLE_APP_STORE_PROVISIONING_PROFILE` | iOS の App Store Connect 配布用プロファイルを base64 にしたもの |
+| `APP_STORE_CONNECT_KEY` | App Manager キーの `AuthKey_<id>.p8` のテキスト（`APPLE_NOTARY_KEY` と同じく、崩れた改行は復元する） |
+| `APP_STORE_CONNECT_KEY_ID` | そのキーの ID |
+
+ほかに `APPLE_TEAM_ID`、`APPLE_NOTARY_ISSUER_ID`（Issuer ID はチームのどのキーでも同じなので、公証用キーのものを
+そのまま使う）、Apple ビルドの OAuth の Secrets（`DROPBOX_APP_KEY`、`ONEDRIVE_CLIENT_ID`、
+`GOOGLE_DRIVE_APPLE_CLIENT_ID`）を読む。macOS のリリースと違い、ここでは 3 つの OAuth の Secrets がすべて必須である:
+1 つでも欠けたビルドはそのプロバイダーを隠してしまい、掲載文や審査メモと食い違うため。
+
+`contents: write` を持つのは最初のジョブだけである（GitHub の generate-notes API に必要なため）。アプリをビルドし、
+Apple の認証情報を持つジョブは読み取りしかできない。
+
+ブランチの検査は、マージ前のコードを誤ってビルド・署名しないためのもので、強制ではない。検査を取り除いた
+ワークフローを持つブランチから始めれば検査も飛ばされるうえ、リポジトリの Secrets は、書き込み権限を持つ人が push した
+どのワークフローからでも読める。署名素材に届く経路を本当に制限するには、上記の Secrets を、デプロイ可能なブランチを
+バージョンブランチに限った GitHub の environment に移し、`publish` ジョブの `environment:` にその environment を指定する。
+
+ビルドに使う Xcode は（`DEVELOPER_DIR` で、`release.yml` と揃えて）固定している。App Store Connect が
+より新しい Xcode を求めるようになったら上げること。
 
 ### F-Droid への公開
 

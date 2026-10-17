@@ -37,7 +37,11 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: .github/scripts/check-release-config.sh
+        run: >
+          .github/scripts/check-release-config.sh "The macOS release"
+          APPLE_DEVELOPER_ID_CERT_P12 APPLE_DEVELOPER_ID_CERT_PASSWORD APPLE_TEAM_ID
+          APPLE_PROVISIONING_PROFILE APPLE_NOTARY_KEY APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID
+          SPARKLE_PRIVATE_KEY
 
       # Same tag handling as the other package jobs: `v0.1.0` -> `0.1.0`, with an optional SemVer-style
       # pre-release suffix, which also means no .dmg.
@@ -94,7 +98,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
           printf '%s' "$APPLE_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/profile.provisioningprofile"
-          .github/scripts/prepare-notary-key.sh "$RUNNER_TEMP/AuthKey.p8"
+          .github/scripts/prepare-api-key.sh APPLE_NOTARY_KEY "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Build, sign, notarize and package
         env:
