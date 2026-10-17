@@ -1353,10 +1353,11 @@ Store. The Mac App Store is not covered: that build needs the self-updater remov
 
 **Review comes before the tag.** The workflow builds a branch or commit (`ref`, `v0` by default), not
 a release tag, under the App Store version given as `version` (x.y.z — App Store versions take no
-pre-release suffix, so a pre-release is never submitted). `ref` must already be on a version
-branch (`v0`, …): the build runs with the signing certificate and the App Manager key, so a commit
-on no version branch — a feature branch, a pull request — is refused before anything is built. A
-rejection that needs a code change is fixed on `v0` and submitted again under the same version.
+pre-release suffix, so a pre-release is never submitted). Both the branch the run is started from
+("Use workflow from", which supplies the workflow and its scripts) and `ref` must be on a version
+branch (`v0`, …): the build runs with the signing certificate and the App Manager key, so a run
+started from, or building, a feature branch or a pull request is refused before anything is built.
+A rejection that needs a code change is fixed on `v0` and submitted again under the same version.
 Once the version is approved:
 
 1. Tag the commit the run's job summary reports as `v<version>` and publish the GitHub Release, which
@@ -1439,7 +1440,16 @@ all three OAuth secrets are required here: a build without one hides that provid
 contradict the listing and the review notes.
 
 Only the first job gets `contents: write`, which GitHub's generate-notes API needs; the job that
-builds the app and holds the Apple credentials can only read. The Xcode it builds with is pinned (`Xcode_26.6`, as in `release.yml`); raise it when App Store Connect starts requiring
+builds the app and holds the Apple credentials can only read.
+
+The branch checks keep unmerged code from being built and signed by mistake; they are not
+enforcement. A run started from a branch whose copy of the workflow drops them skips them too, and
+repository secrets can be read by any workflow someone with write access pushes. To actually limit
+who reaches the signing material, move the secrets above into a GitHub environment whose deployment
+branches are limited to the version branches, and name that environment in the `publish` job's
+`environment:`.
+
+The Xcode it builds with is pinned (`Xcode_26.6`, as in `release.yml`); raise it when App Store Connect starts requiring
 a newer Xcode.
 
 ### Publishing to F-Droid

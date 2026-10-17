@@ -41,8 +41,9 @@ concurrency:
 
 jobs:
   # Runs none of `ref`'s code — only git and gh — so the build job below never holds a token that
-  # can write to the repository, and only code already on a version branch reaches the signing
-  # certificate and the App Manager key.
+  # can write to the repository. Its branch checks keep unmerged code from being built and signed
+  # by mistake; they are not enforcement, since a run started from a branch whose copy of this
+  # workflow drops them skips them too (see docs/build.md's "Publishing to the App Store").
   prepare:
     name: Check ref & generate release notes
     runs-on: ubuntu-latest
@@ -55,6 +56,15 @@ jobs:
       notes: ${{ steps.notes.outputs.notes }}
 
     steps:
+      # This workflow and the scripts in .publish-tools come from the branch the run was started
+      # from ("Use workflow from"), not from `ref`.
+      - name: Check the workflow's own branch
+        run: |
+          if ! [[ "$GITHUB_REF" =~ ^refs/heads/v[0-9]+$ ]]; then
+            echo "::error::Started from $GITHUB_REF. Start the workflow from a version branch such as v0 (\"Use workflow from\"): this workflow and its scripts come from that branch."
+            exit 1
+          fi
+
       - name: Check version
         env:
           VERSION: ${{ inputs.version }}
