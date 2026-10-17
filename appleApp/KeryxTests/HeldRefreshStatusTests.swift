@@ -34,7 +34,7 @@ struct HeldRefreshStatusTests {
     }
 
     @Test
-    func goingIdleLeavesAResultUp() {
+    func updateCheckingFalseIsANoOpAfterShowingAResult() {
         let held = HeldRefreshStatus(resultDuration: .seconds(60), resultGrace: .milliseconds(10))
 
         held.showResult(.newArticles(2))
