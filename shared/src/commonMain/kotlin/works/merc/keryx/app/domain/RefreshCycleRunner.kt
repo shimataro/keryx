@@ -125,7 +125,7 @@ class RefreshCycleRunner(
         targets: () -> List<Feeds>,
     ): Result<Unit>? {
         var syncResult: Result<Unit>? = null
-        val refresh: suspend () -> Unit = { step("feedRefresh") { onRefreshed(refreshAndNotify(targets())) } }
+        val refresh: suspend () -> Unit = { step("feedRefresh") { refreshAndNotify(targets(), onRefreshed) } }
         val sync: suspend () -> Unit = {
             step("sync") { if (cloudSession.isConnected()) syncResult = syncRepository.sync(trigger) }
         }
@@ -136,11 +136,12 @@ class RefreshCycleRunner(
         return syncResult
     }
 
-    private suspend fun refreshAndNotify(targets: List<Feeds>): Map<String, Result<Int>> {
+    /** Hands the results to [onRefreshed] before notifying, so a failing notification cannot lose them. */
+    private suspend fun refreshAndNotify(targets: List<Feeds>, onRefreshed: (Map<String, Result<Int>>) -> Unit) {
         val results = activityCenter.trackFeedRefresh { feedRepository.refreshFeeds(targets) }
+        onRefreshed(results)
         newArticleNotifier.notifyIfEnabled(
             results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
         )
-        return results
     }
 }

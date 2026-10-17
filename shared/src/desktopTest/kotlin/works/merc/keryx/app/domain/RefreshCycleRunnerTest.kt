@@ -91,6 +91,7 @@ class RefreshCycleRunnerTest {
         connected: Boolean = true,
         fetchGate: CompletableDeferred<Unit>? = null,
         fetchStatus: HttpStatusCode = HttpStatusCode.OK,
+        notifySink: OsNotificationSink? = null,
     ): Fixture {
         val clock = Clock { 1000L }
         val log = Collections.synchronizedList(mutableListOf<String>())
@@ -134,7 +135,7 @@ class RefreshCycleRunnerTest {
         )
         val runner = RefreshCycleRunner(
             activityCenter, feedRepository, syncRepository, cloudSession,
-            NewArticleNotifier { message, _ -> log += "notify:$message" },
+            NewArticleNotifier(notifySink ?: OsNotificationSink { message, _ -> log += "notify:$message" }),
             settingsRepository, FakeNotificationMessages(), notificationCenter, clock,
         )
         return Fixture(runner, activityCenter, notificationCenter, log)
@@ -333,6 +334,19 @@ class RefreshCycleRunnerTest {
         assertEquals(AppNotificationLevel.WARNING, warning.level)
         assertEquals(NotificationText.RefreshFailed, warning.text)
         assertEquals(AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED), warning.action)
+    }
+
+    @Test
+    fun aFailingNotificationStillReportsTheRefreshOutcome() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, notifySink = { _, _ -> error("notification failed") })
+        val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
+        val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC) { _, block -> runCatching { block() } }
+        collector.cancel()
+
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 1, allFailed = false)), seen.toList())
     }
 
     @Test
