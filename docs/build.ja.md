@@ -1438,9 +1438,8 @@ Apple の認証情報を持つジョブは読み取りしかできない。
 どのワークフローからでも読める。署名素材に届く経路を本当に制限するには、上記の Secrets を、デプロイ可能なブランチを
 バージョンブランチに限った GitHub の environment に移し、`publish` ジョブの `environment:` にその environment を指定する。
 
-ビルドに使う Xcode は
-（`release.yml` と同じく `Xcode_26.6` に）固定している。App Store Connect がより新しい Xcode を求めるようになったら
-上げること。
+ビルドに使う Xcode は（`DEVELOPER_DIR` で、`release.yml` と揃えて）固定している。App Store Connect が
+より新しい Xcode を求めるようになったら上げること。
 
 ### F-Droid への公開
 

@@ -1451,8 +1451,8 @@ who reaches the signing material, move the secrets above into a GitHub environme
 branches are limited to the version branches, and name that environment in the `publish` job's
 `environment:`.
 
-The Xcode it builds with is pinned (`Xcode_26.6`, as in `release.yml`); raise it when App Store Connect starts requiring
-a newer Xcode.
+The Xcode it builds with is pinned (`DEVELOPER_DIR`, kept in step with `release.yml`); raise it
+when App Store Connect starts requiring a newer Xcode.
 
 ### Publishing to F-Droid
 
