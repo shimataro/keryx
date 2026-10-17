@@ -14,8 +14,10 @@
 # Usage: check-release-config.sh <what is being published> <secret name>...
 #   e.g. check-release-config.sh "The macOS release" APPLE_TEAM_ID SPARKLE_PRIVATE_KEY
 #
-# Inputs (environment variables): one per secret named on the command line; each may be unset or
-# empty.
+# Inputs (environment variables): one per secret named on the command line, always mapped in the
+# step's `env:` even when the secret is not set — an unset secret then arrives as an empty string,
+# which counts as missing. A name with no variable at all is a mistake in the workflow (the two
+# lists drifted apart), and is reported as that instead.
 set -euo pipefail
 
 [ $# -ge 2 ] || { echo "usage: $0 <what is being published> <secret name>..." >&2; exit 2; }
@@ -26,6 +28,8 @@ missing=()
 for name in "$@"; do
   # The name is used for an indirect expansion, so accept only an identifier.
   [[ "$name" =~ ^[A-Z_][A-Z0-9_]*$ ]] || { echo "::error::Invalid secret name: '$name'." >&2; exit 2; }
+  [ -n "${!name+x}" ] \
+    || { echo "::error::$label: $name is not passed to this step; map it in the step's env." >&2; exit 2; }
   value="${!name:-}"
   if [ -z "${value//[[:space:]]/}" ]; then
     missing+=("$name")
