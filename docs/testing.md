@@ -438,6 +438,9 @@ confirm the routes really agree on screen, with a provider connected:
   connect-time initial sync, and while any refresh or sync is running, the toolbar button, the Feed
   menu item and the Settings button are all disabled; once it ends all three are enabled again
   together. (Keep Settings open while checking the menu bar.)
+- iOS: while a sync runs, the sidebar's sync button turns into a spinner and comes back once it
+  ends, without the "+" button beside it, the settings button or the bar's glass group moving or
+  changing size; VoiceOver reads the spinner as "Syncing…".
 - Make the provider reject the token (e.g. revoke the app's access in the provider's account
   settings), then sync: once the authorization failure is recorded, all three are disabled, and
   hovering (long-pressing, on Android) the toolbar button shows "Sign-in expired — reconnect in
