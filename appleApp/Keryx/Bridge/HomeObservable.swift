@@ -606,8 +606,12 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.cloudConnected { assignIfChanged(\.cloudConnected, v.boolValue) }
     }
 
+    /// Re-reads the value on each delivery instead of assigning the delivered one: this observer and
+    /// `observeRefreshOutcomes` are separate tasks, so an in-flight value can still be queued on the main actor
+    /// after a refresh's result is shown, and would otherwise put "checking" back over that result.
     private func observeActivity() async {
-        for await v in viewModel.activity {
+        for await _ in viewModel.activity {
+            let v = viewModel.activity.value
             assignIfChanged(\.activity, v)
             #if os(iOS)
             refreshStatus.updateChecking(
