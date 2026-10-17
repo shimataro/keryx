@@ -878,7 +878,8 @@ Compose-drawn simplified view instead of using the native web view (never a free
 covers block structure, inline decorations, and images).
 
 **Workflow lint.** Most of what this section describes (`release.yml`, `publish-play.yml`,
-`.github/scripts/`) only ever runs when a release is cut, so `.github/workflows/lint-workflows.yml`
+`publish-app-store.yml`, `.github/scripts/`) only ever runs when a release is cut or a store
+submission is made, so `.github/workflows/lint-workflows.yml`
 checks it statically on every push that touches `.github/**`: `shellcheck` (preinstalled on
 `ubuntu-latest`) over `.github/scripts/*.sh`, and `actionlint` over every workflow — undefined
 `inputs`/`matrix`/`needs` references, unknown action inputs, expression type errors, and each `run:`
@@ -1342,6 +1343,98 @@ descriptions, and the generated header/footer lines are dropped). Written identi
 misleading than a same-language duplicate. Edit a release's notes for a specific locale afterward
 directly in Play Console if a translated version is ever wanted; neither workflow touches an
 existing release once published.
+
+### Publishing to the App Store
+
+The iOS app goes to App Store review through `.github/workflows/publish-app-store.yml`, run by hand
+(Actions → "Publish iOS app to the App Store" → Run workflow). `release.yml` does nothing for the App
+Store. The Mac App Store is not covered: that build needs the self-updater removed first (see
+[`distribution/app-store/README.md`](../distribution/app-store/README.md)).
+
+**Review comes before the tag.** The workflow builds a branch or commit (`ref`, `v0` by default), not
+a release tag, under the App Store version given as `version` (x.y.z — App Store versions take no
+pre-release suffix, so a pre-release is never submitted). A rejection that needs a code change is
+fixed on `v0` and submitted again under the same version. Once the version is approved:
+
+1. Tag the commit the run's job summary reports as `v<version>` and publish the GitHub Release, which
+   runs `release.yml` for every other platform as usual.
+2. Release the version in App Store Connect. The workflow always sets it to a manual release, so an
+   approved build never goes live on its own.
+
+Inputs:
+
+| Input | Meaning |
+| --- | --- |
+| `ref` | Branch, tag or commit to build (default `v0`) |
+| `version` | App Store version, x.y.z — the GitHub release this will become |
+| `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
+
+**What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
+from `ref`):
+
+1. Checks that every secret below is set (`check-release-config.sh`), imports the certificate into a
+   throwaway keychain, and writes the profile and the API key into the runner's temp directory (all
+   removed at the end).
+2. `app-store-connect.sh next-build-number` picks the build number: one more than the highest build
+   App Store Connect already has for that version (a workflow run number would restart per
+   workflow). It also fails at once, before the build, if the API key is rejected or a version is
+   already in review or approved but not released — App Store Connect takes no other version then.
+3. `package-ios-app-store.sh` archives and exports the app with manual signing (Release,
+   `generic/platform=iOS`, `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` set from the inputs),
+   checks the exported app with `verify-store-requirements.sh` and its signature (Team ID, Apple
+   Distribution), runs `altool --validate-app`, then uploads it.
+4. `app-store-connect.sh submit` waits (up to 45 minutes) for App Store Connect to finish processing
+   the build, then points the iOS App Store version at it: the version named `version` if it is
+   editable, otherwise the one editable version renamed to `version` (App Store Connect allows one),
+   otherwise a new one. Whatever build was attached before is replaced. "What's New" is filled in
+   only once some version has been released — App Store Connect has no such field for an app's
+   first version — from GitHub's generated release notes for that commit, formatted like the Play
+   release notes and written to every localization in English. With `submit` on, it then adds the
+   version to a review submission and submits it.
+5. Writes the version, the build number and the commit it was built from to the job summary.
+
+Running it again for the same version is safe: each run uploads a new build number and replaces the
+attached build.
+
+**After a rejection:**
+
+- Metadata only (description, screenshots, review notes): fix it in App Store Connect and resubmit
+  there; no new build is needed.
+- A code change: fix it on `v0` and run the workflow again with the same `version`. If App Store
+  Connect left the submission in "Unresolved Issues", the run resubmits it when it already holds this
+  version, and otherwise stops and asks for its items to be resolved or removed in App Store Connect
+  first (such a submission takes no new items).
+
+**One-time setup:**
+
+1. App Store Connect → Users and Access → Integrations → App Store Connect API: create a team key
+   with the **App Manager** role (submitting for review needs it; Developer is not enough) and
+   download its `.p8`. Keep it apart from the notarization key, so either can be revoked alone.
+2. Xcode → Settings → Accounts → Manage Certificates → + → **Apple Distribution**, then export it
+   (with its private key) as `.p12`. The cloud-managed certificate Xcode's automatic signing uses
+   cannot be exported.
+3. developer.apple.com → Profiles: create an iOS **App Store Connect** distribution profile for
+   `works.merc.keryx` with that certificate (e.g. "Keryx iOS App Store"; the scripts accept letters,
+   digits, spaces, `.`, `_` and `-` in its name) and download the `.mobileprovision`.
+4. Set the repository secrets:
+
+| Secret | Content |
+| --- | --- |
+| `APPLE_DISTRIBUTION_CERT_P12` | The Apple Distribution certificate with its private key, as `.p12`, base64-encoded (`base64 -i certificate.p12`) |
+| `APPLE_DISTRIBUTION_CERT_PASSWORD` | The password the `.p12` was exported with |
+| `APPLE_APP_STORE_PROVISIONING_PROFILE` | The iOS App Store Connect profile, base64-encoded |
+| `APP_STORE_CONNECT_KEY` | The text of the App Manager key's `AuthKey_<id>.p8` (line breaks are restored, as for `APPLE_NOTARY_KEY`) |
+| `APP_STORE_CONNECT_KEY_ID` | That key's ID |
+
+It also reads `APPLE_TEAM_ID`, `APPLE_NOTARY_ISSUER_ID` (the issuer ID is the same for every team key,
+so the notarization key's serves this one too) and the Apple build's OAuth secrets
+(`DROPBOX_APP_KEY`, `ONEDRIVE_CLIENT_ID`, `GOOGLE_DRIVE_APPLE_CLIENT_ID`). Unlike the macOS release,
+all three OAuth secrets are required here: a build without one hides that provider, which would
+contradict the listing and the review notes.
+
+The workflow asks for `contents: write`, which GitHub's generate-notes API needs. The Xcode it builds
+with is pinned (`Xcode_26.6`, as in `release.yml`); raise it when App Store Connect starts requiring
+a newer Xcode.
 
 ### Publishing to F-Droid
 

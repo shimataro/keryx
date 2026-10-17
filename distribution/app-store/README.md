@@ -158,27 +158,33 @@ To retake them:
   so every store listing says "Microsoft OneDrive" the first time. Google asks for the full name "Google Drive"
   and a trademark attribution in the description, which both descriptions carry
   (<https://developers.google.com/drive/branding>).
-- [x] Marketing version: the same number as the GitHub release (0.26.0 for the first App Store build), passed at
-  archive time as `MARKETING_VERSION` — not the `0.1.0` left in `appleApp/project.yml`, which no release uses —
-  with `CURRENT_PROJECT_VERSION` raised for every upload of the same version. Set the App Store Connect
-  version to the same number before uploading.
+- [x] Marketing version: the same number as the GitHub release (0.26.0 for the first App Store build) — not the
+  `0.1.0` left in `appleApp/project.yml`, which no release uses. The iOS build is uploaded and submitted by the
+  `publish-app-store.yml` workflow, given that number as its `version` input: it sets `MARKETING_VERSION`, picks
+  an unused `CURRENT_PROJECT_VERSION`, and creates or renames the App Store Connect version to match (see
+  "Publishing to the App Store" in [`docs/build.md`](../../docs/build.md)). The GitHub release is tagged only
+  after approval, on the commit the workflow reports. Archiving by hand in Xcode remains the fallback when the
+  workflow cannot be used; then pass the same two settings yourself and set the App Store Connect version first.
 - [ ] Verify the example feed in the review notes still resolves.
 - [ ] If [`PRIVACY.md`](../../PRIVACY.md)'s effective date has changed since the last submission,
   re-check the App Privacy answer, the age-rating answers and the review notes above against it —
   App Store Connect keeps the old answers and will not notice the policy moved.
-- [ ] Build the archive with the Dropbox, OneDrive and Google Drive (Apple) keys set — `dropbox.app.key`,
-  `onedrive.client.id` and `googledrive.apple.client.id` in `local.properties`, or the matching
-  environment variables (see [`docs/build.md`](../../docs/build.md)). A provider whose key is empty is
-  hidden, which would contradict the listing and the review notes: check that Settings ▸ Cloud sync
-  offers all three.
+- [ ] Build with the Dropbox, OneDrive and Google Drive (Apple) keys set. A provider whose key is empty is hidden,
+  which would contradict the listing and the review notes. The workflow refuses to run unless the
+  `DROPBOX_APP_KEY`, `ONEDRIVE_CLIENT_ID` and `GOOGLE_DRIVE_APPLE_CLIENT_ID` secrets are all set; a hand-made
+  archive needs `dropbox.app.key`, `onedrive.client.id` and `googledrive.apple.client.id` in `local.properties`,
+  or the matching environment variables (see [`docs/build.md`](../../docs/build.md)). Either way, check in the
+  TestFlight build that Settings ▸ Cloud sync offers all three.
 - [ ] Screenshots: iPhone and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: they are
   listing assets, not part of the Mac App Store build, so take them when that build is ready, keep them in
   `screenshots/<en-US|ja>/mac/`, and upload them under the version's App Previews and Screenshots ▸ macOS in
   App Store Connect. The required sizes change with App Store Connect.
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
-  2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first — then run
-  **Validate App** in Organizer: it must report no ITMS-90474 (orientations) and no ITMS-91053
-  (privacy manifest) problems. This needs the team's signing identity.
+  2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first. The workflow pins
+  its Xcode (`DEVELOPER_DIR` in `publish-app-store.yml`, kept in step with `release.yml`), so raise the pin when
+  the requirement moves. The workflow validates every build with `altool --validate-app` before uploading it;
+  for a hand-made archive, run **Validate App** in Organizer instead. Either must report no ITMS-90474
+  (orientations) and no ITMS-91053 (privacy manifest) problems.
 - [ ] Mac App Store build only: remove the self-updater first — Sparkle, its `SU*` Info.plist keys,
   the "Check for Updates…" menu item and automatic-check toggle, and the `mach-lookup` temporary
   exception in `Keryx-macOS.entitlements` (guideline 2.4.5(vii)). When that lands, also note in
