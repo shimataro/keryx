@@ -45,7 +45,8 @@ class ActivityCenter {
      */
     val activity: StateFlow<ActivitySnapshot> = _activity.asStateFlow()
 
-    private val _refreshOutcomes = MutableSharedFlow<RefreshOutcome>(extraBufferCapacity = 8)
+    private val REFRESH_OUTCOMES_BUFFER = 8
+    private val _refreshOutcomes = MutableSharedFlow<RefreshOutcome>(extraBufferCapacity = REFRESH_OUTCOMES_BUFFER)
 
     /**
      * One event per finished feed refresh that covered at least one feed ([reportRefreshOutcome]),
