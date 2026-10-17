@@ -45,13 +45,20 @@ suspend fun resolveNotificationText(text: NotificationText): String {
 /** The explanatory dialog body [detail] names, localized. */
 @Composable
 fun infoDialogText(detail: InfoDialogText): String = stringResource(
-    when (detail) {
-        InfoDialogText.TOKEN_STORAGE_FALLBACK -> Res.string.notification_token_storage_fallback_detail
-        InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED -> Res.string.notification_token_storage_not_persisted_detail
-        InfoDialogText.APP_TRANSLOCATED -> Res.string.notification_app_translocated_detail
-        InfoDialogText.REFRESH_FAILED -> Res.string.notification_refresh_failed_detail
-    },
+    infoDialogTextResource(detail),
 )
+
+/** [detail] as a localized string, for use outside composition. */
+suspend fun resolveInfoDialogText(detail: InfoDialogText): String = getString(
+    infoDialogTextResource(detail),
+)
+
+private fun infoDialogTextResource(detail: InfoDialogText): StringResource = when (detail) {
+    InfoDialogText.TOKEN_STORAGE_FALLBACK -> Res.string.notification_token_storage_fallback_detail
+    InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED -> Res.string.notification_token_storage_not_persisted_detail
+    InfoDialogText.APP_TRANSLOCATED -> Res.string.notification_app_translocated_detail
+    InfoDialogText.REFRESH_FAILED -> Res.string.notification_refresh_failed_detail
+}
 
 /**
  * The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero — the
