@@ -104,8 +104,14 @@ refresh_token() {
 # reports the body and fails. Never prints the Authorization header.
 api() {
   local method="$1" url="$2" body="${3:-}" status
+  # A response's `links.next` is followed as given, so refuse any absolute URL off the API host
+  # before the token is attached to it.
+  if [[ "$url" == /* ]]; then
+    url="$HOST$url"
+  elif [[ "$url" != "$HOST/"* ]]; then
+    fail "Refusing to send the App Store Connect token to $url (not $HOST)."
+  fi
   refresh_token
-  [[ "$url" == /* ]] && url="$HOST$url"
   local args=(--silent --show-error --globoff --request "$method"
     --header "Authorization: Bearer $token" --output "$work/response" --write-out '%{http_code}')
   if [ -n "$body" ]; then
