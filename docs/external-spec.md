@@ -450,6 +450,14 @@ refreshed, and it leaves the bar's limited room to the other actions. Android's 
 no pull — it is a modal navigation surface laid over the article list, and keeps its refresh button
 in its header. Neither does the macOS sidebar, which keeps its toolbar button.
 
+With no Refresh All button to spin, iOS shows a refresh or sync in the toolbar's status area instead
+— the centre of the bottom bar, where Mail says "Checking for Mail…" — in both the sidebar and the
+article list: a small spinner with "Checking for new articles…" or "Syncing…", whatever started it
+(a pull, ⌘R, the refresh at launch, a background refresh, an automatic sync). Idle shows nothing
+there, not a last-updated time, so the bar leaves the room to the list. The status is never drawn
+as a pull indicator started by the app itself, which would pull the list down unasked, and VoiceOver
+is not told when it changes.
+
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
 macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own teal theme,
