@@ -174,8 +174,9 @@ grep -q '^Authority=Apple Distribution' <<< "$app_details" \
   || fail "$app is not signed with an Apple Distribution certificate."
 version_in_app="$(plutil -extract CFBundleShortVersionString raw -o - "$app/Info.plist")"
 build_in_app="$(plutil -extract CFBundleVersion raw -o - "$app/Info.plist")"
-[ "$version_in_app" = "$VERSION" ] && [ "$build_in_app" = "$BUILD_NUMBER" ] \
-  || fail "The app says $version_in_app ($build_in_app), expected $VERSION ($BUILD_NUMBER)."
+if [ "$version_in_app" != "$VERSION" ] || [ "$build_in_app" != "$BUILD_NUMBER" ]; then
+  fail "The app says $version_in_app ($build_in_app), expected $VERSION ($BUILD_NUMBER)."
+fi
 
 # --- Validate, then upload. altool finds AuthKey_<id>.p8 through API_PRIVATE_KEYS_DIR. ---
 altool_auth=(-t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID")
