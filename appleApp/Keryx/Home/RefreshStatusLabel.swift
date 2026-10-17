@@ -15,6 +15,9 @@ struct RefreshStatusLabel: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        // iOS 26 sizes a toolbar item to its glass capsule and truncates the caption to "…" unless
+        // the label claims its own width.
+        .fixedSize()
         .accessibilityElement(children: .combine)
     }
 
@@ -36,7 +39,13 @@ struct RefreshStatusToolbarItem: ToolbarContent {
             refreshIndicatorShown: home.activity.refreshIndicatorShown,
             syncing: home.activity.syncing
         ) {
-            ToolbarItem(placement: .status) { RefreshStatusLabel(status: status) }
+            if #available(iOS 26, *) {
+                // Plain status text as Mail shows it, not a glass button that looks tappable.
+                ToolbarItem(placement: .status) { RefreshStatusLabel(status: status) }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .status) { RefreshStatusLabel(status: status) }
+            }
         }
     }
 }
