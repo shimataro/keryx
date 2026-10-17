@@ -23,11 +23,12 @@ func notificationText(_ text: NotificationText) -> String {
 /// sealed-interface type (no `onEnum(of:)`) — it's a plain, argument-less Kotlin enum, so its cases
 /// bridge as static properties rather than Swift `enum` cases.
 func infoDialogText(_ text: InfoDialogText) -> String {
-    if text == .appTranslocated { return L("notification_app_translocated_detail") }
-    if text == .tokenStorageFallback { return L("notification_token_storage_fallback_detail") }
-    if text == .tokenStorageNotPersisted { return L("notification_token_storage_not_persisted_detail") }
-    if text == .refreshFailed { return L("notification_refresh_failed_detail") }
-    return L("error_generic")
+    switch text {
+    case .appTranslocated: return L("notification_app_translocated_detail")
+    case .tokenStorageFallback: return L("notification_token_storage_fallback_detail")
+    case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted_detail")
+    case .refreshFailed: return L("notification_refresh_failed_detail")
+    }
 }
 
 /// Localizes an `ErrorKind` — shared between the notification center and the Cloud Sync settings
