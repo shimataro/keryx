@@ -1148,10 +1148,12 @@ with this app (its data is not carried over — see "Apple Native Apps (SwiftUI)
 [app-architecture.md](app-architecture.md)).
 
 **A missing secret fails the release.** Right after checking out, the job runs
-`.github/scripts/check-release-config.sh`, which requires every repository secret below to be set
-and non-empty. If any is missing, it names the missing ones in an error and the job fails before
-building anything, so `deploy-pages` (which waits for this job) does not run either: a release never
-goes out without its macOS package, and never with an unsigned one.
+`.github/scripts/check-release-config.sh` with the names of the repository secrets below, and the
+script requires each one it is given to be set and non-empty (the App Store workflow calls it with
+its own list — see "Publishing to the App Store"). If any is missing, it names the missing ones in
+an error and the job fails before building anything, so `deploy-pages` (which waits for this job)
+does not run either: a release never goes out without its macOS package, and never with an unsigned
+one.
 
 | Secret | Content |
 | --- | --- |

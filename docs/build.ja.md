@@ -1160,9 +1160,10 @@ Compose 版はもうリリースしない。インストール済みの Compose 
 このアプリへ自分自身を置き換える（データは引き継がれない——[app-architecture.ja.md](app-architecture.ja.md) の
 「Apple ネイティブアプリ（SwiftUI）」を参照）。
 
-**Secrets が欠けているとリリースは失敗する。** ジョブはチェックアウトの直後に `.github/scripts/check-release-config.sh` を実行し、
-下記の Secrets がすべて設定済みで空でないことを要求する。1 つでも欠けていれば、欠けているものの名前をエラーに出し、
-何もビルドせずにジョブが失敗する。このジョブを待つ `deploy-pages` も動かないため、macOS のパッケージが無いまま、
+**Secrets が欠けているとリリースは失敗する。** ジョブはチェックアウトの直後に、下記の Secrets の名前を渡して
+`.github/scripts/check-release-config.sh` を実行する。スクリプトは渡された Secrets がすべて設定済みで空でないことを
+要求する（App Store のワークフローも自分の一覧を渡して呼ぶ——「App Store への公開」を参照）。1 つでも欠けていれば、
+欠けているものの名前をエラーに出し、何もビルドせずにジョブが失敗する。このジョブを待つ `deploy-pages` も動かないため、macOS のパッケージが無いまま、
 あるいは未署名のパッケージでリリースが出ることはない。
 
 | Secret | 内容 |
