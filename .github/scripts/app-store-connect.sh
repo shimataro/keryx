@@ -1,0 +1,342 @@
+#!/usr/bin/env bash
+# Talks to the App Store Connect API for publish-app-store.yml: picks the next build number for a
+# version before the build, and afterwards attaches the uploaded build to that App Store version and
+# (optionally) submits it for review.
+#
+# Subcommands:
+#   next-build-number  Prints the next free CFBundleVersion for VERSION on iOS (one more than the
+#                      highest build already uploaded for it, or 1), and writes it to $GITHUB_OUTPUT
+#                      as `build_number` when that is set. Build numbers come from App Store Connect
+#                      rather than from a workflow run number, which restarts with every workflow.
+#                      It runs before the build, so a bad API key, or a version already in review
+#                      or approved but not released, fails the job within a minute.
+#   submit             Waits for BUILD_NUMBER to finish processing, points the iOS App Store version
+#                      VERSION at it (creating or renaming the one editable version as needed, always
+#                      with a manual release), fills in "What's New" once a version has already been
+#                      released, and submits it for review when SUBMIT is true.
+#
+# Nothing here releases the app: the version is always set to a manual release, so an approved
+# build waits in App Store Connect until someone releases it there.
+#
+# Inputs (environment variables):
+#   ASC_KEY_PATH    App Store Connect API key (.p8, App Manager role).
+#   ASC_KEY_ID      Its key ID.
+#   ASC_ISSUER_ID   The team's issuer ID.
+#   VERSION         Marketing version, x.y.z (CFBundleShortVersionString).
+#   BUILD_NUMBER    submit only: the CFBundleVersion that was uploaded.
+#   SUBMIT          submit only: "true" to submit for review, "false" to stop once the build is
+#                   attached.
+#   SOURCE_SHA      submit only: the commit the build was made from (reported in the job summary,
+#                   and the target of the generated release notes).
+#   GH_TOKEN, GITHUB_REPOSITORY
+#                   submit only, once a version has been released: used to generate the release
+#                   notes for "What's New" with GitHub's generate-notes API.
+#
+# See docs/build.md's "Publishing to the App Store".
+set -euo pipefail
+
+HOST="https://api.appstoreconnect.apple.com"
+BUNDLE_ID="works.merc.keryx"
+PLATFORM="IOS"
+PROCESSING_TIMEOUT_SECONDS=$((45 * 60))
+POLL_INTERVAL_SECONDS=30
+# altool's tokens live about five minutes; renew well before that.
+TOKEN_MAX_AGE_SECONDS=120
+WHATS_NEW_LIMIT=4000
+
+# App Store version states (appVersionState, falling back to the older appStoreState).
+EDITABLE_STATES="PREPARE_FOR_SUBMISSION DEVELOPER_REJECTED REJECTED METADATA_REJECTED INVALID_BINARY READY_FOR_REVIEW"
+IN_REVIEW_STATES="WAITING_FOR_REVIEW IN_REVIEW WAITING_FOR_EXPORT_COMPLIANCE"
+APPROVED_STATES="PENDING_DEVELOPER_RELEASE PENDING_APPLE_RELEASE ACCEPTED PROCESSING_FOR_DISTRIBUTION"
+RELEASED_STATES="READY_FOR_DISTRIBUTION READY_FOR_SALE REPLACED_WITH_NEW_VERSION REMOVED_FROM_SALE DEVELOPER_REMOVED_FROM_SALE"
+
+fail() {
+  echo "::error::$*" >&2
+  exit 1
+}
+
+command="${1:-}"
+case "$command" in
+  next-build-number | submit) ;;
+  *) echo "usage: $0 next-build-number|submit" >&2; exit 2 ;;
+esac
+
+: "${ASC_KEY_PATH:?ASC_KEY_PATH is not set}"
+: "${ASC_KEY_ID:?ASC_KEY_ID is not set}"
+: "${ASC_ISSUER_ID:?ASC_ISSUER_ID is not set}"
+: "${VERSION:?VERSION is not set}"
+[ -s "$ASC_KEY_PATH" ] || fail "App Store Connect API key not found: $ASC_KEY_PATH"
+[[ "$ASC_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || fail "Invalid App Store Connect key ID."
+[[ "$ASC_ISSUER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+  || fail "Invalid App Store Connect issuer ID."
+# App Store versions take no pre-release suffix.
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Invalid version: '$VERSION' (expected x.y.z)."
+
+work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/app-store-connect.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+token=""
+token_issued_at=0
+RESPONSE=""
+ALL=""
+
+# Signs a new token with altool (ES256, audience appstoreconnect-v1) when the current one is
+# missing or old. Called at the top level only (never inside $(...)), so the token survives
+# between requests.
+refresh_token() {
+  local now output
+  now=$(date +%s)
+  if [ -n "$token" ] && [ $((now - token_issued_at)) -lt "$TOKEN_MAX_AGE_SECONDS" ]; then
+    return
+  fi
+  if ! output=$(xcrun altool --generate-jwt --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" \
+    --p8-file-path "$ASC_KEY_PATH" 2> "$work/altool.err"); then
+    cat "$work/altool.err" >&2
+    fail "altool could not sign an App Store Connect token with the API key."
+  fi
+  token=$(grep -Eo 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+' <<< "$output" | head -n 1) || true
+  [ -n "$token" ] || fail "altool printed no App Store Connect token."
+  echo "::add-mask::$token"
+  token_issued_at=$now
+}
+
+# api METHOD PATH-OR-URL [JSON body] — leaves the response body in RESPONSE; on an HTTP error,
+# reports the body and fails. Never prints the Authorization header.
+api() {
+  local method="$1" url="$2" body="${3:-}" status
+  refresh_token
+  [[ "$url" == /* ]] && url="$HOST$url"
+  local args=(--silent --show-error --globoff --request "$method"
+    --header "Authorization: Bearer $token" --output "$work/response" --write-out '%{http_code}')
+  if [ -n "$body" ]; then
+    args+=(--header "Content-Type: application/json" --data "$body")
+  fi
+  status=$(curl "${args[@]}" "$url") || fail "App Store Connect API $method $url could not be reached."
+  RESPONSE=$(cat "$work/response")
+  [[ "$status" == 2* ]] || fail "App Store Connect API $method $url returned HTTP $status: $RESPONSE"
+}
+
+# api_all PATH — GETs every page of a collection, leaving the combined `data` array in ALL.
+api_all() {
+  local url="$1"
+  ALL='[]'
+  while [ -n "$url" ]; do
+    api GET "$url"
+    ALL=$(jq -c --argjson page "$RESPONSE" '. + $page.data' <<< "$ALL")
+    url=$(jq -r '.links.next // empty' <<< "$RESPONSE")
+  done
+}
+
+in_list() {
+  local needle="$1" item
+  for item in $2; do [ "$item" = "$needle" ] && return 0; done
+  return 1
+}
+
+api GET "/v1/apps?filter[bundleId]=$BUNDLE_ID&fields[apps]=bundleId"
+app_id=$(jq -er --arg bundle "$BUNDLE_ID" \
+  'first(.data[] | select(.attributes.bundleId == $bundle) | .id)' <<< "$RESPONSE") \
+  || fail "No App Store Connect app with bundle ID $BUNDLE_ID (or the API key cannot see it)."
+
+# Reads the app's iOS App Store versions and fails if one is in review or approved but not yet
+# released (App Store Connect then takes no other version). Leaves the editable version, if any, in
+# version_id / version_state / editable_version, preferring one named VERSION, and sets
+# released_before when some version has already been released.
+load_versions() {
+  local id version state
+  api_all "/v1/apps/$app_id/appStoreVersions?filter[platform]=$PLATFORM&fields[appStoreVersions]=versionString,appVersionState,appStoreState&limit=200"
+  version_id=""
+  version_state=""
+  editable_version=""
+  released_before=false
+  while IFS=$'\t' read -r id version state; do
+    [ -n "$id" ] || continue
+    if in_list "$state" "$IN_REVIEW_STATES"; then
+      fail "Version $version is already $state. Remove it from review in App Store Connect first, or wait for the result."
+    fi
+    if in_list "$state" "$APPROVED_STATES"; then
+      fail "Version $version is approved but not released yet ($state). Release it in App Store Connect before submitting another version."
+    fi
+    if in_list "$state" "$RELEASED_STATES"; then
+      released_before=true
+    fi
+    if in_list "$state" "$EDITABLE_STATES"; then
+      # App Store Connect allows one editable version per platform; prefer an exact match anyway.
+      if [ -z "$version_id" ] || [ "$version" = "$VERSION" ]; then
+        version_id="$id"
+        version_state="$state"
+        editable_version="$version"
+      fi
+    fi
+  done < <(jq -r '.[] | [.id, .attributes.versionString,
+    (.attributes.appVersionState // .attributes.appStoreState)] | @tsv' <<< "$ALL")
+}
+
+builds_url="/v1/builds?filter[app]=$app_id&filter[preReleaseVersion.version]=$VERSION&filter[preReleaseVersion.platform]=$PLATFORM&fields[builds]=version,processingState&limit=200"
+
+if [ "$command" = "next-build-number" ]; then
+  # Checked before the build too, so a version stuck in review fails the job in seconds.
+  load_versions
+  api_all "$builds_url"
+  next=$(jq -r '[.[].attributes.version | tonumber? // empty] | (max // 0) + 1' <<< "$ALL")
+  echo "Next build number for $VERSION: $next" >&2
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    echo "build_number=$next" >> "$GITHUB_OUTPUT"
+  else
+    echo "$next"
+  fi
+  exit 0
+fi
+
+# --- submit ---
+: "${BUILD_NUMBER:?BUILD_NUMBER is not set}"
+: "${SUBMIT:?SUBMIT is not set}"
+: "${SOURCE_SHA:?SOURCE_SHA is not set}"
+[[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail "Invalid build number: '$BUILD_NUMBER'."
+[[ "$SUBMIT" == "true" || "$SUBMIT" == "false" ]] || fail "SUBMIT must be true or false."
+[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "Invalid SOURCE_SHA."
+
+# 1. Wait for the uploaded build to show up and finish processing.
+echo "Waiting for build $VERSION ($BUILD_NUMBER) to finish processing..."
+deadline=$(($(date +%s) + PROCESSING_TIMEOUT_SECONDS))
+build_id=""
+while :; do
+  api GET "$builds_url&filter[version]=$BUILD_NUMBER"
+  state=$(jq -r '.data[0].attributes.processingState // "NOT_FOUND"' <<< "$RESPONSE")
+  case "$state" in
+    VALID)
+      build_id=$(jq -er '.data[0].id' <<< "$RESPONSE")
+      break
+      ;;
+    INVALID | FAILED)
+      fail "Build $VERSION ($BUILD_NUMBER) ended processing as $state; App Store Connect emails the reason."
+      ;;
+  esac
+  [ "$(date +%s)" -lt "$deadline" ] \
+    || fail "Build $VERSION ($BUILD_NUMBER) is still $state after $((PROCESSING_TIMEOUT_SECONDS / 60)) minutes. Once it is processed, attach it in App Store Connect."
+  echo "  $state; checking again in ${POLL_INTERVAL_SECONDS}s."
+  sleep "$POLL_INTERVAL_SECONDS"
+done
+echo "Build $VERSION ($BUILD_NUMBER) is processed."
+
+# 2. Pick (or create) the App Store version.
+load_versions
+
+if [ -z "$version_id" ]; then
+  echo "Creating App Store version $VERSION."
+  api POST /v1/appStoreVersions "$(jq -cn --arg app "$app_id" --arg version "$VERSION" --arg platform "$PLATFORM" \
+    '{data: {type: "appStoreVersions",
+      attributes: {platform: $platform, versionString: $version, releaseType: "MANUAL"},
+      relationships: {app: {data: {type: "apps", id: $app}}}}}')"
+  version_id=$(jq -er '.data.id' <<< "$RESPONSE")
+else
+  if [ "$editable_version" != "$VERSION" ]; then
+    echo "Renaming the editable App Store version $editable_version ($version_state) to $VERSION."
+  else
+    echo "Using App Store version $VERSION ($version_state)."
+  fi
+  api PATCH "/v1/appStoreVersions/$version_id" "$(jq -cn --arg id "$version_id" --arg version "$VERSION" \
+    '{data: {type: "appStoreVersions", id: $id, attributes: {versionString: $version, releaseType: "MANUAL"}}}')"
+fi
+
+# 3. Attach the build, replacing whichever one was attached before.
+api PATCH "/v1/appStoreVersions/$version_id/relationships/build" \
+  "$(jq -cn --arg id "$build_id" '{data: {type: "builds", id: $id}}')"
+echo "Attached build $BUILD_NUMBER to version $VERSION."
+
+# 4. "What's New" — App Store Connect has no such field for an app's first version.
+if [ "$released_before" = "true" ]; then
+  : "${GH_TOKEN:?GH_TOKEN is not set (needed for the release notes)}"
+  : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set (needed for the release notes)}"
+  # Same formatting as publish-play.yml's "Prepare Play release notes" step (and release.yml's),
+  # duplicated for the same "no reusable-workflow setup yet" reason; keep them in sync by hand. The
+  # body comes from generate-notes rather than the GitHub Release, which is only cut after approval.
+  whats_new=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+    -f tag_name="v$VERSION" -f target_commitish="$SOURCE_SHA" --jq .body | awk '
+      { line = $0; gsub(/\r$/, "", line) }
+      line ~ /^## / { next }
+      line ~ /^\*\*Full Changelog\*\*/ { next }
+      line ~ /^$/ { next }
+      line ~ /^### / { sub(/^### /, "", line); print line; next }
+      line ~ /^- \*\*/ {
+        rest = line
+        sub(/^- \*\*/, "", rest)
+        sub(/\*\*.*$/, "", rest)
+        print "- " rest
+      }
+    ' | awk -v limit="$WHATS_NEW_LIMIT" '
+      { len += length($0) + (NR > 1 ? 1 : 0) }
+      len <= limit { print; next }
+      { exit }
+    ')
+  if [ -z "$whats_new" ]; then
+    whats_new="See the release notes: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+  fi
+  # Every localization gets the same English text, as on Google Play: leaving one out would carry
+  # over the previous version's text there.
+  api_all "/v1/appStoreVersions/$version_id/appStoreVersionLocalizations?fields[appStoreVersionLocalizations]=locale"
+  while IFS=$'\t' read -r localization_id locale; do
+    [ -n "$localization_id" ] || continue
+    api PATCH "/v1/appStoreVersionLocalizations/$localization_id" \
+      "$(jq -cn --arg id "$localization_id" --arg text "$whats_new" \
+        '{data: {type: "appStoreVersionLocalizations", id: $id, attributes: {whatsNew: $text}}}')"
+    echo "Set What's New for $locale."
+  done < <(jq -r '.[] | [.id, .attributes.locale] | @tsv' <<< "$ALL")
+else
+  echo "No version has been released yet, so What's New is left out (App Store Connect has none for a first version)."
+fi
+
+# 5. Submit for review.
+submitted=false
+if [ "$SUBMIT" = "true" ]; then
+  api_all "/v1/reviewSubmissions?filter[app]=$app_id&filter[platform]=$PLATFORM&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES&limit=200"
+  submission=$(jq -c 'first(.[]) // empty' <<< "$ALL")
+  if [ -z "$submission" ]; then
+    api POST /v1/reviewSubmissions "$(jq -cn --arg app "$app_id" --arg platform "$PLATFORM" \
+      '{data: {type: "reviewSubmissions", attributes: {platform: $platform},
+        relationships: {app: {data: {type: "apps", id: $app}}}}}')"
+    submission_id=$(jq -er '.data.id' <<< "$RESPONSE")
+    submission_state="READY_FOR_REVIEW"
+    echo "Created review submission $submission_id."
+  else
+    submission_id=$(jq -er '.id' <<< "$submission")
+    submission_state=$(jq -er '.attributes.state' <<< "$submission")
+    echo "Using review submission $submission_id ($submission_state)."
+  fi
+
+  api_all "/v1/reviewSubmissions/$submission_id/items?include=appStoreVersion&limit=200"
+  has_item=$(jq -r --arg id "$version_id" \
+    'any(.[]; .relationships.appStoreVersion.data.id? == $id)' <<< "$ALL")
+  if [ "$has_item" != "true" ]; then
+    # A submission with unresolved issues takes no new items; App Store Connect wants its rejected
+    # items fixed and resubmitted, or removed, first.
+    [ "$submission_state" != "UNRESOLVED_ISSUES" ] \
+      || fail "Review submission $submission_id has unresolved issues and does not contain version $VERSION. Resolve or remove its items in App Store Connect, then run again."
+    api POST /v1/reviewSubmissionItems "$(jq -cn --arg submission "$submission_id" --arg version "$version_id" \
+      '{data: {type: "reviewSubmissionItems", relationships: {
+        reviewSubmission: {data: {type: "reviewSubmissions", id: $submission}},
+        appStoreVersion: {data: {type: "appStoreVersions", id: $version}}}}}')"
+    echo "Added version $VERSION to the review submission."
+  fi
+
+  api PATCH "/v1/reviewSubmissions/$submission_id" "$(jq -cn --arg id "$submission_id" \
+    '{data: {type: "reviewSubmissions", id: $id, attributes: {submitted: true}}}')"
+  submitted=true
+  echo "Submitted version $VERSION ($BUILD_NUMBER) for review."
+fi
+
+# 6. Job summary.
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "## App Store: Keryx $VERSION ($BUILD_NUMBER)"
+    echo
+    echo "- Built from: \`$SOURCE_SHA\`"
+    if [ "$submitted" = "true" ]; then
+      echo "- Submitted for review."
+    else
+      echo "- Build attached, **not submitted**: add the version for review in App Store Connect."
+    fi
+    echo
+    echo "Once approved, tag that commit as \`v$VERSION\` and publish the GitHub Release, then release the version in App Store Connect (it is set to a manual release)."
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
