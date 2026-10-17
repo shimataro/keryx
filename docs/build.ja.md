@@ -887,9 +887,10 @@ WebView ライブラリが `linux-aarch64` バイナリを同梱していない�
 コンテンツは外部で開くボタンになる）。
 
 **ワークフローの lint。** 本節で扱うものの大半（`release.yml`、`publish-play.yml`、`publish-app-store.yml`、
-`.github/scripts/`）はリリースやストアへの提出のときにしか動かないため、`.github/workflows/lint-workflows.yml` が `.github/**` に触れる push の
-たびに静的検査する: `.github/scripts/*.sh` に対する `shellcheck`（`ubuntu-latest` に同梱）と、全
-ワークフローに対する `actionlint` — 未定義の `inputs`/`matrix`/`needs` 参照、action に存在しない入力、
+`.github/scripts/`）はリリースやストアへの提出のときにしか動かないため、
+`.github/workflows/lint-workflows.yml` が `.github/**` に触れる push のたびに静的検査する:
+`.github/scripts/*.sh` に対する `shellcheck`（`ubuntu-latest` に同梱）と、全ワークフローに対する
+`actionlint` — 未定義の `inputs`/`matrix`/`needs` 参照、action に存在しない入力、
 式の型エラー、そして各 `run:` ブロックの shellcheck 検査。ただし `steps.<id>.outputs.<name>` の綴り
 誤りは検出できない（ステップの出力は実行時に `$GITHUB_OUTPUT` 経由で書かれるため）。actionlint は
 ランナーに同梱されていないので、ワークフローはバージョン固定のリリース tarball をダウンロードし、
