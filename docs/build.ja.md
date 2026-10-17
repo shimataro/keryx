@@ -1182,7 +1182,7 @@ Compose 版はもうリリースしない。インストール済みの Compose 
 1. 証明書を使い捨てのキーチェーンに取り込み、プロファイルと公証用キーをランナーの一時ディレクトリに書く
    （どれも最後に削除する）。スクリプトはプロファイルを Xcode の provisioning profile ディレクトリにも
    （`<uuid>.provisionprofile` として）入れ、終了時に削除する（同じものが元からあった場合は残す）。公証用キーは、
-   base64 の本体から組み立て直し（`prepare-notary-key.sh`）、秘密鍵として読めることを確認する。
+   base64 の本体から組み立て直し（`prepare-api-key.sh`）、秘密鍵として読めることを確認する。
 2. `package-macos-swiftui.sh` を実行する。まず Apple の公証サービスに提出履歴を問い合わせる——読み取りだけの呼び出しで、
    キー、Key ID、Issuer ID のどれかが誤っていると、ビルドの後ではなく数秒で失敗する。そのあと、Xcode でアプリを archive・export し（Release、arm64 のみ——共有フレームワークに
    Intel スライスが無いため）、署名（Hardened Runtime、Team ID、Sparkle の補助ツール）を検証し、アプリを公証して staple し、

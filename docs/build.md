@@ -1173,7 +1173,7 @@ the credentials):
    into the runner's temp directory (all removed at the end). The script also installs the profile
    into Xcode's provisioning-profile directory (as `<uuid>.provisionprofile`) and removes it
    afterwards, unless the same profile was already there. The notarization key is rebuilt from its
-   base64 body (`prepare-notary-key.sh`) and checked to parse as a private key.
+   base64 body (`prepare-api-key.sh`) and checked to parse as a private key.
 2. Runs `package-macos-swiftui.sh`. It first asks Apple's notary service for the submission history —
    a read-only call that fails within seconds if the key, its key id or the issuer id is wrong, rather
    than after the build. Then it archives and exports the app with Xcode (Release, arm64 only —
