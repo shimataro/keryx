@@ -1,25 +1,31 @@
 import Testing
 
-/// `RefreshStatus.from` picks what the iOS toolbar's status area shows.
+/// `RefreshStatus` decides what the iOS toolbar's status area says about a feed refresh.
 @Suite
 struct RefreshStatusTests {
     @Test
-    func nothingWhileIdle() {
-        #expect(RefreshStatus.from(refreshIndicatorShown: false, syncing: false) == nil)
+    func aRefreshOrACycleIsChecking() {
+        #expect(RefreshStatus.isChecking(feedRefreshing: true, refreshCycleRunning: false))
+        #expect(RefreshStatus.isChecking(feedRefreshing: false, refreshCycleRunning: true))
     }
 
     @Test
-    func refreshingWhileRefreshing() {
-        #expect(RefreshStatus.from(refreshIndicatorShown: true, syncing: false) == .refreshing)
+    func idleIsNotChecking() {
+        #expect(!RefreshStatus.isChecking(feedRefreshing: false, refreshCycleRunning: false))
     }
 
     @Test
-    func syncingWhileSyncing() {
-        #expect(RefreshStatus.from(refreshIndicatorShown: false, syncing: true) == .syncing)
+    func newArticlesAreCounted() {
+        #expect(RefreshStatus.result(newArticleCount: 3, allFailed: false) == .newArticles(3))
     }
 
     @Test
-    func refreshWinsWhenBothHold() {
-        #expect(RefreshStatus.from(refreshIndicatorShown: true, syncing: true) == .refreshing)
+    func nothingNewSaysSo() {
+        #expect(RefreshStatus.result(newArticleCount: 0, allFailed: false) == .noNewArticles)
+    }
+
+    @Test
+    func anAllFailedRefreshIsAFailure() {
+        #expect(RefreshStatus.result(newArticleCount: 0, allFailed: true) == .refreshFailed)
     }
 }

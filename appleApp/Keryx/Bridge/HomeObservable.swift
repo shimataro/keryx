@@ -146,8 +146,8 @@ final class HomeObservable: ObservableAssignment {
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast: TransientToastState
-    /// The toolbar status area's refresh/sync text, fed from `activity` and held up long enough to
-    /// notice (`HeldRefreshStatus`). iOS only — macOS keeps its spinning Refresh button.
+    /// The toolbar status area's refresh status — "checking", then the result — fed from `activity`
+    /// and `refreshOutcomes` (`HeldRefreshStatus`). iOS only — macOS keeps its spinning Refresh button.
     let refreshStatus = HeldRefreshStatus()
     #endif
 
@@ -322,11 +322,12 @@ final class HomeObservable: ObservableAssignment {
         async let t31: () = observeCanSyncNow()
         async let t32: () = observeSyncDisabledByAuth()
         async let t33: () = observeSelectedArticleShownUnread()
+        async let t34: () = observeRefreshOutcomes()
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t26, t27, t28, t29, t30,
-            t31, t32, t33
+            t31, t32, t33, t34
         )
     }
 
@@ -609,9 +610,22 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.activity {
             assignIfChanged(\.activity, v)
             #if os(iOS)
-            refreshStatus.update(RefreshStatus.from(refreshIndicatorShown: v.refreshIndicatorShown, syncing: v.syncing))
+            refreshStatus.updateChecking(
+                RefreshStatus.isChecking(feedRefreshing: v.feedRefreshing, refreshCycleRunning: v.refreshCycleRunning)
+            )
             #endif
         }
+    }
+
+    /// Each finished feed refresh's result, for the toolbar status (`HeldRefreshStatus`). iOS only.
+    private func observeRefreshOutcomes() async {
+        #if os(iOS)
+        for await outcome in viewModel.refreshOutcomes {
+            refreshStatus.showResult(
+                RefreshStatus.result(newArticleCount: Int(outcome.newArticleCount), allFailed: outcome.allFailed)
+            )
+        }
+        #endif
     }
 
     /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a

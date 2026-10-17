@@ -1,18 +1,24 @@
-/// What the iOS toolbar's status area says while background work runs (`RefreshStatusLabel`): a
-/// feed refresh or a cloud sync, whichever route started it — the pull, ⌘R, startup maintenance, a
-/// background refresh or an automatic sync. Nothing while idle, so the area stays empty and the
-/// bottom toolbar disappears (`external-spec.md` §9). Kept free of SwiftUI so the standalone
-/// `KeryxTests` bundle can compile it directly.
-enum RefreshStatus {
-    case refreshing
-    case syncing
+/// What the iOS toolbar's status area says about a feed refresh (`RefreshStatusLabel`): that new
+/// articles are being checked for — whatever started it: the pull, ⌘R, startup maintenance, a
+/// background refresh — and then how the check went. A sync on its own never shows here; the sync
+/// button's spinning icon is its feedback (`external-spec.md` §9). Kept free of SwiftUI so the
+/// standalone `KeryxTests` bundle can compile it directly.
+enum RefreshStatus: Equatable {
+    case checking
+    case newArticles(Int)
+    case noNewArticles
+    case refreshFailed
 
-    /// The status for `ActivitySnapshot.refreshIndicatorShown` / `.syncing` — the same two flags the
-    /// toolbar's own Refresh / Sync buttons spin on, which never both hold for the same phase. A
-    /// refresh wins should both ever be true.
-    static func from(refreshIndicatorShown: Bool, syncing: Bool) -> RefreshStatus? {
-        if refreshIndicatorShown { return .refreshing }
-        if syncing { return .syncing }
-        return nil
+    /// Whether a check is in flight, from `ActivitySnapshot`: a feed refresh, or a refresh-then-sync
+    /// cycle — whose sync still counts as checking, as the pull indicator stays up through it too —
+    /// but never a sync on its own.
+    static func isChecking(feedRefreshing: Bool, refreshCycleRunning: Bool) -> Bool {
+        feedRefreshing || refreshCycleRunning
+    }
+
+    /// The result a finished check (a shared `RefreshOutcome`) shows.
+    static func result(newArticleCount: Int, allFailed: Bool) -> RefreshStatus {
+        if allFailed { return .refreshFailed }
+        return newArticleCount > 0 ? .newArticles(newArticleCount) : .noNewArticles
     }
 }

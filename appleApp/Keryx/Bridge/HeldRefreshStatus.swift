@@ -1,64 +1,70 @@
 import Foundation
 import Observation
 
-/// How long the iOS toolbar's refresh status stays up at the least — named in this one place.
+/// How long the iOS toolbar's refresh status keeps each state — named in this one place.
 enum RefreshStatusTiming {
-    /// As long as the URL-copy toast (`CopyConfirmationTiming.toast`): a refresh with nothing new
-    /// finishes in well under a second, too quickly to be seen at all.
-    static let minimum: Duration = .seconds(2)
+    /// How long a finished check's result stays up — a little longer than the URL-copy toast
+    /// (`CopyConfirmationTiming.toast`), since it can be a sentence to read.
+    static let result: Duration = .milliseconds(2500)
+    /// How long "checking" waits, once the check has ended, for its result to arrive. The shared
+    /// code reports the result only after the activity has gone idle, so without this the status
+    /// would vanish for a moment between the two.
+    static let resultGrace: Duration = .milliseconds(500)
 }
 
-/// The refresh status the iOS toolbar shows (`RefreshStatusToolbarItem`), held on screen for at
-/// least `minimum` once it appears so a refresh that ends at once is still noticed — the same idea
-/// as `PullRefreshHold` for the pull indicator. Work that runs longer clears as soon as it ends.
-/// One instance (`HomeObservable.refreshStatus`) feeds both columns, so they never disagree.
+/// The refresh status the iOS toolbar shows (`RefreshStatusToolbarItem`): "checking" while a check
+/// runs, then its result for a moment. One instance (`HomeObservable.refreshStatus`) feeds both
+/// columns, so they never disagree.
 @MainActor
 @Observable
 final class HeldRefreshStatus {
     private(set) var status: RefreshStatus?
-    @ObservationIgnored private var shownSince: ContinuousClock.Instant?
     @ObservationIgnored private var clearTask: Task<Void, Never>?
-    @ObservationIgnored private let minimum: Duration
-    @ObservationIgnored private let now: () -> ContinuousClock.Instant
+    @ObservationIgnored private let resultDuration: Duration
+    @ObservationIgnored private let resultGrace: Duration
 
-    init(
-        minimum: Duration = RefreshStatusTiming.minimum,
-        now: @escaping () -> ContinuousClock.Instant = { ContinuousClock.now }
-    ) {
-        self.minimum = minimum
-        self.now = now
+    init(resultDuration: Duration = RefreshStatusTiming.result, resultGrace: Duration = RefreshStatusTiming.resultGrace) {
+        self.resultDuration = resultDuration
+        self.resultGrace = resultGrace
     }
 
-    /// Takes the latest status straight from the activity. A status shows at once (a change of
-    /// phase only changes the text, keeping the original start); `nil` clears it once `minimum` has
-    /// passed since it first showed, returning the task that does so when that is still ahead.
+    /// Takes whether a check is in flight (`RefreshStatus.isChecking`). A check that starts replaces
+    /// whatever is shown; one that ends leaves "checking" up for `resultGrace`, for its result to
+    /// take over. A result on screen is left alone when the activity goes idle. Returns the task
+    /// that clears the status, when one was scheduled.
     @discardableResult
-    func update(_ raw: RefreshStatus?) -> Task<Void, Never>? {
-        if let raw {
-            clearTask?.cancel()
-            clearTask = nil
-            if shownSince == nil { shownSince = now() }
-            status = raw
+    func updateChecking(_ checking: Bool) -> Task<Void, Never>? {
+        if checking {
+            cancelClear()
+            status = .checking
             return nil
         }
-        guard let shownSince, clearTask == nil else { return clearTask }
-        let wait = PullRefreshHold.remaining(after: now() - shownSince, minimum: minimum)
-        guard wait > .zero else {
-            clear()
-            return nil
-        }
+        guard status == .checking, clearTask == nil else { return nil }
+        return scheduleClear(after: resultGrace)
+    }
+
+    /// Shows a finished check's result (`RefreshStatus.result`) for `resultDuration`, returning the
+    /// task that then clears it.
+    @discardableResult
+    func showResult(_ result: RefreshStatus) -> Task<Void, Never> {
+        cancelClear()
+        status = result
+        return scheduleClear(after: resultDuration)
+    }
+
+    private func scheduleClear(after delay: Duration) -> Task<Void, Never> {
         let task = Task { [weak self] in
-            try? await Task.sleep(for: wait)
-            guard !Task.isCancelled else { return }
-            self?.clear()
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.status = nil
+            self.clearTask = nil
         }
         clearTask = task
         return task
     }
 
-    private func clear() {
-        status = nil
-        shownSince = nil
+    private func cancelClear() {
+        clearTask?.cancel()
         clearTask = nil
     }
 }
