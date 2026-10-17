@@ -255,6 +255,8 @@ struct ArticleListView: View {
         // The title feeds the next column's back button and its long-press menu; the heading is
         // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
         ToolbarItem(placement: .principal) { Color.clear }
+        // The same status as the sidebar's, for the column an iPhone mostly shows.
+        RefreshStatusToolbarItem(home: home)
         #endif
         // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
         // the overflow menu it collapses into at a narrow width takes each row's title from it.
