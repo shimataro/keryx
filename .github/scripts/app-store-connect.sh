@@ -86,19 +86,23 @@ ALL=""
 
 # Signs a new token with altool (ES256, audience appstoreconnect-v1) when the current one is
 # missing or old. Called at the top level only (never inside $(...)), so the token survives
-# between requests.
+# between requests. altool prints the token on stderr, not stdout (Xcode 26), so both are read,
+# and neither is ever echoed once the token may be in it.
 refresh_token() {
-  local now output
+  local now
   now=$(date +%s)
   if [ -n "$token" ] && [ $((now - token_issued_at)) -lt "$TOKEN_MAX_AGE_SECONDS" ]; then
     return
   fi
-  if ! output=$(xcrun altool --generate-jwt --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" \
-    --p8-file-path "$ASC_KEY_PATH" 2> "$work/altool.err"); then
+  if ! (umask 077 && xcrun altool --generate-jwt --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" \
+    --p8-file-path "$ASC_KEY_PATH" > "$work/altool.out" 2> "$work/altool.err"); then
     cat "$work/altool.err" >&2
+    rm -f "$work/altool.out" "$work/altool.err"
     fail "altool could not sign an App Store Connect token with the API key."
   fi
-  token=$(grep -Eo 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+' <<< "$output" | head -n 1) || true
+  token=$(cat "$work/altool.out" "$work/altool.err" \
+    | grep -Eo 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+' | head -n 1) || true
+  rm -f "$work/altool.out" "$work/altool.err"
   [ -n "$token" ] || fail "altool printed no App Store Connect token."
   echo "::add-mask::$token"
   token_issued_at=$now
