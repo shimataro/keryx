@@ -16,16 +16,16 @@ struct RefreshStatusTests {
 
     @Test
     func newArticlesAreCounted() {
-        #expect(RefreshStatus.result(newArticleCount: 3, allFailed: false) == .newArticles(3))
+        #expect(RefreshStatus.result(newArticleCount: 3, unreachable: false) == .newArticles(3))
     }
 
     @Test
     func nothingNewSaysSo() {
-        #expect(RefreshStatus.result(newArticleCount: 0, allFailed: false) == .noNewArticles)
+        #expect(RefreshStatus.result(newArticleCount: 0, unreachable: false) == .noNewArticles)
     }
 
     @Test
-    func anAllFailedRefreshIsAFailure() {
-        #expect(RefreshStatus.result(newArticleCount: 0, allFailed: true) == .refreshFailed)
+    func anUnreachableRefreshIsAFailure() {
+        #expect(RefreshStatus.result(newArticleCount: 0, unreachable: true) == .refreshFailed)
     }
 }

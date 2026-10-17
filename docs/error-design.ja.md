@@ -158,7 +158,7 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 | `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く（Android ではカテゴリ一覧ではなく、該当カテゴリの画面を直接開く）。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、その理由が認証失敗のとき（`SyncRepository.lastSyncAuthFailed`）は接続済みプロバイダの「同期データをリセット」に代えて**連携し直す**アクションを提示する。`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
-| `ShowInfoDialog(detail)` | フィード更新で、対象のフィードがすべて失敗したとき（`RefreshCycleRunner` から `reportRefreshOutcome` 経由）——多くはオフライン。同じ内容はまとめるので、失敗が続いても 1 件のまま | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
+| `ShowInfoDialog(detail)` | フィード更新で、対象のどのフィードにも接続できなかったとき——すべてがタイムアウトしたか、応答をまったく得られなかった（`RefreshCycleRunner` から `reportRefreshOutcome` の `isUnreachable` 経由）——多くはオフライン。エラーで応答したフィード（HTTP ステータス、404/410、読めない内容）は数えない: 接続を確認しても解決せず、フィード一覧がすでに印を付けているため。同じ内容はまとめるので、失敗が続いても 1 件のまま | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンが平文ファイルに残ったとき（`CloudSession`）——`TokenStorage.save()` が `TokenSaveOutcome.PLAINTEXT_FILE` を返した場合。OS のセキュアな認証情報ストアに到達できなかったか、（Android で）セキュアな書き込みは成功したが古い平文のコピーを削除できなかった場合 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンをどこにも保存できなかったとき（`CloudSession`）——セキュアストアにも平文フォールバックファイルにも書き込めず `TokenSaveOutcome.NOT_PERSISTED` が返った場合。再起動後に再接続が必要 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
@@ -189,8 +189,9 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 なく、次回のスケジュール済み同期試行を指す。
 
 \*\*\* 失敗したフィードごとに 1 件ずつ入るわけではない（失敗中のフィードはフィード一覧で示す）。ベルに入るのは、
-1 回の更新で対象のフィードがすべて失敗したときの `NotificationText.RefreshFailed` の警告 1 件だけで（上記の
-「次のアクション」の表を参照）、同じ内容はまとめられる。一部のフィードが成功した更新では何も追加しない。
+1 回の更新で対象のどのフィードにも接続できなかったときの `NotificationText.RefreshFailed` の警告 1 件だけで（上記の
+「次のアクション」の表を参照）、同じ内容はまとめられる。いずれかのフィードが応答した更新（成功でもエラーでも）では
+何も追加しない。
 
 ## 定数（`core/Constants.kt`、抜粋）
 

@@ -456,7 +456,8 @@ in both the sidebar and the article list. While new articles are being checked f
 it (a pull, ⌘R, the refresh at launch, a background refresh), it shows a small spinner with "Checking
 for new articles…", and keeps it through the cloud sync that follows, as the pull's own indicator
 does. Once that is done it shows the result for about two and a half seconds, without the spinner:
-"N new articles", "No new articles", or — when every feed it covered failed — "Couldn't check for
+"N new articles", "No new articles", or — when none of the feeds it covered could be reached (each
+timed out or got no response, most likely because the device is offline) — "Couldn't check for
 new articles. Check your connection or try again later." behind a warning symbol, so a failure reads as one at
 a glance without relying on its color. That failure also stays in the notification center, whose
 entry explains what to do. A sync on its own (the sync button, or the automatic sync after reading)

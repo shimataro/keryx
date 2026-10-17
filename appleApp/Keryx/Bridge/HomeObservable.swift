@@ -626,7 +626,7 @@ final class HomeObservable: ObservableAssignment {
         #if os(iOS)
         for await outcome in viewModel.refreshOutcomes {
             refreshStatus.showResult(
-                RefreshStatus.result(newArticleCount: Int(outcome.newArticleCount), allFailed: outcome.allFailed)
+                RefreshStatus.result(newArticleCount: Int(outcome.newArticleCount), unreachable: outcome.unreachable)
             )
         }
         #endif

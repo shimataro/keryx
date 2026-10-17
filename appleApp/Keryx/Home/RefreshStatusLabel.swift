@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The toolbar status area's text about a feed refresh, as Mail's "Checking for Mail…" and "Updated
 /// Just Now": a small spinner and "Checking for new articles…" while it runs, then its result with no
-/// spinner — or, when every feed failed, a warning symbol, so a failure reads as one at a glance
+/// spinner — or, when no feed could be reached, a warning symbol, so a failure reads as one at a glance
 /// without relying on its color alone. VoiceOver reads it as a plain label and is not told when it
 /// changes, so background work never interrupts what is being read.
 struct RefreshStatusLabel: View {

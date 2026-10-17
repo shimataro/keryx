@@ -40,6 +40,7 @@ import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.singleProviderCloudSession
+import java.io.IOException
 import java.util.Collections
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -90,7 +91,9 @@ class RefreshCycleRunnerTest {
         db: KeryxDatabase,
         connected: Boolean = true,
         fetchGate: CompletableDeferred<Unit>? = null,
-        fetchStatus: HttpStatusCode = HttpStatusCode.OK,
+        /** The status each feed URL answers with, or `null` for a request that gets no response. */
+        fetchStatus: (url: String) -> HttpStatusCode? = { HttpStatusCode.OK },
+        fetchBody: String = RSS,
         notifySink: OsNotificationSink? = null,
     ): Fixture {
         val clock = Clock { 1000L }
@@ -101,14 +104,15 @@ class RefreshCycleRunnerTest {
             httpClient { request ->
                 log += "fetch:${request.url}"
                 fetchGate?.await()
-                respond(RSS, fetchStatus)
+                val status = fetchStatus(request.url.toString()) ?: throw IOException("unreachable")
+                respond(fetchBody, status)
             },
         )
         val favicons = FaviconResolver(httpClient { respond("", HttpStatusCode.NotFound) })
         val articleRepository = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, clock, Dispatchers.Unconfined)
         val feedRepository = FeedRepository(
             db, fetcher, favicons, articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
-            NotificationCenter(), clock, Dispatchers.Unconfined,
+            notificationCenter, clock, Dispatchers.Unconfined,
         )
         val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { scope -> cleanups += { scope.cancel() } }
         val syncRepository = SyncRepository(
@@ -314,14 +318,14 @@ class RefreshCycleRunnerTest {
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
         collector.cancel()
 
-        assertEquals(listOf(RefreshOutcome(newArticleCount = 2, allFailed = false) to true), seen.toList())
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 2, unreachable = false) to true), seen.toList())
         assertTrue(f.notificationCenter.items.value.isEmpty())
     }
 
     @Test
-    fun anAllFailedRefreshReportsItAndWarnsOnceHoweverOftenItRecurs() = withDb { driver, db ->
+    fun anUnreachableRefreshReportsItAndWarnsOnceHoweverOftenItRecurs() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, fetchStatus = HttpStatusCode.ServiceUnavailable)
+        val f = fixture(driver, db, fetchStatus = { null })
         val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
         val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
 
@@ -329,7 +333,7 @@ class RefreshCycleRunnerTest {
         f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
         collector.cancel()
 
-        assertEquals(List(2) { RefreshOutcome(newArticleCount = 0, allFailed = true) }, seen.toList())
+        assertEquals(List(2) { RefreshOutcome(newArticleCount = 0, unreachable = true) }, seen.toList())
         val warning = f.notificationCenter.items.value.single()
         assertEquals(AppNotificationLevel.WARNING, warning.level)
         assertEquals(NotificationText.RefreshFailed, warning.text)
@@ -346,7 +350,7 @@ class RefreshCycleRunnerTest {
         f.runner.run(trigger = SyncTrigger.AUTOMATIC) { _, block -> runCatching { block() } }
         collector.cancel()
 
-        assertEquals(listOf(RefreshOutcome(newArticleCount = 1, allFailed = false)), seen.toList())
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 1, unreachable = false)), seen.toList())
     }
 
     @Test
@@ -373,7 +377,66 @@ class RefreshCycleRunnerTest {
         f.runner.refreshFeed(db.feedsQueries.getById("f1").executeAsOne())
         collector.cancel()
 
-        assertEquals(listOf(RefreshOutcome(newArticleCount = 1, allFailed = false)), seen.toList())
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 1, unreachable = false)), seen.toList())
         assertEquals(listOf("fetch:https://ex.com/f1"), f.log.toList(), "a single feed's refresh neither notifies nor syncs")
+    }
+
+    @Test
+    fun aRefreshWhoseFeedsAllAnsweredWithErrorsIsNotUnreachable() = withDb { driver, db ->
+        db.insertFeed("gone", url = "https://ex.com/gone")
+        db.insertFeed("missing", url = "https://ex.com/missing")
+        db.insertFeed("broken", url = "https://ex.com/broken")
+        val statuses = mapOf(
+            "https://ex.com/gone" to HttpStatusCode.Gone,
+            "https://ex.com/missing" to HttpStatusCode.NotFound,
+            "https://ex.com/broken" to HttpStatusCode.ServiceUnavailable,
+        )
+        val f = fixture(driver, db, fetchStatus = { statuses.getValue(it) })
+        val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
+        val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+        collector.cancel()
+
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 0, unreachable = false)), seen.toList())
+        assertTrue(
+            f.notificationCenter.items.value.none { it.text == NotificationText.RefreshFailed },
+            "a feed that answered is not a connection problem: ${f.notificationCenter.items.value}",
+        )
+    }
+
+    @Test
+    fun aSingleGoneFeedOnlyRaisesItsOwnNotification() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, fetchStatus = { HttpStatusCode.Gone })
+
+        f.runner.refreshFeed(db.feedsQueries.getById("f1").executeAsOne())
+
+        assertIs<NotificationText.FeedGone>(f.notificationCenter.items.value.single().text)
+    }
+
+    @Test
+    fun anUnparsableFeedIsNotUnreachable() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, fetchBody = "not a feed")
+        val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
+        val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
+
+        f.runner.refreshFeed(db.feedsQueries.getById("f1").executeAsOne())
+        collector.cancel()
+
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 0, unreachable = false)), seen.toList())
+        assertTrue(f.notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun anUnreachableFeedAlongsideOneThatAnsweredIsNotUnreachable() = withDb { driver, db ->
+        db.insertFeed("down", url = "https://ex.com/down")
+        db.insertFeed("missing", url = "https://ex.com/missing")
+        val f = fixture(driver, db, fetchStatus = { if (it.endsWith("missing")) HttpStatusCode.NotFound else null })
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+
+        assertTrue(f.notificationCenter.items.value.isEmpty())
     }
 }

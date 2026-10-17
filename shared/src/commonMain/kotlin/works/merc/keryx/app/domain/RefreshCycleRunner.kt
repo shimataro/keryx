@@ -16,7 +16,7 @@ import works.merc.keryx.app.data.local.db.Feeds
  * busy for anything consulting [ActivitySnapshot.idle]. The sync only runs while a cloud provider
  * is connected ([CloudSession.isConnected]). Once a run's activity tracking has ended, its refresh is
  * reported through [reportRefreshOutcome] — the outcome a UI shows, and the notification-center
- * warning when every feed failed.
+ * warning when no feed could be reached ([isUnreachable]).
  *
  * The runner does no dispatcher switching of its own: it runs in the caller's context, so a caller
  * on the UI thread must move it off (the refresh, the sync, and [CloudSession.isConnected] all do

@@ -17,8 +17,8 @@ enum RefreshStatus: Equatable {
     }
 
     /// The result a finished check (a shared `RefreshOutcome`) shows.
-    static func result(newArticleCount: Int, allFailed: Bool) -> RefreshStatus {
-        if allFailed { return .refreshFailed }
+    static func result(newArticleCount: Int, unreachable: Bool) -> RefreshStatus {
+        if unreachable { return .refreshFailed }
         return newArticleCount > 0 ? .newArticles(newArticleCount) : .noNewArticles
     }
 }

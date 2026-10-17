@@ -4,24 +4,43 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FeedFetchException
+import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.isErr
+import works.merc.keryx.app.core.errorOrNull
 import works.merc.keryx.app.core.valueOrNull
 
 /**
  * How a finished feed refresh went, as data for a UI to word: how many new articles it fetched, and
- * whether every feed it covered failed. Emitted through [ActivityCenter.refreshOutcomes].
+ * whether it could reach none of the feeds it covered ([isUnreachable]). Emitted through
+ * [ActivityCenter.refreshOutcomes].
  */
-data class RefreshOutcome(val newArticleCount: Int, val allFailed: Boolean)
+data class RefreshOutcome(val newArticleCount: Int, val unreachable: Boolean)
 
 /** The new-article total of a refresh's per-feed [results]; a failed feed counts as none. */
 fun newArticleCount(results: Map<String, Result<Int>>): Int = results.values.sumOf { it.valueOrNull ?: 0 }
 
 /**
- * Reports a finished refresh: an all-failed refresh becomes a (coalesced) notification-center
- * warning whose next action explains what to do, and every refresh that covered at least one feed
+ * True when every feed in [results] failed without reaching its server — a timeout, or a request that
+ * got no response at all ([FeedFetchException.noResponse]): most likely the device is offline. A feed
+ * that answered with an error (an HTTP status, 404/410, an unreadable body) is not counted as
+ * unreachable, since checking the connection would not help; the feed list flags it instead, and a
+ * 410 has a notification of its own.
+ */
+fun isUnreachable(results: Map<String, Result<Int>>): Boolean =
+    results.isNotEmpty() && results.values.all { result ->
+        when (val e = result.errorOrNull) {
+            is FeedTimeoutException -> true
+            is FeedFetchException -> e.noResponse
+            else -> false
+        }
+    }
+
+/**
+ * Reports a finished refresh: an unreachable one ([isUnreachable]) becomes a (coalesced)
+ * notification-center warning whose next action explains what to do, and every refresh that covered at least one feed
  * becomes a [RefreshOutcome] on [ActivityCenter.refreshOutcomes]. The one place both are decided, so
  * every refresh route (the cycle runner's refresh-then-sync, a single feed's refresh) reports alike.
  *
@@ -35,8 +54,8 @@ internal suspend fun reportRefreshOutcome(
     clock: Clock,
 ) {
     if (results.isEmpty()) return
-    val allFailed = results.values.all { it.isErr }
-    if (allFailed) {
+    val unreachable = isUnreachable(results)
+    if (unreachable) {
         notificationCenter.addCoalescing(
             AppNotification(
                 id = IdGenerator.newId(),
@@ -47,5 +66,5 @@ internal suspend fun reportRefreshOutcome(
             ),
         )
     }
-    activityCenter.emitRefreshOutcome(RefreshOutcome(newArticleCount(results), allFailed))
+    activityCenter.emitRefreshOutcome(RefreshOutcome(newArticleCount(results), unreachable))
 }
