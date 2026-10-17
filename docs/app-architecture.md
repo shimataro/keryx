@@ -524,6 +524,15 @@ color, so a theme change while an article is already open still repaints it. The
 a no-op: WebView2/WebKit/WebKitGTK already paint their own scrollbar from `color-scheme`, so nothing
 else is needed there.
 
+**`color-scheme` alone is not enough on iOS either.** The iOS reader's `WKWebView` is transparent
+(`isOpaque = false`, so the reader's own background shows through until the first document paints),
+and WebKit then no longer derives the scroll indicator's style from the page, leaving a dark
+indicator over the dark reader. `ArticleWebView.updateUIView` therefore sets
+`scrollView.indicatorStyle` from the in-app theme on every update (`ReaderScrollIndicator` decides
+which: a light indicator for a dark theme, a dark one for a light theme), so a theme change while an
+article is open — and a page the swipe pager reaches — is covered. macOS needs nothing: its
+`WKWebView` draws its scroller from the window's appearance and `color-scheme`.
+
 **The feed body is third-party content, and the document is built to survive it.** A body is
 embedded raw (so its rich markup renders) beneath a `<base href>` at the article's own origin,
 which also lets it reach the source site's own stylesheets — either a `<link rel="stylesheet">` it

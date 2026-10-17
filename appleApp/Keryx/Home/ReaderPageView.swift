@@ -36,7 +36,7 @@ struct ReaderPageView: View {
     private static let rebuildDebounce: Duration = .milliseconds(75)
 
     var body: some View {
-        ArticleWebView(html: document.html)
+        ArticleWebView(html: document.html, isDarkTheme: colorScheme == .dark)
             #if os(iOS)
             // Shows through the WebView until its first document paints (see `ArticleWebView`).
             .background(.background)

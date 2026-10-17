@@ -523,6 +523,15 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 テーマを切り替えても塗り直される。デスクトップ側の `actual` は no-op——WebView2/WebKit/WebKitGTK
 は既に `color-scheme` から自身のスクロールバーを描いているため、他に何もする必要がない。
 
+**iOS でも `color-scheme` だけでは足りない。** iOS のリーダーの `WKWebView` は透明
+（`isOpaque = false`。最初のドキュメントが描画されるまでリーダー自身の背景を見せるため）で、
+その場合 WebKit はスクロールインジケータのスタイルをページから決めなくなり、ダークのリーダー上に
+暗いインジケータが残る。そのため `ArticleWebView.updateUIView` は更新のたびにアプリ内テーマから
+`scrollView.indicatorStyle` を設定する（どちらにするかは `ReaderScrollIndicator` が決め、ダークテーマには
+明るいインジケータ、ライトテーマには暗いインジケータを使う）。これにより、記事を開いたままのテーマ切替や、
+スワイプのページャが到達するページにも反映される。macOS は何もしなくてよい——その `WKWebView` は
+ウィンドウの appearance と `color-scheme` からスクローラを描くため。
+
 **フィード本文はサードパーティのコンテンツであり、文書はそれに耐えるよう組み立てている。** 本文は
 リッチマークアップを活かすため無加工で埋め込まれ、その上に記事自身のオリジンを指す `<base href>` が
 付く。このため本文は配信元サイトのスタイルシートにも到達できてしまう — 本文が持つ
