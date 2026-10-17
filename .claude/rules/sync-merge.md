@@ -1,6 +1,6 @@
 ---
 paths:
-  - "**/DatabaseMerger*.kt"     # the merge runs here, on a dedicated JDBC connection
+  - "**/DatabaseMerger*.kt"     # the merge runs here, on a dedicated connection of its own
   - "**/MergeSql.kt"            # merge SQL statements
   - "**/SyncRepository.kt"      # download → merge → snapshot → upload orchestration
   - "**/DatabaseSnapshot*.kt"
@@ -19,7 +19,8 @@ paths:
 SQLDelight driver.** SQLDelight's JVM `JdbcSqliteDriver` opens a fresh
 connection per statement for file DBs, so an `ATTACH` on one call is invisible
 to the merge statements on the next. `DatabaseMerger` does the whole
-attach → version-check → merge → detach on a single dedicated JDBC connection.
+attach → version-check → merge → detach on a single dedicated connection — JDBC on desktop,
+requery's `SQLiteDatabase` on Android, and `RawSqliteConnection` (`appleMain`) on Apple.
 
 ## Merge-failure classification lives in DatabaseMerger, not SyncRepository
 
@@ -36,7 +37,7 @@ destructive-action decision, not a refactor.
 
 ## Read the full design before changing any of this
 
-`docs/sync-architecture.md` is **not** imported into the session (it is ~37KB and would
+`docs/sync-architecture.md` is **not** imported into the session (it is ~70KB and would
 cost that on every session, so `.claude/CLAUDE.md` lists it as read-on-demand). This rule
 is a guard rail, not the design. **Read `docs/sync-architecture.md` before changing sync
 behavior** — it is the only place the download/merge/upload flow, the unchanged-transfer

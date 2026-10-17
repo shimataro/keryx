@@ -15,7 +15,12 @@ are out of scope for "latest stable".
   so bumping `kotlin` moves them too.
 - **`gradle/wrapper/gradle-wrapper.properties`** — Gradle (`distributionUrl`).
 - **`settings.gradle.kts`** — `foojay-resolver-convention` plugin version.
-- **`composeApp/build.gradle.kts`** — `jvmToolchain(N)` and `JvmTarget.JVM_N` (JDK, keep on latest **LTS**).
+- **`composeApp/build.gradle.kts`, `shared/build.gradle.kts`, `testing/build.gradle.kts`** —
+  `jvmToolchain(N)` and `JvmTarget.JVM_N` (JDK, keep on latest **LTS**; the Android targets'
+  `JVM_17` is separate and stays).
+- **Holds recorded in `libs.versions.toml` comments** (e.g. Kotlin held for CodeQL) — read them
+  before bumping; a hold stays until its stated condition is met. SKIE must support the Kotlin
+  version (CLAUDE.md "Environment").
 
 ## Step 1 — Inventory current versions
 
@@ -95,18 +100,13 @@ These move as a group and can break if one outpaces the others:
   the current Compose MP.
 - Keep **Compose MP itself on its latest _stable_** (do not adopt a `1.x.0-beta` just to
   enable a newer lifecycle — stable is the constraint).
-- **`compose-material3` and `compose-material-icons-extended` are versioned independently
-  from `compose-multiplatform`** (the direct-dependency declarations in `libs.versions.toml`
-  do not use `version.ref = "compose-multiplatform"`), but they follow **different rules**:
-  - When bumping `compose-multiplatform`, update **only `compose-material3`** to the version
-    that release aligns to — verify against the resolved tree
-    (`./gradlew :composeApp:dependencies --configuration desktopRuntimeClasspath`, which shows
-    what the aligned version actually is). Leaving `compose-material3` stale silently pins it
-    to an older minor.
-  - **`compose-material-icons-extended` stays pinned at `1.7.3`.** JetBrains froze this
-    artifact at 1.7.3 (CMP-9684, deprecated in favour of Material Symbols) and publishes no
-    newer versions, so it does **not** track the Compose MP release — do not try to bump it
-    to a "release-aligned" version, as none exists.
+- **`compose-material3` is versioned independently from `compose-multiplatform`** (its
+  declaration in `libs.versions.toml` does not use `version.ref = "compose-multiplatform"`).
+  When bumping `compose-multiplatform`, update `compose-material3` to the version that release
+  aligns to — verify against the resolved tree
+  (`./gradlew :composeApp:dependencies --configuration desktopRuntimeClasspath`, which shows
+  what the aligned version actually is). Leaving `compose-material3` stale silently pins it
+  to an older minor.
 
 ## Step 4 — Apply and verify
 
@@ -117,8 +117,10 @@ These move as a group and can break if one outpaces the others:
    ```bash
    ./gradlew build
    ```
-   Verify test count/health from `composeApp/build/test-results/desktopTest/*.xml`
-   (failures/errors must be 0). Compare the count against `docs/testing.md`.
+   Verify test count/health from `shared/build/test-results/desktopTest/*.xml` and
+   `composeApp/build/test-results/desktopTest/*.xml` (failures/errors must be 0 in both).
+   On a Mac, also run `./gradlew :shared:macosArm64Test` (a Kotlin or SKIE bump can break the
+   Kotlin/Native build alone).
 3. On a red build, **isolate the culprit one bump at a time** and revert the offending
    library to its previous stable version (lifecycle and a Kotlin minor are the usual
    suspects — see Step 3). Re-run until green.
@@ -128,15 +130,16 @@ These move as a group and can break if one outpaces the others:
 Only the version numbers that are written out **with their patch component** need editing:
 
 - **`.claude/CLAUDE.md`** — the `## Environment` block spells out exact versions
-  (e.g. `Kotlin 2.4.10 ...`, `Ktor 3.5.1, Koin 4.2.2, ...`). Update every line that names a
+  (e.g. `Kotlin 2.4.10 ...`, `Ktor 3.5.2, Koin 4.2.2, ...`). Update every line that names a
   version you changed.
-- **`docs/testing.md`** — update the test count only if it actually changed.
 - **`THIRD-PARTY-LICENSES.md`** — update only when a shipped runtime dependency was **added
   or removed** (not for version bumps). See constraint #8 in `.claude/CLAUDE.md`.
-- **Usually no change:** `docs/external-spec.md` cites versions as `major.minor` (e.g.
-  `Kotlin 2.4`, `Ktor 3.5`, `Gradle 9.6`), so patch/minor bumps within the same major.minor
-  don't touch it. Edit only if a major.minor actually changed. `README.md` is user-facing
-  only and must not cite dependency versions at all — don't add them there.
+- **`docs/*.md` with their `.ja.md` twins** — these also spell out full versions:
+  `external-spec.md` §11 (Gradle / Kotlin / Compose MP), and the Gradle version in `build.md`
+  and `setup.md`. `grep -rn` the old version string across `docs/` and update every hit, the
+  English file and its `.ja.md` in the same step (`.claude/rules/docs-translation.md`).
+  `README.md` is user-facing only and must not cite dependency versions at all — don't add
+  them there.
 
 ## How to report
 

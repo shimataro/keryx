@@ -52,6 +52,12 @@ Conventions: `docs/testing.md`. Layout is `commonTest/` (pure + Ktor `MockEngine
   explains where. Do not "fix" those.
 - Does a new test depend on wall-clock time, real network, or the host OS in a way that will flake on
   one of the three CI platforms?
+- The other test source sets follow the same rules: `shared/src/{appleTest,macosTest}` (Kotlin/Native,
+  `./gradlew :shared:macosArm64Test`), the instrumented suites (`androidApp/src/androidTest` and
+  `shared/src/androidDeviceTest` run on CI's emulator; `composeApp/src/androidDeviceTest` does not
+  yet, so a test added only there is verified locally alone), `androidGms/src/test`, and
+  `appleApp/KeryxTests` (Swift Testing, `xcodebuild -scheme Keryx test`). New Swift logic outside a
+  view body needs a test there.
 
 ## Checklist — code generation
 
@@ -70,3 +76,15 @@ Conventions: `docs/testing.md`. Layout is `commonTest/` (pure + Ktor `MockEngine
 - Does it add a packaging prerequisite the runners do not have (`fakeroot`, `rpm`, WiX, Xcode CLT)?
 - Does it add or change a Gradle task, JVM flag, or resource that packaging depends on?
 - Does a new dependency or config break one platform's packaging task only?
+- **Apple**: a change to `appleApp/project.yml` needs `xcodegen generate` (the `.xcodeproj` is never
+  committed); a new Swift source directory must be listed there; `Scripts/build-shared.sh` and
+  `Scripts/verify-store-requirements.sh` must still match what the project produces, and the
+  latter must still check any new store requirement that `PrivacyInfo.xcprivacy` or the
+  entitlements introduce.
+- **Android**: a manifest or `res/xml/**` change must build in all three flavors (`github`, `play`,
+  `fdroid`), and the `fdroid` flavor must still pull in nothing from `androidGms`.
+- **Release scripts and packaging** (`.github/scripts/**`, `snap/snapcraft.yaml`,
+  `composeApp/packaging/**`, `design/**/*.sh`): do they still match the artifact names, paths, and
+  versions the workflows produce?
+- **Gradle settings** (`settings.gradle.kts`, `gradle.properties`, `gradle/wrapper/**`): a module
+  added or removed, a JVM arg, or a wrapper bump affects every job.
