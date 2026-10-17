@@ -146,6 +146,9 @@ final class HomeObservable: ObservableAssignment {
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast: TransientToastState
+    /// The toolbar status area's refresh/sync text, fed from `activity` and held up long enough to
+    /// notice (`HeldRefreshStatus`). iOS only — macOS keeps its spinning Refresh button.
+    let refreshStatus = HeldRefreshStatus()
     #endif
 
     /// How an in-app copy confirmation is delivered — see `ArticleUrlCopyConfirmation`.
@@ -603,7 +606,12 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeActivity() async {
-        for await v in viewModel.activity { assignIfChanged(\.activity, v) }
+        for await v in viewModel.activity {
+            assignIfChanged(\.activity, v)
+            #if os(iOS)
+            refreshStatus.update(RefreshStatus.from(refreshIndicatorShown: v.refreshIndicatorShown, syncing: v.syncing))
+            #endif
+        }
     }
 
     /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a

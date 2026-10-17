@@ -30,15 +30,13 @@ struct RefreshStatusLabel: View {
 }
 
 /// The status-area item both iOS columns (sidebar and article list) add: present only while
-/// something runs, so an idle toolbar leaves the bottom bar to the content.
+/// something runs (held a moment longer by `HeldRefreshStatus`), so an idle toolbar leaves the
+/// bottom bar to the content.
 struct RefreshStatusToolbarItem: ToolbarContent {
     let home: HomeObservable
 
     var body: some ToolbarContent {
-        if let status = RefreshStatus.from(
-            refreshIndicatorShown: home.activity.refreshIndicatorShown,
-            syncing: home.activity.syncing
-        ) {
+        if let status = home.refreshStatus.status {
             if #available(iOS 26, *) {
                 // Plain status text as Mail shows it, not a glass button that looks tappable.
                 ToolbarItem(placement: .status) { RefreshStatusLabel(status: status) }
