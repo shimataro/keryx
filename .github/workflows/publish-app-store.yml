@@ -79,7 +79,8 @@ jobs:
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
-          if [ -z "$(git branch -r --contains "$sha" --list 'origin/v[0-9]*')" ]; then
+          # Exactly v<number>: a glob such as v[0-9]* would also take v0-wip.
+          if ! git branch -r --contains "$sha" --format='%(refname:short)' | grep -Eq '^origin/v[0-9]+$'; then
             echo "::error::'$REF' ($sha) is not on a version branch such as v0. Only merged code is built with the App Store keys: merge it into a version branch first, then run again."
             exit 1
           fi
