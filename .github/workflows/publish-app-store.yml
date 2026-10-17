@@ -1,8 +1,8 @@
 name: Publish iOS app to the App Store
 
-# Builds the SwiftUI app for iOS from `ref`, uploads it to App Store Connect, attaches it to the
-# App Store version `version` and submits that version for review (see docs/build.md's
-# "Publishing to the App Store").
+# Builds the SwiftUI app for iOS from `ref` (a commit already on a version branch), uploads it to
+# App Store Connect, attaches it to the App Store version `version` and submits that version for
+# review (see docs/build.md's "Publishing to the App Store").
 #
 # Run by hand, before the release is tagged: App Store review comes first, so a rejection that
 # needs a code change is fixed on v0 and submitted again under the same version. Once the version
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag or commit to build"
+        description: "Branch, tag or commit to build (must be on a version branch)"
         required: true
         type: string
         default: v0
@@ -31,8 +31,7 @@ on:
         default: true
 
 permissions:
-  # generate-notes (the "What's New" text) needs write access to contents.
-  contents: write
+  contents: read
 
 # Build numbers are read from App Store Connect before the build, so two runs at once could pick
 # the same one.
@@ -41,12 +40,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Build, upload & submit (${{ inputs.version }})
-    runs-on: macos-26
-    # The build takes about fifteen minutes; App Store Connect's processing of the upload is waited
-    # for up to 45 more.
-    timeout-minutes: 90
+  # Runs none of `ref`'s code — only git and gh — so the build job below never holds a token that
+  # can write to the repository, and only code already on a version branch reaches the signing
+  # certificate and the App Manager key.
+  prepare:
+    name: Check ref & generate release notes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # generate-notes (the "What's New" text) needs write access to contents.
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      notes: ${{ steps.notes.outputs.notes }}
 
     steps:
       - name: Check version
@@ -58,10 +64,56 @@ jobs:
             exit 1
           fi
 
+      # Full history, so the commit can be checked against every version branch.
       - name: Checkout
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check that ref is on a version branch
+        id: source
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          if [ -z "$(git branch -r --contains "$sha" --list 'origin/v[0-9]*')" ]; then
+            echo "::error::'$REF' ($sha) is not on a version branch such as v0. Only merged code is built with the App Store keys: merge it into a version branch first, then run again."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # Generated here rather than in the build job, which has no write access. The release is only
+      # cut after approval, so the notes come from generate-notes for the commit, not from it.
+      - name: Generate release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          body=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="v$VERSION" -f target_commitish="$SOURCE_SHA" --jq .body)
+          delimiter="EOF_$(openssl rand -hex 16)"
+          { echo "notes<<$delimiter"; printf '%s\n' "$body"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build, upload & submit (${{ inputs.version }})
+    needs: prepare
+    runs-on: macos-26
+    # The build takes about fifteen minutes; App Store Connect's processing of the upload is waited
+    # for up to 45 more.
+    timeout-minutes: 90
+
+    steps:
+      # The commit `prepare` checked, not `ref` again, which could have moved since.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       # The scripts come from this workflow's own ref, not from `ref`, which may predate them.
@@ -73,10 +125,6 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           persist-credentials: false
-
-      - name: Record commit
-        id: source
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Fails the job, naming each missing secret, before anything is built. The OAuth ids are
       # required too: a build without one hides that provider, contradicting the listing.
@@ -181,10 +229,10 @@ jobs:
           VERSION: ${{ inputs.version }}
           BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
           SUBMIT: ${{ inputs.submit }}
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+          RELEASE_NOTES_BODY: ${{ needs.prepare.outputs.notes }}
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           ASC_KEY_PATH="$RUNNER_TEMP/private_keys/AuthKey_$ASC_KEY_ID.p8" \
             .publish-tools/.github/scripts/app-store-connect.sh submit

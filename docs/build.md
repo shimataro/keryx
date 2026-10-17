@@ -1353,8 +1353,11 @@ Store. The Mac App Store is not covered: that build needs the self-updater remov
 
 **Review comes before the tag.** The workflow builds a branch or commit (`ref`, `v0` by default), not
 a release tag, under the App Store version given as `version` (x.y.z — App Store versions take no
-pre-release suffix, so a pre-release is never submitted). A rejection that needs a code change is
-fixed on `v0` and submitted again under the same version. Once the version is approved:
+pre-release suffix, so a pre-release is never submitted). `ref` must already be on a version
+branch (`v0`, …): the build runs with the signing certificate and the App Manager key, so a commit
+on no version branch — a feature branch, a pull request — is refused before anything is built. A
+rejection that needs a code change is fixed on `v0` and submitted again under the same version.
+Once the version is approved:
 
 1. Tag the commit the run's job summary reports as `v<version>` and publish the GitHub Release, which
    runs `release.yml` for every other platform as usual.
@@ -1365,33 +1368,36 @@ Inputs:
 
 | Input | Meaning |
 | --- | --- |
-| `ref` | Branch, tag or commit to build (default `v0`) |
+| `ref` | Branch, tag or commit to build (default `v0`); must be on a version branch |
 | `version` | App Store version, x.y.z — the GitHub release this will become |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
 
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
 from `ref`):
 
-1. Checks that every secret below is set (`check-release-config.sh`), imports the certificate into a
+1. A first job, which runs none of `ref`'s code, checks that `ref` is on a version branch and
+   generates GitHub's release notes for that commit (for "What's New" below). The build job then
+   checks out exactly that commit.
+2. Checks that every secret below is set (`check-release-config.sh`), imports the certificate into a
    throwaway keychain, and writes the profile and the API key into the runner's temp directory (all
    removed at the end).
-2. `app-store-connect.sh next-build-number` picks the build number: one more than the highest build
+3. `app-store-connect.sh next-build-number` picks the build number: one more than the highest build
    App Store Connect already has for that version (a workflow run number would restart per
    workflow). It also fails at once, before the build, if the API key is rejected or a version is
    already in review or approved but not released — App Store Connect takes no other version then.
-3. `package-ios-app-store.sh` archives and exports the app with manual signing (Release,
+4. `package-ios-app-store.sh` archives and exports the app with manual signing (Release,
    `generic/platform=iOS`, `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` set from the inputs),
    checks the exported app with `verify-store-requirements.sh` and its signature (Team ID, Apple
    Distribution), runs `altool --validate-app`, then uploads it.
-4. `app-store-connect.sh submit` waits (up to 45 minutes) for App Store Connect to finish processing
+5. `app-store-connect.sh submit` waits (up to 45 minutes) for App Store Connect to finish processing
    the build, then points the iOS App Store version at it: the version named `version` if it is
    editable, otherwise the one editable version renamed to `version` (App Store Connect allows one),
    otherwise a new one. Whatever build was attached before is replaced. "What's New" is filled in
    only once some version has been released — App Store Connect has no such field for an app's
-   first version — from GitHub's generated release notes for that commit, formatted like the Play
+   first version — from the release notes the first job generated, formatted like the Play
    release notes and written to every localization in English. With `submit` on, it then adds the
    version to a review submission and submits it.
-5. Writes the version, the build number and the commit it was built from to the job summary.
+6. Writes the version, the build number and the commit it was built from to the job summary.
 
 Running it again for the same version is safe: each run uploads a new build number and replaces the
 attached build.
@@ -1432,8 +1438,8 @@ so the notarization key's serves this one too) and the Apple build's OAuth secre
 all three OAuth secrets are required here: a build without one hides that provider, which would
 contradict the listing and the review notes.
 
-The workflow asks for `contents: write`, which GitHub's generate-notes API needs. The Xcode it builds
-with is pinned (`Xcode_26.6`, as in `release.yml`); raise it when App Store Connect starts requiring
+Only the first job gets `contents: write`, which GitHub's generate-notes API needs; the job that
+builds the app and holds the Apple credentials can only read. The Xcode it builds with is pinned (`Xcode_26.6`, as in `release.yml`); raise it when App Store Connect starts requiring
 a newer Xcode.
 
 ### Publishing to F-Droid
