@@ -12,7 +12,6 @@ import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ActivityCenter
-import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
 import works.merc.keryx.app.domain.SyncTrigger
@@ -37,7 +36,6 @@ internal class HomeRefreshController(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
     private val runner: RefreshCycleRunner,
-    private val feedRepository: FeedRepository,
     private val activityCenter: ActivityCenter,
     private val currentFilter: () -> ArticleFilter,
     private val retrimPins: () -> Unit,
@@ -59,7 +57,7 @@ internal class HomeRefreshController(
     /** Refreshes one feed. */
     fun refreshFeed(feed: Feeds) {
         scope.launch {
-            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) } }
+            withContext(dispatcher) { runner.refreshFeed(feed) }
         }
     }
 

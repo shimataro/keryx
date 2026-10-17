@@ -15,6 +15,7 @@ import works.merc.keryx.app.resources.error_sync_conflict
 import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.notification_app_translocated
+import works.merc.keryx.app.resources.notification_refresh_failed
 import works.merc.keryx.app.resources.notification_token_storage_fallback
 import works.merc.keryx.app.resources.notification_token_storage_not_persisted
 import works.merc.keryx.app.resources.settings_import_failed
@@ -75,5 +76,6 @@ class NotificationTextsTest {
         assertEquals(getString(Res.string.notification_token_storage_fallback), resolveNotificationText(NotificationText.TokenStorageFallback))
         assertEquals(getString(Res.string.notification_token_storage_not_persisted), resolveNotificationText(NotificationText.TokenStorageNotPersisted))
         assertEquals(getString(Res.string.notification_app_translocated), resolveNotificationText(NotificationText.AppTranslocated))
+        assertEquals(getString(Res.string.notification_refresh_failed), resolveNotificationText(NotificationText.RefreshFailed))
     }
 }

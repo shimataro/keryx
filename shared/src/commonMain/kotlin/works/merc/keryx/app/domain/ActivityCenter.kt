@@ -1,7 +1,10 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -41,6 +44,20 @@ class ActivityCenter {
      * all three counters consistently (e.g. [ActivitySnapshot.idle]).
      */
     val activity: StateFlow<ActivitySnapshot> = _activity.asStateFlow()
+
+    private val _refreshOutcomes = MutableSharedFlow<RefreshOutcome>(extraBufferCapacity = 8)
+
+    /**
+     * One event per finished feed refresh that covered at least one feed ([reportRefreshOutcome]),
+     * emitted once that refresh's activity tracking has ended. An event stream rather than state, so
+     * two identical outcomes in a row still reach a UI as two. Not replayed: an outcome nobody is
+     * collecting is simply dropped.
+     */
+    val refreshOutcomes: SharedFlow<RefreshOutcome> = _refreshOutcomes.asSharedFlow()
+
+    fun emitRefreshOutcome(outcome: RefreshOutcome) {
+        _refreshOutcomes.tryEmit(outcome)
+    }
 
     suspend fun <T> trackFeedRefresh(block: suspend () -> T): T =
         track(

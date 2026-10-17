@@ -13,6 +13,7 @@ func notificationText(_ text: NotificationText) -> String {
     case .tokenStorageFallback: return L("notification_token_storage_fallback")
     case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted")
     case .appTranslocated: return L("notification_app_translocated")
+    case .refreshFailed: return L("notification_refresh_failed")
     case .updateAvailable(let t): return LF("update_available_notification", t.version)
     case .updateReadyToInstall(let t): return LF("update_ready_notification", t.version)
     }
@@ -25,6 +26,7 @@ func infoDialogText(_ text: InfoDialogText) -> String {
     if text == .appTranslocated { return L("notification_app_translocated_detail") }
     if text == .tokenStorageFallback { return L("notification_token_storage_fallback_detail") }
     if text == .tokenStorageNotPersisted { return L("notification_token_storage_not_persisted_detail") }
+    if text == .refreshFailed { return L("notification_refresh_failed_detail") }
     return L("error_generic")
 }
 

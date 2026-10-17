@@ -256,7 +256,7 @@ class HomeViewModelTest {
         )
         val refreshCycleRunner = RefreshCycleRunner(
             activityCenter, feedRepository, syncRepository, cloudSession, newArticleNotifier,
-            settingsRepository, FakeNotificationMessages(),
+            settingsRepository, FakeNotificationMessages(), NotificationCenter(), clock,
         )
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,

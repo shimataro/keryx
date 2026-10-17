@@ -101,6 +101,8 @@
     <string name="home_unsubscribe_body">Starred articles will remain available.</string>
     <string name="home_refresh">Refresh</string>
     <string name="home_refreshing">Checking for new articles…</string>
+    <string name="home_no_new_articles">No new articles</string>
+    <string name="home_refresh_failed">Couldn’t check for new articles. Check your connection.</string>
     <string name="home_refresh_this_list">Refresh this list</string>
     <plurals name="home_new_articles">
         <item quantity="one">%1$d new article</item>
@@ -303,6 +305,8 @@
     <string name="database_too_new_message">This data was updated by a newer version of Keryx. Please use the latest version of Keryx.</string>
     <string name="notification_app_translocated">Keryx is running from a temporary location. If Dropbox integration and similar features fail, move Keryx to the Applications folder and relaunch it.</string>
     <string name="notification_app_translocated_detail">macOS uses a mechanism called App Translocation to run apps launched directly from a disk image (DMG) or the Downloads folder from a random temporary location each time.\n\nBecause this changes Keryx’s actual path, the OS can’t deliver keryx:// links to it, which can prevent Dropbox or OneDrive integration (OAuth authentication) from completing.\n\nFix: copy Keryx.app to the Applications folder and launch it from there.</string>
+    <string name="notification_refresh_failed">Couldn’t check for new articles. Check your connection.</string>
+    <string name="notification_refresh_failed_detail">Keryx couldn’t reach any of your feeds, so it couldn’t check for new articles. This usually means the device is offline.\n\nFix: check your internet connection. Once it’s back, the next refresh picks up anything new — or refresh your feeds yourself to check right away.</string>
     <string name="notification_token_storage_fallback">Your cloud account sign-in is stored in an unencrypted local file rather than the OS secure credential store.</string>
     <string name="notification_token_storage_fallback_detail">Keryx keeps your cloud account sign-in (the access and refresh tokens) in the OS secure credential store — Keychain on macOS, Credential Manager on Windows, Secret Service on Linux (or, on the Snap package, a local store encrypted with a per-app key from your desktop’s Secret portal) — whenever it can reach it. Right now the sign-in is in a local file instead: either that store could not be reached, or it could, but an older copy left behind in the local file could not be deleted.\n\nThe file is permission-restricted (readable and writable by your user account only, mode 0600), but it is not encrypted, so another program running as the same user could read it.\n\nFix: on the Snap package this usually means your desktop environment’s Secret portal isn’t available. Update `xdg-desktop-portal` and its desktop-specific backend (e.g. `xdg-desktop-portal-gnome`/`-kde`), then restart Keryx and connect your cloud account again.\n\nOn other installs it usually means no keyring service (GNOME Keyring, KWallet, and the like) is running. Start one, then connect your cloud account again.\n\nIf the secure store is already working again, this is a leftover copy: delete the `*_tokens.json` file in Keryx’s data directory to remove it.</string>
     <string name="notification_token_storage_not_persisted">Your cloud account sign-in could not be saved. You will need to connect the account again after restarting Keryx.</string>

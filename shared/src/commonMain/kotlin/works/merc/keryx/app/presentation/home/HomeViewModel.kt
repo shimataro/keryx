@@ -9,6 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +53,7 @@ import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
@@ -1486,12 +1488,14 @@ class HomeViewModel(
      */
     val activity: StateFlow<ActivitySnapshot> = activityCenter.activity
 
+    /** How each finished feed refresh went — see [ActivityCenter.refreshOutcomes]. */
+    val refreshOutcomes: SharedFlow<RefreshOutcome> = activityCenter.refreshOutcomes
+
     // Refresh / sync actions live in their own class; this ViewModel only delegates to it.
     private val refreshController = HomeRefreshController(
         scope = viewModelScope,
         dispatcher = dispatcher,
         runner = refreshCycleRunner,
-        feedRepository = feedRepository,
         activityCenter = activityCenter,
         currentFilter = { _filter.value },
         retrimPins = ::retrimPinnedReadStates,

@@ -113,7 +113,7 @@ fun sharedModule(): Module = module {
     single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get()) }
     single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
-    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
+    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 }
 
 /**

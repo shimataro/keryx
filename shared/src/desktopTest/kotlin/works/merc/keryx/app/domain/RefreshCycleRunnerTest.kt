@@ -18,8 +18,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.FakeTokenStorage
+import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.InfoDialogText
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -70,6 +74,7 @@ class RefreshCycleRunnerTest {
     private class Fixture(
         val runner: RefreshCycleRunner,
         val activityCenter: ActivityCenter,
+        val notificationCenter: NotificationCenter,
         /** "fetch:<url>", "notify:<message>" and "sync" entries, in the order they happened. */
         val log: MutableList<String>,
     )
@@ -85,15 +90,17 @@ class RefreshCycleRunnerTest {
         db: KeryxDatabase,
         connected: Boolean = true,
         fetchGate: CompletableDeferred<Unit>? = null,
+        fetchStatus: HttpStatusCode = HttpStatusCode.OK,
     ): Fixture {
         val clock = Clock { 1000L }
         val log = Collections.synchronizedList(mutableListOf<String>())
         val activityCenter = ActivityCenter()
+        val notificationCenter = NotificationCenter()
         val fetcher = FeedFetcher(
             httpClient { request ->
                 log += "fetch:${request.url}"
                 fetchGate?.await()
-                respond(RSS, HttpStatusCode.OK)
+                respond(RSS, fetchStatus)
             },
         )
         val favicons = FaviconResolver(httpClient { respond("", HttpStatusCode.NotFound) })
@@ -128,9 +135,9 @@ class RefreshCycleRunnerTest {
         val runner = RefreshCycleRunner(
             activityCenter, feedRepository, syncRepository, cloudSession,
             NewArticleNotifier { message, _ -> log += "notify:$message" },
-            settingsRepository, FakeNotificationMessages(),
+            settingsRepository, FakeNotificationMessages(), notificationCenter, clock,
         )
-        return Fixture(runner, activityCenter, log)
+        return Fixture(runner, activityCenter, notificationCenter, log)
     }
 
     private fun withDb(block: suspend CoroutineScope.(SqlDriver, KeryxDatabase) -> Unit): Unit = runBlocking {
@@ -291,5 +298,68 @@ class RefreshCycleRunnerTest {
 
         assertEquals(RefreshCycleRunner.CycleOutcome.Ran(null), outcome)
         assertFalse("sync" in f.log)
+    }
+
+    @Test
+    fun aFinishedCycleReportsItsNewArticleCountOnceIdle() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        db.insertFeed("f2", url = "https://ex.com/f2")
+        val f = fixture(driver, db)
+        val seen = Collections.synchronizedList(mutableListOf<Pair<RefreshOutcome, Boolean>>())
+        val collector = launch(Dispatchers.Unconfined) {
+            f.activityCenter.refreshOutcomes.collect { seen += it to f.activityCenter.activity.value.idle }
+        }
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+        collector.cancel()
+
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 2, allFailed = false) to true), seen.toList())
+        assertTrue(f.notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun anAllFailedRefreshReportsItAndWarnsOnceHoweverOftenItRecurs() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, fetchStatus = HttpStatusCode.ServiceUnavailable)
+        val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
+        val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+        f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
+        collector.cancel()
+
+        assertEquals(List(2) { RefreshOutcome(newArticleCount = 0, allFailed = true) }, seen.toList())
+        val warning = f.notificationCenter.items.value.single()
+        assertEquals(AppNotificationLevel.WARNING, warning.level)
+        assertEquals(NotificationText.RefreshFailed, warning.text)
+        assertEquals(AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED), warning.action)
+    }
+
+    @Test
+    fun aSelectionCoveringNoFeedReportsNothing() = withDb { driver, db ->
+        db.insertFolder("empty", name = "Empty")
+        val f = fixture(driver, db)
+        val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
+        val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
+
+        f.runner.runIfIdle(ArticleFilter.Folder("empty"), SyncTrigger.MANUAL)
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC) // All, with no feed subscribed
+        collector.cancel()
+
+        assertTrue(seen.isEmpty(), "nothing was refreshed: $seen")
+    }
+
+    @Test
+    fun aSingleFeedRefreshReportsItsOutcome() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db)
+        val seen = Collections.synchronizedList(mutableListOf<RefreshOutcome>())
+        val collector = launch(Dispatchers.Unconfined) { f.activityCenter.refreshOutcomes.collect { seen += it } }
+
+        f.runner.refreshFeed(db.feedsQueries.getById("f1").executeAsOne())
+        collector.cancel()
+
+        assertEquals(listOf(RefreshOutcome(newArticleCount = 1, allFailed = false)), seen.toList())
+        assertEquals(listOf("fetch:https://ex.com/f1"), f.log.toList(), "a single feed's refresh neither notifies nor syncs")
     }
 }
