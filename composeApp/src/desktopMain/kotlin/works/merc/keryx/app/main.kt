@@ -481,6 +481,10 @@ fun main(args: Array<String>) {
         // every route ends in windowVisible = false) is when deferred reading-state changes should
         // reach other devices. Quitting deliberately doesn't wait on the network for this: the
         // next launch's startup sync uploads whatever is still pending.
+        // The flush runs on appScope, not the effect's own scope: the effect is cancelled when the
+        // composition leaves (on exit), and the upload should not be cut off with it. With
+        // startMinimized the effect also fires on the first composition; nothing is pending then, so
+        // flushPendingSync returns at once.
         LaunchedEffect(windowVisible) {
             if (!windowVisible) appScope.launch { koin.get<SyncRepository>().flushPendingSync() }
         }
