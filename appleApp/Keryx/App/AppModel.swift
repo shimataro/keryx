@@ -128,13 +128,19 @@ final class AppModel {
     func stopForegroundLoop() {
         sdk?.stopRefreshLoop()
     }
+    #endif
 
     /// Sends local changes still waiting for their sync debounce window (marked read / starred) as the
-    /// scene leaves the foreground, so they reach other devices without waiting for the next refresh.
-    /// Runs inside a background task so suspension doesn't cut the upload short; if the OS ends that
-    /// grace period first, nothing is lost — the next sync uploads the same changes.
+    /// app leaves the foreground (iOS) or its window hides to the menu bar (macOS), so they reach other
+    /// devices without waiting for the next refresh. Never called on quit: that must not wait on the
+    /// network, and the next launch's startup sync sends what is pending.
+    ///
+    /// On iOS it runs inside a background task so suspension doesn't cut the upload short, and skips
+    /// the exit the app caused itself by opening a link (`flushOnLeavingForeground`); if the OS ends
+    /// that grace period first, nothing is lost — the next sync uploads the same changes.
     func flushPendingSync() {
         guard let sdk else { return }
+        #if os(iOS)
         var taskId = UIBackgroundTaskIdentifier.invalid
         let endTask = {
             guard taskId != .invalid else { return }
@@ -146,8 +152,10 @@ final class AppModel {
             try? await sdk.syncRepository.flushOnLeavingForeground()
             endTask()
         }
+        #else
+        Task { try? await sdk.syncRepository.flushPendingSync() }
+        #endif
     }
-    #endif
 
     #if os(iOS)
     /// The iOS background refresh: schedules the next run (a request is one-shot), runs one
