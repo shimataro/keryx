@@ -1353,27 +1353,33 @@ The iOS app goes to App Store review through `.github/workflows/publish-app-stor
 Store. The Mac App Store is not covered: that build needs the self-updater removed first (see
 [`distribution/app-store/README.md`](../distribution/app-store/README.md)).
 
-**Review comes before the tag.** The workflow builds a branch or commit (`ref`, `v0` by default), not
-a release tag, under the App Store version given as `version` (x.y.z — App Store versions take no
-pre-release suffix, so a pre-release is never submitted). Both the branch the run is started from
-("Use workflow from", which supplies the workflow and its scripts) and `ref` must be on a version
-branch (`v0`, …): the build runs with the signing certificate and the App Manager key, so a run
-started from, or building, a feature branch or a pull request is refused before anything is built.
-A rejection that needs a code change is fixed on `v0` and submitted again under the same version.
-Once the version is approved:
+**The GitHub Release comes first.** App Store review can take a week or more, so it holds back only
+iOS:
 
-1. Tag the commit the run's job summary reports as `v<version>` and publish the GitHub Release, which
-   runs `release.yml` for every other platform as usual.
-2. Release the version in App Store Connect. The workflow always sets it to a manual release, so an
-   approved build never goes live on its own.
+1. Publish the GitHub Release `v<version>` as usual; `release.yml` ships every other platform.
+2. Run the workflow with `version` set to that version. With `ref` left empty it builds the tag
+   `v<version>`.
+3. Once approved, the version goes live on its own with `release` set to `automatic` (the default);
+   with `manual`, release it in App Store Connect.
+
+`version` is x.y.z: App Store versions take no pre-release suffix, so a pre-release is never
+submitted. Both the branch the run is started from ("Use workflow from", which supplies the workflow
+and its scripts) and `ref` must be on a version branch (`v0`, …): the build runs with the signing
+certificate and the App Manager key, so a run started from, or building, a feature branch or a pull
+request is refused before anything is built.
+
+While a version is waiting for review, in review, or approved but not released, App Store Connect
+takes no other iOS version, so the next one waits until that version is released. GitHub Releases go
+ahead meanwhile; iOS catches up with the latest one once the current version is out.
 
 Inputs:
 
 | Input | Meaning |
 | --- | --- |
-| `ref` | Branch, tag or commit to build (default `v0`); must be on a version branch |
-| `version` | App Store version, x.y.z — the GitHub release this will become |
+| `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
+| `version` | App Store version, x.y.z — the GitHub release to submit |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
+| `release` | `automatic` (default): App Store Connect releases the version as soon as it is approved. `manual`: it waits for a release in App Store Connect |
 
 Run the first one with `submit` off: nothing but a real run exercises the build, the upload and the
 App Store Connect calls, and with it off a mistake stops before review. Check the version and its
@@ -1413,10 +1419,11 @@ attached build.
 
 - Metadata only (description, screenshots, review notes): fix it in App Store Connect and resubmit
   there; no new build is needed.
-- A code change: fix it on `v0` and run the workflow again with the same `version`. If App Store
-  Connect left the submission in "Unresolved Issues", the run resubmits it when it already holds this
-  version, and otherwise stops and asks for its items to be resolved or removed in App Store Connect
-  first (such a submission takes no new items).
+- A code change: fix it on `v0`, publish it as the next patch release for every platform (so a tag's
+  contents are the same everywhere), and run the workflow with that version; it renames the rejected
+  App Store version to match. If App Store Connect left the submission in "Unresolved Issues", the run
+  resubmits it when it already holds this version, and otherwise stops and asks for its items to be
+  resolved or removed in App Store Connect first (such a submission takes no new items).
 
 **One-time setup:**
 
