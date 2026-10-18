@@ -22,7 +22,7 @@ on:
         type: string
         default: ""
       version:
-        description: "App Store version, x.y.z (the GitHub release to submit)"
+        description: "App Store version, x.y.z (also the tag v<version> built when ref is empty)"
         required: true
         type: string
       submit:

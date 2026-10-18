@@ -1377,13 +1377,14 @@ Inputs:
 | Input | Meaning |
 | --- | --- |
 | `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
-| `version` | App Store version, x.y.z — the GitHub release to submit |
+| `version` | App Store version, x.y.z — also the name of the release tag built when `ref` is empty |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
 | `release` | `automatic` (default): App Store Connect releases the version as soon as it is approved. `manual`: it waits for a release in App Store Connect |
 
-Run the first one with `submit` off: nothing but a real run exercises the build, the upload and the
-App Store Connect calls, and with it off a mistake stops before review. Check the version and its
-build in App Store Connect, then submit it there (or run again with `submit` on).
+Run the first one with `submit` off and `release` set to `manual`: nothing but a real run exercises
+the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
+review, and with `manual` an approved build still waits for a release in App Store Connect. Check the
+version and its build in App Store Connect, then submit it there (or run again with `submit` on).
 
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
 from `ref`):
