@@ -148,12 +148,12 @@ final class AppModel {
             taskId = .invalid
         }
         taskId = UIApplication.shared.beginBackgroundTask(withName: "FlushPendingSync") { endTask() }
-        Task {
+        Task.detached(priority: .utility) {
             try? await sdk.syncRepository.flushOnLeavingForeground()
-            endTask()
+            await MainActor.run { endTask() }
         }
         #else
-        Task { try? await sdk.syncRepository.flushPendingSync() }
+        Task.detached(priority: .utility) { try? await sdk.syncRepository.flushPendingSync() }
         #endif
     }
 
