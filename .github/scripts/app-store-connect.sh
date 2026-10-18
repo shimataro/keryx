@@ -11,12 +11,13 @@
 #                      It runs before the build, so a bad API key, or a version already in review
 #                      or approved but not released, fails the job within a minute.
 #   submit             Waits for BUILD_NUMBER to finish processing, points the iOS App Store version
-#                      VERSION at it (creating or renaming the one editable version as needed, always
-#                      with a manual release), fills in "What's New" once a version has already been
-#                      released, and submits it for review when SUBMIT is true.
+#                      VERSION at it (creating or renaming the one editable version as needed, with
+#                      the release type RELEASE asks for), fills in "What's New" once a version has
+#                      already been released, and submits it for review when SUBMIT is true.
 #
-# Nothing here releases the app: the version is always set to a manual release, so an approved
-# build waits in App Store Connect until someone releases it there.
+# Nothing here releases the app directly: with RELEASE=automatic App Store Connect releases the
+# version once it is approved, and with RELEASE=manual the approved build waits there until someone
+# releases it.
 #
 # Inputs (environment variables):
 #   ASC_KEY_PATH    App Store Connect API key (.p8, App Manager role).
@@ -26,6 +27,8 @@
 #   BUILD_NUMBER    submit only: the CFBundleVersion that was uploaded.
 #   SUBMIT          submit only: "true" to submit for review, "false" to stop once the build is
 #                   attached.
+#   RELEASE         submit only: "automatic" to release the version as soon as it is approved,
+#                   "manual" to wait for a release in App Store Connect.
 #   SOURCE_SHA      submit only: the commit the build was made from (reported in the job summary,
 #                   and the target of the generated release notes).
 #   RELEASE_NOTES_BODY
@@ -205,9 +208,15 @@ fi
 # --- submit ---
 : "${BUILD_NUMBER:?BUILD_NUMBER is not set}"
 : "${SUBMIT:?SUBMIT is not set}"
+: "${RELEASE:?RELEASE is not set}"
 : "${SOURCE_SHA:?SOURCE_SHA is not set}"
 [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail "Invalid build number: '$BUILD_NUMBER'."
 [[ "$SUBMIT" == "true" || "$SUBMIT" == "false" ]] || fail "SUBMIT must be true or false."
+case "$RELEASE" in
+  automatic) release_type="AFTER_APPROVAL" ;;
+  manual) release_type="MANUAL" ;;
+  *) fail "RELEASE must be automatic or manual." ;;
+esac
 [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "Invalid SOURCE_SHA."
 
 # 1. Wait for the uploaded build to show up and finish processing.
@@ -239,8 +248,9 @@ load_versions
 if [ -z "$version_id" ]; then
   echo "Creating App Store version $VERSION."
   api POST /v1/appStoreVersions "$(jq -cn --arg app "$app_id" --arg version "$VERSION" --arg platform "$PLATFORM" \
+    --arg release "$release_type" \
     '{data: {type: "appStoreVersions",
-      attributes: {platform: $platform, versionString: $version, releaseType: "MANUAL"},
+      attributes: {platform: $platform, versionString: $version, releaseType: $release},
       relationships: {app: {data: {type: "apps", id: $app}}}}}')"
   version_id=$(jq -er '.data.id' <<< "$RESPONSE")
 else
@@ -250,7 +260,8 @@ else
     echo "Using App Store version $VERSION ($version_state)."
   fi
   api PATCH "/v1/appStoreVersions/$version_id" "$(jq -cn --arg id "$version_id" --arg version "$VERSION" \
-    '{data: {type: "appStoreVersions", id: $id, attributes: {versionString: $version, releaseType: "MANUAL"}}}')"
+    --arg release "$release_type" \
+    '{data: {type: "appStoreVersions", id: $id, attributes: {versionString: $version, releaseType: $release}}}')"
 fi
 
 # 3. Attach the build, replacing whichever one was attached before.
@@ -265,7 +276,8 @@ if [ "$released_before" = "true" ]; then
   : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set (needed for the release notes)}"
   # Same formatting as publish-play.yml's "Prepare Play release notes" step (and release.yml's),
   # duplicated for the same "no reusable-workflow setup yet" reason; keep them in sync by hand. The
-  # body comes from generate-notes rather than the GitHub Release, which is only cut after approval.
+  # body comes from generate-notes rather than the GitHub Release, so a run does not depend on the
+  # Release existing.
   whats_new=$(printf '%s\n' "$RELEASE_NOTES_BODY" | awk '
       { line = $0; gsub(/\r$/, "", line) }
       line ~ /^## / { next }
@@ -351,6 +363,10 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       echo "- Build attached, **not submitted**: add the version for review in App Store Connect."
     fi
     echo
-    echo "Once approved, tag that commit as \`v$VERSION\` and publish the GitHub Release, then release the version in App Store Connect (it is set to a manual release)."
+    if [ "$RELEASE" = "automatic" ]; then
+      echo "Once approved, the version is released on the App Store automatically."
+    else
+      echo "Once approved, release the version in App Store Connect (it is set to a manual release)."
+    fi
   } >> "$GITHUB_STEP_SUMMARY"
 fi
