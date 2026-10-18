@@ -635,6 +635,47 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A multi-feed refresh only ever runs inside a RefreshCycleRunner cycle, which syncs once right
+     * after it — so the refresh itself must not arm the debounce (once per feed), which could fire a
+     * second whole-DB upload mid-refresh.
+     */
+    @Test
+    fun refreshFeedsSchedulesNoSync(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            repeat(3) { f ->
+                newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed("https://ex.com/$f/feed")
+            }
+            var syncCount = 0
+            val fresh = RSS.replace("<guid>g1</guid>", "<guid>g-fresh</guid>")
+            val repo = newRepo(db, driver, fetcherWith { respond(fresh, HttpStatusCode.OK) }, syncScheduler = { syncCount++ })
+
+            repo.refreshAll()
+
+            assertEquals(0, syncCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A single-feed refresh has no surrounding cycle to sync after it, so it schedules exactly one. */
+    @Test
+    fun refreshFeedSchedulesOneSync(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed("https://ex.com/feed")
+            var syncCount = 0
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, syncScheduler = { syncCount++ })
+
+            repo.refreshFeed(db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne())
+
+            assertEquals(1, syncCount)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun refreshFeedMakesNewArticleImmediatelySearchableWithoutManualRebuild(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()

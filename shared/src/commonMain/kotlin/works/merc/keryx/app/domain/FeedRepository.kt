@@ -349,6 +349,9 @@ class FeedRepository(
     suspend fun refreshFeed(feed: Feeds): Result<Int> {
         val outcome = refreshFeedArticles(feed)
         if (outcome.hadArticles) ftsManager.indexMissing()
+        // Unlike refreshFeeds (only ever run inside a RefreshCycleRunner cycle, which syncs after it),
+        // a single-feed refresh has no sync of its own to ride on.
+        syncScheduler.scheduleSync()
         return outcome.result
     }
 
@@ -481,7 +484,9 @@ class FeedRepository(
                 action = AppNotificationAction.ShowFeedDetail(feed.id),
             )
         }
-        syncScheduler.scheduleSync()
+        // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
+        // per feed and could fire a whole-DB upload mid-refresh, on top of the one RefreshCycleRunner
+        // runs right after. The single-feed refreshFeed() schedules its own.
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
     }
 
