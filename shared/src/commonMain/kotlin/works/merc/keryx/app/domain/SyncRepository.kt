@@ -125,8 +125,12 @@ class SyncRepository(
     /**
      * Local changes exist that no sync has picked up yet. Set by [scheduleSync] and
      * [scheduleDeferredSync], cleared when a sync starts (its snapshot will include them), and
-     * restored if that sync fails. [flushPendingSync] and an expiring debounce window both sync only
-     * while this is set, so a window outlived by a refresh cycle's own sync costs nothing.
+     * restored if that sync does not succeed. [flushPendingSync] and an expiring debounce window
+     * both sync only while this is set, so a window outlived by a refresh cycle's own sync costs
+     * nothing.
+     *
+     * Neither this nor [soonRequested] is ever collected: a `MutableStateFlow` is used only as a
+     * thread-safe flag with an atomic [getAndUpdate], since commonMain has no stable atomic type.
      */
     private val unsyncedChanges = MutableStateFlow(false)
 
@@ -224,19 +228,16 @@ class SyncRepository(
     /**
      * Schedules a debounced cloud synchronization.
      */
-    override fun scheduleSync() {
-        if (cloudProvider() == null) return
-        if (_autoSyncSuspended.value) return
-        unsyncedChanges.value = true
-        soonRequested.value = true
-        syncSignals.trySend(Unit)
-    }
+    override fun scheduleSync() = schedule(soon = true)
 
     /** Schedules a sync after [DEFERRED_SYNC_DEBOUNCE_MS] of quiet — see [SyncScheduler.scheduleDeferredSync]. */
-    override fun scheduleDeferredSync() {
+    override fun scheduleDeferredSync() = schedule(soon = false)
+
+    private fun schedule(soon: Boolean) {
         if (cloudProvider() == null) return
         if (_autoSyncSuspended.value) return
         unsyncedChanges.value = true
+        if (soon) soonRequested.value = true
         syncSignals.trySend(Unit)
     }
 
@@ -244,8 +245,15 @@ class SyncRepository(
      * Syncs now if local changes are still waiting for a debounce window, and returns once that
      * sync has finished; does nothing otherwise. Called when the app leaves the foreground, so
      * deferred reading-state changes reach other devices without waiting out their long window.
+     *
+     * A sync already in flight is waited out first: it cleared the flag when it started, so checking
+     * at once would return while its upload is still running — and on iOS the caller ends its
+     * background task on return, letting the OS suspend that upload. Should that sync fail or be
+     * cancelled (iOS cancels the refresh cycle's on backgrounding), it restores the flag, and this
+     * flush sends the changes itself.
      */
     suspend fun flushPendingSync() {
+        mutex.withLock { }
         if (!unsyncedChanges.value) return
         sync(SyncTrigger.AUTOMATIC)
     }
@@ -269,16 +277,19 @@ class SyncRepository(
         // disconnect can never be undone by a sync that was already in flight.
         return activityCenter.trackSync {
             mutex.withLock {
+                // Cleared before the snapshot is taken, so a change made during this sync re-arms
+                // it; restored on every exit but success (an error result, a throw, a cancellation)
+                // so a sync that uploaded nothing doesn't drop pending changes.
+                val hadUnsyncedChanges = unsyncedChanges.getAndUpdate { false }
+                var succeeded = false
                 try {
-                    // Cleared before the snapshot is taken, so a change made during this sync
-                    // re-arms it; restored on failure so a failed sync doesn't drop pending changes.
-                    val hadUnsyncedChanges = unsyncedChanges.getAndUpdate { false }
                     val result = syncLocked()
-                    if (result !is Result.Ok && hadUnsyncedChanges) unsyncedChanges.value = true
+                    succeeded = result is Result.Ok
                     updateAutoSyncGate(result)
                     emitErrorNotification(result)
                     result
                 } finally {
+                    if (!succeeded && hadUnsyncedChanges) unsyncedChanges.value = true
                     _syncPhase.value = SyncPhase.IDLE
                 }
             }
