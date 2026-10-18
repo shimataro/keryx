@@ -8,6 +8,7 @@ import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -456,8 +457,8 @@ class HomeViewModelTest {
         pumpUntil { vm.manualRefreshStatus.value !is ManualRefreshStatus.Checking }
 
         assertEquals(
-            ManualRefreshStatus.Finished(RefreshOutcome(newArticleCount = 1, unreachable = false)),
-            vm.manualRefreshStatus.value,
+            RefreshOutcome(newArticleCount = 1, unreachable = false),
+            assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value).outcome,
         )
         assertTrue(activityCenter.activity.value.idle, "the status finishes only after the sync, with the cycle")
     }
@@ -473,9 +474,29 @@ class HomeViewModelTest {
         pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Finished }
 
         assertEquals(
-            ManualRefreshStatus.Finished(RefreshOutcome(newArticleCount = 1, unreachable = false)),
-            vm.manualRefreshStatus.value,
+            RefreshOutcome(newArticleCount = 1, unreachable = false),
+            assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value).outcome,
         )
+    }
+
+    @Test
+    fun twoFeedRefreshesWithTheSameOutcomeFinishUnequal() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { throw IOException("unreachable") })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        val feed = db.feedsQueries.getById("f1").executeAsOne()
+
+        vm.refreshFeed(feed)
+        pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Finished }
+        val first = assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value)
+        vm.refreshFeed(feed)
+        pumpUntil { (vm.manualRefreshStatus.value as? ManualRefreshStatus.Finished)?.let { it != first } == true }
+        val second = assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value)
+
+        assertEquals(RefreshOutcome(newArticleCount = 0, unreachable = true), first.outcome)
+        assertEquals(first.outcome, second.outcome)
+        assertTrue(second.generation > first.generation, "a StateFlow would otherwise conflate the second result away")
     }
 
     @Test
@@ -510,8 +531,8 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
 
         assertEquals(
-            ManualRefreshStatus.Finished(RefreshOutcome(newArticleCount = 2, unreachable = false)),
-            vm.manualRefreshStatus.value,
+            RefreshOutcome(newArticleCount = 2, unreachable = false),
+            assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value).outcome,
         )
     }
 

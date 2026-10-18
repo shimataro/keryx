@@ -63,6 +63,12 @@ internal class HomeRefreshController(
      */
     val manualRefreshStatus: StateFlow<ManualRefreshStatus> = _manualRefreshStatus.asStateFlow()
 
+    /**
+     * The [ManualRefreshStatus.Finished.generation] source. A plain var: every end is counted from a
+     * `finally` running on [scope], which is Main-confined.
+     */
+    private var endCount = 0L
+
     /** Refreshes one feed. */
     fun refreshFeed(feed: Feeds) {
         scope.launch {
@@ -71,7 +77,9 @@ internal class HomeRefreshController(
             try {
                 outcome = withContext(dispatcher) { runner.refreshFeed(feed) }
             } finally {
-                _manualRefreshStatus.update { it.ended(outcome) }
+                // Numbered outside update(), so a retried update stamps the same generation.
+                val generation = ++endCount
+                _manualRefreshStatus.update { it.ended(outcome, generation) }
             }
         }
     }
@@ -134,7 +142,10 @@ internal class HomeRefreshController(
                 }
             }
         } finally {
-            if (started) _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh) }
+            if (started) {
+                val generation = ++endCount
+                _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh, generation) }
+            }
         }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.

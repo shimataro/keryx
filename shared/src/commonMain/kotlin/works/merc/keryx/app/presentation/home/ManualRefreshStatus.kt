@@ -18,8 +18,13 @@ sealed interface ManualRefreshStatus {
     /** [running] refreshes are in flight; [pending] combines those that have already finished. */
     data class Checking(val running: Int, val pending: RefreshOutcome?) : ManualRefreshStatus
 
-    /** Every refresh has finished; [outcome] is how they went. Stays until the next one starts. */
-    data class Finished(val outcome: RefreshOutcome) : ManualRefreshStatus
+    /**
+     * Every refresh has finished; [outcome] is how they went. Stays until the next one starts.
+     * [generation] is unique to each end and increases with it, so two checks in a row with the same
+     * outcome stay unequal and a StateFlow collector that missed the [Checking] in between still
+     * receives the second one rather than having it conflated away.
+     */
+    data class Finished(val outcome: RefreshOutcome, val generation: Long) : ManualRefreshStatus
 }
 
 /** The status once one more manual refresh has started. */
@@ -29,10 +34,11 @@ internal fun ManualRefreshStatus.started(): ManualRefreshStatus = when (this) {
 }
 
 /**
- * The status once one manual refresh has ended with [outcome] (`null` when it refreshed no feed). An
- * end with nothing running is ignored.
+ * The status once one manual refresh has ended with [outcome] (`null` when it refreshed no feed),
+ * stamping [generation] on a resulting [ManualRefreshStatus.Finished]. An end with nothing running is
+ * ignored.
  */
-internal fun ManualRefreshStatus.ended(outcome: RefreshOutcome?): ManualRefreshStatus {
+internal fun ManualRefreshStatus.ended(outcome: RefreshOutcome?, generation: Long): ManualRefreshStatus {
     if (this !is ManualRefreshStatus.Checking) return this
     val combined = when {
         pending == null -> outcome
@@ -41,7 +47,7 @@ internal fun ManualRefreshStatus.ended(outcome: RefreshOutcome?): ManualRefreshS
     }
     return when {
         running > 1 -> ManualRefreshStatus.Checking(running - 1, combined)
-        combined != null -> ManualRefreshStatus.Finished(combined)
+        combined != null -> ManualRefreshStatus.Finished(combined, generation)
         else -> ManualRefreshStatus.Idle
     }
 }
