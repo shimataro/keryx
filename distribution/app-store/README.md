@@ -162,8 +162,8 @@ To retake them:
   `0.1.0` left in `appleApp/project.yml`, which no release uses. The iOS build is uploaded and submitted by the
   `publish-app-store.yml` workflow, given that number as its `version` input: it sets `MARKETING_VERSION`, picks
   an unused `CURRENT_PROJECT_VERSION`, and creates or renames the App Store Connect version to match (see
-  "Publishing to the App Store" in [`docs/build.md`](../../docs/build.md)). The GitHub release is tagged only
-  after approval, on the commit the workflow reports. Archiving by hand in Xcode remains the fallback when the
+  "Publishing to the App Store" in [`docs/build.md`](../../docs/build.md)). The GitHub release is published
+  first, and the workflow builds its tag. Archiving by hand in Xcode remains the fallback when the
   workflow cannot be used; then pass the same two settings yourself and set the App Store Connect version first.
 - [ ] Verify the example feed in the review notes still resolves.
 - [ ] If [`PRIVACY.md`](../../PRIVACY.md)'s effective date has changed since the last submission,
