@@ -485,8 +485,9 @@ class FeedRepository(
             )
         }
         // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
-        // per feed and could fire a whole-DB upload mid-refresh, on top of the one RefreshCycleRunner
-        // runs right after. The single-feed refreshFeed() schedules its own.
+        // per feed and could fire a whole-DB upload mid-refresh. RefreshCycleRunner covers the batch
+        // (it syncs right after, or schedules one when the cycle synced first); the single-feed
+        // refreshFeed() schedules its own.
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
     }
 

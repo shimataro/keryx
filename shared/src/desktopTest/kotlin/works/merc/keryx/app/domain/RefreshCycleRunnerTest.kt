@@ -161,7 +161,9 @@ class RefreshCycleRunnerTest {
 
         f.runner.run(order = RefreshCycleRunner.CycleOrder.SYNC_THEN_REFRESH, trigger = SyncTrigger.AUTOMATIC)
 
-        assertEquals(listOf("sync", "fetch:https://ex.com/f1", "notify:new:1"), f.log.toList())
+        // The trailing "sync" is the short-window sync the cycle schedules for what its refresh wrote
+        // (scheduleSync consults the provider first); a refresh-then-sync cycle schedules none.
+        assertEquals(listOf("sync", "fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
     }
 
     @Test

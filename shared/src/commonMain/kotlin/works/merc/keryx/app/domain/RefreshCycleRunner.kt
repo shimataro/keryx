@@ -98,7 +98,13 @@ class RefreshCycleRunner(
         }
         when (order) {
             CycleOrder.REFRESH_THEN_SYNC -> { refresh(); sync() }
-            CycleOrder.SYNC_THEN_REFRESH -> { sync(); refresh() }
+            CycleOrder.SYNC_THEN_REFRESH -> {
+                sync(); refresh()
+                // Nothing syncs after this refresh, and a refresh schedules no sync of its own, so
+                // what it just wrote (new articles, feed URL changes, error counts) would wait for
+                // the next periodic cycle. One short-window sync picks it up.
+                syncRepository.scheduleSync()
+            }
         }
         return syncResult
     }
