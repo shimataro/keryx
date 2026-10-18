@@ -49,7 +49,14 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
      total number of attempts (2 retries after the first).
 6. On success, record `last_synced_at`, the uploaded snapshot's (uncompressed) digest, and **the revision the upload itself produced** (`CloudStorage.upload`/`create` return it). It must come from the write's own response, never a follow-up `metadata()` call: a second request could observe another device's newer write, and storing that revision would make the next sync skip a download whose contents were never merged.
 
-Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batches sync after a fixed delay from the last operation.
+Debouncing: Because every sync re-uploads the whole database, how often a local change triggers one is what decides the transfer volume. `SyncScheduler` therefore has two windows, both measured from the last change (a burst collapses into one sync):
+
+- **Structural changes** (subscribe/unsubscribe, rename, folders, tags, global settings, a single-feed refresh) call `scheduleSync()` and sync after `SYNC_DEBOUNCE_MS` (5 seconds).
+- **Reading-state changes** (read/unread, star, mark-all-read) arrive one by one while reading, so they call `scheduleDeferredSync()` and wait for `DEFERRED_SYNC_DEBOUNCE_MS` (5 minutes) of quiet instead. A structural change arriving meanwhile shortens the wait to the 5-second window, and carries the reading-state changes with it.
+- `SyncRepository.flushPendingSync()` syncs at once if anything is still pending, and is called when the app leaves the foreground: Android's `MainActivity.onStop` (not on a configuration change), the iOS scene entering the background (inside a background task), and the desktop window being hidden to the tray. Quitting the desktop app does not wait on the network for it; the next launch's startup sync uploads what is pending.
+- Any sync that runs first — a refresh cycle's, a manual one — picks the pending changes up too: an "unsynced changes" flag is cleared as a sync starts (its snapshot includes them) and restored if it fails, and a debounce window that expires with the flag already cleared does nothing. The refresh itself (`FeedRepository.refreshFeeds`, only ever run inside a `RefreshCycleRunner` cycle) schedules no sync, since its cycle syncs right after it.
+
+Deferring a change never loses it: the next sync of any kind finds it in the snapshot (see "Skipping Unchanged Transfers" below). Only how soon other devices see it changes.
 
 ### Sync Progress Feedback
 
@@ -104,7 +111,7 @@ The background loop syncs on a timer, so the overwhelmingly common case is that 
 - **Download** is skipped on an unchanged revision (step 2). Because step 6 records the revision the upload produced, a device that is the only writer recognises its own uploads and never downloads them back.
 - **Upload** is skipped when the freshly built snapshot hashes to the same digest as the last uploaded one *and* no merge happened this cycle (step 5). A merge is always followed by an upload even if nothing else changed locally, because last-write-wins can leave the local DB holding rows the cloud lacks.
 
-Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever reads it out of the uploaded file.
+Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped — which is also why deferring a reading-state change (see "Debouncing" above) only delays it. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever reads it out of the uploaded file.
 
 The digest is stored in `sync_state`, which is itself excluded from the upload — so it is per-device state, and a device that has never uploaded simply finds no digest and uploads.
 
