@@ -452,10 +452,17 @@ in its header. Neither does the macOS sidebar, which keeps its toolbar button.
 
 With no Refresh All button to spin, iOS shows a feed refresh in the toolbar's status area instead
 — the centre of the bottom bar, where Mail says "Checking for Mail…" and then "Updated Just Now" —
-in both the sidebar and the article list. While new articles are being checked for, whatever started
-it (a pull, ⌘R, the refresh at launch, a background refresh), it shows a small spinner with "Checking
-for new articles…", and keeps it through the cloud sync that follows, as the pull's own indicator
-does. Once that is done it shows the result for about two and a half seconds, without the spinner:
+in both the sidebar and the article list. It shows only a refresh the user started — a pull (of
+either column, whatever it covers), Refresh All (⌘R), or a feed's own Refresh (its context menu,
+⌘⇧R). The refresh at launch, a background refresh and the periodic one while the app is open show
+nothing: before iOS 26 the status is the only item in that bottom bar, so the bar itself appears and
+goes with it, and a refresh nobody asked for must not move the list (see "Least surprise"); after the
+user's own action, the brief appearance is the response to that action. While new articles are being
+checked for, it shows a small spinner with "Checking for new articles…", and keeps it through the
+cloud sync that follows, as the pull's own indicator does. Refreshes the user starts while another is
+still running (a feed's Refresh during a pull, say) count as one check: the spinner stays until the
+last has finished, and the result counts them all. A pull made while an automatic refresh is already
+running starts nothing new (see above), so it shows only the pull's own indicator and no result. Once that is done it shows the result for about two and a half seconds, without the spinner:
 "N new articles", "No new articles", or — when none of the feeds it covered could be reached (each
 timed out or got no response, most likely because the device is offline) — "Couldn't check for
 new articles. Check your connection or try again later." behind a warning symbol, so a failure reads as one at

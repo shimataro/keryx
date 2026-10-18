@@ -43,9 +43,11 @@ struct RefreshStatusLabel: View {
     }
 }
 
-/// The status-area item both iOS columns (sidebar and article list) add: present only while a check
-/// runs and for a moment after (`HeldRefreshStatus`), so an idle toolbar leaves the bottom bar to the
-/// content.
+/// The status-area item both iOS columns (sidebar and article list) add: present only while a refresh
+/// the user started runs and for a moment after (`HeldRefreshStatus`), so an idle toolbar leaves the
+/// bottom bar to the content. Before iOS 26 nothing else sits in that bar, so it appears and goes with
+/// the item — acceptable as the response to the user's own action, which is why automatic refreshes
+/// never show here (`external-spec.md` §9).
 struct RefreshStatusToolbarItem: ToolbarContent {
     let home: HomeObservable
 

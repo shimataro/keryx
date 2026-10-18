@@ -14,10 +14,15 @@ import works.merc.keryx.app.core.valueOrNull
 
 /**
  * How a finished feed refresh went, as data for a UI to word: how many new articles it fetched, and
- * whether it could reach none of the feeds it covered ([isUnreachable]). Emitted through
- * [ActivityCenter.refreshOutcomes].
+ * whether it could reach none of the feeds it covered ([isUnreachable]). Returned by
+ * [RefreshCycleRunner]'s manual entry points ([RefreshCycleRunner.runIfIdle],
+ * [RefreshCycleRunner.refreshFeed]).
  */
-data class RefreshOutcome(val newArticleCount: Int, val unreachable: Boolean)
+data class RefreshOutcome(val newArticleCount: Int, val unreachable: Boolean) {
+    /** Two refreshes as one: their new articles added up, unreachable only if neither reached a feed. */
+    operator fun plus(other: RefreshOutcome): RefreshOutcome =
+        RefreshOutcome(newArticleCount + other.newArticleCount, unreachable && other.unreachable)
+}
 
 /** The new-article total of a refresh's per-feed [results]; a failed feed counts as none. */
 fun newArticleCount(results: Map<String, Result<Int>>): Int = results.values.sumOf { it.valueOrNull ?: 0 }
@@ -40,20 +45,17 @@ fun isUnreachable(results: Map<String, Result<Int>>): Boolean =
 
 /**
  * Reports a finished refresh: an unreachable one ([isUnreachable]) becomes a (coalesced)
- * notification-center warning whose next action explains what to do, and every refresh that covered at least one feed
- * becomes a [RefreshOutcome] on [ActivityCenter.refreshOutcomes]. The one place both are decided, so
- * every refresh route (the cycle runner's refresh-then-sync, a single feed's refresh) reports alike.
- *
- * Call it only once the refresh's activity tracking has ended: a UI showing the outcome reads
- * [ActivityCenter.activity] alongside it, and must already see the refresh finished.
+ * notification-center warning whose next action explains what to do, and every refresh that covered
+ * at least one feed becomes the returned [RefreshOutcome] (`null` for one that covered none). The one
+ * place both are decided, so every refresh route (the cycle runner's refresh-then-sync, a single
+ * feed's refresh) reports alike.
  */
 internal suspend fun reportRefreshOutcome(
     results: Map<String, Result<Int>>,
-    activityCenter: ActivityCenter,
     notificationCenter: NotificationCenter,
     clock: Clock,
-) {
-    if (results.isEmpty()) return
+): RefreshOutcome? {
+    if (results.isEmpty()) return null
     val unreachable = isUnreachable(results)
     if (unreachable) {
         notificationCenter.addCoalescing(
@@ -66,5 +68,5 @@ internal suspend fun reportRefreshOutcome(
             ),
         )
     }
-    activityCenter.emitRefreshOutcome(RefreshOutcome(newArticleCount(results), unreachable))
+    return RefreshOutcome(newArticleCount(results), unreachable)
 }

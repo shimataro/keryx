@@ -163,8 +163,8 @@ struct FeedListView: View {
                 Label(L("settings_title"), systemImage: "gearshape")
             }
         }
-        // With no Refresh All button here, the status area is what shows a refresh or sync that
-        // the pull did not start (startup, background, ⌘R, an automatic sync).
+        // With no Refresh All button here, the status area is what shows the result of a refresh
+        // the user started — the pull, ⌘R, a feed's Refresh.
         RefreshStatusToolbarItem(home: home)
         #endif
         #if os(macOS)

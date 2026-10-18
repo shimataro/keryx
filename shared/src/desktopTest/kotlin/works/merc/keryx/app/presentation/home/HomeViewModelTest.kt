@@ -55,6 +55,7 @@ import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.FakeNotificationMessages
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
@@ -431,6 +432,147 @@ class HomeViewModelTest {
         assertFalse(activityCenter.activity.value.feedRefreshing)
         assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
         assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
+    }
+
+    @Test
+    fun aManualRefreshChecksThroughItsCycleThenReportsItsOutcome() = runTest {
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { gate.await(); respond(RSS, HttpStatusCode.OK) },
+            activityCenter = activityCenter,
+            cloudProvider = CountingNoCloud(),
+        )
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+
+        vm.refreshAll()
+        pumpUntil { activityCenter.activity.value.feedRefreshing }
+        assertIs<ManualRefreshStatus.Checking>(vm.manualRefreshStatus.value)
+
+        gate.complete(Unit)
+        pumpUntil { vm.manualRefreshStatus.value !is ManualRefreshStatus.Checking }
+
+        assertEquals(
+            ManualRefreshStatus.Finished(RefreshOutcome(newArticleCount = 1, unreachable = false)),
+            vm.manualRefreshStatus.value,
+        )
+        assertTrue(activityCenter.activity.value.idle, "the status finishes only after the sync, with the cycle")
+    }
+
+    @Test
+    fun aFeedsOwnRefreshReportsItsOutcome() = runTest {
+        db.insertFeed("f1")
+        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshFeed(db.feedsQueries.getById("f1").executeAsOne())
+        pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Finished }
+
+        assertEquals(
+            ManualRefreshStatus.Finished(RefreshOutcome(newArticleCount = 1, unreachable = false)),
+            vm.manualRefreshStatus.value,
+        )
+    }
+
+    @Test
+    fun aFeedRefreshDuringAPullKeepsCheckingAndAddsToItsOutcome() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertFeed("f2")
+        val gate = CompletableDeferred<Unit>()
+        val activityCenter = ActivityCenter()
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { request ->
+                if (request.url.toString().endsWith("f1")) gate.await()
+                respond(RSS, HttpStatusCode.OK)
+            },
+            activityCenter = activityCenter,
+        )
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.pullToRefresh()
+        pumpUntil { activityCenter.activity.value.feedRefreshing }
+        vm.refreshFeed(db.feedsQueries.getById("f2").executeAsOne())
+        pumpUntil { (vm.manualRefreshStatus.value as? ManualRefreshStatus.Checking)?.pending != null }
+        assertEquals(
+            ManualRefreshStatus.Checking(running = 1, pending = RefreshOutcome(newArticleCount = 1, unreachable = false)),
+            vm.manualRefreshStatus.value,
+            "the feed's result waits for the pull rather than replacing its check",
+        )
+
+        gate.complete(Unit)
+        pumpUntil { !vm.pulling }
+
+        assertEquals(
+            ManualRefreshStatus.Finished(RefreshOutcome(newArticleCount = 2, unreachable = false)),
+            vm.manualRefreshStatus.value,
+        )
+    }
+
+    @Test
+    fun aRefreshTheUserDidNotStartLeavesTheStatusIdle() = runTest {
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter()
+        try {
+            val vm = newViewModel(activityCenter = activityCenter)
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            // A background cycle (startup, the refresh loop) runs outside the ViewModel.
+            val gate = CompletableDeferred<Unit>()
+            val job = activityScope.launch {
+                activityCenter.trackRefreshCycle { activityCenter.trackFeedRefresh { gate.await() } }
+            }
+            testScheduler.advanceUntilIdle()
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+
+            gate.complete(Unit)
+            job.join()
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+        } finally {
+            activityScope.cancel()
+        }
+    }
+
+    @Test
+    fun aPullThatStartsNoCycleLeavesTheStatusIdle() = runTest {
+        db.insertFolder("empty", "Empty")
+        db.insertFeed("f1")
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter()
+        try {
+            val vm = newViewModel(activityCenter = activityCenter)
+            subscribeAll(vm)
+            vm.selectFilter(ArticleFilter.Folder("empty"))
+            testScheduler.advanceUntilIdle()
+
+            vm.pullToRefresh()
+            pumpUntil { !vm.pulling }
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value, "nothing to refresh")
+
+            // A pull that joins a refresh already in flight starts nothing of its own either.
+            val gate = CompletableDeferred<Unit>()
+            val job = activityScope.launch { activityCenter.trackFeedRefresh { gate.await() } }
+            vm.selectFilter(ArticleFilter.All)
+            testScheduler.advanceUntilIdle()
+            vm.pullToRefresh()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.pulling)
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value, "busy")
+
+            gate.complete(Unit)
+            job.join()
+            pumpUntil { !vm.pulling }
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+        } finally {
+            activityScope.cancel()
+        }
     }
 
     @Test

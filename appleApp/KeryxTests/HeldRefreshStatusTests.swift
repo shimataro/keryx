@@ -1,65 +1,75 @@
 import Testing
 
-/// Covers `HeldRefreshStatus`: "checking" while a check runs, then its result for a moment.
+/// Covers `HeldRefreshStatus`: "checking" while a refresh the user started runs, then its result for a
+/// moment.
 @MainActor
 @Suite
 struct HeldRefreshStatusTests {
     @Test
     func aCheckShowsCheckingThenItsResultUntilTheResultTimesOut() async {
-        let held = HeldRefreshStatus(resultDuration: .milliseconds(10), resultGrace: .seconds(60))
+        let held = HeldRefreshStatus(resultDuration: .milliseconds(10))
 
-        held.updateChecking(true)
+        held.update(.checking)
         #expect(held.status == .checking)
 
-        let grace = held.updateChecking(false)
-        #expect(held.status == .checking, "checking waits for its result rather than vanishing")
+        let clear = held.update(.noNewArticles)
+        #expect(held.status == .noNewArticles)
 
-        let clear = held.showResult(.noNewArticles)
-        await grace?.value
-        #expect(held.status == .noNewArticles, "the result cancels the grace period's clear")
-
-        await clear.value
+        await clear?.value
         #expect(held.status == nil)
     }
 
     @Test
-    func aCheckWithNoResultClearsAfterTheGrace() async {
-        let held = HeldRefreshStatus(resultDuration: .seconds(60), resultGrace: .milliseconds(10))
+    func aCheckThatRefreshedNothingClearsAtOnce() {
+        let held = HeldRefreshStatus()
 
-        held.updateChecking(true)
-        let grace = held.updateChecking(false)
-        await grace?.value
+        held.update(.checking)
+        held.update(nil)
 
         #expect(held.status == nil)
     }
 
     @Test
-    func updateCheckingFalseIsANoOpAfterShowingAResult() {
-        let held = HeldRefreshStatus(resultDuration: .seconds(60), resultGrace: .milliseconds(10))
+    func idleLeavesAResultToTimeOut() {
+        let held = HeldRefreshStatus(resultDuration: .seconds(60))
 
-        held.showResult(.newArticles(2))
-        let clear = held.updateChecking(false)
+        held.update(.newArticles(2))
+        held.update(nil)
 
-        #expect(clear == nil)
         #expect(held.status == .newArticles(2))
     }
 
     @Test
     func aNewCheckReplacesTheResult() async {
-        let held = HeldRefreshStatus(resultDuration: .milliseconds(10), resultGrace: .seconds(60))
+        let held = HeldRefreshStatus(resultDuration: .milliseconds(10))
 
-        let clear = held.showResult(.refreshFailed)
-        held.updateChecking(true)
-        await clear.value
+        let clear = held.update(.refreshFailed)
+        held.update(.checking)
+        await clear?.value
 
         #expect(held.status == .checking, "the replaced result's timer must not clear the new check")
+    }
+
+    @Test
+    func aNewResultRestartsTheTimer() async {
+        let held = HeldRefreshStatus(resultDuration: .milliseconds(10))
+
+        let first = held.update(.noNewArticles)
+        held.update(.checking)
+        let second = held.update(.newArticles(1))
+        await first?.value
+
+        #expect(held.status == .newArticles(1), "the first result's timer must not clear the second")
+        await second?.value
+        #expect(held.status == nil)
     }
 
     @Test
     func nothingShowsWhenNoCheckRan() {
         let held = HeldRefreshStatus()
 
-        #expect(held.updateChecking(false) == nil)
+        held.update(nil)
+
         #expect(held.status == nil)
     }
 }

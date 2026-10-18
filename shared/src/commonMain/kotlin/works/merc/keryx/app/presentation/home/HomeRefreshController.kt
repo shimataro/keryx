@@ -13,6 +13,7 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
 import works.merc.keryx.app.domain.SyncTrigger
 
@@ -54,10 +55,24 @@ internal class HomeRefreshController(
      */
     val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> = _pullRefreshingFilters.asStateFlow()
 
+    private val _manualRefreshStatus = MutableStateFlow<ManualRefreshStatus>(ManualRefreshStatus.Idle)
+
+    /**
+     * What the refreshes started here are doing — see [ManualRefreshStatus]. Updated with
+     * [MutableStateFlow.update], since a cycle starts on [dispatcher] rather than on [scope].
+     */
+    val manualRefreshStatus: StateFlow<ManualRefreshStatus> = _manualRefreshStatus.asStateFlow()
+
     /** Refreshes one feed. */
     fun refreshFeed(feed: Feeds) {
         scope.launch {
-            withContext(dispatcher) { runner.refreshFeed(feed) }
+            _manualRefreshStatus.update { it.started() }
+            var outcome: RefreshOutcome? = null
+            try {
+                outcome = withContext(dispatcher) { runner.refreshFeed(feed) }
+            } finally {
+                _manualRefreshStatus.update { it.ended(outcome) }
+            }
         }
     }
 
@@ -108,7 +123,19 @@ internal class HomeRefreshController(
      */
     private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
         retrimPins()
-        val outcome = withContext(dispatcher) { runner.runIfIdle(filter, SyncTrigger.MANUAL) }
+        // A cycle that never starts (busy, or nothing to refresh) leaves the status alone.
+        var started = false
+        var outcome: CycleOutcome? = null
+        try {
+            outcome = withContext(dispatcher) {
+                runner.runIfIdle(filter, SyncTrigger.MANUAL) {
+                    started = true
+                    _manualRefreshStatus.update { it.started() }
+                }
+            }
+        } finally {
+            if (started) _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh) }
+        }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
         if (outcome is CycleOutcome.Ran) retrimPins()

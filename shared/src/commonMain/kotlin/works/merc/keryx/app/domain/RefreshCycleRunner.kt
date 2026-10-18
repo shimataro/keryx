@@ -14,9 +14,9 @@ import works.merc.keryx.app.data.local.db.Feeds
  * Every run is wrapped in one [ActivityCenter] refresh cycle, and its refresh in
  * [ActivityCenter.trackFeedRefresh], so the gap between the refresh and the sync still counts as
  * busy for anything consulting [ActivitySnapshot.idle]. The sync only runs while a cloud provider
- * is connected ([CloudSession.isConnected]). Once a run's activity tracking has ended, its refresh is
- * reported through [reportRefreshOutcome] — the outcome a UI shows, and the notification-center
- * warning when no feed could be reached ([isUnreachable]).
+ * is connected ([CloudSession.isConnected]). Every run's refresh is reported through
+ * [reportRefreshOutcome] — the notification-center warning when no feed could be reached
+ * ([isUnreachable]), and the [RefreshOutcome] the manual entry points return for a UI to show.
  *
  * The runner does no dispatcher switching of its own: it runs in the caller's context, so a caller
  * on the UI thread must move it off (the refresh, the sync, and [CloudSession.isConnected] all do
@@ -44,8 +44,11 @@ class RefreshCycleRunner(
         /** A feed / folder / tag selection covered no subscribed feed; nothing was fetched or synced. */
         data object NothingToRefresh : CycleOutcome
 
-        /** The cycle ran. [syncResult] is the sync's result, or `null` when no provider is connected. */
-        data class Ran(val syncResult: Result<Unit>?) : CycleOutcome
+        /**
+         * The cycle ran. [syncResult] is the sync's result, or `null` when no provider is connected;
+         * [refresh] is how its refresh went, or `null` when it refreshed no feed.
+         */
+        data class Ran(val syncResult: Result<Unit>?, val refresh: RefreshOutcome? = null) : CycleOutcome
     }
 
     /**
@@ -65,16 +68,11 @@ class RefreshCycleRunner(
         order: CycleOrder = CycleOrder.REFRESH_THEN_SYNC,
         trigger: SyncTrigger,
         step: suspend (name: String, block: suspend () -> Unit) -> Unit = { _, block -> block() },
-    ): Result<Unit>? {
-        var refreshed: Map<String, Result<Int>>? = null
-        try {
-            return activityCenter.trackRefreshCycle {
-                runStages(order, trigger, step, { refreshed = it }) { feedRepository.feedsCoveredBy(filter) }
-            }
-        } finally {
-            refreshed?.let { report(it) }
+    ): Result<Unit>? = reportingRefresh { onRefreshed ->
+        activityCenter.trackRefreshCycle {
+            runStages(order, trigger, step, onRefreshed) { feedRepository.feedsCoveredBy(filter) }
         }
-    }
+    }.first
 
     /**
      * The manual entry point: runs a [CycleOrder.REFRESH_THEN_SYNC] cycle for [filter] only if
@@ -85,37 +83,53 @@ class RefreshCycleRunner(
      * [ArticleFilter.Folder] / [ArticleFilter.Tag] selection covering no subscribed feed returns
      * [CycleOutcome.NothingToRefresh] without starting a cycle or syncing. [ArticleFilter.All] /
      * [ArticleFilter.Starred] always run, so a sync still happens with no feeds subscribed.
+     *
+     * [onStarted] is called once the cycle has claimed the idle center, before any of it runs — never
+     * for [CycleOutcome.Busy] or [CycleOutcome.NothingToRefresh] — on the caller's context.
      */
-    suspend fun runIfIdle(filter: ArticleFilter, trigger: SyncTrigger): CycleOutcome {
+    suspend fun runIfIdle(filter: ArticleFilter, trigger: SyncTrigger, onStarted: () -> Unit = {}): CycleOutcome {
         val targets = feedRepository.feedsCoveredBy(filter)
         val coversEveryFeed = filter == ArticleFilter.All || filter == ArticleFilter.Starred
         if (!coversEveryFeed && targets.isEmpty()) return CycleOutcome.NothingToRefresh
         // The outcome itself is the block's result, so a `null` sync result (not connected) stays
         // distinguishable from tryTrackRefreshCycle's own `null` ("busy").
-        var refreshed: Map<String, Result<Int>>? = null
-        try {
-            return activityCenter.tryTrackRefreshCycle<CycleOutcome> {
+        val (ran, refresh) = reportingRefresh { onRefreshed ->
+            activityCenter.tryTrackRefreshCycle {
+                onStarted()
                 CycleOutcome.Ran(
-                    runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, { _, block -> block() }, { refreshed = it }) { targets },
+                    runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, { _, block -> block() }, onRefreshed) { targets },
                 )
-            } ?: CycleOutcome.Busy
-        } finally {
-            refreshed?.let { report(it) }
+            }
         }
+        return ran?.copy(refresh = refresh) ?: CycleOutcome.Busy
     }
 
     /**
      * Refreshes [feed] alone — no new-article notification and no sync, unlike a cycle — and reports
-     * it like one ([reportRefreshOutcome]), so a UI hears how it went whichever refresh ran.
+     * it like one ([reportRefreshOutcome]), returning how it went.
      */
-    suspend fun refreshFeed(feed: Feeds): Result<Int> {
+    suspend fun refreshFeed(feed: Feeds): RefreshOutcome? {
         val result = activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) }
-        report(mapOf(feed.id to result))
-        return result
+        return reportRefreshOutcome(mapOf(feed.id to result), notificationCenter, clock)
     }
 
-    private suspend fun report(results: Map<String, Result<Int>>) =
-        reportRefreshOutcome(results, activityCenter, notificationCenter, clock)
+    /**
+     * Runs [block], handing it the callback that records its refresh's per-feed results, and reports
+     * those results ([reportRefreshOutcome]) once [block] has ended — even when it throws, so a
+     * failing later stage cannot lose them. Returns [block]'s value with the reported outcome.
+     */
+    private suspend fun <T> reportingRefresh(
+        block: suspend (onRefreshed: (Map<String, Result<Int>>) -> Unit) -> T,
+    ): Pair<T, RefreshOutcome?> {
+        var refreshed: Map<String, Result<Int>>? = null
+        var outcome: RefreshOutcome? = null
+        val value = try {
+            block { refreshed = it }
+        } finally {
+            outcome = refreshed?.let { reportRefreshOutcome(it, notificationCenter, clock) }
+        }
+        return value to outcome
+    }
 
     private suspend fun runStages(
         order: CycleOrder,
