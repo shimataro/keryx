@@ -20,12 +20,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** A [SyncScheduler] fake that counts invocations. */
+/**
+ * A [SyncScheduler] fake that counts deferred-sync requests. Every sync [ArticleRepository]
+ * schedules is a reading-state change, which must use the long deferred window (each sync uploads
+ * the whole database), so the short-window [scheduleSync] fails the test outright.
+ */
 private class CountingSyncScheduler : SyncScheduler {
     var callCount = 0
         private set
 
     override fun scheduleSync() {
+        error("reading-state changes must call scheduleDeferredSync, not scheduleSync")
+    }
+
+    override fun scheduleDeferredSync() {
         callCount++
     }
 }

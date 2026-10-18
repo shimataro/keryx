@@ -231,24 +231,24 @@ class ArticleRepository(
     fun markAsRead(id: String) {
         val now = clock.nowMillis()
         articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     fun markAsUnread(id: String) {
         val now = clock.nowMillis()
         articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     fun setStarred(id: String, starred: Boolean) {
         val now = clock.nowMillis()
         articles.updateStarStatus(is_starred = if (starred) 1L else 0L, starred_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     /**
      * Marks exactly the given article [ids] as read in a single transaction, with one
-     * [SyncScheduler.scheduleSync] call regardless of how many ids are passed. Used for the
+     * [SyncScheduler.scheduleDeferredSync] call regardless of how many ids are passed. Used for the
      * search scope's "mark all read", where the target set comes from an FTS snapshot rather
      * than a `WHERE` clause like [markAllAsRead].
      */
@@ -262,7 +262,7 @@ class ArticleRepository(
                 articles.updateReadStatusByIds(read_at = now, updated_at = now, id = chunk)
             }
         }
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     fun markAllAsRead(filter: ArticleFilter) {
@@ -274,7 +274,7 @@ class ArticleRepository(
             is ArticleFilter.Folder -> articles.markAllReadByFolder(now, now, filter.folderId)
             ArticleFilter.Starred -> return // no-op
         }
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     /**

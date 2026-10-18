@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -19,6 +20,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.cloudBackupPath
@@ -113,16 +115,39 @@ class SyncRepository(
      * [mutex] and the upload is rev-checked. The cost is the duplicated work.) A conflated channel
      * with the single consumer below keeps the same trailing-debounce semantics with no shared
      * mutable state, mirroring how `SettingsRepository` coalesces its own disk write.
+     *
+     * A signal carries no payload: which window applies is read from [soonRequested] each time the
+     * window is (re-)armed, since a conflated channel would let a later deferred signal overwrite an
+     * earlier urgent one.
      */
     private val syncSignals = Channel<Unit>(capacity = Channel.CONFLATED)
+
+    /**
+     * Local changes exist that no sync has picked up yet. Set by [scheduleSync] and
+     * [scheduleDeferredSync], cleared when a sync starts (its snapshot will include them), and
+     * restored if that sync fails. [flushPendingSync] and an expiring debounce window both sync only
+     * while this is set, so a window outlived by a refresh cycle's own sync costs nothing.
+     */
+    private val unsyncedChanges = MutableStateFlow(false)
+
+    /**
+     * A structural change ([scheduleSync]) is waiting, so the short [SYNC_DEBOUNCE_MS] window
+     * applies rather than [DEFERRED_SYNC_DEBOUNCE_MS]. Cleared when the window expires.
+     */
+    private val soonRequested = MutableStateFlow(false)
 
     init {
         scope.launch {
             for (signal in syncSignals) {
                 // Re-arm as long as calls keep arriving, so the window is measured from the last one.
-                while (withTimeoutOrNull(SYNC_DEBOUNCE_MS) { syncSignals.receive() } != null) {
-                    // Another scheduleSync() landed inside the window; restart it.
+                // The window is re-read on every re-arm, so an urgent change shortens a deferred wait.
+                while (withTimeoutOrNull(debounceWindowMs()) { syncSignals.receive() } != null) {
+                    // Another schedule call landed inside the window; restart it.
                 }
+                soonRequested.value = false
+                // A sync that ran meanwhile (a refresh cycle, a manual sync, a flush) already
+                // uploaded what this window was waiting for.
+                if (!unsyncedChanges.value) continue
                 // This is the *only* consumer, so a throw escaping here would end debounced syncing
                 // for the rest of the process while scheduleSync() kept succeeding into a channel
                 // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
@@ -194,13 +219,35 @@ class SyncRepository(
         }
     }
 
+    private fun debounceWindowMs(): Long = if (soonRequested.value) SYNC_DEBOUNCE_MS else DEFERRED_SYNC_DEBOUNCE_MS
+
     /**
      * Schedules a debounced cloud synchronization.
      */
     override fun scheduleSync() {
         if (cloudProvider() == null) return
         if (_autoSyncSuspended.value) return
+        unsyncedChanges.value = true
+        soonRequested.value = true
         syncSignals.trySend(Unit)
+    }
+
+    /** Schedules a sync after [DEFERRED_SYNC_DEBOUNCE_MS] of quiet — see [SyncScheduler.scheduleDeferredSync]. */
+    override fun scheduleDeferredSync() {
+        if (cloudProvider() == null) return
+        if (_autoSyncSuspended.value) return
+        unsyncedChanges.value = true
+        syncSignals.trySend(Unit)
+    }
+
+    /**
+     * Syncs now if local changes are still waiting for a debounce window, and returns once that
+     * sync has finished; does nothing otherwise. Called when the app leaves the foreground, so
+     * deferred reading-state changes reach other devices without waiting out their long window.
+     */
+    suspend fun flushPendingSync() {
+        if (!unsyncedChanges.value) return
+        sync(SyncTrigger.AUTOMATIC)
     }
 
     /**
@@ -223,7 +270,11 @@ class SyncRepository(
         return activityCenter.trackSync {
             mutex.withLock {
                 try {
+                    // Cleared before the snapshot is taken, so a change made during this sync
+                    // re-arms it; restored on failure so a failed sync doesn't drop pending changes.
+                    val hadUnsyncedChanges = unsyncedChanges.getAndUpdate { false }
                     val result = syncLocked()
+                    if (result !is Result.Ok && hadUnsyncedChanges) unsyncedChanges.value = true
                     updateAutoSyncGate(result)
                     emitErrorNotification(result)
                     result

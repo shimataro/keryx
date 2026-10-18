@@ -17,6 +17,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.NotificationText
@@ -1498,6 +1499,116 @@ class SyncRepositoryTest {
         advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
         runCurrent()
         assertEquals(3, cloud.existsCount)
+    }
+
+    // --- Deferred (reading-state) syncs and flushing ---
+    //
+    // Each test first syncs once so the .gz exists, then resets existsCount: from there on, one
+    // sync costs exactly one metadata request, so existsCount counts syncs.
+
+    private suspend fun TestScope.syncedRepo(cloud: FakeCloudStorage): SyncRepository =
+        newRepo(cloud).also {
+            assertIs<Result.Ok<Unit>>(it.sync())
+            cloud.existsCount = 0
+        }
+
+    @Test
+    fun scheduleDeferredSyncWaitsForTheLongWindow() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(0, cloud.existsCount, "a reading-state change must not sync on the short window")
+
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun scheduleSyncShortensAPendingDeferredWindowIntoOneSync() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS)
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+
+        // The deferred change rode along with that sync; nothing is left for a later window.
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun flushPendingSyncSyncsOnlyWhenChangesArePending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.flushPendingSync()
+        assertEquals(0, cloud.existsCount, "nothing pending, so nothing to flush")
+
+        repo.scheduleDeferredSync()
+        repo.flushPendingSync()
+        assertEquals(1, cloud.existsCount)
+
+        // The still-armed window finds nothing left to sync when it expires.
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun anySyncPicksUpPendingDeferredChanges() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        repo.sync(SyncTrigger.AUTOMATIC) // e.g. a refresh cycle's own sync
+        assertEquals(1, cloud.existsCount)
+
+        repo.flushPendingSync()
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun aFailedSyncKeepsDeferredChangesPending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        cloud.queueExists(Result.Err(CloudStorageException("offline")))
+        repo.flushPendingSync()
+        assertEquals(1, cloud.existsCount)
+
+        repo.flushPendingSync() // retried, since the failed sync uploaded nothing
+        assertEquals(2, cloud.existsCount)
+
+        repo.flushPendingSync() // now delivered
+        assertEquals(2, cloud.existsCount)
+    }
+
+    @Test
+    fun scheduleDeferredSyncIsSuppressedWhileCloudDataIsUnusable() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(byteArrayOf(1, 2, 3, 4)), "r1")
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        repo.flushPendingSync()
+
+        assertEquals(1, cloud.existsCount) // only the initial sync() call's own exists() check
     }
 
     @Test
