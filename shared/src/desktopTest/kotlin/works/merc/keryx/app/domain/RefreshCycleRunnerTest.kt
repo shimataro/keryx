@@ -226,7 +226,7 @@ class RefreshCycleRunnerTest {
         val f = fixture(driver, db, fetchGate = gate)
         val snapshots = Collections.synchronizedList(mutableListOf<ActivitySnapshot>())
 
-        val cycle = async(Dispatchers.Default) {
+        val cycle = async {
             f.runner.run(trigger = SyncTrigger.AUTOMATIC) { _, block ->
                 snapshots += f.activityCenter.activity.value // between stages: only the cycle is up
                 block()
@@ -248,7 +248,7 @@ class RefreshCycleRunnerTest {
         val f = fixture(driver, db)
         val gate = CompletableDeferred<Unit>()
         val entered = CompletableDeferred<Unit>()
-        val busy = launch(Dispatchers.Default) { f.activityCenter.trackSync { entered.complete(Unit); gate.await() } }
+        val busy = launch { f.activityCenter.trackSync { entered.complete(Unit); gate.await() } }
         entered.await()
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)

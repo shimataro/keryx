@@ -5,7 +5,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -94,10 +94,12 @@ class UpdateMenuActionTest {
 
     private val tempDirs = mutableListOf<File>()
     private val scopes = mutableListOf<CoroutineScope>()
+    private val dispatchers = mutableListOf<ExecutorCoroutineDispatcher>()
 
     @AfterTest
     fun tearDown() {
         scopes.forEach { it.cancel() }
+        dispatchers.forEach { it.close() }
         tempDirs.forEach { it.deleteRecursively() }
     }
 
@@ -210,7 +212,8 @@ class UpdateMenuActionTest {
                 respond(payload, HttpStatusCode.OK)
             },
         ) { expectSuccess = false }
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes.add(it) }
+        val dispatcher = testThreadDispatcher("update-menu-action-test").also { dispatchers.add(it) }
+        val scope = CoroutineScope(SupervisorJob() + dispatcher).also { scopes.add(it) }
         val installer = RecordingInstaller(canInstall)
         val location = if (canInstall) WRITABLE_MAC_LOCATION else READ_ONLY_MAC_LOCATION
         val dir = createTempDirectory("update-menu-action-test").toFile().also { tempDirs.add(it) }
