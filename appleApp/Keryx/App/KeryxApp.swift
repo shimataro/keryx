@@ -146,7 +146,9 @@ struct KeryxApp: App {
         // the next background refresh scheduled.
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
-            case .active: model.startForegroundWorkIfNeeded()
+            case .active:
+                ExternalAppLaunch.shared.clear()
+                model.startForegroundWorkIfNeeded()
             case .background:
                 scheduleBackgroundRefresh()
                 model.stopForegroundLoop()

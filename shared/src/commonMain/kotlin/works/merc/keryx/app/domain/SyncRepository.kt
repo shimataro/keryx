@@ -44,6 +44,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.ContentDigest
 import works.merc.keryx.app.platform.DatabaseMerger
+import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.platform.DatabaseSnapshot
 import works.merc.keryx.app.platform.FileIO
@@ -239,6 +240,17 @@ class SyncRepository(
         unsyncedChanges.value = true
         if (soon) soonRequested.value = true
         syncSignals.trySend(Unit)
+    }
+
+    /**
+     * [flushPendingSync] for a mobile app leaving the foreground, except when it left only because it
+     * sent the user to another app itself (opening an article in the browser — see
+     * [ExternalAppLaunch]): that would upload the whole database once per article read that way. The
+     * changes stay pending for the long window, the next sync, or the next real exit.
+     */
+    suspend fun flushOnLeavingForeground() {
+        if (ExternalAppLaunch.consumeLaunched()) return
+        flushPendingSync()
     }
 
     /**

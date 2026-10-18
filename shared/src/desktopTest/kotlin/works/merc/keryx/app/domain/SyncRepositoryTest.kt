@@ -33,6 +33,7 @@ import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
@@ -1599,6 +1600,35 @@ class SyncRepositoryTest {
 
         repo.flushPendingSync() // now delivered
         assertEquals(2, cloud.existsCount)
+    }
+
+    @Test
+    fun flushOnLeavingForegroundSkipsTheExitCausedByTheAppsOwnLaunch() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        repo.scheduleDeferredSync()
+
+        ExternalAppLaunch.markLaunched()
+        repo.flushOnLeavingForeground()
+        assertEquals(0, cloud.existsCount, "opening a link in the browser is not leaving the app")
+
+        // The mark was consumed, so the next real exit flushes what stayed pending.
+        repo.flushOnLeavingForeground()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun flushOnLeavingForegroundFlushesWithoutALaunchMark() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        ExternalAppLaunch.clear()
+
+        repo.flushOnLeavingForeground()
+        assertEquals(0, cloud.existsCount, "nothing pending")
+
+        repo.scheduleDeferredSync()
+        repo.flushOnLeavingForeground()
+        assertEquals(1, cloud.existsCount)
     }
 
     @Test

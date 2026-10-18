@@ -17,6 +17,7 @@ import works.merc.keryx.app.handleOpmlOpenIfPresent
 import works.merc.keryx.app.handleSharedLinkIfPresent
 import works.merc.keryx.app.platform.AndroidAuthorizationHost
 import works.merc.keryx.app.platform.AndroidFilePickerHost
+import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.runAndroidStartupTasks
 
 /**
@@ -76,16 +77,26 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Back in front: a launch the app made itself (a browser tab) is over, and one that never took
+     * the app out of the foreground must not swallow a later real exit.
+     */
+    override fun onResume() {
+        super.onResume()
+        ExternalAppLaunch.clear()
+    }
+
+    /**
      * Leaving the app is when deferred reading-state changes (marked read / starred, which wait out a
-     * long debounce window) should reach other devices. Launched on the process-wide scope rather
-     * than `lifecycleScope`, which an Activity finishing right after this would cancel. A
+     * long debounce window) should reach other devices — unless the app left only to open a link in
+     * the browser (see `SyncRepository.flushOnLeavingForeground`). Launched on the process-wide scope
+     * rather than `lifecycleScope`, which an Activity finishing right after this would cancel. A
      * configuration change is not leaving the app.
      */
     override fun onStop() {
         super.onStop()
         if (isChangingConfigurations) return
         val koin = KoinPlatform.getKoin()
-        koin.get<CoroutineScope>().launch { koin.get<SyncRepository>().flushPendingSync() }
+        koin.get<CoroutineScope>().launch { koin.get<SyncRepository>().flushOnLeavingForeground() }
     }
 
     override fun onDestroy() {

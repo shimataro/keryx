@@ -52,6 +52,9 @@ actual object BrowserOpener {
                 BrowserLaunchKind.VIEW ->
                     context.startActivity(Intent(Intent.ACTION_VIEW, uri).withTaskFlag(activity == null))
             }
+            // Reached only when the launch above did not throw: the app is about to leave the
+            // foreground on its own account, which is not the user leaving (ExternalAppLaunch).
+            ExternalAppLaunch.markLaunched()
         } catch (e: ActivityNotFoundException) {
             Log.warn(TAG, "No activity found to open URL: $target", e)
         }
