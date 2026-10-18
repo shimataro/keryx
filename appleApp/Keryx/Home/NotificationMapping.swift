@@ -20,8 +20,8 @@ func notificationText(_ text: NotificationText) -> String {
 }
 
 /// Localizes an `InfoDialogText` — the explanatory detail behind a `ShowInfoDialog` action. Not a
-/// sealed-interface type (no `onEnum(of:)`) — it's a plain, argument-less Kotlin enum, so its cases
-/// bridge as static properties rather than Swift `enum` cases.
+/// sealed-interface type (no `onEnum(of:)`) — it's a plain, argument-less Kotlin enum, which SKIE
+/// bridges as a frozen Swift `enum`, so the `switch` is exhaustive and a new case fails to compile here.
 func infoDialogText(_ text: InfoDialogText) -> String {
     switch text {
     case .appTranslocated: return L("notification_app_translocated_detail")
