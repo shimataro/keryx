@@ -83,6 +83,19 @@ jobs:
             exit 1
           fi
 
+      # With ref empty the tag v<version> is built, so it has to exist already; checked here so a
+      # missing tag fails with a clear message rather than checkout's generic one.
+      - name: Check the release tag
+        if: inputs.ref == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" --silent; then
+            echo "::error::Tag v$VERSION was not found. Publish the GitHub Release v$VERSION first, or set ref."
+            exit 1
+          fi
+
       # Full history, so the commit can be checked against every version branch.
       - name: Checkout
         uses: actions/checkout@v7

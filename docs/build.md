@@ -1358,7 +1358,7 @@ iOS:
 
 1. Publish the GitHub Release `v<version>` as usual; `release.yml` ships every other platform.
 2. Run the workflow with `version` set to that version. With `ref` left empty it builds the tag
-   `v<version>`.
+   `v<version>`. The tag must already exist; without it the run stops before anything is built.
 3. Once approved, the version goes live on its own with `release` set to `automatic` (the default);
    with `manual`, release it in App Store Connect.
 
@@ -1388,9 +1388,9 @@ build in App Store Connect, then submit it there (or run again with `submit` on)
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
 from `ref`):
 
-1. A first job, which runs none of `ref`'s code, checks that `ref` is on a version branch and
-   generates GitHub's release notes for that commit (for "What's New" below). The build job then
-   checks out exactly that commit.
+1. A first job, which runs none of `ref`'s code, checks that `ref` is on a version branch (and,
+   with `ref` empty, that the tag `v<version>` exists) and generates GitHub's release notes for that
+   commit (for "What's New" below). The build job then checks out exactly that commit.
 2. Checks that every secret below is set (`check-release-config.sh`), imports the certificate into a
    throwaway keychain, and writes the profile and the API key into the runner's temp directory (all
    removed at the end).
