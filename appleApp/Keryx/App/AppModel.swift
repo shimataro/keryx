@@ -1,6 +1,9 @@
 import Foundation
 import KeryxShared
 import Observation
+#if os(iOS)
+import UIKit
+#endif
 
 /// Builds and holds the shared `KeryxSdk` graph for the lifetime of the app, and the
 /// `@Observable` adapters SwiftUI views read from. One instance per process — see
@@ -124,6 +127,25 @@ final class AppModel {
     /// (`runBackgroundRefresh` is the only work wanted in that slot).
     func stopForegroundLoop() {
         sdk?.stopRefreshLoop()
+    }
+
+    /// Sends local changes still waiting for their sync debounce window (marked read / starred) as the
+    /// scene leaves the foreground, so they reach other devices without waiting for the next refresh.
+    /// Runs inside a background task so suspension doesn't cut the upload short; if the OS ends that
+    /// grace period first, nothing is lost — the next sync uploads the same changes.
+    func flushPendingSync() {
+        guard let sdk else { return }
+        var taskId = UIBackgroundTaskIdentifier.invalid
+        let endTask = {
+            guard taskId != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(taskId)
+            taskId = .invalid
+        }
+        taskId = UIApplication.shared.beginBackgroundTask(withName: "FlushPendingSync") { endTask() }
+        Task {
+            try? await sdk.syncRepository.flushPendingSync()
+            endTask()
+        }
     }
     #endif
 

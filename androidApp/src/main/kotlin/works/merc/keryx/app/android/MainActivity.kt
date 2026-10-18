@@ -12,6 +12,7 @@ import org.koin.core.Koin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.App
 import works.merc.keryx.app.dispatchOAuthCallbackIfPresent
+import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.handleOpmlOpenIfPresent
 import works.merc.keryx.app.handleSharedLinkIfPresent
 import works.merc.keryx.app.platform.AndroidAuthorizationHost
@@ -72,6 +73,19 @@ class MainActivity : ComponentActivity() {
         // FeedRefreshWorker) — and why it's safe to call again on every onCreate (rotation), since
         // the function guards itself to once per process.
         koin.get<CoroutineScope>().launch { runAndroidStartupTasks(koin) }
+    }
+
+    /**
+     * Leaving the app is when deferred reading-state changes (marked read / starred, which wait out a
+     * long debounce window) should reach other devices. Launched on the process-wide scope rather
+     * than `lifecycleScope`, which an Activity finishing right after this would cancel. A
+     * configuration change is not leaving the app.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (isChangingConfigurations) return
+        val koin = KoinPlatform.getKoin()
+        koin.get<CoroutineScope>().launch { koin.get<SyncRepository>().flushPendingSync() }
     }
 
     override fun onDestroy() {

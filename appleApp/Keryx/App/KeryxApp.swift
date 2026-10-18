@@ -150,6 +150,7 @@ struct KeryxApp: App {
             case .background:
                 scheduleBackgroundRefresh()
                 model.stopForegroundLoop()
+                model.flushPendingSync()
             default: break
             }
         }
