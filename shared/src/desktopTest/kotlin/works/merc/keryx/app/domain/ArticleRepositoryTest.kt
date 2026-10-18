@@ -495,6 +495,84 @@ class ArticleRepositoryTest {
     }
 
     @Test
+    fun markAsReadOnAnAlreadyReadArticleChangesNothingAndSchedulesNoSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", isRead = 1L)
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markAsRead("a1")
+
+            val row = db.articlesQueries.getById("a1").executeAsOne()
+            assertNull(row.read_at)
+            assertEquals(0L, row.updated_at)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun markAsReadStampsAnUnreadArticleOnce() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markAsRead("a1")
+            repo.markAsRead("a1")
+
+            assertTrue(db.articlesQueries.getById("a1").executeAsOne().read_at != null)
+            assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun markAsUnreadOnAnUnreadArticleChangesNothingAndSchedulesNoSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markAsUnread("a1")
+
+            assertNull(db.articlesQueries.getById("a1").executeAsOne().read_at)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun setStarredToTheCurrentStateChangesNothingAndSchedulesNoSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", isStarred = 1L)
+            db.insertArticle("a2", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.setStarred("a1", true)
+            repo.setStarred("a2", false)
+
+            assertNull(db.articlesQueries.getById("a1").executeAsOne().starred_at)
+            assertNull(db.articlesQueries.getById("a2").executeAsOne().starred_at)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun markAllAsReadAllMarksEveryUnreadArticle() {
         val (driver, db) = inMemoryDb()
         try {

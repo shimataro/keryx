@@ -224,26 +224,29 @@ class ArticleRepository(
     }
 
     /**
-     * Marks an article as read and schedules synchronization.
+     * Marks an article as read and schedules a deferred synchronization. Does nothing (no write, no
+     * sync) when the article is already read, so re-opening one never re-stamps `read_at`.
      *
      * @param id The ID of the article to mark as read.
      */
     fun markAsRead(id: String) {
         val now = clock.nowMillis()
-        articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleDeferredSync()
+        val changed = articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
+        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     fun markAsUnread(id: String) {
         val now = clock.nowMillis()
-        articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleDeferredSync()
+        val changed = articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
+        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     fun setStarred(id: String, starred: Boolean) {
         val now = clock.nowMillis()
-        articles.updateStarStatus(is_starred = if (starred) 1L else 0L, starred_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleDeferredSync()
+        val changed = articles.updateStarStatus(
+            is_starred = if (starred) 1L else 0L, starred_at = now, updated_at = now, id = id,
+        )
+        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     /**
