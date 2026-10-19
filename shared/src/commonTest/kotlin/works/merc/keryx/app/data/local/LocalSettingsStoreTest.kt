@@ -65,6 +65,20 @@ class LocalSettingsStoreTest {
     }
 
     @Test
+    fun syncOnMeteredNetworkDefaultsToOffAndRoundTrips() {
+        assertFalse(store.load().syncOnMeteredNetwork)
+        store.save(LocalSettings(syncOnMeteredNetwork = true))
+        assertTrue(store.load().syncOnMeteredNetwork)
+    }
+
+    @Test
+    fun loadingOldSettingsFileWithoutSyncOnMeteredNetworkKeyDefaultsToOff() {
+        FileIO.writeText(FileIO.join(dir, "local_settings.json"), """{"themeMode":"dark"}""")
+
+        assertFalse(store.load().syncOnMeteredNetwork)
+    }
+
+    @Test
     fun loadingOldSettingsFileWithoutExpandedTagIdsKeyStillWorks() {
         // Simulates a `local_settings.json` written before `expandedTagIds` existed.
         FileIO.writeText(

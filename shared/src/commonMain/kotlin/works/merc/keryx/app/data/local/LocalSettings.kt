@@ -55,4 +55,11 @@ data class LocalSettings(
      * `com.canonical.AppMenu.Registrar` is present (macOS/Windows/non-KDE Linux), where the bar always shows.
      */
     val appMenuBarVisible: Boolean? = null,
+    /**
+     * Whether automatic cloud sync also runs on a metered network (mobile data, a metered Wi-Fi,
+     * tethering). Off by default: a sync uploads the whole database. Never overrides the OS's
+     * data-saving mode (see [works.merc.keryx.app.domain.NetworkUsagePolicy]). Only offered where
+     * the platform reports metered networks (Android, iOS).
+     */
+    val syncOnMeteredNetwork: Boolean = false,
 )

@@ -5,6 +5,9 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import org.koin.core.module.Module
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -26,6 +29,7 @@ import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NetworkUsagePolicy
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
@@ -102,6 +106,13 @@ fun sharedModule(): Module = module {
             // localDbPath left at its constructor default (platform/DatabaseFile.kt's
             // databaseFilePath(), already the platform-correct real DB path on both desktop and
             // Android) rather than passed here — see that function's own KDoc for why it exists.
+            // Lazy for the same reason as cloudProvider: SettingsRepository depends on this class
+            // (as its SyncScheduler), so resolving it eagerly here would be a cycle.
+            automaticSyncAllowed = {
+                combine(get<NetworkConditionMonitor>().condition, get<SettingsRepository>().localSettings) { condition, settings ->
+                    NetworkUsagePolicy.automaticSyncAllowed(condition, settings.syncOnMeteredNetwork)
+                }.distinctUntilChanged()
+            },
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }
@@ -116,7 +127,12 @@ fun sharedModule(): Module = module {
     single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get()) }
     single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
-    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
+    single {
+        val monitor = get<NetworkConditionMonitor>()
+        RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) {
+            NetworkUsagePolicy.automaticRefreshAllowed(monitor.condition.first())
+        }
+    }
 }
 
 /**

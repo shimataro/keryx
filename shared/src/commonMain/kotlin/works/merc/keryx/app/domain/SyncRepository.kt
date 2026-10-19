@@ -3,9 +3,13 @@ package works.merc.keryx.app.domain
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -49,17 +53,18 @@ import works.merc.keryx.app.platform.databaseFilePath
 
 /**
  * Who asked for a sync. Only [AUTOMATIC] is subject to the unusable-cloud-DB gate
- * ([SyncRepository.autoSyncSuspended]): a person who pressed "sync" must always get a real
- * attempt (and the failure that explains why), or the app would silently do nothing with no way
- * for them to find out.
+ * ([SyncRepository.autoSyncSuspended]) and the network gate ([SyncRepository.syncDeferredForNetwork]):
+ * a person who pressed "sync" must always get a real attempt (and the failure that explains why),
+ * or the app would silently do nothing with no way for them to find out.
  */
 enum class SyncTrigger { MANUAL, AUTOMATIC }
 
 /**
  * The step [SyncRepository] is currently on, for live progress feedback in the cloud-sync settings
  * tab. [IDLE] outside any [SyncRepository.sync]/[SyncRepository.resetCloudData] call — including
- * the entire duration of an [SyncTrigger.AUTOMATIC] call skipped by [SyncRepository.autoSyncSuspended],
- * which never enters [ActivityCenter.trackSync] at all. Updated only from inside the single mutex
+ * the entire duration of an [SyncTrigger.AUTOMATIC] call skipped by [SyncRepository.autoSyncSuspended]
+ * or deferred for the network ([SyncRepository.syncDeferredForNetwork]), neither of which enters
+ * [ActivityCenter.trackSync] at all. Updated only from inside the single mutex
  * both of those methods hold, so a queued sync never sees a stale phase left by the one ahead of it.
  */
 enum class SyncPhase { IDLE, CHECKING, DOWNLOADING, MERGING, INDEXING, PREPARING, UPLOADING, ARCHIVING }
@@ -84,6 +89,14 @@ class SyncRepository(
     private val notificationCenter: NotificationCenter,
     private val localDbPath: String = databaseFilePath(),
     private val tempDir: String = AppDirs.tempDir(),
+    /**
+     * Whether an [SyncTrigger.AUTOMATIC] sync may use the current network
+     * ([NetworkUsagePolicy.automaticSyncAllowed]), as a flow so a deferred sync can wait for the
+     * moment it becomes true. A lambda, like [cloudProvider], because what it reads
+     * (`SettingsRepository`) itself depends on this class as its [SyncScheduler]. The default (always
+     * allowed) is for tests that do not exercise the gate.
+     */
+    private val automaticSyncAllowed: () -> Flow<Boolean> = { flowOf(true) },
 ) : SyncScheduler {
 
     private val mutex = Mutex()
@@ -102,6 +115,13 @@ class SyncRepository(
     private val _lastSyncAuthFailed = MutableStateFlow(false)
     private val _autoSyncSuspended = MutableStateFlow(false)
     private val _syncPhase = MutableStateFlow(SyncPhase.IDLE)
+    private val _syncDeferredForNetwork = MutableStateFlow(false)
+
+    /** Guards [deferredSyncWaiter] (and its pairing with [_syncDeferredForNetwork]). */
+    private val deferralMutex = Mutex()
+
+    /** Waits for the network to allow automatic syncing again, then schedules the deferred sync. */
+    private var deferredSyncWaiter: Job? = null
 
     /**
      * Debounce signals, coalesced. [scheduleSync] is called from the UI thread (tag / folder / feed
@@ -168,6 +188,21 @@ class SyncRepository(
     val syncPhase: StateFlow<SyncPhase> = _syncPhase
 
     /**
+     * True while an [SyncTrigger.AUTOMATIC] sync was held back because the current network does not
+     * allow it ([NetworkUsagePolicy.automaticSyncAllowed] — a metered network without the user's
+     * opt-in, or the OS's data-saving mode), and no sync has succeeded since. While it is true, a
+     * waiter schedules a sync the moment the network allows one; Android additionally hands the
+     * deferred sync to a `WorkManager` job constrained to an unmetered network, so it also happens
+     * with the app closed.
+     *
+     * Deliberately in-memory, like [autoSyncSuspended]: the uploaded snapshot is the whole database,
+     * so the next sync that is allowed carries every change made in the meantime, and there is no
+     * queue of pending changes to remember. Cleared by any successful sync (a manual one included)
+     * and by [clearSyncFailureState].
+     */
+    val syncDeferredForNetwork: StateFlow<Boolean> = _syncDeferredForNetwork
+
+    /**
      * Clears everything tied to the current cloud connection — the mirrored failure reason, the
      * automatic-sync pause, and the "what we last saw / last uploaded" markers — e.g. when the
      * connection that produced them is being torn down so a subsequently-connected provider does
@@ -192,6 +227,7 @@ class SyncRepository(
             setSyncState(SYNC_STATE_CLOUD_FILE_REV, "")
             setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, "")
         }
+        clearNetworkDeferral()
     }
 
     /**
@@ -208,14 +244,24 @@ class SyncRepository(
      *
      * @param trigger Who is asking. [SyncTrigger.AUTOMATIC] is skipped (returning [Result.Ok]) while
      * [autoSyncSuspended] is true, so a known-unusable cloud DB does not get re-downloaded and
-     * re-merged on every debounced write or background cycle; [SyncTrigger.MANUAL] (the default)
-     * always runs, so a person who explicitly asked for a sync always gets a real attempt.
+     * re-merged on every debounced write or background cycle, and is deferred (also returning
+     * [Result.Ok], see [syncDeferredForNetwork]) while the current network does not allow it;
+     * [SyncTrigger.MANUAL] (the default) always runs, so a person who explicitly asked for a sync
+     * always gets a real attempt.
      * @return The synchronization result.
      */
     suspend fun sync(trigger: SyncTrigger = SyncTrigger.MANUAL): Result<Unit> {
-        if (trigger == SyncTrigger.AUTOMATIC && _autoSyncSuspended.value) {
-            Log.info(TAG, "Automatic sync skipped: cloud data is unusable until it is reset")
-            return Result.Ok(Unit)
+        if (trigger == SyncTrigger.AUTOMATIC) {
+            if (_autoSyncSuspended.value) {
+                Log.info(TAG, "Automatic sync skipped: cloud data is unusable until it is reset")
+                return Result.Ok(Unit)
+            }
+            // Nothing to defer with no provider connected; syncLocked() would skip it anyway.
+            if (!automaticSyncAllowed().first() && cloudProvider() != null) {
+                Log.info(TAG, "Automatic sync deferred: the current network does not allow it")
+                deferUntilNetworkAllows()
+                return Result.Ok(Unit)
+            }
         }
         // The gate and the failure text are written inside the lock, not after it: they are two of
         // the four fields clearSyncFailureState() clears, and it takes the same lock so a
@@ -231,6 +277,33 @@ class SyncRepository(
                     _syncPhase.value = SyncPhase.IDLE
                 }
             }
+        }.also { if (it is Result.Ok) clearNetworkDeferral() }
+    }
+
+    /**
+     * Marks a sync as deferred for the network and starts — once, however many syncs get deferred
+     * meanwhile — a waiter that schedules a sync as soon as [automaticSyncAllowed] turns true. The
+     * flag itself stays up until a sync actually succeeds: the network can turn restrictive again
+     * before the debounced sync runs, deferring it anew.
+     */
+    private suspend fun deferUntilNetworkAllows() {
+        deferralMutex.withLock {
+            _syncDeferredForNetwork.value = true
+            if (deferredSyncWaiter?.isActive == true) return
+            deferredSyncWaiter = scope.launch {
+                automaticSyncAllowed().first { it }
+                Log.info(TAG, "Network allows automatic sync again; scheduling the deferred sync")
+                scheduleSync()
+            }
+        }
+    }
+
+    /** Drops the deferral: nothing is pending any more (a sync succeeded) or the connection is gone. */
+    private suspend fun clearNetworkDeferral() {
+        deferralMutex.withLock {
+            _syncDeferredForNetwork.value = false
+            deferredSyncWaiter?.cancel()
+            deferredSyncWaiter = null
         }
     }
 
