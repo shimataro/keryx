@@ -78,11 +78,11 @@ internal class AndroidNetworkConditionMonitor(context: Context) : NetworkConditi
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                     capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)
                 )
-        val metered = !unmetered
-        // Data Saver only ever applies to metered networks, so it means nothing on Wi-Fi.
-        val dataSaver = metered &&
-            connectivity.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
-        return NetworkCondition(metered = metered, dataSaver = dataSaver)
+        return NetworkCondition.of(
+            unmetered = unmetered,
+            dataSaverRequested = connectivity.restrictBackgroundStatus ==
+                ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,
+        )
     }
 
     private companion object {

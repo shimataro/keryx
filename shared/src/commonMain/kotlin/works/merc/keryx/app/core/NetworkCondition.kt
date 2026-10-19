@@ -13,5 +13,13 @@ data class NetworkCondition(val metered: Boolean, val dataSaver: Boolean) {
     companion object {
         /** No restriction at all: an unmetered network, no network, or a platform with no such signal. */
         val UNRESTRICTED = NetworkCondition(metered = false, dataSaver = false)
+
+        /**
+         * The condition for a platform that reports "unmetered" and "the user asked to save data"
+         * separately (Android). Data saving only ever applies to a metered network there, so it
+         * means nothing on an unmetered one.
+         */
+        fun of(unmetered: Boolean, dataSaverRequested: Boolean): NetworkCondition =
+            NetworkCondition(metered = !unmetered, dataSaver = !unmetered && dataSaverRequested)
     }
 }

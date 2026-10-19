@@ -63,4 +63,16 @@ class NetworkUsagePolicyTest {
         condition.value = unrestricted
         assertEquals(true, gate.first())
     }
+
+    @Test
+    fun conditionFromAnUnmeteredNetworkIgnoresTheDataSaverSwitch() {
+        assertEquals(NetworkCondition.UNRESTRICTED, NetworkCondition.of(unmetered = true, dataSaverRequested = true))
+        assertEquals(NetworkCondition.UNRESTRICTED, NetworkCondition.of(unmetered = true, dataSaverRequested = false))
+    }
+
+    @Test
+    fun conditionFromAMeteredNetworkCarriesTheDataSaverSwitch() {
+        assertEquals(metered, NetworkCondition.of(unmetered = false, dataSaverRequested = false))
+        assertEquals(meteredDataSaver, NetworkCondition.of(unmetered = false, dataSaverRequested = true))
+    }
 }
