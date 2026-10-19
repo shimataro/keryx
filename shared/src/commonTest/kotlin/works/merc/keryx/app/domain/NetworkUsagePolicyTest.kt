@@ -75,4 +75,10 @@ class NetworkUsagePolicyTest {
         assertEquals(metered, NetworkCondition.of(unmetered = false, dataSaverRequested = false))
         assertEquals(meteredDataSaver, NetworkCondition.of(unmetered = false, dataSaverRequested = true))
     }
+
+    @Test
+    fun deferredSyncJobWaitsForAnUnmeteredNetworkOnlyWithoutTheOptIn() {
+        assertEquals(true, NetworkUsagePolicy.deferredSyncNeedsUnmeteredNetwork(syncOnMetered = false))
+        assertEquals(false, NetworkUsagePolicy.deferredSyncNeedsUnmeteredNetwork(syncOnMetered = true))
+    }
 }

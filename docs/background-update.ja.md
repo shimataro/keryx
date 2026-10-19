@@ -121,13 +121,15 @@ Google Drive も持つ（[sync-architecture.ja.md](sync-architecture.ja.md) の
 
 **保留された同期。** `KeryxApplication.onCreate` は `startDeferredSyncHandoff`
 （`background/DeferredSync.kt`）も呼ぶ。これはプロセスが生きている間ずっと
-`SyncRepository.syncDeferredForNetwork` を監視し、立つたびに `NetworkType.UNMETERED` を条件とする一意な
+`SyncRepository.syncDeferredForNetwork` を監視し、立つたびに `NetworkType.UNMETERED`（ユーザーが従量制回線での同期を許可している場合は
+`NetworkType.CONNECTED`。`NetworkUsagePolicy.deferredSyncNeedsUnmeteredNetwork`）を条件とする一意な
 単発 `DeferredSyncWorker`（`"deferred_sync"`、`ExistingWorkPolicy.KEEP` なので連続して保留されても
-ジョブは 1 つ）を enqueue する。Worker は `SyncRepository.sync(SyncTrigger.AUTOMATIC)` を呼ぶだけで、
-従量制でない回線ではネットワークゲートを通過し（`autoSyncSuspended` の対象であることは変わらない）、
+ジョブは 1 つ）を enqueue する。保留中にこの許可設定が変わったときはジョブを置き換える。
+Worker は `SyncRepository.sync(SyncTrigger.AUTOMATIC)` を呼ぶだけで、
+同期が許可される回線ではネットワークゲートを通過し（`autoSyncSuspended` の対象であることは変わらない）、
 `FeedRefreshWorker` と同じく `CloudStorageException` のときにリトライし、同期の後でフラグが再び立っている
-ときもリトライする（ゲート評価前に回線が従量制に戻って同期が保留された場合で、この一意なジョブだけが
-それを実行できるため。リトライでも非従量制の制約は維持される）。アプリを閉じた後で端末が
+ときもリトライする（ゲート評価前に回線が制限付きに戻って同期が保留された場合で、この一意なジョブだけが
+それを実行できるため。リトライでもジョブのネットワーク制約は維持される）。アプリを閉じた後で端末が
 Wi-Fi につながったときに保留中の変更を同期するのはこのジョブ — `SyncRepository` 自身のプロセス内の待機
 ジョブはプロセスが生きている間しか働かない。このプロセス内でフラグが下りたとき（プロセス内の待機ジョブが引き継いだ、同期が成功した、または
 接続が解除された）はジョブを取り消す。以前のプロセスが残したジョブは、その変更がまだ同期されていない

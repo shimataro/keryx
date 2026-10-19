@@ -170,7 +170,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
   off if the permission is refused, with a link to the OS notification settings after a denial) and
   background refresh runs on `WorkManager`, at roughly the interval configured in Settings (on a
   metered network or under Data Saver, its sync and refresh follow §4's rule, and a sync held back
-  for the network is handed to a job that waits for an unmetered one); the
+  for the network is handed to a job that waits for a network that allows it); the
   in-app "check for update" is hidden when the app was installed from an app store (currently just
   Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no
   equivalent of the digit badge — the platform has no API to set an app-icon badge count independent

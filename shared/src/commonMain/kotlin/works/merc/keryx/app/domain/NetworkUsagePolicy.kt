@@ -37,6 +37,15 @@ object NetworkUsagePolicy {
     }.distinctUntilChanged()
 
     /**
+     * Whether the background job that carries a sync deferred for the network must wait for an
+     * unmetered network. Without the opt-in ([syncOnMetered] false) only an unmetered network lets
+     * the sync through; with it, any connection does. Data Saver needs no network type of its own:
+     * the OS stops background traffic on a metered network while it is on, and a job that still runs
+     * early is deferred again by the sync gate and retried.
+     */
+    fun deferredSyncNeedsUnmeteredNetwork(syncOnMetered: Boolean): Boolean = !syncOnMetered
+
+    /**
      * Whether an automatic feed refresh may run. Feed fetches are conditional requests and usually
      * small, so a metered network alone does not stop them — only the OS's data-saving mode does.
      */

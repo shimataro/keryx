@@ -182,7 +182,7 @@ upload. Automatic syncing becoming suspended (`autoSyncSuspended`) and `clearSyn
 Like `autoSyncSuspended`, the deferral is **in-memory**: there is no queue of pending changes to
 remember, because the next sync that is allowed uploads the whole database and so carries every change
 made in the meantime. The waiter only covers the time the process stays alive; Android additionally
-hands the deferred sync to a `WorkManager` job constrained to an unmetered network, so it also happens
+hands the deferred sync to a `WorkManager` job that waits for a network the sync is allowed on (an unmetered one, unless the user opted in to syncing on a metered one), so it also happens
 after the app is closed (see "Deferred sync" in [background-update.md](background-update.md)). On iOS a
 deferral left by a closed app is picked up by the next background refresh or foreground sync that the
 network allows.
