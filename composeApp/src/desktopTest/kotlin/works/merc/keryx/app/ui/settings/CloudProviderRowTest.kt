@@ -257,7 +257,7 @@ class CloudProviderRowTest {
     }
 
     @Test
-    fun syncDeferredForTheNetworkReplacesTheLastSyncedSubtitle() = runDesktopComposeUiTest {
+    fun syncDeferredForTheNetworkShowsBesideTheLastSyncedSubtitle() = runDesktopComposeUiTest {
         setContent {
             Box(Modifier.width(640.dp)) {
                 ConnectedOneDriveRow(iconOnly = false, lastSyncedAtText = "2026/09/16 12:34", deferredForNetwork = true)
@@ -266,11 +266,11 @@ class CloudProviderRowTest {
         waitForIdle()
 
         onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertIsDisplayed()
-        onAllNodesWithText("最終同期: 2026/09/16 12:34").assertCountEquals(0)
+        onNodeWithText("最終同期: 2026/09/16 12:34").assertIsDisplayed()
     }
 
     @Test
-    fun liveProgressTakesPriorityOverTheNetworkDeferral() = runDesktopComposeUiTest {
+    fun syncDeferredForTheNetworkStaysUpWhileLiveProgressShows() = runDesktopComposeUiTest {
         setContent {
             Box(Modifier.width(640.dp)) {
                 ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…", deferredForNetwork = true)
@@ -279,7 +279,24 @@ class CloudProviderRowTest {
         waitForIdle()
 
         onNodeWithText("アップロードしています…").assertIsDisplayed()
-        onAllNodesWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertCountEquals(0)
+        onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertIsDisplayed()
+    }
+
+    @Test
+    fun syncDeferredForTheNetworkWrapsInFullAtPhoneWidth() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(320.dp)) {
+                ConnectedOneDriveRow(iconOnly = true, lastSyncedAtText = "2026/09/16 12:34", deferredForNetwork = true)
+            }
+        }
+        waitForIdle()
+
+        // The text node holds the whole string whether or not it was ellipsized, so compare the
+        // laid-out height against a single line: a wrapped message is taller than one label line.
+        val deferred = onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します")
+        deferred.assertIsDisplayed()
+        val single = onNodeWithText("最終同期: 2026/09/16 12:34").fetchSemanticsNode().size.height
+        assertTrue(deferred.fetchSemanticsNode().size.height > single)
     }
 
     @Test

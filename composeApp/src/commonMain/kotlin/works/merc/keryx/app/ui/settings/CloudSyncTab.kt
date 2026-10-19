@@ -420,8 +420,8 @@ internal fun cloudProviderRowStatusText(
  * @param statusText Live progress text (a sync phase, or "disconnecting…") shown in the same slot
  *   [lastSyncedAtText] otherwise occupies, taking priority over it — see the status slot below.
  *   Only ever non-null for the connected row.
- * @param deferredForNetwork An automatic sync is waiting for a network that allows it; the status
- *   slot says it will sync on Wi-Fi in place of the last-synced subtitle (live progress still wins).
+ * @param deferredForNetwork An automatic sync is waiting for a network that allows it; a wrapping
+ *   notice below the status slot says so, whatever the slot itself shows.
  * @param iconOnly Whether the trailing actions drop their labels — see [ProviderActionButton]. Only
  *   overridden by tests; production always takes the platform's own answer.
  * @param onSelect Invoked to select or connect the provider.
@@ -597,14 +597,6 @@ internal fun CloudProviderRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                deferredForNetwork -> Text(
-                    stringResource(Res.string.settings_cloud_sync_deferred_network),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = contentColor.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
-                )
                 lastSyncedAtText != null -> Text(
                     stringResource(Res.string.settings_last_synced, lastSyncedAtText),
                     style = MaterialTheme.typography.labelSmall,
@@ -612,6 +604,17 @@ internal fun CloudProviderRow(
                     modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
                 )
             }
+        }
+        // A sync waiting for a network that allows it. Outside the fixed-height slot above because
+        // the message is a full sentence that must wrap at phone width, and it stays up while a
+        // manual sync's progress shows, so it appears and disappears only with the deferral itself.
+        if (deferredForNetwork) {
+            Text(
+                stringResource(Res.string.settings_cloud_sync_deferred_network),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.8f),
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
         }
         // An in-progress sync failure (localized per ErrorKind by the caller) takes precedence: it
         // describes the live state of a working connection, whereas `failed` only reports that the

@@ -274,7 +274,7 @@ struct CloudSyncSettingsTab: View {
                 }
             } else if cloudSync.syncDeferredForNetwork {
                 // An automatic sync is waiting for a network that allows it; "Sync Now" still runs
-                // at once. Same place as Compose's `deferredForNetwork` status.
+                // at once. Compose shows the same notice (`deferredForNetwork`) as its own wrapping line.
                 Text(L("settings_cloud_sync_deferred_network")).font(.caption).foregroundStyle(.secondary)
             } else if let lastSynced = cloudSync.lastSyncedAtText {
                 Text(LF("settings_last_synced", lastSynced)).font(.caption).foregroundStyle(.secondary)
