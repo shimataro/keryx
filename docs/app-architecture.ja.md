@@ -19,7 +19,7 @@
 
 | モジュール | 内容 |
 | --- | --- |
-| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
 | `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
 | `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
 | `:androidGms` | Google Play 開発者サービスに依存するものすべて —— Android の Google Drive（`PlayServicesGoogleDriveAuth.kt`、`PlayServicesGoogleDriveBackend`）。`fdroid` flavor がこれを外せるよう独立したモジュールにしてある。依存するのは `:androidApp` の `github` と `play` flavor だけ —— 下記参照。 |
@@ -38,7 +38,7 @@
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
@@ -81,7 +81,7 @@
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
-                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
     ui/           theme/, navigation/（Navigator、SettingsOpenRequests——設定を開くすべての経路が通る唯一の
                   窓口。Setup 中の要求は Home が表示されるまで保留する）, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
@@ -358,6 +358,26 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
 `SEARCH_FALLBACK_RESULT_LIMIT` 上限で行う。FTS ランクが存在しないため）。両経路のハイライトマーカーは
 FTS5 の `highlight()` ではなく Kotlin 側（`markTerms`）で生成し、`LIKE` で拾った短い語も FTS 一致と
 同じ見え方でマークされる。正確な文字数の閾値は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節を参照。
+
+### NetworkConditionMonitor（expect / actual）
+
+`platform/NetworkConditionMonitor.kt` はインターフェイス — `condition: Flow<NetworkCondition>`
+（`core/NetworkCondition(metered, dataSaver)`。最初に現在値、以後は変化のたびに流す）と
+`supported: Boolean` — と、`sharedModule` がシングルトンとして登録する
+`expect fun platformNetworkConditionMonitor()` を宣言する。`expect class` ではなくインターフェイスにして
+いるのは、テストで `:testing` の `FakeNetworkConditionMonitor` に差し替えられるようにするため。actual:
+
+- **Android**（`androidMain`）: `AndroidAppContext` 経由の `ConnectivityManager`。初期値は `activeNetwork`
+  の capabilities から同期的に読むので、`WorkManager` で起こされた直後でも仮の値で判断しない。以後の変化は
+  `registerDefaultNetworkCallback` と、実行時に登録する `ACTION_RESTRICT_BACKGROUND_CHANGED` レシーバーで
+  追う。`ACCESS_NETWORK_STATE` が必要。
+- **iOS**（`iosMain`）: `nw_path_monitor`（`isExpensive` / `isConstrained`）。最初のパス通知までは何も流さない。
+- **デスクトップ / macOS**（`desktopMain`、`macosMain`）: `UnrestrictedNetworkConditionMonitor` — 常に
+  制限なしで、`supported = false`。
+
+利用者は `domain/NetworkUsagePolicy` で、`SharedModule` で `SyncRepository` と `RefreshCycleRunner` に
+配線される（`CloudSyncController.meteredSettingSupported` は `supported` を読む）。
+[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照。
 
 ### DatabaseMerger（expect / actual）— 同期マージの要
 

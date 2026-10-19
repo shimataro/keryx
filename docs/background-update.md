@@ -74,6 +74,13 @@ background and the next activation restarts it with a fresh interval, so a loop 
 the OS has woken the suspended process for a background refresh cannot spend the slot on the update
 check or the FTS rebuild. The startup sequence is stopped the same way if it is still running then, and the next activation reruns it from the start; once it has completed, it is not run again in that process.
 
+**Metered networks and Low Data Mode.** A background run goes through the same `RefreshCycleRunner`
+gates as every other automatic cycle (see "Network Gate" in [sync-architecture.md](sync-architecture.md)):
+on cellular or tethering the sync is deferred unless the user allowed syncing over mobile data, and
+under Low Data Mode the refresh is skipped as well. iOS has no counterpart of Android's
+unmetered-network job: a sync deferred when the app was suspended happens in the next background run
+or foreground sync that the network allows.
+
 **App icon badge.** The app icon shows the total unread count (`setBadgeCount`, the same value as
 macOS's Dock badge), updated while running and after each background run. It needs the
 notification authorization, which the app requests whenever its "notifications" setting is on.
@@ -110,6 +117,24 @@ returning a `Result.Err` instead is handled separately — `Result.retry()` only
 `error-design.md`'s auto-retry table marks retryable (`CloudStorageException`), leaving the
 permanent failures it marks non-retryable (`CloudAuthException`/`SchemaVersionException`/
 `CloudDataIncompatibleException`) for the next regularly-scheduled run instead.
+
+**Metered networks and Data Saver.** The periodic job keeps its `NetworkType.CONNECTED` constraint:
+on a metered network the feed refresh still runs, and only the sync step is deferred (unless the
+user allowed syncing over mobile data); with Data Saver on, the cycle skips its refresh too — see
+"Network Gate" in [sync-architecture.md](sync-architecture.md). A user who allows the app
+unrestricted data in the OS is exempt from Data Saver, and is treated as such.
+
+**Deferred sync.** `KeryxApplication.onCreate` also calls `startDeferredSyncHandoff`
+(`background/DeferredSync.kt`), which watches `SyncRepository.syncDeferredForNetwork` for the rest of
+the process's life. Each time it goes up, it enqueues a unique one-time `DeferredSyncWorker`
+(`"deferred_sync"`, `ExistingWorkPolicy.KEEP`, so a burst of deferrals leaves one job) constrained to
+`NetworkType.UNMETERED`; the worker just runs `SyncRepository.sync(SyncTrigger.AUTOMATIC)`, which on
+an unmetered network passes the network gate (and remains subject to `autoSyncSuspended`), retrying
+only a `CloudStorageException` as `FeedRefreshWorker` does. This is what syncs the pending changes once
+the device reaches Wi-Fi after the app has been closed — `SyncRepository`'s own in-process waiter
+covers only the time the process is alive. When the flag drops in this process (a sync succeeded, or
+the connection was removed), the job is cancelled; a job left by an earlier process is never cancelled
+at startup, since its changes have not been synced yet.
 
 `MainActivity.onCreate` calls `runAndroidStartupTasks` (`AndroidStartupTasks.kt`) — the Android
 counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning (which
