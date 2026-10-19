@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -118,8 +119,14 @@ class SyncRepository(
     private val _syncPhase = MutableStateFlow(SyncPhase.IDLE)
     private val _syncDeferredForNetwork = MutableStateFlow(false)
 
-    /** Guards [deferredSyncWaiter] (and its pairing with [_syncDeferredForNetwork]). */
+    /** Guards [deferredSyncWaiter], [deferralGeneration] (and their pairing with [_syncDeferredForNetwork]). */
     private val deferralMutex = Mutex()
+
+    /**
+     * Bumped each time a sync is deferred. A sync that succeeds clears the deferral only if this is
+     * unchanged since it started: a deferral raised while it ran covers changes it did not upload.
+     */
+    private var deferralGeneration = 0
 
     /** Waits for the network to allow automatic syncing again, then schedules the deferred sync. */
     private var deferredSyncWaiter: Job? = null
@@ -191,15 +198,17 @@ class SyncRepository(
     /**
      * True while an [SyncTrigger.AUTOMATIC] sync was held back because the current network does not
      * allow it ([NetworkUsagePolicy.automaticSyncAllowed] — a metered network without the user's
-     * opt-in, or the OS's data-saving mode), and no sync has succeeded since. While it is true, a
-     * waiter schedules a sync the moment the network allows one; Android additionally hands the
+     * opt-in, or the OS's data-saving mode) and the network has not allowed one since. While it is
+     * true, a waiter schedules a sync the moment the network allows one (and drops the flag then); Android additionally hands the
      * deferred sync to a `WorkManager` job constrained to an unmetered network, so it also happens
      * with the app closed.
      *
      * Deliberately in-memory, like [autoSyncSuspended]: the uploaded snapshot is the whole database,
      * so the next sync that is allowed carries every change made in the meantime, and there is no
-     * queue of pending changes to remember. Cleared by any successful sync (a manual one included)
-     * and by [clearSyncFailureState].
+     * queue of pending changes to remember. Also cleared by a successful sync (a manual one included) unless
+     * another sync was deferred while it ran, when automatic syncing becomes suspended, and by
+     * [clearSyncFailureState]. A sync that fails after the network allowed it reports through
+     * [lastSyncError] instead, so the flag never claims a wait that nothing is performing.
      */
     val syncDeferredForNetwork: StateFlow<Boolean> = _syncDeferredForNetwork
 
@@ -255,6 +264,8 @@ class SyncRepository(
         if (trigger == SyncTrigger.AUTOMATIC) {
             if (_autoSyncSuspended.value) {
                 Log.info(TAG, "Automatic sync skipped: cloud data is unusable until it is reset")
+                // Nothing will resume a deferral while automatic syncing is suspended.
+                clearNetworkDeferral()
                 return Result.Ok(Unit)
             }
             // Nothing to defer with no provider connected; syncLocked() would skip it anyway.
@@ -264,6 +275,7 @@ class SyncRepository(
                 return Result.Ok(Unit)
             }
         }
+        val deferralAtStart = deferralMutex.withLock { deferralGeneration }
         // The gate and the failure text are written inside the lock, not after it: they are two of
         // the four fields clearSyncFailureState() clears, and it takes the same lock so a
         // disconnect can never be undone by a sync that was already in flight.
@@ -278,31 +290,56 @@ class SyncRepository(
                     _syncPhase.value = SyncPhase.IDLE
                 }
             }
-        }.also { if (it is Result.Ok) clearNetworkDeferral() }
+        }.also { result ->
+            when {
+                result is Result.Ok -> clearNetworkDeferral(onlyIfGeneration = deferralAtStart)
+                // A failure that suspends automatic syncing leaves nothing to resume the deferral.
+                _autoSyncSuspended.value -> clearNetworkDeferral()
+            }
+        }
     }
 
     /**
      * Marks a sync as deferred for the network and starts — once, however many syncs get deferred
-     * meanwhile — a waiter that schedules a sync as soon as [automaticSyncAllowedFlow] turns true. The
-     * flag itself stays up until a sync actually succeeds: the network can turn restrictive again
-     * before the debounced sync runs, deferring it anew.
+     * meanwhile — a waiter that schedules a sync as soon as [automaticSyncAllowedFlow] turns true,
+     * at which point the deferral is over (the flag drops): the sync it schedules either runs, and
+     * reports its own failure, or is deferred anew should the network turn restrictive again first.
      */
     private suspend fun deferUntilNetworkAllows() {
         deferralMutex.withLock {
+            // A disconnect may have landed since the caller looked; it must not be undone.
+            if (cloudProvider() == null) return
+            deferralGeneration++
             _syncDeferredForNetwork.value = true
             if (deferredSyncWaiter?.isActive == true) return
             deferredSyncWaiter = scope.launch {
+                val self = currentCoroutineContext()[Job]
                 // A gate flow that completes without ever allowing a sync leaves nothing to schedule.
                 automaticSyncAllowedFlow().firstOrNull { it } ?: return@launch
+                val current = deferralMutex.withLock {
+                    (deferredSyncWaiter === self).also {
+                        if (it) {
+                            _syncDeferredForNetwork.value = false
+                            deferredSyncWaiter = null
+                        }
+                    }
+                }
+                if (!current) return@launch
                 Log.info(TAG, "Network allows automatic sync again; scheduling the deferred sync")
                 scheduleSync()
             }
         }
     }
 
-    /** Drops the deferral: nothing is pending any more (a sync succeeded) or the connection is gone. */
-    private suspend fun clearNetworkDeferral() {
+    /**
+     * Drops the deferral: nothing is pending any more (a sync took over, or the connection is gone).
+     *
+     * @param onlyIfGeneration When set, does nothing if another sync was deferred since that
+     * [deferralGeneration] was read.
+     */
+    private suspend fun clearNetworkDeferral(onlyIfGeneration: Int? = null) {
         deferralMutex.withLock {
+            if (onlyIfGeneration != null && onlyIfGeneration != deferralGeneration) return
             _syncDeferredForNetwork.value = false
             deferredSyncWaiter?.cancel()
             deferredSyncWaiter = null

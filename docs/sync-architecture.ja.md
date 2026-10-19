@@ -246,7 +246,7 @@
 | 手動同期 / すべて更新 / プル更新（`MANUAL`） | 実行 | 実行 | 実行 |
 
 `syncOnMeteredNetwork` は端末ローカルの設定（`local_settings.json`、既定はオフ）。`SyncRepository` は
-ゲートを `automaticSyncAllowed: () -> Flow<Boolean>` ラムダとして受け取る — `cloudProvider` と同じ理由で
+ゲートを `automaticSyncAllowedFlow: () -> Flow<Boolean>` ラムダとして受け取る — `cloudProvider` と同じ理由で
 遅延評価（`SettingsRepository` が `SyncRepository` を `SyncScheduler` として依存しているため）で、
 `SharedModule` がモニターと設定を組み合わせて作る。
 
@@ -254,9 +254,13 @@
 — スピナーもフェーズも通知もなく、`lastSyncError` も触らない — `Result.Ok(Unit)` を返すが、抑制ゲートと
 違って保留中のものがあることを覚えておく: `syncDeferredForNetwork`（`StateFlow<Boolean>`）を立て、
 アプリスコープ上の待機ジョブを 1 本だけ（その間に何回保留されても 1 本）起動し、ゲートの Flow が true に
-なった瞬間に `scheduleSync()` を呼ぶ。フラグは同期が実際に成功するまで立ったまま — デバウンスされた同期が
-走る前に回線がまた制限側に戻れば、再び保留されるため。成功した同期（手動を含む）と
-`clearSyncFailureState()`（切断・切り替え）でフラグを下ろし、待機ジョブを取り消す。
+なった瞬間に `scheduleSync()` を呼び、その時点でフラグを下ろす: 保留は終わっており、スケジュールされた
+同期は実行されるか（失敗すれば通常どおり `lastSyncError` に出るので、フラグが実行されていない待機を
+示すことはない）、デバウンス中に回線がまた制限側に戻れば再び保留される。成功した同期（手動を含む）も
+フラグを下ろして待機ジョブを取り消す — ただし、その実行中に別の同期が保留された場合は除く（世代カウンタで
+判定）。その保留は、成功した同期がアップロードしていない変更を対象とするため。自動同期の停止
+（`autoSyncSuspended`）と `clearSyncFailureState()`（切断・切り替え）でも下ろし、切断と競合した保留は
+フラグを立てない。
 
 `autoSyncSuspended` と同じく、保留状態は**インメモリ**: 次に許可された同期がデータベース全体を
 アップロードするので、その間の変更はすべて反映され、保留中の変更の列を覚えておく必要がない。待機ジョブは

@@ -162,18 +162,22 @@ are never restricted.
 | Manual sync / Refresh All / pull-to-refresh (`MANUAL`) | runs | runs | runs |
 
 `syncOnMeteredNetwork` is a device-local setting (`local_settings.json`, off by default).
-`SyncRepository` takes the gate as an `automaticSyncAllowed: () -> Flow<Boolean>` lambda — lazy for the
+`SyncRepository` takes the gate as an `automaticSyncAllowedFlow: () -> Flow<Boolean>` lambda — lazy for the
 same reason as `cloudProvider`, since `SettingsRepository` depends on `SyncRepository` as its
-`SyncScheduler` — which `SharedModule` builds by combining the monitor with the setting.
+`SyncScheduler` — which `SharedModule` builds with `NetworkUsagePolicy.automaticSyncAllowedFlow` from the monitor and the setting.
 
 When `sync(AUTOMATIC)` finds the network disallowed (and a provider is connected), it does not enter
 `trackSync` at all — no spinner, no phase, no notification, `lastSyncError` untouched — and returns
 `Result.Ok(Unit)`, but unlike the suspension gate it remembers that something is pending:
 `syncDeferredForNetwork` (a `StateFlow<Boolean>`) goes up, and a single waiter on the app scope
 (started once, however many syncs are deferred meanwhile) calls `scheduleSync()` the moment the gate
-flow turns true. The flag stays up until a sync actually succeeds — the network can turn restrictive
-again before the debounced sync runs, deferring it anew. Any successful sync (a manual one included)
-and `clearSyncFailureState()` (disconnect / switch) drop the flag and cancel the waiter.
+flow turns true, and drops the flag at that moment: the deferral is over, and the sync it schedules either
+runs (a failure then reaches `lastSyncError` as usual, so the flag never claims a wait nothing is
+performing) or is deferred anew if the network turned restrictive again before the debounce elapsed. A
+successful sync (a manual one included) also drops the flag and cancels the waiter — unless another sync
+was deferred while it ran (a generation counter tells), since that deferral covers changes it did not
+upload. Automatic syncing becoming suspended (`autoSyncSuspended`) and `clearSyncFailureState()`
+(disconnect / switch) drop it too; a deferral racing a disconnect never raises the flag.
 
 Like `autoSyncSuspended`, the deferral is **in-memory**: there is no queue of pending changes to
 remember, because the next sync that is allowed uploads the whole database and so carries every change

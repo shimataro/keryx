@@ -1551,6 +1551,97 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun deferralEndsWhenTheNetworkAllowsEvenIfTheSyncThenFails() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.syncDeferredForNetwork.value)
+        cloud.queueExists(Result.Err(CloudStorageException("boom")))
+
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+
+        // Nothing is waiting for the network any more; the failure is reported as a failure.
+        assertFalse(repo.syncDeferredForNetwork.value)
+        assertNotNull(repo.lastSyncError.value)
+    }
+
+    @Test
+    fun aSyncSucceedingDoesNotClearADeferralRaisedWhileItRan() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        val gate = CompletableDeferred<Unit>()
+        cloud.downloadGate = gate
+        val monitor = FakeNetworkConditionMonitor(NetworkCondition.UNRESTRICTED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+
+        val running = launch { repo.sync(SyncTrigger.MANUAL) }
+        runCurrent() // suspended inside the gated download
+        monitor.current.value = METERED
+        repo.sync(SyncTrigger.AUTOMATIC) // a change made meanwhile: deferred, not uploaded by the running sync
+        assertTrue(repo.syncDeferredForNetwork.value)
+        gate.complete(Unit)
+        running.join()
+
+        assertTrue(repo.syncDeferredForNetwork.value)
+        // ...and its waiter still fires once the network allows.
+        cloud.downloadGate = null
+        val existsBefore = cloud.existsCount
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertTrue(cloud.existsCount > existsBefore)
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun suspendingAutomaticSyncDropsTheDeferral() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "legacy-r1")
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.syncDeferredForNetwork.value)
+
+        // A manual sync finds the cloud unusable, which suspends automatic syncing.
+        val result = repo.sync(SyncTrigger.MANUAL)
+
+        assertIs<Result.Err>(result)
+        assertTrue(repo.autoSyncSuspended.value)
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun aDeferralRacingADisconnectDoesNotRaiseTheFlag() = runTest {
+        val cloud = FakeCloudStorage()
+        var connected = true
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = SyncRepository(
+            driver = localDriver,
+            db = localDb,
+            ftsManager = ftsManager,
+            cloudProvider = { if (connected) cloud else null },
+            clock = Clock { 1_000L },
+            scope = backgroundScope,
+            activityCenter = ActivityCenter(),
+            notificationCenter = notificationCenter,
+            localDbPath = localFile.absolutePath,
+            tempDir = tempDir.absolutePath,
+            automaticSyncAllowedFlow = {
+                // The disconnect lands between the sync's own check and its deferral.
+                connected = false
+                networkGate(monitor, MutableStateFlow(false))()
+            },
+        )
+
+        repo.sync(SyncTrigger.AUTOMATIC)
+
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
     fun clearSyncFailureStateDropsTheDeferral() = runTest {
         val cloud = FakeCloudStorage()
         val monitor = FakeNetworkConditionMonitor(METERED)
