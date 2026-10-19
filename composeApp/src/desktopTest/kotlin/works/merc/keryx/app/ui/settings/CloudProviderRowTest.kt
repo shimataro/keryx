@@ -265,7 +265,7 @@ class CloudProviderRowTest {
         }
         waitForIdle()
 
-        onNodeWithText("Wi-Fi に接続したら同期します").assertIsDisplayed()
+        onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertIsDisplayed()
         onAllNodesWithText("最終同期: 2026/09/16 12:34").assertCountEquals(0)
     }
 
@@ -279,7 +279,7 @@ class CloudProviderRowTest {
         waitForIdle()
 
         onNodeWithText("アップロードしています…").assertIsDisplayed()
-        onAllNodesWithText("Wi-Fi に接続したら同期します").assertCountEquals(0)
+        onAllNodesWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertCountEquals(0)
     }
 
     @Test

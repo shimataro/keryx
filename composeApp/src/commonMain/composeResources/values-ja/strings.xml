@@ -220,7 +220,7 @@
     <string name="settings_last_synced">最終同期: %1$s</string>
     <string name="settings_cloud_sync_on_metered">モバイルデータ通信でも自動で同期する</string>
     <string name="settings_cloud_sync_on_metered_hint">従量制の Wi-Fi・テザリングを含みます。データセーバー / 低データモード中は自動同期しません。</string>
-    <string name="settings_cloud_sync_deferred_network">Wi-Fi に接続したら同期します</string>
+    <string name="settings_cloud_sync_deferred_network">データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します</string>
     <string name="settings_cloud_syncing">同期中…</string>
     <string name="settings_cloud_phase_checking">クラウドを確認しています…</string>
     <string name="settings_cloud_phase_downloading">ダウンロードしています…</string>
