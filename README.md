@@ -27,8 +27,15 @@ macOS 14 (Sonoma) or later on an Apple Silicon Mac. Support for iOS/iPadOS is pl
 
 ## Download
 
-Download the latest release from the [Releases page](https://github.com/shimataro/keryx/releases).
-Linux is available for both x86_64 and arm64.
+<a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on.svg" alt="Get it on F-Droid" height="80"></a>
+<a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg" alt="Get it from the Snap Store" height="56"></a>
+
+- **Android**: [F-Droid](https://f-droid.org/packages/works.merc.keryx/) — updates arrive through the F-Droid client.
+  The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
+- **Linux (x86_64 / arm64)**: [Snap Store](https://snapcraft.io/keryx) — `sudo snap install keryx`, updated automatically.
+
+All platforms (Windows, macOS, Linux `.deb`/`.rpm`/portable, Android `.apk`) are also available from the
+[Releases page](https://github.com/shimataro/keryx/releases).
 
 > [!IMPORTANT]
 > **macOS**: the app is signed and notarized by Apple, so it opens like any other downloaded app
@@ -38,8 +45,8 @@ Linux is available for both x86_64 and arm64.
 > Windows SmartScreen shows a "Windows protected your PC" warning on first run. Click
 > "More info", then "Run anyway" to continue.
 >
-> **Android**: this `.apk` is a sideload install, distributed directly rather than through
-> Google Play, so Android will ask you to allow installing from this source the first time
+> **Android**: if you install from F-Droid, no extra steps are needed. The `.apk` from the Releases
+> page is a sideload install, distributed directly rather than through Google Play, so Android will ask you to allow installing from this source the first time
 > you install it from the app you used to open it (e.g. your file manager or browser).
 
 Once Keryx is running, it can check for, download, and install newer releases on its own — from
@@ -52,10 +59,11 @@ installing from this source" permission above still applies, but you only grant 
 every update afterward.
 
 This applies to the macOS app, a Windows `.msi`/portable install, a Linux portable install, and a
-sideloaded Android `.apk`. A Linux `.deb`/`.rpm` or Snap install, and an Android install from
-Google Play, instead open the release page for you to update through your usual channel (your
-package manager, or Play's own auto-update) — Keryx still tells you a new version exists, just not
-by installing it itself there.
+sideloaded Android `.apk`. A Linux `.deb`/`.rpm` install, and an Android install from Google Play,
+instead open the release page for you to update through your usual channel (your package manager,
+or Play's own auto-update) — Keryx still tells you a new version exists, just not by installing it
+itself there. A Snap install is updated automatically by the Snap Store, and the F-Droid build
+leaves updates entirely to the F-Droid client, so it has no in-app update at all.
 
 ## Development Documentation
 

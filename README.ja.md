@@ -27,8 +27,15 @@ macOS 14（Sonoma）以降が必要です。iOS/iPadOS への対応は今後の�
 
 ## ダウンロード
 
-最新版は [リリースページ](https://github.com/shimataro/keryx/releases) から入手できます。
-Linux は x86_64・arm64 の両方に対応しています。
+<a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on-ja.svg" alt="F-Droid で入手" height="80"></a>
+<a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg" alt="Snap Store から入手" height="56"></a>
+
+- **Android**: [F-Droid](https://f-droid.org/packages/works.merc.keryx/) ——アップデートは F-Droid クライアント経由で届きます。
+  F-Droid 版は Google Drive 同期に対応していません（Dropbox・OneDrive は通常どおり使えます）。
+- **Linux（x86_64 / arm64）**: [Snap Store](https://snapcraft.io/keryx) ——`sudo snap install keryx` でインストールでき、自動で更新されます。
+
+すべてのプラットフォーム（Windows、macOS、Linux の `.deb`／`.rpm`／ポータブル版、Android の `.apk`）は
+[リリースページ](https://github.com/shimataro/keryx/releases) からも入手できます。
 
 > [!IMPORTANT]
 > **macOS**: Apple による署名・公証済みのため、ほかのダウンロードしたアプリと同じように開けます
@@ -38,7 +45,8 @@ Linux は x86_64・arm64 の両方に対応しています。
 > Windows SmartScreen が「WindowsによってPCが保護されました」という警告を表示します。
 > 「詳細情報」→「実行」の順にクリックして続行してください。
 >
-> **Android**: この `.apk` は Google Play を経由せず直接配布するサイドロード版のため、
+> **Android**: F-Droid からインストールする場合、追加の手順は不要です。リリースページの `.apk` は
+> Google Play を経由せず直接配布するサイドロード版のため、
 > 初回インストール時に「提供元不明のアプリ」の許可を求められます。
 
 Keryx は起動した後、通知ベル・タスクトレイ・設定の「アップデート」から（macOS では、メニューバーの
@@ -51,10 +59,12 @@ SmartScreen の「未署名ファイル」プロンプトが出ることはあ�
 直す必要はありません。
 
 これが当てはまるのは、macOS 版、Windows の `.msi`／ポータブル版、Linux のポータブル版、
-そしてサイドロードした Android の `.apk` です。Linux の `.deb`／`.rpm` または Snap インストールと、
+そしてサイドロードした Android の `.apk` です。Linux の `.deb`／`.rpm` インストールと、
 Google Play 経由の Android インストールについては、代わりにリリースページを開くので、そこから
 いつもの経路（パッケージマネージャ、あるいは Play 自身の自動更新）で更新してください——新しい
 バージョンがあることは Keryx が教えてくれますが、その場でのインストールまでは行いません。
+Snap インストールは Snap Store によって自動で更新されます。F-Droid 版はアップデートを F-Droid
+クライアントに任せており、アプリ内のアップデート機能そのものを持ちません。
 
 ## 開発用ドキュメント
 
