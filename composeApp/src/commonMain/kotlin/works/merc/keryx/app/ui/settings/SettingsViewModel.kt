@@ -56,6 +56,7 @@ class SettingsViewModel(
     fun setNotificationEnabled(enabled: Boolean) = preferencesController.setNotificationEnabled(enabled)
     fun setStartMinimized(enabled: Boolean) = preferencesController.setStartMinimized(enabled)
     fun setUpdateCheckIntervalHours(hours: Int) = preferencesController.setUpdateCheckIntervalHours(hours)
+    fun setSyncOnMeteredNetwork(enabled: Boolean) = preferencesController.setSyncOnMeteredNetwork(enabled)
     fun updateReadTimeout(seconds: Int) = preferencesController.updateReadTimeout(seconds)
     fun updateCacheRetention(days: Int?) = preferencesController.updateCacheRetention(days)
 
@@ -76,6 +77,9 @@ class SettingsViewModel(
     val disconnecting = cloudSyncController.disconnecting
     val idle = cloudSyncController.idle
     val canSyncNow = cloudSyncController.canSyncNow
+    val meteredSettingSupported = cloudSyncController.meteredSettingSupported
+    val syncOnMeteredNetwork = cloudSyncController.syncOnMeteredNetwork
+    val syncDeferredForNetwork = cloudSyncController.syncDeferredForNetwork
 
     fun syncNow() = cloudSyncController.syncNow()
     fun connect(type: CloudStorageType) = cloudSyncController.connect(type)

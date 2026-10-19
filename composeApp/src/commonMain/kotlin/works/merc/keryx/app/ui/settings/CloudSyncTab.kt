@@ -34,11 +34,13 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatButton
+import works.merc.keryx.app.ui.common.FlatSwitch
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.IconButtonKind
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.KeryxSettingRow
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.TooltipIconButton
 import works.merc.keryx.app.resources.Res
@@ -66,7 +68,10 @@ import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_action
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_title
+import works.merc.keryx.app.resources.settings_cloud_sync_deferred_network
 import works.merc.keryx.app.resources.settings_cloud_sync_hint
+import works.merc.keryx.app.resources.settings_cloud_sync_on_metered
+import works.merc.keryx.app.resources.settings_cloud_sync_on_metered_hint
 import works.merc.keryx.app.resources.settings_dropbox_connect
 import works.merc.keryx.app.resources.settings_dropbox_disconnect
 import works.merc.keryx.app.resources.settings_google_drive_connect
@@ -97,6 +102,8 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     val syncPhase by vm.syncPhase.collectAsState()
     val disconnecting by vm.disconnecting.collectAsState()
     val canSyncNow by vm.canSyncNow.collectAsState()
+    val syncOnMeteredNetwork by vm.syncOnMeteredNetwork.collectAsState()
+    val syncDeferredForNetwork by vm.syncDeferredForNetwork.collectAsState()
     // Confirmation-dialog triggers for the two disruptive cloud-storage actions (disconnect an
     // established connection, or abort an in-flight OAuth wait). Starting a fresh connect stays
     // immediate — it's low-risk (just opens a browser).
@@ -144,6 +151,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     // Swaps this row's recovery action from "reset sync data" to "reconnect" — see
                     // CloudProviderRow's own comment for why the two are mutually exclusive.
                     authFailed = connected == type && lastSyncAuthFailed,
+                    // An automatic sync is waiting for a network that allows it (see
+                    // SyncRepository.syncDeferredForNetwork); "Sync now" below still runs at once.
+                    deferredForNetwork = connected == type && syncDeferredForNetwork,
                     resetting = resetting,
                     // Live progress for the connected row, in priority order: an in-flight
                     // disconnect (waiting out a sync it must let finish first — see
@@ -166,6 +176,20 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     onDisconnect = { confirmingDisconnect = type },
                     onResetCloudData = { confirmingResetCloudData = true },
                     onReconnect = { vm.reconnect() },
+                )
+            }
+        }
+        // Only where the platform reports metered networks (Android, iOS), and only once a provider
+        // is connected — without one there is no automatic sync for it to govern.
+        if (vm.meteredSettingSupported && connected != null) {
+            Spacer(Modifier.height(8.dp))
+            SettingsCard(settingRowsOnly = true) {
+                KeryxSettingRow(
+                    label = stringResource(Res.string.settings_cloud_sync_on_metered),
+                    supporting = stringResource(Res.string.settings_cloud_sync_on_metered_hint),
+                    onClick = { vm.setSyncOnMeteredNetwork(!syncOnMeteredNetwork) },
+                    trailing = { FlatSwitch(checked = syncOnMeteredNetwork, onCheckedChange = vm::setSyncOnMeteredNetwork) },
+                    toggled = syncOnMeteredNetwork,
                 )
             }
         }
@@ -396,6 +420,8 @@ internal fun cloudProviderRowStatusText(
  * @param statusText Live progress text (a sync phase, or "disconnecting…") shown in the same slot
  *   [lastSyncedAtText] otherwise occupies, taking priority over it — see the status slot below.
  *   Only ever non-null for the connected row.
+ * @param deferredForNetwork An automatic sync is waiting for a network that allows it; the status
+ *   slot says it will sync on Wi-Fi in place of the last-synced subtitle (live progress still wins).
  * @param iconOnly Whether the trailing actions drop their labels — see [ProviderActionButton]. Only
  *   overridden by tests; production always takes the platform's own answer.
  * @param onSelect Invoked to select or connect the provider.
@@ -417,6 +443,7 @@ internal fun CloudProviderRow(
     statusText: String? = null,
     authFailed: Boolean = false,
     resetting: Boolean = false,
+    deferredForNetwork: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
@@ -570,6 +597,14 @@ internal fun CloudProviderRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                deferredForNetwork -> Text(
+                    stringResource(Res.string.settings_cloud_sync_deferred_network),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
+                )
                 lastSyncedAtText != null -> Text(
                     stringResource(Res.string.settings_last_synced, lastSyncedAtText),
                     style = MaterialTheme.typography.labelSmall,

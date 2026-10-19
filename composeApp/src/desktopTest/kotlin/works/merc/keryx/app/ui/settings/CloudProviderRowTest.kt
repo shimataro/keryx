@@ -59,6 +59,7 @@ class CloudProviderRowTest {
         authFailed: Boolean = false,
         statusText: String? = null,
         lastSyncedAtText: String? = null,
+        deferredForNetwork: Boolean = false,
     ) {
         CloudProviderRow(
             type = CloudStorageType.ONEDRIVE,
@@ -72,6 +73,7 @@ class CloudProviderRowTest {
             resetting = resetting,
             statusText = statusText,
             lastSyncedAtText = lastSyncedAtText,
+            deferredForNetwork = deferredForNetwork,
             iconOnly = iconOnly,
             onSelect = {},
             onCancel = {},
@@ -252,6 +254,32 @@ class CloudProviderRowTest {
 
         onNodeWithText("データを統合しています…").assertIsDisplayed()
         onAllNodesWithText("2026/09/16 12:34").assertCountEquals(0)
+    }
+
+    @Test
+    fun syncDeferredForTheNetworkReplacesTheLastSyncedSubtitle() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, lastSyncedAtText = "2026/09/16 12:34", deferredForNetwork = true)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("Wi-Fi に接続したら同期します").assertIsDisplayed()
+        onAllNodesWithText("最終同期: 2026/09/16 12:34").assertCountEquals(0)
+    }
+
+    @Test
+    fun liveProgressTakesPriorityOverTheNetworkDeferral() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…", deferredForNetwork = true)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("アップロードしています…").assertIsDisplayed()
+        onAllNodesWithText("Wi-Fi に接続したら同期します").assertCountEquals(0)
     }
 
     @Test

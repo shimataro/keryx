@@ -162,7 +162,7 @@ fun presentationModule(): Module = module {
     single { SetupController(get(), get(), get(), get()) }
     single { NotificationAlerts(get()) }
     // Also Home's "Sync now" (HomeViewModel takes it as ManualSync), so every route shares one sync.
-    single { CloudSyncController(get(), get(), get(), get(), get()) } bind ManualSync::class
+    single { CloudSyncController(get(), get(), get(), get(), get(), networkConditionMonitor = get()) } bind ManualSync::class
     single { PreferencesController(get()) }
     single { OpmlTransfer(get(), get(), get(), get()) }
     // Every OPML route (Data tab, File menu, opened .opml file) shares this one busy/result state.

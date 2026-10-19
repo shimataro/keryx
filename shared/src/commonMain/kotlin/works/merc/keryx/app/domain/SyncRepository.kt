@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -291,7 +292,8 @@ class SyncRepository(
             _syncDeferredForNetwork.value = true
             if (deferredSyncWaiter?.isActive == true) return
             deferredSyncWaiter = scope.launch {
-                automaticSyncAllowed().first { it }
+                // A gate flow that completes without ever allowing a sync leaves nothing to schedule.
+                automaticSyncAllowed().firstOrNull { it } ?: return@launch
                 Log.info(TAG, "Network allows automatic sync again; scheduling the deferred sync")
                 scheduleSync()
             }
