@@ -21,22 +21,21 @@
 - **完全無料**: フリーミアムなし、試用期間なし、広告なし
 - **オープンソース**: ソースコードが公開されており、誰でも検証・改変可能
 
-## 対応プラットフォーム
-
-現在 Windows / macOS / Linux / Android に対応。macOS 版はネイティブな Mac アプリで、Apple Silicon 搭載の Mac と
-macOS 14（Sonoma）以降が必要です。iOS/iPadOS への対応は今後の予定。
-
 ## ダウンロード
 
 <a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on-ja.svg" alt="F-Droid で入手" height="80"></a>
 <a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg" alt="Snap Store から入手" height="56"></a>
 
-- **Android**: [F-Droid](https://f-droid.org/packages/works.merc.keryx/) ——アップデートは F-Droid クライアント経由で届きます。
-  F-Droid 版は Google Drive 同期に対応していません（Dropbox・OneDrive は通常どおり使えます）。
-- **Linux（x86_64 / arm64）**: [Snap Store](https://snapcraft.io/keryx) ——`sudo snap install keryx` でインストールでき、自動で更新されます。
+| プラットフォーム | 動作要件 | 入手先 |
+| --- | --- | --- |
+| Windows | x86_64 | [リリースページ][releases] の `.msi`／ポータブル版 ZIP |
+| macOS（ネイティブアプリ） | Apple Silicon 搭載の Mac、macOS 14（Sonoma）以降 | [リリースページ][releases] の `.dmg` |
+| Linux | x86_64 / arm64 | [Snap Store](https://snapcraft.io/keryx)、または [リリースページ][releases] の `.deb`／`.rpm`／ポータブル版 ZIP |
+| Android | Android 8.0 以降 | [F-Droid](https://f-droid.org/packages/works.merc.keryx/)、または [リリースページ][releases] の `.apk` |
 
-すべてのプラットフォーム（Windows x86_64、macOS、Linux x86_64 / arm64 の `.deb`／`.rpm`／ポータブル版、
-Android の `.apk`）は [リリースページ](https://github.com/shimataro/keryx/releases) からも入手できます。
+[releases]: https://github.com/shimataro/keryx/releases
+
+iOS/iPadOS への対応は今後の予定です。F-Droid 版は Google Drive 同期に対応していません（Dropbox・OneDrive は通常どおり使えます）。
 
 > [!IMPORTANT]
 > **Windows**: コード署名証明書を用意するまでの間、`.msi` は未署名のため、初回実行時に

@@ -21,22 +21,21 @@ A local-first, cross-platform RSS reader
 - **Completely free**: no freemium, no trial period, no ads
 - **Open source**: source code is public and can be inspected or modified by anyone
 
-## Supported Platforms
-
-Currently available for Windows, macOS, Linux, and Android. The macOS app is a native Mac app and needs
-macOS 14 (Sonoma) or later on an Apple Silicon Mac. Support for iOS/iPadOS is planned for the future.
-
 ## Download
 
 <a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on.svg" alt="Get it on F-Droid" height="80"></a>
 <a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg" alt="Get it from the Snap Store" height="56"></a>
 
-- **Android**: [F-Droid](https://f-droid.org/packages/works.merc.keryx/) — updates arrive through the F-Droid client.
-  The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
-- **Linux (x86_64 / arm64)**: [Snap Store](https://snapcraft.io/keryx) — `sudo snap install keryx`, updated automatically.
+| Platform | Requirements | Get it |
+| --- | --- | --- |
+| Windows | x86_64 | `.msi` / portable ZIP from the [Releases page][releases] |
+| macOS (native app) | macOS 14 (Sonoma) or later on Apple Silicon | `.dmg` from the [Releases page][releases] |
+| Linux | x86_64 / arm64 | [Snap Store](https://snapcraft.io/keryx), or `.deb` / `.rpm` / portable ZIP from the [Releases page][releases] |
+| Android | Android 8.0 or later | [F-Droid](https://f-droid.org/packages/works.merc.keryx/), or `.apk` from the [Releases page][releases] |
 
-All platforms (Windows x86_64, macOS, Linux x86_64 / arm64 `.deb`/`.rpm`/portable, Android `.apk`) are
-also available from the [Releases page](https://github.com/shimataro/keryx/releases).
+[releases]: https://github.com/shimataro/keryx/releases
+
+iOS/iPadOS support is planned. The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
 
 > [!IMPORTANT]
 > **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
