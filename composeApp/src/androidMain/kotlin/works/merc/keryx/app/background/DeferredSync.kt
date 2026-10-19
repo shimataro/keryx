@@ -66,9 +66,17 @@ class DeferredSyncWorker(context: Context, params: WorkerParameters) : Coroutine
         val koin = KoinPlatform.getKoin()
         if (!koin.get<SettingsRepository>().isSetupComplete()) return Result.success()
         return try {
-            val syncResult = koin.get<SyncRepository>().sync(SyncTrigger.AUTOMATIC)
-            // Same retry rule as FeedRefreshWorker: only a storage failure is worth repeating.
-            if (syncResult.errorOrNull is CloudStorageException) Result.retry() else Result.success()
+            val sync = koin.get<SyncRepository>()
+            val syncResult = sync.sync(SyncTrigger.AUTOMATIC)
+            when {
+                // The network turned metered again before the gate was evaluated: the sync was
+                // deferred (reported as Ok) and this job is the one unique job, so finishing would
+                // leave the deferral with nothing to run it. The retry keeps the UNMETERED constraint.
+                sync.syncDeferredForNetwork.value -> Result.retry()
+                // Same retry rule as FeedRefreshWorker: only a storage failure is worth repeating.
+                syncResult.errorOrNull is CloudStorageException -> Result.retry()
+                else -> Result.success()
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

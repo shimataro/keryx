@@ -130,9 +130,11 @@ the process's life. Each time it goes up, it enqueues a unique one-time `Deferre
 (`"deferred_sync"`, `ExistingWorkPolicy.KEEP`, so a burst of deferrals leaves one job) constrained to
 `NetworkType.UNMETERED`; the worker just runs `SyncRepository.sync(SyncTrigger.AUTOMATIC)`, which on
 an unmetered network passes the network gate (and remains subject to `autoSyncSuspended`), retrying
-only a `CloudStorageException` as `FeedRefreshWorker` does. This is what syncs the pending changes once
+a `CloudStorageException` as `FeedRefreshWorker` does — and also when the flag is up again afterwards
+(the network turned metered before the gate ran, so the sync was deferred and this job is the only one
+left to run it; the retry keeps the unmetered constraint). This is what syncs the pending changes once
 the device reaches Wi-Fi after the app has been closed — `SyncRepository`'s own in-process waiter
-covers only the time the process is alive. When the flag drops in this process (a sync succeeded, or
+covers only the time the process is alive. When the flag drops in this process (the in-process waiter took over, a sync succeeded, or
 the connection was removed), the job is cancelled; a job left by an earlier process is never cancelled
 at startup, since its changes have not been synced yet.
 
