@@ -32,7 +32,6 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -294,14 +293,17 @@ class CloudProviderRowTest {
         }
         waitForIdle()
 
-        // The text node holds the whole string whether or not it was ellipsized, so ask the laid-out
-        // text whether it overflowed. Not a height comparison: glyph widths depend on the host's
-        // fonts (Linux CI has no CJK font), so whether the sentence needs a second line does too.
+        // The text node holds the whole string whether or not it was ellipsized, so check that the
+        // laid-out text is allowed to wrap rather than how it actually wrapped: line count and
+        // overflow depend on the host's fonts (Linux CI has no CJK font, so the sentence lays out
+        // as one unbreakable run there).
         val deferred = onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します")
         deferred.assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         deferred.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
-        assertFalse(layouts.single().hasVisualOverflow)
+        val input = layouts.single().layoutInput
+        assertTrue(input.softWrap)
+        assertEquals(Int.MAX_VALUE, input.maxLines)
     }
 
     @Test
