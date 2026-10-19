@@ -36,7 +36,9 @@ import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.platform.NetworkConditionMonitor
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import works.merc.keryx.app.platform.platformNetworkConditionMonitor
 import works.merc.keryx.app.platform.detectInstallLocation
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -70,6 +72,7 @@ fun sharedModule(): Module = module {
     single { NotificationCenter() }
     single { ActivityCenter() }
     single { NewArticleNotifier(get()) }
+    single<NetworkConditionMonitor> { platformNetworkConditionMonitor() }
     // The gate on whether [updateModule] may be used at all (checkForUpdateAndNotify reads it
     // before touching the updater), so it lives here rather than in that optional module: a build
     // without the updater — the Apple app — must still be able to ask, and be told no.
