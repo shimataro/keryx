@@ -1616,24 +1616,21 @@ class SyncRepositoryTest {
     @Test
     fun aDeferralRacingADisconnectDoesNotRaiseTheFlag() = runTest {
         val cloud = FakeCloudStorage()
-        var connected = true
+        var providerCalls = 0
         val monitor = FakeNetworkConditionMonitor(METERED)
         val repo = SyncRepository(
             driver = localDriver,
             db = localDb,
             ftsManager = ftsManager,
-            cloudProvider = { if (connected) cloud else null },
+            // Connected for sync()'s own check, disconnected by the time the deferral re-checks.
+            cloudProvider = { if (providerCalls++ == 0) cloud else null },
             clock = Clock { 1_000L },
             scope = backgroundScope,
             activityCenter = ActivityCenter(),
             notificationCenter = notificationCenter,
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
-            automaticSyncAllowedFlow = {
-                // The disconnect lands between the sync's own check and its deferral.
-                connected = false
-                networkGate(monitor, MutableStateFlow(false))()
-            },
+            automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)),
         )
 
         repo.sync(SyncTrigger.AUTOMATIC)
