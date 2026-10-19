@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -23,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -30,6 +32,7 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -291,12 +294,14 @@ class CloudProviderRowTest {
         }
         waitForIdle()
 
-        // The text node holds the whole string whether or not it was ellipsized, so compare the
-        // laid-out height against a single line: a wrapped message is taller than one label line.
+        // The text node holds the whole string whether or not it was ellipsized, so ask the laid-out
+        // text whether it overflowed. Not a height comparison: glyph widths depend on the host's
+        // fonts (Linux CI has no CJK font), so whether the sentence needs a second line does too.
         val deferred = onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します")
         deferred.assertIsDisplayed()
-        val single = onNodeWithText("最終同期: 2026/09/16 12:34").fetchSemanticsNode().size.height
-        assertTrue(deferred.fetchSemanticsNode().size.height > single)
+        val layouts = mutableListOf<TextLayoutResult>()
+        deferred.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+        assertFalse(layouts.single().hasVisualOverflow)
     }
 
     @Test
