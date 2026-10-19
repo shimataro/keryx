@@ -223,7 +223,7 @@ class CloudSyncControllerTest {
         // to assert it was actually used or to hold work in flight.
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         // The SyncRepository's network gate (default: always allowed) and the platform's monitor.
-        automaticSyncAllowed: () -> Flow<Boolean> = { flowOf(true) },
+        automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
         networkConditionMonitor: NetworkConditionMonitor = UnrestrictedNetworkConditionMonitor,
     ): CloudSyncController {
         val syncScheduler = SyncScheduler {}
@@ -243,7 +243,7 @@ class CloudSyncControllerTest {
             notificationCenter = NotificationCenter(),
             localDbPath = "unused",
             tempDir = "unused",
-            automaticSyncAllowed = automaticSyncAllowed,
+            automaticSyncAllowedFlow = automaticSyncAllowedFlow,
         )
         val session = cloudSession ?: run {
             val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
@@ -346,7 +346,7 @@ class CloudSyncControllerTest {
     fun syncDeferredForNetworkMirrorsTheSyncRepositoryUntilTheDeferralClears() = runTest {
         val controller = newController(
             syncCloudProvider = { AlwaysFailingCloudStorage() },
-            automaticSyncAllowed = { MutableStateFlow(false) },
+            automaticSyncAllowedFlow = { MutableStateFlow(false) },
         )
         assertFalse(controller.syncDeferredForNetwork.value)
 

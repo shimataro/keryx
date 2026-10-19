@@ -5,9 +5,8 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import org.koin.core.module.Module
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -42,8 +41,8 @@ import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.platform.NetworkConditionMonitor
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
-import works.merc.keryx.app.platform.platformNetworkConditionMonitor
 import works.merc.keryx.app.platform.detectInstallLocation
+import works.merc.keryx.app.platform.platformNetworkConditionMonitor
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
@@ -108,10 +107,11 @@ fun sharedModule(): Module = module {
             // Android) rather than passed here — see that function's own KDoc for why it exists.
             // Lazy for the same reason as cloudProvider: SettingsRepository depends on this class
             // (as its SyncScheduler), so resolving it eagerly here would be a cycle.
-            automaticSyncAllowed = {
-                combine(get<NetworkConditionMonitor>().condition, get<SettingsRepository>().localSettings) { condition, settings ->
-                    NetworkUsagePolicy.automaticSyncAllowed(condition, settings.syncOnMeteredNetwork)
-                }.distinctUntilChanged()
+            automaticSyncAllowedFlow = {
+                NetworkUsagePolicy.automaticSyncAllowedFlow(
+                    condition = get<NetworkConditionMonitor>().condition,
+                    syncOnMetered = get<SettingsRepository>().localSettings.map { it.syncOnMeteredNetwork },
+                )
             },
         )
     }

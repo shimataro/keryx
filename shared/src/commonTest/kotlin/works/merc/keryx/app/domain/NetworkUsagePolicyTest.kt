@@ -1,5 +1,8 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
 import works.merc.keryx.app.core.NetworkCondition
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,5 +47,20 @@ class NetworkUsagePolicyTest {
     @Test
     fun unrestrictedConstantIsNeitherMeteredNorSaving() {
         assertEquals(unrestricted, NetworkCondition.UNRESTRICTED)
+    }
+
+    @Test
+    fun syncGateFlowFollowsBothTheNetworkAndTheOptIn() = runTest {
+        val condition = MutableStateFlow(metered)
+        val optIn = MutableStateFlow(false)
+        val gate = NetworkUsagePolicy.automaticSyncAllowedFlow(condition, optIn)
+
+        assertEquals(false, gate.first())
+        optIn.value = true
+        assertEquals(true, gate.first())
+        condition.value = meteredDataSaver
+        assertEquals(false, gate.first())
+        condition.value = unrestricted
+        assertEquals(true, gate.first())
     }
 }

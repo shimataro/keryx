@@ -97,7 +97,7 @@ class SyncRepository(
      * (`SettingsRepository`) itself depends on this class as its [SyncScheduler]. The default (always
      * allowed) is for tests that do not exercise the gate.
      */
-    private val automaticSyncAllowed: () -> Flow<Boolean> = { flowOf(true) },
+    private val automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
 ) : SyncScheduler {
 
     private val mutex = Mutex()
@@ -258,7 +258,7 @@ class SyncRepository(
                 return Result.Ok(Unit)
             }
             // Nothing to defer with no provider connected; syncLocked() would skip it anyway.
-            if (!automaticSyncAllowed().first() && cloudProvider() != null) {
+            if (!automaticSyncAllowedFlow().first() && cloudProvider() != null) {
                 Log.info(TAG, "Automatic sync deferred: the current network does not allow it")
                 deferUntilNetworkAllows()
                 return Result.Ok(Unit)
@@ -283,7 +283,7 @@ class SyncRepository(
 
     /**
      * Marks a sync as deferred for the network and starts — once, however many syncs get deferred
-     * meanwhile — a waiter that schedules a sync as soon as [automaticSyncAllowed] turns true. The
+     * meanwhile — a waiter that schedules a sync as soon as [automaticSyncAllowedFlow] turns true. The
      * flag itself stays up until a sync actually succeeds: the network can turn restrictive again
      * before the debounced sync runs, deferring it anew.
      */
@@ -293,7 +293,7 @@ class SyncRepository(
             if (deferredSyncWaiter?.isActive == true) return
             deferredSyncWaiter = scope.launch {
                 // A gate flow that completes without ever allowing a sync leaves nothing to schedule.
-                automaticSyncAllowed().firstOrNull { it } ?: return@launch
+                automaticSyncAllowedFlow().firstOrNull { it } ?: return@launch
                 Log.info(TAG, "Network allows automatic sync again; scheduling the deferred sync")
                 scheduleSync()
             }

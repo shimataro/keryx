@@ -1,5 +1,8 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import works.merc.keryx.app.core.NetworkCondition
 
 /**
@@ -21,6 +24,17 @@ object NetworkUsagePolicy {
      */
     fun automaticSyncAllowed(condition: NetworkCondition, syncOnMetered: Boolean): Boolean =
         !condition.dataSaver && (!condition.metered || syncOnMetered)
+
+    /**
+     * [automaticSyncAllowed] as a flow over the live network condition and the user's opt-in — the
+     * one composition both production wiring and tests use, so the gate itself is what gets tested.
+     */
+    fun automaticSyncAllowedFlow(
+        condition: Flow<NetworkCondition>,
+        syncOnMetered: Flow<Boolean>,
+    ): Flow<Boolean> = combine(condition, syncOnMetered) { c, onMetered ->
+        automaticSyncAllowed(c, onMetered)
+    }.distinctUntilChanged()
 
     /**
      * Whether an automatic feed refresh may run. Feed fetches are conditional requests and usually
