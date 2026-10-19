@@ -391,6 +391,19 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
     }
 
+    /**
+     * Runs [HomeViewModel.refreshAll] and waits until its cycle has settled, including the hop back
+     * to Main that follows it. The fetch resumes on MockEngine's real dispatcher, so a test that ends
+     * while it is still in flight has that hop land after tearDown's resetMain(), failing whichever
+     * test runs next with "Dispatchers.Main was accessed when ... the test dispatcher was unset".
+     */
+    private fun TestScope.refreshAllAndSettle(vm: HomeViewModel) {
+        vm.refreshAll()
+        // Starts the launched cycle so it has registered itself (activity no longer idle) before polling.
+        testScheduler.runCurrent()
+        pumpUntil { vm.activity.value.idle }
+    }
+
     /** Whether any pull-to-refresh is still pending, whichever selection it was started on. */
     private val HomeViewModel.pulling: Boolean get() = pullRefreshingFilters.value.isNotEmpty()
 
@@ -2914,8 +2927,7 @@ class HomeViewModelTest {
         vm.setUnreadOnly(true)
         testScheduler.advanceUntilIdle()
 
-        vm.refreshAll()
-        testScheduler.advanceUntilIdle()
+        refreshAllAndSettle(vm)
 
         // a1 was selected (now read) and must stay pinned/visible; a2 is still unread on its own.
         assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
@@ -3223,15 +3235,9 @@ class HomeViewModelTest {
         gate.complete(Unit)
 
         // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
-        // so poll with short real sleeps until refreshAll settles (mirrors
-        // refreshAllRaisesTrayNotificationWhenNewArticlesArrive's established pattern).
-        var waited = 0
-        while (activityCenter.activity.value.feedRefreshing && waited < 5_000) {
-            testScheduler.advanceUntilIdle()
-            Thread.sleep(50)
-            waited += 50
-        }
-        testScheduler.advanceUntilIdle()
+        // so poll until the whole cycle settles — not just its feed-refresh stage, which ends before
+        // the sync stage and the final re-trim on Main.
+        pumpUntil { activityCenter.activity.value.idle }
 
         // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
@@ -4221,8 +4227,7 @@ class HomeViewModelTest {
         vm.sync()
         testScheduler.advanceUntilIdle()
 
-        vm.refreshAll()
-        testScheduler.advanceUntilIdle()
+        refreshAllAndSettle(vm)
         // No exception thrown; reaching here is the assertion.
     }
 
