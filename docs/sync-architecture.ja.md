@@ -230,8 +230,8 @@
 アップロードするので、携帯端末では既読操作を数回するたびにモバイルデータを消費してしまう。OS は
 `platform/NetworkConditionMonitor`（`platformNetworkConditionMonitor()` expect から得るインターフェイスで、
 `core/NetworkCondition(metered, dataSaver)` の Flow を流す）を通じて 2 つのシグナルを返す: 現在の回線が
-**従量制**か（Android: デフォルトネットワークに `NET_CAPABILITY_NOT_METERED` がない。iOS:
-`nw_path_is_expensive` — モバイル回線、テザリング、ユーザーが従量制に設定した Wi-Fi）と、ユーザーが OS の
+**従量制**か（Android: デフォルトネットワークに `NET_CAPABILITY_NOT_METERED` がない — モバイル回線、テザリング、ユーザーが従量制に設定した Wi-Fi。iOS:
+`nw_path_is_expensive` — モバイル回線または Personal Hotspot）と、ユーザーが OS の
 **データ節約モード**をオンにしているか（Android: データセーバー、つまり
 `restrictBackgroundStatus == ENABLED`。Android は従量制回線にしか適用しない。iOS: 低データモード、
 `nw_path_is_constrained`。Wi-Fi を含むどの回線にも設定できる）。ネットワークがない状態は制限なしとして扱う。

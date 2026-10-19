@@ -146,8 +146,8 @@ whole database, so on a phone it would spend mobile data on every few mark-as-re
 reports two signals through `platform/NetworkConditionMonitor` (an interface obtained from the
 `platformNetworkConditionMonitor()` expect, as a `core/NetworkCondition(metered, dataSaver)` flow):
 whether the current network is **metered** (Android: the default network lacks
-`NET_CAPABILITY_NOT_METERED`; iOS: `nw_path_is_expensive` — cellular, a tethered hotspot, or a Wi-Fi
-the user marked as metered), and whether the user turned on the OS's **data-saving mode** (Android:
+`NET_CAPABILITY_NOT_METERED` — cellular, tethering, or a Wi-Fi the user marked as metered; iOS:
+`nw_path_is_expensive` — cellular or a Personal Hotspot), and whether the user turned on the OS's **data-saving mode** (Android:
 Data Saver, i.e. `restrictBackgroundStatus == ENABLED`, which Android applies to metered networks
 only; iOS: Low Data Mode, `nw_path_is_constrained`, which can be set on any network including Wi-Fi).
 No network at all counts as unrestricted. Desktop and macOS report neither (`supported = false`) and

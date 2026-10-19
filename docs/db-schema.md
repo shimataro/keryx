@@ -203,7 +203,7 @@ Setup completion = file exists.
 | `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
-| `syncOnMeteredNetwork` | boolean | false (whether automatic cloud sync also runs on a metered network — mobile data, a metered Wi-Fi, tethering. Never overrides the OS's Data Saver / Low Data Mode. Offered only on Android and iOS; see "Network Gate" in [sync-architecture.md](sync-architecture.md)) |
+| `syncOnMeteredNetwork` | boolean | false (whether automatic cloud sync also runs on a metered network — mobile data, tethering, and on Android a Wi-Fi the user marked as metered. Never overrides the OS's Data Saver / Low Data Mode. Offered only on Android and iOS; see "Network Gate" in [sync-architecture.md](sync-architecture.md)) |
 
 ## Cache Cleanup
 

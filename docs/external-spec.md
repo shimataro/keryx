@@ -40,8 +40,7 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   [sync-architecture.md](sync-architecture.md).
 - **On Android and iOS, automatic sync waits for Wi-Fi by default.** Each sync uploads the whole
   database, so an automatic sync (after a change, a background refresh, or at startup) is held back
-  while the device is on a metered network — mobile data, but also a Wi-Fi the user marked as metered,
-  or tethering — and while the OS's Data Saver / Low Data Mode is on. The Cloud Sync settings tab
+  while the device is on a metered network — mobile data or tethering, and on Android also a Wi-Fi the user marked as metered — and while the OS's Data Saver / Low Data Mode is on. The Cloud Sync settings tab
   offers "Sync automatically over mobile data" (off by default, device-local, shown only while a
   provider is connected) to allow metered networks; Data Saver / Low Data Mode always defers. While a
   sync is held back, the connected provider's row says the sync is paused to save data and will run on an unrestricted network (the reason is not distinguished: it may be a metered network, or Data Saver / Low Data Mode, which the opt-in does not override), and it
