@@ -55,8 +55,8 @@ itself is not a browser download, so it never triggers Windows SmartScreen's "un
 prompt, and on Android the "allow installing from this source" permission is granted only once,
 not on every update.
 
-This applies to the macOS app, a Windows `.msi`/portable install, a Linux portable install, and an
-Android `.apk` from the Releases page. A Linux `.deb`/`.rpm` install instead opens the release page
+In-app updates work for the macOS app, a Windows `.msi`/portable install, a Linux portable install,
+and an Android `.apk` from the Releases page. A Linux `.deb`/`.rpm` install instead opens the release page
 for you to update through your package manager — Keryx still tells you a new version exists, just
 not by installing it itself there. A Snap install is updated automatically by the Snap Store, and
 the F-Droid build leaves updates entirely to the F-Droid client, so it has no in-app update at all.

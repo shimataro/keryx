@@ -24,7 +24,7 @@
 ## ダウンロード
 
 <a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on-ja.svg" alt="F-Droid で入手" height="80"></a>
-<a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg" alt="Snap Store から入手" height="56"></a>
+<a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/jp/snap-store-black.svg" alt="Snap Store から入手" height="56"></a>
 
 | プラットフォーム | 動作要件 | 入手先 |
 | --- | --- | --- |
@@ -52,8 +52,8 @@ Keryx は起動した後、通知ベル・タスクトレイ・設定の「ア�
 ダウンロードではないため、Windows SmartScreen の「未署名ファイル」プロンプトは出ません。Android の
 「提供元不明のアプリを許可する」設定も最初の一度だけで、アップデートのたびに許可し直す必要はありません。
 
-これが当てはまるのは、macOS 版、Windows の `.msi`／ポータブル版、Linux のポータブル版、
-そしてリリースページの Android の `.apk` です。Linux の `.deb`／`.rpm` インストールについては、
+アプリ内アップデートに対応するのは、macOS 版、Windows の `.msi`／ポータブル版、Linux の
+ポータブル版、そして Android の `.apk`（リリースページ配布分）です。Linux の `.deb`／`.rpm` インストールについては、
 代わりにリリースページを開くので、そこからパッケージマネージャで更新してください——新しい
 バージョンがあることは Keryx が教えてくれますが、その場でのインストールまでは行いません。
 Snap インストールは Snap Store によって自動で更新されます。F-Droid 版はアップデートを F-Droid
