@@ -1737,6 +1737,9 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
   hide-read group `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
   inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
+  `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
+  `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups
+  even on iOS 27.
 - **The empty band above the outer display's lists** (82pt, against 24pt above the reader, which has no
   navigation title) is the navigation title's own area: removing the article list's empty `.principal`
   item shows the inline title there, and the system Settings app leaves the same band empty above its

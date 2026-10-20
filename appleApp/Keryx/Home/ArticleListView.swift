@@ -256,7 +256,9 @@ struct ArticleListView: View {
         // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
         ToolbarItem(placement: .principal) { Color.clear }
         #endif
-        #if os(iOS)
+        #if os(iOS) && compiler(>=6.4)
+        // `#available` is a runtime check, so `visibilityPriority` also needs the iOS 27 SDK at
+        // compile time; Swift 6.4 ships with it (Xcode 27), while an older Xcode keeps the groups.
         if #available(iOS 27.0, *) {
             // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
             // from the bottom up, which hid Mark All as Read first and squeezed the search button
