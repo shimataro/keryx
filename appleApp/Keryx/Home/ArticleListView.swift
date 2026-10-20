@@ -256,31 +256,45 @@ struct ArticleListView: View {
         // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
         ToolbarItem(placement: .principal) { Color.clear }
         #endif
+        #if os(iOS)
+        if #available(iOS 27.0, *) {
+            // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
+            // from the bottom up, which hid Mark All as Read first and squeezed the search button
+            // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
+            // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
+            ToolbarItemGroup(placement: .navigation) {
+                unreadOnlyToggle
+                hideReadButton
+            }
+            .visibilityPriority(.low)
+
+            FlexibleToolbarSpacer()
+
+            // Separate items, since a priority applies to a whole item or group.
+            ToolbarItem(placement: .primaryAction) { notificationBellButton }
+                .visibilityPriority(.high)
+            ToolbarItem(placement: .primaryAction) { sortButton }
+                .visibilityPriority(.low)
+            ToolbarItem(placement: .primaryAction) { markAllReadButton }
+                .visibilityPriority(.high)
+        } else {
+            groupedToolbarItems
+        }
+        #else
+        groupedToolbarItems
+        #endif
+    }
+
+    /// The toolbar's items in their two groups — what every platform shows where per-item
+    /// visibility priorities are unavailable.
+    @ToolbarContentBuilder
+    private var groupedToolbarItems: some ToolbarContent {
         // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
         // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
         ToolbarItemGroup(placement: .navigation) {
-            Toggle(isOn: Binding(
-                get: { home.unreadOnly },
-                set: { home.viewModel.setUnreadOnly(value: $0) }
-            )) {
-                Label(
-                    L("home_unread_only"),
-                    systemImage: home.unreadOnly
-                        ? "line.3.horizontal.decrease.circle.fill"
-                        : "line.3.horizontal.decrease.circle"
-                )
-            }
-            .toggleStyle(.button)
-            .help(L("home_unread_only"))
-
-            Button {
-                home.viewModel.hideRead()
-            } label: {
-                Label(L("home_hide_read"), systemImage: "eye.slash")
-            }
-            .disabled(!home.canHideRead)
-            .help(L("home_hide_read"))
+            unreadOnlyToggle
+            hideReadButton
         }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
@@ -288,26 +302,62 @@ struct ArticleListView: View {
         FlexibleToolbarSpacer()
 
         ToolbarItemGroup(placement: .primaryAction) {
-            NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
-
-            Button {
-                home.viewModel.toggleSort()
-            } label: {
-                Label(
-                    L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
-                    systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
-                )
-            }
-            .disabled(home.searchActive)
-            .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
-
-            Button {
-                home.viewModel.markAllRead()
-            } label: {
-                Label(L("home_mark_all_read"), systemImage: "checkmark.circle")
-            }
-            .help(L("home_mark_all_read"))
+            notificationBellButton
+            sortButton
+            markAllReadButton
         }
+    }
+
+    private var unreadOnlyToggle: some View {
+        Toggle(isOn: Binding(
+            get: { home.unreadOnly },
+            set: { home.viewModel.setUnreadOnly(value: $0) }
+        )) {
+            Label(
+                L("home_unread_only"),
+                systemImage: home.unreadOnly
+                    ? "line.3.horizontal.decrease.circle.fill"
+                    : "line.3.horizontal.decrease.circle"
+            )
+        }
+        .toggleStyle(.button)
+        .help(L("home_unread_only"))
+    }
+
+    private var hideReadButton: some View {
+        Button {
+            home.viewModel.hideRead()
+        } label: {
+            Label(L("home_hide_read"), systemImage: "eye.slash")
+        }
+        .disabled(!home.canHideRead)
+        .help(L("home_hide_read"))
+    }
+
+    private var notificationBellButton: some View {
+        NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
+    }
+
+    private var sortButton: some View {
+        Button {
+            home.viewModel.toggleSort()
+        } label: {
+            Label(
+                L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
+                systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
+            )
+        }
+        .disabled(home.searchActive)
+        .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
+    }
+
+    private var markAllReadButton: some View {
+        Button {
+            home.viewModel.markAllRead()
+        } label: {
+            Label(L("home_mark_all_read"), systemImage: "checkmark.circle")
+        }
+        .help(L("home_mark_all_read"))
     }
 
     // MARK: - Content / empty states
