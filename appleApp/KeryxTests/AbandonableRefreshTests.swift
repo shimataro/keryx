@@ -11,9 +11,16 @@ struct AbandonableRefreshTests {
     @Test
     func abandoningEndsTheWaitAtOnce() async {
         let refresh = AbandonableRefresh()
+        let (started, signalStarted) = AsyncStream<Void>.makeStream()
         let elapsed = await clock.measure {
-            async let run: () = refresh.run { await PullRefreshHold.run(minimum: longHold) {} }
-            await Task.yield()
+            async let run: () = refresh.run {
+                signalStarted.yield()
+                await PullRefreshHold.run(minimum: longHold) {}
+            }
+            // `async let` hops to the main actor before `run` registers its task, so a bare
+            // `Task.yield()` could abandon before there was anything to abandon. The work running
+            // means `run` has already registered it.
+            for await _ in started { break }
             refresh.abandon()
             await run
         }
