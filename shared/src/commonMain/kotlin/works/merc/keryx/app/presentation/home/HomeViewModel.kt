@@ -113,9 +113,13 @@ class HomeViewModel(
     private val articlesLoaded = MutableStateFlow(false)
 
     // null until the first DB emission lands; every public view of it reads that as an empty list.
+    // flowOn directly upstream of stateIn, as for the article list: stateIn fuses it into its own
+    // coroutine, so the StateFlow's equality check of each new list — every row, on every feed write
+    // a refresh makes — runs on `dispatcher` rather than the main thread.
     private val feedsSnapshot: StateFlow<List<Feeds>?> =
         feedRepository.watchAllFeeds()
             .onEach { hasFeeds.value = it.isNotEmpty() }
+            .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
     val feeds: StateFlow<List<Feeds>> = DerivedStateFlow(
