@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.presentation.DerivedStateFlow
 
 /** The outcome of one OPML operation, shown inline next to the Data tab's import/export buttons. Data only — each UI localizes it. */
@@ -150,12 +151,10 @@ class OpmlTransferController(
     suspend fun importResult(xml: String?): OpmlResult {
         if (xml == null) return OpmlResult.ImportFailed
         val job = scope.async {
-            try {
+            runCatchingUnlessCancelled {
                 val outcome = withContext(dispatcher) { transfer.importOpml(xml) }
                 OpmlResult.Imported(outcome.added, outcome.failed)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
+            }.getOrElse { e ->
                 Log.warn(TAG, "Failed to import OPML", e)
                 OpmlResult.ImportFailed
             }

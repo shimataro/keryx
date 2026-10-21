@@ -5,7 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.head
 import io.ktor.client.statement.bodyAsText
-import kotlinx.coroutines.CancellationException
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 
 /**
  * Best-effort favicon URL resolution. Only the URL is stored in the DB; the
@@ -59,15 +59,6 @@ class FaviconResolver(private val client: HttpClient) {
     suspend fun isReachable(url: String): Boolean = runCatchingUnlessCancelled {
         client.head(url).status.value in 200..299
     }.getOrDefault(false)
-
-    /** [runCatching], except that a [CancellationException] is rethrown rather than captured. */
-    private inline fun <T> runCatchingUnlessCancelled(block: () -> T): kotlin.Result<T> = try {
-        kotlin.Result.success(block())
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        kotlin.Result.failure(e)
-    }
 
     private data class FaviconCandidate(val url: String, val isSvg: Boolean, val resolution: Int)
 }

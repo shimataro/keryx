@@ -2,7 +2,6 @@ package works.merc.keryx.app.presentation.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,6 +22,7 @@ import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectionService
@@ -240,13 +240,8 @@ class CloudSyncController(
                 // would silently stop all future last-synced refreshes) or leak as an uncaught
                 // exception. Best-effort UI state — log and carry on. Cancellation still propagates.
                 if (!isSyncing) {
-                    try {
-                        refreshLastSyncedAt()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        Log.warn(TAG, "Failed to refresh last-synced time", e)
-                    }
+                    runCatchingUnlessCancelled { refreshLastSyncedAt() }
+                        .onFailure { e -> Log.warn(TAG, "Failed to refresh last-synced time", e) }
                 }
             }
         }
@@ -267,11 +262,8 @@ class CloudSyncController(
         viewModelScope.launch {
             try {
                 _runs.tryEmit(ManualSyncEdge.Started)
-                withContext(dispatcher) { syncRepository.sync() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                Log.error(TAG, "Manual sync failed", e)
+                runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
+                    .onFailure { e -> Log.error(TAG, "Manual sync failed", e) }
             } finally {
                 _manualSyncInFlight.value = false
                 _runs.tryEmit(ManualSyncEdge.Finished)
@@ -306,11 +298,8 @@ class CloudSyncController(
             if (!connected) return@launch
             _initialSyncingType.value = type
             try {
-                withContext(dispatcher) { syncRepository.sync() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                Log.error(TAG, "Initial sync failed", e)
+                runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
+                    .onFailure { e -> Log.error(TAG, "Initial sync failed", e) }
             } finally {
                 _initialSyncingType.value = null
             }
