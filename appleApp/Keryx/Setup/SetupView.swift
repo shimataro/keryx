@@ -72,7 +72,11 @@ struct SetupView: View {
             }
         }
         .padding(40)
+        #if os(macOS)
+        // The Setup window's minimum size. iOS gets no minimum: the screen is the limit, and iPhone
+        // Duo's outer display leaves 382pt beside its vertical bar, which a 480pt minimum overflowed.
         .frame(minWidth: 480, minHeight: 420)
+        #endif
         .task { await setup.startObserving() }
         // Skips Setup entirely when no cloud provider is configured for this build — matches
         // Compose's own auto-choice (`App.kt:43-54`), rather than showing a cloud section with no
