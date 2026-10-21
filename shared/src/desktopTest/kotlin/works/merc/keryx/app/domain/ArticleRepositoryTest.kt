@@ -716,8 +716,8 @@ class ArticleRepositoryTest {
     }
 
     /**
-     * `articles_fts` is raw SQL outside the schema and can be absent (briefly DROPped during a sync's
-     * upload window): searching then returns no hits, rather than throwing out of the repository.
+     * `articles_fts` is raw SQL outside the schema and can be absent (before the first startup
+     * catch-up has created it): searching then returns no hits, rather than throwing out of the repository.
      */
     @Test
     fun searchReturnsNoHitsInsteadOfThrowingWhenTheIndexIsUnavailable() {

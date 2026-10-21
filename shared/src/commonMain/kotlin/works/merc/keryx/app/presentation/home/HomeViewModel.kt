@@ -700,7 +700,7 @@ class HomeViewModel(
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
-            // doesn't auto-notify. search() absorbs the transient articles_fts-dropped case itself.
+            // doesn't auto-notify. search() absorbs an unavailable index (absent before the first startup catch-up) itself.
             // Debounced: a refresh commits once per fetched feed, and each commit would otherwise
             // re-run the whole FTS query while a search is showing.
             articleChangeSignal.debounce(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS),
