@@ -1,7 +1,5 @@
 package works.merc.keryx.app.domain
 
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.update
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS
 
@@ -18,21 +16,6 @@ interface FaviconMissStore {
 
     /** Forgets a miss for [feedId] — a lookup found a favicon after all. */
     fun clearMiss(feedId: String)
-}
-
-/** Keeps the misses in memory only, for the life of the process. */
-class InMemoryFaviconMissStore : FaviconMissStore {
-    private val misses = MutableStateFlow<Map<String, Long>>(emptyMap())
-
-    override fun missedAt(feedId: String): Long? = misses.value[feedId]
-
-    override fun recordMiss(feedId: String, at: Long) {
-        misses.update { withFaviconMiss(it, feedId, at) }
-    }
-
-    override fun clearMiss(feedId: String) {
-        misses.update { it - feedId }
-    }
 }
 
 /**

@@ -59,7 +59,7 @@ class FeedRepository(
     private val notificationCenter: NotificationCenter,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    private val faviconMisses: FaviconMissStore = InMemoryFaviconMissStore(),
+    private val faviconMisses: FaviconMissStore,
 ) {
     private val feeds get() = db.feedsQueries
 

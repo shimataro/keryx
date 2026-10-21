@@ -68,13 +68,4 @@ class FaviconMissStoreTest {
         // "expired" is exactly one interval old — a lookup is due again, so it no longer needs remembering.
         assertEquals(mapOf("recent" to 1_000L + FAVICON_RETRY_INTERVAL_MS + 1, "f1" to now), after)
     }
-
-    @Test
-    fun theInMemoryStoreBehavesTheSame() {
-        val store = InMemoryFaviconMissStore()
-        store.recordMiss("f1", 10L)
-        assertEquals(10L, store.missedAt("f1"))
-        store.clearMiss("f1")
-        assertNull(store.missedAt("f1"))
-    }
 }

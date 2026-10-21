@@ -20,6 +20,7 @@ import app.cash.sqldelight.db.SqlDriver
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
@@ -211,6 +212,7 @@ class FeedRepositoryTest {
         return FeedRepository(
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
             notificationCenter, clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
     }
 
