@@ -9,8 +9,8 @@ import works.merc.keryx.app.domain.FaviconMissStore
  * one would probe a site without a favicon again in every new process.
  *
  * Unlike the settings-backed one it never drops expired entries (`SettingsFaviconMissStore` prunes
- * those older than `FAVICON_RETRY_INTERVAL_MS` when it records a miss), so a test that spans more
- * than a retry interval sees no difference only because the lookup itself checks the age.
+ * those older than `FAVICON_RETRY_INTERVAL_MS` when it records a miss). An expired entry still does
+ * not suppress a lookup, because `FeedRepository` compares the entry's age with that interval.
  */
 class InMemoryFaviconMissStore : FaviconMissStore {
     private val misses = HashMap<String, Long>()
