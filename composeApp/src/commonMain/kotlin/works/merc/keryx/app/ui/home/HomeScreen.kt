@@ -103,7 +103,7 @@ fun HomeScreen() {
     // inside the keyboard-shortcut callbacks below, which read vm.selectedArticle.value live at
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val searchActive by vm.searchActive.collectAsState()
     // Whether the expanded search bar is open — see homeBackAction's own KDoc.
     val searchBarVisible by vm.searchBarVisible.collectAsState()

@@ -133,7 +133,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val unreadOnly by homeVm.unreadOnly.collectAsState()
     val canSyncNow by homeVm.canSyncNow.collectAsState()
     val opmlBusy by opmlController.busy.collectAsState()
-    val feeds by homeVm.feeds.collectAsState()
+    val feeds by homeVm.structuralFeeds.collectAsState()
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
     val feedTagMap by homeVm.feedTagMap.collectAsState()
@@ -245,7 +245,7 @@ internal fun FrameWindowScope.AppMenuBar(
         copyUrl = { menuController.send(MenuCommand.CopyUrl) },
         refreshAll = { homeVm.refreshAll() },
         sync = { homeVm.sync() },
-        refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it) } },
+        refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it.id) } },
         toggleFeedTag = { tagId, attached -> selectedFeed?.let { homeVm.setFeedTag(it.id, tagId, attached) } },
         moveFeedToFolder = { folderId -> selectedFeed?.let { homeVm.moveFeed(it.id, folderId) } },
         newFolderForSelectedFeed = { menuController.send(MenuCommand.NewFolderForSelectedFeed) },

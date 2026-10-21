@@ -352,6 +352,19 @@ class FeedRepository(
         return outcome.result
     }
 
+    /**
+     * Refreshes the feed [id] names, re-reading its row first so the conditional request carries
+     * the feed's current `etag` / `last_modified` rather than whatever a caller's (possibly stale)
+     * copy of the row holds.
+     *
+     * @return The refresh result, or `null` when no subscribed feed has that id (it was
+     *   unsubscribed in the meantime), in which case nothing is fetched.
+     */
+    suspend fun refreshFeedById(id: String): Result<Int>? {
+        val feed = getFeedById(id)?.takeIf { it.deleted_at == null } ?: return null
+        return refreshFeed(feed)
+    }
+
     /** Outcome of [applyFetch]: the article-count result, plus whether any articles were fetched. */
     private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
 

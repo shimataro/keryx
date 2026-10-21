@@ -194,7 +194,7 @@ internal fun FeedListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val tags by vm.tags.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
     val folders by vm.folders.collectAsState()
@@ -625,7 +625,7 @@ internal fun FeedListPane(
                                 editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
                                 onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                                 onRenameCancel = { inlineEdit = null },
-                                onRefresh = { vm.refreshFeed(feed) },
+                                onRefresh = { vm.refreshFeed(feed.id) },
                                 tags = tags,
                                 attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                                 onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
@@ -797,7 +797,7 @@ internal fun FeedListPane(
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                                     onRenameCancel = { inlineEdit = null },
-                                    onRefresh = { vm.refreshFeed(feed) },
+                                    onRefresh = { vm.refreshFeed(feed.id) },
                                     tags = tags,
                                     attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                                     onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },

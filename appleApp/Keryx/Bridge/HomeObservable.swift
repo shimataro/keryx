@@ -24,8 +24,8 @@ final class HomeObservable: ObservableAssignment {
     /// cached, since `KeryxSdk.newAddFeedController()` itself returns a new instance every call.
     let makeAddFeedController: () -> AddFeedController
 
-    /// The latest `feeds` emission, always — the rows action-time lookups (`currentFeed(id:)`)
-    /// resolve through. Not observed: a refresh re-emits it once per fetched feed, so views read
+    /// The latest `feeds` emission, always — the rows action-time lookups (`requestDelete`'s
+    /// selection target) resolve through. Not observed: a refresh re-emits it once per fetched feed, so views read
     /// `hasFeeds` / `feedsById` / `sidebar` / `subscribedFeedUrls` instead, which only change with
     /// `HomeViewModel.structuralFeeds`.
     @ObservationIgnored private(set) var feeds: [Feeds] = []
@@ -192,16 +192,11 @@ final class HomeObservable: ObservableAssignment {
         updateFeedListSelectionTarget()
     }
 
-    /// The current row for `id`: the `Feeds` the sidebar and `feedsById` hold may carry a stale
-    /// `etag` / `last_modified` (see `structuralFeeds`), which a refresh sends as its conditional
-    /// request.
-    func currentFeed(id: String) -> Feeds? {
-        feeds.first { $0.id == id }
-    }
-
-    /// Refreshes `feed` from its current row — see `currentFeed(id:)`.
+    /// Refreshes `feed`. Only its id is passed on: `HomeViewModel.refreshFeed` re-reads the row,
+    /// since the `Feeds` the sidebar and `feedsById` hold may carry a stale `etag` /
+    /// `last_modified` (see `structuralFeeds`), which a refresh sends as its conditional request.
     func refreshFeed(_ feed: Feeds) {
-        viewModel.refreshFeed(feed: currentFeed(id: feed.id) ?? feed)
+        viewModel.refreshFeed(feedId: feed.id)
     }
 
     /// The one handler every route that selects an article goes through: it selects, then brings

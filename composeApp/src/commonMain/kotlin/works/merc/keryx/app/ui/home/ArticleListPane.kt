@@ -181,7 +181,7 @@ fun ArticleListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val filter by vm.filter.collectAsState()
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val folders by vm.folders.collectAsState()
     val tags by vm.tags.collectAsState()
     val title = onOpenDrawer?.let {

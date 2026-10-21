@@ -2996,6 +2996,48 @@ class HomeViewModelTest {
         assertEquals(0, manualSync.syncNowCalls)
     }
 
+    // --- refreshFeed ---
+
+    @Test
+    fun refreshFeedSendsTheFeedsCurrentConditionalHeadersReadFromTheDb() = runTest {
+        db.insertFeed("f1")
+        db.feedsQueries.updateCacheHeaders("etag-current", null, 0L, "f1")
+        val sentEtags = java.util.Collections.synchronizedList(mutableListOf<String?>())
+        val vm = newViewModel(feedFetcher = fetcherWith { request ->
+            sentEtags += request.headers[io.ktor.http.HttpHeaders.IfNoneMatch]
+            respond("", HttpStatusCode.NotModified)
+        })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshFeed("f1")
+        kotlinx.coroutines.withContext(Dispatchers.Default) {
+            kotlinx.coroutines.withTimeout(5_000) { while (sentEtags.isEmpty() || !vm.activity.value.idle) kotlinx.coroutines.delay(10) }
+        }
+
+        assertEquals(listOf<String?>("etag-current"), sentEtags.toList())
+    }
+
+    @Test
+    fun refreshFeedOfAnUnsubscribedFeedFetchesNothing() = runTest {
+        db.insertFeed("f1", deletedAt = 1L)
+        val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+        val vm = newViewModel(feedFetcher = fetcherWith {
+            fetches.incrementAndGet()
+            respond(RSS, HttpStatusCode.OK)
+        })
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        vm.refreshFeed("f1")
+        kotlinx.coroutines.withContext(Dispatchers.Default) {
+            kotlinx.coroutines.withTimeout(5_000) { while (!vm.activity.value.idle) kotlinx.coroutines.delay(10) }
+            kotlinx.coroutines.delay(100)
+        }
+
+        assertEquals(0, fetches.get())
+    }
+
     // --- canHideRead / hideRead ---
 
     @Test

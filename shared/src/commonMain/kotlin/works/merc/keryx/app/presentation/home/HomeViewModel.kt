@@ -108,11 +108,11 @@ class HomeViewModel(
     /**
      * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
      * ([feedsStructurallyEqual]) — what a refresh rewrites once per fetched feed without anything on
-     * screen reading it. Consumed by the Apple app, which rebuilds its sidebar, feed lookups and
-     * article rows' feed info from this rather than from every [feeds] emission; the comparison
-     * runs on [dispatcher] instead of reading every field across the Swift bridge on the main
-     * thread. Its `Feeds` may therefore lag [feeds] in those three fields — anything needing the
-     * fresh conditional-request fields (a refresh) must resolve the row from [feeds].
+     * screen reading it. What both UIs render the feed list, the article rows' feed info and every
+     * feed lookup from (the Compose panes and menu bar, and the Apple app's sidebar), so a refresh
+     * that only moves those three fields recomposes / rebuilds nothing; the comparison runs on
+     * [dispatcher] instead of on the main thread. Its `Feeds` may therefore lag [feeds] in those
+     * three fields — which is why [refreshFeed] takes an id and re-reads the row itself.
      */
     val structuralFeeds: StateFlow<List<Feeds>> =
         feeds.distinctUntilChanged(::feedsStructurallyEqual)
@@ -1497,8 +1497,12 @@ class HomeViewModel(
         retrimPins = ::retrimPinnedReadStates,
     )
 
-    /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
-    fun refreshFeed(feed: Feeds) = refreshController.refreshFeed(feed)
+    /**
+     * Refreshes the feed [feedId] names, from its current row. Takes the id rather than a row so no
+     * caller can hand over a copy whose conditional-request fields lag behind (as
+     * [structuralFeeds]' rows do). See [HomeRefreshController.refreshFeed].
+     */
+    fun refreshFeed(feedId: String) = refreshController.refreshFeed(feedId)
 
     /**
      * Refreshes all feeds, notifies about newly available articles when enabled, and synchronizes
