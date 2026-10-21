@@ -15,14 +15,14 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -31,8 +31,8 @@ import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
 import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.newHomeViewModel
@@ -267,13 +267,6 @@ class SearchPaneNavigationTest {
     }
 
     /**
-     * Regression test for a bug where selecting an article at `PaneLayout.Dual` advanced
-     * `focusedPane` to `HomePane.ArticleDetail` (mirroring `PaneLayout.Single`'s own drill-in),
-     * even though `visiblePanes` shows the same two panes at every depth there — the article list
-     * pane then rendered `focused = false` on the very next frame, and ↑/↓ (routed through
-     * `keyboardPaneFor`) stopped moving the just-tapped selection at all.
-     */
-    /**
      * Changing the query is the user asking for a different list, so the results list goes back to the
      * top — as it does when the filter changes — rather than staying wherever the previous results
      * were scrolled to (and, with the selected row no longer revealed on a mere change of results,
@@ -323,14 +316,14 @@ class SearchPaneNavigationTest {
     fun searchResultsChangingDoNotPullTheListBackToTheSelection() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         db.insertFeed("f1")
-        repeat(40) { db.insertArticleRow("a%02d".format(it), "f1", createdAt = it.toLong(), searchText = "alpha beta") }
+        repeat(80) { db.insertArticleRow("a%02d".format(it), "f1", createdAt = it.toLong(), searchText = "alpha beta") }
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
             vm.setSearchBarVisible(true)
             vm.setSearchQuery("alpha")
             var focusedPane by mutableStateOf(HomePane.ArticleList)
             setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
-            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 40 }
+            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 80 }
             waitForIdle()
             val ids = vm.searchResults.value.map { it.article.id }
             val (first, last) = ids.first() to ids.last()
@@ -351,15 +344,24 @@ class SearchPaneNavigationTest {
             // A new matching article changes the results (the search re-runs on the write).
             db.insertArticleRow("a99", "f1", createdAt = 99L, searchText = "alpha beta")
             runBlocking { FtsManager(driver).indexMissing() }
-            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 41 }
+            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 81 }
             waitForIdle()
 
-            // The list stayed at the top: the selected row did not pull it back down.
+            // The list stayed at the top: the selected row did not pull it back down. Checked by which
+            // rows are composed — the pane's own LazyListState is not reachable from here — and with 80
+            // results the last row is far beyond anything a lazy list composes ahead of the viewport.
             onAllNodesWithTag("article-$first").assertCountEquals(1)
             onAllNodesWithTag("article-$last").assertCountEquals(0)
         }
     }
 
+    /**
+     * Regression test for a bug where selecting an article at `PaneLayout.Dual` advanced
+     * `focusedPane` to `HomePane.ArticleDetail` (mirroring `PaneLayout.Single`'s own drill-in),
+     * even though `visiblePanes` shows the same two panes at every depth there — the article list
+     * pane then rendered `focused = false` on the very next frame, and ↑/↓ (routed through
+     * `keyboardPaneFor`) stopped moving the just-tapped selection at all.
+     */
     @Test
     fun articleRowSelectionAtDualLayoutDoesNotAdvanceFocusedPaneToArticleDetail() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
