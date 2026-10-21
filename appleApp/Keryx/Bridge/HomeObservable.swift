@@ -288,7 +288,7 @@ final class HomeObservable: ObservableAssignment {
         await PullRefreshHold.run {
             start()
             for await pending in viewModel.pullRefreshingFilters {
-                if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+                if !pending.contains(where: { kotlinValuesEqual($0 as AnyObject, filter) }) { return }
             }
         }
     }
@@ -528,12 +528,7 @@ final class HomeObservable: ObservableAssignment {
 
     private func updateFeedListSelectionTarget() {
         let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: structuralFeeds, folders: folders, tags: tags)
-        let unchanged = switch (feedListSelectionTarget, target) {
-        case (nil, nil): true
-        case let (old?, new?): (old as? NSObject)?.isEqual(new) ?? false
-        default: false
-        }
-        if !unchanged { feedListSelectionTarget = target }
+        if !kotlinValuesEqual(feedListSelectionTarget as AnyObject?, target as AnyObject?) { feedListSelectionTarget = target }
         assignIfChanged(\.articleListTitle, FeedListModelKt.articleListTitle(
             filter: filter, feeds: structuralFeeds, folders: folders, tags: tags,
             allLabel: L("home_all_feeds"), starredLabel: L("home_starred")
@@ -629,7 +624,7 @@ final class HomeObservable: ObservableAssignment {
     /// (which the reader keys its revision on), an unchanged re-read does not.
     private func syncReaderContent() {
         let v = viewModel.readerContent.value
-        if !(v as AnyObject).isEqual(readerContent as AnyObject) { readerContent = v }
+        if !kotlinValuesEqual(v as AnyObject, readerContent as AnyObject) { readerContent = v }
     }
 
     private func observeSelectedFeedName() async {

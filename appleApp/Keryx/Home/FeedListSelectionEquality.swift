@@ -1,3 +1,4 @@
+import Foundation
 import KeryxShared
 
 /// `ArticleFilter` and `FeedListRowSelection` are Kotlin sealed types — compared here via
@@ -24,6 +25,15 @@ func feedListRowSelectionsEqual(_ a: FeedListRowSelection, _ b: FeedListRowSelec
     case (.tag(let x), .tag(let y)): return x.tagId == y.tagId
     default: return false
     }
+}
+
+/// Kotlin value equality (`equals`) through the bridge, for a Kotlin value that reaches Swift typed
+/// as a protocol or as `AnyObject` — a sealed hierarchy, a data class behind an interface — and so
+/// is not `Equatable`. Two nils are equal; a nil and a value are not. The one way the app compares
+/// such values, where it used to be written three different ways.
+func kotlinValuesEqual(_ a: AnyObject?, _ b: AnyObject?) -> Bool {
+    guard let a, let b else { return a == nil && b == nil }
+    return (a as? NSObject)?.isEqual(b) ?? (a === b)
 }
 
 /// `DropBoundary` (the feed-list drag-and-drop insertion point) is a Kotlin sealed type too —
