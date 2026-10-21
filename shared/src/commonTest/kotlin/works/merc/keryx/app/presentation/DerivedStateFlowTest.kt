@@ -1,5 +1,6 @@
 package works.merc.keryx.app.presentation
 
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -37,20 +38,31 @@ class DerivedStateFlowTest {
 
     @Test
     fun collectorsUseTheGivenEquivalenceInsteadOfEquals() = runTest(UnconfinedTestDispatcher()) {
-        val values = MutableStateFlow(listOf(1))
+        // A SharedFlow upstream, unlike a StateFlow, passes an equal value on again — which is what
+        // tells the two equivalences apart.
+        val upstream = MutableSharedFlow<List<Int>>(replay = 1)
+        val current = listOf(1)
+        upstream.tryEmit(current)
         val byIdentity = DerivedStateFlow(
-            compute = { values.value },
-            changes = values.map { it },
+            compute = { upstream.replayCache.last() },
+            changes = upstream,
             areEquivalent = ::sameListOrBothEmpty,
         )
-        val received = mutableListOf<List<Int>>()
-        val job = launch { byIdentity.collect { received += it } }
+        val byEquals = DerivedStateFlow(compute = { upstream.replayCache.last() }, changes = upstream)
+        val identityReceived = mutableListOf<List<Int>>()
+        val equalsReceived = mutableListOf<List<Int>>()
+        val jobs = listOf(
+            launch { byIdentity.collect { identityReceived += it } },
+            launch { byEquals.collect { equalsReceived += it } },
+        )
 
-        values.value = listOf(2)
-        values.value = listOf(3)
+        upstream.emit(current) // the very same instance: dropped by both
+        upstream.emit(listOf(1)) // equal contents, a new instance: kept by identity, dropped by ==
+        upstream.emit(listOf(2))
 
-        assertEquals(listOf(listOf(1), listOf(2), listOf(3)), received)
-        job.cancel()
+        assertEquals(listOf(listOf(1), listOf(1), listOf(2)), identityReceived)
+        assertEquals(listOf(listOf(1), listOf(2)), equalsReceived)
+        jobs.forEach { it.cancel() }
     }
 
     @Test
