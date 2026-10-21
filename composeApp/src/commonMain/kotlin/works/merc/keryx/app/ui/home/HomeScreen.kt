@@ -59,7 +59,6 @@ import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
-import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.BackHandler
@@ -100,7 +99,7 @@ fun HomeScreen() {
     val menuController = koinInject<MenuController>()
 
     // Note: the selected article is deliberately NOT collected at this scope. It's only needed
-    // inside the keyboard-shortcut callbacks below, which read vm.selectedArticle.value live at
+    // inside the keyboard-shortcut callbacks below, which read vm.selectedArticleRow.value live at
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
     val feeds by vm.structuralFeeds.collectAsState()
@@ -155,15 +154,12 @@ fun HomeScreen() {
     // ArticleDetailPane watches to flash its copy button's inline ✓ (only for the article it shows:
     // an Android long-press menu doesn't select its row first, so it can copy a different one), and
     // Android's "URL copied" snackbar, which therefore appears even when the reader isn't on screen.
-    val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticle.value?.id }
+    val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticleId.value }
     // The one handler behind every "Share" route — the reader's button and the article-row context
     // menu. Null where the platform has no share sheet (desktop), which keeps both routes off screen.
     val articleSharer = rememberArticleSharer()
     val shareArticleRow: ((ArticleListRow) -> Unit)? = remember(articleSharer) {
         articleSharer?.let { sharer -> { row: ArticleListRow -> sharer.share(row.url, row.title) } }
-    }
-    val shareArticle: ((Articles) -> Unit)? = remember(articleSharer) {
-        articleSharer?.let { sharer -> { article: Articles -> sharer.share(article.url, article.title) } }
     }
     val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
@@ -332,12 +328,13 @@ fun HomeScreen() {
     }
 
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
-    // selection at call time (vm.selectedArticle.value) so a command collected once stays correct.
+    // selection at call time (vm.selectedArticleRow.value) so a command collected once stays correct
+    // — and acts on the article just selected even while its body is still loading.
     fun openSelectedInBrowser() {
-        openInBrowserIfAllowed(vm.selectedArticle.value?.url)
+        openInBrowserIfAllowed(vm.selectedArticleRow.value?.url)
     }
     fun copySelectedUrl() {
-        vm.selectedArticle.value?.let { urlCopier.copy(it.url, it.id) }
+        vm.selectedArticleRow.value?.let { urlCopier.copy(it.url, it.id) }
     }
     fun focusSearch() {
         // Opens the bar at a narrow layout (a no-op at Triple, where HomeScreen's own
@@ -477,7 +474,7 @@ fun HomeScreen() {
                         } else {
                             when (focusedPane) {
                                 HomePane.FeedList -> {
-                                    if (vm.selectedArticle.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
+                                    if (vm.selectedArticleId.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
                                     setFocusedPane(HomePane.ArticleList)
                                 }
                                 HomePane.ArticleList -> setFocusedPane(HomePane.ArticleDetail)
@@ -618,7 +615,7 @@ fun HomeScreen() {
                             copyPulse = urlCopier.pulse,
                             onCopyUrl = { urlCopier.copy(it.url, it.id) },
                             onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
-                            onShare = shareArticle,
+                            onShare = shareArticleRow,
                         )
                     }
                     }
@@ -747,7 +744,7 @@ fun HomeScreen() {
                                     copyPulse = urlCopier.pulse,
                                     onCopyUrl = { urlCopier.copy(it.url, it.id) },
                                     onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
-                                    onShare = shareArticle,
+                                    onShare = shareArticleRow,
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
                                     // Dual the reader is a permanent neighbor of the article list,

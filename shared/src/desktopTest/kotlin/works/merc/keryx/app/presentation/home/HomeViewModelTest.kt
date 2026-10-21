@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import works.merc.keryx.app.core.ARTICLE_CONTENT_CACHE_LIMIT
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedNotFoundException
@@ -1196,13 +1197,17 @@ class HomeViewModelTest {
      *
      * @return The ViewModel, already subscribed and settled.
      */
-    private fun TestScope.newViewModelWithHydrationOn(dispatcher: CoroutineDispatcher, vararg ids: String): HomeViewModel {
+    private fun TestScope.newViewModelWithHydrationOn(
+        dispatcher: CoroutineDispatcher,
+        vararg ids: String,
+        dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    ): HomeViewModel {
         db.insertFeed("f1")
         ids.forEachIndexed { index, id ->
             val order = (ids.size - index).toLong()
             db.insertArticle(id, "f1", isRead = 0L, publishedAt = order, createdAt = order, content = "<p>$id</p>")
         }
-        val vm = newViewModel(dispatcher = dispatcher)
+        val vm = newViewModel(dispatcher = dispatcher, dbWriteDispatcher = dbWriteDispatcher)
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
         return vm
@@ -1211,6 +1216,214 @@ class HomeViewModelTest {
     private fun HomeViewModel.row(id: String) = articles.value.single { it.id == id }
 
     private fun dbIsRead(id: String) = db.articlesQueries.getById(id).executeAsOne().is_read
+
+    // --- Header-first reader: selectedArticleId / selectedArticleRow / readerContent ---
+
+    /** [newViewModelWithHydrationOn] with [first] already selected and loaded. */
+    private fun TestScope.newViewModelShowing(first: String, holding: HoldingDispatcher, vararg ids: String, dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined): HomeViewModel {
+        val vm = newViewModelWithHydrationOn(holding, *ids, dbWriteDispatcher = dbWriteDispatcher)
+        vm.selectArticle(vm.row(first))
+        testScheduler.advanceUntilIdle()
+        assertEquals(first, vm.selectedArticle.value?.id)
+        return vm
+    }
+
+    private fun HomeViewModel.readerArticleId(): String? = when (val content = readerContent.value) {
+        ReaderContent.None -> null
+        is ReaderContent.Header -> "header:" + content.row.id
+        is ReaderContent.Full -> content.article.id
+    }
+
+    /**
+     * An ordinary lookup lands well inside the grace period, so the reader goes straight from the
+     * previous article to the new one in full — one document load, never a header in between.
+     */
+    @Test
+    fun readerContentStaysFullWhenHydrationBeatsGrace() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+        val seen = mutableListOf<String?>()
+        backgroundScope.launch { vm.readerContent.collect { seen += vm.readerArticleId() } }
+        testScheduler.runCurrent()
+
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        testScheduler.runCurrent()
+
+        assertEquals("a2", vm.readerArticleId())
+        assertTrue(seen.none { it?.startsWith("header:") == true }, "no header in $seen")
+        assertEquals("<p>a2</p>", (vm.readerContent.value as ReaderContent.Full).article.content)
+    }
+
+    /** A lookup held past the grace period (a write lock) shows the new article's header, then the article. */
+    @Test
+    fun readerContentShowsHeaderAfterGraceThenFull() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.runCurrent()
+        assertEquals("a1", vm.readerArticleId(), "inside the grace period the previous article stays")
+        testScheduler.advanceTimeBy(READER_HEADER_FIRST_GRACE_MS - 1)
+        assertEquals("a1", vm.readerArticleId())
+        testScheduler.advanceTimeBy(2)
+        assertEquals("header:a2", vm.readerArticleId())
+        assertEquals(1L, (vm.readerContent.value as ReaderContent.Header).row.is_read, "selecting reads it")
+
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
+    }
+
+    @Test
+    fun headerIsClearedBySelectFilterAndBySupersedingSelection() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2", "a3")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals("header:a2", vm.readerArticleId())
+        // A newer selection replaces the header at once — with its own, rather than the reader going
+        // back to a1 for another grace period while the lookups are still held.
+        vm.selectArticle(vm.row("a3"))
+        assertEquals("header:a3", vm.readerArticleId())
+        assertEquals("a3", vm.selectedArticleRow.value?.id)
+
+        vm.selectFilter(ArticleFilter.Starred)
+        assertEquals(ReaderContent.None, vm.readerContent.value)
+        assertNull(vm.selectedArticleRow.value)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ReaderContent.None, vm.readerContent.value, "a grace timer firing later shows nothing")
+
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals(ReaderContent.None, vm.readerContent.value, "the held lookups do not bring anything back")
+    }
+
+    @Test
+    fun headerIsClearedWhenHydrationFindsTombstone() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals("header:a2", vm.readerArticleId())
+        driver.stampArticleDeleted("a2", deletedAt = 10L)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a1", vm.readerArticleId())
+        assertEquals("a1", vm.selectedArticleId.value)
+        assertEquals("a1", vm.selectedArticleRow.value?.id)
+    }
+
+    @Test
+    fun selectedArticleIdUpdatesSynchronously() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+        assertEquals("a1", vm.selectedArticle.value?.id, "the body is still loading")
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    @Test
+    fun selectedArticleRowReflectsStarToggleWhilePending() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        vm.toggleStarSelected()
+
+        assertEquals(1L, vm.selectedArticleRow.value?.is_starred)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, vm.selectedArticleRow.value?.is_starred)
+        assertEquals(1L, vm.selectedArticle.value?.is_starred)
+    }
+
+    /**
+     * The lookup runs outside the DB-write FIFO, so it can read the row before a star toggled while it
+     * was waiting has landed; the toggle must still win in the reader.
+     */
+    @Test
+    fun starToggledWhilePendingSurvivesAStaleHydration() = runTest {
+        val holding = HoldingDispatcher()
+        val writes = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2", dbWriteDispatcher = writes)
+
+        holding.hold()
+        writes.hold()
+        vm.selectArticle(vm.row("a2"))
+        vm.toggleStarSelected()
+        // The lookup reads the row while the star write is still queued behind it.
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, db.articlesQueries.getById("a2").executeAsOne().is_starred, "the write has not landed")
+
+        assertEquals("a2", vm.selectedArticle.value?.id)
+        assertEquals(1L, vm.selectedArticle.value?.is_starred)
+        assertEquals(1L, vm.selectedArticleRow.value?.is_starred)
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(1L, vm.selectedArticle.value?.is_starred)
+    }
+
+    @Test
+    fun toggleStarSelectedTargetsCursorWhilePending() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        vm.toggleStarSelected()
+        vm.toggleStarSelected()
+        vm.toggleStarSelected()
+
+        assertEquals(1L, db.articlesQueries.getById("a2").executeAsOne().is_starred)
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_starred, "never the previous article")
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, vm.selectedArticle.value?.is_starred)
+        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_starred)
+    }
+
+    @Test
+    fun selectedFeedNameFollowsTheCursor() = runTest {
+        db.insertFeed("f1")
+        db.insertFeed("f2")
+        db.insertArticle("a1", "f1", publishedAt = 2L, createdAt = 2L, content = "<p>a1</p>")
+        db.insertArticle("a2", "f2", publishedAt = 1L, createdAt = 1L, content = "<p>a2</p>")
+        val holding = HoldingDispatcher()
+        val vm = newViewModel(dispatcher = holding)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals("Feed f1", vm.selectedFeedName.value)
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+
+        assertEquals("Feed f2", vm.selectedFeedName.value)
+        assertNull(vm.selectedFeedFaviconUrl.value)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals("Feed f2", vm.selectedFeedName.value)
+    }
 
     /**
      * A right-click on an unselected row selects it (its `onOpen`) and then runs "Mark as unread"
@@ -5414,6 +5627,9 @@ class HomeViewModelTest {
 
         db.feedsQueries.updateCustomTitle("Mine", 2_000L, 2_000L, "f1")
         testScheduler.advanceUntilIdle()
+        // advanceUntilIdle stops once only backgroundScope work is left, which can include the
+        // collector above resuming on the structural list's last emission; run it too.
+        testScheduler.runCurrent()
         assertEquals(afterLoad + 1, emissions.size)
         assertEquals(listOf<String?>("Mine"), emissions.last())
         assertEquals("\"v2\"", vm.structuralFeeds.value.single().etag)
@@ -5955,6 +6171,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(1, vm.newArticleCount.value)
     }
+
 }
 
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>

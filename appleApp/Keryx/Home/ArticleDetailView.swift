@@ -30,7 +30,12 @@ struct ArticleDetailView: View {
     @State private var copyConfirmed = false
 
     var body: some View {
-        let hasArticle = home.selectedArticle != nil
+        #if os(iOS)
+        // The pager follows the selection itself, so it appears with it rather than once its body loads.
+        let hasArticle = home.hasSelectedArticle
+        #else
+        let hasArticle = !(home.readerContent is ReaderContentNone)
+        #endif
         ZStack {
             #if os(iOS)
             // A swipe pager only while there is an article to page from — a pager with nothing
@@ -39,9 +44,11 @@ struct ArticleDetailView: View {
                 ArticlePagerView(home: home, preferences: preferences)
             }
             #else
+            let reader = readerPageInputs(home.readerContent)
             ReaderPageView(
-                row: home.selectedArticle?.toReaderRow(),
-                revision: home.selectedArticle.map(ObjectIdentifier.init),
+                row: reader.row,
+                header: reader.header,
+                revision: reader.revision,
                 preferences: preferences
             )
             .allowsHitTesting(hasArticle)
@@ -72,6 +79,16 @@ struct ArticleDetailView: View {
     }
 
     #if os(macOS)
+    /// `HomeViewModel.readerContent` as `ReaderPageView`'s inputs: the loaded article's body, or —
+    /// while a newly selected article's body is held up past the grace period — its header alone.
+    private func readerPageInputs(_ content: ReaderContent) -> (row: ArticleReaderRow?, header: ArticleListRow?, revision: ObjectIdentifier?) {
+        switch onEnum(of: content) {
+        case .none: return (nil, nil, nil)
+        case .header(let header): return (nil, header.row, ObjectIdentifier(header.row))
+        case .full(let full): return (full.article.toReaderRow(), nil, ObjectIdentifier(full.article))
+        }
+    }
+
     private var feedName: String? { home.selectedFeedName }
     private var feedFaviconUrl: String? { home.selectedFeedFaviconUrl }
 
@@ -102,7 +119,8 @@ struct ArticleDetailView: View {
     // In the window toolbar (the strip above this column) so each pane gets its own toolbar section.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        let article = home.selectedArticle
+        // The selection itself, current before its body has loaded — never the previous article.
+        let article = home.selectedArticleRow
         // Separate rules, shared with every other route: any non-blank URL can be copied, but only
         // an http(s) one is opened.
         let copyEnabled = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false

@@ -3,6 +3,8 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -32,9 +34,13 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     appKey: String = "",
     // See newHomeViewModel's own parameter: null builds the real CloudSyncController.
     manualSync: ManualSync? = null,
+    // See newHomeViewModel's own parameter: lets a test hold a selection's body lookup.
+    dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     block: suspend (HomeViewModelFixture) -> T,
 ): T {
-    val fixture = newHomeViewModel(driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync)
+    val fixture = newHomeViewModel(
+        driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync, dispatcher = dispatcher,
+    )
     return try {
         // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and
         // doing that from a `finally` would mask the assertion failure that actually ended [block].

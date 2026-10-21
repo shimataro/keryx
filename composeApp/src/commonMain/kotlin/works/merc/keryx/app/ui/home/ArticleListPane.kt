@@ -201,7 +201,9 @@ fun ArticleListPane(
     val query by vm.searchQuery.collectAsState()
     val searchBarVisible by vm.searchBarVisible.collectAsState()
     val searchActive by vm.searchActive.collectAsState()
-    val selected by vm.selectedArticle.collectAsState()
+    // The selection itself, not the hydrated article: the highlight and scroll-into-view follow the
+    // click at once rather than once the reader's body lookup returns (it can wait out a write lock).
+    val selectedId by vm.selectedArticleId.collectAsState()
     val unreadOnly by vm.unreadOnly.collectAsState()
     val canHideRead by vm.canHideRead.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
@@ -308,8 +310,8 @@ fun ArticleListPane(
 
         // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's own
         // scroll-to-selection effect for the base list).
-        LaunchedEffect(selected?.id, results) {
-            val index = results.indexOfFirst { it.article.id == selected?.id }
+        LaunchedEffect(selectedId, results) {
+            val index = results.indexOfFirst { it.article.id == selectedId }
             if (index !in results.indices) return@LaunchedEffect
             searchListState.scrollToIndexIfNeeded(index)
         }
@@ -372,7 +374,7 @@ fun ArticleListPane(
         articles = articles,
         feedTitles = feedTitles,
         feedFavicons = feedFavicons,
-        selectedId = selected?.id,
+        selectedId = selectedId,
         unreadOnly = unreadOnly,
         canHideRead = canHideRead,
         // Deliberately the real sort direction even while search disables the button — search

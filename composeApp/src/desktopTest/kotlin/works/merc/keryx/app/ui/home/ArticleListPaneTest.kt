@@ -17,6 +17,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -42,12 +44,14 @@ import kotlinx.coroutines.launch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -573,6 +577,36 @@ class ArticleListPaneTest {
 
         assertEquals(1, selectCount)
         assertEquals(0, activateCount)
+    }
+
+    /**
+     * The highlight follows the click itself rather than the reader's body lookup, which can wait out
+     * a write lock (a sync merge, an FTS rebuild) for seconds.
+     */
+    @Test
+    fun theHighlightMovesBeforeTheSelectionsBodyHasLoaded() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertArticleRow("a1", "f1", createdAt = 2L)
+        db.insertArticleRow("a2", "f1", createdAt = 1L)
+        val holding = HoldingDispatcher()
+        useHomeViewModel(driver, db, dispatcher = holding) { fixture ->
+            val vm = fixture.vm
+            setContent { ArticleListPane(vm = vm, focused = true, onActivated = {}) }
+            waitForIdle()
+
+            holding.hold()
+            try {
+                onNodeWithText("Title a2").performClick()
+                waitForIdle()
+
+                assertNull(vm.selectedArticle.value, "the body lookup is still held")
+                onNodeWithText("Title a2").assertIsSelected()
+                onNodeWithText("Title a1").assertIsNotSelected()
+            } finally {
+                holding.release()
+            }
+        }
     }
 
     @Test

@@ -109,9 +109,15 @@ final class HomeObservable: ObservableAssignment {
     @ObservationIgnored private var sidebarRebuild: CoalescedAction?
     private(set) var newArticleCount: Int = 0
 
-    private(set) var selectedArticle: Articles?
+    /// `HomeViewModel.selectedArticleRow` — the selection's row, current the moment an article is
+    /// selected (before its body has loaded). What the reader's toolbar and the menu bar act on.
+    private(set) var selectedArticleRow: ArticleListRow?
+    /// `HomeViewModel.readerContent` — what the macOS reader shows: nothing, the selection's header
+    /// while its body is held up past the grace period, or the loaded article. The iOS pager reads
+    /// only its loaded article (`loadedArticle`).
+    private(set) var readerContent: ReaderContent = ReaderContentNone.shared
     // Narrow facts about the selection for the menu bar (`HomeCommands`) and the article list,
-    // assigned only when they change: reading `selectedArticle` / `filter` / the feed list there directly
+    // assigned only when they change: reading `selectedArticleRow` / `filter` / the feed list there directly
     // made every article selection, star/read toggle and feed refresh re-evaluate them all.
     private(set) var hasSelectedArticle = false
     private(set) var selectedArticleId: String?
@@ -224,7 +230,14 @@ final class HomeObservable: ObservableAssignment {
     private func selecting(_ select: () -> Void) {
         select()
         syncSelectedArticleShownUnread()
+        // The highlight, the toolbar and the reader follow the selection at once rather than a turn later.
+        syncSelectedArticleRow()
+        syncReaderContent()
     }
+
+    /// The fully loaded article the reader holds (`ReaderContent.Full`), or nil — which, while a newly
+    /// selected article's body is still loading, is still the previous article.
+    var loadedArticle: Articles? { (readerContent as? ReaderContentFull)?.article }
 
     private func syncSelectedArticleShownUnread() {
         assignIfChanged(\.selectedArticleShownUnread, viewModel.isSelectedArticleShownUnread())
@@ -311,7 +324,8 @@ final class HomeObservable: ObservableAssignment {
         async let t22: () = observeCanHideRead()
         async let t23: () = observeArticles()
         async let t24: () = observeNewArticleCount()
-        async let t25: () = observeSelectedArticle()
+        async let t25: () = observeSelectedArticleRow()
+        async let t25b: () = observeReaderContent()
         async let t26: () = observeSelectedFeedName()
         async let t27: () = observeSelectedFeedFaviconUrl()
         async let t28: () = observeArticleContents()
@@ -324,7 +338,7 @@ final class HomeObservable: ObservableAssignment {
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
-            t21, t22, t23, t24, t25, t26, t27, t28, t29, t30,
+            t21, t22, t23, t24, t25, t25b, t26, t27, t28, t29, t30,
             t31, t32, t33, t34
         )
     }
@@ -582,16 +596,31 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.newArticleCount { assignIfChanged(\.newArticleCount, Int(v.int32Value)) }
     }
 
-    private func observeSelectedArticle() async {
-        for await v in viewModel.selectedArticle {
-            // Always assigned: a star/read toggle emits a new instance of the same article, which
-            // the reader keys its revision on.
-            selectedArticle = v
-            assignIfChanged(\.hasSelectedArticle, v != nil)
-            assignIfChanged(\.selectedArticleId, v?.id)
-            assignIfChanged(\.selectedArticleHasUsableUrl, ArticleListModelKt.hasUsableUrl(url: v?.url))
-            assignIfChanged(\.selectedArticleCanOpenInBrowser, ArticleListModelKt.canOpenInBrowser(url: v?.url))
-        }
+    /// Re-reads the value on each delivery, like `observeSelectedArticleShownUnread`: `selecting` has
+    /// already synced it, and an older queued emission must not put the previous selection back.
+    private func observeSelectedArticleRow() async {
+        for await _ in viewModel.selectedArticleRow { syncSelectedArticleRow() }
+    }
+
+    private func syncSelectedArticleRow() {
+        let v = viewModel.selectedArticleRow.value
+        assignIfChanged(\.selectedArticleRow, v)
+        assignIfChanged(\.hasSelectedArticle, v != nil)
+        assignIfChanged(\.selectedArticleId, v?.id)
+        assignIfChanged(\.selectedArticleHasUsableUrl, ArticleListModelKt.hasUsableUrl(url: v?.url))
+        assignIfChanged(\.selectedArticleCanOpenInBrowser, ArticleListModelKt.canOpenInBrowser(url: v?.url))
+    }
+
+    /// Re-reads the value on each delivery, for the same reason as `observeSelectedArticleRow`.
+    private func observeReaderContent() async {
+        for await _ in viewModel.readerContent { syncReaderContent() }
+    }
+
+    /// Assigned only when it changes by value: a star/read toggle publishes a new article instance
+    /// (which the reader keys its revision on), an unchanged re-read does not.
+    private func syncReaderContent() {
+        let v = viewModel.readerContent.value
+        if !(v as AnyObject).isEqual(readerContent as AnyObject) { readerContent = v }
     }
 
     private func observeSelectedFeedName() async {

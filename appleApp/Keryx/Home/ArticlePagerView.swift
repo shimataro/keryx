@@ -26,21 +26,26 @@ struct ArticlePagerView: View {
     }
 
     var body: some View {
-        let selected = home.selectedArticle
-        let pages = pagerPages(selected: selected)
-        TabView(selection: selectionBinding(pages: pages, selectedId: selected?.id)) {
+        // The selection itself, so a settled swipe is never pulled back to the previous page while
+        // the new one's body is still loading; that page keeps showing its held copy (or just the
+        // background) until then.
+        let selectedId = home.selectedArticleId
+        let loaded = home.loadedArticle.flatMap { $0.id == selectedId ? $0 : nil }
+        let pages = pagerPages(selected: home.selectedArticleRow)
+        TabView(selection: selectionBinding(pages: pages, selectedId: selectedId)) {
             // Plain Swift ids, so a body evaluation never reads a row through the Kotlin bridge.
             ForEach(pages.ids, id: \.self) { id in
-                let isSelected = id == selected?.id
+                let isSelected = id == selectedId
                 // `readerContents`' own rule, resolved per page: the selection's fully-loaded row
                 // wins over the held copy, which is what a page shows once swiped away from.
                 let cached = home.articleContents[id]
+                let own = isSelected ? loaded : nil
                 ReaderPageView(
-                    row: isSelected ? selected?.toReaderRow() : cached,
-                    revision: isSelected ? selected.map(ObjectIdentifier.init) : cached.map(ObjectIdentifier.init),
+                    row: own?.toReaderRow() ?? cached,
+                    revision: own.map(ObjectIdentifier.init) ?? cached.map(ObjectIdentifier.init),
                     // Each page names its own feed: a neighbour in All Feeds may belong to another one.
-                    feedName: (isSelected ? selected?.feed_id : cached?.feed_id).flatMap { home.feedsById[$0]?.displayTitle() },
-                    feedFaviconUrl: (isSelected ? selected?.feed_id : cached?.feed_id).flatMap { home.feedsById[$0]?.favicon_url },
+                    feedName: (own?.feed_id ?? cached?.feed_id).flatMap { home.feedsById[$0]?.displayTitle() },
+                    feedFaviconUrl: (own?.feed_id ?? cached?.feed_id).flatMap { home.feedsById[$0]?.favicon_url },
                     preferences: preferences
                 )
                 .tag(Optional(id))
@@ -53,8 +58,8 @@ struct ArticlePagerView: View {
         .task { await pager.startObserving() }
         // Hydrates both neighbours as soon as the selection moves, so the page a swipe uncovers is
         // already there rather than loading as it slides in.
-        .task(id: selected?.id) {
-            for id in neighbourIds(of: selected?.id, in: pages) where home.articleContents[id] == nil {
+        .task(id: selectedId) {
+            for id in neighbourIds(of: selectedId, in: pages) where home.articleContents[id] == nil {
                 home.viewModel.requestArticleContent(id: id)
             }
         }
@@ -67,7 +72,7 @@ struct ArticlePagerView: View {
     /// trip of the whole list through the Kotlin bridge; only the fallback asks `readerPages`, for
     /// the one-page list holding just the selection while it is not in the list (yet — before the
     /// first emission — or any more), so the pager never clamps onto — and selects — another article.
-    private func pagerPages(selected: Articles?) -> ReaderPagerPages {
+    private func pagerPages(selected: ArticleListRow?) -> ReaderPagerPages {
         guard let selected, pager.index.indexById[selected.id] == nil else {
             return ReaderPagerPages(rows: pager.rows, index: pager.index)
         }

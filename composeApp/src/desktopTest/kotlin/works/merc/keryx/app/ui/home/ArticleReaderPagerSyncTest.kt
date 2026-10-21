@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -19,7 +20,11 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -299,4 +304,73 @@ class ArticleReaderPagerSyncTest {
         assertEquals("a3", selectedId)
     }
 
+
+    /**
+     * The pager follows `HomeViewModel.selectedArticleId` — the selection itself — not the loaded
+     * article: a swipe's own selection is still loading its body for as long as the lookup waits (a
+     * sync merge's write lock can hold it for seconds), and following the loaded article would scroll
+     * the pager straight back to the page just swiped away from until then.
+     */
+    @Test
+    fun aSettledSwipeIsNotUndoneWhileTheNewSelectionsBodyIsStillLoading() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        listOf("a1" to 3L, "a2" to 2L, "a3" to 1L).forEach { (id, createdAt) -> db.insertArticleRow(id, "f1", createdAt) }
+        val holding = HoldingDispatcher()
+        useHomeViewModel(driver, db, dispatcher = holding) { fixture ->
+            val vm = fixture.vm
+            vm.selectArticle(vm.articles.value.single { it.id == "a2" })
+            waitForIdle()
+            assertEquals("a2", vm.selectedArticle.value?.id)
+            var pagerStateRef: PagerState? = null
+
+            setContent {
+                val pages by vm.articles.collectAsState()
+                val selectedId by vm.selectedArticleId.collectAsState()
+                val pagerState = rememberPagerState(initialPage = 1) { pages.size }
+                pagerStateRef = pagerState
+                val controller = rememberArticleSwipeController(pagerState, { true }, { true })
+                ArticleReaderPagerSync(pagerState, pages, selectedId, controller, vm::selectArticle)
+                Box(
+                    Modifier.testTag("root").size(hostWidthDp, 500.dp)
+                        .onSizeChanged { controller.widthPx = it.width.toFloat() }
+                        .articleSwipeNavigation(controller),
+                ) {
+                    HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize(), userScrollEnabled = false) {
+                        Box(Modifier.fillMaxSize())
+                    }
+                }
+            }
+            waitForIdle()
+            fun Dp.toPxOffset(): Float = with(density) { toPx() }
+            val start = Offset(hostWidthDp.toPxOffset() / 2, 250.dp.toPxOffset())
+
+            holding.hold()
+            try {
+                onNodeWithTag("root").performTouchInput {
+                    down(start)
+                    advanceEventTime(16L)
+                    moveBy(Offset((-commitDragDp).dp.toPxOffset(), 0f))
+                    up()
+                }
+                waitForIdle()
+
+                assertEquals("a3", vm.selectedArticleId.value)
+                assertEquals("a2", vm.selectedArticle.value?.id, "the new selection's body is still held")
+                assertEquals(2, pagerStateRef?.currentPage)
+            } finally {
+                holding.release()
+            }
+        }
+    }
+}
+
+/** Inserts an unread article row for the ViewModel-backed test above. */
+private fun KeryxDatabase.insertArticleRow(id: String, feedId: String, createdAt: Long) {
+    articlesQueries.insert(
+        id = id, feed_id = feedId, guid = id, url = "https://article/$id", title = "Title $id",
+        summary = null, content = "<p>$id</p>", author = null, published_at = null, thumbnail_url = null,
+        is_read = 0L, read_at = null, is_starred = 0L, starred_at = null, cached_at = 0L,
+        search_text = "", updated_at = 0L, created_at = createdAt,
+    )
 }

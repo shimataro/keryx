@@ -223,6 +223,15 @@ const val DUAL_PANE_MIN_WIDTH = ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WI
 /** Must be `>= TRIPLE_PANE_MIN_WIDTH` — see [TRIPLE_PANE_MIN_WIDTH]'s KDoc. */
 const val WINDOW_MIN_WIDTH = 920
 
+/**
+ * How long a newly selected article's body lookup may take before the reader shows the article's
+ * header (from its list row) in place of the previous article. Long enough that an ordinary
+ * millisecond-scale lookup goes straight to the full article — one document load, never a header
+ * followed by a second load — and short enough that a lookup stuck behind a write lock (a sync
+ * merge, an FTS rebuild) shows the new article at once rather than after the busy_timeout.
+ */
+const val READER_HEADER_FIRST_GRACE_MS = 50L
+
 /** Debounce for re-running search as the user types, so every keystroke doesn't trigger an FTS query. */
 const val SEARCH_DEBOUNCE_MS = 250L
 

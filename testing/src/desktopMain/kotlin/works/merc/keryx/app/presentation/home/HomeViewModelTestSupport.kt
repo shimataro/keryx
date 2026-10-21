@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -154,6 +155,9 @@ fun newHomeViewModel(
     // button's enabled state behaves as in production — which [HomeViewModelFixture.close] tears
     // down. A test that wants to drive it directly passes a FakeManualSync instead.
     manualSync: ManualSync? = null,
+    // The ViewModel's background dispatcher (its flows and selectArticle's body lookup) — overridable
+    // so a test can hold a hydration mid-flight with a HoldingDispatcher.
+    dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
 ): HomeViewModelFixture {
     // A fresh, unique directory per call (not a fixed name shared across every test in this file):
     // LocalSettingsStore persists lastFilter/collapsedFolderIds/etc. to a JSON file there, and a
@@ -216,7 +220,7 @@ fun newHomeViewModel(
         val vm = HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, activityCenter, clock, refreshCycleRunner, effectiveManualSync,
-            Dispatchers.Unconfined, Dispatchers.Unconfined,
+            dispatcher, Dispatchers.Unconfined,
         )
         return HomeViewModelFixture(
             vm, driver, syncScope, listOf(fetcherClient, faviconClient, authClient), ownedManualSync,

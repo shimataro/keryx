@@ -126,7 +126,8 @@ internal fun FrameWindowScope.AppMenuBar(
 
     val screen by menuController.currentScreen.collectAsState()
     val feedListKeysActive by menuController.feedListKeysActive.collectAsState()
-    val selected by homeVm.selectedArticle.collectAsState()
+    // The selection's row, so the Article menu enables for an article whose body is still loading.
+    val selected by homeVm.selectedArticleRow.collectAsState()
     val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()

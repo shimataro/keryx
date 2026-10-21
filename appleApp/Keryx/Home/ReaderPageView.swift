@@ -6,13 +6,16 @@ import AppKit
 import UIKit
 #endif
 
-/// One reader page: an `ArticleWebView` showing `row`, or — while `row` is `nil` — a blank themed
-/// document on macOS (nothing selected) and just the reader's background on iOS (a pager page whose
-/// body is still loading). Used once by the macOS reader and once per page by the iOS swipe pager
+/// One reader page: an `ArticleWebView` showing `row`, or — while `row` is `nil` — `header`'s title
+/// and date alone (macOS, a selection whose body is held up past the grace period — see
+/// `HomeViewModel.readerContent`), else a blank themed document on macOS (nothing selected) and just
+/// the reader's background on iOS (a pager page whose body is still loading). Used once by the macOS reader and once per page by the iOS swipe pager
 /// (`ArticlePagerView`).
 struct ReaderPageView: View {
     /// The article to render, or `nil` for the blank state.
     let row: ArticleReaderRow?
+    /// The article whose header alone to show while `row` is `nil`; only the macOS reader passes one.
+    var header: ArticleListRow?
     /// Identifies the instance `row` came from, so the document is rebuilt only when a new one is
     /// actually published — see `rebuildDocument()`.
     let revision: ObjectIdentifier?
@@ -66,9 +69,10 @@ struct ReaderPageView: View {
         // A pager page whose body is still loading shows only the reader's background rather than
         // loading a blank document first: the WebView then loads once, when the body arrives. (Each
         // iOS page is one article, so there is never a previous article's media to stop.)
-        if row == nil { return }
+        if row == nil && header == nil { return }
         #endif
-        if let wait = rebuildThrottle.delay(for: row?.id, now: .now) {
+        // Keyed by article, so the full article replacing its own header rebuilds at once.
+        if let wait = rebuildThrottle.delay(for: row?.id ?? header?.id, now: .now) {
             do { try await Task.sleep(for: wait) } catch { return }
         }
         let inputs = readerDocumentInputs()
@@ -82,20 +86,25 @@ struct ReaderPageView: View {
         // A blank themed document rather than none, so a previous article's embedded media stops
         // playing.
         guard let row else {
-            return ReaderDocumentInputs(theme: theme, content: .placeholder)
+            guard let header else { return ReaderDocumentInputs(theme: theme, content: .placeholder) }
+            return ReaderDocumentInputs(theme: theme, content: .header(documentHeader(
+                title: header.title, author: nil, publishedAt: header.published_at, url: header.url
+            )))
         }
-        let title = row.title.isEmpty ? L("article_no_title") : row.title
-        let meta = FormattingKt.articleMetaText(author: row.author, publishedAt: row.published_at, feedName: feedName)
-        let header = ReaderDocumentInputs.Header(
-            title: title,
-            meta: meta,
-            metaIconUrl: feedFaviconUrl,
-            url: row.url,
-            openInBrowserTooltip: L("article_open_in_browser")
-        )
+        let header = documentHeader(title: row.title, author: row.author, publishedAt: row.published_at, url: row.url)
         return ReaderDocumentInputs(
             theme: theme,
             content: .article(header, row: row, noContentMessage: L("article_no_content"))
+        )
+    }
+
+    private func documentHeader(title: String, author: String?, publishedAt: KotlinLong?, url: String) -> ReaderDocumentInputs.Header {
+        ReaderDocumentInputs.Header(
+            title: title.isEmpty ? L("article_no_title") : title,
+            meta: FormattingKt.articleMetaText(author: author, publishedAt: publishedAt, feedName: feedName),
+            metaIconUrl: feedFaviconUrl,
+            url: url,
+            openInBrowserTooltip: L("article_open_in_browser")
         )
     }
 

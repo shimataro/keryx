@@ -963,6 +963,29 @@ only intents made after that selection) so it shows at once whichever route made
 same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of what the button
 shows, so a tap during that window can never land on the previous article, and a second tap undoes the first.
 
+Everything else about the selection follows the cursor too, through two values `HomeViewModel` derives from
+it (both `DerivedStateFlow`s, so neither can be read out of step with the cursor):
+`selectedArticleId` (the cursor itself — what the article list highlights and scrolls to, what the narrow
+layouts' pager follows, and what a URL copy's ✓ is matched against) and `selectedArticleRow` (the loaded
+article once it is the cursor's, otherwise the list row the selection was made with, carrying every optimistic
+read/star write made on it meanwhile — what the reader toolbar's star, open, copy and share, the menu bar,
+the keyboard shortcuts and the toolbar's feed name act on). `toggleStarSelected` targets the cursor's article
+like `toggleReadSelected`, and a star toggled while the body loads is recorded (a second `SelectionReadIntents`)
+and laid over the hydrated row, since that lookup runs outside `dbWriteDispatcher`'s FIFO and can read the row
+from before the write. Only the read/unread button keeps `selectedArticleShownUnread` as its one source.
+
+The single (non-pager) reader is driven by `readerContent` (`None` / `Header(row)` / `Full(article)`).
+Normally it goes straight from the previous article to the new one in `Full` — one document load. Only when
+the body lookup has not returned within `READER_HEADER_FIRST_GRACE_MS` (50 ms — a lookup waiting out a sync
+merge's or an FTS rebuild's write lock) does the grace timer `hydrateSelection` starts publish `Header`: the
+new article's title, date and link from its list row over an empty body, the same document the pager draws for
+a page whose body has not loaded. The timer is cancelled on every exit from the hydration and re-checks on
+firing that its selection is still the newest, still the cursor's and still unloaded. The header is cleared
+once the body lands, by `selectFilter` and by a tombstoned lookup; a newer selection made while a header is
+showing takes the header over at once rather than returning the reader to the previously loaded article for
+another grace period. Compose's single reader and the macOS SwiftUI reader both render it; the iOS pager does
+not (a page with no body yet shows only the reader's background, as before).
+
 ## Navigation
 
 `ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no
