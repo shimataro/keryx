@@ -93,9 +93,7 @@ struct ArticleTableView: NSViewRepresentable {
         private var rowHeightMeasured = false
         private var lastResetGeneration: Int
         private var lastScrollGeneration: Int
-        private var lastSelectedId: String?
-        private var lastRevealRequest: Int
-        private var hasUpdated = false
+        private var revealTracker: ArticleTableRevealTracker
         /// Set by a filter switch until the new rows arrive (or the user scrolls): they are shown
         /// from the top instead of anchored to whatever row the previous filter had on screen.
         private var resetPending = false
@@ -105,9 +103,7 @@ struct ArticleTableView: NSViewRepresentable {
         init(resetGeneration: Int, scrollGeneration: Int, revealRequest: Int) {
             lastResetGeneration = resetGeneration
             lastScrollGeneration = scrollGeneration
-            // The request the table is created under is already acted on (or is not one): only a later
-            // change is the user selecting.
-            lastRevealRequest = revealRequest
+            revealTracker = ArticleTableRevealTracker(revealRequest: revealRequest)
         }
 
         func attach(scrollView: NSScrollView, table: ArticleNSTableView) {
@@ -163,31 +159,23 @@ struct ArticleTableView: NSViewRepresentable {
                 refreshVisibleCells()
             }
 
-            // Two separate triggers, deliberately. A selection the user makes is a new `revealRequest`
-            // (below). A selection restored from the previous session never is — it arrives with the
-            // first rows, as `selectedId` already set — so the first update reveals it once the table
-            // has a size; afterwards `selectedId` moving on its own (a selection handed back after a
-            // tombstone) must not scroll anything.
-            if newParent.selectedId != lastSelectedId {
-                lastSelectedId = newParent.selectedId
-                if !hasUpdated {
-                    // The first update runs before the table has a size, so the selection restored
-                    // from the previous session is brought into view once it has been laid out.
-                    Task { [weak self] in
-                        await Task.yield()
-                        self?.revealSelection()
-                    }
+            switch revealTracker.update(selectedId: newParent.selectedId, revealRequest: newParent.revealRequest) {
+            case .none:
+                break
+            case .now:
+                revealSelection()
+            case .afterLayout:
+                // The first update runs before the table has a size, so the selection is brought into
+                // view once it has been laid out.
+                Task { [weak self] in
+                    await Task.yield()
+                    self?.revealSelection()
                 }
-            }
-            if newParent.revealRequest != lastRevealRequest {
-                lastRevealRequest = newParent.revealRequest
-                if hasUpdated { revealSelection() }
             }
             if newParent.scrollRequest.generation != lastScrollGeneration {
                 lastScrollGeneration = newParent.scrollRequest.generation
                 scrollToFreshEnd(newestFirst: newParent.scrollRequest.newestFirst)
             }
-            hasUpdated = true
             scheduleReport()
         }
 
