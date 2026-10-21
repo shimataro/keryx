@@ -1,4 +1,4 @@
-package works.merc.keryx.app.presentation.settings
+package works.merc.keryx.app.presentation
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map

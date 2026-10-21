@@ -30,6 +30,9 @@ final class HomeObservable: ObservableAssignment {
     /// `HomeViewModel.structuralFeeds`.
     @ObservationIgnored private(set) var feeds: [Feeds] = []
     private(set) var hasFeeds = false
+    /// `HomeViewModel.articleListBody` — whether the article list has loaded at all yet, and
+    /// whether there are no feeds; what the list's empty states are decided from.
+    private(set) var listBody: ArticleListBody = .pending
     /// The latest `structuralFeeds` emission — what `sidebar`, `feedsById` and the selection target
     /// are built from. Its `Feeds` may lag behind `feeds` in `etag` / `last_modified` /
     /// `updated_at` (`feedsStructurallyEqual`). Not observed: views read what is derived from it.
@@ -88,6 +91,9 @@ final class HomeObservable: ObservableAssignment {
     /// per body evaluation, off the main actor (`ArticleRowList.buildInBackground`); assigned only
     /// when some row actually changed.
     private(set) var articleRows = ArticleRowList.empty
+    /// Whether an `articleRows` build is in flight. While it is, an empty `articleRows` may only
+    /// be the previous emission's, so the list shows no "no articles" message until it lands.
+    private(set) var articleRowsBuilding = false
     private(set) var searchRows = ArticleRowList.empty
     /// The in-flight background build of each list. A newer request cancels the older one, and a
     /// result is applied only if it is still the latest request's (`rowListGeneration`), so an
@@ -314,11 +320,12 @@ final class HomeObservable: ObservableAssignment {
         async let t31: () = observeCanSyncNow()
         async let t32: () = observeSyncDisabledByAuth()
         async let t33: () = observeSelectedArticleShownUnread()
+        async let t34: () = observeArticleListBody()
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t26, t27, t28, t29, t30,
-            t31, t32, t33
+            t31, t32, t33, t34
         )
     }
 
@@ -489,6 +496,10 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.canHideRead { assignIfChanged(\.canHideRead, v.boolValue) }
     }
 
+    private func observeArticleListBody() async {
+        for await v in viewModel.articleListBody { assignIfChanged(\.listBody, v) }
+    }
+
     private func observeArticles() async {
         for await v in viewModel.articles {
             articles = v
@@ -539,8 +550,10 @@ final class HomeObservable: ObservableAssignment {
             guard let self, !Task.isCancelled, articleRowsBuild?.generation == generation else { return }
             articleRowsBuild = nil
             if list.generation != articleRows.generation { articleRows = list }
+            assignIfChanged(\.articleRowsBuilding, false)
         }
         articleRowsBuild = (task, generation)
+        assignIfChanged(\.articleRowsBuilding, true)
     }
 
     private func rebuildSearchRows() {

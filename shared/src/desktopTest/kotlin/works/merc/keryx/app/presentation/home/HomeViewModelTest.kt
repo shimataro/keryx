@@ -2996,6 +2996,54 @@ class HomeViewModelTest {
         assertEquals(0, manualSync.syncNowCalls)
     }
 
+    // --- articleListBody ---
+
+    @Test
+    fun articleListBodyIsPendingUntilTheArticleListHasLoaded() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        // The article list is built on `dispatcher`; holding it keeps its first emission back.
+        val holding = HoldingDispatcher().apply { hold() }
+        val vm = newViewModel(dispatcher = holding)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListBody.Pending, vm.articleListBody.value)
+        assertEquals(emptyList(), vm.articles.value)
+
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleListBody.Content, vm.articleListBody.value)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun articleListBodyIsNoFeedsOnceLoadedWithoutAnyFeed() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleListBody.NoFeeds, vm.articleListBody.value)
+    }
+
+    @Test
+    fun articleListBodyDoesNotReturnToPendingOnAFilterSwitch() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val holding = HoldingDispatcher()
+        val vm = newViewModel(dispatcher = holding)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListBody.Content, vm.articleListBody.value)
+
+        holding.hold()
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleListBody.Content, vm.articleListBody.value)
+        holding.release()
+    }
+
     // --- refreshFeed ---
 
     @Test

@@ -72,6 +72,7 @@ import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.ArticleListBody
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.resources.Res
@@ -280,17 +281,20 @@ fun ArticleListPane(
     val branchReturnRipplePulse: Int
     val branchOnAddFeedClick: (() -> Unit)?
     val hasNoFeeds: Boolean
+    val loading: Boolean
     val sortEnabled: Boolean
     val titleMarkedById: Map<String, String>?
     val emptyContent: (@Composable () -> Unit)?
 
     if (!searchActive) {
         val baseArticles by vm.articles.collectAsState()
+        val body by vm.articleListBody.collectAsState()
         articles = baseArticles
         listState = baseListState
         branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = onAddFeedClick
-        hasNoFeeds = feeds.isEmpty()
+        hasNoFeeds = body == ArticleListBody.NoFeeds
+        loading = body == ArticleListBody.Pending
         sortEnabled = true
         titleMarkedById = null
         emptyContent = null
@@ -315,6 +319,7 @@ fun ArticleListPane(
         branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = null
         hasNoFeeds = false
+        loading = false
         sortEnabled = false
         titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } }
         emptyContent = when {
@@ -394,6 +399,7 @@ fun ArticleListPane(
         title = if (barShown) null else title,
         onSearchClick = if (barShown) null else onSearchClick,
         hasNoFeeds = hasNoFeeds,
+        loading = loading,
         onAddFeedClick = branchOnAddFeedClick,
         sortEnabled = sortEnabled,
         titleMarkedById = titleMarkedById,
@@ -625,6 +631,10 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   when there are no feeds at all — otherwise a narrow layout, where the "+" button lives inside
  *   the feed-list drawer, would leave a phone-width user with no visible way to add their first
  *   feed. Only consulted when [emptyContent] is `null`; a non-empty [articles] always wins over both.
+ * @param loading Whether the feed list or the article list has yet to load at launch
+ *   ([ArticleListBody.Pending]): an empty [articles] then shows no message at all, rather than
+ *   flashing "no feeds" / "no articles" before the first DB emission. Only consulted when
+ *   [emptyContent] is `null`.
  * @param onAddFeedClick Invoked from the "Add feed" button shown when [hasNoFeeds]. `null` (the
  *   default) omits the button, leaving just the message.
  * @param emptyContent Overrides the ordinary [hasNoFeeds]/`home_no_articles` empty-state message
@@ -670,6 +680,7 @@ internal fun ArticleListPaneContent(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
     hasNoFeeds: Boolean = false,
+    loading: Boolean = false,
     onAddFeedClick: (() -> Unit)? = null,
     sortEnabled: Boolean = true,
     titleMarkedById: Map<String, String>? = null,
@@ -751,6 +762,8 @@ internal fun ArticleListPaneContent(
             if (articles.isEmpty()) {
                 if (emptyContent != null) {
                     emptyContent()
+                } else if (loading) {
+                    // Nothing yet — see ArticleListPaneContent's `loading`.
                 } else if (hasNoFeeds) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         // A narrow layout's "+" button lives inside the feed-list drawer (closed by

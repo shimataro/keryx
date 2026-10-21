@@ -522,6 +522,31 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun emptyStateShowsNeitherMessageWhileTheListsAreStillLoading() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = false,
+                loading = true,
+                onAddFeedClick = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("記事がありません").assertDoesNotExist()
+        onNodeWithText("フィードが登録されていません").assertDoesNotExist()
+        onNodeWithText("フィードを追加").assertDoesNotExist()
+    }
+
+    @Test
     fun rightClickOnArticleRowSelectsWithoutActivatingPaneFocus() = runDesktopComposeUiTest {
         val items = articles(3)
         var activateCount = 0

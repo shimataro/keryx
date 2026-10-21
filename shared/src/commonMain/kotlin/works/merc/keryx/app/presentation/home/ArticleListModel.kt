@@ -1,5 +1,6 @@
 package works.merc.keryx.app.presentation.home
 
+import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 
 /** Whether [url] is present and non-blank — the single rule for when "copy URL" is available, on
@@ -95,6 +96,25 @@ fun articleReadAfterContextMenuOpen(isRead: Boolean, selectedByOpen: Boolean): B
  */
 fun hasHideableRead(rows: List<ArticleListRow>, selectedId: String?): Boolean =
     rows.any { it.is_read == 1L && it.id != selectedId }
+
+/**
+ * Which of the article list's whole-pane states applies, independent of the rows themselves:
+ *
+ * - [Pending]: the feed list or the article list has not loaded yet at launch. Nothing is shown —
+ *   neither "no feeds" nor "no articles" — so a cold start doesn't flash an empty state before the
+ *   first DB emission.
+ * - [NoFeeds]: no feed is subscribed — the "no feeds" prompt with its "Add feed" button.
+ * - [Content]: anything else. Whether the list is empty ("no articles") is decided from the list a
+ *   UI actually renders, not here, so the message can never disagree with the rows on screen.
+ */
+enum class ArticleListBody { Pending, NoFeeds, Content }
+
+/** [ArticleListBody] for the latest emissions, `null` for one that has not arrived yet. */
+fun articleListBody(feeds: List<Feeds>?, articles: List<ArticleListRow>?): ArticleListBody = when {
+    feeds == null || articles == null -> ArticleListBody.Pending
+    feeds.isEmpty() -> ArticleListBody.NoFeeds
+    else -> ArticleListBody.Content
+}
 
 /** Whether [url] is a plain http:// or https:// URL. Scheme matching is case-insensitive. */
 fun isHttpOrHttpsUrl(url: String?): Boolean {

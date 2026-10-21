@@ -339,7 +339,11 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !home.hasFeeds {
+        // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
+        // before the first emission (`ArticleListBody.pending`).
+        if home.listBody == .pending {
+            headed(Color.clear)
+        } else if home.listBody == .noFeeds {
             headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
@@ -348,7 +352,7 @@ struct ArticleListView: View {
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
-            noArticlesView
+            if home.articleRowsBuilding { headed(Color.clear) } else { noArticlesView }
         } else {
             articleList
                 .modifier(PullToRefreshModifier(home: home))

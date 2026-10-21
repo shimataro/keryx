@@ -56,6 +56,7 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
 
 /**
@@ -102,8 +103,12 @@ class HomeViewModel(
     // already has real data instead of flashing empty lists.
     private val started = SharingStarted.Eagerly
 
-    val feeds: StateFlow<List<Feeds>> =
-        feedRepository.watchAllFeeds().stateIn(viewModelScope, started, emptyList())
+    // null until the first DB emission lands, so [articleListBody] can tell "not loaded yet" apart
+    // from "no feeds"; every public view of it reads that as an empty list.
+    private val feedsSnapshot: StateFlow<List<Feeds>?> =
+        feedRepository.watchAllFeeds().stateIn(viewModelScope, started, null)
+
+    val feeds: StateFlow<List<Feeds>> = DerivedStateFlow({ feedsSnapshot.value.orEmpty() }, feedsSnapshot.map { it.orEmpty() })
 
     /**
      * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
@@ -328,7 +333,8 @@ class HomeViewModel(
                 }
         }
 
-    val articles: StateFlow<List<ArticleListRow>> =
+    // null until the first list emission lands — see [feedsSnapshot].
+    private val articlesSnapshot: StateFlow<List<ArticleListRow>?> =
         combine(
             filteredArticles, unreadOnly, _newestFirst, _pinnedReadStates, _pinnedUnstarredArticles,
         ) { list, unread, newest, pinnedReadStates, pinnedUnstarred ->
@@ -396,7 +402,20 @@ class HomeViewModel(
             if (newest) filtered else filtered.asReversed()
         }
             .flowOn(dispatcher)
-            .stateIn(viewModelScope, started, emptyList())
+            .stateIn(viewModelScope, started, null)
+
+    val articles: StateFlow<List<ArticleListRow>> =
+        DerivedStateFlow({ articlesSnapshot.value.orEmpty() }, articlesSnapshot.map { it.orEmpty() })
+
+    /**
+     * What the article list shows in place of its rows before and without them — see
+     * [articleListBody]. [ArticleListBody.Pending] only until the feed list and the article list
+     * have each loaded once at launch; a filter switch never returns to it.
+     */
+    val articleListBody: StateFlow<ArticleListBody> = DerivedStateFlow(
+        { articleListBody(feedsSnapshot.value, articlesSnapshot.value) },
+        combine(feedsSnapshot, articlesSnapshot, ::articleListBody),
+    )
 
     // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
     // measures "the fresh side" against. null until the list first reports.
