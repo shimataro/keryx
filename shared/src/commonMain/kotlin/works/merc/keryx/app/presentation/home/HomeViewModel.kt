@@ -496,8 +496,12 @@ class HomeViewModel(
      * once [selectArticle]'s body lookup returns, so it is still the previous article until then —
      * what the reader shows is [readerContent], and what the toolbar and every other per-selection
      * action act on is [selectedArticleRow].
+     *
+     * Not a source for any UI, so not part of the API the UIs see: reading it for the toolbar or a
+     * shortcut is what made those act on the previous article while a selection's body loaded.
+     * Kept `internal` for this module's tests of the hydration.
      */
-    val selectedArticle: StateFlow<Articles?> = _selectedArticle
+    internal val selectedArticle: StateFlow<Articles?> = _selectedArticle
 
     /**
      * Explicit read-state intents made while a [selectArticle] hydration is still loading — see

@@ -321,7 +321,7 @@ class ArticleReaderPagerSyncTest {
             val vm = fixture.vm
             vm.selectArticle(vm.articles.value.single { it.id == "a2" })
             waitForIdle()
-            assertEquals("a2", vm.selectedArticle.value?.id)
+            assertEquals("a2", vm.loadedArticleId())
             var pagerStateRef: PagerState? = null
 
             setContent {
@@ -356,7 +356,7 @@ class ArticleReaderPagerSyncTest {
                 waitForIdle()
 
                 assertEquals("a3", vm.selectedArticleId.value)
-                assertEquals("a2", vm.selectedArticle.value?.id, "the new selection's body is still held")
+                assertEquals("a2", vm.loadedArticleId(), "the new selection's body is still held")
                 assertEquals(2, pagerStateRef?.currentPage)
             } finally {
                 holding.release()

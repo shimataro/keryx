@@ -10,8 +10,10 @@ import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
+import works.merc.keryx.app.presentation.home.ReaderContent
 import works.merc.keryx.app.presentation.home.newHomeViewModel
 import works.merc.keryx.app.presentation.ManualSync
 
@@ -49,3 +51,9 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
         fixture.close()
     }
 }
+
+/**
+ * The id of the article whose body the reader has loaded — what `HomeViewModel.selectedArticle` held
+ * before it became shared-module internal — or `null` while the reader shows a header or nothing.
+ */
+internal fun HomeViewModel.loadedArticleId(): String? = (readerContent.value as? ReaderContent.Full)?.article?.id

@@ -282,7 +282,7 @@ class SearchPaneNavigationTest {
             onNodeWithText("Title a1").performClick()
             waitForIdle()
 
-            assertEquals("a1", vm.selectedArticle.value?.id)
+            assertEquals("a1", vm.loadedArticleId())
             assertEquals(HomePane.ArticleList, focusedPane)
         }
     }

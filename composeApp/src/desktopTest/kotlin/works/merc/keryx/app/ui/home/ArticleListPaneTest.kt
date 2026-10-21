@@ -647,7 +647,7 @@ class ArticleListPaneTest {
                 onNodeWithText("Title a2").performClick()
                 waitForIdle()
 
-                assertNull(vm.selectedArticle.value, "the body lookup is still held")
+                assertNull(vm.loadedArticleId(), "the body lookup is still held")
                 onNodeWithText("Title a2").assertIsSelected()
                 onNodeWithText("Title a1").assertIsNotSelected()
             } finally {
