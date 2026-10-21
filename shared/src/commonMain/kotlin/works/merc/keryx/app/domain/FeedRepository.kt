@@ -10,8 +10,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -58,6 +56,7 @@ class FeedRepository(
     private val notificationCenter: NotificationCenter,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val faviconMisses: FaviconMissStore = InMemoryFaviconMissStore(),
 ) {
     private val feeds get() = db.feedsQueries
 
@@ -381,17 +380,13 @@ class FeedRepository(
         class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
     }
 
-    // Feeds whose last favicon lookup found nothing, with when it did — see FAVICON_RETRY_INTERVAL_MS.
-    // In memory only: never persisted or synced.
-    private val faviconMisses = MutableStateFlow<Map<String, Long>>(emptyMap())
-
     /**
      * Whether a refresh that fetched [feed] should look its favicon up: it has none yet, and no
      * lookup found none within [FAVICON_RETRY_INTERVAL_MS].
      */
     private fun needsFaviconLookup(feed: Feeds): Boolean {
         if (!feed.favicon_url.isNullOrEmpty()) return false
-        val missedAt = faviconMisses.value[feed.id] ?: return true
+        val missedAt = faviconMisses.missedAt(feed.id) ?: return true
         return clock.nowMillis() - missedAt >= FAVICON_RETRY_INTERVAL_MS
     }
 
@@ -403,10 +398,10 @@ class FeedRepository(
     private fun applyFavicon(step: RefreshStep.FaviconResolved) {
         val url = step.url
         if (url == null) {
-            faviconMisses.update { it + (step.feedId to clock.nowMillis()) }
+            faviconMisses.recordMiss(step.feedId, clock.nowMillis())
             return
         }
-        faviconMisses.update { it - step.feedId }
+        faviconMisses.clearMiss(step.feedId)
         try {
             val written = feeds.updateFaviconUrlIfMissing(url, clock.nowMillis(), step.feedId).value
             if (written > 0) syncScheduler.scheduleSync()

@@ -1209,6 +1209,39 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * Android starts a new process for most background refreshes, so a miss held only by the
+     * repository instance would not stop the next one probing the site again: the record is the
+     * store's, and a repository built over the same store (a new process reads the same settings)
+     * leaves the feed alone.
+     */
+    @Test
+    fun aMissIsHonouredByARepositoryBuiltOverTheSameStore(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            subscribeWithoutFavicon(db, driver)
+            val store = InMemoryFaviconMissStore()
+            val faviconRequests = java.util.concurrent.atomic.AtomicInteger(0)
+            fun repo() = FeedRepository(
+                db, fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolverWith { faviconRequests.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined),
+                ftsManagerIndexed(driver), SyncScheduler {}, NotificationCenter(), Clock { 1000L }, Dispatchers.Unconfined,
+                faviconMisses = store,
+            )
+
+            repo().refreshAll()
+            val afterFirstProcess = faviconRequests.get()
+            assertTrue(afterFirstProcess > 0, "the first refresh must look the favicon up")
+
+            repo().refreshAll()
+
+            assertEquals(afterFirstProcess, faviconRequests.get(), "the second repository must not probe the site again")
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun aFaviconResolvedAfterTheFeedWasUnsubscribedIsNotWritten(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
