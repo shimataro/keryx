@@ -43,7 +43,7 @@ struct ArticleTableView: NSViewRepresentable {
     let onVisibleIdsChanged: ([String]) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(resetGeneration: resetGeneration, scrollGeneration: scrollRequest.generation)
+        Coordinator(resetGeneration: resetGeneration, scrollGeneration: scrollRequest.generation, revealRequest: revealRequest)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -94,7 +94,7 @@ struct ArticleTableView: NSViewRepresentable {
         private var lastResetGeneration: Int
         private var lastScrollGeneration: Int
         private var lastSelectedId: String?
-        private var lastRevealRequest: Int?
+        private var lastRevealRequest: Int
         private var hasUpdated = false
         /// Set by a filter switch until the new rows arrive (or the user scrolls): they are shown
         /// from the top instead of anchored to whatever row the previous filter had on screen.
@@ -102,9 +102,12 @@ struct ArticleTableView: NSViewRepresentable {
         private var reportTask: Task<Void, Never>?
         private var lastReportedIds: [String]?
 
-        init(resetGeneration: Int, scrollGeneration: Int) {
+        init(resetGeneration: Int, scrollGeneration: Int, revealRequest: Int) {
             lastResetGeneration = resetGeneration
             lastScrollGeneration = scrollGeneration
+            // The request the table is created under is already acted on (or is not one): only a later
+            // change is the user selecting.
+            lastRevealRequest = revealRequest
         }
 
         func attach(scrollView: NSScrollView, table: ArticleNSTableView) {
@@ -160,6 +163,11 @@ struct ArticleTableView: NSViewRepresentable {
                 refreshVisibleCells()
             }
 
+            // Two separate triggers, deliberately. A selection the user makes is a new `revealRequest`
+            // (below). A selection restored from the previous session never is — it arrives with the
+            // first rows, as `selectedId` already set — so the first update reveals it once the table
+            // has a size; afterwards `selectedId` moving on its own (a selection handed back after a
+            // tombstone) must not scroll anything.
             if newParent.selectedId != lastSelectedId {
                 lastSelectedId = newParent.selectedId
                 if !hasUpdated {
@@ -172,9 +180,8 @@ struct ArticleTableView: NSViewRepresentable {
                 }
             }
             if newParent.revealRequest != lastRevealRequest {
-                let isFirst = lastRevealRequest == nil
                 lastRevealRequest = newParent.revealRequest
-                if !isFirst, hasUpdated { revealSelection() }
+                if hasUpdated { revealSelection() }
             }
             if newParent.scrollRequest.generation != lastScrollGeneration {
                 lastScrollGeneration = newParent.scrollRequest.generation
