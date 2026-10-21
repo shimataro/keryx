@@ -74,6 +74,7 @@ import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.home.ArticleListBody
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.articleListCatchingUp
 import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
@@ -299,7 +300,7 @@ fun ArticleListPane(
         branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = onAddFeedClick
         hasNoFeeds = body == ArticleListBody.NoFeeds
-        loading = body == ArticleListBody.Pending
+        loading = body == ArticleListBody.Pending || articleListCatchingUp(baseArticles.size, vm.hasArticleRowsNow())
         sortEnabled = true
         titleMarkedById = null
         emptyContent = null

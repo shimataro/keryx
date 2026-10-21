@@ -354,7 +354,16 @@ struct ArticleListView: View {
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
-            if home.articleRowsBuilding { headed(Color.clear) } else { noArticlesView }
+            // Nothing while the rows are still on their way: being built, or held by the view model
+            // but not yet received here (`articleListCatchingUp`).
+            if home.articleRowsBuilding
+                || ArticleListModelKt.articleListCatchingUp(
+                    displayedRows: Int32(displayedRows.count), snapshotHasRows: home.viewModel.hasArticleRowsNow()
+                ) {
+                headed(Color.clear)
+            } else {
+                noArticlesView
+            }
         } else {
             articleList
                 .modifier(PullToRefreshModifier(home: home))

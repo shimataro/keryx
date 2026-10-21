@@ -24,4 +24,16 @@ class ArticleListBodyTest {
         // "No articles" is decided from the list a UI renders, not here.
         assertEquals(ArticleListBody.Content, articleListBody(hasFeeds = true, articlesLoaded = true))
     }
+
+    @Test
+    fun aUiShowingNoRowsWhileTheViewModelHoldsSomeIsStillCatchingUp() {
+        assertEquals(true, articleListCatchingUp(displayedRows = 0, snapshotHasRows = true))
+    }
+
+    @Test
+    fun aUiShowingRowsOrBeingGenuinelyEmptyIsNotCatchingUp() {
+        assertEquals(false, articleListCatchingUp(displayedRows = 3, snapshotHasRows = true))
+        assertEquals(false, articleListCatchingUp(displayedRows = 0, snapshotHasRows = false))
+        assertEquals(false, articleListCatchingUp(displayedRows = 3, snapshotHasRows = false))
+    }
 }

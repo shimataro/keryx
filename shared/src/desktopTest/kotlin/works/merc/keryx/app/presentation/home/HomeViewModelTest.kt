@@ -3349,6 +3349,28 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun hasArticleRowsNowFollowsTheListTheViewModelHolds() = runTest {
+        db.insertFeed("f1")
+        val holding = HoldingDispatcher().apply { hold() }
+        val vm = newViewModel(dispatcher = holding)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        // The article list has not been built yet, so there is nothing to report.
+        assertEquals(false, vm.hasArticleRowsNow())
+
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals(true, vm.hasArticleRowsNow())
+        assertEquals(vm.articles.value.isNotEmpty(), vm.hasArticleRowsNow())
+
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        // Nothing starred: the list the view model holds is empty again.
+        assertEquals(false, vm.hasArticleRowsNow())
+    }
+
+    @Test
     fun articleListBodyIsNoFeedsOnceLoadedWithoutAnyFeed() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)

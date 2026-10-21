@@ -118,6 +118,17 @@ fun articleListBody(hasFeeds: Boolean?, articlesLoaded: Boolean): ArticleListBod
     else -> ArticleListBody.Content
 }
 
+/**
+ * Whether a UI's own copy of the article list is still catching up with the ViewModel's: it shows
+ * no rows ([displayedRows] is 0) while the ViewModel already holds some ([snapshotHasRows], from
+ * `HomeViewModel.hasArticleRowsNow`). A UI collects [ArticleListBody] and the rows separately (and
+ * Apple builds its rows off the main thread), so for a moment it can have seen the one without the
+ * other; showing "no articles" then would flash a message the next frame contradicts. It shows
+ * nothing instead, until its rows arrive.
+ */
+fun articleListCatchingUp(displayedRows: Int, snapshotHasRows: Boolean): Boolean =
+    displayedRows == 0 && snapshotHasRows
+
 /** Whether [url] is a plain http:// or https:// URL. Scheme matching is case-insensitive. */
 fun isHttpOrHttpsUrl(url: String?): Boolean {
     if (url.isNullOrBlank()) return false

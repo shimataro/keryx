@@ -432,6 +432,13 @@ class HomeViewModel(
     )
 
     /**
+     * Whether the article list the ViewModel holds right now has any rows — the answer a UI that has not
+     * yet received them through [articles] needs, to tell "still catching up" from "no articles"
+     * ([articleListCatchingUp]). Reads the latest value; O(1).
+     */
+    fun hasArticleRowsNow(): Boolean = articlesSnapshot.value?.isNotEmpty() == true
+
+    /**
      * What the article list shows in place of its rows before and without them — see
      * [articleListBody]. [ArticleListBody.Pending] only until the feed list and the article list
      * have each loaded once at launch; a filter switch never returns to it.
