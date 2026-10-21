@@ -36,6 +36,33 @@ class DerivedStateFlowTest {
     }
 
     @Test
+    fun collectorsUseTheGivenEquivalenceInsteadOfEquals() = runTest(UnconfinedTestDispatcher()) {
+        val values = MutableStateFlow(listOf(1))
+        val byIdentity = DerivedStateFlow(
+            compute = { values.value },
+            changes = values.map { it },
+            areEquivalent = ::sameListOrBothEmpty,
+        )
+        val received = mutableListOf<List<Int>>()
+        val job = launch { byIdentity.collect { received += it } }
+
+        values.value = listOf(2)
+        values.value = listOf(3)
+
+        assertEquals(listOf(listOf(1), listOf(2), listOf(3)), received)
+        job.cancel()
+    }
+
+    @Test
+    fun sameListOrBothEmptyIsIdentityOrEmptiness() {
+        val list = listOf(1, 2)
+        assertEquals(true, sameListOrBothEmpty(list, list))
+        assertEquals(false, sameListOrBothEmpty(list, listOf(1, 2).toMutableList().also { it[1] = 3 }))
+        assertEquals(true, sameListOrBothEmpty(emptyList<Int>(), mutableListOf()))
+        assertEquals(false, sameListOrBothEmpty(emptyList(), listOf(1)))
+    }
+
+    @Test
     fun collectorsDoNotReceiveConsecutiveDuplicates() = runTest(UnconfinedTestDispatcher()) {
         val parity = DerivedStateFlow(compute = { a.value % 2 }, changes = a.map { it % 2 })
         val received = mutableListOf<Int>()

@@ -60,6 +60,7 @@ import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.sameListOrBothEmpty
 
 /**
  * How long the article-change signal must stay quiet before an active search re-runs — short
@@ -105,12 +106,23 @@ class HomeViewModel(
     // already has real data instead of flashing empty lists.
     private val started = SharingStarted.Eagerly
 
-    // null until the first DB emission lands, so [articleListBody] can tell "not loaded yet" apart
-    // from "no feeds"; every public view of it reads that as an empty list.
-    private val feedsSnapshot: StateFlow<List<Feeds>?> =
-        feedRepository.watchAllFeeds().stateIn(viewModelScope, started, null)
+    // What [articleListBody] is decided from: small flags, so deciding it never compares a list.
+    // `null` / false until the first DB emission lands, which tells "not loaded yet" apart from
+    // "no feeds".
+    private val hasFeeds = MutableStateFlow<Boolean?>(null)
+    private val articlesLoaded = MutableStateFlow(false)
 
-    val feeds: StateFlow<List<Feeds>> = DerivedStateFlow({ feedsSnapshot.value.orEmpty() }, feedsSnapshot.map { it.orEmpty() })
+    // null until the first DB emission lands; every public view of it reads that as an empty list.
+    private val feedsSnapshot: StateFlow<List<Feeds>?> =
+        feedRepository.watchAllFeeds()
+            .onEach { hasFeeds.value = it.isNotEmpty() }
+            .stateIn(viewModelScope, started, null)
+
+    val feeds: StateFlow<List<Feeds>> = DerivedStateFlow(
+        { feedsSnapshot.value.orEmpty() },
+        feedsSnapshot.map { it.orEmpty() },
+        areEquivalent = ::sameListOrBothEmpty,
+    )
 
     /**
      * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
@@ -403,11 +415,17 @@ class HomeViewModel(
             // per emission and never mutated afterwards, so it reads identically.
             if (newest) filtered else filtered.asReversed()
         }
+            // Before flowOn, not after: stateIn fuses a flowOn directly upstream of it into its own
+            // coroutine, and any operator in between would put a channel hop back.
+            .onEach { articlesLoaded.value = true }
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
-    val articles: StateFlow<List<ArticleListRow>> =
-        DerivedStateFlow({ articlesSnapshot.value.orEmpty() }, articlesSnapshot.map { it.orEmpty() })
+    val articles: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
+        { articlesSnapshot.value.orEmpty() },
+        articlesSnapshot.map { it.orEmpty() },
+        areEquivalent = ::sameListOrBothEmpty,
+    )
 
     /**
      * What the article list shows in place of its rows before and without them — see
@@ -415,8 +433,8 @@ class HomeViewModel(
      * have each loaded once at launch; a filter switch never returns to it.
      */
     val articleListBody: StateFlow<ArticleListBody> = DerivedStateFlow(
-        { articleListBody(feedsSnapshot.value, articlesSnapshot.value) },
-        combine(feedsSnapshot, articlesSnapshot, ::articleListBody),
+        { articleListBody(hasFeeds.value, articlesLoaded.value) },
+        combine(hasFeeds, articlesLoaded, ::articleListBody),
     )
 
     // The article list's viewport as of its last markArticlesSeen report — what newArticleCount

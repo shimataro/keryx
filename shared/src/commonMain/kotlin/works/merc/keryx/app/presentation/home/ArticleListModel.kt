@@ -1,6 +1,5 @@
 package works.merc.keryx.app.presentation.home
 
-import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 
 /** Whether [url] is present and non-blank — the single rule for when "copy URL" is available, on
@@ -109,10 +108,13 @@ fun hasHideableRead(rows: List<ArticleListRow>, selectedId: String?): Boolean =
  */
 enum class ArticleListBody { Pending, NoFeeds, Content }
 
-/** [ArticleListBody] for the latest emissions, `null` for one that has not arrived yet. */
-fun articleListBody(feeds: List<Feeds>?, articles: List<ArticleListRow>?): ArticleListBody = when {
-    feeds == null || articles == null -> ArticleListBody.Pending
-    feeds.isEmpty() -> ArticleListBody.NoFeeds
+/**
+ * [ArticleListBody] from what has loaded so far: [hasFeeds] is `null` until the feed list has
+ * emitted, then whether it holds any feed; [articlesLoaded] says the article list has emitted.
+ */
+fun articleListBody(hasFeeds: Boolean?, articlesLoaded: Boolean): ArticleListBody = when {
+    hasFeeds == null || !articlesLoaded -> ArticleListBody.Pending
+    !hasFeeds -> ArticleListBody.NoFeeds
     else -> ArticleListBody.Content
 }
 
