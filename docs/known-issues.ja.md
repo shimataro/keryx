@@ -124,8 +124,10 @@ java.lang.IllegalArgumentException: onReuse is only expected on attached node
 **2 つが同時に**必要。
 
 1. 記事一覧の scroll-into-view が動くこと — `ArticleListPaneContent` の
-   `LaunchedEffect(selected?.id, …)` → `scrollToIndexIfNeeded`（`ui/home/HomeCommon.kt`）。
-   **選択記事の id が変わったときだけ**再起動する。
+   `LaunchedEffect(listState, revealRequest, …)` → `scrollToIndexIfNeeded`（`ui/home/HomeCommon.kt`）。
+   キーのうち、操作中に変わるのは `revealRequest` だけで、これはユーザーが別の記事へ動かした選択を数える
+   （`HomeViewModel.selectionRevealRequests`）。選択記事の id が単独で変わる場合（墓石化した行を
+   選んだために、直前の記事へカーソルが戻る場合）は再起動しない。
 2. 行のレイアウトノード数が一定以上あること。現在の `ArticleRow` は閾値を超えている。
 
 自動再現ハーネス（後述）で測定した結果、**選択変更とホイールイベントが交互に 15 回以上**
@@ -155,7 +157,7 @@ java.lang.IllegalArgumentException: onReuse is only expected on attached node
 - 選択変更が **1 回だけ**の場合。そのスクロールアニメーション中にホイールを回しても再現しない（0 / 5）。
 - 一覧が空→非空になるとき（起動時の選択復元、未読のみ ON で自動更新が着弾した場合）（0 / 5）。
 - バックグラウンド更新、クラウド同期、キャッシュ削除、既読/未読・スターの切り替え、
-  「すべて既読」。いずれも選択記事の **id を変えない**ため、effect が再起動しない。
+  「すべて既読」。いずれもユーザーが行う選択ではないため、effect が再起動しない。
 
 ### 原因
 

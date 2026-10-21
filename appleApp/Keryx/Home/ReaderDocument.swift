@@ -28,6 +28,8 @@ struct ReaderDocumentInputs: Sendable {
     enum Content: Sendable {
         /// No article selected.
         case placeholder
+        /// An article whose body is still loading: its header alone, over an empty body.
+        case header(Header)
         /// An article; `build` renders `noContentMessage` in place of the body when the feed
         /// supplied neither `content` nor `summary` (or only whitespace — whose links still count,
         /// as they always have).
@@ -73,6 +75,17 @@ struct ReaderDocument: Sendable {
         switch inputs.content {
         case .placeholder:
             return ReaderDocument(html: ArticleWebViewHtmlKt.articlePlaceholderHtml(theme: theme, message: ""))
+        case let .header(header):
+            return ReaderDocument(html: ArticleWebViewHtmlKt.wrapArticleHtml(
+                theme: theme,
+                title: header.title,
+                meta: header.meta,
+                body: "",
+                baseUrl: header.url,
+                titleUrl: header.url,
+                titleTooltip: header.openInBrowserTooltip,
+                metaIconUrl: header.metaIconUrl
+            ))
         case let .article(header, row, noContentMessage):
             let body = row.readerBody()
             if let body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

@@ -319,14 +319,16 @@ Two nullable parameters carry the narrow-layout signal, and they are always supp
 (`ui/home/ArticlePagerSync.kt`) for the pages and their bodies. They are separate because the first
 is a deliberately stable `remember`ed bundle whose identity must not churn, while the second changes
 as articles load — folding them together would invalidate the callbacks on every load. The branch
-between the two reader forms checks `readerPaging != null && article != null && isTouchPrimary` —
-all three, not `readerPaging` alone: `article != null` keeps a `PaneLayout.Dual` reader that has
+between the two reader forms checks `readerPaging != null && selectedRow != null && isTouchPrimary` —
+all three, not `readerPaging` alone: `selectedRow != null` (`HomeViewModel.selectedArticleRow` — current the
+moment a selection is made, before its body loads, so the pager mounts with the selection rather than once
+the body has landed) keeps a `PaneLayout.Dual` reader that has
 `readerPaging` but nothing selected yet on its HTML placeholder rather than silently showing
 whatever article the pager last happened to rest on, and `isTouchPrimary` is checked again here
 even though the caller already only builds `readerPaging` on a touch-primary platform — the
 composable that actually decides whether the heavyweight pager mounts is where that invariant has
-to hold, not just the caller above it. The gesture and the accessibility actions stay gated on the
-same three conditions. It is deliberately **not**
+to hold, not just the caller above it. The gesture and the accessibility actions are gated on
+`swipeEnabled` — `isTouchPrimary && swipeNavigation != null && selectedRow != null`. It is deliberately **not**
 gated on `onNavigateUp`, despite that being this file's usual narrow-layout signal: `onNavigateUp`
 is `null` at `PaneLayout.Dual` (the reader is a permanent neighbor of the article list there, with
 no back button of its own, the same as Gmail's own tablet reading pane), but the swipe must still
