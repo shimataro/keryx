@@ -3333,17 +3333,20 @@ class HomeViewModelTest {
     fun articleListBodyIsPendingUntilTheArticleListHasLoaded() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
-        // The article list is built on `dispatcher`; holding it keeps its first emission back.
+        // The feed list and the article list are both built on `dispatcher`; holding it keeps both
+        // first emissions back, so neither the feeds nor the body can have been decided yet.
         val holding = HoldingDispatcher().apply { hold() }
         val vm = newViewModel(dispatcher = holding)
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
         assertEquals(ArticleListBody.Pending, vm.articleListBody.value)
+        assertEquals(emptyList(), vm.feeds.value)
         assertEquals(emptyList(), vm.articles.value)
 
         holding.release()
         testScheduler.advanceUntilIdle()
 
+        assertEquals(listOf("f1"), vm.feeds.value.map { it.id })
         assertEquals(ArticleListBody.Content, vm.articleListBody.value)
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
     }
