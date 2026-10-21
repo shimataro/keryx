@@ -5,11 +5,14 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.head
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.CancellationException
 
 /**
  * Best-effort favicon URL resolution. Only the URL is stored in the DB; the
  * image bytes are fetched at display time by Coil. Every failure path returns
- * null (the caller then stores a sentinel to avoid re-checking).
+ * null — which a refresh remembers for a while (`FAVICON_RETRY_INTERVAL_MS`) so it
+ * doesn't re-probe the site every time — except cancellation, which propagates, so
+ * an abandoned lookup is never mistaken for a site without a favicon.
  */
 class FaviconResolver(private val client: HttpClient) {
 
@@ -19,7 +22,7 @@ class FaviconResolver(private val client: HttpClient) {
 
         // 1. Look for declared <link rel=icon> candidates in the site's HTML,
         // preferring SVG first, then the largest declared bitmap resolution.
-        val candidates = runCatching {
+        val candidates = runCatchingUnlessCancelled {
             val html = client.get(base).bodyAsText()
             val doc = Ksoup.parse(html = html, baseUri = base)
             doc.select("link[rel~=(?i)icon]")
@@ -53,9 +56,18 @@ class FaviconResolver(private val client: HttpClient) {
         return null
     }
 
-    suspend fun isReachable(url: String): Boolean = runCatching {
+    suspend fun isReachable(url: String): Boolean = runCatchingUnlessCancelled {
         client.head(url).status.value in 200..299
     }.getOrDefault(false)
+
+    /** [runCatching], except that a [CancellationException] is rethrown rather than captured. */
+    private inline fun <T> runCatchingUnlessCancelled(block: () -> T): kotlin.Result<T> = try {
+        kotlin.Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        kotlin.Result.failure(e)
+    }
 
     private data class FaviconCandidate(val url: String, val isSvg: Boolean, val resolution: Int)
 }

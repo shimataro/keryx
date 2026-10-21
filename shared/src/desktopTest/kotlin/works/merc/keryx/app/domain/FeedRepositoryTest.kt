@@ -10,7 +10,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import app.cash.sqldelight.db.QueryResult
@@ -1057,6 +1059,157 @@ class FeedRepositoryTest {
             val results = withTimeout(10_000) { repo.refreshFeeds(feedList) }
 
             assertEquals(feedList.map { it.id }, results.keys.toList())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A [FaviconResolver] answering every request through [handler] (production client config). */
+    private fun faviconResolverWith(handler: MockRequestHandler): FaviconResolver =
+        FaviconResolver(
+            HttpClient(MockEngine(handler)) {
+                followRedirects = false
+                expectSuccess = false
+                install(HttpTimeout)
+            },
+        )
+
+    /** Subscribes one feed with no favicon (the subscribe-time lookup finds none) and returns its id. */
+    private suspend fun subscribeWithoutFavicon(
+        db: works.merc.keryx.app.data.local.db.KeryxDatabase,
+        driver: app.cash.sqldelight.db.SqlDriver,
+        url: String = "https://ex.com/feed",
+    ): String {
+        newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed(url)
+        val feed = db.feedsQueries.getByUrl(url).executeAsOne()
+        assertEquals(null, feed.favicon_url)
+        return feed.id
+    }
+
+    @Test
+    fun refreshAppliesTheFeedsArticlesBeforeItsFaviconLookupFinishesThenStoresTheFavicon(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val releaseFavicon = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val synced = java.util.concurrent.atomic.AtomicInteger(0)
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith { request ->
+                    releaseFavicon.await()
+                    if (request.url.encodedPath == "/favicon.ico") respond("", HttpStatusCode.OK) else respond("", HttpStatusCode.NotFound)
+                },
+                syncScheduler = SyncScheduler { synced.incrementAndGet() },
+            )
+
+            val refresh = async(Dispatchers.Default) { repo.refreshAll() }
+            withTimeout(5_000) { while (db.articlesQueries.watchByFeed(feedId).executeAsList().size < 2) delay(10) }
+            assertEquals(null, db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+            val syncsBeforeFavicon = synced.get()
+
+            releaseFavicon.complete(Unit)
+            withTimeout(5_000) { refresh.await() }
+
+            assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+            // A favicon is a synced column, so storing it asks for a sync of its own.
+            assertTrue(synced.get() > syncsBeforeFavicon)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshDoesNotLookAMissingFaviconUpAgainWithinTheRetryInterval(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            subscribeWithoutFavicon(db, driver)
+            val faviconRequests = java.util.concurrent.atomic.AtomicInteger(0)
+            val now = java.util.concurrent.atomic.AtomicLong(1_000L)
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith {
+                    faviconRequests.incrementAndGet()
+                    respond("", HttpStatusCode.NotFound)
+                },
+                clock = Clock { now.get() },
+            )
+
+            repo.refreshAll()
+            val afterFirst = faviconRequests.get()
+            assertTrue(afterFirst > 0, "the first refresh must look the favicon up")
+
+            now.addAndGet(works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS - 1)
+            repo.refreshAll()
+            assertEquals(afterFirst, faviconRequests.get(), "no new lookup within the retry interval")
+
+            now.addAndGet(1)
+            repo.refreshAll()
+            assertTrue(faviconRequests.get() > afterFirst, "looked up again once the interval has passed")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aFaviconResolvedAfterTheFeedWasUnsubscribedIsNotWritten(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val lookupStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val releaseFavicon = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith {
+                    lookupStarted.complete(Unit)
+                    releaseFavicon.await()
+                    respond("", HttpStatusCode.OK)
+                },
+            )
+
+            val refresh = async(Dispatchers.Default) { repo.refreshAll() }
+            withTimeout(5_000) { lookupStarted.await() }
+            repo.unsubscribeFeed(feedId)
+            val updatedAtAfterUnsubscribe = db.feedsQueries.getById(feedId).executeAsOne().updated_at
+            releaseFavicon.complete(Unit)
+            withTimeout(5_000) { refresh.await() }
+
+            val feed = db.feedsQueries.getById(feedId).executeAsOne()
+            assertEquals(null, feed.favicon_url)
+            assertEquals(updatedAtAfterUnsubscribe, feed.updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aCancelledFaviconLookupIsNotRememberedAsMissing(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val lookupStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val hang = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val cancelledRepo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith {
+                    lookupStarted.complete(Unit)
+                    hang.await()
+                    respond("", HttpStatusCode.OK)
+                },
+            )
+            val refresh = launch(Dispatchers.Default) { cancelledRepo.refreshAll() }
+            withTimeout(5_000) { lookupStarted.await() }
+            refresh.cancelAndJoin()
+
+            // The same repository (same in-memory miss record) looks the favicon up on the next
+            // refresh, because the abandoned lookup never concluded that there was none.
+            hang.complete(Unit)
+            cancelledRepo.refreshAll()
+
+            assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
         } finally {
             driver.close()
         }

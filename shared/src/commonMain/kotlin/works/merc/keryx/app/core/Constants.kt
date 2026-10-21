@@ -69,6 +69,13 @@ const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
 
+/**
+ * How long a refresh leaves a feed's favicon alone after a lookup found none, before looking again.
+ * Remembered in memory only (per process), so a site without any favicon isn't re-probed on every
+ * refresh, while one that adds a favicon later still gets it.
+ */
+const val FAVICON_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000L
+
 /** HTTP request timeout for the shared client (distinct from [CONNECTION_TIMEOUT_MS], the connect phase). */
 const val REQUEST_TIMEOUT_MS = 60_000L
 
