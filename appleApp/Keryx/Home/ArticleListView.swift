@@ -111,10 +111,12 @@ struct ArticleListView: View {
                     .onChange(of: filterKey, initial: false) { _, _ in
                         if let first = displayedRows.first?.id { proxy.scrollTo(first) }
                     }
-                    // Only when the selection actually moved off-screen (keyboard navigation, a
-                    // restored selection) — a row already visible (e.g. just clicked) never jumps.
-                    .onChange(of: home.selectedArticleId) { _, id in
-                        guard let id, !visibleRows.appearedIds.contains(id) else { return }
+                    // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
+                    // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
+                    // Not on `selectedArticleId` itself: it also moves back without the user acting
+                    // (a selection found tombstoned), which must not scroll the list.
+                    .onChange(of: home.selectionRevealRequests) { _, _ in
+                        guard let id = home.selectedArticleId, !visibleRows.appearedIds.contains(id) else { return }
                         proxy.scrollTo(id)
                     }
                     .onChange(of: displayedRows.isEmpty) { _, isEmpty in
@@ -339,7 +341,11 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !home.hasFeeds {
+        // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
+        // before the first emission (`ArticleListBody.pending`).
+        if home.listBody == .pending {
+            headed(Color.clear)
+        } else if home.listBody == .noFeeds {
             headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
@@ -348,7 +354,17 @@ struct ArticleListView: View {
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
-            noArticlesView
+            // Nothing while the rows are still on their way: being built, or held by the view model
+            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
+            // view is woken whichever way it settles).
+            if home.articleRowsBuilding
+                || ArticleListModelKt.articleListCatchingUp(
+                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
+                ) {
+                headed(Color.clear)
+            } else {
+                noArticlesView
+            }
         } else {
             articleList
                 .modifier(PullToRefreshModifier(home: home))
@@ -447,6 +463,7 @@ struct ArticleListView: View {
         return ArticleTableView(
             rows: displayed,
             selectedId: selectedId,
+            revealRequest: home.selectionRevealRequests,
             resetGeneration: tableResetGeneration,
             scrollRequest: tableScrollRequest,
             contextMenuSelectionTracker: contextMenuSelectionTracker,

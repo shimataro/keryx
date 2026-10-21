@@ -17,6 +17,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -42,12 +44,14 @@ import kotlinx.coroutines.launch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -264,6 +268,7 @@ class ArticleListPaneTest {
         val items = articles(30)
         lateinit var state: LazyListState
         var selected by mutableStateOf<ArticleListRow?>(null)
+        var revealRequest by mutableStateOf(0)
 
         setContent {
             state = rememberLazyListState()
@@ -271,6 +276,7 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
+                revealRequest = revealRequest,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -283,12 +289,54 @@ class ArticleListPaneTest {
         waitForIdle()
 
         selected = items[25]
+        revealRequest++
         waitForIdle()
 
         onNodeWithTag("article-a25").assertIsDisplayed()
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == 25 }
         assertTrue(info.offset >= state.layoutInfo.viewportStartOffset)
         assertTrue(info.offset + info.size <= state.layoutInfo.viewportEndOffset)
+    }
+
+    /**
+     * The selection's id also changes without the user acting — a selection found tombstoned hands
+     * the cursor back to the article before it — and the list must stay where it is then: only a
+     * user's selection (a new `revealRequest`) scrolls.
+     */
+    @Test
+    fun doesNotScrollWhenTheSelectedIdChangesWithoutARevealRequest() = runDesktopComposeUiTest {
+        val items = articles(30)
+        lateinit var state: LazyListState
+        var selectedId by mutableStateOf<String?>(items[25].id)
+        var revealRequest by mutableStateOf(1)
+
+        setContent {
+            state = rememberLazyListState()
+            ArticleListPaneContent(
+                articles = items,
+                feedTitles = emptyMap(),
+                selectedId = selectedId,
+                revealRequest = revealRequest,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                listState = state,
+            )
+        }
+        waitForIdle()
+        // The user selected a25, far down: it was scrolled into view.
+        onNodeWithTag("article-a25").assertIsDisplayed()
+        val before = state.firstVisibleItemIndex
+
+        // The cursor goes back to a0 (off screen) on its own.
+        selectedId = items[0].id
+        waitForIdle()
+
+        assertEquals(before, state.firstVisibleItemIndex)
+        onNodeWithTag("article-a25").assertIsDisplayed()
     }
 
     /**
@@ -395,6 +443,7 @@ class ArticleListPaneTest {
         val items = articles(30)
         lateinit var state: LazyListState
         var selected by mutableStateOf<ArticleListRow?>(null)
+        var revealRequest by mutableStateOf(0)
         // First frame: tall enough that a single row is never clipped, so we can measure it.
         var containerHeight by mutableStateOf(2000.dp)
 
@@ -404,6 +453,7 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
+                revealRequest = revealRequest,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -433,6 +483,7 @@ class ArticleListPaneTest {
 
         val indexBefore = state.firstVisibleItemIndex
         selected = items[targetIndex]
+        revealRequest++
         waitForIdle()
 
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == targetIndex }
@@ -522,6 +573,31 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun emptyStateShowsNeitherMessageWhileTheListsAreStillLoading() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = false,
+                loading = true,
+                onAddFeedClick = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("記事がありません").assertDoesNotExist()
+        onNodeWithText("フィードが登録されていません").assertDoesNotExist()
+        onNodeWithText("フィードを追加").assertDoesNotExist()
+    }
+
+    @Test
     fun rightClickOnArticleRowSelectsWithoutActivatingPaneFocus() = runDesktopComposeUiTest {
         val items = articles(3)
         var activateCount = 0
@@ -548,6 +624,36 @@ class ArticleListPaneTest {
 
         assertEquals(1, selectCount)
         assertEquals(0, activateCount)
+    }
+
+    /**
+     * The highlight follows the click itself rather than the reader's body lookup, which can wait out
+     * a write lock (a sync merge, an FTS rebuild) for seconds.
+     */
+    @Test
+    fun theHighlightMovesBeforeTheSelectionsBodyHasLoaded() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertArticleRow("a1", "f1", createdAt = 2L)
+        db.insertArticleRow("a2", "f1", createdAt = 1L)
+        val holding = HoldingDispatcher()
+        useHomeViewModel(driver, db, dispatcher = holding) { fixture ->
+            val vm = fixture.vm
+            setContent { ArticleListPane(vm = vm, focused = true, onActivated = {}) }
+            waitForIdle()
+
+            holding.hold()
+            try {
+                onNodeWithText("Title a2").performClick()
+                waitForIdle()
+
+                assertNull(vm.loadedArticleId(), "the body lookup is still held")
+                onNodeWithText("Title a2").assertIsSelected()
+                onNodeWithText("Title a1").assertIsNotSelected()
+            } finally {
+                holding.release()
+            }
+        }
     }
 
     @Test

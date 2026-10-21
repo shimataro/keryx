@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
@@ -56,10 +55,10 @@ internal class HomeRefreshController(
      */
     val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> = _pullRefreshingFilters.asStateFlow()
 
-    /** Refreshes one feed. */
-    fun refreshFeed(feed: Feeds) {
+    /** Refreshes one feed, by id — see [FeedRepository.refreshFeedById]. */
+    fun refreshFeed(feedId: String) {
         scope.launch {
-            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) } }
+            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeedById(feedId) } }
         }
     }
 

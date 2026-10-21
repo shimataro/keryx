@@ -43,6 +43,20 @@ class LocalSettingsStoreTest {
     }
 
     @Test
+    fun faviconMissedAtDefaultsToEmptyForAFileWrittenBeforeItExisted() {
+        FileIO.writeText(FileIO.join(dir, "local_settings.json"), """{"themeMode":"dark"}""")
+        val loaded = store.load()
+        assertEquals("dark", loaded.themeMode)
+        assertEquals(emptyMap(), loaded.faviconMissedAt)
+    }
+
+    @Test
+    fun faviconMissedAtRoundTrips() {
+        store.save(LocalSettings(faviconMissedAt = mapOf("f1" to 1_000L, "f2" to 2_000L)))
+        assertEquals(mapOf("f1" to 1_000L, "f2" to 2_000L), store.load().faviconMissedAt)
+    }
+
+    @Test
     fun collapsedFolderIdsDefaultsToEmptySet() {
         assertEquals(emptySet(), store.load().collapsedFolderIds)
     }

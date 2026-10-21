@@ -78,15 +78,20 @@ UPDATE feeds SET deleted_updated_at = ? WHERE id = ?;
 updateCustomTitle:
 UPDATE feeds SET custom_title = ?, updated_at = ?, custom_title_updated_at = ? WHERE id = ?;
 
-updateFaviconUrl:
-UPDATE feeds SET favicon_url = ?, updated_at = ? WHERE id = ?;
+-- Refresh path: fills in a favicon resolved after the feed's own writes. Guarded in the statement
+-- itself rather than on a row read beforehand, so a feed unsubscribed — or given a favicon by a
+-- resubscribe or a sync merge — in the meantime is left alone, and its updated_at (the row's
+-- last-write-wins stamp in the sync merge) does not move when nothing is written.
+updateFaviconUrlIfMissing:
+UPDATE feeds SET favicon_url = ?, updated_at = ?
+WHERE id = ? AND deleted_at IS NULL AND (favicon_url IS NULL OR favicon_url = '');
 
 updateCacheHeaders:
 UPDATE feeds SET etag = ?, last_modified = ?, updated_at = ? WHERE id = ?;
 
 -- Refresh path: update only the content columns a feed refresh owns. Deliberately does NOT touch
 -- deleted_at / sort_order / custom_title / folder_id / favicon_url (favicon has its own
--- updateFaviconUrl), so a concurrent unsubscribe / reorder / rename can't be reverted by a refresh
+-- updateFaviconUrlIfMissing), so a concurrent unsubscribe / reorder / rename can't be reverted by a refresh
 -- that started from a now-stale snapshot.
 updateContent:
 UPDATE feeds SET site_url = ?, title = ?, description = ?, updated_at = ? WHERE id = ?;

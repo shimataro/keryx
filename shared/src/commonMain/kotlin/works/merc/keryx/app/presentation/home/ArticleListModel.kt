@@ -96,6 +96,40 @@ fun articleReadAfterContextMenuOpen(isRead: Boolean, selectedByOpen: Boolean): B
 fun hasHideableRead(rows: List<ArticleListRow>, selectedId: String?): Boolean =
     rows.any { it.is_read == 1L && it.id != selectedId }
 
+/**
+ * Which of the article list's whole-pane states applies, independent of the rows themselves:
+ *
+ * - [Pending]: the feed list or the article list has not loaded yet at launch. Nothing is shown —
+ *   neither "no feeds" nor "no articles" — so a cold start doesn't flash an empty state before the
+ *   first DB emission.
+ * - [NoFeeds]: no feed is subscribed — the "no feeds" prompt with its "Add feed" button.
+ * - [Content]: anything else. Whether the list is empty ("no articles") is decided from the list a
+ *   UI actually renders, not here, so the message can never disagree with the rows on screen.
+ */
+enum class ArticleListBody { Pending, NoFeeds, Content }
+
+/**
+ * [ArticleListBody] from what has loaded so far: [hasFeeds] is `null` until the feed list has
+ * emitted, then whether it holds any feed; [articlesLoaded] says the article list has emitted.
+ */
+fun articleListBody(hasFeeds: Boolean?, articlesLoaded: Boolean): ArticleListBody = when {
+    hasFeeds == null || !articlesLoaded -> ArticleListBody.Pending
+    !hasFeeds -> ArticleListBody.NoFeeds
+    else -> ArticleListBody.Content
+}
+
+/**
+ * Whether a UI's own copy of the article list is still catching up with the ViewModel's: it shows
+ * no rows ([displayedRows] is 0) while the ViewModel already holds some ([viewModelHasRows], from
+ * `HomeViewModel.articleListHasRows`). A UI collects [ArticleListBody], that flag and the rows
+ * separately (and Apple builds its rows off the main thread), so for a moment it can have seen the
+ * one without the other; showing "no articles" then would flash a message the next frame
+ * contradicts. It shows nothing instead, until its rows arrive — and, the flag being collected too,
+ * is woken to show the message if they never do.
+ */
+fun articleListCatchingUp(displayedRows: Int, viewModelHasRows: Boolean): Boolean =
+    displayedRows == 0 && viewModelHasRows
+
 /** Whether [url] is a plain http:// or https:// URL. Scheme matching is case-insensitive. */
 fun isHttpOrHttpsUrl(url: String?): Boolean {
     if (url.isNullOrBlank()) return false

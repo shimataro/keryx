@@ -29,6 +29,7 @@ import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
@@ -332,6 +333,7 @@ class SettingsViewModelTest {
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)

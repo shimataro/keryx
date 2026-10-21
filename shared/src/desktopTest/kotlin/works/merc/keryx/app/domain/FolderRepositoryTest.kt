@@ -9,6 +9,7 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.FtsSearch
@@ -55,6 +56,7 @@ class FolderRepositoryTest {
             db, FeedFetcher(failingClient()), FaviconResolver(failingClient()),
             articleRepository, ftsManager, syncScheduler, NotificationCenter(),
             clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         return FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
     }

@@ -69,6 +69,14 @@ const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
 
+/**
+ * How long a refresh leaves a feed's favicon alone after a lookup found none, before looking again.
+ * The miss is recorded per feed by `FaviconMissStore` in the device-local settings, so it outlives the
+ * process: a site without any favicon isn't re-probed on every refresh or launch, while one that adds
+ * a favicon later still gets it.
+ */
+const val FAVICON_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000L
+
 /** HTTP request timeout for the shared client (distinct from [CONNECTION_TIMEOUT_MS], the connect phase). */
 const val REQUEST_TIMEOUT_MS = 60_000L
 
@@ -215,6 +223,15 @@ const val DUAL_PANE_MIN_WIDTH = ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WI
 
 /** Must be `>= TRIPLE_PANE_MIN_WIDTH` — see [TRIPLE_PANE_MIN_WIDTH]'s KDoc. */
 const val WINDOW_MIN_WIDTH = 920
+
+/**
+ * How long a newly selected article's body lookup may take before the reader shows the article's
+ * header (from its list row) in place of the previous article. Long enough that an ordinary
+ * millisecond-scale lookup goes straight to the full article — one document load, never a header
+ * followed by a second load — and short enough that a lookup stuck behind a write lock (a sync
+ * merge, an FTS rebuild) shows the new article at once rather than after the busy_timeout.
+ */
+const val READER_HEADER_FIRST_GRACE_MS = 50L
 
 /** Debounce for re-running search as the user types, so every keystroke doesn't trigger an FTS query. */
 const val SEARCH_DEBOUNCE_MS = 250L

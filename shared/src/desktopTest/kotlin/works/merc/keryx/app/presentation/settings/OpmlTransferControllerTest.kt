@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import java.util.Collections
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.awaitCondition
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
@@ -126,6 +127,7 @@ class OpmlTransferControllerTest {
         val feedRepository = FeedRepository(
             db, feedFetcher, FaviconResolver(faviconClient), articleRepository, ftsManagerIndexed(driver), syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)

@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import org.koin.core.Koin
 import org.koin.dsl.koinApplication
 import org.koin.dsl.module
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -90,6 +91,7 @@ class OpmlOpenHandlerTest {
         val feedRepository = FeedRepository(
             db, FeedFetcher(client), FaviconResolver(faviconClient), articleRepository, ftsManagerIndexed(driver),
             SyncScheduler {}, NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val folderRepository = FolderRepository(db, feedRepository, SyncScheduler {}, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, SyncScheduler {}, clock, Dispatchers.Unconfined)

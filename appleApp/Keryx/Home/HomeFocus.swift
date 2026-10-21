@@ -35,7 +35,7 @@ extension FocusedValues {
 /// → before the sidebar outline's own expand/collapse does.
 @MainActor
 func moveFocusFromFeedListToArticleList(home: HomeObservable, focusedPane: FocusState<HomeFocusedPane?>.Binding) {
-    if home.selectedArticle == nil, let first = home.viewModel.currentArticles().first {
+    if home.selectedArticleId == nil, let first = home.viewModel.currentArticles().first {
         home.selectArticle(first)
     }
     focusedPane.wrappedValue = .articleList

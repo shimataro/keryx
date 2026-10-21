@@ -160,7 +160,7 @@ class ReaderPagingTest {
     @Test
     fun readerPagesReturnsTheListUnchangedWhenTheSelectionIsInIt() {
         val pages = rows("a1", "a2")
-        assertEquals(pages, readerPages(pages, selected = article("a1")))
+        assertEquals(pages, readerPages(pages, selected = pages[0]))
     }
 
     @Test
@@ -174,8 +174,19 @@ class ReaderPagingTest {
         // The article list starts empty (pagerArticles is WhileSubscribed) or can briefly omit a
         // freshly-selected row; falling back keeps the reader on the same composition slot instead
         // of tearing down its WebView by swapping between an empty pager and a populated one.
-        val result = readerPages(emptyList(), selected = article("a1"))
+        val selected = rows("a1").single()
+        val result = readerPages(emptyList(), selected = selected)
 
-        assertEquals(listOf("a1"), result.map { it.id })
+        assertEquals(listOf(selected), result)
+    }
+
+    @Test
+    fun readerPagesFollowsASelectionWhoseBodyHasNotLoadedYet() {
+        // The selection's row is current the moment it is selected, so the fallback page is the new
+        // article rather than the previous one the reader's loaded article still is.
+        val previous = rows("a1").single()
+        val selected = rows("a2").single()
+
+        assertEquals(listOf(selected), readerPages(listOf(previous), selected = selected))
     }
 }
