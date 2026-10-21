@@ -987,7 +987,8 @@ scroll back to that article unprompted. Clearing the selection with a filter swi
 not requests either (the first composition brings a restored selection into view itself). The search results
 list follows the same rule: it scrolls to the selection on a request or when its results first arrive, never because
 its contents changed — a background write re-running the search, or a selection handed back after a tombstone,
-must not pull the list back to the selected row.
+must not pull the list back to the selected row. Changing the query is the user asking for a different list, so the
+results go back to the top, as they do when the filter changes (a pane remount keeps the position).
 
 The single (non-pager) reader is driven by `readerContent` (`None` / `Header(row)` / `Full(article)`).
 Normally it goes straight from the previous article to the new one in `Full` — one document load. When there is no

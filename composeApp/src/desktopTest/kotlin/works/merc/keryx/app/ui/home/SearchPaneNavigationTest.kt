@@ -274,6 +274,46 @@ class SearchPaneNavigationTest {
      * `keyboardPaneFor`) stopped moving the just-tapped selection at all.
      */
     /**
+     * Changing the query is the user asking for a different list, so the results list goes back to the
+     * top — as it does when the filter changes — rather than staying wherever the previous results
+     * were scrolled to (and, with the selected row no longer revealed on a mere change of results,
+     * leaving neither the top results nor the selection on screen).
+     */
+    @Test
+    fun changingTheQueryScrollsTheSearchResultsBackToTheTop() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        repeat(80) { db.insertArticleRow("a%02d".format(it), "f1", createdAt = it.toLong(), searchText = "alpha beta") }
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            vm.setSearchBarVisible(true)
+            vm.setSearchQuery("alpha")
+            var focusedPane by mutableStateOf(HomePane.ArticleList)
+            setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
+            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 80 }
+            waitForIdle()
+            val ids = vm.searchResults.value.map { it.article.id }
+            val (first, last) = ids.first() to ids.last()
+
+            // Scroll to the end of the results by selecting the last one.
+            vm.selectArticle(vm.searchResults.value.last().article)
+            waitForIdle()
+            mainClock.advanceTimeBy(2_000)
+            waitForIdle()
+            onAllNodesWithTag("article-$last").assertCountEquals(1)
+            onAllNodesWithTag("article-$first").assertCountEquals(0)
+
+            // A different query that matches the same articles: the same rows, a new list.
+            vm.setSearchQuery("alpha beta")
+            waitUntil(timeoutMillis = 10_000) { onAllNodesWithTag("article-$first").fetchSemanticsNodes().isNotEmpty() }
+            waitForIdle()
+
+            onAllNodesWithTag("article-$first").assertCountEquals(1)
+            onAllNodesWithTag("article-$last").assertCountEquals(0)
+        }
+    }
+
+    /**
      * Search results re-run on background writes (a refresh, a sync, the read write a selection
      * makes), and a selection handed back after a tombstone changes the result list too. Neither is
      * the user choosing anything, so the list must stay where the user scrolled it rather than being

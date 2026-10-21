@@ -229,6 +229,17 @@ fun ArticleListPane(
             lastFilter = encoded
         }
     }
+    // The search results list goes back to the top when the user changes the query, as it does for a
+    // filter: the new results are a different list, and the position in the previous one (a long way
+    // down, say) means nothing in it. The first composition and a pane remount keep the position —
+    // `lastQuery` is saved, so coming back from an article leaves the results where they were.
+    var lastQuery by rememberSaveable { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (query != lastQuery) {
+            searchListState.scrollToItem(0)
+            lastQuery = query
+        }
+    }
 
     // Whether the expanded search bar (a narrow-layout-only header replacing the hamburger/title
     // row) is actually on screen right now — onExitSearch is non-null at a narrow layout
