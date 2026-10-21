@@ -1768,6 +1768,35 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
 
+### iPhone Duo (iOS)
+
+iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and
+tab bar as one vertical bar on the trailing edge. The system does this by itself for toolbars built with
+`.toolbar` on a `NavigationSplitView`, which is all this app uses, so no Duo-specific layout code
+exists. What was measured on the iOS 27.1 simulator, and what follows from it:
+
+- **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
+  outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
+  circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
+  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the unread-only /
+  hide-read group `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
+  inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
+  so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
+  `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
+  `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups
+  even on iOS 27.
+- **The empty band above the outer display's lists** (82pt, against 24pt above the reader, which has no
+  navigation title) is the navigation title's own area: removing the article list's empty `.principal`
+  item shows the inline title there, and the system Settings app leaves the same band empty above its
+  own lists. It is left as is.
+- **The inner display in portrait** (669pt, a regular width) shows the reader alone, with the article
+  list over it on demand. That is the split view's own decision: neither `.balanced` with a
+  `.doubleColumn` visibility nor a 300pt ideal width for the list made the two columns tile, and the
+  HIG asks for the system container rather than a custom one. The half-folded pose needs nothing
+  either: the split view lines its columns up with the fold by itself.
+- **Not measured:** the narrowest width two apps get side by side on the inner display. The simulator's
+  resize mode works on the outer display only (where 466pt is already the minimum).
+
 ### `KeryxSdk`: the Swift entry point
 
 `sdk/KeryxSdk.kt` (appleMain) is the only thing the Swift app constructs:
