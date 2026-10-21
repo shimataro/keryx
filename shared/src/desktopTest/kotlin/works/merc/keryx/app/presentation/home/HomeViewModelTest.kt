@@ -981,6 +981,9 @@ class HomeViewModelTest {
 
         assertEquals("a1", vm.selectedArticle.value?.id)
         assertEquals("<p>first</p>", vm.selectedArticle.value?.content)
+        // The cursor, the toolbar's row and the reader all stay on the article that is on screen.
+        assertEquals("a1", vm.selectedArticleId.value)
+        assertEquals("a1", vm.selectedArticleRow.value?.id)
         // Nothing about the dead article may be applied: pinning it would let the `articles` merge
         // step re-add it to the visible list, and persisting it would restore it on the next launch.
         assertTrue(vm.articles.value.none { it.id == "a2" && it.is_read == 1L })
@@ -1301,6 +1304,49 @@ class HomeViewModelTest {
         holding.release()
         testScheduler.advanceUntilIdle()
         assertEquals(ReaderContent.None, vm.readerContent.value, "the held lookups do not bring anything back")
+    }
+
+    /**
+     * The list scrolls a selection into view when the user makes one. The cursor handed back to the
+     * article before it (the selection's row turned out to be tombstoned) must not count as one:
+     * scrolling the list back to that article would move it with nothing asked for.
+     */
+    @Test
+    fun aSelectionFoundTombstonedCountsAsOneRevealRequestNotTwo() = runTest {
+        val vm = newViewModelShowing("a1", HoldingDispatcher(), "a1", "a2")
+        val afterFirst = vm.selectionRevealRequests.value
+
+        driver.stampArticleDeleted("a2", deletedAt = 10L)
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+
+        // The user's click is the one request; the cursor going back to a1 is not another.
+        assertEquals(afterFirst + 1, vm.selectionRevealRequests.value)
+        assertEquals("a1", vm.selectedArticleId.value)
+    }
+
+    @Test
+    fun everySelectionTheUserMakesIsARevealRequest() = runTest {
+        val vm = newViewModelShowing("a1", HoldingDispatcher(), "a1", "a2", "a3")
+        val start = vm.selectionRevealRequests.value
+
+        vm.selectArticle(vm.row("a2"))
+        vm.selectArticle(vm.row("a3"))
+        vm.selectArticle(vm.row("a3"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(start + 3, vm.selectionRevealRequests.value)
+    }
+
+    @Test
+    fun clearingTheSelectionWithAFilterSwitchIsNotARevealRequest() = runTest {
+        val vm = newViewModelShowing("a1", HoldingDispatcher(), "a1", "a2")
+        val start = vm.selectionRevealRequests.value
+
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(start, vm.selectionRevealRequests.value)
     }
 
     @Test

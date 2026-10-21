@@ -268,6 +268,7 @@ class ArticleListPaneTest {
         val items = articles(30)
         lateinit var state: LazyListState
         var selected by mutableStateOf<ArticleListRow?>(null)
+        var revealRequest by mutableStateOf(0)
 
         setContent {
             state = rememberLazyListState()
@@ -275,6 +276,7 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
+                revealRequest = revealRequest,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -287,12 +289,54 @@ class ArticleListPaneTest {
         waitForIdle()
 
         selected = items[25]
+        revealRequest++
         waitForIdle()
 
         onNodeWithTag("article-a25").assertIsDisplayed()
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == 25 }
         assertTrue(info.offset >= state.layoutInfo.viewportStartOffset)
         assertTrue(info.offset + info.size <= state.layoutInfo.viewportEndOffset)
+    }
+
+    /**
+     * The selection's id also changes without the user acting — a selection found tombstoned hands
+     * the cursor back to the article before it — and the list must stay where it is then: only a
+     * user's selection (a new `revealRequest`) scrolls.
+     */
+    @Test
+    fun doesNotScrollWhenTheSelectedIdChangesWithoutARevealRequest() = runDesktopComposeUiTest {
+        val items = articles(30)
+        lateinit var state: LazyListState
+        var selectedId by mutableStateOf<String?>(items[25].id)
+        var revealRequest by mutableStateOf(1)
+
+        setContent {
+            state = rememberLazyListState()
+            ArticleListPaneContent(
+                articles = items,
+                feedTitles = emptyMap(),
+                selectedId = selectedId,
+                revealRequest = revealRequest,
+                unreadOnly = false,
+                onToggleUnreadOnly = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                listState = state,
+            )
+        }
+        waitForIdle()
+        // The user selected a25, far down: it was scrolled into view.
+        onNodeWithTag("article-a25").assertIsDisplayed()
+        val before = state.firstVisibleItemIndex
+
+        // The cursor goes back to a0 (off screen) on its own.
+        selectedId = items[0].id
+        waitForIdle()
+
+        assertEquals(before, state.firstVisibleItemIndex)
+        onNodeWithTag("article-a25").assertIsDisplayed()
     }
 
     /**
@@ -399,6 +443,7 @@ class ArticleListPaneTest {
         val items = articles(30)
         lateinit var state: LazyListState
         var selected by mutableStateOf<ArticleListRow?>(null)
+        var revealRequest by mutableStateOf(0)
         // First frame: tall enough that a single row is never clipped, so we can measure it.
         var containerHeight by mutableStateOf(2000.dp)
 
@@ -408,6 +453,7 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
+                revealRequest = revealRequest,
                 unreadOnly = false,
                 onToggleUnreadOnly = {},
                 onToggleSort = {},
@@ -437,6 +483,7 @@ class ArticleListPaneTest {
 
         val indexBefore = state.firstVisibleItemIndex
         selected = items[targetIndex]
+        revealRequest++
         waitForIdle()
 
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == targetIndex }

@@ -204,6 +204,9 @@ fun ArticleListPane(
     // The selection itself, not the hydrated article: the highlight and scroll-into-view follow the
     // click at once rather than once the reader's body lookup returns (it can wait out a write lock).
     val selectedId by vm.selectedArticleId.collectAsState()
+    // What scrolls the selection into view — not selectedId itself, which also moves back without
+    // the user acting (a selection found tombstoned) and must not move the list.
+    val revealRequest by vm.selectionRevealRequests.collectAsState()
     val unreadOnly by vm.unreadOnly.collectAsState()
     val canHideRead by vm.canHideRead.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
@@ -310,7 +313,7 @@ fun ArticleListPane(
 
         // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's own
         // scroll-to-selection effect for the base list).
-        LaunchedEffect(selectedId, results) {
+        LaunchedEffect(revealRequest, results) {
             val index = results.indexOfFirst { it.article.id == selectedId }
             if (index !in results.indices) return@LaunchedEffect
             searchListState.scrollToIndexIfNeeded(index)
@@ -375,6 +378,7 @@ fun ArticleListPane(
         feedTitles = feedTitles,
         feedFavicons = feedFavicons,
         selectedId = selectedId,
+        revealRequest = revealRequest,
         unreadOnly = unreadOnly,
         canHideRead = canHideRead,
         // Deliberately the real sort direction even while search disables the button — search
@@ -616,6 +620,8 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
  * @param selectedId The identifier of the selected article, if any.
+ * @param revealRequest Bumped by each selection the user makes (`HomeViewModel.selectionRevealRequests`);
+ *   a change scrolls [selectedId]'s row into view. [selectedId] changing on its own does not.
  * @param unreadOnly Whether to show only unread articles.
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
@@ -659,6 +665,7 @@ internal fun ArticleListPaneContent(
     feedTitles: Map<String, String>,
     feedFavicons: Map<String, String?> = emptyMap(),
     selectedId: String?,
+    revealRequest: Int = 0,
     unreadOnly: Boolean,
     onToggleUnreadOnly: () -> Unit,
     canHideRead: Boolean = false,
@@ -693,7 +700,7 @@ internal fun ArticleListPaneContent(
     newArticleCount: Int = 0,
     onNewArticlesClick: () -> Unit = {},
 ) {
-    LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
+    LaunchedEffect(listState, revealRequest, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
         // Before the list's first measure pass layoutInfo is still empty, which

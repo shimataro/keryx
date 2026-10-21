@@ -121,6 +121,10 @@ final class HomeObservable: ObservableAssignment {
     // made every article selection, star/read toggle and feed refresh re-evaluate them all.
     private(set) var hasSelectedArticle = false
     private(set) var selectedArticleId: String?
+    /// `HomeViewModel.selectionRevealRequests` — one more per selection the user makes. The article
+    /// list scrolls the selection into view when this changes, not when `selectedArticleId` does: that
+    /// also moves back without the user acting (a selection found tombstoned).
+    private(set) var selectionRevealRequests = 0
     private(set) var selectedArticleHasUsableUrl = false
     /// `canOpenInBrowser` for the selected article's URL — Open in Browser's own (http(s)) rule.
     private(set) var selectedArticleCanOpenInBrowser = false
@@ -326,6 +330,7 @@ final class HomeObservable: ObservableAssignment {
         async let t24: () = observeNewArticleCount()
         async let t25: () = observeSelectedArticleRow()
         async let t25b: () = observeReaderContent()
+        async let t25c: () = observeSelectionRevealRequests()
         async let t26: () = observeSelectedFeedName()
         async let t27: () = observeSelectedFeedFaviconUrl()
         async let t28: () = observeArticleContents()
@@ -338,7 +343,7 @@ final class HomeObservable: ObservableAssignment {
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
-            t21, t22, t23, t24, t25, t25b, t26, t27, t28, t29, t30,
+            t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
             t31, t32, t33, t34
         )
     }
@@ -600,6 +605,10 @@ final class HomeObservable: ObservableAssignment {
     /// already synced it, and an older queued emission must not put the previous selection back.
     private func observeSelectedArticleRow() async {
         for await _ in viewModel.selectedArticleRow { syncSelectedArticleRow() }
+    }
+
+    private func observeSelectionRevealRequests() async {
+        for await v in viewModel.selectionRevealRequests { assignIfChanged(\.selectionRevealRequests, Int(v.int32Value)) }
     }
 
     private func syncSelectedArticleRow() {

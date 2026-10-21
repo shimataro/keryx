@@ -974,6 +974,12 @@ like `toggleReadSelected`, and a star toggled while the body loads is recorded (
 and laid over the hydrated row, since that lookup runs outside `dbWriteDispatcher`'s FIFO and can read the row
 from before the write. Only the read/unread button keeps `selectedArticleShownUnread` as its one source.
 
+The list scrolls the selection into view on `selectionRevealRequests`, not on `selectedArticleId`: that counts the
+selections the user makes (one per `selectArticle`, from any route), whereas the cursor also moves on its own —
+a selection whose row a sync merge has tombstoned hands it back to the article before it — and the list must not
+scroll back to that article unprompted. Clearing the selection with a filter switch and a restored selection are
+not requests either (the first composition brings a restored selection into view itself).
+
 The single (non-pager) reader is driven by `readerContent` (`None` / `Header(row)` / `Full(article)`).
 Normally it goes straight from the previous article to the new one in `Full` — one document load. Only when
 the body lookup has not returned within `READER_HEADER_FIRST_GRACE_MS` (50 ms — a lookup waiting out a sync
