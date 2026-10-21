@@ -203,6 +203,7 @@ Setup completion = file exists.
 | `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
+| `faviconMissedAt` | object (feed id → Unix ms) | `{}` (when a refresh's favicon lookup last found none for a feed; that feed is not looked up again for `FAVICON_RETRY_INTERVAL_MS` (24 h). Entries older than that are dropped whenever one is added. Device-local, not synced) |
 
 ## Cache Cleanup
 

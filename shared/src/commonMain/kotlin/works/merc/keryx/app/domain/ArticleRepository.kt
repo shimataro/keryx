@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.HtmlText
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Articles
@@ -21,6 +22,8 @@ import works.merc.keryx.app.data.remote.ParsedArticle
  * 900 leaves headroom. Large id lists (search hits, mark-as-read snapshots) are chunked to this size.
  */
 private const val ID_FETCH_CHUNK = 900
+
+private const val TAG = "ArticleRepository"
 
 /**
  * The columns of an article that the list panes actually render, plus `created_at` as the sort
@@ -283,7 +286,9 @@ class ArticleRepository(
      * @param query The full-text search query.
      * @param scope Restricts results to the same row set [scope] would show as an ordinary
      *   (non-search) article-list filter — see `FtsSearch.articleScopeSql`.
-     * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily unavailable.
+     * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily
+     *   unavailable. That failure is logged and absorbed rather than thrown — one of the documented best-effort
+     *   accesses in `docs/error-design.md`.
      */
     fun search(query: String, scope: ArticleFilter): List<ArticleSearchResult> =
         try {
@@ -300,11 +305,14 @@ class ArticleRepository(
             hits.mapNotNull { hit ->
                 byId[hit.id]?.let { ArticleSearchResult(article = it, titleMarked = hit.titleMarked) }
             }
-        } catch (_: Exception) {
-            // `articles_fts` is raw SQL outside SQLDelight and is briefly DROPped during a sync's
-            // upload window (rebuilt right after). Querying it then throws a raw SQLite exception;
-            // absorb it here (DataSource/Repository boundary) so the transient "index unavailable"
-            // state surfaces as no hits instead of leaking a raw exception to the ViewModel.
+        } catch (e: Exception) {
+            // `articles_fts` is raw SQL outside SQLDelight, so a query against it can fail with a raw
+            // SQLite exception the schema never promised away: the table missing (before the first
+            // startup catch-up has created it) or damaged. Absorb it here (DataSource/Repository
+            // boundary) so an "index unavailable" state surfaces as no hits instead of leaking a raw
+            // exception to the ViewModel — but leave a trace, so a search that stays empty has
+            // something to be investigated from.
+            Log.warn(TAG, "Search failed; showing no results", e)
             emptyList()
         }
 

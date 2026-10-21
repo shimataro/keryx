@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.FakeTokenStorage
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.Result
@@ -101,6 +102,7 @@ class RefreshCycleRunnerTest {
         val feedRepository = FeedRepository(
             db, fetcher, favicons, articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { scope -> cleanups += { scope.cancel() } }
         val syncRepository = SyncRepository(

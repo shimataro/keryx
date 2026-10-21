@@ -35,7 +35,8 @@ struct SetupView: View {
         }
         #if os(macOS)
         // The window's minimum size — not applied on iOS, where it would lay the view out wider
-        // than an iPhone's screen. Tall enough for both option cards at the full padding, so
+        // than an iPhone's screen (iPhone Duo's outer display leaves only 382pt beside its vertical
+        // bar, which a 480pt minimum overflowed). Tall enough for both option cards at the full padding, so
         // scrolling is only needed once the connecting progress or an error is shown below them.
         .frame(minWidth: 480, minHeight: 480)
         #endif
