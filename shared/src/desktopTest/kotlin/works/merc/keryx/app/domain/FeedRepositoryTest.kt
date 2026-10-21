@@ -149,6 +149,31 @@ private class FailFirstFaviconWriteDriver(private val delegate: app.cash.sqldeli
     }
 }
 
+/**
+ * Fails chosen statements while armed: the [failingInsert]th `INSERT INTO articles` (counted from
+ * arming), and/or every `INSERT INTO articles_fts` (the search-index catch-up). Everything else
+ * passes through, so a refresh can be made to fail part-way and the aftermath inspected.
+ */
+private class FaultInjectingDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    @Volatile var failingInsert: Int? = null
+    @Volatile var failIndexing = false
+    private var inserts = 0
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (sql.startsWith("INSERT INTO articles (") && failingInsert != null && ++inserts == failingInsert) {
+            error("simulated article write failure")
+        }
+        if (failIndexing && sql.contains("INSERT INTO articles_fts")) error("simulated index failure")
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
+}
+
 class FeedRepositoryTest {
 
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
@@ -1300,6 +1325,94 @@ class FeedRepositoryTest {
             cancelledRepo.refreshAll()
 
             assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** Two subscribed feeds, one answering at once and one 100 ms later, so the first is applied first. */
+    private suspend fun twoFeedsOneSlow(driver: FaultInjectingDriver): Triple<works.merc.keryx.app.data.local.db.KeryxDatabase, FeedRepository, List<Feeds>> {
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        val setup = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        setup.subscribeFeed("https://ex.com/ok")
+        setup.subscribeFeed("https://ex.com/slow")
+        val repo = newRepo(db, driver, fetcherWith { request ->
+            if (request.url.encodedPath == "/slow") delay(100)
+            respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+        })
+        return Triple(db, repo, repo.feedsCoveredBy(ArticleFilter.All).sortedBy { it.url })
+    }
+
+    private fun searchHits(db: works.merc.keryx.app.data.local.db.KeryxDatabase, driver: app.cash.sqldelight.db.SqlDriver) =
+        runBlocking {
+            ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+                .search("Serialization", ArticleFilter.All).map { it.article.feed_id }
+        }
+
+    /**
+     * An apply that fails part-way leaves the feeds applied before it committed and propagates the
+     * failure — but those feeds' new articles are indexed first, rather than staying out of search
+     * until some later refresh.
+     */
+    @Test
+    fun refreshFeedsIndexesTheFeedsAppliedBeforeAnApplyFailureThenRethrows(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            val (db, repo, feedList) = twoFeedsOneSlow(driver)
+            val okFeed = feedList.single { it.url.endsWith("/ok") }
+            // The ok feed's apply writes two articles (g1, g2); the third insert is the slow feed's.
+            driver.failingInsert = 3
+
+            val failure = runCatching { repo.refreshFeeds(feedList) }.exceptionOrNull()
+
+            assertEquals("simulated article write failure", failure?.message)
+            assertEquals(listOf(okFeed.id), searchHits(db, driver), "the feed applied before the failure is searchable")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** The index catch-up failing as well must not hide the failure that started it. */
+    @Test
+    fun refreshFeedsKeepsTheApplyFailureAndAttachesAnIndexFailureToIt(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            val (_, repo, feedList) = twoFeedsOneSlow(driver)
+            driver.failingInsert = 3
+            driver.failIndexing = true
+
+            val failure = runCatching { repo.refreshFeeds(feedList) }.exceptionOrNull()
+
+            assertEquals("simulated article write failure", failure?.message)
+            assertEquals(listOf("simulated index failure"), failure?.suppressed?.map { it.message })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A refresh that is abandoned is not worth an O(articles) index scan on the way out. */
+    @Test
+    fun aCancelledRefreshFeedsDoesNotIndexOnTheWayOut(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            val (db, repo, feedList) = twoFeedsOneSlow(driver)
+            driver.failIndexing = true // would throw if the cancelled refresh tried to index
+
+            val refresh = launch(Dispatchers.Default) { repo.refreshFeeds(feedList) }
+            // The ok feed has been applied; the slow one is still fetching.
+            withTimeout(5_000) {
+                while (db.articlesQueries.watchByFeed(feedList.single { it.url.endsWith("/ok") }.id).executeAsList().size < 2) delay(5)
+            }
+            refresh.cancelAndJoin()
+
+            assertTrue(refresh.isCancelled)
+            // Nothing was indexed (the failing driver would have thrown out of the cancellation path
+            // and the join would not report a plain cancellation): the new article is not searchable yet.
+            driver.failIndexing = false
+            assertEquals(emptyList(), searchHits(db, driver))
         } finally {
             driver.close()
         }
