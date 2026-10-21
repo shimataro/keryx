@@ -550,8 +550,9 @@ class HomeViewModel(
     private val _selectionRevealRequests = MutableStateFlow(0)
 
     /**
-     * Counts the user's selections — one per [selectArticle], whatever route made it (a click, J/K,
-     * a notification) — so the article list scrolls the selection into view when this changes, and
+     * Counts the user's selections that move to another article — one per such [selectArticle],
+     * whatever route made it (a click, J/K, a notification); choosing the article that is already
+     * selected is not counted — so the article list scrolls the selection into view when this changes, and
      * not whenever [selectedArticleId] does. That id also moves without the user acting: a selection
      * whose row turns out to have been tombstoned by a sync merge hands the cursor back to the
      * article before it, and the list must not scroll back to that article on its own
@@ -980,9 +981,12 @@ class HomeViewModel(
         _pendingSelectedRow.value = article.copy(is_read = 1L)
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
+        val movedSelection = selectionCursorId != article.id
         selectionCursorId = article.id
-        // After the cursor, so a collector that sees the new count already sees the new id.
-        _selectionRevealRequests.update { it + 1 }
+        // After the cursor, so a collector that sees the new count already sees the new id. Only a
+        // selection that moves to another article is a request: choosing the one already selected
+        // (a second click, a right-click) leaves the list where it is, as it always has.
+        if (movedSelection) _selectionRevealRequests.update { it + 1 }
         _cursorIntentSeq.value = readIntents.currentSeq
         // A header already standing in for a body still loading (a write lock is holding the
         // lookups) moves straight to this selection, rather than the reader going back to the

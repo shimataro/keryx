@@ -128,7 +128,7 @@ things at once:
 
 1. The article list's scroll-into-view effect running — `ArticleListPaneContent`'s
    `LaunchedEffect(listState, revealRequest, …)` → `scrollToIndexIfNeeded` (`ui/home/HomeCommon.kt`).
-   Of its keys only `revealRequest` changes during use: it counts the selections the user makes
+   Of its keys only `revealRequest` changes during use: it counts the selections the user moves to another article
    (`HomeViewModel.selectionRevealRequests`). The selection's id changing on its own — a selection
    found tombstoned hands the cursor back to the article before it — does not re-key it.
 2. A row with enough layout nodes. `ArticleRow`'s current structure is past the threshold.

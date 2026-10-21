@@ -980,7 +980,8 @@ and laid over the hydrated row, since that lookup runs outside `dbWriteDispatche
 from before the write. Only the read/unread button keeps `selectedArticleShownUnread` as its one source.
 
 The list scrolls the selection into view on `selectionRevealRequests`, not on `selectedArticleId`: that counts the
-selections the user makes (one per `selectArticle`, from any route), whereas the cursor also moves on its own —
+selections the user moves to another article (one per such `selectArticle`, from any route; choosing the article
+that is already selected is not one), whereas the cursor also moves on its own —
 a selection whose row a sync merge has tombstoned hands it back to the article before it — and the list must not
 scroll back to that article unprompted. Clearing the selection with a filter switch and a restored selection are
 not requests either (the first composition brings a restored selection into view itself). The search results

@@ -125,7 +125,7 @@ java.lang.IllegalArgumentException: onReuse is only expected on attached node
 
 1. 記事一覧の scroll-into-view が動くこと — `ArticleListPaneContent` の
    `LaunchedEffect(listState, revealRequest, …)` → `scrollToIndexIfNeeded`（`ui/home/HomeCommon.kt`）。
-   キーのうち、操作中に変わるのは `revealRequest` だけで、これはユーザーが行った選択を数える
+   キーのうち、操作中に変わるのは `revealRequest` だけで、これはユーザーが別の記事へ動かした選択を数える
    （`HomeViewModel.selectionRevealRequests`）。選択記事の id が単独で変わる場合（墓石化した行を
    選んだために、直前の記事へカーソルが戻る場合）は再起動しない。
 2. 行のレイアウトノード数が一定以上あること。現在の `ArticleRow` は閾値を超えている。

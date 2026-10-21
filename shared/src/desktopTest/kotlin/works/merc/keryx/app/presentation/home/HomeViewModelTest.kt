@@ -1364,16 +1364,48 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun everySelectionTheUserMakesIsARevealRequest() = runTest {
+    fun everySelectionThatMovesToAnotherArticleIsARevealRequest() = runTest {
         val vm = newViewModelShowing("a1", HoldingDispatcher(), "a1", "a2", "a3")
         val start = vm.selectionRevealRequests.value
 
         vm.selectArticle(vm.row("a2"))
         vm.selectArticle(vm.row("a3"))
-        vm.selectArticle(vm.row("a3"))
         testScheduler.advanceUntilIdle()
 
-        assertEquals(start + 3, vm.selectionRevealRequests.value)
+        assertEquals(start + 2, vm.selectionRevealRequests.value)
+    }
+
+    /**
+     * Choosing the article that is already selected (a second click, a right-click) is not a request:
+     * the list stays where it is, as it did when it followed the selection's id.
+     */
+    @Test
+    fun selectingTheAlreadySelectedArticleIsNotARevealRequest() = runTest {
+        val vm = newViewModelShowing("a1", HoldingDispatcher(), "a1", "a2")
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        val start = vm.selectionRevealRequests.value
+
+        vm.selectArticle(vm.row("a2"))
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(start, vm.selectionRevealRequests.value)
+    }
+
+    @Test
+    fun selectingAgainAfterAFilterSwitchClearedTheSelectionIsARevealRequest() = runTest {
+        val vm = newViewModelShowing("a1", HoldingDispatcher(), "a1", "a2")
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        val start = vm.selectionRevealRequests.value
+
+        // The same article as before the switch, but the selection was cleared: this is a new one.
+        vm.selectArticle(vm.row("a1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(start + 1, vm.selectionRevealRequests.value)
     }
 
     @Test
