@@ -1234,23 +1234,36 @@ class HomeViewModel(
      * the selection, which that pass refreshes only after the pin, and whose copy its identity check
      * would also mistake for a fresh user write (see [retrimmedSelectionPin]).
      *
-     * @param verifyAlive Whether to check the selection is still alive first — a blocking DB read on
-     *   the caller's (main) thread. A tombstone a sync merge wrote does not necessarily tick the
+     * @param verifyAlive Whether to check the selection is still alive — a DB read, run afterwards on
+     *   [dbWriteDispatcher] rather than on the caller's thread, which then drops the selection's pin
+     *   if it was tombstoned. A tombstone a sync merge wrote does not necessarily tick the
      *   reconcile, so the refresh/sync edges and the user's own re-trims check; mark-all-read under
      *   Starred, which never did, skips it.
      */
     private fun retrimPinnedReadStates(verifyAlive: Boolean = true) {
         val before = _pinnedReadStates.value
-        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
-        // step re-adds any read-pinned id missing from the repository result, which would put
-        // deleted content back into the visible list.
         val candidate = selectionReadPinCandidate(before)
-            ?.takeIf { !verifyAlive || it.id in articleRepository.aliveArticleFlags(listOf(it.id)) }
+        var keptPin: ArticleListRow? = null
         _pinnedReadStates.update { current ->
             val kept = current.unreadPins()
             if (candidate == null) return@update kept
             val pin = retrimmedSelectionPin(before[candidate.id], current[candidate.id], candidate)
+            keptPin = pin
             if (pin == null) kept else kept + (candidate.id to pin)
+        }
+        val pin = keptPin
+        if (!verifyAlive || candidate == null || pin == null) return
+        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
+        // step re-adds any read-pinned id missing from the repository result, which would put
+        // deleted content back into the visible list. Checked after the re-trim rather than before
+        // it, so the caller's (main) thread never waits on the DB — a write lock held by a merge
+        // would stall it for as long as the merge runs. Read through dbWriteDispatcher, behind any
+        // write already queued there. Only the very pin kept above is dropped: one a later
+        // selection or reconcile pass replaced since belongs to that newer state.
+        viewModelScope.launch {
+            val alive = withContext(dbWriteDispatcher) { candidate.id in articleRepository.aliveArticleFlags(listOf(candidate.id)) }
+            if (alive) return@launch
+            _pinnedReadStates.update { current -> if (current[candidate.id] === pin) current - candidate.id else current }
         }
     }
 

@@ -3466,6 +3466,42 @@ class HomeViewModelTest {
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
     }
 
+    /**
+     * The re-trim's alive check for the selection runs on dbWriteDispatcher, not on the caller's
+     * (main) thread — a DB write lock held by a sync merge would otherwise stall the UI for as long
+     * as the merge runs. A tombstoned selection's pin is dropped once that read has run.
+     */
+    @Test
+    fun retrimChecksTheSelectionIsAliveOnTheDbWriteDispatcherThenDropsATombstonedPin() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("a2", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        val writes = HoldingDispatcher()
+        val vm = newViewModel(dbWriteDispatcher = writes)
+        subscribeAll(vm)
+        vm.selectFilter(ArticleFilter.All)
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        vm.selectArticle(db.articlesQueries.getById("a1").executeAsOne().toListRow())
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        writes.hold()
+        driver.stampArticleDeleted("a1", deletedAt = 100L)
+        vm.setUnreadOnly(false)
+        testScheduler.advanceUntilIdle()
+        vm.setUnreadOnly(true)
+        testScheduler.advanceUntilIdle()
+        // The alive check is queued behind the held dispatcher; nothing read the DB on this thread.
+        assertTrue(writes.queuedCount > 0)
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        writes.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("a2"), vm.articles.value.map { it.id })
+    }
+
     @Test
     fun markAllReadOnStarredFilterDoesNotForceSelectedArticleReadState() = runTest {
         db.insertFeed("f1")

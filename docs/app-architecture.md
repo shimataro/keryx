@@ -1281,7 +1281,10 @@ their "mark as unread" write may still be in flight, and dropping one would let 
 lose the row until that write lands. The selection's pin is decided inside one `update`, against the
 map being updated, so a re-trim composes with a concurrent reconcile pass. A pin that pass dropped
 since stays dropped, and an existing pin is kept as it is: it is never re-created from the
-selection, which the pass refreshes only after the pin.
+selection, which the pass refreshes only after the pin. Whether the selection still exists (a sync
+merge may have tombstoned it) is checked afterwards, by a read on `dbWriteDispatcher` rather than on
+the calling (main) thread, so a write lock held by a merge never stalls the UI; a tombstoned
+selection's pin is then dropped, but only if it is still the very pin the re-trim kept.
 
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
