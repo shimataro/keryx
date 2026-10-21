@@ -29,7 +29,9 @@ and lose more than the access itself is worth. The accesses that are, today:
 - The FTS search query (`ArticleRepository.search`): a failing index returns no hits rather than an error.
 - The "last synced" read for the Cloud Sync settings tab (`CloudSyncController`): UI state only.
 
-Any other DB access propagates as before; a new best-effort one is added to this list, with its reason.
+Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
+operation the user started — an OPML import or export — that fails is not an exception to this: it is reported
+to the user as that operation's failure, not swallowed.)
 
 ## Error Types (`core/KeryxException.kt`, `core/Result.kt`)
 

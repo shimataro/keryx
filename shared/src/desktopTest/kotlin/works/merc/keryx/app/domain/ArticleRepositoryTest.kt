@@ -715,6 +715,26 @@ class ArticleRepositoryTest {
         }
     }
 
+    /**
+     * `articles_fts` is raw SQL outside the schema and can be absent (briefly DROPped during a sync's
+     * upload window): searching then returns no hits, rather than throwing out of the repository.
+     */
+    @Test
+    fun searchReturnsNoHitsInsteadOfThrowingWhenTheIndexIsUnavailable() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", title = "Kotlin Multiplatform", content = "cross platform apps")
+            // No ftsManagerIndexed(driver): the articles_fts table does not exist.
+
+            val results = newRepo(db, driver).search("Kotlin", ArticleFilter.All)
+
+            assertEquals(emptyList(), results)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun searchReturnsMatchingArticlesAfterRebuild() {
         val (driver, db) = inMemoryDb()
