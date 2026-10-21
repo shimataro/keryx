@@ -71,8 +71,9 @@ const val MAX_REDIRECTS = 5 // redirect loop guard
 
 /**
  * How long a refresh leaves a feed's favicon alone after a lookup found none, before looking again.
- * Remembered in memory only (per process), so a site without any favicon isn't re-probed on every
- * refresh, while one that adds a favicon later still gets it.
+ * The miss is recorded per feed by `FaviconMissStore` in the device-local settings, so it outlives the
+ * process: a site without any favicon isn't re-probed on every refresh or launch, while one that adds
+ * a favicon later still gets it.
  */
 const val FAVICON_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
