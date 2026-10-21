@@ -344,6 +344,8 @@ class SearchPaneNavigationTest {
             // A new matching article changes the results (the search re-runs on the write).
             db.insertArticleRow("a99", "f1", createdAt = 99L, searchText = "alpha beta")
             runBlocking { FtsManager(driver).indexMissing() }
+            // As a sync does: notify after indexing, so the requery cannot run before the row is indexed.
+            driver.notifyListeners("articles")
             waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 81 }
             waitForIdle()
 
