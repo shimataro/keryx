@@ -180,6 +180,7 @@ targets:
     sources:
       - path: KeryxTests
       - path: Keryx/Home/ReaderNavigationGate.swift
+      - path: Keryx/Home/ReaderRebuildThrottle.swift
       - path: Keryx/Home/ReaderProcessRecovery.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/CompactSidebarSelection.swift

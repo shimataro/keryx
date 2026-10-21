@@ -30,10 +30,9 @@ struct ReaderPageView: View {
     /// arrive as flows of their own). Mirrors Compose's own `remember`/`LaunchedEffect` memoization
     /// (`ArticleDetailPane.kt`).
     @State private var document = ReaderDocument.empty
-
-    /// How long a rebuild waits for its key to settle before starting, so stepping quickly through
-    /// articles (J/K held down, rapid clicks) builds only the article it stops on.
-    private static let rebuildDebounce: Duration = .milliseconds(75)
+    /// Makes a rebuild wait only inside a burst of article switches (J/K held down, rapid clicks),
+    /// so the burst builds only the article it stops on while a single click builds at once.
+    @State private var rebuildThrottle = ReaderRebuildThrottle()
 
     var body: some View {
         ArticleWebView(html: document.html)
@@ -69,9 +68,8 @@ struct ReaderPageView: View {
         // iOS page is one article, so there is never a previous article's media to stop.)
         if row == nil { return }
         #endif
-        // The first document a page shows is built at once; only replacing one waits to settle.
-        if !document.html.isEmpty {
-            do { try await Task.sleep(for: Self.rebuildDebounce) } catch { return }
+        if let wait = rebuildThrottle.delay(for: row?.id, now: .now) {
+            do { try await Task.sleep(for: wait) } catch { return }
         }
         let inputs = readerDocumentInputs()
         let built = await ReaderDocument.build(inputs)
