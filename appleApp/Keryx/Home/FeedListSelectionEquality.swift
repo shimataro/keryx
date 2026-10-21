@@ -30,7 +30,11 @@ func feedListRowSelectionsEqual(_ a: FeedListRowSelection, _ b: FeedListRowSelec
 /// Kotlin value equality (`equals`) through the bridge, for a Kotlin value that reaches Swift typed
 /// as a protocol or as `AnyObject` — a sealed hierarchy, a data class behind an interface — and so
 /// is not `Equatable`. Two nils are equal; a nil and a value are not. The one way the app compares
-/// such values, where it used to be written three different ways.
+/// whole Kotlin values, where it used to be written several different ways.
+///
+/// The `onEnum(of:)` functions above are a different thing on purpose: they compare only what
+/// *identifies* a sealed value (a filter's feed id, say), which is narrower than `equals` and is
+/// what selection and drag-and-drop logic needs.
 func kotlinValuesEqual(_ a: AnyObject?, _ b: AnyObject?) -> Bool {
     guard let a, let b else { return a == nil && b == nil }
     return (a as? NSObject)?.isEqual(b) ?? (a === b)
