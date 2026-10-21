@@ -981,7 +981,10 @@ scroll back to that article unprompted. Clearing the selection with a filter swi
 not requests either (the first composition brings a restored selection into view itself).
 
 The single (non-pager) reader is driven by `readerContent` (`None` / `Header(row)` / `Full(article)`).
-Normally it goes straight from the previous article to the new one in `Full` — one document load. Only when
+Normally it goes straight from the previous article to the new one in `Full` — one document load. When there is no
+previously loaded article to keep on screen (the first selection after launch or after a filter switch), `Header`
+shows at once instead — never the "no article selected" placeholder, which the toolbar and the list highlight
+(already on the new selection) would contradict. Only when
 the body lookup has not returned within `READER_HEADER_FIRST_GRACE_MS` (50 ms — a lookup waiting out a sync
 merge's or an FTS rebuild's write lock) does the grace timer `hydrateSelection` starts publish `Header`: the
 new article's title, date and link from its list row over an empty body, the same document the pager draws for

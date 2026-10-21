@@ -15,8 +15,9 @@ sealed interface ReaderContent {
     data object None : ReaderContent
 
     /**
-     * The selected article's body has been loading for longer than
-     * [works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS]: the reader shows the article's
+     * The selected article's body is not loaded and there is no reader content worth keeping in
+     * its place: either nothing was loaded before it, or the body has been loading for longer than
+     * [works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS]. The reader shows the article's
      * header — title, date, link — from its list [row], with an empty body, until it loads.
      */
     data class Header(val row: ArticleListRow) : ReaderContent
@@ -43,9 +44,16 @@ internal fun resolveSelectedRow(cursor: String?, hydrated: Articles?, pending: A
 }
 
 /**
- * What the reader shows ([HomeViewModel.readerContent]): the new selection's header once
- * [headerId] says its grace period ran out with the body still loading, otherwise the loaded article
- * — which, inside that grace period, is still the previous one — or nothing.
+ * What the reader shows ([HomeViewModel.readerContent]):
+ *
+ * - the new selection's header once [headerId] says its grace period ran out with the body still
+ *   loading;
+ * - otherwise the loaded article — which, inside that grace period, is still the previous one, kept
+ *   on screen rather than swapped for a header that would turn into the body within milliseconds;
+ * - with nothing loaded to keep, the new selection's header at once: there is no previous article
+ *   to hold, and "no article selected" would contradict the toolbar and the list highlight, which
+ *   already follow the selection;
+ * - nothing, when nothing is selected.
  *
  * @param headerId The article whose header the grace timer asked for, or `null`.
  * @see resolveSelectedRow for the other parameters.
@@ -59,6 +67,7 @@ internal fun resolveReaderContent(
     cursor != null && headerId == cursor && hydrated?.id != cursor && pending != null && pending.id == cursor ->
         ReaderContent.Header(pending)
     hydrated != null -> ReaderContent.Full(hydrated)
+    cursor != null && pending != null && pending.id == cursor -> ReaderContent.Header(pending)
     else -> ReaderContent.None
 }
 

@@ -1280,6 +1280,43 @@ class HomeViewModelTest {
         assertEquals("a2", vm.readerArticleId())
     }
 
+    /**
+     * With nothing loaded to keep on screen, the first selection shows its header at once rather
+     * than the "no article selected" placeholder, which the toolbar and the list highlight (already
+     * on the new selection) would contradict.
+     */
+    @Test
+    fun theFirstSelectionShowsItsHeaderAtOnceWhileItsBodyLoads() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1", "a2")
+        assertEquals(ReaderContent.None, vm.readerContent.value)
+
+        holding.hold()
+        vm.selectArticle(vm.row("a1"))
+
+        assertEquals("header:a1", vm.readerArticleId(), "no grace period when there is nothing to keep")
+        assertEquals("a1", vm.selectedArticleRow.value?.id)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        assertEquals("a1", vm.readerArticleId())
+    }
+
+    @Test
+    fun aFirstSelectionFoundTombstonedLeavesTheReaderOnThePlaceholder() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelWithHydrationOn(holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a1"))
+        assertEquals("header:a1", vm.readerArticleId())
+        driver.stampArticleDeleted("a1", deletedAt = 10L)
+        holding.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ReaderContent.None, vm.readerContent.value)
+        assertNull(vm.selectedArticleRow.value)
+    }
+
     @Test
     fun headerIsClearedBySelectFilterAndBySupersedingSelection() = runTest {
         val holding = HoldingDispatcher()

@@ -56,7 +56,15 @@ class ReaderContentTest {
     fun aHeaderForAnotherArticleOrAnAlreadyLoadedOneIsNotShown() {
         val loaded = article("a2")
         assertEquals(ReaderContent.Full(loaded), resolveReaderContent("a2", loaded, row("a2"), headerId = "a2"))
-        assertEquals(ReaderContent.None, resolveReaderContent("a3", null, row("a3"), headerId = "a2"))
+        assertEquals(ReaderContent.None, resolveReaderContent("a3", null, null, headerId = "a2"))
+    }
+
+    @Test
+    fun withNothingLoadedTheNewSelectionsHeaderShowsAtOnceNotThePlaceholder() {
+        val pending = row("a1")
+        assertEquals(ReaderContent.Header(pending), resolveReaderContent("a1", null, pending, headerId = null))
+        // A row for some other article is never borrowed.
+        assertEquals(ReaderContent.None, resolveReaderContent("a2", null, pending, headerId = null))
     }
 
     @Test
