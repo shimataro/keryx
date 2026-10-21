@@ -14,10 +14,8 @@ import kotlin.native.HiddenFromObjC
  *
  * `inline`, so the block may suspend. Captures every other [Throwable], as `runCatching` does.
  *
- * Deliberately not used where only an `Exception` should be caught (so an `Error` still escapes —
- * `FeedRepository.applyFavicon`, `runMaintenanceStep`), or where cancellation has side effects
- * of its own to run (`UpdateRepository`, `FeedFetcher`'s retry loop): those keep an explicit
- * `catch`.
+ * Not for every catch: where only an `Exception` should be caught (so an `Error` still escapes), or
+ * where cancellation has work of its own to do, write the `catch` out — and say why at that site.
  *
  * Public so `:composeApp` can use it too, but hidden from Swift: its `kotlin.Result` return type
  * has no useful Objective-C form, and the Apple app has no use for it.

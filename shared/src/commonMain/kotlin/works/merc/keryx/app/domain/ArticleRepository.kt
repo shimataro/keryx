@@ -306,11 +306,12 @@ class ArticleRepository(
                 byId[hit.id]?.let { ArticleSearchResult(article = it, titleMarked = hit.titleMarked) }
             }
         } catch (e: Exception) {
-            // `articles_fts` is raw SQL outside SQLDelight and is briefly DROPped during a sync's
-            // upload window (rebuilt right after). Querying it then throws a raw SQLite exception;
-            // absorb it here (DataSource/Repository boundary) so the transient "index unavailable"
-            // state surfaces as no hits instead of leaking a raw exception to the ViewModel — but
-            // leave a trace, so a search that stays empty has something to be investigated from.
+            // `articles_fts` is raw SQL outside SQLDelight, so a query against it can fail with a raw
+            // SQLite exception the schema never promised away: the table missing (before the first
+            // startup catch-up has created it) or damaged. Absorb it here (DataSource/Repository
+            // boundary) so an "index unavailable" state surfaces as no hits instead of leaking a raw
+            // exception to the ViewModel — but leave a trace, so a search that stays empty has
+            // something to be investigated from.
             Log.warn(TAG, "Search failed; showing no results", e)
             emptyList()
         }
