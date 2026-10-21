@@ -126,6 +126,29 @@ private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver 
     override fun close() = delegate.close()
 }
 
+/**
+ * Fails the first `UPDATE feeds SET favicon_url` it is asked to run — the write a refresh makes
+ * once its favicon lookup succeeds — and passes everything else through.
+ */
+private class FailFirstFaviconWriteDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    var failed = false
+        private set
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (!failed && sql.startsWith("UPDATE feeds SET favicon_url")) {
+            failed = true
+            error("simulated favicon write failure")
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
+}
+
 class FeedRepositoryTest {
 
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
@@ -1147,6 +1170,40 @@ class FeedRepositoryTest {
             now.addAndGet(1)
             repo.refreshAll()
             assertTrue(faviconRequests.get() > afterFirst, "looked up again once the interval has passed")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The favicon write is best-effort — a failure is logged and the refresh carries on — but it
+     * does not give up on the favicon: nothing records a miss for a lookup that found one, so the
+     * next refresh looks it up and stores it.
+     */
+    @Test
+    fun aFaviconWriteThatFailsIsRetriedOnTheNextRefresh(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FailFirstFaviconWriteDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith { request ->
+                    if (request.url.encodedPath == "/favicon.ico") respond("", HttpStatusCode.OK) else respond("", HttpStatusCode.NotFound)
+                },
+            )
+
+            val first = repo.refreshAll()
+
+            assertTrue(driver.failed, "the first favicon write must have been attempted and failed")
+            assertTrue(first.values.all { it is Result.Ok }, "a failed favicon write must not fail the refresh: $first")
+            assertEquals(null, db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+
+            repo.refreshAll()
+
+            assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
         } finally {
             driver.close()
         }
