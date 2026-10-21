@@ -9,6 +9,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -1001,6 +1002,61 @@ class FeedRepositoryTest {
             // Every feed's serially-applied write landed: each feed now holds its 2nd article (g2) too,
             // so nothing was lost when the concurrent fetches funneled into the sequential write phase.
             assertEquals(2 * n, db.articlesQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshAllAppliesFeedsThatHaveFetchedWhileASlowerFeedIsStillFetching(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            setupRepo.subscribeFeed("https://ex.com/slow")
+            setupRepo.subscribeFeed("https://ex.com/fast")
+            val slowFeedId = db.feedsQueries.getByUrl("https://ex.com/slow").executeAsOne().id
+            val fastFeedId = db.feedsQueries.getByUrl("https://ex.com/fast").executeAsOne().id
+            val releaseSlow = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                if (request.url.encodedPath == "/slow") releaseSlow.await()
+                respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+            })
+            fun articleCount(feedId: String) = db.articlesQueries.watchByFeed(feedId).executeAsList().size
+
+            val refresh = async(Dispatchers.Default) { repo.refreshAll() }
+            // The fast feed's new article lands while the slow feed's fetch is still held open —
+            // the refresh does not wait for every fetch before writing anything.
+            withTimeout(5_000) { while (articleCount(fastFeedId) < 2) delay(10) }
+            assertEquals(1, articleCount(slowFeedId))
+            assertFalse(refresh.isCompleted)
+
+            releaseSlow.complete(Unit)
+            val results = withTimeout(5_000) { refresh.await() }
+
+            assertEquals(2, articleCount(slowFeedId))
+            assertTrue(results.values.all { it is Result.Ok }, "both feeds should refresh Ok: $results")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshAllResultKeepsTheFeedListOrderWhateverOrderTheFetchesFinishIn(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            for (i in 1..4) setupRepo.subscribeFeed("https://ex.com/feed$i")
+            val feedList = setupRepo.feedsCoveredBy(ArticleFilter.All)
+            // Earlier feeds in the list finish later, so completion order is the reverse of it.
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                val index = request.url.encodedPath.removePrefix("/feed").toInt()
+                delay((5 - index) * 40L)
+                respond(RSS, HttpStatusCode.OK)
+            })
+
+            val results = withTimeout(10_000) { repo.refreshFeeds(feedList) }
+
+            assertEquals(feedList.map { it.id }, results.keys.toList())
         } finally {
             driver.close()
         }

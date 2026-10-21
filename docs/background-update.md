@@ -514,7 +514,7 @@ Every `feeds` write on the refresh path is also guarded on the value actually ch
 article-list query joins `feeds`, so SQLDelight re-runs it on any `feeds` write; a refresh where
 nothing changed now writes nothing and triggers no re-query.
 
-`FeedRepository.refreshAll` fetches feeds' network data **concurrently** (bounded to `REFRESH_FETCH_CONCURRENCY` simultaneous fetches), then applies each feed's DB writes **serially** in feed order. A large subscription list therefore refreshes in roughly the time of its slowest fetches rather than the sum of every fetch. DB writes stay single-threaded — the JVM SQLite driver opens a fresh connection per statement, so concurrent writes could contend — and each feed's articles are still committed one feed at a time, so they appear incrementally in the list as the refresh progresses.
+`FeedRepository.refreshAll` fetches feeds' network data **concurrently** (bounded to `REFRESH_FETCH_CONCURRENCY` simultaneous fetches), and applies each feed's DB writes **serially**, as soon as that feed's own fetch completes — so a slow feed never holds back the articles of the feeds that have already arrived. A large subscription list therefore refreshes in roughly the time of its slowest fetches rather than the sum of every fetch. DB writes stay single-threaded — one coroutine applies them all, since the JVM SQLite driver opens a fresh connection per statement and concurrent writes could contend — and each feed's articles are committed one feed at a time, so they appear incrementally in the list as the refresh progresses. The search index is brought up to date once, after every feed has been applied.
 
 ## Startup Tasks (`runStartupTasks` / `runAndroidStartupTasks`)
 

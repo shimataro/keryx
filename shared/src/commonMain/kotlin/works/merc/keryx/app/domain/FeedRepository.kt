@@ -2,11 +2,13 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -505,7 +507,7 @@ class FeedRepository(
      * Refreshes all feeds and collects the article-count result for each feed.
      *
      * Network fetching is performed concurrently with bounded concurrency, while database updates
-     * are applied in the original feed order.
+     * are applied serially as each feed's fetch completes — see [refreshFeeds].
      *
      * @return A map from feed ID to the result containing the number of newly processed articles.
      */
@@ -539,8 +541,9 @@ class FeedRepository(
 
     /**
      * Refreshes [feedList] (e.g. [feedsCoveredBy] the article list's current selection), fetching
-     * concurrently with bounded concurrency, then applying the DB writes serially in list order and
-     * indexing any new articles for search.
+     * concurrently with bounded concurrency while applying each feed's DB writes as soon as its own
+     * fetch completes — serially, from this one coroutine — and finally indexing any new articles
+     * for search.
      *
      * Pass rows freshly read from the DB (as [feedsCoveredBy] returns them) rather than a
      * long-lived UI snapshot, so a stale etag / URL is never used for the fetch.
@@ -549,26 +552,53 @@ class FeedRepository(
      * @return A map from feed ID to the result containing the number of newly processed articles.
      */
     suspend fun refreshFeeds(feedList: List<Feeds>): Map<String, Result<Int>> {
-        // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO
-        // DB writes — this is where the wall-clock win comes from vs. the old sequential loop.
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
-        val phases = coroutineScope {
-            feedList.map { feed ->
-                async(dispatcher) { feed to semaphore.withPermit { fetchFeed(feed) } }
-            }.awaitAll()
-        }
-        // Phase 2: apply DB writes + notifications serially, in the original feed order, so writes
-        // stay single-threaded. Each feed's upsertParsed still notifies watchAll, so articles from
-        // earlier feeds appear incrementally as the loop advances.
-        val result = LinkedHashMap<String, Result<Int>>()
+        // Unlimited, and sent to only after the permit is released: a fetch that finishes while the
+        // writer is busy applying another feed must free its permit for the next fetch rather than
+        // wait for the writer, or the writer's pace would cap the fetch concurrency.
+        val fetched = Channel<Pair<Feeds, FeedFetchPhase>>(Channel.UNLIMITED)
+        val results = HashMap<String, Result<Int>>(feedList.size)
         var anyHadArticles = false
-        for ((feed, phase) in phases) {
-            val outcome = applyFetch(feed, phase)
-            result[feed.id] = outcome.result
-            if (outcome.hadArticles) anyHadArticles = true
+        try {
+            coroutineScope {
+                // Network phase: every feed's fetch runs concurrently (bounded by the semaphore),
+                // with NO DB writes.
+                val fetches = feedList.map { feed ->
+                    launch(dispatcher) {
+                        val phase = semaphore.withPermit { fetchFeed(feed) }
+                        fetched.send(feed to phase)
+                    }
+                }
+                launch {
+                    fetches.joinAll()
+                    fetched.close()
+                }
+                // Apply phase: this coroutine alone applies each feed's writes + notifications, in
+                // the order the fetches complete, so writes stay single-threaded while a slow feed
+                // no longer holds back every other feed's articles. Each feed's upsert notifies
+                // watchAll, so articles appear as their feed lands.
+                for ((feed, phase) in fetched) {
+                    val outcome = applyFetch(feed, phase)
+                    results[feed.id] = outcome.result
+                    if (outcome.hadArticles) anyHadArticles = true
+                }
+            }
+        } catch (e: Exception) {
+            // Feeds applied before the failure stay committed; index them so they don't stay out of
+            // search until the next refresh. A cancellation (the whole refresh was abandoned) skips
+            // this O(articles) scan: the next hot-path indexMissing picks the rows up.
+            if (e !is CancellationException && anyHadArticles) {
+                try {
+                    ftsManager.indexMissing()
+                } catch (indexFailure: Exception) {
+                    e.addSuppressed(indexFailure)
+                }
+            }
+            throw e
         }
         if (anyHadArticles) ftsManager.indexMissing()
-        return result
+        // Keyed in feedList's order, as callers have always received it.
+        return feedList.associateTo(LinkedHashMap()) { it.id to results.getValue(it.id) }
     }
 
     /**
