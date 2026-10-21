@@ -31,21 +31,19 @@ struct ArticlePagerView: View {
         // background) until then.
         let selectedId = home.selectedArticleId
         let loaded = home.loadedArticle.flatMap { $0.id == selectedId ? $0 : nil }
-        let pages = pagerPages(selected: home.selectedArticleRow)
+        let pages = ReaderPagerPages.resolve(pagerRows: pager.rows, index: pager.index, selected: home.selectedArticleRow)
         TabView(selection: selectionBinding(pages: pages, selectedId: selectedId)) {
             // Plain Swift ids, so a body evaluation never reads a row through the Kotlin bridge.
             ForEach(pages.ids, id: \.self) { id in
                 let isSelected = id == selectedId
-                // `readerContents`' own rule, resolved per page: the selection's fully-loaded row
-                // wins over the held copy, which is what a page shows once swiped away from.
                 let cached = home.articleContents[id]
-                let own = isSelected ? loaded : nil
+                let source = ReaderPageSource.resolve(isSelected: isSelected, loaded: loaded, cached: cached)
                 ReaderPageView(
-                    row: own?.toReaderRow() ?? cached,
-                    revision: own.map(ObjectIdentifier.init) ?? cached.map(ObjectIdentifier.init),
+                    row: source.row,
+                    revision: source.revision,
                     // Each page names its own feed: a neighbour in All Feeds may belong to another one.
-                    feedName: (own?.feed_id ?? cached?.feed_id).flatMap { home.feedsById[$0]?.displayTitle() },
-                    feedFaviconUrl: (own?.feed_id ?? cached?.feed_id).flatMap { home.feedsById[$0]?.favicon_url },
+                    feedName: source.feedId.flatMap { home.feedsById[$0]?.displayTitle() },
+                    feedFaviconUrl: source.feedId.flatMap { home.feedsById[$0]?.favicon_url },
                     preferences: preferences
                 )
                 .tag(Optional(id))
@@ -59,25 +57,12 @@ struct ArticlePagerView: View {
         // Hydrates both neighbours as soon as the selection moves, so the page a swipe uncovers is
         // already there rather than loading as it slides in.
         .task(id: selectedId) {
-            for id in neighbourIds(of: selectedId, in: pages) where home.articleContents[id] == nil {
+            for id in pages.neighbourIds(of: selectedId) where home.articleContents[id] == nil {
                 home.viewModel.requestArticleContent(id: id)
             }
         }
         // A long reading session's bodies must not stay resident once the reader is gone.
         .onDisappear { home.viewModel.clearArticleContents() }
-    }
-
-    /// The pages the pager shows — `readerPages`' rule. The common case, a selection that is in
-    /// `pagerArticles`, is decided here from `pager.index`, sparing every body evaluation a round
-    /// trip of the whole list through the Kotlin bridge; only the fallback asks `readerPages`, for
-    /// the one-page list holding just the selection while it is not in the list (yet — before the
-    /// first emission — or any more), so the pager never clamps onto — and selects — another article.
-    private func pagerPages(selected: ArticleListRow?) -> ReaderPagerPages {
-        guard let selected, pager.index.indexById[selected.id] == nil else {
-            return ReaderPagerPages(rows: pager.rows, index: pager.index)
-        }
-        let rows = ReaderPagingKt.readerPages(pages: pager.rows, selected: selected)
-        return ReaderPagerPages(rows: rows, index: ReaderPagerIndex(rows: rows))
     }
 
     /// The pager's page follows the selection; a settled swipe is the one thing that moves the
@@ -92,20 +77,5 @@ struct ArticlePagerView: View {
             }
         )
     }
-
-    private func neighbourIds(of id: String?, in pages: ReaderPagerPages) -> [String] {
-        guard let id, let index = pages.indexById[id] else { return [] }
-        return [index - 1, index + 1].filter(pages.ids.indices.contains).map { pages.ids[$0] }
-    }
-}
-
-/// The pager's rows, their ids and each one's position — always from the same emission (or the
-/// same fallback list), so an index from `indexById` addresses `rows` and `ids` alike.
-private struct ReaderPagerPages {
-    let rows: [ArticleListRow]
-    let index: ReaderPagerIndex
-
-    var ids: [String] { index.ids }
-    var indexById: [String: Int] { index.indexById }
 }
 #endif

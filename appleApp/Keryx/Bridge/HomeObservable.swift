@@ -231,6 +231,12 @@ final class HomeObservable: ObservableAssignment {
         selecting { viewModel.selectPrevious() }
     }
 
+    /// Runs a selection and brings every selection-derived value up to date in the same turn.
+    ///
+    /// Not unit-tested here: it needs a live `HomeViewModel`, which `KeryxTests` has no seam for. What
+    /// it syncs from is covered where it is decided — `HomeViewModelTest` and `ReaderContentTest`
+    /// (`selectedArticleRow` / `readerContent` / `selectedArticleShownUnread`), and the pure rules
+    /// that turn those into what the views show by `ReaderPageSourceTests` and `KotlinValuesEqualTests`.
     private func selecting(_ select: () -> Void) {
         select()
         syncSelectedArticleShownUnread()

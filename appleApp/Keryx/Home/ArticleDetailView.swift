@@ -44,7 +44,7 @@ struct ArticleDetailView: View {
                 ArticlePagerView(home: home, preferences: preferences)
             }
             #else
-            let reader = readerPageInputs(home.readerContent)
+            let reader = ReaderPageInputs.resolve(home.readerContent)
             ReaderPageView(
                 row: reader.row,
                 header: reader.header,
@@ -79,16 +79,6 @@ struct ArticleDetailView: View {
     }
 
     #if os(macOS)
-    /// `HomeViewModel.readerContent` as `ReaderPageView`'s inputs: the loaded article's body, or —
-    /// while a newly selected article's body is held up past the grace period — its header alone.
-    private func readerPageInputs(_ content: ReaderContent) -> (row: ArticleReaderRow?, header: ArticleListRow?, revision: ObjectIdentifier?) {
-        switch onEnum(of: content) {
-        case .none: return (nil, nil, nil)
-        case .header(let header): return (nil, header.row, ObjectIdentifier(header.row))
-        case .full(let full): return (full.article.toReaderRow(), nil, ObjectIdentifier(full.article))
-        }
-    }
-
     private var feedName: String? { home.selectedFeedName }
     private var feedFaviconUrl: String? { home.selectedFeedFaviconUrl }
 
