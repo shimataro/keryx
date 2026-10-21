@@ -311,9 +311,12 @@ fun ArticleListPane(
         // word, or "a b" where every word is too short, count as no terms.
         val hasValidTerms = searchTerms(query).isNotEmpty()
 
-        // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's own
-        // scroll-to-selection effect for the base list).
-        LaunchedEffect(revealRequest, results) {
+        // Keep the keyboard-selected result in view — on the same rule as ArticleListPaneContent's
+        // own effect for the base list: when the user selects (revealRequest) and when results first
+        // arrive, never because their contents changed. A background write re-running the search,
+        // or a selection handed back after a tombstone, must not pull the list to the selection.
+        // `results` is read through its State delegate, so the effect sees the latest list.
+        LaunchedEffect(revealRequest, results.isNotEmpty()) {
             val index = results.indexOfFirst { it.article.id == selectedId }
             if (index !in results.indices) return@LaunchedEffect
             searchListState.scrollToIndexIfNeeded(index)

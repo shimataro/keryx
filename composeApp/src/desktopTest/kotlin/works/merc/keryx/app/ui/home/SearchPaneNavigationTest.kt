@@ -12,11 +12,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -26,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import org.koin.compose.KoinApplication
 import org.koin.dsl.koinConfiguration
 import org.koin.dsl.module
+import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.insertFeed
@@ -268,6 +273,53 @@ class SearchPaneNavigationTest {
      * pane then rendered `focused = false` on the very next frame, and ↑/↓ (routed through
      * `keyboardPaneFor`) stopped moving the just-tapped selection at all.
      */
+    /**
+     * Search results re-run on background writes (a refresh, a sync, the read write a selection
+     * makes), and a selection handed back after a tombstone changes the result list too. Neither is
+     * the user choosing anything, so the list must stay where the user scrolled it rather than being
+     * pulled back to the selected row: it scrolls to the selection only when the user selects.
+     */
+    @Test
+    fun searchResultsChangingDoNotPullTheListBackToTheSelection() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        repeat(40) { db.insertArticleRow("a%02d".format(it), "f1", createdAt = it.toLong(), searchText = "alpha beta") }
+        useHomeViewModel(driver, db) { fixture ->
+            val vm = fixture.vm
+            vm.setSearchBarVisible(true)
+            vm.setSearchQuery("alpha")
+            var focusedPane by mutableStateOf(HomePane.ArticleList)
+            setContent { DualHomeTestHost(vm, focusedPane, { focusedPane = it }) }
+            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 40 }
+            waitForIdle()
+            val ids = vm.searchResults.value.map { it.article.id }
+            val (first, last) = ids.first() to ids.last()
+
+            // Select the last result, far down the list: the selection scrolls itself into view...
+            vm.selectArticle(vm.searchResults.value.last().article)
+            waitForIdle()
+            mainClock.advanceTimeBy(2_000)
+            waitForIdle()
+            onAllNodesWithTag("article-$last").assertCountEquals(1)
+            onAllNodesWithTag("article-$first").assertCountEquals(0)
+            // ...then the user scrolls back to the top, away from the selection.
+            onNode(hasScrollAction()).performScrollToIndex(0)
+            waitForIdle()
+            onAllNodesWithTag("article-$first").assertCountEquals(1)
+            onAllNodesWithTag("article-$last").assertCountEquals(0)
+
+            // A new matching article changes the results (the search re-runs on the write).
+            db.insertArticleRow("a99", "f1", createdAt = 99L, searchText = "alpha beta")
+            runBlocking { FtsManager(driver).indexMissing() }
+            waitUntil(timeoutMillis = 10_000) { vm.searchResults.value.size == 41 }
+            waitForIdle()
+
+            // The list stayed at the top: the selected row did not pull it back down.
+            onAllNodesWithTag("article-$first").assertCountEquals(1)
+            onAllNodesWithTag("article-$last").assertCountEquals(0)
+        }
+    }
+
     @Test
     fun articleRowSelectionAtDualLayoutDoesNotAdvanceFocusedPaneToArticleDetail() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
@@ -291,11 +343,11 @@ class SearchPaneNavigationTest {
 private const val ARTICLE_DETAIL_STUB_TAG = "article-detail-stub"
 
 /** Inserts an article row for the DB-backed test above (mirrors ArticleListPaneTest.kt's own). */
-private fun KeryxDatabase.insertArticleRow(id: String, feedId: String, createdAt: Long) {
+private fun KeryxDatabase.insertArticleRow(id: String, feedId: String, createdAt: Long, searchText: String = "") {
     articlesQueries.insert(
         id = id, feed_id = feedId, guid = id, url = "https://article/$id", title = "Title $id",
         summary = null, content = null, author = null, published_at = null, thumbnail_url = null,
         is_read = 0L, read_at = null, is_starred = 0L, starred_at = null, cached_at = 0L,
-        search_text = "", updated_at = 0L, created_at = createdAt,
+        search_text = searchText, updated_at = 0L, created_at = createdAt,
     )
 }
