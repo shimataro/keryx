@@ -45,7 +45,8 @@
                   NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。
                   SelectionReadIntents——選択した記事の本文の読み込み中に行った、既読・未読の明示的な操作の記録（その選択の
                   暗黙の既読より優先させるため）。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
-                  ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
+                  ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。ReaderContent——単一（非ページャ）のリーダーが表示するもの
+                  （none / header-first / full）と、選択ごとの操作がすべて対象にする選択行。両 UI が同じ判断を使う。AddFeedController——購読追加ダイアログの
                   ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
                   サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
                   あるかどうか。NameValidation——フォルダ・タグの新規作成/リネームダイアログが共有する
@@ -76,7 +77,8 @@
                   リーダーが共有）、RelativeTime（relativeTimeOf——タイムスタンプの経過時間を
                   now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）、
                   ManualSync（Home と設定の両方が依存する「今すぐ同期」の契約。実装は
-                  `settings/CloudSyncController`）。
+                  `settings/CloudSyncController`）、DerivedStateFlow（読むたびに他の StateFlow から計算する読み取り専用の
+                  StateFlow。入力とずれた値が観測されることがない。HomeViewModel・CloudSyncController・OpmlTransferController が使う）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
@@ -558,8 +560,9 @@ commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の
 両隣は実際にマウントされた `WebView` であり、それはページャ自身の item content ではなく
 `ArticleWebViewCarousel` 経由で描画される（理由は下記）。`PaneLayout.Triple`（デスクトップの全ウインドウと、
 横持ちの大型タブレット）は上で述べた単一の無条件コンポーズのリーダーのままで、2 つの形態の分岐は
-`readerPaging != null && article != null && isTouchPrimary` の 3 つすべてを見る——`readerPaging`
-単独ではない。`article != null` があるのは、paging データはあるがまだ何も選択されていない
+`readerPaging != null && selectedRow != null && isTouchPrimary` の 3 つすべてを見る——`readerPaging`
+単独ではない。`selectedRow`（`HomeViewModel.selectedArticleRow`。選択した瞬間に最新になる）が null でないことを
+見るのは、paging データはあるがまだ何も選択されていない
 `PaneLayout.Dual` のリーダーを、ページャがたまたま最後に表示していた記事のままにせず、
 プレースホルダの HTML に留めるため。`isTouchPrimary` をここでもう一度見ているのは、
 `ArticleDetailPane`（ViewModel 側のラッパー）がタッチ主体のプラットフォームでしか
@@ -571,7 +574,7 @@ commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の
 `ArticleSwipeNavigation` と `ArticleReaderPaging` は同じ「null = `PaneLayout.Triple`」のシグナル
 だが、前者が意図的に安定した `remember` 済みのコールバック束であるのに対し後者は記事のロードに
 応じて変化するデータを運ぶため、別パラメータに分けてある——`ArticleDetailPane` は自身の組み立てを
-`remember(pages, contents, article)` で包み、記事の書き込みのたびにリーダー全体を再コンポーズ
+`remember(pages, contents, selectedRow, loaded)` で包み、記事の書き込みのたびにリーダー全体を再コンポーズ
 しないようにしている。シグナルが `onNavigateUp` ではなく `swipeNavigation` なのは、
 `PaneLayout.Dual` ではリーダーに戻るボタンが無い（`onNavigateUp` が `null`）がスワイプは有効で
 なければならないため（下記「Home's adaptive pane layout」参照）。

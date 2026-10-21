@@ -64,6 +64,7 @@ import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.awaitCondition
 import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
@@ -3355,9 +3356,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         vm.refreshFeed("f1")
-        kotlinx.coroutines.withContext(Dispatchers.Default) {
-            kotlinx.coroutines.withTimeout(5_000) { while (sentEtags.isEmpty() || !vm.activity.value.idle) kotlinx.coroutines.delay(10) }
-        }
+        awaitCondition { sentEtags.isNotEmpty() && vm.activity.value.idle }
 
         assertEquals(listOf<String?>("etag-current"), sentEtags.toList())
     }
@@ -3374,10 +3373,10 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         vm.refreshFeed("f1")
-        kotlinx.coroutines.withContext(Dispatchers.Default) {
-            kotlinx.coroutines.withTimeout(5_000) { while (!vm.activity.value.idle) kotlinx.coroutines.delay(10) }
-            kotlinx.coroutines.delay(100)
-        }
+        // The launched refresh runs only once the test scheduler is pumped; before that the activity
+        // counter is still idle and a wait on it would pass without anything having run.
+        testScheduler.advanceUntilIdle()
+        awaitCondition { vm.activity.value.idle }
 
         assertEquals(0, fetches.get())
     }

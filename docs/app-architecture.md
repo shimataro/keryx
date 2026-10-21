@@ -49,7 +49,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the explicit read/unread actions taken while a selection's body is still loading, so they win
                   over that selection's implicit read; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
-                  the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
+                  the reader pager's page/selection rules; ReaderContent — what the single (non-pager) reader
+                  shows (none / header-first / full) and the selected row every per-selection action acts on,
+                  decided once for both UIs; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
                   which warning/error still needs announcing in a transient surface with no queue of
                   its own, e.g. Android's foreground Snackbar; NameValidation — the folder/tag
@@ -86,7 +88,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
                   into now/minutes/hours/days/absolute, shared by both apps' notification center
                   rows), ManualSync (the "Sync now" contract Home and Settings both depend on,
-                  implemented by `settings/CloudSyncController`). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  implemented by `settings/CloudSyncController`), DerivedStateFlow (a read-only StateFlow computed from
+                  other state flows on every read, so a derived value can never be observed out of step with its
+                  inputs — used by HomeViewModel, CloudSyncController and OpmlTransferController). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -562,8 +566,9 @@ pages either side of the one on screen are real, mounted `WebView`s, rendered th
 `ArticleWebViewCarousel` rather than the pager's own item content (see below for why).
 `PaneLayout.Triple` (every
 desktop window, and a wide tablet in landscape) keeps the single unconditionally-composed reader
-described above; the branch between the two forms checks `readerPaging != null && article != null
-&& isTouchPrimary` — all three, not `readerPaging` alone. `article != null` keeps a `PaneLayout.Dual`
+described above; the branch between the two forms checks `readerPaging != null && selectedRow != null
+&& isTouchPrimary` — all three, not `readerPaging` alone. `selectedRow != null` (`HomeViewModel.selectedArticleRow`,
+current the moment a selection is made) keeps a `PaneLayout.Dual`
 reader that has paging data but nothing selected yet on its HTML placeholder, rather than resting
 the pager on whatever page it last happened to show; `isTouchPrimary` is checked again at this level
 even though `ArticleDetailPane` (the ViewModel-facing wrapper) already only builds `readerPaging` on
@@ -575,7 +580,7 @@ caller above it.
 `ArticleSwipeNavigation` and `ArticleReaderPaging` are the same "null means `PaneLayout.Triple`"
 signal, kept as separate parameters because the first is a deliberately stable, `remember`ed
 callback bundle while the second carries data that changes as articles load — `ArticleDetailPane`
-wraps its own construction in `remember(pages, contents, article)` so building it does not
+wraps its own construction in `remember(pages, contents, selectedRow, loaded)` so building it does not
 recompose the whole reader on every article write. The signal is `swipeNavigation`, not
 `onNavigateUp` — at `PaneLayout.Dual` the reader has no back control (`onNavigateUp` is `null`) but
 swipe must still work there (see "Home's adaptive pane layout" below).
@@ -964,7 +969,7 @@ same value: `toggleReadSelected` acts on the cursor's article and sets it to the
 shows, so a tap during that window can never land on the previous article, and a second tap undoes the first.
 
 Everything else about the selection follows the cursor too, through two values `HomeViewModel` derives from
-it (both `DerivedStateFlow`s, so neither can be read out of step with the cursor):
+it (both `DerivedStateFlow`s — `presentation/DerivedStateFlow.kt` — so neither can be read out of step with the cursor):
 `selectedArticleId` (the cursor itself — what the article list highlights and scrolls to, what the narrow
 layouts' pager follows, and what a URL copy's ✓ is matched against) and `selectedArticleRow` (the loaded
 article once it is the cursor's, otherwise the list row the selection was made with, carrying every optimistic

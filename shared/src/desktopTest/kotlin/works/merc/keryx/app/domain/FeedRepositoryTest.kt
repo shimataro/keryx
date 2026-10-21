@@ -1267,6 +1267,24 @@ class FeedRepositoryTest {
         }
     }
 
+    /** The guard `refreshFeed(feedId)` relies on: no fetch for a feed that is gone or was never there. */
+    @Test
+    fun refreshFeedByIdOfAnUnsubscribedOrUnknownFeedReturnsNullWithoutFetching(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("gone", deletedAt = 5L)
+            val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+            val repo = newRepo(db, driver, fetcherWith { fetches.incrementAndGet(); respond(RSS, HttpStatusCode.OK) })
+
+            assertNull(repo.refreshFeedById("gone"))
+            assertNull(repo.refreshFeedById("missing"))
+
+            assertEquals(0, fetches.get())
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun aFaviconResolvedAfterTheFeedWasUnsubscribedIsNotWritten(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
