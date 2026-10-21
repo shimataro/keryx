@@ -3348,26 +3348,32 @@ class HomeViewModelTest {
         assertEquals(listOf("a1"), vm.articles.value.map { it.id })
     }
 
+    /**
+     * A UI decides "still catching up" from this flag, so it must be a flow it collects: the last
+     * change here (back to false) is one the UI may never see rows for, and only the flag's own
+     * emission can wake it.
+     */
     @Test
-    fun hasArticleRowsNowFollowsTheListTheViewModelHolds() = runTest {
+    fun articleListHasRowsEmitsEveryChangeIncludingTheLastBackToFalse() = runTest {
         db.insertFeed("f1")
+        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
+        // Held, so the article list has not been built when the collector attaches.
         val holding = HoldingDispatcher().apply { hold() }
         val vm = newViewModel(dispatcher = holding)
+        val seen = mutableListOf<Boolean>()
+        backgroundScope.launch(Dispatchers.Unconfined) { vm.articleListHasRows.collect { seen += it } }
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
-        // The article list has not been built yet, so there is nothing to report.
-        assertEquals(false, vm.hasArticleRowsNow())
-
-        db.insertArticle("a1", "f1", isRead = 0L, publishedAt = 1L, createdAt = 1L)
         holding.release()
         testScheduler.advanceUntilIdle()
-        assertEquals(true, vm.hasArticleRowsNow())
-        assertEquals(vm.articles.value.isNotEmpty(), vm.hasArticleRowsNow())
+        assertEquals(true, vm.articleListHasRows.value)
 
         vm.selectFilter(ArticleFilter.Starred)
         testScheduler.advanceUntilIdle()
-        // Nothing starred: the list the view model holds is empty again.
-        assertEquals(false, vm.hasArticleRowsNow())
+
+        // false until the list loaded, true with rows, and false again for the empty Starred list.
+        assertEquals(listOf(false, true, false), seen)
+        assertEquals(false, vm.articleListHasRows.value)
     }
 
     @Test

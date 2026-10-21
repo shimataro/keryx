@@ -27,13 +27,13 @@ class ArticleListBodyTest {
 
     @Test
     fun aUiShowingNoRowsWhileTheViewModelHoldsSomeIsStillCatchingUp() {
-        assertEquals(true, articleListCatchingUp(displayedRows = 0, snapshotHasRows = true))
+        assertEquals(true, articleListCatchingUp(displayedRows = 0, viewModelHasRows = true))
     }
 
     @Test
     fun aUiShowingRowsOrBeingGenuinelyEmptyIsNotCatchingUp() {
-        assertEquals(false, articleListCatchingUp(displayedRows = 3, snapshotHasRows = true))
-        assertEquals(false, articleListCatchingUp(displayedRows = 0, snapshotHasRows = false))
-        assertEquals(false, articleListCatchingUp(displayedRows = 3, snapshotHasRows = false))
+        assertEquals(false, articleListCatchingUp(displayedRows = 3, viewModelHasRows = true))
+        assertEquals(false, articleListCatchingUp(displayedRows = 0, viewModelHasRows = false))
+        assertEquals(false, articleListCatchingUp(displayedRows = 3, viewModelHasRows = false))
     }
 }

@@ -111,6 +111,7 @@ class HomeViewModel(
     // "no feeds".
     private val hasFeeds = MutableStateFlow<Boolean?>(null)
     private val articlesLoaded = MutableStateFlow(false)
+    private val _articleListHasRows = MutableStateFlow(false)
 
     // null until the first DB emission lands; every public view of it reads that as an empty list.
     // flowOn directly upstream of stateIn, as for the article list: stateIn fuses it into its own
@@ -421,7 +422,10 @@ class HomeViewModel(
         }
             // Before flowOn, not after: stateIn fuses a flowOn directly upstream of it into its own
             // coroutine, and any operator in between would put a channel hop back.
-            .onEach { articlesLoaded.value = true }
+            .onEach {
+                articlesLoaded.value = true
+                _articleListHasRows.value = it.isNotEmpty()
+            }
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
@@ -432,11 +436,13 @@ class HomeViewModel(
     )
 
     /**
-     * Whether the article list the ViewModel holds right now has any rows — the answer a UI that has not
-     * yet received them through [articles] needs, to tell "still catching up" from "no articles"
-     * ([articleListCatchingUp]). Reads the latest value; O(1).
+     * Whether the article list the ViewModel holds has any rows — a flag a UI collects alongside
+     * [articles], so it can tell "still catching up" from "no articles" ([articleListCatchingUp]).
+     * A flow rather than a call that reads the current value: a UI must recompose when this changes,
+     * and a value read in passing never makes it — the last change (to `false`, after rows that
+     * never reached the UI) would leave the UI blank with no later emission to wake it.
      */
-    fun hasArticleRowsNow(): Boolean = articlesSnapshot.value?.isNotEmpty() == true
+    val articleListHasRows: StateFlow<Boolean> = _articleListHasRows.asStateFlow()
 
     /**
      * What the article list shows in place of its rows before and without them — see

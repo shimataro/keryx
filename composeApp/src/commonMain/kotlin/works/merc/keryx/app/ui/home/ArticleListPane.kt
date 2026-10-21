@@ -295,12 +295,13 @@ fun ArticleListPane(
     if (!searchActive) {
         val baseArticles by vm.articles.collectAsState()
         val body by vm.articleListBody.collectAsState()
+        val viewModelHasRows by vm.articleListHasRows.collectAsState()
         articles = baseArticles
         listState = baseListState
         branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = onAddFeedClick
         hasNoFeeds = body == ArticleListBody.NoFeeds
-        loading = body == ArticleListBody.Pending || articleListCatchingUp(baseArticles.size, vm.hasArticleRowsNow())
+        loading = body == ArticleListBody.Pending || articleListCatchingUp(baseArticles.size, viewModelHasRows)
         sortEnabled = true
         titleMarkedById = null
         emptyContent = null

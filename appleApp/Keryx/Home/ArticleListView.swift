@@ -355,10 +355,11 @@ struct ArticleListView: View {
             searchContent
         } else if displayedRows.isEmpty {
             // Nothing while the rows are still on their way: being built, or held by the view model
-            // but not yet received here (`articleListCatchingUp`).
+            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
+            // view is woken whichever way it settles).
             if home.articleRowsBuilding
                 || ArticleListModelKt.articleListCatchingUp(
-                    displayedRows: Int32(displayedRows.count), snapshotHasRows: home.viewModel.hasArticleRowsNow()
+                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
                 ) {
                 headed(Color.clear)
             } else {
