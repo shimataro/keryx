@@ -12,6 +12,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -68,6 +69,7 @@ import works.merc.keryx.app.platform.UnrestrictedNetworkConditionMonitor
 import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.singleProviderCloudSession
+import works.merc.keryx.app.testThreadDispatcher
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -164,6 +166,9 @@ class CloudSyncControllerTest {
     // them all (not just the latest) so tearDown() can cancel every one, same as createdControllers.
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
 
+    /** Thread-backed dispatchers a test created ([testThreadDispatcher]), closed in [tearDown]. */
+    private val testDispatchers = mutableListOf<ExecutorCoroutineDispatcher>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -184,6 +189,8 @@ class CloudSyncControllerTest {
         }
         createdControllers.clear()
         createdSyncScopes.clear()
+        testDispatchers.forEach { it.close() }
+        testDispatchers.clear()
         Dispatchers.resetMain()
         driver.close()
         File(dir).deleteRecursively()
@@ -417,16 +424,16 @@ class CloudSyncControllerTest {
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion below — the controller's
-    // collector runs on the standalone UnconfinedTestDispatcher installed as Main, and the sync on a
-    // real Dispatchers.Default thread, neither on runTest's scheduler, so both the true and the false
-    // side of the transition are polled with real wall-clock waits.
+    // collector runs on the standalone UnconfinedTestDispatcher installed as Main, and the sync's
+    // delay resumes on the coroutines' real timer thread, neither on runTest's scheduler, so both the
+    // true and the false side of the transition are polled with real wall-clock waits.
     @Test
     fun syncingMirrorsActivityCenter() {
         val activityCenter = ActivityCenter()
         val controller = newController(activityCenter = activityCenter)
         assertFalse(controller.syncing.value)
 
-        val job = CoroutineScope(Dispatchers.Default).launch {
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
             activityCenter.trackSync { delay(200) }
         }
 
@@ -447,7 +454,7 @@ class CloudSyncControllerTest {
     fun syncingReflectsActivityCenterAcrossAFullCycleEvenWhenAlreadyRunningAtConstruction() {
         val activityCenter = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
-        val job = CoroutineScope(Dispatchers.Default).launch {
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
             activityCenter.trackSync { gate.await() }
         }
         awaitConditionBlocking { activityCenter.activity.value.syncing }
@@ -781,7 +788,7 @@ class CloudSyncControllerTest {
         assertTrue(controller.canSyncNow.value)
 
         val gate = CompletableDeferred<Unit>()
-        val job = CoroutineScope(Dispatchers.Default).launch {
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
             activityCenter.trackSync { gate.await() }
         }
         awaitConditionBlocking { !controller.idle.value }
@@ -828,7 +835,7 @@ class CloudSyncControllerTest {
         val controller = newController(
             tokenStorage = tokenStorage,
             syncCloudProvider = { GatedCloudStorage(gate) },
-            dispatcher = Dispatchers.Default,
+            dispatcher = testThreadDispatcher("cloud-sync-controller-test").also { testDispatchers += it },
         )
         assertFalse(controller.syncing.value)
 

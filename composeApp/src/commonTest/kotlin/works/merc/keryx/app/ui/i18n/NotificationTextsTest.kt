@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.error_cloud_auth
@@ -15,8 +16,13 @@ import works.merc.keryx.app.resources.error_sync_conflict
 import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.notification_app_translocated
+import works.merc.keryx.app.resources.notification_app_translocated_detail
+import works.merc.keryx.app.resources.notification_refresh_failed
+import works.merc.keryx.app.resources.notification_refresh_failed_detail
 import works.merc.keryx.app.resources.notification_token_storage_fallback
+import works.merc.keryx.app.resources.notification_token_storage_fallback_detail
 import works.merc.keryx.app.resources.notification_token_storage_not_persisted
+import works.merc.keryx.app.resources.notification_token_storage_not_persisted_detail
 import works.merc.keryx.app.resources.settings_import_failed
 import works.merc.keryx.app.resources.settings_import_success
 import works.merc.keryx.app.resources.update_available_notification
@@ -75,5 +81,14 @@ class NotificationTextsTest {
         assertEquals(getString(Res.string.notification_token_storage_fallback), resolveNotificationText(NotificationText.TokenStorageFallback))
         assertEquals(getString(Res.string.notification_token_storage_not_persisted), resolveNotificationText(NotificationText.TokenStorageNotPersisted))
         assertEquals(getString(Res.string.notification_app_translocated), resolveNotificationText(NotificationText.AppTranslocated))
+        assertEquals(getString(Res.string.notification_refresh_failed), resolveNotificationText(NotificationText.RefreshFailed))
+    }
+
+    @Test
+    fun infoDialogTextsResolveTheirDetailString() = runTest {
+        assertEquals(getString(Res.string.notification_token_storage_fallback_detail), resolveInfoDialogText(InfoDialogText.TOKEN_STORAGE_FALLBACK))
+        assertEquals(getString(Res.string.notification_token_storage_not_persisted_detail), resolveInfoDialogText(InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED))
+        assertEquals(getString(Res.string.notification_app_translocated_detail), resolveInfoDialogText(InfoDialogText.APP_TRANSLOCATED))
+        assertEquals(getString(Res.string.notification_refresh_failed_detail), resolveInfoDialogText(InfoDialogText.REFRESH_FAILED))
     }
 }

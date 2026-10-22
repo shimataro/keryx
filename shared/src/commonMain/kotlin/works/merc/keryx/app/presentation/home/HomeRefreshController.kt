@@ -11,8 +11,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.ActivityCenter
-import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
 import works.merc.keryx.app.domain.SyncTrigger
 
@@ -36,7 +36,6 @@ internal class HomeRefreshController(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
     private val runner: RefreshCycleRunner,
-    private val feedRepository: FeedRepository,
     private val activityCenter: ActivityCenter,
     private val currentFilter: () -> ArticleFilter,
     private val retrimPins: () -> Unit,
@@ -55,10 +54,32 @@ internal class HomeRefreshController(
      */
     val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> = _pullRefreshingFilters.asStateFlow()
 
-    /** Refreshes one feed, by id — see [FeedRepository.refreshFeedById]. */
+    private val _manualRefreshStatus = MutableStateFlow<ManualRefreshStatus>(ManualRefreshStatus.Idle)
+
+    /**
+     * What the refreshes started here are doing — see [ManualRefreshStatus]. Updated with
+     * [MutableStateFlow.update], since a cycle starts on [dispatcher] rather than on [scope].
+     */
+    val manualRefreshStatus: StateFlow<ManualRefreshStatus> = _manualRefreshStatus.asStateFlow()
+
+    /**
+     * The [ManualRefreshStatus.Finished.generation] source. A plain var: every end is counted from a
+     * `finally` running on [scope], which is Main-confined.
+     */
+    private var endCount = 0L
+
+    /** Refreshes one feed, by id — see [RefreshCycleRunner.refreshFeed]. */
     fun refreshFeed(feedId: String) {
         scope.launch {
-            withContext(dispatcher) { activityCenter.trackFeedRefresh { feedRepository.refreshFeedById(feedId) } }
+            _manualRefreshStatus.update { it.started() }
+            var outcome: RefreshOutcome? = null
+            try {
+                outcome = withContext(dispatcher) { runner.refreshFeed(feedId) }
+            } finally {
+                // Numbered outside update(), so a retried update stamps the same generation.
+                val generation = ++endCount
+                _manualRefreshStatus.update { it.ended(outcome, generation) }
+            }
         }
     }
 
@@ -109,7 +130,22 @@ internal class HomeRefreshController(
      */
     private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
         retrimPins()
-        val outcome = withContext(dispatcher) { runner.runIfIdle(filter, SyncTrigger.MANUAL) }
+        // A cycle that never starts (busy, or nothing to refresh) leaves the status alone.
+        var started = false
+        var outcome: CycleOutcome? = null
+        try {
+            outcome = withContext(dispatcher) {
+                runner.runIfIdle(filter, SyncTrigger.MANUAL) {
+                    started = true
+                    _manualRefreshStatus.update { it.started() }
+                }
+            }
+        } finally {
+            if (started) {
+                val generation = ++endCount
+                _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh, generation) }
+            }
+        }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
         if (outcome is CycleOutcome.Ran) retrimPins()

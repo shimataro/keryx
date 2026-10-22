@@ -165,6 +165,10 @@ final class HomeObservable: ObservableAssignment {
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast: TransientToastState
+    /// The toolbar status area's refresh status — "checking", then the result — for the refreshes the
+    /// user started, fed from `manualRefreshStatus` (`HeldRefreshStatus`). iOS only — macOS keeps its
+    /// spinning Refresh button.
+    let refreshStatus = HeldRefreshStatus()
     #endif
 
     /// How an in-app copy confirmation is delivered — see `ArticleUrlCopyConfirmation`.
@@ -350,12 +354,18 @@ final class HomeObservable: ObservableAssignment {
         async let t33: () = observeSelectedArticleShownUnread()
         async let t34: () = observeArticleListBody()
         async let t35: () = observeArticleListHasRows()
+        #if os(iOS)
+        async let t36: () = observeManualRefreshStatus()
+        #endif
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
             t31, t32, t33, t34, t35
         )
+        #if os(iOS)
+        await t36
+        #endif
     }
 
     private func observeFeeds() async {
@@ -660,6 +670,25 @@ final class HomeObservable: ObservableAssignment {
     private func observeActivity() async {
         for await v in viewModel.activity { assignIfChanged(\.activity, v) }
     }
+
+    #if os(iOS)
+    /// The refreshes the user started, for the toolbar status (`HeldRefreshStatus`).
+    private func observeManualRefreshStatus() async {
+        for await status in viewModel.manualRefreshStatus {
+            switch onEnum(of: status) {
+            case .idle:
+                refreshStatus.update(nil)
+            case .checking:
+                refreshStatus.update(.checking)
+            case .finished(let finished):
+                let outcome = finished.outcome
+                refreshStatus.update(
+                    RefreshStatus.result(newArticleCount: Int(outcome.newArticleCount), unreachable: outcome.unreachable)
+                )
+            }
+        }
+    }
+    #endif
 
     /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a
     /// selection can still be queued on the main actor after `selecting` has synced the new one, and would

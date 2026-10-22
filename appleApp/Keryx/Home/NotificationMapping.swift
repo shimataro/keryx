@@ -13,19 +13,22 @@ func notificationText(_ text: NotificationText) -> String {
     case .tokenStorageFallback: return L("notification_token_storage_fallback")
     case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted")
     case .appTranslocated: return L("notification_app_translocated")
+    case .refreshFailed: return L("notification_refresh_failed")
     case .updateAvailable(let t): return LF("update_available_notification", t.version)
     case .updateReadyToInstall(let t): return LF("update_ready_notification", t.version)
     }
 }
 
 /// Localizes an `InfoDialogText` — the explanatory detail behind a `ShowInfoDialog` action. Not a
-/// sealed-interface type (no `onEnum(of:)`) — it's a plain, argument-less Kotlin enum, so its cases
-/// bridge as static properties rather than Swift `enum` cases.
+/// sealed-interface type (no `onEnum(of:)`) — it's a plain, argument-less Kotlin enum, which SKIE
+/// bridges as a frozen Swift `enum`, so the `switch` is exhaustive and a new case fails to compile here.
 func infoDialogText(_ text: InfoDialogText) -> String {
-    if text == .appTranslocated { return L("notification_app_translocated_detail") }
-    if text == .tokenStorageFallback { return L("notification_token_storage_fallback_detail") }
-    if text == .tokenStorageNotPersisted { return L("notification_token_storage_not_persisted_detail") }
-    return L("error_generic")
+    switch text {
+    case .appTranslocated: return L("notification_app_translocated_detail")
+    case .tokenStorageFallback: return L("notification_token_storage_fallback_detail")
+    case .tokenStorageNotPersisted: return L("notification_token_storage_not_persisted_detail")
+    case .refreshFailed: return L("notification_refresh_failed_detail")
+    }
 }
 
 /// Localizes an `ErrorKind` — shared between the notification center and the Cloud Sync settings

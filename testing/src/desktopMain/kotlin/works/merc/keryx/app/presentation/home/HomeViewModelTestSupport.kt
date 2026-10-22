@@ -208,7 +208,7 @@ fun newHomeViewModel(
         )
         val refreshCycleRunner = RefreshCycleRunner(
             activityCenter, feedRepository, syncRepository, cloudSession, NewArticleNotifier(),
-            settingsRepository, FakeNotificationMessages(),
+            settingsRepository, FakeNotificationMessages(), NotificationCenter(), clock,
         )
         // The controller this fixture creates (and so must tear down) when the caller passed none.
         var ownedManualSync: CloudSyncController? = null
