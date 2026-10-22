@@ -43,6 +43,20 @@ class LocalSettingsStoreTest {
     }
 
     @Test
+    fun faviconMissedAtDefaultsToEmptyForAFileWrittenBeforeItExisted() {
+        FileIO.writeText(FileIO.join(dir, "local_settings.json"), """{"themeMode":"dark"}""")
+        val loaded = store.load()
+        assertEquals("dark", loaded.themeMode)
+        assertEquals(emptyMap(), loaded.faviconMissedAt)
+    }
+
+    @Test
+    fun faviconMissedAtRoundTrips() {
+        store.save(LocalSettings(faviconMissedAt = mapOf("f1" to 1_000L, "f2" to 2_000L)))
+        assertEquals(mapOf("f1" to 1_000L, "f2" to 2_000L), store.load().faviconMissedAt)
+    }
+
+    @Test
     fun collapsedFolderIdsDefaultsToEmptySet() {
         assertEquals(emptySet(), store.load().collapsedFolderIds)
     }
@@ -62,6 +76,20 @@ class LocalSettingsStoreTest {
     fun expandedTagIdsRoundTrips() {
         store.save(LocalSettings(expandedTagIds = setOf("t1", "t2")))
         assertEquals(setOf("t1", "t2"), store.load().expandedTagIds)
+    }
+
+    @Test
+    fun syncOnMeteredNetworkDefaultsToOffAndRoundTrips() {
+        assertFalse(store.load().syncOnMeteredNetwork)
+        store.save(LocalSettings(syncOnMeteredNetwork = true))
+        assertTrue(store.load().syncOnMeteredNetwork)
+    }
+
+    @Test
+    fun loadingOldSettingsFileWithoutSyncOnMeteredNetworkKeyDefaultsToOff() {
+        FileIO.writeText(FileIO.join(dir, "local_settings.json"), """{"themeMode":"dark"}""")
+
+        assertFalse(store.load().syncOnMeteredNetwork)
     }
 
     @Test

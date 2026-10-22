@@ -17,7 +17,7 @@ listing/
 └── ja/
     └── (same five files)
 screenshots/
-└── <en-US|ja>/<iphone|ipad>/{1,2,3}.png   # see "Screenshots" below
+└── <en-US|ja>/<iphone|iphone-duo|ipad>/{1,2,3}.png   # see "Screenshots" below
 ```
 
 Content derives from [`README.md`](../../README.md) and [`PRIVACY.md`](../../PRIVACY.md) (and their
@@ -107,15 +107,17 @@ no auto-launch.
 
 ## Screenshots
 
-Three per device class and locale, uploaded under App Store Connect's 6.9-inch iPhone and 13-inch iPad
-slots (smaller sizes are scaled from these). Taken in the iOS Simulator with the app's own data, in the
-same order as the Android set (`fastlane/README.md`):
+Three per device class and locale, uploaded under App Store Connect's 6.9-inch iPhone, iPhone Duo and
+13-inch iPad slots (smaller sizes are scaled from these; iPhone Duo has a slot of its own, which becomes
+required in April 2027 for builds made with the iOS 27.1 SDK or later and earns the listing the "optimized
+for iPhone Duo" badge). Taken in the iOS Simulator with the app's own data, in the same order as the
+Android set (`fastlane/README.md`):
 
-| File | iPhone 17 Pro Max (1320×2868) | iPad Pro 13-inch (M5) (2752×2064 landscape, 2064×2752 portrait) |
-| --- | --- | --- |
-| `1.png` | Article list | Three panes, landscape, with the picture of the day open |
-| `2.png` | Reader (an English featured article) | Three panes, landscape, with a featured article open |
-| `3.png` | Feed list with folders and tags | Three panes, portrait |
+| File | iPhone 17 Pro Max (1320×2868) | iPhone Duo (outer display 1398×2034, inner display 2853×2007 landscape) | iPad Pro 13-inch (M5) (2752×2064 landscape, 2064×2752 portrait) |
+| --- | --- | --- | --- |
+| `1.png` | Article list | Article list, outer display (closed) | Three panes, landscape, with the picture of the day open |
+| `2.png` | Reader (an English featured article) | Article list and reader, inner display (open, landscape), with an English featured article open | Three panes, landscape, with a featured article open |
+| `3.png` | Feed list with folders and tags | Feed list with folders and tags, outer display (closed) | Three panes, portrait |
 
 To retake them:
 
@@ -141,6 +143,14 @@ To retake them:
   upright but App Store Connect may not; only then turn the pixels with `sips -r 270` (the next step strips
   the tag) and check the result is upright. Leave a capture already in landscape pixels as it is, and never
   rotate the files in `screenshots/` — they are already turned and stripped.
+- iPhone Duo: capture each display with `simctl io <device> screenshot --display=<UUID>` (the UUIDs come from
+  `simctl io <device> enumerate`: the outer display is the 1398×2034 one, the inner the 2007×2853 one); the
+  result is already the accepted size, in landscape pixels for a landscape pose. Switch poses with Device Hub's
+  closed / open buttons. For `2.png`, open the article on the outer display first and then open the device: the
+  inner display keeps the selection and shows the list and the reader side by side. Pick the list so the
+  selected row is on screen there (the `Wikipedia` folder, rather than All Feeds, where a featured article from
+  a day or two ago is far down). On the outer display the feed list has room for fewer rows, so collapse a
+  folder if the tags would otherwise fall off the bottom.
 - Shrink every file losslessly with `optipng -o7 -strip all` before committing.
 
 ## Before submitting
@@ -162,8 +172,8 @@ To retake them:
   `0.1.0` left in `appleApp/project.yml`, which no release uses. The iOS build is uploaded and submitted by the
   `publish-app-store.yml` workflow, given that number as its `version` input: it sets `MARKETING_VERSION`, picks
   an unused `CURRENT_PROJECT_VERSION`, and creates or renames the App Store Connect version to match (see
-  "Publishing to the App Store" in [`docs/build.md`](../../docs/build.md)). The GitHub release is tagged only
-  after approval, on the commit the workflow reports. Archiving by hand in Xcode remains the fallback when the
+  "Publishing to the App Store" in [`docs/build.md`](../../docs/build.md)). The GitHub release is published
+  first, and the workflow builds its tag. Archiving by hand in Xcode remains the fallback when the
   workflow cannot be used; then pass the same two settings yourself and set the App Store Connect version first.
 - [ ] Verify the example feed in the review notes still resolves.
 - [ ] If [`PRIVACY.md`](../../PRIVACY.md)'s effective date has changed since the last submission,
@@ -175,7 +185,7 @@ To retake them:
   archive needs `dropbox.app.key`, `onedrive.client.id` and `googledrive.apple.client.id` in `local.properties`,
   or the matching environment variables (see [`docs/build.md`](../../docs/build.md)). Either way, check in the
   TestFlight build that Settings ▸ Cloud sync offers all three.
-- [ ] Screenshots: iPhone and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: they are
+- [ ] Screenshots: iPhone, iPhone Duo and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: they are
   listing assets, not part of the Mac App Store build, so take them when that build is ready, keep them in
   `screenshots/<en-US|ja>/mac/`, and upload them under the version's App Previews and Screenshots ▸ macOS in
   App Store Connect. The required sizes change with App Store Connect.

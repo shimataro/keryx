@@ -2,6 +2,7 @@ package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.db.Feeds
 
@@ -18,6 +19,10 @@ import works.merc.keryx.app.data.local.db.Feeds
  * [reportRefreshOutcome] — the notification-center warning when no feed could be reached
  * ([isUnreachable]), and the [RefreshOutcome] the manual entry points return for a UI to show.
  *
+ * An [SyncTrigger.AUTOMATIC] cycle skips its refresh while the OS's data-saving mode is on
+ * ([automaticRefreshAllowed]); its sync stage is then subject to [SyncRepository]'s own network
+ * gate. A [SyncTrigger.MANUAL] cycle always refreshes.
+ *
  * The runner does no dispatcher switching of its own: it runs in the caller's context, so a caller
  * on the UI thread must move it off (the refresh, the sync, and [CloudSession.isConnected] all do
  * blocking IO).
@@ -32,6 +37,12 @@ class RefreshCycleRunner(
     private val notificationMessages: NotificationMessages,
     private val notificationCenter: NotificationCenter,
     private val clock: Clock,
+    /**
+     * Whether an automatic cycle may fetch feeds on the current network
+     * ([NetworkUsagePolicy.automaticRefreshAllowed]). The default (always allowed) is for tests that
+     * do not exercise the gate.
+     */
+    private val automaticRefreshAllowed: suspend () -> Boolean = { true },
 ) {
     /** Which of a cycle's two stages runs first. */
     enum class CycleOrder { REFRESH_THEN_SYNC, SYNC_THEN_REFRESH }
@@ -105,12 +116,14 @@ class RefreshCycleRunner(
     }
 
     /**
-     * Refreshes [feed] alone — no new-article notification and no sync, unlike a cycle — and reports
-     * it like one ([reportRefreshOutcome]), returning how it went.
+     * Refreshes the feed [feedId] names alone — no new-article notification and no sync, unlike a
+     * cycle — and reports it like one ([reportRefreshOutcome]), returning how it went. The feed's row
+     * is re-read first ([FeedRepository.refreshFeedById]); a feed unsubscribed in the meantime is
+     * not fetched, and nothing is reported (`null`).
      */
-    suspend fun refreshFeed(feed: Feeds): RefreshOutcome? {
-        val result = activityCenter.trackFeedRefresh { feedRepository.refreshFeed(feed) }
-        return reportRefreshOutcome(mapOf(feed.id to result), notificationCenter, clock)
+    suspend fun refreshFeed(feedId: String): RefreshOutcome? {
+        val result = activityCenter.trackFeedRefresh { feedRepository.refreshFeedById(feedId) } ?: return null
+        return reportRefreshOutcome(mapOf(feedId to result), notificationCenter, clock)
     }
 
     /**
@@ -139,13 +152,25 @@ class RefreshCycleRunner(
         targets: () -> List<Feeds>,
     ): Result<Unit>? {
         var syncResult: Result<Unit>? = null
-        val refresh: suspend () -> Unit = { step("feedRefresh") { refreshAndNotify(targets(), onRefreshed) } }
+        val refresh: suspend () -> Unit = {
+            if (trigger == SyncTrigger.AUTOMATIC && !automaticRefreshAllowed()) {
+                Log.info(TAG, "Automatic feed refresh skipped: the OS is saving data")
+            } else {
+                step("feedRefresh") { refreshAndNotify(targets(), onRefreshed) }
+            }
+        }
         val sync: suspend () -> Unit = {
             step("sync") { if (cloudSession.isConnected()) syncResult = syncRepository.sync(trigger) }
         }
         when (order) {
             CycleOrder.REFRESH_THEN_SYNC -> { refresh(); sync() }
-            CycleOrder.SYNC_THEN_REFRESH -> { sync(); refresh() }
+            CycleOrder.SYNC_THEN_REFRESH -> {
+                sync(); refresh()
+                // Nothing syncs after this refresh, and a refresh schedules no sync of its own, so
+                // what it just wrote (new articles, feed URL changes, error counts) would wait for
+                // the next periodic cycle. One short-window sync picks it up.
+                syncRepository.scheduleSync()
+            }
         }
         return syncResult
     }
@@ -157,5 +182,9 @@ class RefreshCycleRunner(
         newArticleNotifier.notifyIfEnabled(
             results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
         )
+    }
+
+    private companion object {
+        const val TAG = "RefreshCycleRunner"
     }
 }

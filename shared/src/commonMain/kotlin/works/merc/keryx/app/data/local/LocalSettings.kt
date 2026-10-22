@@ -55,4 +55,18 @@ data class LocalSettings(
      * `com.canonical.AppMenu.Registrar` is present (macOS/Windows/non-KDE Linux), where the bar always shows.
      */
     val appMenuBarVisible: Boolean? = null,
+    /**
+     * Whether automatic cloud sync also runs on a metered network (mobile data, a metered Wi-Fi,
+     * tethering). Off by default: a sync uploads the whole database. Never overrides the OS's
+     * data-saving mode (see [works.merc.keryx.app.domain.NetworkUsagePolicy]). Only offered where
+     * the platform reports metered networks (Android, iOS).
+     */
+    val syncOnMeteredNetwork: Boolean = false,
+    /**
+     * When a refresh's favicon lookup last found nothing, per feed id (Unix ms): a feed listed here
+     * is not looked up again for `FAVICON_RETRY_INTERVAL_MS`. Pruned of expired entries whenever one
+     * is added, so it stays as small as the number of feeds that missed recently. Device-local, like
+     * the rest — a miss on one device says nothing about another's network.
+     */
+    val faviconMissedAt: Map<String, Long> = emptyMap(),
 )

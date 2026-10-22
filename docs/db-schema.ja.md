@@ -77,7 +77,7 @@
   全デバイスで同一 ID になるため、同期マージ（記事を `id` で照合する）が既読・スターを後勝ちで
   伝播できる。既存行は `upsert` の `ON CONFLICT(feed_id, guid)` が既存 ID を保持する
   （決定的生成は新規行のみに効く）。
-- 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。
+- 既読・スターの競合解決は `read_at` / `starred_at` で後勝ち。状態が実際に変わったときだけ打刻される（`updateReadStatus` / `updateStarStatus` が変化を条件にしている）ため、既読の記事を再度開いても `read_at` は更新されない。
 - `content` は `summary` より優先して表示。両方 NULL の場合、その場にローカライズされた「本文なし」の
   プレースホルダーを表示する（外部ブラウザーで開くリンク／ボタン付き）。自動で何かが開くことはない。
 - `search_text` ＝ `content`（無ければ `summary`）の HTML タグを除去した平文。両方 NULL なら `""`。
@@ -224,6 +224,8 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `lastUnreadOnlyStarred` | boolean\|null | null（スター付きフィルタ専用。`lastUnreadOnly` とは独立） |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null（Linux KDE Global Menu: null=自動（`RegisterWindow` が成功するまで表示し、その後非表示）。true/false は Ctrl+M またはエクスポートされた「メニューバーを表示」チェックボックスによる明示的な上書き。`com.canonical.AppMenu.Registrar` が存在しない環境では効果なし） |
+| `syncOnMeteredNetwork` | boolean | false（従量制回線 — モバイルデータ通信、テザリング、Android ではユーザーが従量制に設定した Wi-Fi — でも自動クラウド同期を行うか。OS のデータセーバー / 低データモードより優先されることはない。Android と iOS でのみ設定できる。[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照） |
+| `faviconMissedAt` | object（フィード ID → Unix ms） | `{}`（更新時の favicon 探索がそのフィードで最後に何も見つけられなかった時刻。そのフィードは `FAVICON_RETRY_INTERVAL_MS`（24 時間）の間は探し直さない。それより古いエントリは、追加のたびに削除する。端末ローカルで同期対象外） |
 
 ## キャッシュ削除
 

@@ -242,6 +242,7 @@ Project-wide, this is on top of the two Android suites above:
     corrupted; a corrupt legacy file during migration and an invalid (non-gzip) `.gz` payload both
     classified as `CloudDataIncompatibleException`; a reset renaming/recreating only `.gz` while
     leaving the legacy file untouched.
+- deferred reading-state syncs (`SyncRepositoryTest.kt`): `scheduleDeferredSync` waits the long window while `scheduleSync` uses the short one and returns to it after expiring, a structural change shortening a pending deferred window into one sync, `flushPendingSync` syncing only when changes are pending and waiting out a sync in flight, `flushOnLeavingForeground` skipping the app's own launch mark (`ExternalAppLaunchTest`), and the unsynced-changes flag surviving an error result, an exception and a cancellation and being re-armed by a change made mid-sync; `SyncSchedulerTest` for the default `scheduleDeferredSync` delegation; `ArticleRepositoryTest` for read/star writes that change nothing stamping and scheduling nothing; `RefreshCycleRunnerTest` for the startup cycle's post-refresh `scheduleSync`
 - the automatic-sync suspension gate (`SyncRepositoryTest.kt`: an `AUTOMATIC`-triggered sync skipped while `autoSyncSuspended`, a `MANUAL` one never gated, `scheduleSync()` likewise suppressed, and the gate clearing on a successful sync/reset/`clearSyncFailureState()` — `SchemaVersionException` deliberately never triggers the gate)
 - the in-app update pipeline:
   - `UpdateCheckerTest.kt`: `assets[]`/`body` parsing into `asset`/`releaseNotes`, a non-`sha256` or
@@ -416,7 +417,8 @@ The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-archite
 
 - Sync, then sync again immediately with nothing changed on either side: the second sync completes without transferring the database. The app log shows `Sync: nothing changed locally or remotely; skipping transfer`, and the provider's own activity/version history shows no new revision.
 - Repeat that idle sync several times (or just leave the app running across a few background intervals) and confirm it never starts uploading again on its own — a provider whose write response omitted the revision would silently re-download and re-upload every cycle instead.
-- Toggle one article's read state, wait out the debounce: exactly one upload happens and no download (the cloud revision is still the one this device wrote).
+- Toggle one article's read state and wait out the 5-minute reading-state window (or hide the window to the tray / send the app to the background to flush at once): exactly one upload happens and no download (the cloud revision is still the one this device wrote). Rename a feed instead: it syncs after about 5 seconds, and carries any pending read-state change with it.
+- On each platform, mark articles read, then leave the app (Android/iOS: go to the home screen; Compose desktop and the native macOS app: hide the window to the tray): the change reaches a second device without waiting for the next refresh. On Android and iOS, opening an article in the browser and coming back must *not* upload.
 - Change something on a *second* device, then sync on the first: the download happens and the change appears — the skip must not hide another device's writes.
 - Reconnect the account (disconnect → connect) and confirm the first sync afterwards still works: the stored revision/digest belong to the previous connection.
 
@@ -438,6 +440,9 @@ confirm the routes really agree on screen, with a provider connected:
   connect-time initial sync, and while any refresh or sync is running, the toolbar button, the Feed
   menu item and the Settings button are all disabled; once it ends all three are enabled again
   together. (Keep Settings open while checking the menu bar.)
+- iOS: while a sync runs, the sidebar's sync button turns into a spinner and comes back once it
+  ends, without the "+" button beside it, the settings button or the bar's glass group moving or
+  changing size; VoiceOver reads the spinner as "Syncing…".
 - Make the provider reject the token (e.g. revoke the app's access in the provider's account
   settings), then sync: once the authorization failure is recorded, all three are disabled, and
   hovering (long-pressing, on Android) the toolbar button shows "Sign-in expired — reconnect in
@@ -1424,6 +1429,20 @@ by `OpmlTransferObservableTests`); confirm on macOS:
   spinner and the result text (both counts when some feeds failed) appear on the Data tab. Export
   (⌘E) likewise ends with the result text on the Data tab.
 - While an import runs, File ▸ Import/Export are disabled.
+
+### (SwiftUI) Setup on a small screen
+
+`SetupView` scrolls when its content does not fit; that layout can only be seen in the running app.
+Delete and reinstall the app to bring first-run Setup back, then confirm:
+
+- (iOS) On an iPhone SE (3rd generation) in portrait and landscape, at the largest Dynamic Type
+  size, in English and Japanese: no text is truncated with "…" (it wraps instead), every cloud
+  provider button can be reached by scrolling, and the scroll indicator flashes briefly as the
+  screen appears.
+- (iOS) On a large iPhone and an iPad, where everything fits: the content is vertically centered and
+  does not bounce when dragged, as before.
+- (macOS) Shrink the window to its minimum: both option cards are still shown in full, with nothing
+  truncated or cut off. At the default window size the screen looks as before.
 
 ### In-App Update
 

@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshOutcome
@@ -69,13 +68,13 @@ internal class HomeRefreshController(
      */
     private var endCount = 0L
 
-    /** Refreshes one feed. */
-    fun refreshFeed(feed: Feeds) {
+    /** Refreshes one feed, by id — see [RefreshCycleRunner.refreshFeed]. */
+    fun refreshFeed(feedId: String) {
         scope.launch {
             _manualRefreshStatus.update { it.started() }
             var outcome: RefreshOutcome? = null
             try {
-                outcome = withContext(dispatcher) { runner.refreshFeed(feed) }
+                outcome = withContext(dispatcher) { runner.refreshFeed(feedId) }
             } finally {
                 // Numbered outside update(), so a retried update stamps the same generation.
                 val generation = ++endCount

@@ -2,7 +2,6 @@ package works.merc.keryx.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.platform.FileSelector
@@ -56,6 +56,7 @@ class SettingsViewModel(
     fun setNotificationEnabled(enabled: Boolean) = preferencesController.setNotificationEnabled(enabled)
     fun setStartMinimized(enabled: Boolean) = preferencesController.setStartMinimized(enabled)
     fun setUpdateCheckIntervalHours(hours: Int) = preferencesController.setUpdateCheckIntervalHours(hours)
+    fun setSyncOnMeteredNetwork(enabled: Boolean) = preferencesController.setSyncOnMeteredNetwork(enabled)
     fun updateReadTimeout(seconds: Int) = preferencesController.updateReadTimeout(seconds)
     fun updateCacheRetention(days: Int?) = preferencesController.updateCacheRetention(days)
 
@@ -76,6 +77,9 @@ class SettingsViewModel(
     val disconnecting = cloudSyncController.disconnecting
     val idle = cloudSyncController.idle
     val canSyncNow = cloudSyncController.canSyncNow
+    val meteredSettingSupported = cloudSyncController.meteredSettingSupported
+    val syncOnMeteredNetwork = cloudSyncController.syncOnMeteredNetwork
+    val syncDeferredForNetwork = cloudSyncController.syncDeferredForNetwork
 
     fun syncNow() = cloudSyncController.syncNow()
     fun connect(type: CloudStorageType) = cloudSyncController.connect(type)
@@ -160,12 +164,10 @@ class SettingsViewModel(
             var result: OpmlResult? = null
             try {
                 val target = fileSelector.pickSaveFile(opmlFileRequests.export()) ?: return@launch
-                result = try {
+                result = runCatchingUnlessCancelled {
                     withContext(dispatcher) { target.writeText(opmlController.exportDocument()) }
                     OpmlResult.Exported
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
+                }.getOrElse { e ->
                     Log.warn(TAG, "Failed to export OPML", e)
                     OpmlResult.ExportFailed
                 }
@@ -214,14 +216,10 @@ class SettingsViewModel(
     }
 
     /** [PickedFile.readText], with a read failure (other than cancellation) logged and mapped to `null`. */
-    private suspend fun readOrNull(source: PickedFile): String? = try {
-        source.readText()
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Log.warn(TAG, "Failed to read the picked OPML file", e)
-        null
-    }
+    private suspend fun readOrNull(source: PickedFile): String? =
+        runCatchingUnlessCancelled { source.readText() }
+            .onFailure { e -> Log.warn(TAG, "Failed to read the picked OPML file", e) }
+            .getOrNull()
 
     /** Clears the latest OPML import or export result once it has been shown. */
     fun clearOpmlResult() = opmlController.clearResult()

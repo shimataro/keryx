@@ -5,3 +5,6 @@ MD013: # line-length
 
 MD024: # no-duplicate-heading
   siblings_only: true
+
+MD033: # no-inline-html
+  allowed_elements: [a, img]

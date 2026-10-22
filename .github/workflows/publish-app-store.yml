@@ -1,14 +1,15 @@
 name: Publish iOS app to the App Store
 
-# Builds the SwiftUI app for iOS from `ref` (a commit already on a version branch), uploads it to
-# App Store Connect, attaches it to the App Store version `version` and submits that version for
-# review (see docs/build.md's "Publishing to the App Store").
+# Builds the SwiftUI app for iOS from `ref` (by default the release tag v<version>; any commit
+# already on a version branch), uploads it to App Store Connect, attaches it to the App Store
+# version `version` and submits that version for review (see docs/build.md's "Publishing to the App
+# Store").
 #
-# Run by hand, before the release is tagged: App Store review comes first, so a rejection that
-# needs a code change is fixed on v0 and submitted again under the same version. Once the version
-# is approved, tag the commit this run reports in its summary as v<version> and publish the GitHub
-# Release; release.yml does nothing for the App Store. The version is always set to a manual
-# release, so an approved build waits in App Store Connect until someone releases it there.
+# Run by hand, after the GitHub Release is published: release.yml ships every other platform at
+# once and does nothing for the App Store, so a long review holds back only iOS. A rejection that
+# needs a code change ships as the next patch release, for every platform, so a tag's contents are
+# the same everywhere. `release` picks whether an approved version goes live on its own or waits in
+# App Store Connect until someone releases it there.
 #
 # Running it again for the same version is safe: each run uploads a new build number and replaces
 # the build attached to the version.
@@ -16,12 +17,12 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag or commit to build (must be on a version branch)"
-        required: true
+        description: "Branch, tag or commit to build (must be on a version branch); empty builds the tag v<version>"
+        required: false
         type: string
-        default: v0
+        default: ""
       version:
-        description: "App Store version, x.y.z (the GitHub release this will become)"
+        description: "App Store version, x.y.z (also the tag v<version> built when ref is empty)"
         required: true
         type: string
       submit:
@@ -29,6 +30,14 @@ on:
         required: true
         type: boolean
         default: true
+      release:
+        description: "Once approved: release automatically, or wait for a manual release in App Store Connect"
+        required: true
+        type: choice
+        options:
+          - automatic
+          - manual
+        default: automatic
 
 permissions:
   contents: read
@@ -74,18 +83,31 @@ jobs:
             exit 1
           fi
 
+      # With ref empty the tag v<version> is built, so it has to exist already; checked here so a
+      # missing tag fails with a clear message rather than checkout's generic one.
+      - name: Check the release tag
+        if: inputs.ref == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" --silent; then
+            echo "::error::Tag v$VERSION was not found. Publish the GitHub Release v$VERSION first, or set ref."
+            exit 1
+          fi
+
       # Full history, so the commit can be checked against every version branch.
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || format('v{0}', inputs.version) }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Check that ref is on a version branch
         id: source
         env:
-          REF: ${{ inputs.ref }}
+          REF: ${{ inputs.ref || format('v{0}', inputs.version) }}
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
@@ -96,8 +118,9 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      # Generated here rather than in the build job, which has no write access. The release is only
-      # cut after approval, so the notes come from generate-notes for the commit, not from it.
+      # Generated here rather than in the build job, which has no write access. The notes come from
+      # generate-notes for the commit rather than from the GitHub Release, so a run does not depend
+      # on the Release existing or on its body.
       - name: Generate release notes
         id: notes
         env:
@@ -240,6 +263,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
           SUBMIT: ${{ inputs.submit }}
+          RELEASE: ${{ inputs.release }}
           SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
           RELEASE_NOTES_BODY: ${{ needs.prepare.outputs.notes }}
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}

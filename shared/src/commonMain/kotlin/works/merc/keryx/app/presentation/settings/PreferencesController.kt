@@ -42,6 +42,7 @@ class PreferencesController(
     fun setNotificationEnabled(enabled: Boolean) = update { it.copy(notificationEnabled = enabled) }
     fun setStartMinimized(enabled: Boolean) = update { it.copy(startMinimized = enabled) }
     fun setUpdateCheckIntervalHours(hours: Int) = update { it.copy(updateCheckIntervalHours = hours) }
+    fun setSyncOnMeteredNetwork(enabled: Boolean) = update { it.copy(syncOnMeteredNetwork = enabled) }
 
     fun updateReadTimeout(seconds: Int) {
         settingsRepository.setReadTimeoutSeconds(seconds)

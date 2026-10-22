@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.HtmlText
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Articles
@@ -21,6 +22,8 @@ import works.merc.keryx.app.data.remote.ParsedArticle
  * 900 leaves headroom. Large id lists (search hits, mark-as-read snapshots) are chunked to this size.
  */
 private const val ID_FETCH_CHUNK = 900
+
+private const val TAG = "ArticleRepository"
 
 /**
  * The columns of an article that the list panes actually render, plus `created_at` as the sort
@@ -224,31 +227,34 @@ class ArticleRepository(
     }
 
     /**
-     * Marks an article as read and schedules synchronization.
+     * Marks an article as read and schedules a deferred synchronization. Does nothing (no write, no
+     * sync) when the article is already read, so re-opening one never re-stamps `read_at`.
      *
      * @param id The ID of the article to mark as read.
      */
     fun markAsRead(id: String) {
         val now = clock.nowMillis()
-        articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleSync()
+        val changed = articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
+        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     fun markAsUnread(id: String) {
         val now = clock.nowMillis()
-        articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleSync()
+        val changed = articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
+        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     fun setStarred(id: String, starred: Boolean) {
         val now = clock.nowMillis()
-        articles.updateStarStatus(is_starred = if (starred) 1L else 0L, starred_at = now, updated_at = now, id = id)
-        syncScheduler.scheduleSync()
+        val changed = articles.updateStarStatus(
+            is_starred = if (starred) 1L else 0L, starred_at = now, updated_at = now, id = id,
+        )
+        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     /**
      * Marks exactly the given article [ids] as read in a single transaction, with one
-     * [SyncScheduler.scheduleSync] call regardless of how many ids are passed. Used for the
+     * [SyncScheduler.scheduleDeferredSync] call regardless of how many ids are passed. Used for the
      * search scope's "mark all read", where the target set comes from an FTS snapshot rather
      * than a `WHERE` clause like [markAllAsRead].
      */
@@ -262,7 +268,7 @@ class ArticleRepository(
                 articles.updateReadStatusByIds(read_at = now, updated_at = now, id = chunk)
             }
         }
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     fun markAllAsRead(filter: ArticleFilter) {
@@ -274,7 +280,7 @@ class ArticleRepository(
             is ArticleFilter.Folder -> articles.markAllReadByFolder(now, now, filter.folderId)
             ArticleFilter.Starred -> return // no-op
         }
-        syncScheduler.scheduleSync()
+        syncScheduler.scheduleDeferredSync()
     }
 
     /**
@@ -283,7 +289,9 @@ class ArticleRepository(
      * @param query The full-text search query.
      * @param scope Restricts results to the same row set [scope] would show as an ordinary
      *   (non-search) article-list filter — see `FtsSearch.articleScopeSql`.
-     * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily unavailable.
+     * @return Matching articles with highlighted titles, or an empty list when the search index is temporarily
+     *   unavailable. That failure is logged and absorbed rather than thrown — one of the documented best-effort
+     *   accesses in `docs/error-design.md`.
      */
     fun search(query: String, scope: ArticleFilter): List<ArticleSearchResult> =
         try {
@@ -300,11 +308,14 @@ class ArticleRepository(
             hits.mapNotNull { hit ->
                 byId[hit.id]?.let { ArticleSearchResult(article = it, titleMarked = hit.titleMarked) }
             }
-        } catch (_: Exception) {
-            // `articles_fts` is raw SQL outside SQLDelight and is briefly DROPped during a sync's
-            // upload window (rebuilt right after). Querying it then throws a raw SQLite exception;
-            // absorb it here (DataSource/Repository boundary) so the transient "index unavailable"
-            // state surfaces as no hits instead of leaking a raw exception to the ViewModel.
+        } catch (e: Exception) {
+            // `articles_fts` is raw SQL outside SQLDelight, so a query against it can fail with a raw
+            // SQLite exception the schema never promised away: the table missing (before the first
+            // startup catch-up has created it) or damaged. Absorb it here (DataSource/Repository
+            // boundary) so an "index unavailable" state surfaces as no hits instead of leaking a raw
+            // exception to the ViewModel — but leave a trace, so a search that stays empty has
+            // something to be investigated from.
+            Log.warn(TAG, "Search failed; showing no results", e)
             emptyList()
         }
 

@@ -183,8 +183,12 @@ ON CONFLICT(feed_id, guid) DO UPDATE SET
     search_text = excluded.search_text,
     updated_at = excluded.updated_at;
 
+-- Only writes when the state actually changes, so re-opening an already-read article neither
+-- re-stamps read_at (which would win last-write-wins over another device's later "mark unread" and
+-- change the sync snapshot for nothing) nor needs a sync. The affected-row count tells the caller
+-- whether anything changed.
 updateReadStatus:
-UPDATE articles SET is_read = ?, read_at = ?, updated_at = ? WHERE id = ?;
+UPDATE articles SET is_read = :is_read, read_at = ?, updated_at = ? WHERE id = ? AND is_read <> :is_read;
 
 -- Marks a batch of articles read in one statement (callers chunk the id list to stay under
 -- SQLite's bound-parameter limit). Used by markArticlesAsRead instead of a per-id UPDATE loop.
@@ -194,8 +198,9 @@ UPDATE articles SET is_read = ?, read_at = ?, updated_at = ? WHERE id = ?;
 updateReadStatusByIds:
 UPDATE articles SET is_read = 1, read_at = ?, updated_at = ? WHERE id IN ? AND is_read = 0 AND deleted_at IS NULL;
 
+-- Same no-op guard as updateReadStatus, for starred_at.
 updateStarStatus:
-UPDATE articles SET is_starred = ?, starred_at = ?, updated_at = ? WHERE id = ?;
+UPDATE articles SET is_starred = :is_starred, starred_at = ?, updated_at = ? WHERE id = ? AND is_starred <> :is_starred;
 
 -- The feed_id EXISTS guard on markAllReadAll/markAllReadByTag keeps this in the same row set as
 -- the corresponding plain list query (watchAll/watchByTag, both INNER JOIN feeds ... f.deleted_at

@@ -127,8 +127,10 @@ layer and never reaches the DB write path. Recovery is restarting the app.
 things at once:
 
 1. The article list's scroll-into-view effect running — `ArticleListPaneContent`'s
-   `LaunchedEffect(selected?.id, …)` → `scrollToIndexIfNeeded` (`ui/home/HomeCommon.kt`). Only a
-   change of the *selected article's id* re-keys it.
+   `LaunchedEffect(listState, revealRequest, …)` → `scrollToIndexIfNeeded` (`ui/home/HomeCommon.kt`).
+   Of its keys only `revealRequest` changes during use: it counts the selections the user moves to another article
+   (`HomeViewModel.selectionRevealRequests`). The selection's id changing on its own — a selection
+   found tombstoned hands the cursor back to the article before it — does not re-key it.
 2. A row with enough layout nodes. `ArticleRow`'s current structure is past the threshold.
 
 Measured with an automated harness (see below), the crash needs the selection change and the wheel
@@ -159,7 +161,7 @@ Verified not to reproduce, so "it crashed while I left it alone" is not this bug
 - The list going from empty to non-empty — startup restore, or a refresh landing with unread-only
   on (0 / 5).
 - Background feed refresh, cloud sync, cache cleanup, read/unread and star toggles, and
-  "mark all read". None of these change the selected article's *id*, so the effect never re-keys.
+  "mark all read". None of these is a selection the user makes, so the effect never re-keys.
 
 ### Cause
 

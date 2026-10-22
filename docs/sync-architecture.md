@@ -49,7 +49,17 @@ Conflict prevention is done via a revision check on upload — Dropbox: `rev`, a
      total number of attempts (2 retries after the first).
 6. On success, record `last_synced_at`, the uploaded snapshot's (uncompressed) digest, and **the revision the upload itself produced** (`CloudStorage.upload`/`create` return it). It must come from the write's own response, never a follow-up `metadata()` call: a second request could observe another device's newer write, and storing that revision would make the next sync skip a download whose contents were never merged.
 
-Debouncing: After changes such as read/star, `SyncScheduler.scheduleSync()` batches sync after a fixed delay from the last operation.
+Debouncing: Because every sync re-uploads the whole database, how often a local change triggers one is what decides the transfer volume. `SyncScheduler` therefore has two windows, both measured from the last change (a burst collapses into one sync):
+
+- **Structural changes** (subscribe/unsubscribe, rename, folders, tags, global settings, a single-feed refresh) call `scheduleSync()` and sync after `SYNC_DEBOUNCE_MS` (5 seconds).
+- **Reading-state changes** (read/unread, star, mark-all-read) arrive one by one while reading, so they call `scheduleDeferredSync()` and wait for `DEFERRED_SYNC_DEBOUNCE_MS` (5 minutes) of quiet instead. A structural change arriving meanwhile shortens the wait to the 5-second window, and carries the reading-state changes with it.
+- `SyncRepository.flushPendingSync()` syncs at once if anything is still pending, and is called when the app leaves the foreground: Android's `MainActivity.onStop` (not on a configuration change), the iOS scene entering the background (inside a background task), and the desktop window being hidden to the tray — Compose desktop and the native macOS app alike. Quitting the desktop app does not wait on the network for it; the next launch's startup sync uploads what is pending. It first waits out a sync already in flight (which cleared the pending flag when it started), so the caller's background grace period covers that upload too.
+- On Android and iOS the flush goes through `flushOnLeavingForeground()`, which skips an exit the app caused itself: `BrowserOpener` marks its launch (`ExternalAppLaunch`) and the next exit consumes the mark, so reading an article in the browser does not upload the database once per article. The mark is cleared whenever the app is back in front. The changes stay pending for the long window, the next sync, or the next real exit.
+- Any sync that runs first — a refresh cycle's, a manual one — picks the pending changes up too: an "unsynced changes" flag is cleared as a sync starts (its snapshot includes them) and restored on every exit but success — an error result, an exception or a cancellation (iOS cancels the refresh cycle's sync on backgrounding) — and a debounce window that expires with the flag already cleared does nothing.
+- The refresh itself (`FeedRepository.refreshFeeds`, only ever run inside a `RefreshCycleRunner` cycle) schedules no sync. A refresh-then-sync cycle syncs right after it; the startup sync-then-refresh cycle has nothing after its refresh, so it schedules one short-window sync (`scheduleSync()`) for what the refresh wrote.
+- A read/unread or star call that changes nothing (re-opening an already-read article) writes nothing and schedules nothing: the single-row updates are guarded on the state changing, so `read_at` / `starred_at` are stamped only by a real change. Last-write-wins therefore no longer lets merely re-opening an article beat another device's later "mark unread" — the unread state stays.
+
+Deferring a change never loses it, even when the sync that would have sent it fails or is cancelled: the next sync of any kind finds it in the snapshot (see "Skipping Unchanged Transfers" below). Only how soon other devices see it changes.
 
 ### Sync Progress Feedback
 
@@ -104,7 +114,7 @@ The background loop syncs on a timer, so the overwhelmingly common case is that 
 - **Download** is skipped on an unchanged revision (step 2). Because step 6 records the revision the upload produced, a device that is the only writer recognises its own uploads and never downloads them back.
 - **Upload** is skipped when the freshly built snapshot hashes to the same digest as the last uploaded one *and* no merge happened this cycle (step 5). A merge is always followed by an upload even if nothing else changed locally, because last-write-wins can leave the local DB holding rows the cloud lacks.
 
-Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever reads it out of the uploaded file.
+Comparing the snapshot's own content is what makes skipping safe: a local edit cannot hash to the previous digest, so no change is ever silently dropped — which is also why deferring a reading-state change (see "Debouncing" above) only delays it. The opposite misjudgement — treating identical data as changed — merely uploads, exactly as before. Dropping `sync_state` from the snapshot (step 5) is what makes the digest stable: `last_synced_at` is rewritten on every successful sync, so leaving it in would change the bytes every cycle and the check could never fire. That table is device-local by design (see [db-schema.md](db-schema.md)) and appears in neither `MergeSql` nor `DatabaseMerger`'s expected schema, so no receiving device ever reads it out of the uploaded file.
 
 The digest is stored in `sync_state`, which is itself excluded from the upload — so it is per-device state, and a device that has never uploaded simply finds no digest and uploads.
 
@@ -123,7 +133,8 @@ rather than looking stuck — which is the correct ordering anyway.
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
 debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
-path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` — is subject to
+path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` and
+`DeferredSyncWorker` — is subject to
 a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
 is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
 spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded
@@ -137,6 +148,58 @@ The gate is set by `updateAutoSyncGate` (called from both `sync()` and `resetClo
 `autoSyncSuspended` is deliberately **in-memory, not persisted**: a process restart is a free, honest retry (another device may have fixed the cloud data in the meantime), and the gate's entire purpose — not re-downloading/re-merging the same unusable file, and not re-raising the same notification, within one running process — needs nothing more durable than that. It clears on any successful sync (manual or automatic), on a successful `resetCloudData()`, and via `clearSyncFailureState()` — which also clears the mirrored failure-reason text — called when the connection that produced it is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`).
 
 Nothing about the reset/notification UI is affected by the gate: the notification-center `ResetCloudData` button and the settings screen's reset button are unconditional (not gated), and `lastSyncError` is left untouched by a skipped `AUTOMATIC` call, so the cloud-sync tab keeps showing why sync is currently broken.
+
+### Network Gate (Metered Networks and Data Saver)
+
+A second `AUTOMATIC`-only gate sits beside the one above. An automatic sync uploads a snapshot of the
+whole database, so on a phone it would spend mobile data on every few mark-as-read taps. The OS
+reports two signals through `platform/NetworkConditionMonitor` (an interface obtained from the
+`platformNetworkConditionMonitor()` expect, as a `core/NetworkCondition(metered, dataSaver)` flow):
+whether the current network is **metered** (Android: the default network lacks
+`NET_CAPABILITY_NOT_METERED` — cellular, tethering, or a Wi-Fi the user marked as metered; iOS:
+`nw_path_is_expensive` — cellular or a Personal Hotspot), and whether the user turned on the OS's **data-saving mode** (Android:
+Data Saver, i.e. `restrictBackgroundStatus == ENABLED`, which Android applies to metered networks
+only; iOS: Low Data Mode, `nw_path_is_constrained`, which can be set on any network including Wi-Fi).
+No network at all counts as unrestricted. Desktop and macOS report neither (`supported = false`) and
+are never restricted.
+
+`domain/NetworkUsagePolicy` turns that into the one decision every caller shares:
+
+| | Unrestricted | Metered | Data Saver / Low Data Mode |
+| --- | --- | --- | --- |
+| Automatic sync (`SyncTrigger.AUTOMATIC`) | runs | deferred, unless `syncOnMeteredNetwork` is on | deferred |
+| Automatic feed refresh (an `AUTOMATIC` `RefreshCycleRunner` cycle) | runs | runs | skipped |
+| Manual sync / Refresh All / pull-to-refresh (`MANUAL`) | runs | runs | runs |
+
+`syncOnMeteredNetwork` is a device-local setting (`local_settings.json`, off by default).
+`SyncRepository` takes the gate as an `automaticSyncAllowedFlow: () -> Flow<Boolean>` lambda — lazy for the
+same reason as `cloudProvider`, since `SettingsRepository` depends on `SyncRepository` as its
+`SyncScheduler` — which `SharedModule` builds with `NetworkUsagePolicy.automaticSyncAllowedFlow` from the monitor and the setting.
+
+When `sync(AUTOMATIC)` finds the network disallowed (and a provider is connected), it does not enter
+`trackSync` at all — no spinner, no phase, no notification, `lastSyncError` untouched — and returns
+`Result.Ok(Unit)`, but unlike the suspension gate it remembers that something is pending:
+`syncDeferredForNetwork` (a `StateFlow<Boolean>`) goes up, and a single waiter on the app scope
+(started once, however many syncs are deferred meanwhile) calls `scheduleSync()` the moment the gate
+flow turns true, and drops the flag at that moment: the deferral is over, and the sync it schedules either
+runs (a failure then reaches `lastSyncError` as usual, so the flag never claims a wait nothing is
+performing) or is deferred anew if the network turned restrictive again before the debounce elapsed. A
+successful sync (a manual one included) also drops the flag and cancels the waiter — unless another sync
+was deferred while it ran (a generation counter tells), since that deferral covers changes it did not
+upload. Automatic syncing becoming suspended (`autoSyncSuspended`) and `clearSyncFailureState()`
+(disconnect / switch) drop it too; a deferral racing a disconnect never raises the flag.
+
+Like `autoSyncSuspended`, the deferral is **in-memory**: there is no queue of pending changes to
+remember, because the next sync that is allowed uploads the whole database and so carries every change
+made in the meantime. The waiter only covers the time the process stays alive; Android additionally
+hands the deferred sync to a `WorkManager` job that waits for a network the sync is allowed on (an unmetered one, unless the user opted in to syncing on a metered one), so it also happens
+after the app is closed (see "Deferred sync" in [background-update.md](background-update.md)). On iOS a
+deferral left by a closed app is picked up by the next background refresh or foreground sync that the
+network allows.
+
+The automatic feed refresh stays allowed on a metered network because each fetch is a conditional
+request and usually small; only the OS's data-saving mode, the user's explicit request to save data,
+stops it.
 
 ## Merge (`DatabaseMerger` + `MergeSql`)
 
