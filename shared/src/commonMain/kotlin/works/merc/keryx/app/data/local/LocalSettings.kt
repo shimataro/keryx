@@ -62,4 +62,11 @@ data class LocalSettings(
      * the platform reports metered networks (Android, iOS).
      */
     val syncOnMeteredNetwork: Boolean = false,
+    /**
+     * When a refresh's favicon lookup last found nothing, per feed id (Unix ms): a feed listed here
+     * is not looked up again for `FAVICON_RETRY_INTERVAL_MS`. Pruned of expired entries whenever one
+     * is added, so it stays as small as the number of feeds that missed recently. Device-local, like
+     * the rest — a miss on one device says nothing about another's network.
+     */
+    val faviconMissedAt: Map<String, Long> = emptyMap(),
 )

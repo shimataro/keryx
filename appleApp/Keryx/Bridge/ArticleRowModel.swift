@@ -208,7 +208,7 @@ struct ArticleRowList: Sendable {
                old.markedTitle == markedTitle,
                old.feedTitle == info?.title,
                old.faviconUrl == info?.faviconUrl,
-               old.row.isEqual(row) {
+               kotlinValuesEqual(old.row, row) {
                 if index != rows.count { unchanged = false }
                 rows.append(old)
                 continue

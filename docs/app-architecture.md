@@ -49,7 +49,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the explicit read/unread actions taken while a selection's body is still loading, so they win
                   over that selection's implicit read; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
-                  the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
+                  the reader pager's page/selection rules; ReaderContent — what the single (non-pager) reader
+                  shows (none / header-first / full) and the selected row every per-selection action acts on,
+                  decided once for both UIs; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
                   which warning/error still needs announcing in a transient surface with no queue of
                   its own, e.g. Android's foreground Snackbar; NameValidation — the folder/tag
@@ -86,7 +88,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
                   into now/minutes/hours/days/absolute, shared by both apps' notification center
                   rows), ManualSync (the "Sync now" contract Home and Settings both depend on,
-                  implemented by `settings/CloudSyncController`). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  implemented by `settings/CloudSyncController`), DerivedStateFlow (a read-only StateFlow computed from
+                  other state flows on every read, so a derived value can never be observed out of step with its
+                  inputs — used by HomeViewModel, CloudSyncController and OpmlTransferController). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
                   NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
@@ -545,6 +549,15 @@ color, so a theme change while an article is already open still repaints it. The
 a no-op: WebView2/WebKit/WebKitGTK already paint their own scrollbar from `color-scheme`, so nothing
 else is needed there.
 
+**`color-scheme` alone is not enough on iOS either.** The iOS reader's `WKWebView` is transparent
+(`isOpaque = false`, so the reader's own background shows through until the first document paints),
+and WebKit then no longer derives the scroll indicator's style from the page, leaving a dark
+indicator over the dark reader. `ArticleWebView.updateUIView` therefore sets
+`scrollView.indicatorStyle` from the in-app theme on every update (`ReaderScrollIndicator` decides
+which: a light indicator for a dark theme, a dark one for a light theme), so a theme change while an
+article is open — and a page the swipe pager reaches — is covered. macOS needs nothing: its
+`WKWebView` draws its scroller from the window's appearance and `color-scheme`.
+
 **The feed body is third-party content, and the document is built to survive it.** A body is
 embedded raw (so its rich markup renders) beneath a `<base href>` at the article's own origin,
 which also lets it reach the source site's own stylesheets — either a `<link rel="stylesheet">` it
@@ -583,8 +596,9 @@ pages either side of the one on screen are real, mounted `WebView`s, rendered th
 `ArticleWebViewCarousel` rather than the pager's own item content (see below for why).
 `PaneLayout.Triple` (every
 desktop window, and a wide tablet in landscape) keeps the single unconditionally-composed reader
-described above; the branch between the two forms checks `readerPaging != null && article != null
-&& isTouchPrimary` — all three, not `readerPaging` alone. `article != null` keeps a `PaneLayout.Dual`
+described above; the branch between the two forms checks `readerPaging != null && selectedRow != null
+&& isTouchPrimary` — all three, not `readerPaging` alone. `selectedRow != null` (`HomeViewModel.selectedArticleRow`,
+current the moment a selection is made) keeps a `PaneLayout.Dual`
 reader that has paging data but nothing selected yet on its HTML placeholder, rather than resting
 the pager on whatever page it last happened to show; `isTouchPrimary` is checked again at this level
 even though `ArticleDetailPane` (the ViewModel-facing wrapper) already only builds `readerPaging` on
@@ -596,7 +610,7 @@ caller above it.
 `ArticleSwipeNavigation` and `ArticleReaderPaging` are the same "null means `PaneLayout.Triple`"
 signal, kept as separate parameters because the first is a deliberately stable, `remember`ed
 callback bundle while the second carries data that changes as articles load — `ArticleDetailPane`
-wraps its own construction in `remember(pages, contents, article)` so building it does not
+wraps its own construction in `remember(pages, contents, selectedRow, loaded)` so building it does not
 recompose the whole reader on every article write. The signal is `swipeNavigation`, not
 `onNavigateUp` — at `PaneLayout.Dual` the reader has no back control (`onNavigateUp` is `null`) but
 swipe must still work there (see "Home's adaptive pane layout" below).
@@ -984,6 +998,43 @@ only intents made after that selection) so it shows at once whichever route made
 same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of what the button
 shows, so a tap during that window can never land on the previous article, and a second tap undoes the first.
 
+Everything else about the selection follows the cursor too, through two values `HomeViewModel` derives from
+it (both `DerivedStateFlow`s — `presentation/DerivedStateFlow.kt` — so neither can be read out of step with the cursor):
+`selectedArticleId` (the cursor itself — what the article list highlights and scrolls to, what the narrow
+layouts' pager follows, and what a URL copy's ✓ is matched against) and `selectedArticleRow` (the loaded
+article once it is the cursor's, otherwise the list row the selection was made with, carrying every optimistic
+read/star write made on it meanwhile — what the reader toolbar's star, open, copy and share, the menu bar,
+the keyboard shortcuts and the toolbar's feed name act on). `toggleStarSelected` targets the cursor's article
+like `toggleReadSelected`, and a star toggled while the body loads is recorded (a second `SelectionReadIntents`)
+and laid over the hydrated row, since that lookup runs outside `dbWriteDispatcher`'s FIFO and can read the row
+from before the write. Only the read/unread button keeps `selectedArticleShownUnread` as its one source.
+
+The list scrolls the selection into view on `selectionRevealRequests`, not on `selectedArticleId`: that counts the
+selections the user moves to another article (one per such `selectArticle`, from any route; choosing the article
+that is already selected is not one), whereas the cursor also moves on its own —
+a selection whose row a sync merge has tombstoned hands it back to the article before it — and the list must not
+scroll back to that article unprompted. Clearing the selection with a filter switch and a restored selection are
+not requests either (the first composition brings a restored selection into view itself). The search results
+list follows the same rule: it scrolls to the selection on a request or when its results first arrive, never because
+its contents changed — a background write re-running the search, or a selection handed back after a tombstone,
+must not pull the list back to the selected row. Changing the query is the user asking for a different list, so the
+results go back to the top, as they do when the filter changes (a pane remount keeps the position).
+
+The single (non-pager) reader is driven by `readerContent` (`None` / `Header(row)` / `Full(article)`).
+Normally it goes straight from the previous article to the new one in `Full` — one document load. When there is no
+previously loaded article to keep on screen (the first selection after launch or after a filter switch), `Header`
+shows at once instead — never the "no article selected" placeholder, which the toolbar and the list highlight
+(already on the new selection) would contradict. Only when
+the body lookup has not returned within `READER_HEADER_FIRST_GRACE_MS` (50 ms — a lookup waiting out a sync
+merge's or an FTS rebuild's write lock) does the grace timer `hydrateSelection` starts publish `Header`: the
+new article's title, date and link from its list row over an empty body, the same document the pager draws for
+a page whose body has not loaded. The timer is cancelled on every exit from the hydration and re-checks on
+firing that its selection is still the newest, still the cursor's and still unloaded. The header is cleared
+once the body lands, by `selectFilter` and by a tombstoned lookup; a newer selection made while a header is
+showing takes the header over at once rather than returning the reader to the previously loaded article for
+another grace period. Compose's single reader and the macOS SwiftUI reader both render it; the iOS pager does
+not (a page with no body yet shows only the reader's background, as before).
+
 ## Navigation
 
 `ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no
@@ -1302,7 +1353,10 @@ their "mark as unread" write may still be in flight, and dropping one would let 
 lose the row until that write lands. The selection's pin is decided inside one `update`, against the
 map being updated, so a re-trim composes with a concurrent reconcile pass. A pin that pass dropped
 since stays dropped, and an existing pin is kept as it is: it is never re-created from the
-selection, which the pass refreshes only after the pin.
+selection, which the pass refreshes only after the pin. Whether the selection still exists (a sync
+merge may have tombstoned it) is checked afterwards, by a read on `dbWriteDispatcher` rather than on
+the calling (main) thread, so a write lock held by a merge never stalls the UI; a tombstoned
+selection's pin is then dropped, but only if it is still the very pin the re-trim kept.
 
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
@@ -1743,6 +1797,35 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 `AccentColor`'s `#4DB6AC`, on which white text would be unreadable (2.4:1). Unlike macOS it is not
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
+
+### iPhone Duo (iOS)
+
+iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and
+tab bar as one vertical bar on the trailing edge. The system does this by itself for toolbars built with
+`.toolbar` on a `NavigationSplitView`, which is all this app uses, so no Duo-specific layout code
+exists. What was measured on the iOS 27.1 simulator, and what follows from it:
+
+- **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
+  outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
+  circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
+  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the unread-only /
+  hide-read group `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
+  inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
+  so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
+  `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
+  `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups
+  even on iOS 27.
+- **The empty band above the outer display's lists** (82pt, against 24pt above the reader, which has no
+  navigation title) is the navigation title's own area: removing the article list's empty `.principal`
+  item shows the inline title there, and the system Settings app leaves the same band empty above its
+  own lists. It is left as is.
+- **The inner display in portrait** (669pt, a regular width) shows the reader alone, with the article
+  list over it on demand. That is the split view's own decision: neither `.balanced` with a
+  `.doubleColumn` visibility nor a 300pt ideal width for the list made the two columns tile, and the
+  HIG asks for the system container rather than a custom one. The half-folded pose needs nothing
+  either: the split view lines its columns up with the fold by itself.
+- **Not measured:** the narrowest width two apps get side by side on the inner display. The simulator's
+  resize mode works on the outer display only (where 466pt is already the minimum).
 
 ### `KeryxSdk`: the Swift entry point
 

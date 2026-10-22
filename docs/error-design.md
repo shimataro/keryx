@@ -17,6 +17,22 @@
 | Invalid feed URL | Result type |
 | DB access failure / program bug | Exception |
 
+**Documented exception to the last row: best-effort writes and reads.** A DB access that only feeds
+something cosmetic or derived, and that is retried by the next ordinary run anyway, is logged
+(`Log.warn`) and carried on from rather than thrown — because throwing would cancel the work around it
+and lose more than the access itself is worth. The accesses that are, today:
+
+- The favicon write at the end of a feed refresh (`FeedRepository.applyFavicon`). A failure leaves the
+  feed without a favicon and without a "no favicon found" record, so the next refresh looks it up and
+  stores it again; propagating it would cancel the whole refresh, including feeds fetched but not yet
+  applied.
+- The FTS search query (`ArticleRepository.search`): a failing index returns no hits rather than an error.
+- The "last synced" read for the Cloud Sync settings tab (`CloudSyncController`): UI state only.
+
+Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
+operation the user started — an OPML import or export — that fails is not an exception to this: it is reported
+to the user as that operation's failure, not swallowed.)
+
 ## Error Types (`core/KeryxException.kt`, `core/Result.kt`)
 
 ```kotlin

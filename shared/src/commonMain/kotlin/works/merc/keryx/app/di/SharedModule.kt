@@ -33,6 +33,7 @@ import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.SettingsFaviconMissStore
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
@@ -124,7 +125,12 @@ fun sharedModule(): Module = module {
     single { SettingsRepository(get(), get(), get(), get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
-    single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get()) }
+    single {
+        FeedRepository(
+            get(), get(), get(), get(), get(), get(), get(), get(),
+            faviconMisses = SettingsFaviconMissStore(get()),
+        )
+    }
     single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
     single {

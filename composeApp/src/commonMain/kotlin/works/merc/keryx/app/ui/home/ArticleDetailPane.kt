@@ -63,7 +63,6 @@ import io.github.kdroidfilter.webview.web.WebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
 import org.jetbrains.compose.resources.stringResource
-import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
@@ -81,10 +80,12 @@ import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.presentation.articleMetaText
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.ReaderContent
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
 import works.merc.keryx.app.presentation.home.canShareArticleUrl
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
+import works.merc.keryx.app.presentation.home.listRow
 import works.merc.keryx.app.presentation.home.readerContents
 import works.merc.keryx.app.presentation.home.readerPages
 import works.merc.keryx.app.resources.Res
@@ -129,7 +130,7 @@ internal const val ARTICLE_READER_TEST_TAG = "article-reader"
  *   (this pane's own copy button included — see [ArticleUrlCopier]); each increment flashes the copy
  *   button's inline ✓. Only increments made while this pane is composed count.
  * @param onCopyUrl The shared "copy article URL" handler ([ArticleUrlCopier.copy]) the toolbar's copy
- *   button calls with the displayed article; the pane never writes the clipboard itself.
+ *   button calls with the selected article's row; the pane never writes the clipboard itself.
  * @param onOpenInBrowser The shared "open in browser" handler ([openInBrowserIfAllowed]) the
  *   toolbar's open button calls with the displayed article. The button is enabled only for an
  *   http(s) URL ([canOpenInBrowser]); copying needs only a non-blank one.
@@ -143,16 +144,20 @@ fun ArticleDetailPane(
     modifier: Modifier = Modifier,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
-    onCopyUrl: (Articles) -> Unit = {},
-    onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
-    onShare: ((Articles) -> Unit)? = null,
+    onCopyUrl: (ArticleListRow) -> Unit = {},
+    onOpenInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onShare: ((ArticleListRow) -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
     swipeNavigation: ArticleSwipeNavigation? = null,
     // Overridable only so a desktopTest can exercise the touch-primary branch below without a real
     // touch-primary platform to run on; every real call site relies on the default.
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
-    val article by vm.selectedArticle.collectAsState()
+    // The reader's document follows readerContent; the toolbar and the pager follow the selection
+    // itself (selectedArticleRow), which is current the moment an article is selected, before its
+    // body has loaded — so neither acts on, or scrolls back to, the previous article meanwhile.
+    val readerContent by vm.readerContent.collectAsState()
+    val selectedRow by vm.selectedArticleRow.collectAsState()
     val shownUnread by vm.selectedArticleShownUnread.collectAsState()
     val feedName by vm.selectedFeedName.collectAsState()
     val feedFaviconUrl by vm.selectedFeedFaviconUrl.collectAsState()
@@ -179,10 +184,11 @@ fun ArticleDetailPane(
         // Remembered so the pane below can skip recomposition: ArticleReaderPaging holds a List and
         // a Map and is therefore unstable, so a fresh instance every time would make every article
         // write recompose the whole reader.
-        remember(pages, contents, article) {
+        val loaded = (readerContent as? ReaderContent.Full)?.article
+        remember(pages, contents, selectedRow, loaded) {
             ArticleReaderPaging(
-                pages = readerPages(pages, article),
-                contents = readerContents(contents, article),
+                pages = readerPages(pages, selectedRow),
+                contents = readerContents(contents, loaded),
                 requestContent = vm::requestArticleContent,
                 onPageSettled = vm::selectArticle,
             )
@@ -194,7 +200,8 @@ fun ArticleDetailPane(
     DisposableEffect(vm) { onDispose { vm.clearArticleContents() } }
 
     ArticleDetailPaneContent(
-        article = article,
+        readerContent = readerContent,
+        selectedRow = selectedRow,
         feedName = feedName,
         feedFaviconUrl = feedFaviconUrl,
         feedsById = feedsById,
@@ -219,7 +226,7 @@ fun ArticleDetailPane(
  *
  * The reader is a **heavyweight native AWT surface** (an OS browser view hosted through
  * `SwingPanel`), so it is composed unconditionally here — never behind an `if` — regardless of
- * whether [article] is selected. Compose Desktop's `SwingInteropContainer` runs a
+ * whether an article is selected. Compose Desktop's `SwingInteropContainer` runs a
  * `validate()` + `repaint()` on the *whole window* whenever that surface is added, removed, or
  * moved, so unmounting it for the "no article selected" state (as this pane used to do) flickers
  * every pane, not just this one. See `docs/known-issues.md` for the full investigation.
@@ -235,18 +242,24 @@ fun ArticleDetailPane(
  */
 @Composable
 internal fun ArticleDetailPaneContent(
-    article: Articles?,
+    /** What the single reader shows — see `HomeViewModel.readerContent`. */
+    readerContent: ReaderContent,
+    /**
+     * The selected article's row, which the toolbar, the pager and the accessibility label follow —
+     * see `HomeViewModel.selectedArticleRow`. Ahead of [readerContent] while a body is loading.
+     */
+    selectedRow: ArticleListRow? = readerContent.listRow(),
     feedName: String? = null,
     feedFaviconUrl: String? = null,
     feedsById: Map<String, Feeds> = emptyMap(),
     modifier: Modifier = Modifier,
     /** Whether the read/unread button shows the unread state — see `HomeViewModel.selectedArticleShownUnread`. */
-    shownUnread: Boolean = article?.is_read == 0L,
+    shownUnread: Boolean = selectedRow?.is_read == 0L,
     onActivated: () -> Unit = {},
     copyPulse: Int = 0,
-    onCopyUrl: (Articles) -> Unit = {},
-    onOpenInBrowser: (Articles) -> Unit = { openInBrowserIfAllowed(it.url) },
-    onShare: ((Articles) -> Unit)? = null,
+    onCopyUrl: (ArticleListRow) -> Unit = {},
+    onOpenInBrowser: (ArticleListRow) -> Unit = { openInBrowserIfAllowed(it.url) },
+    onShare: ((ArticleListRow) -> Unit)? = null,
     onToggleStar: () -> Unit = {},
     onToggleRead: () -> Unit = {},
     onNavigateUp: (() -> Unit)? = null,
@@ -302,8 +315,8 @@ internal fun ArticleDetailPaneContent(
     // PaneLayout.Triple the reader is a permanent, keyboard-driven pane shared with desktop,
     // exactly like J/K there — a swipe gesture has no place in that state, and no caller passes
     // swipeNavigation there.
-    val swipeEnabled = isTouchPrimary && swipeNavigation != null && article != null
-    val selectedId = article?.id
+    val swipeEnabled = isTouchPrimary && swipeNavigation != null && selectedRow != null
+    val selectedId = selectedRow?.id
     val pages = readerPaging?.pages.orEmpty()
     // Created unconditionally, with no pages at PaneLayout.Triple, so the controller below always
     // has something to drive and this pane keeps one composition shape on every platform. A pager
@@ -334,16 +347,16 @@ internal fun ArticleDetailPaneContent(
     ) {
         WindowDragArea(Modifier.fillMaxWidth()) {
             ArticleDetailToolbar(
-                article = article,
+                article = selectedRow,
                 feedName = if (feedInByline) null else feedName,
                 feedFaviconUrl = feedFaviconUrl,
                 showCopied = showCopied,
                 onToggleStar = onToggleStar,
                 unread = shownUnread,
                 onToggleRead = onToggleRead,
-                onCopyUrl = { article?.let(onCopyUrl) },
-                onOpenInBrowser = { article?.let(onOpenInBrowser) },
-                onShare = onShare?.let { share -> { article?.let(share) } },
+                onCopyUrl = { selectedRow?.let(onCopyUrl) },
+                onOpenInBrowser = { selectedRow?.let(onOpenInBrowser) },
+                onShare = onShare?.let { share -> { selectedRow?.let(share) } },
                 onNavigateUp = onNavigateUp,
             )
         }
@@ -379,7 +392,7 @@ internal fun ArticleDetailPaneContent(
                     // subtree, so without this a screen-reader user invoking the next/previous
                     // action below would get no confirmation that anything happened.
                     .semantics {
-                        article?.title?.takeIf { it.isNotBlank() }?.let { contentDescription = it }
+                        selectedRow?.title?.takeIf { it.isNotBlank() }?.let { contentDescription = it }
                         liveRegion = LiveRegionMode.Polite
                     }
                     .articleSwipeAccessibilityActions(
@@ -394,7 +407,7 @@ internal fun ArticleDetailPaneContent(
                 // readerPaging conditionally: this is the composable that actually decides
                 // whether the heavyweight pager mounts, so the invariant belongs at this level
                 // too, the same way swipeEnabled above already gates on it.
-                if (readerPaging != null && article != null && isTouchPrimary) {
+                if (readerPaging != null && selectedRow != null && isTouchPrimary) {
                     // Invisible: this Pager exists only to drive scroll physics, snapping, and
                     // settle detection (pagerState.currentPage / currentPageOffsetFraction /
                     // settledPage) — see ArticleWebViewCarousel below for why the real content
@@ -429,14 +442,14 @@ internal fun ArticleDetailPaneContent(
                         reader = reader,
                     )
                 } else {
-                    val bylineFeed = article?.let { bylineFeeds[it.feed_id] }
+                    val bylineFeed = readerContent.listRow()?.let { bylineFeeds[it.feed_id] }
                     val bylineFeedName = bylineFeed?.displayTitle()
                     val bylineFaviconUrl = bylineFeed?.favicon_url
                     val document = remember(
-                        theme, article, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
+                        theme, readerContent, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
                     ) {
                         singleReaderDocument(
-                            theme, article, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
+                            theme, readerContent, bylineFeedName, bylineFaviconUrl, noTitleText, placeholderText, noContentText, openInBrowserTooltip,
                         )
                     }
                     reader(document.html, document.body, document.articleUrl, true)
@@ -465,7 +478,7 @@ internal fun ArticleDetailPaneContent(
  */
 @Composable
 private fun ArticleDetailToolbar(
-    article: Articles?,
+    article: ArticleListRow?,
     feedName: String?,
     feedFaviconUrl: String?,
     showCopied: Boolean,
@@ -626,22 +639,26 @@ private fun readerDocument(
  *
  * Routed through [readerDocument] rather than repeating its `when`: the two used to derive the body
  * (and the content/summary fallback) separately, which is one edit away from the single reader and
- * the pager disagreeing about how to render the same article. The only case this adds is the
- * placeholder, which the pager has no equivalent of.
+ * the pager disagreeing about how to render the same article. A [ReaderContent.Header] — a body still
+ * loading past its grace period — is exactly the pager's own not-yet-loaded page. The only case this
+ * adds is the placeholder, which the pager has no equivalent of.
  */
 private fun singleReaderDocument(
     theme: ArticleHtmlTheme,
-    article: Articles?,
+    content: ReaderContent,
     feedName: String?,
     feedFaviconUrl: String?,
     noTitleText: String,
     placeholderText: String,
     noContentText: String,
     openInBrowserTooltip: String,
-): ReaderDocument {
-    if (article == null) return ReaderDocument(articlePlaceholderHtml(theme, placeholderText), body = "", articleUrl = null)
-    return readerDocument(
-        theme, article.toListRow(), article.toReaderRow(), feedName, feedFaviconUrl, noTitleText, noContentText, openInBrowserTooltip,
+): ReaderDocument = when (content) {
+    ReaderContent.None -> ReaderDocument(articlePlaceholderHtml(theme, placeholderText), body = "", articleUrl = null)
+    is ReaderContent.Header -> readerDocument(
+        theme, content.row, full = null, feedName, feedFaviconUrl, noTitleText, noContentText, openInBrowserTooltip,
+    )
+    is ReaderContent.Full -> readerDocument(
+        theme, content.article.toListRow(), content.article.toReaderRow(), feedName, feedFaviconUrl, noTitleText, noContentText, openInBrowserTooltip,
     )
 }
 

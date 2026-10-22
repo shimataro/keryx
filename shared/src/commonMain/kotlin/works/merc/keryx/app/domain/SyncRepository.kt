@@ -31,6 +31,7 @@ import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
@@ -156,11 +157,8 @@ class SyncRepository(
                 // nobody reads. sync() is not exception-proof (a bare SQLDelight write in
                 // setSyncState, resource loading in emitErrorNotification), which is why its other
                 // call sites in main.kt guard the same way.
-                runCatching { sync(SyncTrigger.AUTOMATIC) }
-                    .onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.error(TAG, "Debounced sync failed", e)
-                    }
+                runCatchingUnlessCancelled { sync(SyncTrigger.AUTOMATIC) }
+                    .onFailure { e -> Log.error(TAG, "Debounced sync failed", e) }
             }
         }
     }

@@ -204,6 +204,7 @@ Setup completion = file exists.
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |
 | `syncOnMeteredNetwork` | boolean | false (whether automatic cloud sync also runs on a metered network — mobile data, tethering, and on Android a Wi-Fi the user marked as metered. Never overrides the OS's Data Saver / Low Data Mode. Offered only on Android and iOS; see "Network Gate" in [sync-architecture.md](sync-architecture.md)) |
+| `faviconMissedAt` | object (feed id → Unix ms) | `{}` (when a refresh's favicon lookup last found none for a feed; that feed is not looked up again for `FAVICON_RETRY_INTERVAL_MS` (24 h). Entries older than that are dropped whenever one is added. Device-local, not synced) |
 
 ## Cache Cleanup
 
