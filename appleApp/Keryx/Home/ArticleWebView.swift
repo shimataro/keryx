@@ -9,6 +9,8 @@ import WebKit
 /// script synthesizes is cancelled in the page (`syntheticClickGuard`).
 struct ArticleWebView {
     let html: String
+    /// The in-app theme, which picks the iOS scroll indicator (see `ReaderScrollIndicator`).
+    let isDarkTheme: Bool
 
     @MainActor
     func makeCoordinator() -> Coordinator {
@@ -204,6 +206,10 @@ extension ArticleWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.scrollView.indicatorStyle = switch ReaderScrollIndicator(isDarkTheme: isDarkTheme) {
+        case .dark: .black
+        case .light: .white
+        }
         configure(webView, coordinator: context.coordinator)
     }
 }

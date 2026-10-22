@@ -38,7 +38,7 @@ struct ReaderPageView: View {
     @State private var rebuildThrottle = ReaderRebuildThrottle()
 
     var body: some View {
-        ArticleWebView(html: document.html)
+        ArticleWebView(html: document.html, isDarkTheme: colorScheme == .dark)
             #if os(iOS)
             // Shows through the WebView until its first document paints (see `ArticleWebView`).
             .background(.background)
