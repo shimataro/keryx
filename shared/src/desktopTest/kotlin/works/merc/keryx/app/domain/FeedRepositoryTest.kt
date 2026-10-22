@@ -777,7 +777,7 @@ class FeedRepositoryTest {
             val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
             assertEquals(listOf(article.id), searchRepo.search("Kotlin", ArticleFilter.All).map { it.article.id }, "sanity check before the no-op refresh")
 
-            // A 304-style response: no articles at all, so refreshFeedArticles.hadArticles is false
+            // A 304-style response: no articles at all, so the refresh has nothing new to index
             // and the (already up-to-date) FTS index should not need — and must not be broken by —
             // the no-op refresh.
             val noChangeFetcher = fetcherWith { respond("", HttpStatusCode.NotModified) }
