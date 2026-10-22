@@ -17,6 +17,58 @@ struct SetupView: View {
     }
 
     var body: some View {
+        // Scrollable so a short or narrow screen (an iPhone in landscape, a large Dynamic Type size,
+        // a macOS window shrunk to its minimum) reaches every option instead of SwiftUI truncating
+        // the text and clipping the cloud card off the bottom; `minHeight` keeps the content
+        // vertically centered whenever it does fit. `fixedSize` comes first so the content is
+        // laid out at its own height: the `minHeight` frame proposes the screen's height, which
+        // would otherwise squeeze content that only just overflows back into truncated text.
+        GeometryReader { geometry in
+            ScrollView {
+                content
+                    .padding(contentPadding)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicatorsFlash(onAppear: true)
+        }
+        #if os(macOS)
+        // The window's minimum size — not applied on iOS, where it would lay the view out wider
+        // than an iPhone's screen (iPhone Duo's outer display leaves only 382pt beside its vertical
+        // bar, which a 480pt minimum overflowed). Tall enough for both option cards at the full padding, so
+        // scrolling is only needed once the connecting progress or an error is shown below them.
+        .frame(minWidth: 480, minHeight: 480)
+        #endif
+        .task { await setup.startObserving() }
+        // Skips Setup entirely when no cloud provider is configured for this build — matches
+        // Compose's own auto-choice (`App.kt:43-54`), rather than showing a cloud section with no
+        // providers in it and making the user pick "local only" for themselves regardless.
+        .task {
+            if setup.controller.availableCloudTypes.isEmpty {
+                setup.controller.chooseLocalOnly { onDone() }
+            }
+        }
+        .alert(L("setup_abort_connect_confirm_title"), isPresented: $showAbortConfirm) {
+            Button(L("common_abort"), role: .destructive) {
+                setup.controller.cancelConnect()
+                oauthCoordinator.cancelActiveSession()
+            }
+            Button(L("common_cancel"), role: .cancel) {}
+        } message: {
+            Text(L("setup_abort_connect_confirm_body"))
+        }
+    }
+
+    private var contentPadding: EdgeInsets {
+        #if os(macOS)
+        EdgeInsets(top: 40, leading: 40, bottom: 40, trailing: 40)
+        #else
+        EdgeInsets(top: 24, leading: 20, bottom: 24, trailing: 20)
+        #endif
+    }
+
+    private var content: some View {
         VStack(spacing: 24) {
             Text(L("setup_title"))
                 .font(.largeTitle.bold())
@@ -71,30 +123,8 @@ struct SetupView: View {
                     .foregroundStyle(.red)
             }
         }
-        .padding(40)
-        #if os(macOS)
-        // The Setup window's minimum size. iOS gets no minimum: the screen is the limit, and iPhone
-        // Duo's outer display leaves 382pt beside its vertical bar, which a 480pt minimum overflowed.
-        .frame(minWidth: 480, minHeight: 420)
-        #endif
-        .task { await setup.startObserving() }
-        // Skips Setup entirely when no cloud provider is configured for this build — matches
-        // Compose's own auto-choice (`App.kt:43-54`), rather than showing a cloud section with no
-        // providers in it and making the user pick "local only" for themselves regardless.
-        .task {
-            if setup.controller.availableCloudTypes.isEmpty {
-                setup.controller.chooseLocalOnly { onDone() }
-            }
-        }
-        .alert(L("setup_abort_connect_confirm_title"), isPresented: $showAbortConfirm) {
-            Button(L("common_abort"), role: .destructive) {
-                setup.controller.cancelConnect()
-                oauthCoordinator.cancelActiveSession()
-            }
-            Button(L("common_cancel"), role: .cancel) {}
-        } message: {
-            Text(L("setup_abort_connect_confirm_body"))
-        }
+        // Every text here, including the connecting/error status, stays centered when it wraps.
+        .multilineTextAlignment(.center)
     }
 
     /// Centered heading + description above full-width actions — the counterpart of Compose's own
