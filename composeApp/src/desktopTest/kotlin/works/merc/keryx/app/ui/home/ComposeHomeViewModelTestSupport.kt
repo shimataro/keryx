@@ -3,13 +3,17 @@ package works.merc.keryx.app.ui.home
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.cloud.TokenStorage
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.HomeViewModelFixture
 import works.merc.keryx.app.presentation.home.HomeViewModelFixtureTokenStorage
+import works.merc.keryx.app.presentation.home.ReaderContent
 import works.merc.keryx.app.presentation.home.newHomeViewModel
 import works.merc.keryx.app.presentation.ManualSync
 
@@ -32,9 +36,13 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
     appKey: String = "",
     // See newHomeViewModel's own parameter: null builds the real CloudSyncController.
     manualSync: ManualSync? = null,
+    // See newHomeViewModel's own parameter: lets a test hold a selection's body lookup.
+    dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     block: suspend (HomeViewModelFixture) -> T,
 ): T {
-    val fixture = newHomeViewModel(driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync)
+    val fixture = newHomeViewModel(
+        driver, db, syncScheduler, clock, activityCenter, tokenStorage, appKey, manualSync = manualSync, dispatcher = dispatcher,
+    )
     return try {
         // waitForIdle only on the success path: it rethrows Compose's own uncaught exceptions, and
         // doing that from a `finally` would mask the assertion failure that actually ended [block].
@@ -43,3 +51,9 @@ internal suspend fun <T> ComposeUiTest.useHomeViewModel(
         fixture.close()
     }
 }
+
+/**
+ * The id of the article whose body the reader has loaded — what `HomeViewModel.selectedArticle` held
+ * before it became shared-module internal — or `null` while the reader shows a header or nothing.
+ */
+internal fun HomeViewModel.loadedArticleId(): String? = (readerContent.value as? ReaderContent.Full)?.article?.id

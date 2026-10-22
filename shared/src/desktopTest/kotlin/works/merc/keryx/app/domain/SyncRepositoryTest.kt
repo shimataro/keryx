@@ -4,6 +4,9 @@ import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -21,6 +24,7 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
+import works.merc.keryx.app.core.NetworkCondition
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SYNC_DEBOUNCE_MS
@@ -34,6 +38,7 @@ import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.platform.ExternalAppLaunch
+import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.insertFeed
@@ -223,6 +228,7 @@ class SyncRepositoryTest {
         cloud: CloudStorage,
         clockMillis: Long = 1_000L,
         activityCenter: ActivityCenter = ActivityCenter(),
+        automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
     ): SyncRepository =
         SyncRepository(
             driver = localDriver,
@@ -235,7 +241,16 @@ class SyncRepositoryTest {
             notificationCenter = notificationCenter,
             localDbPath = localFile.absolutePath,
             tempDir = tempDir.absolutePath,
+            automaticSyncAllowedFlow = automaticSyncAllowedFlow,
         )
+
+    /** [SyncRepository]'s network gate as SharedModule wires it, over fakes. */
+    private fun networkGate(
+        monitor: FakeNetworkConditionMonitor,
+        syncOnMetered: MutableStateFlow<Boolean>,
+    ): () -> Flow<Boolean> = {
+        NetworkUsagePolicy.automaticSyncAllowedFlow(monitor.condition, syncOnMetered)
+    }
 
     /**
      * Gzip-compresses [bytes] via the production [Gzip] object, round-tripped through temp files —
@@ -1460,6 +1475,216 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun automaticSyncOnAMeteredNetworkIsDeferredWithoutTouchingTheCloud() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val activityCenter = ActivityCenter()
+        val repo = newRepo(cloud, activityCenter = activityCenter, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+
+        val result = repo.sync(SyncTrigger.AUTOMATIC)
+
+        assertIs<Result.Ok<Unit>>(result)
+        assertEquals(0, cloud.existsCount)
+        assertEquals(0, cloud.uploadCount + cloud.createCount)
+        assertTrue(repo.syncDeferredForNetwork.value)
+        assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
+        assertFalse(activityCenter.activity.value.syncing)
+        // A deferral is not a failure: nothing reaches the notification center or the settings tab.
+        assertTrue(notificationCenter.items.value.isEmpty())
+        assertNull(repo.lastSyncError.value)
+    }
+
+    @Test
+    fun automaticSyncOnAMeteredNetworkRunsWhenTheUserOptedIn() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(true)))
+
+        assertIs<Result.Ok<Unit>>(repo.sync(SyncTrigger.AUTOMATIC))
+
+        assertTrue(cloud.existsCount > 0)
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun dataSaverDefersAutomaticSyncEvenWhenTheUserOptedIn() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(NetworkCondition(metered = true, dataSaver = true))
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(true)))
+
+        repo.sync(SyncTrigger.AUTOMATIC)
+
+        assertEquals(0, cloud.existsCount)
+        assertTrue(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun manualSyncOnAMeteredNetworkRunsAndClearsTheDeferral() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.syncDeferredForNetwork.value)
+
+        assertIs<Result.Ok<Unit>>(repo.sync(SyncTrigger.MANUAL))
+
+        assertTrue(cloud.existsCount > 0)
+        assertFalse(repo.syncDeferredForNetwork.value)
+        // The waiter was cancelled with the deferral: reaching an unmetered network later starts no sync.
+        val existsAfterManual = cloud.existsCount
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(existsAfterManual, cloud.existsCount)
+    }
+
+    @Test
+    fun deferredSyncRunsOnceWhenTheNetworkAllowsIt() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        // Several deferred syncs (a burst of writes) still leave a single waiter behind.
+        repeat(3) { repo.sync(SyncTrigger.AUTOMATIC) }
+        runCurrent()
+        assertEquals(0, cloud.existsCount)
+
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+
+        // 2 metadata requests = one first-ever sync (see scheduleSyncDebouncesRapidCalls).
+        assertEquals(2, cloud.existsCount)
+        assertEquals(1, cloud.createCount)
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun deferralEndsWhenTheNetworkAllowsEvenIfTheSyncThenFails() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.syncDeferredForNetwork.value)
+        cloud.queueExists(Result.Err(CloudStorageException("boom")))
+
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+
+        // Nothing is waiting for the network any more; the failure is reported as a failure.
+        assertFalse(repo.syncDeferredForNetwork.value)
+        assertNotNull(repo.lastSyncError.value)
+    }
+
+    @Test
+    fun aSyncSucceedingDoesNotClearADeferralRaisedWhileItRan() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(cloudDbBytes()), "r1")
+        val gate = CompletableDeferred<Unit>()
+        cloud.downloadGate = gate
+        val monitor = FakeNetworkConditionMonitor(NetworkCondition.UNRESTRICTED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+
+        val running = launch { repo.sync(SyncTrigger.MANUAL) }
+        runCurrent() // suspended inside the gated download
+        monitor.current.value = METERED
+        repo.sync(SyncTrigger.AUTOMATIC) // a change made meanwhile: deferred, not uploaded by the running sync
+        assertTrue(repo.syncDeferredForNetwork.value)
+        gate.complete(Unit)
+        running.join()
+
+        assertTrue(repo.syncDeferredForNetwork.value)
+        // ...and its waiter still fires once the network allows.
+        cloud.downloadGate = null
+        val existsBefore = cloud.existsCount
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertTrue(cloud.existsCount > existsBefore)
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun suspendingAutomaticSyncDropsTheDeferral() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_PATH, byteArrayOf(1, 2, 3, 4), "legacy-r1")
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.syncDeferredForNetwork.value)
+
+        // A manual sync finds the cloud unusable, which suspends automatic syncing.
+        val result = repo.sync(SyncTrigger.MANUAL)
+
+        assertIs<Result.Err>(result)
+        assertTrue(repo.autoSyncSuspended.value)
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun aDeferralRacingADisconnectDoesNotRaiseTheFlag() = runTest {
+        val cloud = FakeCloudStorage()
+        var providerCalls = 0
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = SyncRepository(
+            driver = localDriver,
+            db = localDb,
+            ftsManager = ftsManager,
+            // Connected for sync()'s own check, disconnected by the time the deferral re-checks.
+            cloudProvider = { if (providerCalls++ == 0) cloud else null },
+            clock = Clock { 1_000L },
+            scope = backgroundScope,
+            activityCenter = ActivityCenter(),
+            notificationCenter = notificationCenter,
+            localDbPath = localFile.absolutePath,
+            tempDir = tempDir.absolutePath,
+            automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)),
+        )
+
+        repo.sync(SyncTrigger.AUTOMATIC)
+
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
+    fun clearSyncFailureStateDropsTheDeferral() = runTest {
+        val cloud = FakeCloudStorage()
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = newRepo(cloud, automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)))
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.syncDeferredForNetwork.value)
+
+        repo.clearSyncFailureState()
+
+        assertFalse(repo.syncDeferredForNetwork.value)
+        monitor.current.value = NetworkCondition.UNRESTRICTED
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(0, cloud.existsCount)
+    }
+
+    @Test
+    fun automaticSyncWithNoProviderIsNotDeferred() = runTest {
+        val monitor = FakeNetworkConditionMonitor(METERED)
+        val repo = SyncRepository(
+            driver = localDriver,
+            db = localDb,
+            ftsManager = ftsManager,
+            cloudProvider = { null },
+            clock = Clock { 1_000L },
+            scope = backgroundScope,
+            activityCenter = ActivityCenter(),
+            notificationCenter = notificationCenter,
+            localDbPath = localFile.absolutePath,
+            tempDir = tempDir.absolutePath,
+            automaticSyncAllowedFlow = networkGate(monitor, MutableStateFlow(false)),
+        )
+
+        assertIs<Result.Ok<Unit>>(repo.sync(SyncTrigger.AUTOMATIC))
+        assertFalse(repo.syncDeferredForNetwork.value)
+    }
+
+    @Test
     fun scheduleSyncDebouncesRapidCalls() = runTest {
         val cloud = FakeCloudStorage()
         val repo = newRepo(cloud)
@@ -1882,3 +2107,5 @@ class SyncRepositoryTest {
         assertEquals(SyncPhase.IDLE, repo.syncPhase.value)
     }
 }
+
+private val METERED = NetworkCondition(metered = true, dataSaver = false)

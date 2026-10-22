@@ -18,8 +18,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import works.merc.keryx.app.FakeTokenStorage
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.NetworkCondition
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.cloud.DropboxAuthManager
 import works.merc.keryx.app.data.cloud.OAuthTokens
@@ -85,6 +87,7 @@ class RefreshCycleRunnerTest {
         db: KeryxDatabase,
         connected: Boolean = true,
         fetchGate: CompletableDeferred<Unit>? = null,
+        network: NetworkCondition = NetworkCondition.UNRESTRICTED,
     ): Fixture {
         val clock = Clock { 1000L }
         val log = Collections.synchronizedList(mutableListOf<String>())
@@ -101,6 +104,7 @@ class RefreshCycleRunnerTest {
         val feedRepository = FeedRepository(
             db, fetcher, favicons, articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { scope -> cleanups += { scope.cancel() } }
         val syncRepository = SyncRepository(
@@ -129,7 +133,7 @@ class RefreshCycleRunnerTest {
             activityCenter, feedRepository, syncRepository, cloudSession,
             NewArticleNotifier { message, _ -> log += "notify:$message" },
             settingsRepository, FakeNotificationMessages(),
-        )
+        ) { NetworkUsagePolicy.automaticRefreshAllowed(network) }
         return Fixture(runner, activityCenter, log)
     }
 
@@ -152,6 +156,39 @@ class RefreshCycleRunnerTest {
         assertIs<Result.Ok<Unit>>(result)
         assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
         assertTrue(f.activityCenter.activity.value.idle)
+    }
+
+    @Test
+    fun automaticRunSkipsTheRefreshWhileTheOsIsSavingDataButStillReachesTheSync() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, network = NetworkCondition(metered = true, dataSaver = true))
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+
+        assertEquals(listOf("sync"), f.log.toList())
+        assertTrue(f.activityCenter.activity.value.idle)
+    }
+
+    @Test
+    fun automaticRunRefreshesOnAMeteredNetworkWithoutDataSaver() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, network = NetworkCondition(metered = true, dataSaver = false))
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    @Test
+    fun manualRunRefreshesEvenWhileTheOsIsSavingData() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, network = NetworkCondition(metered = true, dataSaver = true))
+
+        f.runner.run(trigger = SyncTrigger.MANUAL)
+        val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
+
+        assertIs<RefreshCycleRunner.CycleOutcome.Ran>(outcome)
+        assertEquals(2, f.log.count { it == "fetch:https://ex.com/f1" })
     }
 
     @Test

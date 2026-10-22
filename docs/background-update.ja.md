@@ -70,6 +70,12 @@ FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 �
 プロセスをバックグラウンド更新のために起こしている間にループのタイマーが満了しても、更新チェックや
 FTS の再構築に枠を使わないようにするため。起動時シーケンスもその時点で実行中なら同様に止め、次にアクティブになったときに最初から再実行する。完了済みなら、そのプロセスでは再実行しない。
 
+**従量制回線と低データモード。** バックグラウンド実行も、他の自動サイクルと同じ `RefreshCycleRunner` の
+ゲートを通る（[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照）: モバイル
+回線やテザリングでは、ユーザーがモバイルデータ通信での同期を許可していない限り同期を保留し、低データ
+モードではフィード更新もスキップする。iOS には Android の従量制でない回線を待つジョブに相当するものは
+なく、アプリが中断中に保留された同期は、回線が許す次のバックグラウンド実行か前面での同期で行われる。
+
 **アプリアイコンのバッジ。** アプリアイコンには未読の総数（`setBadgeCount`。macOS の Dock バッジと
 同じ値）を、実行中とバックグラウンド実行のたびに更新して表示する。通知の許可が必要で、アプリは
 「通知」設定がオンのときに許可を求める。
@@ -106,6 +112,28 @@ Google Drive も持つ（[sync-architecture.ja.md](sync-architecture.ja.md) の
 分類（`CloudStorageException`）に限り `Result.retry()` とし、リトライ不可と定める恒久的な失敗
 （`CloudAuthException`/`SchemaVersionException`/`CloudDataIncompatibleException`）は次回の
 定期実行に委ねる。
+
+**従量制回線とデータセーバー。** 周期ジョブの `NetworkType.CONNECTED` 制約は維持する: 従量制回線でも
+フィード更新は実行し、保留されるのは同期ステップだけ（ユーザーがモバイルデータ通信での同期を許可して
+いない場合）。データセーバーがオンのときはサイクルのフィード更新もスキップする —
+[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照。OS でアプリにデータ使用を
+無制限に許可した場合はデータセーバーの対象外となり、そのように扱われる。
+
+**保留された同期。** `KeryxApplication.onCreate` は `startDeferredSyncHandoff`
+（`background/DeferredSync.kt`）も呼ぶ。これはプロセスが生きている間ずっと
+`SyncRepository.syncDeferredForNetwork` を監視し、立つたびに `NetworkType.UNMETERED`（ユーザーが従量制回線での同期を許可している場合は
+`NetworkType.CONNECTED`。`NetworkUsagePolicy.deferredSyncNeedsUnmeteredNetwork`）を条件とする一意な
+単発 `DeferredSyncWorker`（`"deferred_sync"`、`ExistingWorkPolicy.KEEP` なので連続して保留されても
+ジョブは 1 つ）を enqueue する。保留中にこの許可設定が変わったときはジョブを置き換える。
+Worker は `SyncRepository.sync(SyncTrigger.AUTOMATIC)` を呼ぶだけで、
+同期が許可される回線ではネットワークゲートを通過し（`autoSyncSuspended` の対象であることは変わらない）、
+`FeedRefreshWorker` と同じく `CloudStorageException` のときにリトライし、同期の後でフラグが再び立っている
+ときもリトライする（ゲート評価前に回線が制限付きに戻って同期が保留された場合で、この一意なジョブだけが
+それを実行できるため。リトライでもジョブのネットワーク制約は維持される）。アプリを閉じた後で端末が
+Wi-Fi につながったときに保留中の変更を同期するのはこのジョブ — `SyncRepository` 自身のプロセス内の待機
+ジョブはプロセスが生きている間しか働かない。このプロセス内でフラグが下りたとき（プロセス内の待機ジョブが引き継いだ、同期が成功した、または
+接続が解除された）はジョブを取り消す。以前のプロセスが残したジョブは、その変更がまだ同期されていない
+ため、起動時に取り消すことはない。
 
 `MainActivity.onCreate` から `runAndroidStartupTasks`（`AndroidStartupTasks.kt`）を呼ぶ —
 デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告（Android には該当
@@ -513,11 +541,18 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
 更新では書き込みも再クエリも発生しない。
 
 `FeedRepository.refreshAll` は各フィードのネットワーク取得を**並行**（同時取得数を
-`REFRESH_FETCH_CONCURRENCY` で上限）で行い、その後で各フィードの DB 書き込みをフィード順に
-**直列**で適用する。そのため購読数が多くても、更新にかかる時間は「全取得の合計」ではなく
-「最も遅い取得」程度で済む。DB 書き込みは単一スレッドのまま（JVM の SQLite ドライバは文ごとに
-新しいコネクションを開くため、並行書き込みは競合しうる）で、各フィードの記事は従来どおり
-1 フィードずつコミットされるため、更新の進行に合わせてリストに逐次表示される。
+`REFRESH_FETCH_CONCURRENCY` で上限）で行い、各フィードの DB 書き込みは、そのフィードの取得が
+終わった時点で**直列**に適用する。そのため遅いフィードがあっても、取得済みのフィードの記事が
+待たされることはない。購読数が多くても、更新にかかる時間は「全取得の合計」ではなく
+「最も遅い取得」程度で済む。DB 書き込みは単一スレッドのまま（1 つのコルーチンがすべて適用する。
+JVM の SQLite ドライバは文ごとに新しいコネクションを開くため、並行書き込みは競合しうる）で、
+各フィードの記事は 1 フィードずつコミットされるため、更新の進行に合わせてリストに逐次表示される。
+検索インデックスは、全フィードの適用が終わった後に 1 回だけ更新する。
+まだ favicon のないフィードは、そのフィードの記事を書き込んだ後で favicon を探す（取得枠を別に取るので、
+記事の反映を遅らせない）。見つからなかったフィードは `FAVICON_RETRY_INTERVAL_MS`（24 時間）の間は
+探し直さない（記録は、メモリ上ではなく端末ローカルの設定 `faviconMissedAt` に持つ。Android は
+バックグラウンドの更新の多くで新しいプロセスを起こすので、メモリ上だけの記録では次の更新が同じサイトをまた探してしまう）。見つかった favicon は、そのフィードが購読中で、かつまだ
+favicon を持っていない場合に限って書き込む。
 
 ## 起動時タスク（`runStartupTasks` / `runAndroidStartupTasks`）
 

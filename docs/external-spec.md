@@ -42,6 +42,16 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 - While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its current
   progress (checking the cloud, downloading, merging, updating the search index, preparing the snapshot, uploading, or archiving) instead of just a plain spinner, so a long first-ever sync doesn't look stalled — see
   [sync-architecture.md](sync-architecture.md).
+- **On Android and iOS, automatic sync waits for Wi-Fi by default.** Each sync uploads the whole
+  database, so an automatic sync (after a change, a background refresh, or at startup) is held back
+  while the device is on a metered network — mobile data or tethering, and on Android also a Wi-Fi the user marked as metered — and while the OS's Data Saver / Low Data Mode is on. The Cloud Sync settings tab
+  offers "Sync automatically over mobile data" (off by default, device-local, shown only while a
+  provider is connected) to allow metered networks; Data Saver / Low Data Mode always defers. While a
+  sync is held back, the connected provider's row says the sync is paused to save data and will run on an unrestricted network (the reason is not distinguished: it may be a metered network, or Data Saver / Low Data Mode, which the opt-in does not override), and it
+  runs as soon as the network allows — on Android even with the app closed. "Sync now", "Refresh All"
+  and pull-to-refresh always sync immediately. Automatic feed refreshes continue on a metered network
+  (they are small conditional requests) and stop only under Data Saver / Low Data Mode. Desktop and
+  macOS are never restricted. See "Network Gate" in [sync-architecture.md](sync-architecture.md).
 - **OneDrive supports personal Microsoft accounts only** — a work/school (Microsoft 365 / Entra ID)
   account cannot be connected. Keryx keeps its sync file in OneDrive's hidden per-app folder, and the
   Graph permission that grants access to only that folder is offered for personal accounts alone;
@@ -161,7 +171,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
   context: an in-app explanation when the app opens with notifications on but not allowed (after which
   the setting matches the answer, so it is not asked again), or the system request directly when the setting is switched on — and the setting turns
   off if the permission is refused, with a link to the OS notification settings after a denial) and
-  background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
+  background refresh runs on `WorkManager`, at roughly the interval configured in Settings (on a
+  metered network or under Data Saver, its sync and refresh follow §4's rule, and a sync held back
+  for the network is handed to a job that waits for a network that allows it); the
   in-app "check for update" is hidden when the app was installed from an app store (currently just
   Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no
   equivalent of the digit badge — the platform has no API to set an app-icon badge count independent
@@ -169,7 +181,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   shows the OS's own notification dot (tied to the presence of an active notification) plus a
   long-press count via `setNumber` on launchers that support it, a deliberate asymmetry rather than an oversight; see
   `background-update.md` for the full comparison. The SwiftUI iOS app likewise refreshes in the
-  background (a `BGAppRefreshTask`; the OS picks the timing), posts the new-article notification, and shows the total
+  background (a `BGAppRefreshTask`; the OS picks the timing; on cellular, tethering or under Low Data
+  Mode it follows §4's rule), posts the new-article notification, and shows the total
   unread count as the app icon's badge.
 
 ### Behavior on Feed URL Change / Disappearance
