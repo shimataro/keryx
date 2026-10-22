@@ -16,6 +16,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -54,10 +57,14 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.NetworkConditionMonitor
+import works.merc.keryx.app.platform.UnrestrictedNetworkConditionMonitor
 import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.singleProviderCloudSession
@@ -215,6 +222,9 @@ class CloudSyncControllerTest {
         // matches the rest of newController's Unconfined setup; a test can supply a CoroutineDispatcher
         // to assert it was actually used or to hold work in flight.
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // The SyncRepository's network gate (default: always allowed) and the platform's monitor.
+        automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
+        networkConditionMonitor: NetworkConditionMonitor = UnrestrictedNetworkConditionMonitor,
     ): CloudSyncController {
         val syncScheduler = SyncScheduler {}
         // Unconfined write dispatcher so saveLocalSettings persists inline.
@@ -233,6 +243,7 @@ class CloudSyncControllerTest {
             notificationCenter = NotificationCenter(),
             localDbPath = "unused",
             tempDir = "unused",
+            automaticSyncAllowedFlow = automaticSyncAllowedFlow,
         )
         val session = cloudSession ?: run {
             val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
@@ -249,7 +260,7 @@ class CloudSyncControllerTest {
         createdSettingsRepository = settingsRepository
         return CloudSyncController(
             session, syncRepository, CloudConnectionService(session, settingsRepository, syncRepository),
-            activityCenter, settingsRepository, dispatcher,
+            activityCenter, settingsRepository, dispatcher, networkConditionMonitor,
         ).also { createdControllers += it }
     }
 
@@ -314,6 +325,38 @@ class CloudSyncControllerTest {
      * "reset"/"switch provider" buttons stay correctly blocked, but so did "disconnect" (the bug),
      * which must not be gated on the same flag.
      */
+    @Test
+    fun meteredSettingIsOfferedOnlyWhereThePlatformReportsMeteredNetworks() {
+        assertFalse(newController().meteredSettingSupported)
+        assertTrue(newController(networkConditionMonitor = FakeNetworkConditionMonitor(supported = true)).meteredSettingSupported)
+        assertFalse(newController(networkConditionMonitor = FakeNetworkConditionMonitor(supported = false)).meteredSettingSupported)
+    }
+
+    @Test
+    fun syncOnMeteredNetworkFollowsTheSettingWrittenThroughPreferences() {
+        val controller = newController()
+        assertFalse(controller.syncOnMeteredNetwork.value)
+
+        PreferencesController(createdSettingsRepository).setSyncOnMeteredNetwork(true)
+
+        assertTrue(controller.syncOnMeteredNetwork.value)
+    }
+
+    @Test
+    fun syncDeferredForNetworkMirrorsTheSyncRepositoryUntilTheDeferralClears() = runTest {
+        val controller = newController(
+            syncCloudProvider = { AlwaysFailingCloudStorage() },
+            automaticSyncAllowedFlow = { MutableStateFlow(false) },
+        )
+        assertFalse(controller.syncDeferredForNetwork.value)
+
+        createdSyncRepository.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(controller.syncDeferredForNetwork.value)
+
+        createdSyncRepository.clearSyncFailureState()
+        assertFalse(controller.syncDeferredForNetwork.value)
+    }
+
     @Test
     fun initialSyncKeepsConnectingTypeClearWhileSettingInitialSyncingType() = runTest {
         val gate = CompletableDeferred<Unit>()

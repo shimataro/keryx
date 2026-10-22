@@ -225,6 +225,9 @@
     <string name="settings_cloud_reset_confirm_body">The cloud sync data will be renamed for safekeeping (keryx-&lt;date-time&gt;.db.bak) and rebuilt from this device’s data. If it can’t be renamed, it will be deleted instead. Safekept data is not removed automatically. Any unsynced changes on other devices may be lost.</string>
     <string name="settings_cloud_reset_confirm_action">Reset</string>
     <string name="settings_last_synced">Last synced: %1$s</string>
+    <string name="settings_cloud_sync_on_metered">Sync automatically over mobile data</string>
+    <string name="settings_cloud_sync_on_metered_hint">Includes metered Wi-Fi and tethering. Automatic sync stays off while Data Saver / Low Data Mode is on.</string>
+    <string name="settings_cloud_sync_deferred_network">Sync paused to save data. It will run on an unrestricted network.</string>
     <string name="settings_cloud_syncing">Syncing…</string>
     <string name="settings_cloud_phase_checking">Checking the cloud…</string>
     <string name="settings_cloud_phase_downloading">Downloading…</string>

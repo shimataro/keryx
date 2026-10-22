@@ -224,6 +224,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `lastUnreadOnlyStarred` | boolean\|null | null（スター付きフィルタ専用。`lastUnreadOnly` とは独立） |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null（Linux KDE Global Menu: null=自動（`RegisterWindow` が成功するまで表示し、その後非表示）。true/false は Ctrl+M またはエクスポートされた「メニューバーを表示」チェックボックスによる明示的な上書き。`com.canonical.AppMenu.Registrar` が存在しない環境では効果なし） |
+| `syncOnMeteredNetwork` | boolean | false（従量制回線 — モバイルデータ通信、テザリング、Android ではユーザーが従量制に設定した Wi-Fi — でも自動クラウド同期を行うか。OS のデータセーバー / 低データモードより優先されることはない。Android と iOS でのみ設定できる。[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照） |
 | `faviconMissedAt` | object（フィード ID → Unix ms） | `{}`（更新時の favicon 探索がそのフィードで最後に何も見つけられなかった時刻。そのフィードは `FAVICON_RETRY_INTERVAL_MS`（24 時間）の間は探し直さない。それより古いエントリは、追加のたびに削除する。端末ローカルで同期対象外） |
 
 ## キャッシュ削除

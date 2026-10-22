@@ -22,8 +22,11 @@ final class CloudSyncObservable {
     private(set) var disconnecting: Bool = false
     private(set) var idle: Bool = true
     private(set) var canSyncNow: Bool = false
+    private(set) var syncOnMeteredNetwork: Bool = false
+    private(set) var syncDeferredForNetwork: Bool = false
 
     var availableCloudTypes: [CloudStorageType] { controller.availableCloudTypes }
+    var meteredSettingSupported: Bool { controller.meteredSettingSupported }
 
     init(controller: CloudSyncController) {
         self.controller = controller
@@ -44,7 +47,9 @@ final class CloudSyncObservable {
         async let t12: () = observeDisconnecting()
         async let t13: () = observeIdle()
         async let t14: () = observeCanSyncNow()
-        _ = await (t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14)
+        async let t15: () = observeSyncOnMeteredNetwork()
+        async let t16: () = observeSyncDeferredForNetwork()
+        _ = await (t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16)
     }
 
     private func observeConnectedType() async {
@@ -101,5 +106,13 @@ final class CloudSyncObservable {
 
     private func observeCanSyncNow() async {
         for await v in controller.canSyncNow { canSyncNow = v.boolValue }
+    }
+
+    private func observeSyncOnMeteredNetwork() async {
+        for await v in controller.syncOnMeteredNetwork { syncOnMeteredNetwork = v.boolValue }
+    }
+
+    private func observeSyncDeferredForNetwork() async {
+        for await v in controller.syncDeferredForNetwork { syncDeferredForNetwork = v.boolValue }
     }
 }

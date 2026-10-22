@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -23,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -59,6 +61,7 @@ class CloudProviderRowTest {
         authFailed: Boolean = false,
         statusText: String? = null,
         lastSyncedAtText: String? = null,
+        deferredForNetwork: Boolean = false,
     ) {
         CloudProviderRow(
             type = CloudStorageType.ONEDRIVE,
@@ -72,6 +75,7 @@ class CloudProviderRowTest {
             resetting = resetting,
             statusText = statusText,
             lastSyncedAtText = lastSyncedAtText,
+            deferredForNetwork = deferredForNetwork,
             iconOnly = iconOnly,
             onSelect = {},
             onCancel = {},
@@ -252,6 +256,54 @@ class CloudProviderRowTest {
 
         onNodeWithText("データを統合しています…").assertIsDisplayed()
         onAllNodesWithText("2026/09/16 12:34").assertCountEquals(0)
+    }
+
+    @Test
+    fun syncDeferredForTheNetworkShowsBesideTheLastSyncedSubtitle() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, lastSyncedAtText = "2026/09/16 12:34", deferredForNetwork = true)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertIsDisplayed()
+        onNodeWithText("最終同期: 2026/09/16 12:34").assertIsDisplayed()
+    }
+
+    @Test
+    fun syncDeferredForTheNetworkStaysUpWhileLiveProgressShows() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(640.dp)) {
+                ConnectedOneDriveRow(iconOnly = false, statusText = "アップロードしています…", deferredForNetwork = true)
+            }
+        }
+        waitForIdle()
+
+        onNodeWithText("アップロードしています…").assertIsDisplayed()
+        onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します").assertIsDisplayed()
+    }
+
+    @Test
+    fun syncDeferredForTheNetworkWrapsInFullAtPhoneWidth() = runDesktopComposeUiTest {
+        setContent {
+            Box(Modifier.width(320.dp)) {
+                ConnectedOneDriveRow(iconOnly = true, lastSyncedAtText = "2026/09/16 12:34", deferredForNetwork = true)
+            }
+        }
+        waitForIdle()
+
+        // The text node holds the whole string whether or not it was ellipsized, so check that the
+        // laid-out text is allowed to wrap rather than how it actually wrapped: line count and
+        // overflow depend on the host's fonts (Linux CI has no CJK font, so the sentence lays out
+        // as one unbreakable run there).
+        val deferred = onNodeWithText("データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します")
+        deferred.assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        deferred.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+        val input = layouts.single().layoutInput
+        assertTrue(input.softWrap)
+        assertEquals(Int.MAX_VALUE, input.maxLines)
     }
 
     @Test

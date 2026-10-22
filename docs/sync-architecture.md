@@ -123,7 +123,8 @@ rather than looking stuck — which is the correct ordering anyway.
 
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` takes who is asking. `SyncTrigger.AUTOMATIC` — the
 debounced-write consumer, `runStartupMaintenance` (shared by desktop's `StartupTasks.kt` and Android's startup
-path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` — is subject to
+path), desktop's `backgroundUpdateLoop` (`StartupTasks.kt`), and Android's `FeedRefreshWorker` and
+`DeferredSyncWorker` — is subject to
 a gate: while `autoSyncSuspended` (a `StateFlow<Boolean>`)
 is true, an `AUTOMATIC` call skips the download/merge/upload cycle entirely and returns `Result.Ok(Unit)` without
 spinning the sync spinner or touching the notification center, so a known-unusable cloud DB is not re-downloaded
@@ -137,6 +138,58 @@ The gate is set by `updateAutoSyncGate` (called from both `sync()` and `resetClo
 `autoSyncSuspended` is deliberately **in-memory, not persisted**: a process restart is a free, honest retry (another device may have fixed the cloud data in the meantime), and the gate's entire purpose — not re-downloading/re-merging the same unusable file, and not re-raising the same notification, within one running process — needs nothing more durable than that. It clears on any successful sync (manual or automatic), on a successful `resetCloudData()`, and via `clearSyncFailureState()` — which also clears the mirrored failure-reason text — called when the connection that produced it is disconnected or switched (`SettingsViewModel.disconnect()`/`switchTo()`).
 
 Nothing about the reset/notification UI is affected by the gate: the notification-center `ResetCloudData` button and the settings screen's reset button are unconditional (not gated), and `lastSyncError` is left untouched by a skipped `AUTOMATIC` call, so the cloud-sync tab keeps showing why sync is currently broken.
+
+### Network Gate (Metered Networks and Data Saver)
+
+A second `AUTOMATIC`-only gate sits beside the one above. An automatic sync uploads a snapshot of the
+whole database, so on a phone it would spend mobile data on every few mark-as-read taps. The OS
+reports two signals through `platform/NetworkConditionMonitor` (an interface obtained from the
+`platformNetworkConditionMonitor()` expect, as a `core/NetworkCondition(metered, dataSaver)` flow):
+whether the current network is **metered** (Android: the default network lacks
+`NET_CAPABILITY_NOT_METERED` — cellular, tethering, or a Wi-Fi the user marked as metered; iOS:
+`nw_path_is_expensive` — cellular or a Personal Hotspot), and whether the user turned on the OS's **data-saving mode** (Android:
+Data Saver, i.e. `restrictBackgroundStatus == ENABLED`, which Android applies to metered networks
+only; iOS: Low Data Mode, `nw_path_is_constrained`, which can be set on any network including Wi-Fi).
+No network at all counts as unrestricted. Desktop and macOS report neither (`supported = false`) and
+are never restricted.
+
+`domain/NetworkUsagePolicy` turns that into the one decision every caller shares:
+
+| | Unrestricted | Metered | Data Saver / Low Data Mode |
+| --- | --- | --- | --- |
+| Automatic sync (`SyncTrigger.AUTOMATIC`) | runs | deferred, unless `syncOnMeteredNetwork` is on | deferred |
+| Automatic feed refresh (an `AUTOMATIC` `RefreshCycleRunner` cycle) | runs | runs | skipped |
+| Manual sync / Refresh All / pull-to-refresh (`MANUAL`) | runs | runs | runs |
+
+`syncOnMeteredNetwork` is a device-local setting (`local_settings.json`, off by default).
+`SyncRepository` takes the gate as an `automaticSyncAllowedFlow: () -> Flow<Boolean>` lambda — lazy for the
+same reason as `cloudProvider`, since `SettingsRepository` depends on `SyncRepository` as its
+`SyncScheduler` — which `SharedModule` builds with `NetworkUsagePolicy.automaticSyncAllowedFlow` from the monitor and the setting.
+
+When `sync(AUTOMATIC)` finds the network disallowed (and a provider is connected), it does not enter
+`trackSync` at all — no spinner, no phase, no notification, `lastSyncError` untouched — and returns
+`Result.Ok(Unit)`, but unlike the suspension gate it remembers that something is pending:
+`syncDeferredForNetwork` (a `StateFlow<Boolean>`) goes up, and a single waiter on the app scope
+(started once, however many syncs are deferred meanwhile) calls `scheduleSync()` the moment the gate
+flow turns true, and drops the flag at that moment: the deferral is over, and the sync it schedules either
+runs (a failure then reaches `lastSyncError` as usual, so the flag never claims a wait nothing is
+performing) or is deferred anew if the network turned restrictive again before the debounce elapsed. A
+successful sync (a manual one included) also drops the flag and cancels the waiter — unless another sync
+was deferred while it ran (a generation counter tells), since that deferral covers changes it did not
+upload. Automatic syncing becoming suspended (`autoSyncSuspended`) and `clearSyncFailureState()`
+(disconnect / switch) drop it too; a deferral racing a disconnect never raises the flag.
+
+Like `autoSyncSuspended`, the deferral is **in-memory**: there is no queue of pending changes to
+remember, because the next sync that is allowed uploads the whole database and so carries every change
+made in the meantime. The waiter only covers the time the process stays alive; Android additionally
+hands the deferred sync to a `WorkManager` job that waits for a network the sync is allowed on (an unmetered one, unless the user opted in to syncing on a metered one), so it also happens
+after the app is closed (see "Deferred sync" in [background-update.md](background-update.md)). On iOS a
+deferral left by a closed app is picked up by the next background refresh or foreground sync that the
+network allows.
+
+The automatic feed refresh stays allowed on a metered network because each fetch is a conditional
+request and usually small; only the OS's data-saving mode, the user's explicit request to save data,
+stops it.
 
 ## Merge (`DatabaseMerger` + `MergeSql`)
 

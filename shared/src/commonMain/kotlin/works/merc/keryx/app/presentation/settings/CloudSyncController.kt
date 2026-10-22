@@ -30,6 +30,9 @@ import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.awaitCancellableConnect
+import works.merc.keryx.app.data.local.LocalSettings
+import works.merc.keryx.app.platform.NetworkConditionMonitor
+import works.merc.keryx.app.platform.UnrestrictedNetworkConditionMonitor
 import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.presentation.ManualSyncEdge
@@ -55,6 +58,8 @@ class CloudSyncController(
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    // Whether this platform reports metered networks at all (see [meteredSettingSupported]).
+    networkConditionMonitor: NetworkConditionMonitor = UnrestrictedNetworkConditionMonitor,
 ) : ViewModel(), ManualSync {
 
     /** Cloud providers configured in this build, in display order. */
@@ -149,6 +154,29 @@ class CloudSyncController(
     /** Mirrors [SyncRepository.syncPhase] — the step the current (or most recent) sync is on. */
     private val _syncPhase = MutableStateFlow(syncRepository.syncPhase.value)
     val syncPhase = _syncPhase.asStateFlow()
+
+    /**
+     * Whether to offer the "sync automatically over mobile data" setting
+     * ([LocalSettings.syncOnMeteredNetwork]) — only where the platform reports metered networks
+     * (Android, iOS). Both UIs also show it only while a provider is connected.
+     */
+    val meteredSettingSupported: Boolean = networkConditionMonitor.supported
+
+    /**
+     * The current [LocalSettings.syncOnMeteredNetwork] value, for the setting's switch. Written
+     * through `PreferencesController.setSyncOnMeteredNetwork`, the one setter for it.
+     */
+    val syncOnMeteredNetwork: StateFlow<Boolean> = DerivedStateFlow(
+        compute = { settingsRepository.localSettings.value.syncOnMeteredNetwork },
+        changes = settingsRepository.localSettings.map { it.syncOnMeteredNetwork },
+    )
+
+    /**
+     * True while an automatic sync is waiting for a network that allows it — the connected
+     * provider's row says it will sync once on Wi-Fi. Mirrors [SyncRepository.syncDeferredForNetwork];
+     * "sync now" stays available meanwhile and clears it by succeeding.
+     */
+    val syncDeferredForNetwork: StateFlow<Boolean> = syncRepository.syncDeferredForNetwork
 
     /** True while [disconnect] is tearing down the connected provider — see that function's KDoc. */
     private val _disconnecting = MutableStateFlow(false)

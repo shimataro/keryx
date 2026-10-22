@@ -72,6 +72,17 @@ class PreferencesControllerTest {
     }
 
     @Test
+    fun syncOnMeteredNetworkSetterPersistsToLocalSettings() {
+        val controller = newController()
+        assertFalse(controller.localSettings.value.syncOnMeteredNetwork)
+
+        controller.setSyncOnMeteredNetwork(true)
+
+        assertTrue(controller.localSettings.value.syncOnMeteredNetwork)
+        assertTrue(LocalSettingsStore(dirOverride = dir).load().syncOnMeteredNetwork)
+    }
+
+    @Test
     fun refreshIntervalSetterPersistsToLocalSettings() {
         val controller = newController()
 

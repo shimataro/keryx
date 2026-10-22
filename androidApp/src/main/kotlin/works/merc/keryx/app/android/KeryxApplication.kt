@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import org.koin.core.context.startKoin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.background.startBackgroundRefresh
+import works.merc.keryx.app.background.startDeferredSyncHandoff
 import works.merc.keryx.app.core.AndroidGoogleDriveSupport
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.di.appModule
@@ -57,5 +58,9 @@ class KeryxApplication : Application() {
         // setting for the rest of the process's life — see that function's own KDoc for why this
         // belongs in Application.onCreate rather than MainActivity.
         startBackgroundRefresh(koin)
+
+        // Hands an automatic sync deferred on a metered network to a WorkManager job that waits
+        // for an unmetered one, so it still happens after the app is closed.
+        startDeferredSyncHandoff(koin)
     }
 }

@@ -1,6 +1,7 @@
 package works.merc.keryx.app.domain
 
 import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.db.Feeds
 
@@ -15,6 +16,10 @@ import works.merc.keryx.app.data.local.db.Feeds
  * busy for anything consulting [ActivitySnapshot.idle]. The sync only runs while a cloud provider
  * is connected ([CloudSession.isConnected]).
  *
+ * An [SyncTrigger.AUTOMATIC] cycle skips its refresh while the OS's data-saving mode is on
+ * ([automaticRefreshAllowed]); its sync stage is then subject to [SyncRepository]'s own network
+ * gate. A [SyncTrigger.MANUAL] cycle always refreshes.
+ *
  * The runner does no dispatcher switching of its own: it runs in the caller's context, so a caller
  * on the UI thread must move it off (the refresh, the sync, and [CloudSession.isConnected] all do
  * blocking IO).
@@ -27,6 +32,12 @@ class RefreshCycleRunner(
     private val newArticleNotifier: NewArticleNotifier,
     private val settingsRepository: SettingsRepository,
     private val notificationMessages: NotificationMessages,
+    /**
+     * Whether an automatic cycle may fetch feeds on the current network
+     * ([NetworkUsagePolicy.automaticRefreshAllowed]). The default (always allowed) is for tests that
+     * do not exercise the gate.
+     */
+    private val automaticRefreshAllowed: suspend () -> Boolean = { true },
 ) {
     /** Which of a cycle's two stages runs first. */
     enum class CycleOrder { REFRESH_THEN_SYNC, SYNC_THEN_REFRESH }
@@ -92,7 +103,13 @@ class RefreshCycleRunner(
         targets: () -> List<Feeds>,
     ): Result<Unit>? {
         var syncResult: Result<Unit>? = null
-        val refresh: suspend () -> Unit = { step("feedRefresh") { refreshAndNotify(targets()) } }
+        val refresh: suspend () -> Unit = {
+            if (trigger == SyncTrigger.AUTOMATIC && !automaticRefreshAllowed()) {
+                Log.info(TAG, "Automatic feed refresh skipped: the OS is saving data")
+            } else {
+                step("feedRefresh") { refreshAndNotify(targets()) }
+            }
+        }
         val sync: suspend () -> Unit = {
             step("sync") { if (cloudSession.isConnected()) syncResult = syncRepository.sync(trigger) }
         }
@@ -108,5 +125,9 @@ class RefreshCycleRunner(
         newArticleNotifier.notifyIfEnabled(
             results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
         )
+    }
+
+    private companion object {
+        const val TAG = "RefreshCycleRunner"
     }
 }

@@ -21,7 +21,7 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 
 | Module | Contents |
 | --- | --- |
-| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
 | `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
 | `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
 | `:androidGms` | Everything that needs Google Play services: Google Drive on Android (`PlayServicesGoogleDriveAuth.kt`). Its own module so the `fdroid` flavor can omit it — only `:androidApp`'s `github`/`play` flavors depend on it (see below). |
@@ -40,7 +40,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
@@ -93,7 +93,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   inputs — used by HomeViewModel, CloudSyncController and OpmlTransferController). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
-                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
                   one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
                   wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
@@ -369,6 +369,27 @@ Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not inc
   every process start (see db-schema.md's `articles_fts` section for why).
 - **Concurrency.** `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather
   than error on, the brief write lock of an incremental insert or a rebuild.
+
+### NetworkConditionMonitor (expect / actual)
+
+`platform/NetworkConditionMonitor.kt` declares an interface — `condition: Flow<NetworkCondition>`
+(`core/NetworkCondition(metered, dataSaver)`, the current value first, then every change) and
+`supported: Boolean` — plus `expect fun platformNetworkConditionMonitor()`, which `sharedModule`
+registers as a singleton. An interface rather than an `expect class` so tests can substitute
+`:testing`'s `FakeNetworkConditionMonitor`. The actuals:
+
+- **Android** (`androidMain`): `ConnectivityManager` through `AndroidAppContext`. The initial value
+  is read synchronously from `activeNetwork`'s capabilities, so a `WorkManager` wakeup never acts on
+  a placeholder; `registerDefaultNetworkCallback` and the runtime-registered
+  `ACTION_RESTRICT_BACKGROUND_CHANGED` receiver follow later changes. Needs `ACCESS_NETWORK_STATE`.
+- **iOS** (`iosMain`): `nw_path_monitor` (`isExpensive` / `isConstrained`); nothing is emitted until
+  the first path update.
+- **desktop / macOS** (`desktopMain`, `macosMain`): `UnrestrictedNetworkConditionMonitor` — always
+  unrestricted, `supported = false`.
+
+Its only consumer is `domain/NetworkUsagePolicy`, wired into `SyncRepository` and
+`RefreshCycleRunner` in `SharedModule` (and `CloudSyncController.meteredSettingSupported` reads
+`supported`); see "Network Gate" in [sync-architecture.md](sync-architecture.md).
 
 ### DatabaseMerger (expect / actual) — Key to Sync Merge
 
