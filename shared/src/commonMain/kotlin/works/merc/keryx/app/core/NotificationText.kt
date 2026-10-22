@@ -36,6 +36,9 @@ sealed interface NotificationText {
 
     /** The macOS app is running from a translocated (quarantined, read-only) location. */
     data object AppTranslocated : NotificationText
+
+    /** A feed refresh reached none of the feeds it covered (offline, most likely). */
+    data object RefreshFailed : NotificationText
 }
 
 /** The explanatory dialog body (cause + fix) an [AppNotificationAction.ShowInfoDialog] opens. */
@@ -43,6 +46,7 @@ enum class InfoDialogText {
     TOKEN_STORAGE_FALLBACK,
     TOKEN_STORAGE_NOT_PERSISTED,
     APP_TRANSLOCATED,
+    REFRESH_FAILED,
 }
 
 /**

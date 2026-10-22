@@ -24,6 +24,7 @@ import works.merc.keryx.app.core.MAX_REDIRECTS
 import works.merc.keryx.app.core.Result
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -172,6 +173,28 @@ class FeedFetcherTest {
         assertIs<FeedFetchException>(ex)
         assertEquals("Too many redirects", ex.message)
         assertEquals(MAX_REDIRECTS + 1, attempts)
+    }
+
+    @Test
+    fun aRequestWithNoResponseIsFlaggedAsSuch() = runBlocking {
+        val f = fetcherWith { throw IllegalStateException("Connection refused") }
+        val r = f.fetch("https://ex.com/feed")
+        assertIs<Result.Err>(r)
+        val ex = r.exception
+        assertIs<FeedFetchException>(ex)
+        assertTrue(ex.noResponse)
+        assertEquals("Connection refused", ex.message)
+    }
+
+    @Test
+    fun anErrorStatusIsNotANoResponseFailure() = runBlocking {
+        val f = fetcherWith { respond("", HttpStatusCode.InternalServerError) }
+        val r = f.fetch("https://ex.com/feed")
+        assertIs<Result.Err>(r)
+        val ex = r.exception
+        assertIs<FeedFetchException>(ex)
+        assertFalse(ex.noResponse)
+        assertEquals(500, ex.statusCode)
     }
 
     @Test

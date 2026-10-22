@@ -135,7 +135,7 @@ fun sharedModule(): Module = module {
     single { OpmlImporter(get(), get(), get()) }
     single {
         val monitor = get<NetworkConditionMonitor>()
-        RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) {
+        RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get(), get(), get()) {
             NetworkUsagePolicy.automaticRefreshAllowed(monitor.condition.first())
         }
     }

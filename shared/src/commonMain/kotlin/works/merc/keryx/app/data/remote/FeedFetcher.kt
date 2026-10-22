@@ -55,6 +55,9 @@ class FeedFetcher(
                     }
                     return Result.Err(FeedTimeoutException())
                 }
+                if (e is NoResponseException) {
+                    return Result.Err(FeedFetchException(e.cause?.message ?: "Feed request failed", noResponse = true))
+                }
                 return Result.Err(FeedFetchException(e.message ?: "Feed request failed"))
             }
         }
@@ -81,10 +84,19 @@ class FeedFetcher(
             return Result.Err(FeedFetchException("Too many redirects"))
         }
 
-        val response = client.get(url) {
-            etag?.let { header("If-None-Match", it) }
-            lastModified?.let { header("If-Modified-Since", it) }
-            timeout { requestTimeoutMillis = readTimeoutSeconds() * MILLIS_PER_SECOND }
+        val response = try {
+            client.get(url) {
+                etag?.let { header("If-None-Match", it) }
+                lastModified?.let { header("If-Modified-Since", it) }
+                timeout { requestTimeoutMillis = readTimeoutSeconds() * MILLIS_PER_SECOND }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            // Only the request itself is wrapped: a failure once a response has arrived (parsing,
+            // say) is not a sign of being offline. Timeouts keep their own classification.
+            if (isTimeout(e)) throw e
+            throw NoResponseException(e)
         }
         val status = response.status.value
 
@@ -135,6 +147,9 @@ class FeedFetcher(
         val loc = location?.takeIf { it.isNotBlank() } ?: return null
         return UrlResolver.resolve(base, loc) ?: loc
     }
+
+    /** The request got no response at all — see [FeedFetchException.noResponse]. */
+    private class NoResponseException(cause: Throwable) : Exception(cause)
 
     private fun isTimeout(e: Throwable): Boolean =
         e is HttpRequestTimeoutException || e is ConnectTimeoutException || e is SocketTimeoutException

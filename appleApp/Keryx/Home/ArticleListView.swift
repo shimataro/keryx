@@ -257,6 +257,8 @@ struct ArticleListView: View {
         // The title feeds the next column's back button and its long-press menu; the heading is
         // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
         ToolbarItem(placement: .principal) { Color.clear }
+        // The same status as the sidebar's, for the column an iPhone mostly shows.
+        RefreshStatusToolbarItem(home: home)
         #endif
         #if os(iOS) && compiler(>=6.4)
         // `#available` is a runtime check, so `visibilityPriority` also needs the iOS 27 SDK at

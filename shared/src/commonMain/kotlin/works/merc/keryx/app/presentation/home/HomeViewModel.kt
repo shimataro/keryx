@@ -1725,7 +1725,6 @@ class HomeViewModel(
         scope = viewModelScope,
         dispatcher = dispatcher,
         runner = refreshCycleRunner,
-        feedRepository = feedRepository,
         activityCenter = activityCenter,
         currentFilter = { _filter.value },
         retrimPins = ::retrimPinnedReadStates,
@@ -1749,6 +1748,12 @@ class HomeViewModel(
      * [HomeRefreshController.pullRefreshingFilters].
      */
     val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> get() = refreshController.pullRefreshingFilters
+
+    /**
+     * What the refreshes the user started (pull, Refresh All, a feed's Refresh) are doing — the iOS
+     * toolbar status. See [ManualRefreshStatus].
+     */
+    val manualRefreshStatus: StateFlow<ManualRefreshStatus> get() = refreshController.manualRefreshStatus
 
     /** Pull-to-refresh on the current selection. See [HomeRefreshController.pullToRefresh]. */
     fun pullToRefresh() = refreshController.pullToRefresh()

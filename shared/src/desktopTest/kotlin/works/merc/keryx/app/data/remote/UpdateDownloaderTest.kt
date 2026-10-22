@@ -11,7 +11,6 @@ import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.selects.select
@@ -34,8 +33,8 @@ import kotlin.test.fail
 /**
  * Ceiling on how long [UpdateDownloaderTest.progressArrivesWhileTheBodyIsStillStreaming] waits for
  * the first progress reading. The reading is expected within milliseconds of the download starting,
- * so this only bounds how long a stalled run takes to report; it is deliberately generous because a
- * saturated CI runner's scheduling latency is not what that test is measuring.
+ * so this only bounds how long a stalled run takes to report; a regression that buffers the whole
+ * body never reports at all, however long it is given.
  */
 private const val FIRST_PROGRESS_TIMEOUT_MS = 30_000L
 
@@ -110,6 +109,10 @@ class UpdateDownloaderTest {
      * would park it mid-chunk. 320 KiB (50% of the 640 KiB total) is comfortably past the first
      * whole-percent change `shouldEmitProgress` fires on — which happens after just the first
      * 64 KiB chunk, itself already ~10% of this total — with a whole chunk to spare.
+     *
+     * The download runs on this test's own `runBlocking` thread rather than `Dispatchers.Default`:
+     * the writer and the reader both suspend, so one thread serves both, and the test no longer
+     * depends on a JVM-wide pool that other work in the same test JVM may be holding.
      */
     @Test
     fun progressArrivesWhileTheBodyIsStillStreaming() = runBlocking {
@@ -120,7 +123,7 @@ class UpdateDownloaderTest {
         val dest = destFile()
         val firstProgress = CompletableDeferred<Pair<Long, Long>>()
 
-        val download = async(Dispatchers.Default) {
+        val download = async {
             UpdateDownloader(client).download(
                 url = "https://github.com/x",
                 destPath = dest.absolutePath,

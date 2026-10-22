@@ -163,6 +163,9 @@ struct FeedListView: View {
                 Label(L("settings_title"), systemImage: "gearshape")
             }
         }
+        // With no Refresh All button here, the status area is what shows the result of a refresh
+        // the user started — the pull, ⌘R, a feed's Refresh.
+        RefreshStatusToolbarItem(home: home)
         #endif
         #if os(macOS)
         // macOS 26 right-aligns the sidebar's items by itself; earlier versions pack them against
