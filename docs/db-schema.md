@@ -60,7 +60,7 @@ through it rather than composing `AppDirs.appDataDir()` with the filename themse
 Indexes: `feed_id`, `is_read`, `is_starred`, and a composite `(published_at DESC, created_at DESC, id DESC)` for list ordering.
 
 - `id` is deterministically generated from `(feed_id, guid)` as **UUIDv5** (`IdGenerator.articleId`). The same article gets the same ID on all devices, so sync merge (articles matched by `id`) can propagate read/star states via last-write-wins. Existing rows keep their id via `upsert`'s `ON CONFLICT(feed_id, guid)` — deterministic generation only applies to new rows.
-- Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`.
+- Read/star conflict resolution is last-write-wins via `read_at` / `starred_at`. They are stamped only when the state actually changes (`updateReadStatus` / `updateStarStatus` are guarded on it), so re-opening an already-read article does not move them.
 - `content` is displayed in preference to `summary`. If both are NULL, the reader shows a localized "no content" placeholder in place (with a link/button to open the article in the external browser); nothing opens automatically.
 - `search_text` = the HTML-stripped plain text of `content` (falling back to `summary`), or `""` if both are NULL. Computed at insert/update time (`ArticleRepository`, `HtmlText.toPlainText`).
 - Logical deletion via `deleted_at` (NULL = alive). Cache cleanup (`softDeleteExpired`) is the only **local**

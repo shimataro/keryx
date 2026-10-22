@@ -65,6 +65,13 @@ const val MAX_SYNC_DB_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
 const val SYNC_MAX_RETRY = 3
 const val FEED_TIMEOUT_RETRY_COUNT = 1
 const val SYNC_DEBOUNCE_MS = 5_000L
+
+/**
+ * Debounce window for a reading-state change (read / unread / star) — see
+ * [works.merc.keryx.app.domain.SyncScheduler.scheduleDeferredSync]. Every sync re-uploads the
+ * whole database, so syncing after each article read would cost one full upload per article.
+ */
+const val DEFERRED_SYNC_DEBOUNCE_MS = 5 * 60_000L
 const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard

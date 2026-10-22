@@ -3,6 +3,7 @@ package works.merc.keryx.app.domain
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -20,6 +21,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.NetworkCondition
@@ -35,6 +37,7 @@ import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import works.merc.keryx.app.platform.Gzip
 import works.merc.keryx.app.fileDb
@@ -47,6 +50,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -79,6 +83,9 @@ private class FakeCloudStorage : CloudStorage {
     /** When set, [download] suspends on this gate before returning, so a test can observe an in-flight sync. */
     var downloadGate: CompletableDeferred<Unit>? = null
 
+    /** When set, runs at the start of every [metadata] call, i.e. inside the sync that made it. */
+    var metadataHook: (suspend () -> Unit)? = null
+
     /** When set, [rename] suspends on this gate before returning, so a test can observe an
      * in-flight [SyncRepository.resetCloudData] (its archive step) the same way [downloadGate]
      * does for a regular sync's download step. */
@@ -109,6 +116,7 @@ private class FakeCloudStorage : CloudStorage {
 
     override suspend fun metadata(path: String): Result<CloudFileMeta?> {
         existsCount++
+        metadataHook?.invoke()
         existsQueue.removeFirstOrNull()?.let { return it }
         return Result.Ok(files[path]?.let { CloudFileMeta(it.second) })
     }
@@ -1723,6 +1731,269 @@ class SyncRepositoryTest {
         advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
         runCurrent()
         assertEquals(3, cloud.existsCount)
+    }
+
+    // --- Deferred (reading-state) syncs and flushing ---
+    //
+    // Each test first syncs once so the .gz exists, then resets existsCount: from there on, one
+    // sync costs exactly one metadata request, so existsCount counts syncs.
+
+    private suspend fun TestScope.syncedRepo(cloud: FakeCloudStorage): SyncRepository =
+        newRepo(cloud).also {
+            assertIs<Result.Ok<Unit>>(it.sync())
+            cloud.existsCount = 0
+        }
+
+    @Test
+    fun scheduleDeferredSyncWaitsForTheLongWindow() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(0, cloud.existsCount, "a reading-state change must not sync on the short window")
+
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun scheduleSyncShortensAPendingDeferredWindowIntoOneSync() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS)
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+
+        // The deferred change rode along with that sync; nothing is left for a later window.
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun flushPendingSyncSyncsOnlyWhenChangesArePending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.flushPendingSync()
+        assertEquals(0, cloud.existsCount, "nothing pending, so nothing to flush")
+
+        repo.scheduleDeferredSync()
+        repo.flushPendingSync()
+        assertEquals(1, cloud.existsCount)
+
+        // The still-armed window finds nothing left to sync when it expires.
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun anySyncPicksUpPendingDeferredChanges() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        repo.sync(SyncTrigger.AUTOMATIC) // e.g. a refresh cycle's own sync
+        assertEquals(1, cloud.existsCount)
+
+        repo.flushPendingSync()
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun aFailedSyncKeepsDeferredChangesPending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        cloud.queueExists(Result.Err(CloudStorageException("offline")))
+        repo.flushPendingSync()
+        assertEquals(1, cloud.existsCount)
+
+        repo.flushPendingSync() // retried, since the failed sync uploaded nothing
+        assertEquals(2, cloud.existsCount)
+
+        repo.flushPendingSync() // now delivered
+        assertEquals(2, cloud.existsCount)
+    }
+
+    @Test
+    fun flushOnLeavingForegroundSkipsTheExitCausedByTheAppsOwnLaunch() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        repo.scheduleDeferredSync()
+
+        ExternalAppLaunch.markLaunched()
+        repo.flushOnLeavingForeground()
+        assertEquals(0, cloud.existsCount, "opening a link in the browser is not leaving the app")
+
+        // The mark was consumed, so the next real exit flushes what stayed pending.
+        repo.flushOnLeavingForeground()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun flushOnLeavingForegroundFlushesWithoutALaunchMark() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        ExternalAppLaunch.clear()
+
+        repo.flushOnLeavingForeground()
+        assertEquals(0, cloud.existsCount, "nothing pending")
+
+        repo.scheduleDeferredSync()
+        repo.flushOnLeavingForeground()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun scheduleSyncAloneSyncsAfterTheShortWindow() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS - 1)
+        runCurrent()
+        assertEquals(0, cloud.existsCount)
+
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+    }
+
+    @Test
+    fun deferredSyncGetsTheLongWindowAgainOnceTheShortOneHasExpired() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        assertEquals(1, cloud.existsCount, "urgency must not leak into the next reading-state change")
+
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS)
+        runCurrent()
+        assertEquals(2, cloud.existsCount)
+    }
+
+    @Test
+    fun aChangeMadeDuringASyncKeepsItPending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        var injected = false
+        cloud.metadataHook = {
+            if (!injected) {
+                injected = true
+                repo.scheduleDeferredSync() // lands after the flag was cleared, before the snapshot
+            }
+        }
+        repo.flushPendingSync()
+        assertEquals(1, cloud.existsCount)
+
+        repo.flushPendingSync()
+        assertEquals(2, cloud.existsCount, "the change made during the first sync must be sent by a later one")
+    }
+
+    @Test
+    fun aSyncThatFailsAfterTheMetadataCheckKeepsChangesPending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        localDb.insertFeed("f2", now = 5) // the snapshot differs, so an upload is attempted
+
+        repo.scheduleDeferredSync()
+        cloud.queueUpload(Result.Err(CloudStorageException("offline")))
+        repo.flushPendingSync()
+        assertEquals(1, cloud.existsCount)
+        assertEquals(1, cloud.uploadCount)
+
+        repo.flushPendingSync()
+        assertEquals(2, cloud.existsCount, "retried after the failed upload")
+    }
+
+    @Test
+    fun aSyncThatThrowsKeepsChangesPending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+
+        repo.scheduleDeferredSync()
+        cloud.metadataHook = { throw IllegalStateException("boom") }
+        assertFailsWith<IllegalStateException> { repo.flushPendingSync() }
+
+        cloud.metadataHook = null
+        repo.flushPendingSync()
+        assertEquals(2, cloud.existsCount)
+    }
+
+    @Test
+    fun aCancelledSyncKeepsChangesPending() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        val gate = CompletableDeferred<Unit>()
+        cloud.metadataHook = { gate.await() }
+
+        repo.scheduleDeferredSync()
+        val running = launch { repo.flushPendingSync() }
+        runCurrent()
+        running.cancelAndJoin()
+
+        cloud.metadataHook = null
+        repo.flushPendingSync()
+        assertEquals(2, cloud.existsCount)
+    }
+
+    @Test
+    fun flushPendingSyncWaitsForASyncInFlightAndSendsWhatItLeftBehind() = runTest {
+        val cloud = FakeCloudStorage()
+        val repo = syncedRepo(cloud)
+        val gate = CompletableDeferred<Unit>()
+        cloud.metadataHook = { gate.await() }
+
+        val inFlight = launch { repo.sync(SyncTrigger.AUTOMATIC) }
+        runCurrent()
+        repo.scheduleDeferredSync() // made while the sync above is running
+        var flushed = false
+        val flush = launch { repo.flushPendingSync(); flushed = true }
+        runCurrent()
+        assertTrue(!flushed, "flush must wait for the sync in flight")
+
+        cloud.metadataHook = null
+        gate.complete(Unit)
+        inFlight.join()
+        flush.join()
+        assertEquals(2, cloud.existsCount, "the in-flight sync, then the flush for the later change")
+    }
+
+    @Test
+    fun scheduleDeferredSyncIsSuppressedWhileCloudDataIsUnusable() = runTest {
+        val cloud = FakeCloudStorage()
+        cloud.put(CLOUD_DB_GZ_PATH, gzipOf(byteArrayOf(1, 2, 3, 4)), "r1")
+        val repo = newRepo(cloud)
+        repo.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(repo.autoSyncSuspended.value)
+
+        repo.scheduleDeferredSync()
+        advanceTimeBy(DEFERRED_SYNC_DEBOUNCE_MS * 2)
+        runCurrent()
+        repo.flushPendingSync()
+
+        assertEquals(1, cloud.existsCount) // only the initial sync() call's own exists() check
     }
 
     @Test
