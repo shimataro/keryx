@@ -4,6 +4,9 @@
 
     <!-- Feed fetching, cloud sync (Phase 4), and the update checker all need network access. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether the current network is metered and whether Data Saver is on
+         (NetworkConditionMonitor), so automatic sync can wait for an unmetered network. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Android 13+ (API 33) requires this to post the new-article notification (Phase 3);
          declared now so the manifest doesn't need revisiting when that Phase lands. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

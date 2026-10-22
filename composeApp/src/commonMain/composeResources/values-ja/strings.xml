@@ -218,6 +218,9 @@
     <string name="settings_cloud_reset_confirm_body">クラウド上の同期データを退避用の名前（keryx-日時.db.bak）に変更したうえで、この端末のデータで作り直します。退避できなかった場合は削除されます。退避したデータは自動では消えません。他の端末で未同期の変更がある場合は失われることがあります。</string>
     <string name="settings_cloud_reset_confirm_action">リセット</string>
     <string name="settings_last_synced">最終同期: %1$s</string>
+    <string name="settings_cloud_sync_on_metered">モバイルデータ通信でも自動で同期する</string>
+    <string name="settings_cloud_sync_on_metered_hint">従量制の Wi-Fi・テザリングを含みます。データセーバー / 低データモード中は自動同期しません。</string>
+    <string name="settings_cloud_sync_deferred_network">データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します</string>
     <string name="settings_cloud_syncing">同期中…</string>
     <string name="settings_cloud_phase_checking">クラウドを確認しています…</string>
     <string name="settings_cloud_phase_downloading">ダウンロードしています…</string>

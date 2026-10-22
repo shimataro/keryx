@@ -196,7 +196,7 @@
 `SyncRepository.sync(trigger: SyncTrigger = MANUAL)` は「誰が呼んでいるか」を受け取る。
 `SyncTrigger.AUTOMATIC`（デバウンス書き込みの消費者、`runStartupMaintenance`（デスクトップの
 `StartupTasks.kt` と Android の起動経路で共有）、デスクトップの `backgroundUpdateLoop`
-（`StartupTasks.kt`）、Android の `FeedRefreshWorker`）はゲートの対象になる —
+（`StartupTasks.kt`）、Android の `FeedRefreshWorker` と `DeferredSyncWorker`）はゲートの対象になる —
 `autoSyncSuspended`（`StateFlow<Boolean>`）が true の間、`AUTOMATIC` 呼び出しは
 ダウンロード／マージ／アップロードのサイクルを一切実行せず `Result.Ok(Unit)` を返す。同期スピナーも
 動かさず、通知センターにも触れないので、既に利用不能と分かっているクラウド DB が書き込みのたびに
@@ -223,6 +223,54 @@
 リセット／通知の UI 側はゲートの影響を一切受けない: 通知センターの `ResetCloudData` ボタンも設定画面の
 リセットボタンも無条件（ゲートされない）で、スキップされた `AUTOMATIC` 呼び出しは `lastSyncError` に
 一切触れないため、クラウド同期タブは同期が今なぜ壊れているかを表示し続ける。
+
+### ネットワークゲート（従量制回線とデータセーバー）
+
+上記と並んで、`AUTOMATIC` だけに効く 2 つ目のゲートがある。自動同期はデータベース全体のスナップショットを
+アップロードするので、携帯端末では既読操作を数回するたびにモバイルデータを消費してしまう。OS は
+`platform/NetworkConditionMonitor`（`platformNetworkConditionMonitor()` expect から得るインターフェイスで、
+`core/NetworkCondition(metered, dataSaver)` の Flow を流す）を通じて 2 つのシグナルを返す: 現在の回線が
+**従量制**か（Android: デフォルトネットワークに `NET_CAPABILITY_NOT_METERED` がない — モバイル回線、テザリング、ユーザーが従量制に設定した Wi-Fi。iOS:
+`nw_path_is_expensive` — モバイル回線または Personal Hotspot）と、ユーザーが OS の
+**データ節約モード**をオンにしているか（Android: データセーバー、つまり
+`restrictBackgroundStatus == ENABLED`。Android は従量制回線にしか適用しない。iOS: 低データモード、
+`nw_path_is_constrained`。Wi-Fi を含むどの回線にも設定できる）。ネットワークがない状態は制限なしとして扱う。
+デスクトップと macOS はどちらも報告せず（`supported = false`）、常に制限なし。
+
+`domain/NetworkUsagePolicy` がそれを、すべての呼び出し元が共有する 1 つの判定にする:
+
+| | 制限なし | 従量制 | データセーバー / 低データモード |
+| --- | --- | --- | --- |
+| 自動同期（`SyncTrigger.AUTOMATIC`） | 実行 | `syncOnMeteredNetwork` がオンでなければ保留 | 保留 |
+| 自動フィード更新（`AUTOMATIC` の `RefreshCycleRunner` サイクル） | 実行 | 実行 | スキップ |
+| 手動同期 / すべて更新 / プル更新（`MANUAL`） | 実行 | 実行 | 実行 |
+
+`syncOnMeteredNetwork` は端末ローカルの設定（`local_settings.json`、既定はオフ）。`SyncRepository` は
+ゲートを `automaticSyncAllowedFlow: () -> Flow<Boolean>` ラムダとして受け取る — `cloudProvider` と同じ理由で
+遅延評価（`SettingsRepository` が `SyncRepository` を `SyncScheduler` として依存しているため）で、
+`SharedModule` がモニターと設定を組み合わせて作る。
+
+`sync(AUTOMATIC)` が回線を不許可と判定した場合（かつプロバイダ接続中）、`trackSync` には一切入らず
+— スピナーもフェーズも通知もなく、`lastSyncError` も触らない — `Result.Ok(Unit)` を返すが、抑制ゲートと
+違って保留中のものがあることを覚えておく: `syncDeferredForNetwork`（`StateFlow<Boolean>`）を立て、
+アプリスコープ上の待機ジョブを 1 本だけ（その間に何回保留されても 1 本）起動し、ゲートの Flow が true に
+なった瞬間に `scheduleSync()` を呼び、その時点でフラグを下ろす: 保留は終わっており、スケジュールされた
+同期は実行されるか（失敗すれば通常どおり `lastSyncError` に出るので、フラグが実行されていない待機を
+示すことはない）、デバウンス中に回線がまた制限側に戻れば再び保留される。成功した同期（手動を含む）も
+フラグを下ろして待機ジョブを取り消す — ただし、その実行中に別の同期が保留された場合は除く（世代カウンタで
+判定）。その保留は、成功した同期がアップロードしていない変更を対象とするため。自動同期の停止
+（`autoSyncSuspended`）と `clearSyncFailureState()`（切断・切り替え）でも下ろし、切断と競合した保留は
+フラグを立てない。
+
+`autoSyncSuspended` と同じく、保留状態は**インメモリ**: 次に許可された同期がデータベース全体を
+アップロードするので、その間の変更はすべて反映され、保留中の変更の列を覚えておく必要がない。待機ジョブは
+プロセスが生きている間しか働かないため、Android では加えて保留した同期を、その同期が許可される回線（従量制回線での同期をユーザーが許可していなければ従量制でない回線）を条件とする
+`WorkManager` ジョブに渡し、アプリを閉じた後でも同期されるようにしている（[background-update.ja.md](background-update.ja.md)
+の「保留された同期」を参照）。iOS では、閉じたアプリが残した保留は、回線が許す次のバックグラウンド更新か
+前面での同期で解消される。
+
+自動フィード更新は、各取得が条件付きリクエストで通常は小さいため、従量制回線でも許可したままにしている。
+止めるのは、ユーザーが明示的に通信の節約を求める OS のデータ節約モードだけ。
 
 ## マージ（`DatabaseMerger` + `MergeSql`）
 
