@@ -1430,6 +1430,20 @@ by `OpmlTransferObservableTests`); confirm on macOS:
   (⌘E) likewise ends with the result text on the Data tab.
 - While an import runs, File ▸ Import/Export are disabled.
 
+### (SwiftUI) Setup on a small screen
+
+`SetupView` scrolls when its content does not fit; that layout can only be seen in the running app.
+Delete and reinstall the app to bring first-run Setup back, then confirm:
+
+- (iOS) On an iPhone SE (3rd generation) in portrait and landscape, at the largest Dynamic Type
+  size, in English and Japanese: no text is truncated with "…" (it wraps instead), every cloud
+  provider button can be reached by scrolling, and the scroll indicator flashes briefly as the
+  screen appears.
+- (iOS) On a large iPhone and an iPad, where everything fits: the content is vertically centered and
+  does not bounce when dragged, as before.
+- (macOS) Shrink the window to its minimum: both option cards are still shown in full, with nothing
+  truncated or cut off. At the default window size the screen looks as before.
+
 ### In-App Update
 
 Nothing past `canInstallAndroidApkUpdate`/the pure state-machine functions is exercised by an
