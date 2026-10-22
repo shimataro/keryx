@@ -11,7 +11,12 @@ actual object BrowserOpener {
             Log.warn(TAG, "Not a valid URL: $url")
             return
         }
-        UIApplication.sharedApplication.openURL(nsUrl, options = emptyMap<Any?, Any>(), completionHandler = null)
+        // The app is about to leave the foreground on its own account (ExternalAppLaunch); a launch the
+        // system refuses never leaves, so its mark is dropped again.
+        ExternalAppLaunch.markLaunched()
+        UIApplication.sharedApplication.openURL(nsUrl, options = emptyMap<Any?, Any>()) { opened ->
+            if (!opened) ExternalAppLaunch.clear()
+        }
     }
 
     private const val TAG = "BrowserOpener"

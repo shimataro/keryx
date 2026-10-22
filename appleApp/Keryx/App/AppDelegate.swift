@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         guard sender === mainWindow else { return true }
         sender.orderOut(nil)
         updateActivationPolicySoon()
+        model?.flushPendingSync()
         return false
     }
 
@@ -184,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
                 window.orderOut(nil)
             }
             setDockIconVisible(false)
+            model?.flushPendingSync()
         } else {
             revealMainWindow()
         }

@@ -356,7 +356,13 @@ class FeedRepository(
      * @param feed The feed to refresh.
      * @return The number of new articles, or the refresh error.
      */
-    suspend fun refreshFeed(feed: Feeds): Result<Int> = refreshFeeds(listOf(feed)).getValue(feed.id)
+    suspend fun refreshFeed(feed: Feeds): Result<Int> {
+        val result = refreshFeeds(listOf(feed)).getValue(feed.id)
+        // Unlike refreshFeeds (only ever run inside a RefreshCycleRunner cycle, which syncs after it),
+        // a single-feed refresh has no sync of its own to ride on.
+        syncScheduler.scheduleSync()
+        return result
+    }
 
     /**
      * Refreshes the feed [id] names, re-reading its row first so the conditional request carries
@@ -514,7 +520,10 @@ class FeedRepository(
                 action = AppNotificationAction.ShowFeedDetail(feed.id),
             )
         }
-        syncScheduler.scheduleSync()
+        // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
+        // per feed and could fire a whole-DB upload mid-refresh. RefreshCycleRunner covers the batch
+        // (it syncs right after, or schedules one when the cycle synced first); the single-feed
+        // refreshFeed() schedules its own.
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
     }
 

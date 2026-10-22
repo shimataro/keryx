@@ -59,6 +59,7 @@ import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.domain.backgroundUpdateLoop
@@ -475,6 +476,18 @@ fun main(args: Array<String>) {
         // so that effect can re-apply the icon after a visibility toggle.
         val dockBaseImage = rememberDrawableImage(Res.drawable.app_icon)
         val dockBadgedImage = remember(dockBaseImage, unreadCount) { dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
+
+        // Hiding the window to the tray (close button, the menu bar's Close, or the tray's Hide —
+        // every route ends in windowVisible = false) is when deferred reading-state changes should
+        // reach other devices. Quitting deliberately doesn't wait on the network for this: the
+        // next launch's startup sync uploads whatever is still pending.
+        // The flush runs on appScope, not the effect's own scope: the effect is cancelled when the
+        // composition leaves (on exit), and the upload should not be cut off with it. With
+        // startMinimized the effect also fires on the first composition; nothing is pending then, so
+        // flushPendingSync returns at once.
+        LaunchedEffect(windowVisible) {
+            if (!windowVisible) appScope.launch { koin.get<SyncRepository>().flushPendingSync() }
+        }
 
         // macOS only: the Dock icon / Cmd+Tab entry doesn't follow window visibility
         // on its own (apple.awt.UIElement is read once at AWT startup), so drive it
