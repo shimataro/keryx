@@ -64,26 +64,16 @@ internal fun FeedListDialogs(
     onCreatingTagForFeedIdChange: (String?) -> Unit,
 ) {
     if (showAddTag) {
-        val duplicateError = stringResource(Res.string.home_tag_name_duplicate)
-        var color by remember { mutableStateOf<String?>(null) }
-        TextPromptDialog(
-            title = stringResource(Res.string.home_add_tag),
-            hint = stringResource(Res.string.home_new_tag_hint),
-            blockingError = { name -> if (isDuplicateTagName(name, tags)) duplicateError else null },
-            extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
-            onConfirm = { vm.createTag(it, color); onShowAddTagChange(false) },
+        AddTagPrompt(
+            tags = tags,
+            onConfirm = { name, color -> vm.createTag(name, color); onShowAddTagChange(false) },
             onDismiss = { onShowAddTagChange(false) },
         )
     }
     creatingTagForFeedId?.let { feedId ->
-        val duplicateError = stringResource(Res.string.home_tag_name_duplicate)
-        var color by remember { mutableStateOf<String?>(null) }
-        TextPromptDialog(
-            title = stringResource(Res.string.home_add_tag),
-            hint = stringResource(Res.string.home_new_tag_hint),
-            blockingError = { name -> if (isDuplicateTagName(name, tags)) duplicateError else null },
-            extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
-            onConfirm = { name ->
+        AddTagPrompt(
+            tags = tags,
+            onConfirm = { name, color ->
                 vm.createTag(name, color)?.let { vm.setFeedTag(feedId, it, true) }
                 onCreatingTagForFeedIdChange(null)
             },
@@ -102,21 +92,15 @@ internal fun FeedListDialogs(
         )
     }
     if (showAddFolder) {
-        val duplicateError = stringResource(Res.string.home_folder_name_duplicate)
-        TextPromptDialog(
-            title = stringResource(Res.string.home_add_folder),
-            hint = stringResource(Res.string.home_new_folder_hint),
-            blockingError = { name -> if (isDuplicateFolderName(name, folders)) duplicateError else null },
+        AddFolderPrompt(
+            folders = folders,
             onConfirm = { vm.createFolder(it); onShowAddFolderChange(false) },
             onDismiss = { onShowAddFolderChange(false) },
         )
     }
     creatingFolderForFeedId?.let { feedId ->
-        val duplicateError = stringResource(Res.string.home_folder_name_duplicate)
-        TextPromptDialog(
-            title = stringResource(Res.string.home_add_folder),
-            hint = stringResource(Res.string.home_new_folder_hint),
-            blockingError = { name -> if (isDuplicateFolderName(name, folders)) duplicateError else null },
+        AddFolderPrompt(
+            folders = folders,
             onConfirm = { name ->
                 vm.createFolder(name)?.let { vm.moveFeed(feedId, it) }
                 onCreatingFolderForFeedIdChange(null)
@@ -147,4 +131,40 @@ internal fun FeedListDialogs(
             destructive = true,
         )
     }
+}
+
+/** The "add tag" prompt — a name plus a color — shared by the toolbar's add and a feed row's "new tag". */
+@Composable
+private fun AddTagPrompt(
+    tags: List<Tags>,
+    onConfirm: (name: String, color: String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val duplicateError = stringResource(Res.string.home_tag_name_duplicate)
+    var color by remember { mutableStateOf<String?>(null) }
+    TextPromptDialog(
+        title = stringResource(Res.string.home_add_tag),
+        hint = stringResource(Res.string.home_new_tag_hint),
+        blockingError = { name -> if (isDuplicateTagName(name, tags)) duplicateError else null },
+        extraContent = { TagColorPicker(selected = color, onSelect = { color = it }) },
+        onConfirm = { onConfirm(it, color) },
+        onDismiss = onDismiss,
+    )
+}
+
+/** The "add folder" prompt, shared by the toolbar's add and a feed row's "new folder". */
+@Composable
+private fun AddFolderPrompt(
+    folders: List<Folders>,
+    onConfirm: (name: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val duplicateError = stringResource(Res.string.home_folder_name_duplicate)
+    TextPromptDialog(
+        title = stringResource(Res.string.home_add_folder),
+        hint = stringResource(Res.string.home_new_folder_hint),
+        blockingError = { name -> if (isDuplicateFolderName(name, folders)) duplicateError else null },
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+    )
 }
