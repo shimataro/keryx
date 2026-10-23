@@ -3,8 +3,6 @@ package works.merc.keryx.app.ui.theme
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.interaction.FocusInteraction
-import androidx.compose.foundation.interaction.HoverInteraction
 import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction

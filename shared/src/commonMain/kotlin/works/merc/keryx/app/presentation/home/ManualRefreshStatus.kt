@@ -30,7 +30,7 @@ sealed interface ManualRefreshStatus {
 /** The status once one more manual refresh has started. */
 internal fun ManualRefreshStatus.started(): ManualRefreshStatus = when (this) {
     is ManualRefreshStatus.Checking -> copy(running = running + 1)
-    else -> ManualRefreshStatus.Checking(running = 1, pending = null)
+    ManualRefreshStatus.Idle, is ManualRefreshStatus.Finished -> ManualRefreshStatus.Checking(running = 1, pending = null)
 }
 
 /**

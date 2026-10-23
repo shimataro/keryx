@@ -90,26 +90,17 @@ internal fun registerWindowsUriScheme(
     launcherPath: String,
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
-    val reg = "reg.exe"
-    val (importCommand, regFile) = try {
-        buildShellOpenCommandImport(
-            "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
-            launcherPath,
-        )
-    } catch (e: IOException) {
-        Log.warn(LOG_TAG, "Could not prepare the Windows URI scheme registry file", e)
-        return
-    }
-    val commands = listOf(
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
-        importCommand,
+    registerWindowsShellOpen(
+        commandKey = "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
+        addCommands = listOf(
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
+        ),
+        context = "Windows URI scheme",
+        prepareFailure = "Could not prepare the Windows URI scheme registry file",
+        launcherPath = launcherPath,
+        runCommand = runCommand,
     )
-    try {
-        runRegistryCommands(commands, "Windows URI scheme", runCommand)
-    } finally {
-        regFile.delete()
-    }
 }
 
 /**
@@ -123,24 +114,43 @@ internal fun registerWindowsOpmlAssociation(
     launcherPath: String,
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
-    val reg = "reg.exe"
     val progId = "$APP_NAME.opml"
+    registerWindowsShellOpen(
+        commandKey = "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
+        addCommands = listOf(
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
+        ),
+        context = "Windows .opml association",
+        prepareFailure = "Could not prepare the Windows .opml association registry file",
+        launcherPath = launcherPath,
+        runCommand = runCommand,
+    )
+}
+
+private const val REG_EXE = "reg.exe"
+
+/**
+ * Runs [addCommands] and then the `reg.exe import` that writes [launcherPath] under [commandKey]
+ * (see [buildShellOpenCommandImport]), deleting the temporary `.reg` file afterwards. Logs
+ * [prepareFailure] and registers nothing when that file cannot be written.
+ */
+private fun registerWindowsShellOpen(
+    commandKey: String,
+    addCommands: List<List<String>>,
+    context: String,
+    prepareFailure: String,
+    launcherPath: String,
+    runCommand: (List<String>) -> Int,
+) {
     val (importCommand, regFile) = try {
-        buildShellOpenCommandImport(
-            "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
-            launcherPath,
-        )
+        buildShellOpenCommandImport(commandKey, launcherPath)
     } catch (e: IOException) {
-        Log.warn(LOG_TAG, "Could not prepare the Windows .opml association registry file", e)
+        Log.warn(LOG_TAG, prepareFailure, e)
         return
     }
-    val commands = listOf(
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
-        importCommand,
-    )
     try {
-        runRegistryCommands(commands, "Windows .opml association", runCommand)
+        runRegistryCommands(addCommands + listOf(importCommand), context, runCommand)
     } finally {
         regFile.delete()
     }
@@ -173,7 +183,7 @@ private fun buildShellOpenCommandImport(commandKey: String, launcherPath: String
     // install path can contain non-ASCII characters, since packageMsi's dirChooser lets the user
     // pick any install directory.
     tempFile.writeBytes(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + regFileText.toByteArray(Charsets.UTF_16LE))
-    return listOf("reg.exe", "import", tempFile.path) to tempFile
+    return listOf(REG_EXE, "import", tempFile.path) to tempFile
 }
 
 /**

@@ -13,7 +13,7 @@ struct SidebarRowLabel<IconPopover: View>: View {
     var editor: InlineRenameField?
     #endif
     /// Tapping a tag's color dot — opens its color picker directly, matching Compose's own dot
-    /// (`FeedListPane.kt`'s `clickable(onClickLabel = colorLabel)`), without also changing the list
+    /// (`FeedListTagRow.kt`'s `clickable(onClickLabel = colorLabel)`), without also changing the list
     /// selection. `nil` leaves the dot inert.
     var onIconTap: (() -> Void)?
     /// The color of a `.symbol` icon — `nil` leaves it to the enclosing list's own styling.
@@ -37,7 +37,7 @@ struct SidebarRowLabel<IconPopover: View>: View {
                 if isErroring {
                     Spacer(minLength: 0)
                     // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
-                    // Compose's own `FeedErrorIndicator` (`FeedListDragAndDrop.kt:655-676`) — an
+                    // Compose's own `FeedErrorIndicator` (`FeedListRows.kt`) — an
                     // ordinary fetch error gets no tooltip, only the accessibility label below.
                     Group {
                         if isGone {

@@ -9,7 +9,6 @@ import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
-import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
@@ -144,8 +143,7 @@ class OneDriveStorage(
      */
     private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
         status.value in 200..299 -> {
-            val eTag = (json.parseToJsonElement(bodyAsText()) as? JsonObject)
-                ?.get("eTag")?.jsonPrimitive?.content
+            val eTag = json.topLevelString(bodyAsText(), "eTag")
                 ?: return Result.Err(CloudStorageException("Missing eTag in upload response"))
             Result.Ok(CloudFileMeta(eTag))
         }
@@ -163,12 +161,8 @@ class OneDriveStorage(
      */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
         val response = client.delete(itemUrl(path)) { header("Authorization", "Bearer $token") }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            // Already absent — delete is idempotent.
-            response.status.value == 404 -> Result.Ok(Unit)
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // Already absent counts as deleted — delete is idempotent.
+        response.okOrAbsentOr("OneDrive")
     }
 
     /**
@@ -190,18 +184,15 @@ class OneDriveStorage(
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("name", fileName(to)) }.toString())
         }
-        when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 404 -> Result.Ok(Unit) // already absent — rename is idempotent
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        // Already absent counts as renamed — rename is idempotent.
+        response.okOrAbsentOr("OneDrive")
     }
 
     /**
-     * Determines whether an item exists at the specified path.
+     * Fetches an item's revision (its DriveItem `eTag`) without its contents.
      *
      * @param path The path of the item within the app folder.
-     * @return `true` if the item exists, `false` if it is not found.
+     * @return The item's metadata, `null` if it is not found, or an error result for other failures.
      */
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
         val response = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
@@ -209,8 +200,7 @@ class OneDriveStorage(
             response.status.value in 200..299 -> {
                 // The DriveItem `eTag` is the rev this provider guards uploads with (`If-Match`).
                 // It comes from the same item GET that used to be read only for its status code.
-                val eTag = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
-                    ?.get("eTag")?.jsonPrimitive?.content
+                val eTag = json.topLevelString(response.bodyAsText(), "eTag")
                     ?: return@withToken Result.Err(CloudStorageException("Missing eTag in metadata"))
                 Result.Ok(CloudFileMeta(eTag))
             }

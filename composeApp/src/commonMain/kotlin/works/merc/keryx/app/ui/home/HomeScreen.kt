@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -53,11 +52,9 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
-import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
@@ -70,17 +67,14 @@ import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.nextFeedListRow
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
 import works.merc.keryx.app.resources.notification_detail_title
 import works.merc.keryx.app.resources.notification_snackbar_action
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.ui.article.ArticleScrollUnit
 import works.merc.keryx.app.ui.article.FallbackReaderScrollHost
 import works.merc.keryx.app.ui.article.LocalFallbackReaderScrollHost
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.settings.ResetCloudDataConfirmDialog
 import works.merc.keryx.app.ui.i18n.infoDialogText
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -351,15 +345,19 @@ fun HomeScreen() {
     // selected feed the same way AppMenuBar does (filter.value against the already-collected feeds).
     fun selectedFeedForMenu(): Feeds? =
         (vm.filter.value as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
-    fun copySelectedFeedUrl() {
-        selectedFeedForMenu()?.url?.takeIf { hasUsableUrl(it) }?.let {
+    fun copySelectedFeedLink(link: (Feeds) -> String?) {
+        selectedFeedForMenu()?.let(link)?.takeIf { hasUsableUrl(it) }?.let {
             scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
         }
     }
-    fun copySelectedFeedSiteUrl() {
-        selectedFeedForMenu()?.site_url?.takeIf { hasUsableUrl(it) }?.let {
-            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
-        }
+
+    // Keyboard scrolling of the Compose-drawn fallback reader — see KeyboardNav.kt's own KDoc and
+    // FallbackReaderScrollHost's.
+    fun scrollFallbackReader(direction: Int, unit: ArticleScrollUnit) {
+        scope.launch { fallbackReaderScrollHost.scroll(direction, unit) }
+    }
+    fun scrollFallbackReaderIfFocused(direction: Int, unit: ArticleScrollUnit) {
+        if (keyboardPane == HomePane.ArticleDetail) scrollFallbackReader(direction, unit)
     }
 
     // Menu commands whose target state lives in this screen's composition.
@@ -370,8 +368,8 @@ fun HomeScreen() {
                 MenuCommand.FocusSearch -> focusSearch()
                 MenuCommand.OpenInBrowser -> openSelectedInBrowser()
                 MenuCommand.CopyUrl -> copySelectedUrl()
-                MenuCommand.CopyFeedUrl -> copySelectedFeedUrl()
-                MenuCommand.CopySiteUrl -> copySelectedFeedSiteUrl()
+                MenuCommand.CopyFeedUrl -> copySelectedFeedLink { it.url }
+                MenuCommand.CopySiteUrl -> copySelectedFeedLink { it.site_url }
                 else -> {}
             }
         }
@@ -412,8 +410,7 @@ fun HomeScreen() {
                                 // app-architecture.md); this only reaches the Compose-drawn fallback
                                 // reader, via fallbackReaderScrollHost — see KeyboardNav.kt's own
                                 // KDoc and FallbackReaderScrollHost's.
-                                HomePane.ArticleDetail ->
-                                    scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Line) }
+                                HomePane.ArticleDetail -> scrollFallbackReader(-1, ArticleScrollUnit.Line)
                             }
                         }
                     },
@@ -424,31 +421,14 @@ fun HomeScreen() {
                             null -> when (keyboardPane) {
                                 HomePane.FeedList -> moveFeedSelection(1)
                                 HomePane.ArticleList -> vm.selectNext()
-                                HomePane.ArticleDetail ->
-                                    scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Line) }
+                                HomePane.ArticleDetail -> scrollFallbackReader(1, ArticleScrollUnit.Line)
                             }
                         }
                     },
-                    onPageUp = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Page) }
-                        }
-                    },
-                    onPageDown = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Page) }
-                        }
-                    },
-                    onHome = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Edge) }
-                        }
-                    },
-                    onEnd = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Edge) }
-                        }
-                    },
+                    onPageUp = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Page) },
+                    onPageDown = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Page) },
+                    onHome = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Edge) },
+                    onEnd = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Edge) },
                     onLeft = {
                         // FeedList -> {} covers the drawer-open case too (keyboardPane resolves to
                         // FeedList whenever the drawer is open) — there is nothing further left to
@@ -821,18 +801,13 @@ internal fun PendingNotificationActionHost(
         AppNotificationAction.ResetCloudData ->
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
             // now-stale error notification.
-            KeryxAlertDialog(
-                onDismissRequest = { notifVm.clearPendingAction() },
-                title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-                text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
-                confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+            ResetCloudDataConfirmDialog(
                 onConfirm = {
                     vm.resetCloudData()
                     pending.notificationId?.let(notifVm::dismiss)
                     notifVm.clearPendingAction()
                 },
-                dismissText = stringResource(Res.string.common_cancel),
-                destructive = true,
+                onDismiss = { notifVm.clearPendingAction() },
             )
         // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
         // where that list is a screen of its own and focusing it would navigate backwards; see

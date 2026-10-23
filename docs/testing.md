@@ -488,7 +488,7 @@ confirm on screen that the native menu really follows it:
   context menu lists Refresh, Tags, Move to Folder in that order — the Feed menu's order — on every platform;
   check the SwiftUI app's Feed menu (both "New …" items) and sidebar row menu (macOS and iOS) the same way.
 
-The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
+The article reader's native WebView (`ui/home/ArticleWebView.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/
 enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmation:
 
@@ -690,7 +690,7 @@ on a device or emulator:
   focus). Confirm in both light and dark theme.
 - With a hardware keyboard attached (an emulator's Extended Controls, or a Bluetooth keyboard on a
   real tablet): pressing an arrow key latches `LocalKeyboardEngaged` and shows a `secondary`
-  keyboard-focus ring (`listRowOutline`, `HomeCommon.kt`) around the selected row in whichever pane
+  keyboard-focus ring (`listRowOutline`, `ListRowSelection.kt`) around the selected row in whichever pane
   holds keyboard focus — the *background* color stays the same either way (see the bullet above).
   Confirm at `PaneLayout.Triple` (the ring moves between the feed-list and article-list panes as
   arrow-key focus moves) and inside the drawer at a narrower layout (↑/↓ move the feed selection

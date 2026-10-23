@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.article
 
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.nodes.Element

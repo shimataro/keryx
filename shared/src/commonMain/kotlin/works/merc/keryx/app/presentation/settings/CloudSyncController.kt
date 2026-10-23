@@ -418,11 +418,7 @@ class CloudSyncController(
      */
     fun reconnect() {
         val type = _connectedType.value ?: return
-        viewModelScope.launch {
-            _connectingType.value = type
-            tearDownConnection(type)
-            connect(type)
-        }
+        tearDownAndConnect(from = type, to = type)
     }
 
     /**
@@ -451,10 +447,15 @@ class CloudSyncController(
      */
     fun switchTo(newType: CloudStorageType) {
         val oldType = _connectedType.value ?: return
+        tearDownAndConnect(from = oldType, to = newType)
+    }
+
+    /** Tears down the connection to [from], then [connect]s to [to] — shared by [reconnect] and [switchTo]. */
+    private fun tearDownAndConnect(from: CloudStorageType, to: CloudStorageType) {
         viewModelScope.launch {
-            _connectingType.value = newType
-            tearDownConnection(oldType)
-            connect(newType)
+            _connectingType.value = to
+            tearDownConnection(from)
+            connect(to)
         }
     }
 

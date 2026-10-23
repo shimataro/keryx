@@ -378,7 +378,7 @@ class SelectionBackgroundTest {
      * Regression guard for the tone-aware content color resolving a non-`null` value for an
      * unfocused [RowSelectionTone.PRIMARY] row on a [PaneFocusIndication.Ring] platform — desktop's
      * own [PaneFocusIndication.Dim] resolves `null` there instead (see `nonFocusedSelectionContent`
-     * in `HomeCommon.kt`), which kept this behavior invisible until a palette like Android's did.
+     * in `ListRowSelection.kt`), which kept this behavior invisible until a palette like Android's did.
      */
     @Test
     fun explicitColorsTonePrimaryContentColorUsesUnfocusedContentWhenNotFocused() {

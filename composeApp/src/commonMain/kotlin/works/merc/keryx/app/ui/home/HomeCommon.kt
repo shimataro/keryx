@@ -1,13 +1,11 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
@@ -16,34 +14,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.number
-import kotlinx.datetime.toLocalDateTime
-import kotlin.time.ExperimentalTime
-import kotlin.time.Instant
 import androidx.compose.ui.input.key.Key
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
-import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.FeedListRowSelection
 import works.merc.keryx.app.presentation.home.FeedListSelectionTarget
 import works.merc.keryx.app.presentation.home.canOpenInBrowser
-import works.merc.keryx.app.presentation.home.feedsForTag
-import works.merc.keryx.app.presentation.home.groupFeedsByFolder
 import works.merc.keryx.app.presentation.home.renameHomeKey
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.home_collapse
@@ -217,235 +200,8 @@ internal fun ExpandCollapseChevron(
     }
 }
 
-/**
- * How strongly a feed-list row paints its selection. A feed renders once under its folder group and
- * again under every expanded tag it carries, so "selected" is not a single row: exactly one rendered
- * instance is the one actually clicked/keyboard-navigated to ([PRIMARY]), and every other instance of
- * the same selected feed is a [SECONDARY] echo of it. [NONE] is an unselected row.
- */
-enum class RowSelectionTone { NONE, SECONDARY, PRIMARY }
-
-/**
- * Alpha of a [RowSelectionTone.SECONDARY] row's tint, applied to [RowSelectionColors.selectedBackground]
- * by the tone-aware [selectionBackground] below — deliberately far below a [RowSelectionTone.PRIMARY]
- * background, so a duplicate row of the selected feed reads as "same feed, not the row you're on"
- * rather than as a second selection. The same fraction of the same base color on every platform,
- * which is what makes this a shared constant rather than a per-platform [RowSelectionColors] field.
- */
-internal const val SECONDARY_SELECTION_ALPHA = 0.15f
-
-/**
- * A selected row's background in the pane that does *not* hold keyboard focus — [colors.selectedBackground]
- * unchanged on a platform whose [PaneFocusIndication] is [PaneFocusIndication.Ring] (Android: the
- * color itself never moves with pane focus, see that type's own KDoc), or dimmed to
- * [PaneFocusIndication.Dim.alpha] on a platform whose indication is [PaneFocusIndication.Dim]
- * (desktop: this dimming *is* how pane focus is shown, so it needs to actually differ from the
- * focused color).
- */
-private fun nonFocusedSelectionBackground(colors: RowSelectionColors): Color = when (val focus = colors.paneFocus) {
-    is PaneFocusIndication.Dim -> colors.selectedBackground.copy(alpha = focus.alpha)
-    is PaneFocusIndication.Ring -> colors.selectedBackground
-}
-
-/**
- * A selected row's content color in the pane that does *not* hold keyboard focus — mirrors
- * [nonFocusedSelectionBackground]'s own per-[PaneFocusIndication] split. `null` on [PaneFocusIndication.Dim]
- * (desktop's dimmed background still has enough contrast with each element's own default color, so
- * it sets none — see [RowSelectionColors.selectedContent]'s own KDoc), [colors.selectedContent]
- * unchanged on [PaneFocusIndication.Ring] (Android: content color never moves with pane focus
- * either).
- */
-private fun nonFocusedSelectionContent(colors: RowSelectionColors): Color? = when (colors.paneFocus) {
-    is PaneFocusIndication.Dim -> null
-    is PaneFocusIndication.Ring -> colors.selectedContent
-}
-
-/**
- * Background for a selectable row, taken from this platform's [RowSelectionColors]. Delegates to
- * the [RowSelectionTone] overload below ([selected] is exactly [RowSelectionTone.PRIMARY] vs.
- * [RowSelectionTone.NONE] — the two are mathematically equivalent for a row that never renders more
- * than one instance of itself, e.g. every article row).
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun selectionBackground(
-    selected: Boolean,
-    focused: Boolean,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color = selectionBackground(if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE, focused, colors)
-
-/**
- * Content color to pair with [selectionBackground] — see the [RowSelectionTone] overload below,
- * which this delegates to the same way [selectionBackground] does.
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun selectionContentColorOrNull(
-    selected: Boolean,
-    focused: Boolean,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color? = selectionContentColorOrNull(if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE, focused, colors)
-
-/**
- * Background for a row that can render as more than one instance (see [RowSelectionTone]):
- * [colors.selectedBackground] in the focused pane, [nonFocusedSelectionBackground] otherwise, for
- * [RowSelectionTone.PRIMARY]; a faint [SECONDARY_SELECTION_ALPHA] tint of [colors.selectedBackground]
- * for [RowSelectionTone.SECONDARY] regardless of focus (an echo of the selection, not a second one).
- * Transparent whenever [LocalRowSelectionVisible] reads `false` — set by `HomeScreen` at
- * [PaneLayout.Single], where "selected" doesn't mean "on screen" the way it does at
- * [PaneLayout.Dual]/[PaneLayout.Triple]: tapping a row navigates away from it, so a lingering
- * highlight on a row the user can no longer see would read as stale rather than as "your place."
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun selectionBackground(
-    tone: RowSelectionTone,
-    focused: Boolean,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color = when {
-    !LocalRowSelectionVisible.current -> Color.Transparent
-    tone == RowSelectionTone.PRIMARY -> if (focused) colors.selectedBackground else nonFocusedSelectionBackground(colors)
-    tone == RowSelectionTone.SECONDARY -> colors.selectedBackground.copy(alpha = SECONDARY_SELECTION_ALPHA)
-    else -> Color.Transparent
-}
-
-/**
- * Content color to pair with the tone-aware [selectionBackground] — only a
- * [RowSelectionTone.PRIMARY] row takes one, exactly as in the boolean overload (a
- * [RowSelectionTone.SECONDARY] echo is a faint tint that every element's default color still reads
- * against). Also gated on [LocalRowSelectionVisible].
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun selectionContentColorOrNull(
-    tone: RowSelectionTone,
-    focused: Boolean,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color? = when {
-    !LocalRowSelectionVisible.current || tone != RowSelectionTone.PRIMARY -> null
-    focused -> colors.selectedContent
-    else -> nonFocusedSelectionContent(colors)
-}
-
-/**
- * The color a list row's outline decoration should paint, or `null` for no outline at all — the
- * judgment half of [listRowOutline], kept separate from the `Modifier`-returning half so it can be
- * unit-tested the same way [selectionContentColorOrNull] already is (a `Modifier`'s contents can't
- * be inspected by a test the way a `Color?` can). Delegates to the [RowSelectionTone] overload below
- * the same way [selectionBackground] does.
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun rowOutlineColorOrNull(
-    selected: Boolean,
-    focused: Boolean,
-    dropTargetColor: Color? = null,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color? = rowOutlineColorOrNull(
-    if (selected) RowSelectionTone.PRIMARY else RowSelectionTone.NONE,
-    focused,
-    dropTargetColor,
-    colors,
-)
-
-/**
- * Tone-aware [rowOutlineColorOrNull] — see [rowOutlineColorOrNull]'s boolean overload for the
- * general contract. A non-null [dropTargetColor] always wins over the keyboard-focus ring below — a
- * drop target is a transient, high-urgency signal, and a row can only paint one outline at a time.
- * Otherwise, the ring shows only when **all** of these hold: [LocalRowSelectionVisible] is showing
- * highlights at all, [LocalKeyboardEngaged] has latched (see its own KDoc), this platform's
- * [PaneFocusIndication] is actually [PaneFocusIndication.Ring] (desktop's is [PaneFocusIndication.Dim]
- * — its dimming already carries pane focus, see that type's own KDoc), [focused] is true (this
- * row's pane holds keyboard focus), and [tone] is [RowSelectionTone.PRIMARY] — a row that is merely
- * a [RowSelectionTone.SECONDARY] echo of the selected feed never gets a focus ring, only the one
- * *actual* selected instance does.
- *
- * @param colors Overridable for tests only — production call sites always use the platform default.
- */
-@Composable
-internal fun rowOutlineColorOrNull(
-    tone: RowSelectionTone,
-    focused: Boolean,
-    dropTargetColor: Color? = null,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Color? = when {
-    dropTargetColor != null -> dropTargetColor
-    LocalRowSelectionVisible.current && LocalKeyboardEngaged.current && tone == RowSelectionTone.PRIMARY && focused ->
-        (colors.paneFocus as? PaneFocusIndication.Ring)?.color
-    else -> null
-}
-
-/**
- * A list row's outline decoration — a drop-target border, or (absent one) a keyboard-focus ring
- * around the row currently selected in the pane that holds keyboard focus. Traces [kind]'s own
- * [listRowShape] so the outline always matches the shape the row is clipped to, whichever it is.
- * See [rowOutlineColorOrNull] for the color it resolves.
- */
-@Composable
-internal fun listRowOutline(
-    kind: ListRowKind,
-    selected: Boolean,
-    focused: Boolean,
-    dropTargetColor: Color? = null,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Modifier = rowOutlineColorOrNull(selected, focused, dropTargetColor, colors)?.let {
-    Modifier.border(ROW_OUTLINE_WIDTH, it, listRowShape(kind))
-} ?: Modifier
-
-/** Tone-aware overload of [listRowOutline] — see [rowOutlineColorOrNull]'s own tone overload. */
-@Composable
-internal fun listRowOutline(
-    kind: ListRowKind,
-    tone: RowSelectionTone,
-    focused: Boolean,
-    dropTargetColor: Color? = null,
-    colors: RowSelectionColors = rowSelectionColors(),
-): Modifier = rowOutlineColorOrNull(tone, focused, dropTargetColor, colors)?.let {
-    Modifier.border(ROW_OUTLINE_WIDTH, it, listRowShape(kind))
-} ?: Modifier
-
 /** Shared tint for the starred-article indicator (article list row badge, detail-view toggle). */
 val StarredColor = Color(0xFFFFC107)
-
-/**
- * Desktop's highlighter-pen span for matched search terms (bold + yellow marker background + a dark
- * text color). Theme-independent and constant regardless of row selection, so a match stays legible
- * both on the normal surface and on the teal `primary` background of a selected row (where the row's
- * `onPrimary` text would otherwise wash out over the yellow). Bold alone was invisible on unread
- * titles (already fully bold), which is why the background marker was added. Android uses a
- * theme-derived pair instead — see [searchHighlightSpanStyle].
- */
-val SearchHighlightSpanStyle = SpanStyle(
-    fontWeight = FontWeight.Bold,
-    background = Color(0xFFFFE082), // amber 200-ish marker
-    color = Color(0xFF3E2723),     // near-black, readable on the yellow marker
-)
-
-/**
- * The span [markedToAnnotatedString] paints matched search terms with on this platform.
- *
- * Desktop keeps the fixed [SearchHighlightSpanStyle]. A touch-primary platform (Android) follows its
- * color scheme instead — including Material You dynamic color — with M3's own container/on-container
- * pair ([ColorScheme.tertiaryContainer] / [ColorScheme.onTertiaryContainer]), a role pair Material
- * guarantees legible against each other in light and dark alike. Because the span sets both the
- * background and the text color, the match stays readable whatever the row's own selection
- * background is, which is the same property the fixed desktop marker relies on.
- */
-internal fun searchHighlightSpanStyle(isTouchPrimary: Boolean, colorScheme: ColorScheme): SpanStyle =
-    if (isTouchPrimary) {
-        SpanStyle(
-            fontWeight = FontWeight.Bold,
-            background = colorScheme.tertiaryContainer,
-            color = colorScheme.onTertiaryContainer,
-        )
-    } else {
-        SearchHighlightSpanStyle
-    }
 
 /**
  * Whether the article list's "refresh this list" action — the pull-to-refresh gesture, its
@@ -460,68 +216,6 @@ internal fun searchHighlightSpanStyle(isTouchPrimary: Boolean, colorScheme: Colo
  */
 internal fun pullRefreshAvailable(isTouchPrimary: Boolean, searchActive: Boolean, hasNoFeeds: Boolean): Boolean =
     isTouchPrimary && !searchActive && !hasNoFeeds
-
-/**
- * The rendered `LazyColumn` index for one specific feed-list row instance, or `null` if it isn't
- * currently rendered (its folder is collapsed, its tag isn't expanded, or the item no longer
- * exists). Because [instance] names exactly one rendered row — a feed's folder-group row and its
- * row under a given expanded tag are different instances — no "pick among several" heuristic is
- * needed: the answer is exact.
- *
- * @param instance The row instance whose list index to find.
- * @param collapsedFolderIds Folder IDs whose feed rows are hidden.
- * @param feedTagMap Mapping of feed IDs to their attached tag IDs.
- * @param expandedTagIds Tag IDs whose attached feed rows are rendered.
- */
-fun feedListRowIndex(
-    instance: FeedListRowSelection,
-    feeds: List<Feeds>,
-    folders: List<Folders>,
-    tags: List<Tags>,
-    collapsedFolderIds: Set<String>,
-    feedTagMap: Map<String, Set<String>> = emptyMap(),
-    expandedTagIds: Set<String> = emptySet(),
-): Int? {
-    // All and Starred are rendered outside the LazyColumn entirely (as fixed SidebarRows above
-    // it), so they never correspond to a LazyColumn item and selecting them must not scroll it.
-    if (instance is FeedListRowSelection.All || instance is FeedListRowSelection.Starred) {
-        return null
-    }
-
-    var index = 1 // 0: "Folders" header
-    for ((folder, feedsInFolder) in groupFeedsByFolder(feeds, folders)) {
-        if (folder == null) {
-            if (folders.isNotEmpty()) index++ // NoFolderHeader
-            feedsInFolder.forEachIndexed { i, feed ->
-                if (instance is FeedListRowSelection.FeedInFolderGroup && instance.feedId == feed.id) return index + i
-            }
-            index += feedsInFolder.size
-        } else {
-            if (instance is FeedListRowSelection.Folder && instance.folderId == folder.id) return index
-            index++ // FolderGroupHeader
-            if (folder.id !in collapsedFolderIds) {
-                feedsInFolder.forEachIndexed { i, feed ->
-                    if (instance is FeedListRowSelection.FeedInFolderGroup && instance.feedId == feed.id) return index + i
-                }
-                index += feedsInFolder.size
-            }
-        }
-    }
-    index++ // divider
-    index++ // "Tags" header
-    for (tag in tags) {
-        if (instance is FeedListRowSelection.Tag && instance.tagId == tag.id) return index
-        index++ // TagRow
-        if (tag.id in expandedTagIds) {
-            val feedsInTag = feedsForTag(feeds, feedTagMap, tag.id)
-            if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tag.id) {
-                feedsInTag.forEachIndexed { i, feed -> if (instance.feedId == feed.id) return index + i }
-            }
-            index += feedsInTag.size
-        }
-    }
-    return null
-}
 
 /**
  * Which feed-list row currently has its name open for inline editing (`FeedListPane`'s single
@@ -566,27 +260,6 @@ internal fun FeedListSelectionTarget.toInlineEditTarget(rowInstance: FeedListRow
     )
     is FeedListSelectionTarget.Folder -> InlineEditTarget.Folder(folder.id)
     is FeedListSelectionTarget.Tag -> InlineEditTarget.Tag(tag.id)
-}
-
-/**
- * Turns FTS5 highlight/snippet markup (matched spans wrapped in
- * [FtsSearch.MARK_START]/[FtsSearch.MARK_END]) into an [AnnotatedString] whose matched spans get the
- * [highlight] span (by default desktop's [SearchHighlightSpanStyle] — see [searchHighlightSpanStyle]
- * for the per-platform choice). The sentinel chars are consumed, never rendered. Unbalanced markup is handled defensively: a redundant start or a stray
- * end is ignored, and an unclosed start extends the highlight to the end.
- */
-fun markedToAnnotatedString(
-    marked: String,
-    highlight: SpanStyle = SearchHighlightSpanStyle,
-): AnnotatedString = buildAnnotatedString {
-    var marking = false
-    for (ch in marked) {
-        when (ch) {
-            FtsSearch.MARK_START -> if (!marking) { pushStyle(highlight); marking = true }
-            FtsSearch.MARK_END -> if (marking) { pop(); marking = false }
-            else -> append(ch)
-        }
-    }
 }
 
 /**
@@ -643,89 +316,4 @@ fun autoScrollVelocityPxPerSec(
         else -> 0f
     }
 }
-
-/** Parsed identity of a feed-list `LazyColumn` row, derived from its `key`. */
-internal sealed interface FeedListRowKey {
-    data class Folder(val folderId: String) : FeedListRowKey
-    data class Feed(val feedId: String) : FeedListRowKey
-    data class Tag(val tagId: String) : FeedListRowKey
-    data object NoFolderHeader : FeedListRowKey
-    data object Other : FeedListRowKey
-}
-
-private const val FOLDER_KEY_PREFIX = "folder-"
-private const val FEED_KEY_PREFIX = "feed-"
-private const val TAG_KEY_PREFIX = "tag-"
-private const val NO_FOLDER_HEADER_KEY = "no-folder-header"
-
-/**
- * Identifies the feed-list row represented by a `LazyColumn` item key.
- *
- * Tag-attached feed keys are classified as feed rows rather than tag rows.
- *
- * @param key The item key assigned to the feed-list row.
- * @return The parsed row identity, or `FeedListRowKey.Other` for unrecognized keys.
- */
-internal fun parseFeedListRowKey(key: Any?): FeedListRowKey {
-    val stringKey = key as? String ?: return FeedListRowKey.Other
-    return when {
-        stringKey == NO_FOLDER_HEADER_KEY -> FeedListRowKey.NoFolderHeader
-        stringKey.startsWith(FOLDER_KEY_PREFIX) -> FeedListRowKey.Folder(stringKey.removePrefix(FOLDER_KEY_PREFIX))
-        stringKey.startsWith(FEED_KEY_PREFIX) -> FeedListRowKey.Feed(stringKey.removePrefix(FEED_KEY_PREFIX))
-        stringKey.startsWith(TAG_KEY_PREFIX) && "-feed-" !in stringKey ->
-            FeedListRowKey.Tag(stringKey.removePrefix(TAG_KEY_PREFIX))
-        else -> FeedListRowKey.Other
-    }
-}
-
-/** What a feed-list `LazyColumn` row can be dragged *as*, derived from its `key`. */
-internal sealed interface FeedListDragSourceKey {
-    data class Feed(val feedId: String) : FeedListDragSourceKey
-    data class Folder(val folderId: String) : FeedListDragSourceKey
-}
-
-/** Separator between a tag-attached feed row's tag id and its feed id (`"tag-$tagId-feed-$feedId"`). */
-private const val TAG_FEED_INFIX = "-feed-"
-
-/**
- * Parses a feed-list `LazyColumn` item's `key` into what dragging that row would drag, or `null`
- * when the row isn't draggable at all (a tag row, a section header, the divider).
- *
- * Deliberately separate from [parseFeedListRowKey], which answers the *drop target* question: a
- * feed listed under an expanded tag (`"tag-$tagId-feed-$feedId"`) is a perfectly good drag source
- * — it drags the feed itself — while remaining a non-target ([FeedListRowKey.Other]) there, since
- * dropping onto it means nothing. The two must not be collapsed into one parser.
- */
-internal fun parseFeedListDragSourceKey(key: Any?): FeedListDragSourceKey? {
-    val stringKey = key as? String ?: return null
-    return when {
-        stringKey.startsWith(FOLDER_KEY_PREFIX) ->
-            FeedListDragSourceKey.Folder(stringKey.removePrefix(FOLDER_KEY_PREFIX))
-        stringKey.startsWith(FEED_KEY_PREFIX) ->
-            FeedListDragSourceKey.Feed(stringKey.removePrefix(FEED_KEY_PREFIX))
-        stringKey.startsWith(TAG_KEY_PREFIX) && TAG_FEED_INFIX in stringKey ->
-            FeedListDragSourceKey.Feed(stringKey.substringAfter(TAG_FEED_INFIX))
-        else -> null
-    }
-}
-
-/**
- * A `LazyColumn` item's key and vertical bounds, in the same "distance from the viewport's leading
- * edge" space as `LazyListItemInfo.offset`/`.size` — deliberately decoupled from that real Compose
- * Foundation type so hit-testing stays trivially unit-testable.
- */
-internal data class FeedListRowBand(val key: Any?, val offsetPx: Int, val sizePx: Int)
-
-/** The [FeedListRowBand] in [bands] containing [localY] (already `pointerY - viewportTop`), or `null`
- * if none does (e.g. [localY] falls outside every band, or [bands] is empty). */
-internal fun resolveHitBand(localY: Float, bands: List<FeedListRowBand>): FeedListRowBand? =
-    bands.find { localY >= it.offsetPx && localY < it.offsetPx + it.sizePx }
-
-/** Which half of a matched row/header a drag is currently hovering over, used to decide whether an
- * insertion point lands before or after it. */
-internal enum class RowHalf { TOP, BOTTOM }
-
-/** Resolves which half of [band] [localY] falls in. */
-internal fun resolveRowHalf(localY: Float, band: FeedListRowBand): RowHalf =
-    if (localY - band.offsetPx < band.sizePx / 2f) RowHalf.TOP else RowHalf.BOTTOM
 

@@ -54,8 +54,8 @@ internal const val OPML_MIME_PACKAGE_FILE = "keryx-opml.xml"
  */
 internal class LinuxOpmlAssociationRegistrar(
     private val launcherPath: String,
-    private val applicationsDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications"),
-    private val mimeAppsList: File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list"),
+    private val applicationsDir: File = defaultApplicationsDir(),
+    private val mimeAppsList: File = defaultMimeAppsList(),
     private val mimePackagesDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("mime/packages"),
     private val refreshDesktopDatabase: (File) -> Unit = defaultRefreshDesktopDatabase(),
     private val refreshMimeDatabase: (File) -> Unit = { mimeDir ->
@@ -104,10 +104,7 @@ internal class LinuxOpmlAssociationRegistrar(
                 .getOrThrow()
         }
         if (changed) {
-            // Best-effort only — see the equivalent comment in LinuxUriSchemeRegistrar.register().
-            runCatching { refreshDesktopDatabase(applicationsDir) }.onFailure {
-                Log.info(LOG_TAG, "Could not refresh the desktop database; the association itself is still in place")
-            }
+            refreshDesktopDatabaseBestEffort(refreshDesktopDatabase, applicationsDir, LOG_TAG)
             Log.info(LOG_TAG, "Registered .opml file association at ${desktopFile.path}")
         }
         true

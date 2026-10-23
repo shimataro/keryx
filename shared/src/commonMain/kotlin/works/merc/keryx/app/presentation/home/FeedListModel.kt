@@ -266,5 +266,5 @@ fun resolveFeedListSelectionTarget(
     is ArticleFilter.Feed -> feeds.find { it.id == filter.feedId }?.let(FeedListSelectionTarget::Feed)
     is ArticleFilter.Folder -> folders.find { it.id == filter.folderId }?.let(FeedListSelectionTarget::Folder)
     is ArticleFilter.Tag -> tags.find { it.id == filter.tagId }?.let(FeedListSelectionTarget::Tag)
-    else -> null
+    ArticleFilter.All, ArticleFilter.Starred -> null
 }

@@ -30,6 +30,7 @@ import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.data.local.db.FeedsQueries
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -194,7 +195,7 @@ class FeedRepository(
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
         val wasNewlyCreated = subscribePlacementMutex.withLock {
-            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched, existing)
+            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched)
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
@@ -309,7 +310,6 @@ class FeedRepository(
         now: Long,
         favicon: String?,
         fetched: FetchedFeed,
-        existing: Feeds?,
     ): Boolean {
         return db.transactionWithResult {
             // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
@@ -554,12 +554,12 @@ class FeedRepository(
      * unsubscribed feed). Ordered like [getAllFeeds].
      */
     fun feedsCoveredBy(filter: ArticleFilter): List<Feeds> = when (filter) {
-        ArticleFilter.All, ArticleFilter.Starred -> feeds.watchAll().executeAsList()
-        is ArticleFilter.Feed -> feeds.watchAll().executeAsList().filter { it.id == filter.feedId }
+        ArticleFilter.All, ArticleFilter.Starred -> getAllFeeds()
+        is ArticleFilter.Feed -> getAllFeeds().filter { it.id == filter.feedId }
         is ArticleFilter.Folder -> feeds.getByFolder(filter.folderId).executeAsList()
         is ArticleFilter.Tag -> {
             val tagged = db.feed_tagsQueries.watchFeedIdsForTag(filter.tagId).executeAsList().toSet()
-            feeds.watchAll().executeAsList().filter { it.id in tagged }
+            getAllFeeds().filter { it.id in tagged }
         }
     }
 
@@ -718,7 +718,7 @@ private inline fun applyReorderUpdates(
     previousSortOrderOf: Map<String, Long>,
     feedId: String,
     now: Long,
-    feedsQueries: works.merc.keryx.app.data.local.db.FeedsQueries,
+    feedsQueries: FeedsQueries,
     onFeedId: (index: Int) -> Unit = {},
 ): Long {
     var newFeedSortOrder = 0L

@@ -9,7 +9,7 @@ enum SidebarRowHighlight: Equatable {
     case none
     /// Every *other* rendered copy of the selected filter, e.g. a feed shown under both its folder
     /// group and an expanded tag — the role of the Compose app's `RowSelectionTone.SECONDARY`
-    /// (`HomeCommon.kt`). The Apple app shows it as accent-colored text with no fill: a faint fill of
+    /// (`ListRowSelection.kt`). The Apple app shows it as accent-colored text with no fill: a faint fill of
     /// the selection color reads as a dull smudge on a light sidebar.
     case echo
     /// The accent fill a Finder/Notes sidebar item shows while a dragged item would be dropped onto it.

@@ -98,6 +98,12 @@ fun keryxSurfaceColor(dark: Boolean): Color = if (dark) DarkColors.surface else 
  */
 fun keryxAccentColor(dark: Boolean): Color = if (dark) DarkColors.primary else LightColors.primary
 
+/**
+ * The muted `outlineVariant` tone shared by hairline separators that should recede (settings
+ * sections, the pane resize divider at rest, dialog footers).
+ */
+internal val ColorScheme.subtleDivider: Color get() = outlineVariant.copy(alpha = 0.4f)
+
 /** Lower bound of the app's own font-size setting (see [effectiveFontScale]). */
 const val APP_FONT_SCALE_MIN = 0.8f
 

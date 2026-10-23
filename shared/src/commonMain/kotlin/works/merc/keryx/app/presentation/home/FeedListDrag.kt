@@ -138,7 +138,7 @@ fun resolveFeedListDropHighlight(
                 ?.let(index::belowBoundaryForFolder)
             boundary to null
         }
-        else -> null to null
+        FeedListDropTarget.NoFolderHeader, is FeedListDropTarget.TagHeader, FeedListDropTarget.Other -> null to null
     }
 }
 

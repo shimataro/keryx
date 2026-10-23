@@ -10,7 +10,6 @@ import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
-import works.merc.keryx.app.domain.backgroundUpdateLoop
 import works.merc.keryx.app.domain.runMaintenanceStep
 import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.platform.FileIO

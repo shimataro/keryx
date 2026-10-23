@@ -50,10 +50,13 @@ private val BADGE_FONT_FAMILY: String by lazy {
     if (isMacOs && available.contains(macCandidate)) macCandidate else Font.SANS_SERIF
 }
 
+/** Largest count a badge spells out; anything above it is shown as `"99+"`. */
+private const val MAX_BADGE_COUNT = 99
+
 /** Returns the display label for an unread count, or `null` if no badge should be shown. */
 fun unreadBadgeLabel(count: Long): String? = when {
     count <= 0 -> null
-    count > 99 -> "99+"
+    count > MAX_BADGE_COUNT -> "$MAX_BADGE_COUNT+"
     else -> count.toString()
 }
 

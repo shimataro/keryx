@@ -72,7 +72,7 @@ struct FeedListView: View {
         .modifier(SearchFocusModifier(focusedPane: focusedPane))
         // Spring-loaded folder: holding a dragged feed over a collapsed folder opens it after a
         // short pause, so its feeds become reachable drop targets mid-drag — matches Compose's own
-        // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListDragAndDrop.kt`). The pause and
+        // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListRows.kt`). The pause and
         // whether to spring at all follow the system's own spring-loading setting, as Finder does.
         // Re-checks `hoveredKey` after the delay so releasing/moving away first cancels the expand.
         .onChange(of: hoveredKey) { _, key in
@@ -185,7 +185,7 @@ struct FeedListView: View {
                 Label(L("home_add"), systemImage: "plus")
             }
         }
-        // Mirrors Compose's own `FeedListToolbarRow` (`FeedListPane.kt:883-943`): Refresh All is
+        // Mirrors Compose's own `FeedListToolbarRow` (`FeedListChrome.kt`): Refresh All is
         // always present, Sync only while a cloud provider is connected, and both disable while
         // either operation (or the refresh-then-sync cycle covering the gap between them) is
         // already in flight — `activity.refreshIndicatorShown`/`.syncing` pick which one's own

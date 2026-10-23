@@ -199,10 +199,15 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         // Always present and only disabled when unavailable (no provider, something else running,
         // an auth failure the row's own "reconnect" must fix first), per the layout-stability rule.
         // Kept out of CloudProviderRow: a third labelled action would overrun that row's width.
-        SyncNowButton(
+        // Labelled on every platform (unlike the row's own actions): it stands alone on its line.
+        ProviderActionButton(
+            label = stringResource(Res.string.menu_feed_sync_now),
+            icon = KeryxIcons.Cloud,
+            onClick = { vm.syncNow() },
+            kind = IconButtonKind.Standard,
             enabled = canSyncNow,
             busy = syncing && connected != null,
-            onClick = { vm.syncNow() },
+            iconOnly = false,
         )
     }
 
@@ -227,14 +232,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         )
     }
     if (confirmingResetCloudData) {
-        KeryxAlertDialog(
-            onDismissRequest = { confirmingResetCloudData = false },
-            title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-            text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
-            confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+        ResetCloudDataConfirmDialog(
             onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
-            dismissText = stringResource(Res.string.common_cancel),
-            destructive = true,
+            onDismiss = { confirmingResetCloudData = false },
         )
     }
     confirmingSwitchTo?.let { type ->
@@ -258,23 +258,20 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
 }
 
 /**
- * The tab's "sync now" button: a labelled tonal button whose glyph swaps for a spinner in the same
- * fixed slot while a sync is running, so the swap can't reflow the label.
+ * The destructive "reset cloud sync data" confirmation, shared by this tab's own reset button and
+ * the notification center's `ResetCloudData` action so both routes ask the same question.
  */
 @Composable
-private fun SyncNowButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
-    FlatTonalButton(onClick = onClick, enabled = enabled) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (busy) {
-                SmallSpinner(size = 18.dp, color = LocalContentColor.current)
-            } else {
-                // Decorative: the Text beside it announces the action.
-                KeryxIcon(KeryxIcons.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.menu_feed_sync_now))
-        }
-    }
+internal fun ResetCloudDataConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    KeryxAlertDialog(
+        onDismissRequest = onDismiss,
+        title = stringResource(Res.string.settings_cloud_reset_confirm_title),
+        text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
+        confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+        onConfirm = onConfirm,
+        dismissText = stringResource(Res.string.common_cancel),
+        destructive = true,
+    )
 }
 
 /**

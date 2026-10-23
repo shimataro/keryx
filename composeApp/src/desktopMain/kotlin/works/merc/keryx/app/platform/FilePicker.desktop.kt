@@ -215,9 +215,11 @@ internal fun defaultFilePickerBackend(linux: Boolean = isLinux): FilePickerBacke
  */
 internal fun <W> chooseDialogOwner(active: W?, showingFrames: List<W>): W? = active ?: showingFrames.firstOrNull()
 
-// KeyboardFocusManager is EDT-affine (see AppMenuBarHost.kt's own use of it), so this is only ever
 /**
  * Resolves the window to use as the owner for a file picker dialog.
+ *
+ * KeyboardFocusManager is EDT-affine (see AppMenuBarHost.kt's own use of it), so this is only ever
+ * called from inside the `Dispatchers.Swing` blocks below.
  *
  * @return The active window, the first visible frame, or `null` when no suitable owner exists.
  */

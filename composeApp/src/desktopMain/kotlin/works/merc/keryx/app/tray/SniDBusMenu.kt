@@ -9,6 +9,35 @@ import java.util.concurrent.atomic.AtomicReference
 /** The interface name the menu's properties live under. */
 internal const val DBUSMENU_INTERFACE = "com.canonical.dbusmenu"
 
+/** The dbusmenu protocol version both exported menus implement. */
+private const val DBUSMENU_VERSION = 3L
+
+/**
+ * The read-only properties both exported menus (the tray's and the KDE Global Menu's) report for
+ * [interfaceName]: fixed values for [DBUSMENU_INTERFACE], nothing for any other interface.
+ */
+internal fun dbusMenuProperties(interfaceName: String): Map<String, Variant<*>> {
+    if (interfaceName != DBUSMENU_INTERFACE) return emptyMap()
+    return mapOf(
+        "Version" to Variant(UInt32(DBUSMENU_VERSION)),
+        "TextDirection" to Variant("ltr"),
+        "Status" to Variant("normal"),
+        "IconThemePath" to Variant(emptyList<String>(), "as"),
+    )
+}
+
+/**
+ * The `AboutToShowGroup` reply both exported menus send: every requested id in [knownIds] needs an
+ * update when the layout is [stale], and every other requested id is an error.
+ */
+internal fun aboutToShowGroupReply(ids: List<Int>, stale: Boolean, knownIds: Set<Int>): AboutToShowGroupReply {
+    val known = ids.filter { it in knownIds }
+    return AboutToShowGroupResult(
+        updatesNeeded = if (stale) known else emptyList(),
+        idErrors = ids.filterNot { it in knownIds },
+    )
+}
+
 // MENU_UPDATE_ID/MENU_SEPARATOR_ID are always part of the layout, so a host can always name them
 // in an Event/AboutToShowGroup; handleEvent below still no-ops a click on a currently *disabled*
 // update entry, which a host working from a cached layout can send — see its own comment.
@@ -160,14 +189,8 @@ override fun getObjectPath(): String = objectPath
      * @param ids The menu item IDs to evaluate.
      * @return The known IDs requiring updates and the requested IDs that are not recognized.
      */
-    override fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply {
-        val stale = AboutToShow(MENU_ROOT_ID)
-        val known = ids.filter { it in MENU_KNOWN_IDS }
-        return AboutToShowGroupResult(
-            updatesNeeded = if (stale) known else emptyList(),
-            idErrors = ids.filterNot { it in MENU_KNOWN_IDS },
-        )
-    }
+    override fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply =
+        aboutToShowGroupReply(ids, stale = AboutToShow(MENU_ROOT_ID), knownIds = MENU_KNOWN_IDS)
 
     /**
      * Retrieves the read-only properties exposed by the DBus menu interface.
@@ -175,15 +198,7 @@ override fun getObjectPath(): String = objectPath
      * @param interfaceName The DBus interface whose properties are requested.
      * @return A map of interface properties, or an empty map for an unsupported interface.
      */
-    override fun GetAll(interfaceName: String): Map<String, Variant<*>> {
-        if (interfaceName != DBUSMENU_INTERFACE) return emptyMap()
-        return mapOf(
-            "Version" to Variant(UInt32(3)),
-            "TextDirection" to Variant("ltr"),
-            "Status" to Variant("normal"),
-            "IconThemePath" to Variant(emptyList<String>(), "as"),
-        )
-    }
+    override fun GetAll(interfaceName: String): Map<String, Variant<*>> = dbusMenuProperties(interfaceName)
 
     /**
      * Handles an event for a recognized menu node.

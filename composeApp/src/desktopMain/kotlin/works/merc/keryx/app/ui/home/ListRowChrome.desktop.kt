@@ -15,7 +15,7 @@ internal actual fun listRowShape(kind: ListRowKind): Shape = MaterialTheme.shape
  * Desktop's selection palette: full-strength `primary` (with `onPrimary` content) in the focused
  * pane, dimmed to [UNFOCUSED_SELECTION_ALPHA] elsewhere via [PaneFocusIndication.Dim] — dim enough
  * that each element's own default text/icon color still reads against it, which is why
- * `HomeCommon.kt`'s non-focused content resolution leaves no override for [PaneFocusIndication.Dim]
+ * `ListRowSelection.kt`'s non-focused content resolution leaves no override for [PaneFocusIndication.Dim]
  * (`selectedContent` stays `null` there). Desktop represents pane focus entirely through this
  * dimming, not a separate outline (see [PaneFocusIndication.Dim]'s own KDoc).
  */

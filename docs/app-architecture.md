@@ -184,7 +184,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     `onSelectionAdvance` nullness) — with selection colors from `rowSelectionColors()`'s
     `secondaryContainer`/`onSecondaryContainer` pair, unchanged by which pane holds keyboard
     focus (pane focus is instead shown as a `secondary` outline via
-    `RowSelectionColors.paneFocus`'s `PaneFocusIndication.Ring`, drawn by `HomeCommon.kt`'s
+    `RowSelectionColors.paneFocus`'s `PaneFocusIndication.Ring`, drawn by `ListRowSelection.kt`'s
     `listRowOutline` — see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
     FlatTooltipContent (M3's own icon-button family inside a `TooltipBox` with its own native
     long-press trigger — `IconButtonKind` picks the member: `IconButton` (`Standard`),
@@ -495,7 +495,7 @@ ViewModels are registered as app-scope `single` and obtained via `koinInject()`.
 
 ### Article Reader (native WebView)
 
-`ui/home/ArticleDetailPane.kt`'s reader renders article HTML through a native WebView
+`ui/home/ArticleDetailPane.kt`'s reader renders article HTML through a native WebView (`ui/home/ArticleWebView.kt`)
 (`io.github.kdroidfilter.webview`, a heavyweight AWT `SwingPanel` wrapping a real OS browser view —
 Edge WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux), not a Compose-drawn texture. It is
 composed unconditionally for the pane's lifetime — never behind an `if` — because Compose Desktop's

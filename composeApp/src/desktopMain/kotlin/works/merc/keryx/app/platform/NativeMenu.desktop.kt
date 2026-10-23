@@ -541,7 +541,6 @@ actual fun Modifier.nativeContextMenu(
                         val entries = currentItems()
                         if (entries.isNotEmpty()) {
                             val win = window ?: continue
-                            val localPosition = event.changes.first().position
                             val x = ((elementPosition[0] + localPosition.x) / density.density).toInt()
                             val y = ((elementPosition[1] + localPosition.y) / density.density).toInt()
                             // Whether this is synchronous is the backend's call — see

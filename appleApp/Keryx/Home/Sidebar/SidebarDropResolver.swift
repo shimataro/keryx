@@ -108,7 +108,7 @@ enum SidebarDropResolver {
 
     /// The folder to spring open while `dragged` hovers at `position`: a collapsed folder a feed
     /// would drop into, so its feeds become reachable mid-drag — matching Compose's own
-    /// spring-loaded folder (`FeedListDragAndDrop.kt`). The caller runs the timer itself, rather than
+    /// spring-loaded folder (`FeedListRows.kt`). The caller runs the timer itself, rather than
     /// UIKit's `isSpringLoaded`, which selects the row when it fires.
     static func springLoadFolder(
         at position: SidebarDropPosition,

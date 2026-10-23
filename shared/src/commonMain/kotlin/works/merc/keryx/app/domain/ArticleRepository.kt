@@ -12,6 +12,7 @@ import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.HtmlText
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.MILLIS_PER_DAY
+import works.merc.keryx.app.core.toDbFlag
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -232,22 +233,20 @@ class ArticleRepository(
      *
      * @param id The ID of the article to mark as read.
      */
-    fun markAsRead(id: String) {
-        val now = clock.nowMillis()
-        val changed = articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
-        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
-    }
+    fun markAsRead(id: String) = setReadStatus(id, read = true)
 
-    fun markAsUnread(id: String) {
+    fun markAsUnread(id: String) = setReadStatus(id, read = false)
+
+    private fun setReadStatus(id: String, read: Boolean) {
         val now = clock.nowMillis()
-        val changed = articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
+        val changed = articles.updateReadStatus(is_read = read.toDbFlag(), read_at = now, updated_at = now, id = id)
         if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
     fun setStarred(id: String, starred: Boolean) {
         val now = clock.nowMillis()
         val changed = articles.updateStarStatus(
-            is_starred = if (starred) 1L else 0L, starred_at = now, updated_at = now, id = id,
+            is_starred = starred.toDbFlag(), starred_at = now, updated_at = now, id = id,
         )
         if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }

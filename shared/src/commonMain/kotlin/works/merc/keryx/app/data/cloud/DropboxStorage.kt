@@ -6,7 +6,6 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
-import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
@@ -141,8 +140,7 @@ class DropboxStorage(
      */
     private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
         status.value in 200..299 -> {
-            val rev = (json.parseToJsonElement(bodyAsText()) as? JsonObject)
-                ?.get("rev")?.jsonPrimitive?.content
+            val rev = json.topLevelString(bodyAsText(), "rev")
                 ?: return Result.Err(CloudStorageException("Missing rev in upload response"))
             Result.Ok(CloudFileMeta(rev))
         }
@@ -167,8 +165,7 @@ class DropboxStorage(
                 // `rev` is what an update-mode upload is guarded on, and what the caller compares
                 // against the last revision it merged. This is the same response that used to be
                 // read only for its status code.
-                val rev = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
-                    ?.get("rev")?.jsonPrimitive?.content
+                val rev = json.topLevelString(response.bodyAsText(), "rev")
                     ?: return@withToken Result.Err(CloudStorageException("Missing rev in metadata"))
                 Result.Ok(CloudFileMeta(rev))
             }
