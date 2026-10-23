@@ -345,15 +345,19 @@ fun HomeScreen() {
     // selected feed the same way AppMenuBar does (filter.value against the already-collected feeds).
     fun selectedFeedForMenu(): Feeds? =
         (vm.filter.value as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
-    fun copySelectedFeedUrl() {
-        selectedFeedForMenu()?.url?.takeIf { hasUsableUrl(it) }?.let {
+    fun copySelectedFeedLink(link: (Feeds) -> String?) {
+        selectedFeedForMenu()?.let(link)?.takeIf { hasUsableUrl(it) }?.let {
             scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
         }
     }
-    fun copySelectedFeedSiteUrl() {
-        selectedFeedForMenu()?.site_url?.takeIf { hasUsableUrl(it) }?.let {
-            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
-        }
+
+    // Keyboard scrolling of the Compose-drawn fallback reader — see KeyboardNav.kt's own KDoc and
+    // FallbackReaderScrollHost's.
+    fun scrollFallbackReader(direction: Int, unit: ArticleScrollUnit) {
+        scope.launch { fallbackReaderScrollHost.scroll(direction, unit) }
+    }
+    fun scrollFallbackReaderIfFocused(direction: Int, unit: ArticleScrollUnit) {
+        if (keyboardPane == HomePane.ArticleDetail) scrollFallbackReader(direction, unit)
     }
 
     // Menu commands whose target state lives in this screen's composition.
@@ -364,8 +368,8 @@ fun HomeScreen() {
                 MenuCommand.FocusSearch -> focusSearch()
                 MenuCommand.OpenInBrowser -> openSelectedInBrowser()
                 MenuCommand.CopyUrl -> copySelectedUrl()
-                MenuCommand.CopyFeedUrl -> copySelectedFeedUrl()
-                MenuCommand.CopySiteUrl -> copySelectedFeedSiteUrl()
+                MenuCommand.CopyFeedUrl -> copySelectedFeedLink { it.url }
+                MenuCommand.CopySiteUrl -> copySelectedFeedLink { it.site_url }
                 else -> {}
             }
         }
@@ -406,8 +410,7 @@ fun HomeScreen() {
                                 // app-architecture.md); this only reaches the Compose-drawn fallback
                                 // reader, via fallbackReaderScrollHost — see KeyboardNav.kt's own
                                 // KDoc and FallbackReaderScrollHost's.
-                                HomePane.ArticleDetail ->
-                                    scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Line) }
+                                HomePane.ArticleDetail -> scrollFallbackReader(-1, ArticleScrollUnit.Line)
                             }
                         }
                     },
@@ -418,31 +421,14 @@ fun HomeScreen() {
                             null -> when (keyboardPane) {
                                 HomePane.FeedList -> moveFeedSelection(1)
                                 HomePane.ArticleList -> vm.selectNext()
-                                HomePane.ArticleDetail ->
-                                    scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Line) }
+                                HomePane.ArticleDetail -> scrollFallbackReader(1, ArticleScrollUnit.Line)
                             }
                         }
                     },
-                    onPageUp = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Page) }
-                        }
-                    },
-                    onPageDown = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Page) }
-                        }
-                    },
-                    onHome = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Edge) }
-                        }
-                    },
-                    onEnd = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Edge) }
-                        }
-                    },
+                    onPageUp = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Page) },
+                    onPageDown = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Page) },
+                    onHome = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Edge) },
+                    onEnd = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Edge) },
                     onLeft = {
                         // FeedList -> {} covers the drawer-open case too (keyboardPane resolves to
                         // FeedList whenever the drawer is open) — there is nothing further left to
