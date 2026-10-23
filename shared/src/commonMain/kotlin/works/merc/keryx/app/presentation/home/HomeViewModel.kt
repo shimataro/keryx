@@ -1660,7 +1660,7 @@ class HomeViewModel(
     private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Folder -> f.folderId
         is ArticleFilter.Feed -> feeds.value.firstOrNull { it.id == f.feedId }?.folder_id
-        else -> null
+        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Tag -> null
     }
 
     /**
@@ -1671,7 +1671,7 @@ class HomeViewModel(
      */
     private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Feed -> f.feedId
-        else -> null
+        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Folder, is ArticleFilter.Tag -> null
     }
 
     /**
@@ -1694,7 +1694,9 @@ class HomeViewModel(
     private fun tagIdForNewFeed(): String? = when (val selection = _selectedRowInstance.value) {
         is FeedListRowSelection.Tag -> selection.tagId
         is FeedListRowSelection.FeedInTag -> selection.tagId
-        else -> null
+        FeedListRowSelection.All, FeedListRowSelection.Starred,
+        is FeedListRowSelection.FeedInFolderGroup, is FeedListRowSelection.Folder,
+        -> null
     }
 
     /**
