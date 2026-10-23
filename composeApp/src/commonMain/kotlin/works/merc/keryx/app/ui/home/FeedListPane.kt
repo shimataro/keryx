@@ -377,9 +377,12 @@ internal fun FeedListPane(
         if (reorderAllowed) reorderTargetWithinScope(orderedIds, index, delta) else null
 
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
-    // the list — computed once per composition from the same collected state the rows render from.
-    val editRowIndex = inlineEdit?.let { target ->
-        feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+    // the list — derived from the same collected state the rows render from, and recomputed only when
+    // that state changes rather than on every keystroke's recomposition while the edit is open.
+    val editRowIndex = remember(inlineEdit?.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+        inlineEdit?.let { target ->
+            feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+        }
     }
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
