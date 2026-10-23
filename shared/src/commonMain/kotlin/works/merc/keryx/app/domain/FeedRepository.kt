@@ -84,9 +84,10 @@ class FeedRepository(
     private val _refreshingFeedCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
 
     /**
-     * Ids of the feeds currently being refreshed — from the moment a feed's fetch starts until its
-     * articles are committed — by any route ([refreshFeed], [refreshFeeds]: manual, pull-to-refresh,
-     * background, startup). Session-only, never persisted.
+     * Ids of the feeds currently being refreshed — from the moment a feed's refresh is requested
+     * (including while it is queued for a fetch slot) until its articles are committed — by any route
+     * ([refreshFeed], [refreshFeeds]: manual, pull-to-refresh, background, startup). Session-only,
+     * never persisted.
      */
     val refreshingFeedIds: Flow<Set<String>> = _refreshingFeedCounts.map { it.keys }.distinctUntilChanged()
 
@@ -622,7 +623,9 @@ class FeedRepository(
     /**
      * Network phase of [refreshFeeds]: every feed's fetch runs concurrently (bounded by a
      * semaphore), with NO DB writes, handing its result to [steps]. Each feed stays in
-     * [refreshingFeedIds] from its fetch's start until the writer has committed it. A favicon lookup
+     * [refreshingFeedIds] from the start, including while queued for a fetch slot, until the writer
+     * has committed it — so every feed the refresh covers is marked at once and clears as its own
+     * articles land. A favicon lookup
      * follows that commit under a permit of its own, so it never delays that feed's articles. [steps]
      * is closed once every fetch has finished.
      */

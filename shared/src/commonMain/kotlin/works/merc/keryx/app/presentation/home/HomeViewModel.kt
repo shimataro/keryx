@@ -1629,13 +1629,11 @@ class HomeViewModel(
     val activity: StateFlow<ActivitySnapshot> = activityCenter.activity
 
     /**
-     * The feeds whose row shows the refreshing indicator: those that have been refreshing (any
-     * route — see [FeedRepository.refreshingFeedIds]) for at least [REFRESH_INDICATOR_DELAY_MS].
+     * The feeds whose row shows the refreshing indicator: those being refreshed by any route — see
+     * [FeedRepository.refreshingFeedIds].
      */
     val refreshingFeedIds: StateFlow<Set<String>> =
-        feedRepository.refreshingFeedIds
-            .membersHeldFor(REFRESH_INDICATOR_DELAY_MS)
-            .stateIn(viewModelScope, started, emptySet())
+        feedRepository.refreshingFeedIds.stateIn(viewModelScope, started, emptySet())
 
     /**
      * The collapsed folders whose row shows the refreshing indicator, since their feeds' own rows
