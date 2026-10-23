@@ -35,6 +35,7 @@ import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
+import works.merc.keryx.app.core.toDbFlag
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
@@ -609,15 +610,15 @@ class HomeViewModel(
     private val selectedFeedId: Flow<String?> = selectedArticleRow.map { it?.feed_id }.distinctUntilChanged()
 
     /** The display title of the feed that owns the currently selected article, if any. */
-    val selectedFeedName: StateFlow<String?> = DerivedStateFlow(
-        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id)?.displayTitle() },
-        combine(structuralFeeds, selectedFeedId) { feeds, id -> selectedFeed(feeds, id)?.displayTitle() },
-    )
+    val selectedFeedName: StateFlow<String?> = selectedFeedField { it.displayTitle() }
 
     /** The favicon URL of the feed that owns the currently selected article, if any. */
-    val selectedFeedFaviconUrl: StateFlow<String?> = DerivedStateFlow(
-        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id)?.favicon_url },
-        combine(structuralFeeds, selectedFeedId) { feeds, id -> selectedFeed(feeds, id)?.favicon_url },
+    val selectedFeedFaviconUrl: StateFlow<String?> = selectedFeedField { it.favicon_url }
+
+    /** One field of the feed that owns the currently selected article (see [selectedFeedId]). */
+    private fun <T> selectedFeedField(pick: (Feeds) -> T?): StateFlow<T?> = DerivedStateFlow(
+        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id)?.let(pick) },
+        combine(structuralFeeds, selectedFeedId) { feeds, id -> selectedFeed(feeds, id)?.let(pick) },
     )
 
     /**
@@ -735,16 +736,15 @@ class HomeViewModel(
             val merged = raw.map { result ->
                 val readStatePin = pinnedReadStates[result.article.id]
                 val unstarPin = pinnedUnstarred[result.article.id]
-                when {
-                    readStatePin != null && unstarPin != null -> result.copy(
+                if (readStatePin == null && unstarPin == null) {
+                    result
+                } else {
+                    result.copy(
                         article = result.article.copy(
-                            is_read = readStatePin.is_read,
-                            is_starred = unstarPin.is_starred,
+                            is_read = readStatePin?.is_read ?: result.article.is_read,
+                            is_starred = unstarPin?.is_starred ?: result.article.is_starred,
                         ),
                     )
-                    readStatePin != null -> result.copy(article = result.article.copy(is_read = readStatePin.is_read))
-                    unstarPin != null -> result.copy(article = result.article.copy(is_starred = unstarPin.is_starred))
-                    else -> result
                 }
             }
             // As in `articles`: a read pin keeps its row by membership, an unread pin's row passes on
@@ -762,7 +762,7 @@ class HomeViewModel(
      */
     val pagerArticles: StateFlow<List<ArticleListRow>> =
         combine(searchActive, articles, searchResults) { active, rows, results ->
-            if (active) results.map { it.article } else rows
+            displayedRows(active, rows, results)
         }
             .flowOn(dispatcher)
             // The one flow here that is not `started` (Eagerly): only the reader's pager collects
@@ -781,7 +781,7 @@ class HomeViewModel(
      */
     val canHideRead: StateFlow<Boolean> =
         combine(unreadOnly, searchActive, articles, searchResults, _selectionCursor) { unread, active, rows, results, selectedId ->
-            unread && hasHideableRead(if (active) results.map { it.article } else rows, selectedId)
+            unread && hasHideableRead(displayedRows(active, rows, results), selectedId)
         }.stateIn(viewModelScope, started, false)
 
     /** Runs [ArticleListTopBar]'s "hide read" action — see [canHideRead]. */
@@ -835,10 +835,7 @@ class HomeViewModel(
         val expanded = expansion.toggleTag(tagId)
         // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row.
-        val instance = _selectedRowInstance.value
-        if (!expanded && instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
-            _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
-        }
+        if (!expanded) fallBackFromTagRow(tagId)
     }
 
     /**
@@ -1113,8 +1110,8 @@ class HomeViewModel(
         val starredNow = starIntents.since(article.id, starSeqAtSelect)
         // Optimistic: show the intended read/star state immediately; its persist already went out.
         _selectedArticle.value = full.copy(
-            is_read = if (readNow) 1L else 0L,
-            is_starred = starredNow?.let { if (it) 1L else 0L } ?: full.is_starred,
+            is_read = readNow.toDbFlag(),
+            is_starred = starredNow?.toDbFlag() ?: full.is_starred,
         )
         // After the article itself, so the reader goes from the header (if one was showing) straight
         // to the full article, and selectedArticleRow never resolves to nothing in between.
@@ -1161,7 +1158,18 @@ class HomeViewModel(
      * @return Search-result rows while [searchActive], or the filtered article rows otherwise.
      */
     fun currentArticles(): List<ArticleListRow> =
-        if (searchActive.value) searchResults.value.map { it.article } else articles.value
+        displayedRows(searchActive.value, articles.value, searchResults.value)
+
+    /**
+     * The rows the article list shows: the search results' articles while [searchActive], the
+     * filter's own [rows] otherwise. The one resolution [currentArticles], [pagerArticles] and
+     * [canHideRead] share, so they can never disagree.
+     */
+    private fun displayedRows(
+        searchActive: Boolean,
+        rows: List<ArticleListRow>,
+        results: List<ArticleSearchResult>,
+    ): List<ArticleListRow> = if (searchActive) results.map { it.article } else rows
 
     /**
      * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end
@@ -1222,11 +1230,11 @@ class HomeViewModel(
         // lands the raw query still says "read", and an unread-only list that had lost the pin would
         // drop the row for that window — the reader's pager then collapses to the selected article and
         // rebuilds every page it holds, so the open article visibly reloads. Same reasoning as setStarred.
-        _pinnedReadStates.update { it + (article.id to article.copy(is_read = if (read) 1L else 0L)) }
+        _pinnedReadStates.update { it + (article.id to article.copy(is_read = read.toDbFlag())) }
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_read = if (read) 1L else 0L) }
+            _selectedArticle.update { it?.copy(is_read = read.toDbFlag()) }
         }
-        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_read = if (read) 1L else 0L) else it }
+        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_read = read.toDbFlag()) else it }
     }
 
     /**
@@ -1287,20 +1295,20 @@ class HomeViewModel(
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
         if (_filter.value == ArticleFilter.Starred) {
-            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = if (starred) 1L else 0L)) }
+            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = starred.toDbFlag())) }
         } else if (starred) {
             _pinnedUnstarredArticles.update { it - article.id }
         }
         // A row the raw query no longer returns is drawn from its read pin (the `articles` combine's
         // extra rows), so that pin carries the star too. A fresh instance, as for any user write.
         _pinnedReadStates.update { pins ->
-            pins[article.id]?.let { pins + (article.id to it.copy(is_starred = if (starred) 1L else 0L)) } ?: pins
+            pins[article.id]?.let { pins + (article.id to it.copy(is_starred = starred.toDbFlag())) } ?: pins
         }
         starIntents.record(article.id, starred)
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_starred = if (starred) 1L else 0L) }
+            _selectedArticle.update { it?.copy(is_starred = starred.toDbFlag()) }
         }
-        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_starred = if (starred) 1L else 0L) else it }
+        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_starred = starred.toDbFlag()) else it }
     }
 
     /**
@@ -1412,15 +1420,12 @@ class HomeViewModel(
         if (value) {
             retrimPinnedReadStates()
         }
-        when {
-            _filter.value == ArticleFilter.Starred -> {
-                _unreadOnlyStarred.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
-            }
-            else -> {
-                _unreadOnly.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
-            }
+        if (_filter.value == ArticleFilter.Starred) {
+            _unreadOnlyStarred.value = value
+            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
+        } else {
+            _unreadOnly.value = value
+            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
         }
     }
 
@@ -1827,11 +1832,16 @@ class HomeViewModel(
         if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
         // A deleted tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row (a no-op if the branch above already reset it).
+        fallBackFromTagRow(id)
+        expansion.forgetTag(id)
+    }
+
+    /** Moves a selection on a feed row nested under [tagId] to that feed's canonical row. */
+    private fun fallBackFromTagRow(tagId: String) {
         val instance = _selectedRowInstance.value
-        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == id) {
+        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
             _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
         }
-        expansion.forgetTag(id)
     }
 
     /**
