@@ -18,8 +18,6 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.WindowExceptionHandler
-import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import app.cash.sqldelight.db.SqlDriver
@@ -206,14 +204,7 @@ fun main(args: Array<String>) {
     // overridden the app's theme independently of the OS. Note: changing the in-app theme without
     // restarting won't update this — it's read once at startup.
     if (isMacOs) {
-        System.setProperty(
-            "apple.awt.application.appearance",
-            when (startupThemeMode) {
-                "light" -> "NSAppearanceNameAqua"
-                "dark" -> "NSAppearanceNameDarkAqua"
-                else -> "system"
-            },
-        )
+        System.setProperty("apple.awt.application.appearance", macAppearanceFor(startupThemeMode))
     }
 
     // Open the database before anything can reach it from a background coroutine (an .opml
@@ -284,16 +275,12 @@ fun main(args: Array<String>) {
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
-    Runtime.getRuntime().addShutdownHook(
-        Thread {
-            runCatching {
-                latestWindowState.get()?.let { observed ->
-                    settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
-                }
-                runBlocking { settingsRepository.flush() }
-            }
-        },
-    )
+    addShutdownHook {
+        latestWindowState.get()?.let { observed ->
+            settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
+        }
+        runBlocking { settingsRepository.flush() }
+    }
     val saved = settingsRepository.getLocalSettings()
 
     val appScope = koin.get<CoroutineScope>()
@@ -377,7 +364,7 @@ fun main(args: Array<String>) {
     // Resolved here, before the window exists, so the tray is up even with startMinimized.
     val sniConnection = if (isLinux) SniConnection.tryCreate() else null
     if (sniConnection != null) {
-        Runtime.getRuntime().addShutdownHook(Thread { runCatching { sniConnection.close() } })
+        addShutdownHook { sniConnection.close() }
     }
 
     // Linux/KDE Global Menu: if the com.canonical.AppMenu.Registrar is present, export the app menu
@@ -387,9 +374,7 @@ fun main(args: Array<String>) {
     val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
     val resolvedAppMenuXid = java.util.concurrent.atomic.AtomicReference<Long?>(null)
     if (appMenuConnection != null) {
-        Runtime.getRuntime().addShutdownHook(
-            Thread { runCatching { appMenuConnection.close(resolvedAppMenuXid.get()) } },
-        )
+        addShutdownHook { appMenuConnection.close(resolvedAppMenuXid.get()) }
     }
 
     application {
@@ -575,24 +560,8 @@ fun main(args: Array<String>) {
             newArticleNotifications = newArticleNotifications,
         )
 
-        // Log any exception surfaced during composition/rendering before the default
-        // handler runs; otherwise EDT crashes never reach keryx.N.log (background paths
-        // already log via runCatching). We capture the current (default) factory and
-        // delegate to it, so its existing behavior (error dialog + rethrow) is preserved
-        // unchanged - we only add the log line. Logging is guarded so a logger failure
-        // can't swallow the original crash. Remembered because LocalWindowExceptionHandlerFactory
-        // is a static CompositionLocal: providing a fresh value would force the whole
-        // Window/App subtree to recompose on every unrelated recomposition of this scope.
-        val defaultExceptionFactory = LocalWindowExceptionHandlerFactory.current
-        val exceptionHandlerFactory = remember(defaultExceptionFactory) {
-            WindowExceptionHandlerFactory { win ->
-                val downstream = defaultExceptionFactory.exceptionHandler(win)
-                WindowExceptionHandler { throwable ->
-                    runCatching { Log.error(LOG_TAG, "Uncaught exception in window", throwable) }
-                    downstream.onException(throwable)
-                }
-            }
-        }
+        // Logs window exceptions before the default handler — see rememberLoggingExceptionHandlerFactory.
+        val exceptionHandlerFactory = rememberLoggingExceptionHandlerFactory()
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
         Window(
             onCloseRequest = hideToTray,
@@ -785,11 +754,6 @@ internal fun onUpdateMenuItemClicked(
 }
 
 /**
- * Applies the provided image as the taskbar or Dock icon when supported.
- *
- * @param image The icon image to apply, or `null` if no image is available.
- */
-/**
  * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
  * after it is shown and restored, just before it is fronted.
  */
@@ -801,6 +765,11 @@ private fun Frame.showRestoredAndFocus(beforeToFront: () -> Unit = {}) {
     requestFocus()
 }
 
+/**
+ * Applies the provided image as the taskbar or Dock icon when supported.
+ *
+ * @param image The icon image to apply, or `null` if no image is available.
+ */
 private fun applyBrandedDockIcon(image: Image?) {
     if (image == null || !Taskbar.isTaskbarSupported()) return
     val taskbar = Taskbar.getTaskbar()
