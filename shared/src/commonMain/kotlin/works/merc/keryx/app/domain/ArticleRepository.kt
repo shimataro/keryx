@@ -233,15 +233,13 @@ class ArticleRepository(
      *
      * @param id The ID of the article to mark as read.
      */
-    fun markAsRead(id: String) {
-        val now = clock.nowMillis()
-        val changed = articles.updateReadStatus(is_read = 1L, read_at = now, updated_at = now, id = id)
-        if (changed.value > 0) syncScheduler.scheduleDeferredSync()
-    }
+    fun markAsRead(id: String) = setReadStatus(id, read = true)
 
-    fun markAsUnread(id: String) {
+    fun markAsUnread(id: String) = setReadStatus(id, read = false)
+
+    private fun setReadStatus(id: String, read: Boolean) {
         val now = clock.nowMillis()
-        val changed = articles.updateReadStatus(is_read = 0L, read_at = now, updated_at = now, id = id)
+        val changed = articles.updateReadStatus(is_read = read.toDbFlag(), read_at = now, updated_at = now, id = id)
         if (changed.value > 0) syncScheduler.scheduleDeferredSync()
     }
 
