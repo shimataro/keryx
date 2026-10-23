@@ -663,9 +663,7 @@ class SyncRepository(
                         // response (never a follow-up metadata call, which could return another
                         // device's newer write and make the next sync skip a download it never
                         // merged).
-                        setSyncState(SYNC_STATE_CLOUD_FILE_REV, upload.value.rev)
-                        if (digest != null) setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
-                        setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+                        recordUploaded(upload.value.rev, digest)
                         return Result.Ok(Unit)
                     }
                     is Result.Err ->
@@ -677,8 +675,7 @@ class SyncRepository(
                         }
                 }
             } finally {
-                FileIO.delete(snapshotPath)
-                FileIO.delete(snapshotGzPath)
+                deleteSnapshotFiles()
             }
         }
         Log.warn(TAG, "Sync failed after $SYNC_MAX_RETRY retries (rev conflict never resolved)")
@@ -703,16 +700,13 @@ class SyncRepository(
                 is Result.Ok -> {
                     // Same bookkeeping as a successful upload: the file we just created is, by
                     // definition, already merged here, so the next sync can skip downloading it.
-                    setSyncState(SYNC_STATE_CLOUD_FILE_REV, r.value.rev)
-                    if (digest != null) setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
-                    setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+                    recordUploaded(r.value.rev, digest)
                     Result.Ok(Unit)
                 }
                 is Result.Err -> r
             }
         } finally {
-            FileIO.delete(snapshotPath)
-            FileIO.delete(snapshotGzPath)
+            deleteSnapshotFiles()
         }
     }
 
@@ -871,8 +865,7 @@ class SyncRepository(
             Result.Ok(digest)
         } catch (e: Throwable) {
             Log.error(TAG, "Snapshot compression failed", e)
-            FileIO.delete(snapshotPath)
-            FileIO.delete(snapshotGzPath)
+            deleteSnapshotFiles()
             Result.Err(CloudStorageException("Snapshot compression failed: ${e.message}"))
         }
     }
@@ -889,6 +882,22 @@ class SyncRepository(
     /** Temp file the compressed upload snapshot is written to and streamed from. */
     private val snapshotGzPath: String get() = FileIO.join(tempDir, "upload_keryx.db.gz")
 
+    /** Deletes both upload snapshot temp files ([snapshotPath], [snapshotGzPath]). */
+    private fun deleteSnapshotFiles() {
+        FileIO.delete(snapshotPath)
+        FileIO.delete(snapshotGzPath)
+    }
+
+    /**
+     * The bookkeeping after a successful upload or create: the revision the write itself produced,
+     * the uploaded snapshot's (uncompressed) [digest] when one was computed, and the sync time.
+     */
+    private fun recordUploaded(rev: String, digest: String?) {
+        setSyncState(SYNC_STATE_CLOUD_FILE_REV, rev)
+        if (digest != null) setSyncState(SYNC_STATE_LAST_UPLOADED_DIGEST, digest)
+        setSyncState(SYNC_STATE_LAST_SYNCED_AT, clock.nowMillis().toString())
+    }
+
     private fun setSyncState(key: String, value: String) {
         db.sync_stateQueries.upsert(key, value)
     }
@@ -896,10 +905,9 @@ class SyncRepository(
     private fun getSyncState(key: String): String? =
         db.sync_stateQueries.get(key).executeAsOneOrNull()
 
+    fun lastSyncedAt(): Long? = getSyncState(SYNC_STATE_LAST_SYNCED_AT)?.toLongOrNull()
+
     private companion object {
         const val TAG = "Sync"
     }
-
-    fun lastSyncedAt(): Long? =
-        db.sync_stateQueries.get(SYNC_STATE_LAST_SYNCED_AT).executeAsOneOrNull()?.toLongOrNull()
 }
