@@ -67,6 +67,8 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.LocalNativeWindow
+import works.merc.keryx.app.platform.applyMacMergedTitleBar
+import works.merc.keryx.app.platform.paintNativeSurface
 import works.merc.keryx.app.ui.theme.KeryxTheme
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -313,9 +315,7 @@ private fun DesktopModalWindow(
             // space applyWindowGeometry's own rounding uses, so the two floors agree.
             window.minimumSize = Dimension(initialWidth.value.roundToInt(), MIN_DIALOG_HEIGHT.value.roundToInt())
             if (isMacOs) {
-                rootPane?.putClientProperty("apple.awt.fullWindowContent", true)
-                rootPane?.putClientProperty("apple.awt.transparentTitleBar", true)
-                rootPane?.putClientProperty("apple.awt.windowTitleVisible", false)
+                rootPane?.applyMacMergedTitleBar()
                 MAC_TITLE_BAR_HEIGHT
             } else {
                 DECORATION_HEIGHT_ALLOWANCE
@@ -357,11 +357,7 @@ private fun DesktopModalWindow(
                 // during composition, not from a LaunchedEffect, so it lands before the first frame
                 // — the same call this function's remember(window) block above already makes for
                 // the other AWT properties. Keyed on the color so a runtime theme switch follows.
-                remember(resolvedContainerColor) {
-                    val nativeSurface = java.awt.Color(resolvedContainerColor.toArgb())
-                    window.background = nativeSurface
-                    (window as? RootPaneContainer)?.contentPane?.background = nativeSurface
-                }
+                remember(resolvedContainerColor) { window.paintNativeSurface(resolvedContainerColor) }
 
                 // Density must come from the DIALOG's own composition, not the caller's: the pixels
                 // measured below are produced by the dialog's layout pass, so converting them with

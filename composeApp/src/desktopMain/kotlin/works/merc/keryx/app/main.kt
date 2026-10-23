@@ -14,7 +14,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
@@ -68,6 +67,8 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
+import works.merc.keryx.app.platform.applyMacMergedTitleBar
+import works.merc.keryx.app.platform.paintNativeSurface
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -424,6 +425,13 @@ fun main(args: Array<String>) {
             runBlocking { settingsRepository.flush() }
             exitApplication()
         }
+        // Closing the window hides it to the tray (the window close button and the menu's Close
+        // Window alike), saving its state first as exitApp does.
+        val hideToTray = {
+            persistWindowStateImmediately()
+            runBlocking { settingsRepository.flush() }
+            windowVisible = false
+        }
 
         // Tracks the window's placement/size/position and persists it (debounced, so a transient
         // mid-transition value while animating into/out of fullscreen isn't the one saved) — see
@@ -587,11 +595,7 @@ fun main(args: Array<String>) {
         }
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
         Window(
-            onCloseRequest = {
-                persistWindowStateImmediately()
-                runBlocking { settingsRepository.flush() }
-                windowVisible = false
-            },
+            onCloseRequest = hideToTray,
             title = APP_NAME,
             state = windowState,
             visible = windowVisible,
@@ -612,9 +616,7 @@ fun main(args: Array<String>) {
                 // the window becoming visible and Compose's first (already-dark) frame. Which of
                 // the two actually fills the visible pixels is platform/timing dependent, so set
                 // both (an opaque dark fill is harmless on either).
-                val nativeSurface = java.awt.Color(windowSurface.toArgb())
-                window.background = nativeSurface
-                window.contentPane.background = nativeSurface
+                window.paintNativeSurface(windowSurface)
                 if (isMacOs) {
                     // Measure the OS's actual title bar height *before* switching to
                     // the transparent/merged style, since fullWindowContent changes
@@ -622,9 +624,7 @@ fun main(args: Array<String>) {
                     // to whatever the current macOS version/system settings use,
                     // instead of hardcoding a guessed constant.
                     WindowChrome.titleBarInsetDp = window.insets.top.toFloat()
-                    window.rootPane.putClientProperty("apple.awt.fullWindowContent", true)
-                    window.rootPane.putClientProperty("apple.awt.transparentTitleBar", true)
-                    window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
+                    window.rootPane.applyMacMergedTitleBar()
                 }
                 Unit
             }
@@ -649,11 +649,7 @@ fun main(args: Array<String>) {
             AppMenuBarHost(
                 appMenuConnection = appMenuConnection,
                 windowVisible = windowVisible,
-                onCloseWindow = {
-                    persistWindowStateImmediately()
-                    runBlocking { settingsRepository.flush() }
-                    windowVisible = false
-                },
+                onCloseWindow = hideToTray,
                 onQuit = exitApp,
                 resolvedXid = resolvedAppMenuXid,
             )
@@ -687,17 +683,10 @@ fun main(args: Array<String>) {
                             // transition - which recreates the Dock tile from scratch - time to
                             // settle first (guaranteed FIFO, after the tile is recreated).
                             SwingUtilities.invokeLater {
-                                window.isVisible = true
-                                window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
-                                applyBrandedDockIcon(dockBadgedImage)
-                                window.toFront()
-                                window.requestFocus()
+                                window.showRestoredAndFocus { applyBrandedDockIcon(dockBadgedImage) }
                             }
                         } else {
-                            window.isVisible = true
-                            window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
-                            window.toFront()
-                            window.requestFocus()
+                            window.showRestoredAndFocus()
                         }
                     }
                 }
@@ -800,6 +789,18 @@ internal fun onUpdateMenuItemClicked(
  *
  * @param image The icon image to apply, or `null` if no image is available.
  */
+/**
+ * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
+ * after it is shown and restored, just before it is fronted.
+ */
+private fun Frame.showRestoredAndFocus(beforeToFront: () -> Unit = {}) {
+    isVisible = true
+    extendedState = extendedState and Frame.ICONIFIED.inv()
+    beforeToFront()
+    toFront()
+    requestFocus()
+}
+
 private fun applyBrandedDockIcon(image: Image?) {
     if (image == null || !Taskbar.isTaskbarSupported()) return
     val taskbar = Taskbar.getTaskbar()
