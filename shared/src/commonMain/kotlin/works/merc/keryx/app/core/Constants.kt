@@ -71,7 +71,7 @@ const val SYNC_DEBOUNCE_MS = 5_000L
  * [works.merc.keryx.app.domain.SyncScheduler.scheduleDeferredSync]. Every sync re-uploads the
  * whole database, so syncing after each article read would cost one full upload per article.
  */
-const val DEFERRED_SYNC_DEBOUNCE_MS = 5 * 60_000L
+const val DEFERRED_SYNC_DEBOUNCE_MS = 5 * MILLIS_PER_MINUTE
 const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
@@ -82,7 +82,7 @@ const val MAX_REDIRECTS = 5 // redirect loop guard
  * process: a site without any favicon isn't re-probed on every refresh or launch, while one that adds
  * a favicon later still gets it.
  */
-const val FAVICON_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000L
+const val FAVICON_RETRY_INTERVAL_MS = MILLIS_PER_DAY
 
 /** HTTP request timeout for the shared client (distinct from [CONNECTION_TIMEOUT_MS], the connect phase). */
 const val REQUEST_TIMEOUT_MS = 60_000L
@@ -299,4 +299,4 @@ const val ONEDRIVE_SCOPES = "Files.ReadWrite.AppFolder offline_access"
 const val OAUTH_CUSTOM_URI_REDIRECT = "keryx://oauth2/callback"
 
 /** How long the interactive connect flow waits for the browser redirect before timing out. */
-const val OAUTH_CONNECT_TIMEOUT_MS = 3 * 60_000L
+const val OAUTH_CONNECT_TIMEOUT_MS = 3 * MILLIS_PER_MINUTE
