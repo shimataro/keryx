@@ -648,7 +648,27 @@ internal sealed interface FeedListRowKey {
 private const val FOLDER_KEY_PREFIX = "folder-"
 private const val FEED_KEY_PREFIX = "feed-"
 private const val TAG_KEY_PREFIX = "tag-"
-private const val NO_FOLDER_HEADER_KEY = "no-folder-header"
+
+/** Separator between a tag-attached feed row's tag id and its feed id (`"tag-$tagId-feed-$feedId"`). */
+private const val TAG_FEED_INFIX = "-feed-"
+
+/** `LazyColumn` key of the feed list's "no folder" group header. */
+internal const val NO_FOLDER_HEADER_KEY = "no-folder-header"
+
+// The `LazyColumn` keys FeedListPane gives its rows — built here, beside the parsers below that
+// read them back, so the two can't drift apart.
+
+/** `LazyColumn` key of a feed row in the folder section. */
+internal fun feedRowKey(feedId: String): String = "$FEED_KEY_PREFIX$feedId"
+
+/** `LazyColumn` key of a folder header row. */
+internal fun folderRowKey(folderId: String): String = "$FOLDER_KEY_PREFIX$folderId"
+
+/** `LazyColumn` key of a tag row. */
+internal fun tagRowKey(tagId: String): String = "$TAG_KEY_PREFIX$tagId"
+
+/** `LazyColumn` key of a feed row listed under an expanded tag. */
+internal fun tagFeedRowKey(tagId: String, feedId: String): String = "$TAG_KEY_PREFIX$tagId$TAG_FEED_INFIX$feedId"
 
 /**
  * Identifies the feed-list row represented by a `LazyColumn` item key.
@@ -664,7 +684,7 @@ internal fun parseFeedListRowKey(key: Any?): FeedListRowKey {
         stringKey == NO_FOLDER_HEADER_KEY -> FeedListRowKey.NoFolderHeader
         stringKey.startsWith(FOLDER_KEY_PREFIX) -> FeedListRowKey.Folder(stringKey.removePrefix(FOLDER_KEY_PREFIX))
         stringKey.startsWith(FEED_KEY_PREFIX) -> FeedListRowKey.Feed(stringKey.removePrefix(FEED_KEY_PREFIX))
-        stringKey.startsWith(TAG_KEY_PREFIX) && "-feed-" !in stringKey ->
+        stringKey.startsWith(TAG_KEY_PREFIX) && TAG_FEED_INFIX !in stringKey ->
             FeedListRowKey.Tag(stringKey.removePrefix(TAG_KEY_PREFIX))
         else -> FeedListRowKey.Other
     }
@@ -675,9 +695,6 @@ internal sealed interface FeedListDragSourceKey {
     data class Feed(val feedId: String) : FeedListDragSourceKey
     data class Folder(val folderId: String) : FeedListDragSourceKey
 }
-
-/** Separator between a tag-attached feed row's tag id and its feed id (`"tag-$tagId-feed-$feedId"`). */
-private const val TAG_FEED_INFIX = "-feed-"
 
 /**
  * Parses a feed-list `LazyColumn` item's `key` into what dragging that row would drag, or `null`

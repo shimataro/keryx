@@ -600,7 +600,7 @@ internal fun FeedListPane(
                         val feedIdsInGroup = feedsInFolder.map { it.id }
                         itemsIndexed(
                             feedsInFolder,
-                            key = { _, feed -> "feed-${feed.id}" },
+                            key = { _, feed -> feedRowKey(feed.id) },
                             contentType = { _, _ -> "feed" },
                         ) { index, feed ->
                             val instance = FeedListRowSelection.FeedInFolderGroup(feed.id)
@@ -665,7 +665,7 @@ internal fun FeedListPane(
                             ?.let { dropIndexState.value.feedZoneBoundaryFor(it.id) }
                         if (folder == null) {
                             if (folders.isNotEmpty()) {
-                                item(key = "no-folder-header", contentType = "folder-header") {
+                                item(key = NO_FOLDER_HEADER_KEY, contentType = "folder-header") {
                                     NoFolderHeader(
                                         firstFeedId = feedsInFolder.firstOrNull()?.id,
                                         feedIdsInNoFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
@@ -679,7 +679,7 @@ internal fun FeedListPane(
                             val collapsed = folder.id in collapsedFolderIds
                             val folderIndex = folders.indexOf(folder)
                             val nextFolderId = folders.getOrNull(folderIndex + 1)?.id
-                            item(key = "folder-${folder.id}", contentType = "folder-header") {
+                            item(key = folderRowKey(folder.id), contentType = "folder-header") {
                                 FolderGroupHeader(
                                     folder = folder,
                                     count = unreadByFolder[folder.id] ?: 0L,
@@ -745,7 +745,7 @@ internal fun FeedListPane(
                         }
                     }
                     tags.forEach { tag ->
-                        item(key = "tag-${tag.id}", contentType = "tag") {
+                        item(key = tagRowKey(tag.id), contentType = "tag") {
                             TagRow(
                                 tag = tag,
                                 count = unreadByTag[tag.id] ?: 0L,
@@ -772,7 +772,7 @@ internal fun FeedListPane(
                             // once under its folder), so the key must be tag-scoped to stay unique.
                             items(
                                 feedsForTag(feeds, feedTagMap, tag.id),
-                                key = { "tag-${tag.id}-feed-${it.id}" },
+                                key = { tagFeedRowKey(tag.id, it.id) },
                                 contentType = { "tag-feed" },
                             ) { feed ->
                                 val instance = FeedListRowSelection.FeedInTag(feed.id, tag.id)
