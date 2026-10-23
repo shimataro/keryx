@@ -67,17 +67,14 @@ import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.nextFeedListRow
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
 import works.merc.keryx.app.resources.notification_detail_title
 import works.merc.keryx.app.resources.notification_snackbar_action
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.ui.article.ArticleScrollUnit
 import works.merc.keryx.app.ui.article.FallbackReaderScrollHost
 import works.merc.keryx.app.ui.article.LocalFallbackReaderScrollHost
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.settings.ResetCloudDataConfirmDialog
 import works.merc.keryx.app.ui.i18n.infoDialogText
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -818,18 +815,13 @@ internal fun PendingNotificationActionHost(
         AppNotificationAction.ResetCloudData ->
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
             // now-stale error notification.
-            KeryxAlertDialog(
-                onDismissRequest = { notifVm.clearPendingAction() },
-                title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-                text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
-                confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+            ResetCloudDataConfirmDialog(
                 onConfirm = {
                     vm.resetCloudData()
                     pending.notificationId?.let(notifVm::dismiss)
                     notifVm.clearPendingAction()
                 },
-                dismissText = stringResource(Res.string.common_cancel),
-                destructive = true,
+                onDismiss = { notifVm.clearPendingAction() },
             )
         // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
         // where that list is a screen of its own and focusing it would navigate backwards; see
