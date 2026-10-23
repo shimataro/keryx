@@ -1628,6 +1628,24 @@ class HomeViewModel(
      */
     val activity: StateFlow<ActivitySnapshot> = activityCenter.activity
 
+    /**
+     * The feeds whose row shows the refreshing indicator: those that have been refreshing (any
+     * route — see [FeedRepository.refreshingFeedIds]) for at least [REFRESH_INDICATOR_DELAY_MS].
+     */
+    val refreshingFeedIds: StateFlow<Set<String>> =
+        feedRepository.refreshingFeedIds
+            .membersHeldFor(REFRESH_INDICATOR_DELAY_MS)
+            .stateIn(viewModelScope, started, emptySet())
+
+    /**
+     * The collapsed folders whose row shows the refreshing indicator, since their feeds' own rows
+     * are hidden — see [collapsedFoldersRefreshing].
+     */
+    val refreshingFolderIds: StateFlow<Set<String>> =
+        combine(feeds, refreshingFeedIds, collapsedFolderIds, ::collapsedFoldersRefreshing)
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, started, emptySet())
+
     // Refresh / sync actions live in their own class; this ViewModel only delegates to it.
     private val refreshController = HomeRefreshController(
         scope = viewModelScope,
