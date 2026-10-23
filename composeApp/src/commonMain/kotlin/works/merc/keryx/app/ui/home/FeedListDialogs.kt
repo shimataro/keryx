@@ -1,13 +1,11 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders

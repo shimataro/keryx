@@ -51,7 +51,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -84,7 +83,6 @@ import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.platform.NativeMenuItem
-import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowChrome
 import works.merc.keryx.app.platform.WindowDragArea
@@ -97,16 +95,12 @@ import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
 import works.merc.keryx.app.resources.home_all_feeds
 import works.merc.keryx.app.resources.home_change_tag_color_menu
-import works.merc.keryx.app.resources.home_copy_feed_url
-import works.merc.keryx.app.resources.home_copy_site_url
 import works.merc.keryx.app.resources.home_delete_tag_menu
 import works.merc.keryx.app.resources.home_edit_tag_menu
 import works.merc.keryx.app.resources.home_folder_name_duplicate
 import works.merc.keryx.app.resources.home_folders
-import works.merc.keryx.app.resources.home_open_site
 import works.merc.keryx.app.resources.home_refresh
 import works.merc.keryx.app.resources.home_refreshing
-import works.merc.keryx.app.resources.home_rename_feed
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred

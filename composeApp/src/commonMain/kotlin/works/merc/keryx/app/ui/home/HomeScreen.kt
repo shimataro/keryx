@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -53,11 +52,9 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
-import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow

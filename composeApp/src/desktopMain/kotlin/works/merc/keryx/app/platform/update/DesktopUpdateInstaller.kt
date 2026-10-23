@@ -369,10 +369,6 @@ internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
     FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.old").path)
 }
 
-/** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain
- * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
- * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
- * avoids pulling in a plist/XML dependency for a single field. */
 /**
  * Longest value [readPlistStringValue] will hand back. A version string is a handful of characters,
  * so this costs nothing legitimate — it exists because the value ends up inside an
@@ -380,6 +376,10 @@ internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
  */
 private const val MAX_PLIST_VALUE_LENGTH = 64
 
+/** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain
+ * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
+ * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
+ * avoids pulling in a plist/XML dependency for a single field. */
 private fun readPlistStringValue(plistPath: String, key: String): String? {
     val file = File(plistPath)
     if (!file.isFile) return null

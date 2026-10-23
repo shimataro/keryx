@@ -47,14 +47,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -295,7 +292,6 @@ fun ArticleListPane(
     // debounce state while search isn't even active, and vice versa.
     val articles: List<ArticleListRow>
     val listState: LazyListState
-    val branchReturnRipplePulse: Int
     val branchOnAddFeedClick: (() -> Unit)?
     val hasNoFeeds: Boolean
     val loading: Boolean
@@ -309,7 +305,6 @@ fun ArticleListPane(
         val viewModelHasRows by vm.articleListHasRows.collectAsState()
         articles = baseArticles
         listState = baseListState
-        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = onAddFeedClick
         hasNoFeeds = body == ArticleListBody.NoFeeds
         loading = body == ArticleListBody.Pending || articleListCatchingUp(baseArticles.size, viewModelHasRows)
@@ -337,7 +332,6 @@ fun ArticleListPane(
 
         articles = results.map { it.article }
         listState = searchListState
-        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = null
         hasNoFeeds = false
         loading = false
@@ -414,7 +408,7 @@ fun ArticleListPane(
         onShareArticle = onShareArticle,
         modifier = modifier,
         listState = listState,
-        returnRipplePulse = branchReturnRipplePulse,
+        returnRipplePulse = returnRipplePulse,
         onActivated = onActivated,
         notifVm = notifVm,
         onOpenDrawer = if (barShown) null else onOpenDrawer,

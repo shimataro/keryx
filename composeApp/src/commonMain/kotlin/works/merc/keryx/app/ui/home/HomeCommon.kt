@@ -20,13 +20,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.number
-import kotlinx.datetime.toLocalDateTime
-import kotlin.time.ExperimentalTime
-import kotlin.time.Instant
 import androidx.compose.ui.input.key.Key
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
@@ -34,8 +28,6 @@ import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
-import works.merc.keryx.app.domain.ArticleListRow
-import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.BrowserOpener
 import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.isMacOs
