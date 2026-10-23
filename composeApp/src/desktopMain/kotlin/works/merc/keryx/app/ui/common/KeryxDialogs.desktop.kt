@@ -75,6 +75,7 @@ import javax.swing.JButton
 import javax.swing.JPanel
 import javax.swing.RootPaneContainer
 import kotlin.math.roundToInt
+import works.merc.keryx.app.ui.theme.subtleDivider
 
 /**
  * Owner window of the immediately enclosing [DesktopModalWindow], if any. Lets a dialog opened
@@ -896,7 +897,7 @@ actual fun KeryxTabDialog(
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     divider = {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.subtleDivider)
                     },
                 ) {
                     KeryxDialogTabs(
