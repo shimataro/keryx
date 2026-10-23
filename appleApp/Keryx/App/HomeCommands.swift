@@ -45,7 +45,7 @@ struct HomeCommands: Commands {
         #endif
 
         CommandGroup(replacing: .newItem) {
-            if let home = model.home, let state {
+            if model.home != nil, let state {
                 Button(L("menu_file_add_feed")) { model.sidebarDialogs.isAddingFeed = true }
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(!state.addItemsEnabled)

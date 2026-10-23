@@ -248,7 +248,6 @@ struct AddFeedSheet: View {
         case .rss: return L("home_add_feed_type_rss")
         case .atom: return L("home_add_feed_type_atom")
         case nil: return nil
-        default: return nil
         }
     }
 

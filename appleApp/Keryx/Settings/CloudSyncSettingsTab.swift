@@ -337,7 +337,6 @@ struct CloudSyncSettingsTab: View {
         case .dropbox: return "settings_dropbox_connect"
         case .googleDrive: return "settings_google_drive_connect"
         case .onedrive: return "settings_onedrive_connect"
-        default: return ""
         }
     }
 
@@ -346,7 +345,6 @@ struct CloudSyncSettingsTab: View {
         case .dropbox: return "settings_dropbox_disconnect"
         case .googleDrive: return "settings_google_drive_disconnect"
         case .onedrive: return "settings_onedrive_disconnect"
-        default: return ""
         }
     }
 }
