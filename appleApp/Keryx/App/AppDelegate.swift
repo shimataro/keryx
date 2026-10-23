@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.updateActivationPolicySoon()
+            MainActor.assumeIsolated { self?.updateActivationPolicySoon() }
         }
     }
 
