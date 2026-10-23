@@ -3,6 +3,9 @@ package works.merc.keryx.app.data.cloud
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
@@ -69,6 +72,22 @@ internal suspend fun HttpResponse.okOrConflictOr(providerName: String, conflictS
     status.value == conflictStatus -> Result.Err(SyncConflictException())
     else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
+
+/**
+ * Maps an HTTP response to success for a 2xx or a 404, or a cloud storage error otherwise — for an
+ * idempotent delete/rename, where an already-absent item counts as done.
+ *
+ * @param providerName The name of the cloud storage provider.
+ */
+internal suspend fun HttpResponse.okOrAbsentOr(providerName: String): Result<Unit> = when {
+    status.value in 200..299 -> Result.Ok(Unit)
+    status.value == 404 -> Result.Ok(Unit)
+    else -> cloudStorageError(providerName, status.value, bodyAsText())
+}
+
+/** The string value of the top-level [key] in the JSON object [body], or `null` if there is none. */
+internal fun Json.topLevelString(body: String, key: String): String? =
+    (parseToJsonElement(body) as? JsonObject)?.get(key)?.jsonPrimitive?.content
 
 /**
  * Abstraction over a cloud storage backend used as the sync bus. Implemented by

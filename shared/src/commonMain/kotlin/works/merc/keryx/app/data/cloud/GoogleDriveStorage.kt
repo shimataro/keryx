@@ -67,7 +67,7 @@ class GoogleDriveStorage(
                 parameters.append("fields", "files(id)")
             }
         }
-        if (response.status.value in 200..299) Result.Ok(Unit) else mapError(response.status.value, response.bodyAsText())
+        okOrError(response)
     }
 
     /**
@@ -225,11 +225,7 @@ class GoogleDriveStorage(
         val response = client.delete("$apiBase/files/$fileId") {
             header("Authorization", "Bearer $token")
         }
-        return when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 404 -> Result.Ok(Unit)
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        return response.okOrAbsentOr("Google Drive")
     }
 
     /**
@@ -274,11 +270,7 @@ class GoogleDriveStorage(
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("name", name) }.toString())
         }
-        return when {
-            response.status.value in 200..299 -> Result.Ok(Unit)
-            response.status.value == 404 -> Result.Ok(Unit)
-            else -> mapError(response.status.value, response.bodyAsText())
-        }
+        return response.okOrAbsentOr("Google Drive")
     }
 
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
