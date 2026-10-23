@@ -492,10 +492,10 @@ device are not counted. The status is never drawn as a pull indicator started by
 which would pull the list down unasked, and VoiceOver is not told when it changes.
 
 While feeds refresh — whatever started it: Refresh All, a pull, a single feed's Refresh, or a
-background or startup refresh — **a feed that has been refreshing for more than a moment (400 ms)
-shows a small spinner in place of its icon** in the feed list, on every platform, until its new
-articles have landed (the unread count updates as the spinner goes). The short wait keeps the many
-feeds that finish quickly from flickering, so only the slow ones are marked. The spinner sits inside
+background or startup refresh — **every feed the refresh covers shows a small spinner in place of
+its icon** in the feed list, on every platform, from the moment the refresh starts (including while
+the feed waits its turn to be fetched) until its own new articles have landed (the unread count
+updates as the spinner goes), so the spinners clear one by one as each feed finishes. The spinner sits inside
 the icon's own slot, so nothing on the row moves, and the unread count and error indicator stay as
 they are. A collapsed folder shows the same spinner in place of its folder icon while any of its feeds
 does; an expanded folder, a tag, All Feeds and Starred show none (the toolbar's refresh spinner covers

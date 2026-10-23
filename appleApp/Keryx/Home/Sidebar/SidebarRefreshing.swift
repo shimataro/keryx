@@ -1,5 +1,5 @@
-/// Which sidebar rows show the refreshing indicator, as plain values: the feeds that have been
-/// refreshing long enough to be marked, and the collapsed folders holding one (`HomeViewModel`'s
+/// Which sidebar rows show the refreshing indicator, as plain values: the feeds being refreshed,
+/// and the collapsed folders holding one (`HomeViewModel`'s
 /// `refreshingFeedIds` / `refreshingFolderIds`, which decide both for every UI). Like
 /// `SidebarUnreadCounts`, the iOS collection view observes it itself, so a feed starting or finishing
 /// reconfigures only the rows whose indicator changed.
