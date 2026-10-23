@@ -171,7 +171,7 @@
     選択色は `rowSelectionColors()` の
     `secondaryContainer`/`onSecondaryContainer` で、どのペインがキーボードフォーカスを持つかに
     関わらず同じ値を使う（ペインフォーカスは代わりに `RowSelectionColors.paneFocus` の
-    `PaneFocusIndication.Ring` による `secondary` の輪郭線で表し、`HomeCommon.kt` の
+    `PaneFocusIndication.Ring` による `secondary` の輪郭線で表し、`ListRowSelection.kt` の
     `listRowOutline` が描く — 詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
     （それぞれ、独自のネイティブな長押しトリガーを持つ `TooltipBox` の中に置いた M3 自身の
     アイコンボタン群 — どれを使うかは `IconButtonKind` が決める: `IconButton`（`Standard`）、
@@ -489,7 +489,7 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 
 ### 記事リーダー（ネイティブ WebView）
 
-`ui/home/ArticleDetailPane.kt` のリーダーは記事 HTML をネイティブ WebView
+`ui/home/ArticleDetailPane.kt` のリーダーは記事 HTML をネイティブ WebView（`ui/home/ArticleWebView.kt`）
 （`io.github.kdroidfilter.webview`。ヘビーウェイトな AWT `SwingPanel` が実 OS のブラウザビュー
 — Windows は Edge WebView2、macOS は WebKit、Linux は WebKitGTK — をラップしたもの）で描画して
 おり、Compose が描画するテクスチャではない。ペインの生存期間中は `if` の下に置かず常時

@@ -287,7 +287,7 @@ internal fun buildAppMenuTree(
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, AppMenuShortcut.FeedRefresh, actions.refreshSelectedFeed),
         // Both submenus end with a "New …" item, like the feed row's context menu
-        // (FeedListDragAndDrop.kt), so Tags always has at least that one entry.
+        // (FeedListRows.kt), so Tags always has at least that one entry.
         AppMenuNode.Menu(
             label = labels.feedAssignTags,
             enabled = ui.feedActionsEnabled,

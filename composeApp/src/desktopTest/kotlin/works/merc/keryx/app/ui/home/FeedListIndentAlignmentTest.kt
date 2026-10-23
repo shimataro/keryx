@@ -49,7 +49,7 @@ class FeedListIndentAlignmentTest {
      * marker (folder icon / tag color dot) and its label — `FolderGroupHeader`'s
      * `Spacer(Modifier.width(8.dp))` after the icon, and `TagRow`'s color-dot click target, whose
      * own trailing `padding(end = 8.dp)` bundles the same gap into its footprint
-     * (`TAG_COLOR_DOT_FOOTPRINT` in `FeedListPane.kt`, private there). */
+     * (`TAG_COLOR_DOT_FOOTPRINT` in `FeedListTagRow.kt`, private there). */
     private val MARKER_TO_LABEL_GAP = FEED_LIST_MARKER_SLOT + 8.dp
 
     /** [FEED_LIST_MARKER_SLOT] plus `FeedRow`/`TagFeedRow`'s own trailing `Spacer(12.dp)` between
