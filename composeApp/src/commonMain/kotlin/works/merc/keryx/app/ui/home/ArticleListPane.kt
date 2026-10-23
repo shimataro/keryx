@@ -193,8 +193,8 @@ fun ArticleListPane(
             starredLabel = stringResource(Res.string.home_starred),
         )
     }
-    val feedTitles = feeds.associate { it.id to it.displayTitle() }
-    val feedFavicons = feeds.associate { it.id to it.favicon_url }
+    val feedTitles = remember(feeds) { feeds.associate { it.id to it.displayTitle() } }
+    val feedFavicons = remember(feeds) { feeds.associate { it.id to it.favicon_url } }
 
     val query by vm.searchQuery.collectAsState()
     val searchBarVisible by vm.searchBarVisible.collectAsState()
@@ -823,6 +823,12 @@ internal fun ArticleListPaneContent(
                     contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues(),
                 ) {
                     items(articles, key = { it.id }) { article ->
+                        // Kept across the row's recompositions (a selection change re-runs every
+                        // visible row) so the highlight isn't rebuilt character by character each time.
+                        val marked = titleMarkedById?.get(article.id)
+                        val titleOverride = remember(marked, article.title, searchHighlight) {
+                            marked?.let { markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight) }
+                        }
                         ArticleRow(
                             article = article,
                             feedTitle = feedTitles[article.feed_id].orEmpty(),
@@ -838,9 +844,7 @@ internal fun ArticleListPaneContent(
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
                             onShare = onShareArticle?.let { share -> { share(article) } },
                             onActivate = onActivated,
-                            titleOverride = titleMarkedById?.get(article.id)?.let {
-                                markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight)
-                            },
+                            titleOverride = titleOverride,
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
                         )
