@@ -200,16 +200,14 @@ class DesktopUpdateInstaller internal constructor(
             // leave up to zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE sitting under <cacheDir>, which
             // nothing reclaims until the next check()'s sweep — up to updateCheckIntervalHours
             // away, and never if the app is closed first.
-            FileSystemExtras.deleteRecursively(extractDir.path)
-            return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
+            return extractionFailed(extractDir, e)
         } catch (e: IOException) {
             // Kotlin has no multi-catch, so this is a second clause rather than widening the one
             // above to Exception (which would also swallow CancellationException on this suspend
             // path). Covers a full disk (ENOSPC), a corrupt archive (ZipException), or an extractor
             // process that could not be started at all — anything the extractor's own
             // java.util.zip/java.io/ProcessBuilder calls can throw beyond its check()s.
-            FileSystemExtras.deleteRecursively(extractDir.path)
-            return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
+            return extractionFailed(extractDir, e)
         }
 
         val extractedApp = File(extractDir, entryDirName)
@@ -228,7 +226,7 @@ class DesktopUpdateInstaller internal constructor(
             return InstallLaunchResult.Failed("Not enough free disk space on the install volume to stage the update")
         }
 
-        val newDir = File(parent, ".${appRootFile.name}.new")
+        val newDir = selfReplaceSibling(parent, appRootFile, "new")
         FileSystemExtras.deleteRecursively(newDir.path) // clear any leftover from a previously failed attempt
         if (!FileSystemExtras.move(extractedApp.path, newDir.path)) {
             FileSystemExtras.deleteRecursively(extractDir.path)
@@ -242,7 +240,7 @@ class DesktopUpdateInstaller internal constructor(
         FileSystemExtras.deleteRecursively(extractDir.path)
         File(filePath).delete()
 
-        val oldDir = File(parent, ".${appRootFile.name}.old")
+        val oldDir = selfReplaceSibling(parent, appRootFile, "old")
         // Cleared for the same reason newDir was above: every script's own retreat step is a plain
         // `mv "$APP" "$OLD"` (never delete-then-move, by design — see UpdateScriptWriter's own
         // KDoc), so if a stale .old is still sitting here from a previous attempt that never got
@@ -365,8 +363,20 @@ internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
     if (location.kind !in SELF_REPLACE_INSTALL_KINDS) return
     val appRootFile = File(location.appRoot ?: return)
     val parent = appRootFile.parentFile ?: return
-    FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.new").path)
-    FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.old").path)
+    FileSystemExtras.deleteRecursively(selfReplaceSibling(parent, appRootFile, "new").path)
+    FileSystemExtras.deleteRecursively(selfReplaceSibling(parent, appRootFile, "old").path)
+}
+
+/**
+ * The hidden `.<app>.new` / `.<app>.old` sibling of [appRoot] in [parent] that a self-replace
+ * stages the new build into and retreats the current one to.
+ */
+private fun selfReplaceSibling(parent: File, appRoot: File, suffix: String): File = File(parent, ".${appRoot.name}.$suffix")
+
+/** Clears the partially extracted [extractDir] and reports the extraction failure [e]. */
+private fun extractionFailed(extractDir: File, e: Exception): InstallLaunchResult.Failed {
+    FileSystemExtras.deleteRecursively(extractDir.path)
+    return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
 }
 
 /**
