@@ -1,6 +1,5 @@
 package works.merc.keryx.app.domain
 
-import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS
 
 /**
