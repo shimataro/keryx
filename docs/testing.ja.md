@@ -549,7 +549,7 @@ Delete）は 1 つの規則 `feedListItemKeysActive`（`ui/home/HomePaneLayout.k
   移動」の順で並ぶこと。SwiftUI 版のフィードメニュー（「新しい…」の 2 項目）とサイドバー行のメニュー
   （macOS と iOS）も同様に確認する。
 
-記事リーダーのネイティブ WebView（`ui/home/ArticleDetailPane.kt`）はヘビーウェイトな AWT
+記事リーダーのネイティブ WebView（`ui/home/ArticleWebView.kt`）はヘビーウェイトな AWT
 サーフェスであり Compose UI テストでは一切ホストできないため、`ArticleDetailPaneTest` がカバーする
 バウンズ／無効化状態のチェックを超えた実際の画面上の挙動は目視で確認する必要がある:
 
@@ -748,7 +748,7 @@ Delete）は 1 つの規則 `feedListItemKeysActive`（`ui/home/HomePaneLayout.k
   ない）。ライト・ダーク両テーマで確認する。
 - 物理キーボードを接続した状態（エミュレータの Extended Controls、または実機に Bluetooth
   キーボードを接続）: 矢印キーを押すと `LocalKeyboardEngaged` がラッチされ、キーボードフォーカスを
-  持つペインの選択行に `secondary` のキーボードフォーカス輪郭（`listRowOutline`、`HomeCommon.kt`）
+  持つペインの選択行に `secondary` のキーボードフォーカス輪郭（`listRowOutline`、`ListRowSelection.kt`）
   が表示されること——*背景色*は上のブレット同様、フォーカスの有無で変わらない。`PaneLayout.Triple`
   （矢印キーでフィード一覧⇔記事一覧のペイン間を輪郭が移動すること）と、より狭いレイアウトの
   ドロワー内（↑/↓ でドロワーを閉じずにフィード選択が動くこと、→ でドロワーが閉じること）の

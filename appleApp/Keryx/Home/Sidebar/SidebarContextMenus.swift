@@ -4,7 +4,7 @@ import UIKit
 
 /// The iOS sidebar's context menus, as `UIMenu`s for its collection view. The items, their order,
 /// enablement and checkmarks are the same as the macOS source list's SwiftUI menus
-/// (`FeedListView+SourceList.swift`), which in turn follow Compose's `FeedListDragAndDrop.kt` — keep
+/// (`FeedListView+SourceList.swift`), which in turn follow Compose's `FeedListRows.kt` — keep
 /// all three in step.
 @MainActor
 enum SidebarContextMenus {
@@ -52,7 +52,7 @@ enum SidebarContextMenus {
     }
 
     /// Refresh, Assign tags ▸, Move to Folder ▸, a separator, the URL/site actions, a separator,
-    /// Rename, a separator, Unsubscribe — `FeedListDragAndDrop.kt`'s order, which is also the Feed
+    /// Rename, a separator, Unsubscribe — `FeedListRows.kt`'s order, which is also the Feed
     /// menu's (`AppMenuTree.kt`, `HomeCommands.swift`).
     private static func feedMenu(
         _ feed: Feeds,

@@ -187,7 +187,7 @@ extension SidebarCollectionViewController: UICollectionViewDragDelegate, UIColle
 
     /// Holding a dragged feed over a collapsed folder opens it after the system's spring-loading
     /// delay, so its feeds become reachable drop targets mid-drag — Compose's own spring-loaded
-    /// folder (`FeedListDragAndDrop.kt`). Timed here rather than with UIKit's `isSpringLoaded`,
+    /// folder (`FeedListRows.kt`). Timed here rather than with UIKit's `isSpringLoaded`,
     /// which selects the row when it fires.
     private func updateSpringLoading(_ position: SidebarDropPosition?, context: SidebarDragContext, outline: SidebarOutline) {
         let folderId = position.flatMap { SidebarDropResolver.springLoadFolder(at: $0, dragging: context.item, outline: outline) }

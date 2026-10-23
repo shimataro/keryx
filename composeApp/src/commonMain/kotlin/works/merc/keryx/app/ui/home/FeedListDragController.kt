@@ -303,6 +303,14 @@ internal class FeedListDragController(
      */
     private fun isWithinHost(pos: Offset): Boolean = pos.x in 0f..hostBoundsState.value.width
 
+    /** Clears the active drop target: the pointer is over no row that could accept a drop. */
+    private fun clearHover() {
+        activeBoundaryState.value = null
+        hoveredAttachTagIdState.value = null
+        overlay.hasValidTarget = false
+        tickOnTargetChange(null, null)
+    }
+
     /**
      * Updates the active drop target for a pointer at [pos] (local to the drag host).
      *
@@ -314,17 +322,11 @@ internal class FeedListDragController(
     private fun updateHover(pos: Offset) {
         val item = overlay.item ?: return
         if (!isWithinHost(pos)) {
-            activeBoundaryState.value = null
-            hoveredAttachTagIdState.value = null
-            overlay.hasValidTarget = false
-            tickOnTargetChange(null, null)
+            clearHover()
             return
         }
         val band = bandAt(pos.y) ?: run {
-            activeBoundaryState.value = null
-            hoveredAttachTagIdState.value = null
-            overlay.hasValidTarget = false
-            tickOnTargetChange(null, null)
+            clearHover()
             return
         }
         val half = resolveRowHalf(pos.y, band).toShared()

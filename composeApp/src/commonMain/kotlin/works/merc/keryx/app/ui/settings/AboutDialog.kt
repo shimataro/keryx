@@ -34,6 +34,7 @@ import works.merc.keryx.app.resources.settings_website
 import works.merc.keryx.app.resources.terms_url
 import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.theme.subtleDivider
 
 /**
  * Minimal "About" dialog: shown from the native application menu's "About Keryx" item on desktop,
@@ -138,6 +139,6 @@ internal fun AboutDialogContent(openUrl: (String) -> Unit = BrowserOpener::open)
 private fun AboutGroupDivider() {
     HorizontalDivider(
         Modifier.padding(vertical = 12.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+        color = MaterialTheme.colorScheme.subtleDivider,
     )
 }

@@ -256,9 +256,10 @@ class UpdateRepository(
                         UpdateState.Idle, UpdateState.UpToDate,
                         is UpdateState.Available, is UpdateState.Failed,
                         -> UpdateState.Checking
-                        // Downloading/Verifying/Ready/Installing/Checking: a check must never
-                        // visibly interrupt these, even momentarily.
-                        else -> current
+                        // A check must never visibly interrupt these, even momentarily.
+                        UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Verifying,
+                        is UpdateState.Ready, is UpdateState.Installing,
+                        -> current
                     }
                 }
             }
@@ -405,7 +406,9 @@ class UpdateRepository(
             when (val current = _state.value) {
                 is UpdateState.Failed -> retryFailed(current)
                 is UpdateState.Available -> startDownloadOf(current.update)
-                else -> Unit
+                UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate, is UpdateState.Downloading,
+                is UpdateState.Verifying, is UpdateState.Ready, is UpdateState.Installing,
+                -> Unit
             }
         }
     }

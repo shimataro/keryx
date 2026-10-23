@@ -5,14 +5,14 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import works.merc.keryx.app.tray.AboutToShowGroupReply
-import works.merc.keryx.app.tray.AboutToShowGroupResult
-import works.merc.keryx.app.tray.DBUSMENU_INTERFACE
 import works.merc.keryx.app.tray.DBusMenu
 import works.merc.keryx.app.tray.DBusMenuEventEntry
 import works.merc.keryx.app.tray.DBusMenuItemProperties
 import works.merc.keryx.app.tray.GetLayoutResult
 import works.merc.keryx.app.tray.MenuLayoutReply
 import works.merc.keryx.app.tray.ReadOnlyDBusProperties
+import works.merc.keryx.app.tray.aboutToShowGroupReply
+import works.merc.keryx.app.tray.dbusMenuProperties
 import works.merc.keryx.app.ui.menu.AppMenuNode
 import works.merc.keryx.app.ui.menu.AppMenuRoot
 import java.util.concurrent.atomic.AtomicReference
@@ -103,12 +103,7 @@ internal class AppMenuDBusMenu(
 
     override fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply {
         val knownIds = current.get().layout.knownIds
-        val stale = AboutToShow(APPMENU_ROOT_ID)
-        val known = ids.filter { it in knownIds }
-        return AboutToShowGroupResult(
-            updatesNeeded = if (stale) known else emptyList(),
-            idErrors = ids.filterNot { it in knownIds },
-        )
+        return aboutToShowGroupReply(ids, stale = AboutToShow(APPMENU_ROOT_ID), knownIds = knownIds)
     }
 
     /**
@@ -117,15 +112,7 @@ internal class AppMenuDBusMenu(
      * @param interfaceName The D-Bus interface whose properties are requested.
      * @return The interface properties, or an empty map when the interface is unsupported.
      */
-    override fun GetAll(interfaceName: String): Map<String, Variant<*>> {
-        if (interfaceName != DBUSMENU_INTERFACE) return emptyMap()
-        return mapOf(
-            "Version" to Variant(UInt32(3)),
-            "TextDirection" to Variant("ltr"),
-            "Status" to Variant("normal"),
-            "IconThemePath" to Variant(emptyList<String>(), "as"),
-        )
-    }
+    override fun GetAll(interfaceName: String): Map<String, Variant<*>> = dbusMenuProperties(interfaceName)
 
     /**
      * Accepts an event for a known node. Emits the node id on [clickedIds] only for `clicked`, and

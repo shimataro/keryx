@@ -6,7 +6,7 @@ import androidx.compose.ui.Modifier
 
 /**
  * A pane's own header row — leading [navigationIcon], optional [title], trailing [actions] — used
- * by `ui/home/FeedListPane.kt`'s `FeedListToolbarRow`, `ui/home/ArticleListPane.kt`'s
+ * by `ui/home/FeedListChrome.kt`'s `FeedListToolbarRow`, `ui/home/ArticleListPane.kt`'s
  * `ArticleListTopBar`, and `ui/home/ArticleDetailPane.kt`'s `ArticleDetailToolbar`. This does
  * **not** change the app's "3 panes, no shared top bar" structure (see the `ui-guidelines` skill's
  * "Pane structure & tonal roles" section) — each pane still calls this separately, with its own

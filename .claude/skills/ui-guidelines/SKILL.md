@@ -714,9 +714,9 @@ change what's showing), or a content item in a list (an article — something yo
 `kind` explicitly; it has no default (see `listRowSurface`'s own KDoc for why — a forgotten `kind`
 should be a compile error, not a silently wrong Android row style).
 
-`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) resolve their actual
+`selectionBackground`/`selectionContentColorOrNull` (`ui/home/ListRowSelection.kt`) resolve their actual
 colors from `rowSelectionColors()` (`ui/home/ListRowChrome.kt`'s `expect`/`actual`,
-`RowSelectionColors`) — the shared logic in `HomeCommon.kt` only handles the `LocalRowSelectionVisible`
+`RowSelectionColors`) — the shared logic in `ListRowSelection.kt` only handles the `LocalRowSelectionVisible`
 gate, the `RowSelectionTone` fan-out (a feed rendered once under its folder and again under every
 expanded tag; the non-primary instances get a faint tint of `RowSelectionColors.selectedBackground`
 at `SECONDARY_SELECTION_ALPHA`), and deriving a non-focused row's actual color from
@@ -735,7 +735,7 @@ The palette itself is per-platform:
   (`ActiveFocusLabelTextColor` equals `ActiveLabelTextColor`). An Android tablet can have a physical
   keyboard attached, though, so pane focus still exists there and still needs to be shown somewhere:
   it's carried by `paneFocus = PaneFocusIndication.Ring(secondary)` instead — a `secondary` outline
-  drawn by `listRowOutline` (`ui/home/HomeCommon.kt`, shared logic; see below) around the selected
+  drawn by `listRowOutline` (`ui/home/ListRowSelection.kt`, shared logic; see below) around the selected
   row in whichever pane holds keyboard focus, M3's own `FocusIndicatorColor` concept (a token that
   ships with no Compose implementation, so Android's `actual` supplies its own).
 
@@ -743,7 +743,7 @@ The palette itself is per-platform:
 one — which is why it is a sealed type rather than a `RowSelectionColors` carrying both a nullable
 dim alpha and a nullable ring color, each platform leaving the other's field unused.
 
-`listRowOutline` (`ui/home/HomeCommon.kt`, two overloads mirroring `selectionBackground`'s
+`listRowOutline` (`ui/home/ListRowSelection.kt`, two overloads mirroring `selectionBackground`'s
 boolean/`RowSelectionTone` split) draws a row's outline decoration: a drop-target border when the row
 is an active drop target, otherwise — gated on `LocalKeyboardEngaged` (below) — the keyboard-focus
 ring above, for whichever selected row is `focused`. A drop target always wins over the focus ring;
@@ -796,7 +796,7 @@ rather than a plain `item(...)` for any such header, following
   visible — exactly the "fixed row/scroll boundary" case the Divider policy
   says needs none.
 - This does not change how a list's rows are hit-tested for drag-and-drop
-  (`FeedListDragController`/`HomeCommon.resolveHitBand`):
+  (`FeedListDragController`/`FeedListRowKeys.kt`'s `resolveHitBand`):
   `LazyListState.layoutInfo.visibleItemsInfo` keeps every item — sticky or
   not — in ascending index order, so a pinned header's band is always
   resolved before any row hidden behind it, with no extra code needed.
@@ -1216,7 +1216,7 @@ Three native-widget exceptions exist on desktop, all outside scrollable containe
   persistent Compose-tree node (see above).
 - `ui/common/KeryxDialogs.desktop.kt` — the dialog button row (`JButton`s in a
   `SwingPanel`), so confirm/cancel get the platform's real buttons.
-- `ui/home/ArticleDetailPane.kt` — the reader `WebView`, a heavyweight AWT
+- `ui/home/ArticleWebView.kt` — the reader `WebView`, a heavyweight AWT
   panel wrapping an OS browser view. This is also *why* every dialog is a
   separate `DialogWindow`: a heavyweight panel always paints over in-window
   Compose `Popup`s.
@@ -1546,12 +1546,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     `HomeView`'s own `textInputFocused` stays false there and the shortcut/focus-handoff logic
     (`HomeShortcutsKt.homeShortcutFor`'s `textInputFocused`, moving into the results with ↓/↑) does
     not see it.
-  - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
+  - `selectionBackground()` (`ui/home/ListRowSelection.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
-  - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
-    `RowHalf`, `resolveRowHalf`) and the shared `presentation/home/FeedListDrag.kt` (`DropBoundary`,
+  - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`)
+    and `FeedListRowKeys.kt` (`RowHalf`, `resolveRowHalf`) and the shared `presentation/home/FeedListDrag.kt` (`DropBoundary`,
     `FeedListDropIndex`, `resolveFeedListDropAction`/`resolveFeedListDropHighlight`) — hand-computed
     row-half hit-testing and a manually drawn insertion line (explicitly modeled on macOS Notes'
     reorder UI) → **already ported, deliberately not to `.onMove`/`.onInsert`**: the Apple app

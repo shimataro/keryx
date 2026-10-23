@@ -1,5 +1,12 @@
 package works.merc.keryx.app.presentation
 
+import works.merc.keryx.app.core.MILLIS_PER_DAY
+import works.merc.keryx.app.core.MILLIS_PER_HOUR
+import works.merc.keryx.app.core.MILLIS_PER_MINUTE
+
+/** Past this many days a notification's timestamp is shown as [RelativeTime.Absolute]. */
+private const val DAYS_PER_WEEK = 7
+
 /**
  * Which relative-time label a notification row shows, given how long ago it was raised. Shared so
  * both readers (Compose's `NotificationCenterSheet.kt`, the Apple app's `NotificationBell.swift`)
@@ -20,9 +27,9 @@ sealed interface RelativeTime {
  * difference (a timestamp slightly ahead of the clock) counts as [RelativeTime.Now].
  */
 fun relativeTimeOf(diffMillis: Long): RelativeTime = when {
-    diffMillis < 60_000L -> RelativeTime.Now
-    diffMillis < 3_600_000L -> RelativeTime.Minutes((diffMillis / 60_000L).toInt())
-    diffMillis < 86_400_000L -> RelativeTime.Hours((diffMillis / 3_600_000L).toInt())
-    diffMillis < 604_800_000L -> RelativeTime.Days((diffMillis / 86_400_000L).toInt())
+    diffMillis < MILLIS_PER_MINUTE -> RelativeTime.Now
+    diffMillis < MILLIS_PER_HOUR -> RelativeTime.Minutes((diffMillis / MILLIS_PER_MINUTE).toInt())
+    diffMillis < MILLIS_PER_DAY -> RelativeTime.Hours((diffMillis / MILLIS_PER_HOUR).toInt())
+    diffMillis < DAYS_PER_WEEK * MILLIS_PER_DAY -> RelativeTime.Days((diffMillis / MILLIS_PER_DAY).toInt())
     else -> RelativeTime.Absolute
 }

@@ -16,6 +16,7 @@ import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatSwitch
 import works.merc.keryx.app.ui.common.KeryxRaisedSurface
 import works.merc.keryx.app.ui.common.KeryxSettingRow
+import works.merc.keryx.app.ui.theme.subtleDivider
 
 // Shared building blocks for the settings tabs (SettingsDialog + *Tab files).
 
@@ -64,7 +65,7 @@ internal fun Section(title: String, content: @Composable () -> Unit) {
     content()
     HorizontalDivider(
         Modifier.padding(top = 16.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+        color = MaterialTheme.colorScheme.subtleDivider,
     )
 }
 
