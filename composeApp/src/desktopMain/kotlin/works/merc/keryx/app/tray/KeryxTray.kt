@@ -120,9 +120,7 @@ internal fun ApplicationScope.KeryxTray(
     when {
         isMacOs -> {
             if (!isTraySupported) return
-            val trayBadgedImage = remember(trayBaseImage, unreadCount) {
-                trayBaseImage?.let { drawUnreadDot(it, unreadCount) }
-            }
+            val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
             MacTray(
                 image = trayBadgedImage,
                 tooltip = tooltip,
@@ -163,9 +161,7 @@ internal fun ApplicationScope.KeryxTray(
         }
 
         isWindows -> {
-            val trayBadgedImage = remember(trayBaseImage, unreadCount) {
-                trayBaseImage?.let { drawUnreadDot(it, unreadCount) }
-            }
+            val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
             WindowsTray(
                 image = trayBadgedImage,
                 tooltip = tooltip,
@@ -184,9 +180,7 @@ internal fun ApplicationScope.KeryxTray(
 
         isTraySupported -> {
             val trayState = rememberTrayState()
-            val trayBadgedImage = remember(trayBaseImage, unreadCount) {
-                trayBaseImage?.let { drawUnreadDot(it, unreadCount) }
-            }
+            val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
             val trayBadgedPainter = remember(trayBadgedImage) {
                 trayBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) }
             }
@@ -216,3 +210,12 @@ internal fun ApplicationScope.KeryxTray(
         }
     }
 }
+
+/**
+ * [base] with the unread dot drawn on it for [unreadCount], redrawn only when either changes.
+ * Called inside each tray branch that needs it rather than once above them, so the Linux SNI
+ * branch (which draws its own) does no work for it.
+ */
+@Composable
+private fun rememberUnreadDotImage(base: BufferedImage?, unreadCount: Long): BufferedImage? =
+    remember(base, unreadCount) { base?.let { drawUnreadDot(it, unreadCount) } }
