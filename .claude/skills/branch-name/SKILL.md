@@ -37,7 +37,9 @@ If no branch matches exactly and none matches case-insensitively either, use the
 base as-is only when it is one of:
 
 - exactly (case-sensitively) one of the tag names — `git for-each-ref --format='%(refname:short)' refs/tags`
-  (not `rev-parse`, for the same case-insensitivity reason);
+  (not `rev-parse`, for the same case-insensitivity reason) — whose target is a commit:
+  `git rev-parse --verify --quiet "refs/tags/<arg>^{commit}"` must succeed (a tag can also point to a
+  tree or blob, which Step 3's `merge-base` cannot use);
 - a commit hash — 4 to 64 hexadecimal characters — that `git rev-parse --verify --quiet "<arg>^{commit}"`
   resolves to a hash starting with the argument (compared case-insensitively; `rev-parse` tries ref
   names before object names, so a hex-looking name can still resolve through a ref).
