@@ -14,7 +14,8 @@ git branch --show-current
 ```
 
 - **Empty output** → detached `HEAD`. Treat it like a version branch in Step 5/6 (create, never
-  rename), but like a non-version branch in Step 2 (default-branch base).
+  rename), but like a non-version branch in Step 2 (the parent branch if one can be detected,
+  otherwise the default branch).
 - A name matching `v*` (e.g. `v0`, `v1`) → a version branch (the default/integration branch).
 - Anything else → a feature branch.
 
