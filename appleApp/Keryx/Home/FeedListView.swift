@@ -369,6 +369,15 @@ struct FaviconView: View {
     }
 }
 
+extension View {
+    /// Sizes a favicon to a `size`-point square with corners rounded in proportion to it, so
+    /// every favicon has the same roundness as the article list's (4pt at 32pt).
+    func faviconFrame(_ size: CGFloat) -> some View {
+        frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size / 8))
+    }
+}
+
 /// The two sidebar `ViewModifier`s below exist only to keep `FeedListView.body`'s own modifier
 /// chain short — chaining all of M3's sheets/alerts directly onto `body` made a single expression
 /// too complex for the type checker ("unable to type-check this expression in reasonable time").
