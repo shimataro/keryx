@@ -185,7 +185,10 @@ In `AskUserQuestion`, each option's `label` is the branch name and its `descript
    If this fails, or the name does not match `<type>/<kebab-summary>` (a type from Step 4,
    lower-case kebab-case summary), explain why and re-prompt via `AskUserQuestion`.
 
-2. Check for a collision (an "Other" name bypasses Step 4's check):
+2. If the name equals the current branch's name (Step 4's "the current name already fits"), output
+   `'<name>' is already the current branch name — nothing to rename.` and stop.
+
+   Otherwise, check for a collision (an "Other" name bypasses Step 4's check):
 
    ```bash
    git rev-parse --verify --quiet "refs/heads/<name>"
