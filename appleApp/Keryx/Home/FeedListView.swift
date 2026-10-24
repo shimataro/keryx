@@ -328,6 +328,8 @@ struct FaviconView: View {
     /// Leaves the slot empty when there is no favicon URL, as Compose's article row does (the
     /// feed list keeps the letter avatar).
     var blankWithoutUrl = false
+    /// Corner radius as a fraction of the favicon's side — the article list's 4pt at 32pt.
+    static let cornerRadiusRatio: CGFloat = 1.0 / 8
 
     /// The image this view loaded, tagged with the URL it was loaded for so a reused view never
     /// shows the previous URL's image.
@@ -370,11 +372,11 @@ struct FaviconView: View {
 }
 
 extension View {
-    /// Sizes a favicon to a `size`-point square with corners rounded in proportion to it, so
-    /// every favicon has the same roundness as the article list's (4pt at 32pt).
+    /// Sizes a favicon to a `size`-point square with corners rounded at
+    /// `FaviconView.cornerRadiusRatio` of it, so every favicon has the same roundness.
     func faviconFrame(_ size: CGFloat) -> some View {
         frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size / 8))
+            .clipShape(RoundedRectangle(cornerRadius: size * FaviconView.cornerRadiusRatio))
     }
 }
 
