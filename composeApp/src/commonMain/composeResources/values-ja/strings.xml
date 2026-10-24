@@ -99,6 +99,7 @@
     <string name="home_refreshing">新着を確認中…</string>
     <string name="home_no_new_articles">新着記事はありません</string>
     <string name="home_refresh_failed">新着を確認できませんでした。接続を確認するか、時間をおいて再度お試しください。</string>
+    <string name="home_feed_refreshing">更新中</string>
     <string name="home_refresh_this_list">この一覧を更新</string>
     <plurals name="home_new_articles">
         <item quantity="other">新着 %1$d 件</item>

@@ -103,6 +103,7 @@
     <string name="home_refreshing">Checking for new articles…</string>
     <string name="home_no_new_articles">No new articles</string>
     <string name="home_refresh_failed">Couldn’t check for new articles. Check your connection or try again later.</string>
+    <string name="home_feed_refreshing">Refreshing</string>
     <string name="home_refresh_this_list">Refresh this list</string>
     <plurals name="home_new_articles">
         <item quantity="one">%1$d new article</item>
