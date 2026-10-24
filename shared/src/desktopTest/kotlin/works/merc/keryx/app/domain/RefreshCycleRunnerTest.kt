@@ -494,7 +494,36 @@ class RefreshCycleRunnerTest {
     }
 
     @Test
-    fun aBusyAutomaticRunIfIdlePublishesNothingAndKeepsTheRunningCycle() = withDb { driver, db ->
+    fun anOverlappedAutomaticCycleStaysJoinableAfterALaterOneEnds() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db)
+        val atSync = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val earlier = async {
+            f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+                if (name == "sync") {
+                    atSync.complete(Unit)
+                    gate.await()
+                }
+                block()
+            }
+        }
+        withTimeout(5_000) { atSync.await() }
+        val running = assertNotNull(f.runner.joinableAutomaticCycle())
+
+        // A later automatic cycle starts while the earlier one is still running, and ends first.
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+
+        val joined = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
+        assertTrue(running === assertIs<RefreshCycleRunner.CycleOutcome.Joined>(joined).cycle)
+        gate.complete(Unit)
+        earlier.await()
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), withTimeout(5_000) { joined.cycle.await() })
+        assertNull(f.runner.joinableAutomaticCycle())
+    }
+
+    @Test
+    fun aBusyAutomaticRunIfIdlePublishesNothingAndKeepsTheRunningCycle()= withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
         val f = fixture(driver, db, fetchGate = gate)

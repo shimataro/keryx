@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.Log
@@ -56,14 +57,14 @@ class RefreshCycleRunner(
     private val automaticRefreshAllowed: suspend () -> Boolean = { true },
 ) {
     /**
-     * The [SyncTrigger.AUTOMATIC] cycle now running, or `null` when none is — see
-     * [joinAutomaticCycle]. Set before a [run] claims the [ActivityCenter] (a [runIfIdle] once it has
-     * claimed it), and cleared after the cycle has released it — by that same cycle alone, so an
-     * overlapping one's is never cleared by another — just before it is completed. So while a [run]
-     * holds the center, it is always joinable; a [runIfIdle]'s is not for the instant between its
+     * The [SyncTrigger.AUTOMATIC] cycles now running, oldest first — see [joinAutomaticCycle]. Each
+     * is added before a [run] claims the [ActivityCenter] (a [runIfIdle] once it has claimed it), and
+     * removed after it has released it — by that same cycle alone, just before it is completed. So
+     * when automatic cycles overlap, one that ends first leaves the others joinable; while a [run]
+     * holds the center, it is always joinable, and a [runIfIdle]'s is not for the instant between its
      * claim and its publish.
      */
-    private val runningAutomaticCycle = MutableStateFlow<AutomaticCycle?>(null)
+    private val runningAutomaticCycles = MutableStateFlow<List<AutomaticCycle>>(emptyList())
 
     /**
      * One running [SyncTrigger.AUTOMATIC] cycle: its [outcome] for joiners, and whether its
@@ -91,7 +92,7 @@ class RefreshCycleRunner(
     }
 
     /**
-     * Joins the running [SyncTrigger.AUTOMATIC] cycle, for a [SyncTrigger.MANUAL] [runIfIdle] that
+     * Joins the most recently started running [SyncTrigger.AUTOMATIC] cycle, for a [SyncTrigger.MANUAL] [runIfIdle] that
      * found it running ([CycleOutcome.Joined]) instead of starting nothing visible. Returns its outcome: the deferred
      * completes once that whole cycle, sync included, has ended, with its [RefreshOutcome] (`null`
      * when it refreshed no feed, or when it failed before reporting one). `null` when no automatic
@@ -104,7 +105,7 @@ class RefreshCycleRunner(
      * the same cycle again posts nothing more. See `external-spec.md` §9 "Refresh feedback".
      */
     internal suspend fun joinAutomaticCycle(): Deferred<RefreshOutcome?>? {
-        val cycle = runningAutomaticCycle.value ?: return null
+        val cycle = runningAutomaticCycles.value.lastOrNull() ?: return null
         val before = cycle.notify.getAndUpdate {
             when (it) {
                 is NotifyState.Pending -> NotifyState.Pending(userJoined = true)
@@ -120,7 +121,7 @@ class RefreshCycleRunner(
      * The running [SyncTrigger.AUTOMATIC] cycle's outcome without joining it, for tests observing
      * what [joinAutomaticCycle] would join.
      */
-    internal fun joinableAutomaticCycle(): Deferred<RefreshOutcome?>? = runningAutomaticCycle.value?.outcome
+    internal fun joinableAutomaticCycle(): Deferred<RefreshOutcome?>? = runningAutomaticCycles.value.lastOrNull()?.outcome
 
     /** Which of a cycle's two stages runs first. */
     enum class CycleOrder { REFRESH_THEN_SYNC, SYNC_THEN_REFRESH }
@@ -251,13 +252,13 @@ class RefreshCycleRunner(
         var refreshed: Map<String, Result<Int>>? = null
         var outcome: RefreshOutcome? = null
         val value = try {
-            block({ refreshed = it }, { if (cycle != null) runningAutomaticCycle.value = cycle }, cycle)
+            block({ refreshed = it }, { if (cycle != null) runningAutomaticCycles.update { it + cycle } }, cycle)
         } finally {
             try {
                 outcome = refreshed?.let { reportRefreshOutcome(it, notificationCenter, clock) }
             } finally {
                 if (cycle != null) {
-                    runningAutomaticCycle.compareAndSet(cycle, null)
+                    runningAutomaticCycles.update { it - cycle }
                     cycle.outcome.complete(outcome)
                 }
             }
