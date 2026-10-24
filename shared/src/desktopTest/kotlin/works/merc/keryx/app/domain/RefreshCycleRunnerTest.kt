@@ -100,6 +100,7 @@ class RefreshCycleRunnerTest {
         fetchBody: String = RSS,
         notifySink: OsNotificationSink? = null,
         network: NetworkCondition = NetworkCondition.UNRESTRICTED,
+        appForeground: AppForeground = AppForeground(),
     ): Fixture {
         val clock = Clock { 1000L }
         val log = Collections.synchronizedList(mutableListOf<String>())
@@ -147,6 +148,7 @@ class RefreshCycleRunnerTest {
             activityCenter, feedRepository, syncRepository, cloudSession,
             NewArticleNotifier(notifySink ?: OsNotificationSink { message, _ -> log += "notify:$message" }),
             settingsRepository, FakeNotificationMessages(), notificationCenter, clock,
+            appForeground = appForeground,
         ) { NetworkUsagePolicy.automaticRefreshAllowed(network) }
         return Fixture(runner, activityCenter, notificationCenter, log)
     }
@@ -606,5 +608,84 @@ class RefreshCycleRunnerTest {
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
         assertTrue(f.notificationCenter.items.value.isEmpty())
+    }
+
+    @Test
+    fun anAutomaticRunInFrontHoldsBackTheNotificationButStillReportsAndSyncs() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val front = AppForeground().also { it.set(true) }
+        val f = fixture(driver, db, fetchGate = gate, appForeground = front)
+
+        val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        val joinable = assertNotNull(f.runner.joinableAutomaticCycle())
+        gate.complete(Unit)
+        cycle.await()
+
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), withTimeout(5_000) { joinable.await() })
+        assertEquals(listOf("fetch:https://ex.com/f1", "sync"), f.log.toList())
+    }
+
+    @Test
+    fun anAutomaticRunIfIdleInFrontStillReturnsItsRefreshOutcome() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+
+        val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC)
+
+        assertEquals(
+            RefreshCycleRunner.CycleOutcome.Ran(Result.Ok(Unit), RefreshOutcome(newArticleCount = 1, unreachable = false)),
+            outcome,
+        )
+        assertTrue(f.log.none { it.startsWith("notify:") })
+    }
+
+    @Test
+    fun anAutomaticRunNotInFrontNotifies() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val front = AppForeground().also { it.set(true); it.set(false) }
+        val f = fixture(driver, db, appForeground = front)
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    @Test
+    fun aManualRunInFrontStillNotifies() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+
+        val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
+
+        assertIs<RefreshCycleRunner.CycleOutcome.Ran>(outcome)
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    @Test
+    fun anUnreachableAutomaticRefreshInFrontStillWarnsInTheNotificationCenter() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, fetchStatus = { null }, appForeground = AppForeground().also { it.set(true) })
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC)
+
+        assertEquals(NotificationText.RefreshFailed, f.notificationCenter.items.value.single().text)
+    }
+
+    @Test
+    fun theFrontStateIsReadWhenTheRefreshFinishesNotWhenItStarts() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val front = AppForeground()
+        val f = fixture(driver, db, fetchGate = gate, appForeground = front)
+
+        val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        front.set(true)
+        gate.complete(Unit)
+        cycle.await()
+
+        assertTrue(f.log.none { it.startsWith("notify:") }, "${f.log}")
     }
 }

@@ -43,6 +43,11 @@ class RefreshCycleRunner(
     private val notificationCenter: NotificationCenter,
     private val clock: Clock,
     /**
+     * Whether the app is in front, which holds back an automatic cycle's new-article notification
+     * (see [refreshAndNotify]). The default (never in front) is for tests that do not exercise it.
+     */
+    private val appForeground: AppForeground = AppForeground(),
+    /**
      * Whether an automatic cycle may fetch feeds on the current network
      * ([NetworkUsagePolicy.automaticRefreshAllowed]). The default (always allowed) is for tests that
      * do not exercise the gate.
@@ -196,7 +201,7 @@ class RefreshCycleRunner(
             if (trigger == SyncTrigger.AUTOMATIC && !automaticRefreshAllowed()) {
                 Log.info(TAG, "Automatic feed refresh skipped: the OS is saving data")
             } else {
-                step("feedRefresh") { refreshAndNotify(targets(), onRefreshed) }
+                step("feedRefresh") { refreshAndNotify(targets(), trigger, onRefreshed) }
             }
         }
         val sync: suspend () -> Unit = {
@@ -215,10 +220,26 @@ class RefreshCycleRunner(
         return syncResult
     }
 
-    /** Hands the results to [onRefreshed] before notifying, so a failing notification cannot lose them. */
-    private suspend fun refreshAndNotify(targets: List<Feeds>, onRefreshed: (Map<String, Result<Int>>) -> Unit) {
+    /**
+     * Hands the results to [onRefreshed] before notifying, so a failing notification cannot lose them.
+     *
+     * The new-article OS notification is posted for a [SyncTrigger.MANUAL] cycle always, and for a
+     * [SyncTrigger.AUTOMATIC] one only while the app is not in front ([AppForeground]): a user looking
+     * at the app already sees the new articles land (the unread counts and the new-articles pill), so
+     * a notification about a refresh they did not ask for would only interrupt them. See
+     * `external-spec.md` §9 "Refresh feedback".
+     */
+    private suspend fun refreshAndNotify(
+        targets: List<Feeds>,
+        trigger: SyncTrigger,
+        onRefreshed: (Map<String, Result<Int>>) -> Unit,
+    ) {
         val results = activityCenter.trackFeedRefresh { feedRepository.refreshFeeds(targets) }
         onRefreshed(results)
+        if (trigger == SyncTrigger.AUTOMATIC && appForeground.inForeground.value) {
+            Log.info(TAG, "New-article notification held back: the app is in front")
+            return
+        }
         newArticleNotifier.notifyIfEnabled(
             results, settingsRepository.getLocalSettings().notificationEnabled, notificationMessages,
         )

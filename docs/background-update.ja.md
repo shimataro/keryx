@@ -44,6 +44,17 @@ while (true) {
   `org.freedesktop.Notifications.Notify` を使う。残る唯一のケース——SNI ホストの無い Linux——だけが
   Compose 自体の `Tray()` コンポーザブルにフォールバックし、その `TrayState.sendNotification` を使う。
   詳細は [app-architecture.ja.md](app-architecture.ja.md) の「デスクトップトレイ」を参照。
+- **自動の更新は、アプリが前面にある間は新着記事の通知を出さない。** 自動のサイクル（起動時の更新、
+  このループ、Android の `FeedRefreshWorker`、iOS のバックグラウンド更新）はすべて、通知の前に
+  `RefreshCycleRunner` で `domain/AppForeground` を確認し、「前面にある」間は通知を出さない——
+  ユーザーは新着が届く様子を既に見ているため。手動の更新（すべて更新、引っ張って更新）は従来どおり
+  通知する。各 UI は状態を報告するだけ: デスクトップはメインウィンドウがフォーカスを持つ間
+  （`main.kt`、`LocalWindowInfo.isWindowFocused` から）、Android は `MainActivity` が resumed の間
+  （`onResume`/`onPause`）、macOS はメインウィンドウがキーウィンドウの間（`AppDelegate`）、iOS は
+  シーンフェーズが `active` の間（`KeryxApp`）。Apple アプリは `KeryxSdk.setAppForeground` を通して報告する。
+  メインウィンドウの前に設定ウィンドウがあると、フォーカス（デスクトップ）やキーの状態（macOS）がそちらへ
+  移るため、前面にないものとして扱う。UI の無いプロセス（`WorkManager` や `BGAppRefreshTask` による起動）は
+  前面にない状態から始まる。[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照。
 
 ## iOS 実装（`KeryxSdk.runBackgroundRefresh` + `appleApp/Keryx/Platform/BackgroundRefresh.swift`）
 
@@ -57,7 +68,9 @@ SwiftUI アプリの `backgroundUpdateLoop` はプロセスが動いている間
 
 SwiftUI の `.backgroundTask(.appRefresh(…))` ハンドラが `AppModel.runBackgroundRefresh` を呼び、それが
 `KeryxSdk.runBackgroundRefresh` を呼ぶ。中身は `RefreshCycleRunner.runIfIdle` の 1 サイクル（更新、
-同じ `OsNotificationPoster` 経由の新着記事 OS 通知、接続中なら同期）。セットアップ完了前は何もしない——
+同じ `OsNotificationPoster` 経由の新着記事 OS 通知、接続中なら同期）。他の自動のサイクルと同じく、
+アプリが前面にある間は通知を出さない。iOS で前面にあるとはシーンフェーズが `active` の間のこと
+（上の `AppForeground` を参照）で、バックグラウンド実行中は決してそうならない。セットアップ完了前は何もしない——
 設定ファイルの存在がセットアップ完了の目印なので、設定の flush もしない。起動時シーケンス、アップデート確認、
 FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 秒）。実行するのは
 `ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もしない。
@@ -171,7 +184,9 @@ return した呼び出しは、`FeedRefreshWorker` 自身が実行しない `cle
 別系統になっている（理由はそのクラス自身の KDoc を参照: `WorkManager` に起こされたプロセスでは、
 更新が終わった時点で `trayEvents` の購読者が既に張られている保証が無い — `trayEvents` は replay 0 で、
 購読者がいない間に発行されたものは黙って捨てられるため。デスクトップ自身の束縛は同じ理由で no-op に
-なっている）。`AndroidNotificationSink` は投稿のたびに
+なっている）。自動の更新（起動時または `FeedRefreshWorker`）は、`MainActivity` が resumed の間は何も
+投稿しない（`AppForeground`、上記参照）。Activity の無い、`WorkManager` に起こされたプロセスは前面にない
+ものとして扱う。`AndroidNotificationSink` は投稿のたびに
 `NotificationManagerCompat.areNotificationsEnabled()` でガードしており、これ1回で Android 13+ の
 `POST_NOTIFICATIONS` ランタイム権限とユーザーによるアプリ/チャンネル単位のブロックの両方をカバーする。
 権限自体は `platform/NotificationPermission.kt` の `rememberNotificationPermission`

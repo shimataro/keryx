@@ -52,6 +52,7 @@ import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
 import works.merc.keryx.app.di.platformModule
+import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.OAuthCallbackParams
@@ -299,6 +300,7 @@ fun main(args: Array<String>) {
     // sink: TrayIcon.displayMessage, org.freedesktop.Notifications, or TrayState, which only
     // exists inside the application {} scope) and to the in-app UI (HomeViewModel).
     val newArticleNotifier = koin.get<NewArticleNotifier>()
+    val appForeground = koin.get<AppForeground>()
     val newArticleNotifications = newArticleNotifier.trayEvents
     appScope.launch { backgroundUpdateLoop(koin) }
 
@@ -665,7 +667,13 @@ fun main(args: Array<String>) {
             // above (outside Window{}, where onTrayAction needs to read it) - LocalWindowInfo is
             // only resolvable inside Window{}'s own content, unlike windowState.size above.
             val currentWindowFocused = LocalWindowInfo.current.isWindowFocused
-            LaunchedEffect(currentWindowFocused) { windowFocused = currentWindowFocused }
+            // Also reported as the app's "in front" state, which holds back an automatic refresh's
+            // new-article notification (AppForeground). A settings window in front takes the focus
+            // and so counts as not in front.
+            LaunchedEffect(currentWindowFocused) {
+                windowFocused = currentWindowFocused
+                appForeground.set(currentWindowFocused)
+            }
 
             // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
             // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()

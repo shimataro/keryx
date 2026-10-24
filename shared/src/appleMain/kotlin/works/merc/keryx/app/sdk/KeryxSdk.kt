@@ -25,6 +25,7 @@ import works.merc.keryx.app.di.applePlatformModule
 import works.merc.keryx.app.di.presentationModule
 import works.merc.keryx.app.di.sharedModule
 import works.merc.keryx.app.data.cloud.OAuthTokens
+import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.AuthorizationLauncher
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
@@ -212,6 +213,15 @@ class KeryxSdk private constructor(private val koin: Koin) {
         refreshLoopJob?.cancel()
         refreshLoopJob = null
         startupJob?.takeIf { it.isActive }?.cancel()
+    }
+
+    /**
+     * Reports whether the app is in front ([AppForeground]): on macOS whether the main window is the
+     * key window, on iOS whether the scene phase is `active`. While it is, an automatic refresh posts
+     * no new-article notification (a manual one still does). Call it on every change.
+     */
+    fun setAppForeground(inForeground: Boolean) {
+        koin.get<AppForeground>().set(inForeground)
     }
 
     /**

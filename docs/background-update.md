@@ -47,6 +47,18 @@ while (true) {
   StatusNotifierItem host uses `LinuxTray`'s `org.freedesktop.Notifications.Notify`, and only the
   remaining case — Linux without an SNI host — falls through to Compose's own `Tray()` composable and
   its `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
+- **An automatic refresh posts no new-article notification while the app is in front.** Every
+  automatic cycle (the startup refresh, this loop, Android's `FeedRefreshWorker`, iOS's background
+  refresh) checks `domain/AppForeground` in `RefreshCycleRunner` before notifying, and holds the
+  notification back while it reads "in front" — the user is already looking at the new articles
+  landing. A manual refresh (Refresh All, a pull) still notifies as before. Each UI only reports the
+  state: desktop while the main window has focus (`main.kt`, from `LocalWindowInfo.isWindowFocused`),
+  Android while `MainActivity` is resumed (`onResume`/`onPause`), macOS while the main window is the
+  key window (`AppDelegate`), and iOS while the scene phase is `active` (`KeryxApp`) — the Apple app
+  through `KeryxSdk.setAppForeground`. A settings window in front of the main window takes the focus
+  (desktop) or the key status (macOS), so it counts as not in front. A process with no UI (a
+  `WorkManager` or `BGAppRefreshTask` wakeup) starts as not in front. See "Refresh feedback" in
+  [external-spec.md](external-spec.md) §9.
 
 ## iOS Implementation (`KeryxSdk.runBackgroundRefresh` + `appleApp/Keryx/Platform/BackgroundRefresh.swift`)
 
@@ -61,7 +73,8 @@ changes, and at the start of every background run.
 The SwiftUI `.backgroundTask(.appRefresh(…))` handler calls `AppModel.runBackgroundRefresh`, which
 calls `KeryxSdk.runBackgroundRefresh`: one `RefreshCycleRunner.runIfIdle` cycle (refresh, the
 new-article OS notification through the same `OsNotificationPoster`, then sync if a provider is
-connected). It does nothing before setup completes — without even flushing settings, since the
+connected). Like every automatic cycle, it holds the notification back while the app is in front —
+on iOS, while the scene phase is `active` (see `AppForeground` above), which a background run never is. It does nothing before setup completes — without even flushing settings, since the
 settings file's existence is the setup-complete marker. It skips the startup sequence, the update
 check and the FTS full rebuild (a background slot lasts about 30 seconds); only
 `ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running;
@@ -175,7 +188,9 @@ New-article notifications reach the OS through `domain/OsNotificationSink.kt`, a
 desktop's `NewArticleNotifier.trayEvents` collection (see that class's own KDoc for why: a
 `WorkManager`-woken process has no guarantee a `trayEvents` collector is already attached by the
 time a refresh finishes, since `trayEvents` has replay 0 and silently drops anything emitted before
-a collector exists; desktop's own binding is a no-op for the same reason). `AndroidNotificationSink`
+a collector exists; desktop's own binding is a no-op for the same reason). An automatic refresh
+(startup or `FeedRefreshWorker`) posts nothing while `MainActivity` is resumed (`AppForeground`, see
+above); a `WorkManager`-woken process with no Activity reads as not in front. `AndroidNotificationSink`
 guards every post on `NotificationManagerCompat.areNotificationsEnabled()`, which alone covers both
 the Android 13+ `POST_NOTIFICATIONS` runtime permission and a user-level app/channel block — the
 permission itself is asked for through `platform/NotificationPermission.kt`'s
