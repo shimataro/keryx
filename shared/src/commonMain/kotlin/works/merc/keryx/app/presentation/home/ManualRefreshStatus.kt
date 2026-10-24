@@ -7,8 +7,8 @@ import works.merc.keryx.app.domain.RefreshOutcome
  * are doing: still checking, or finished with an outcome. Automatic refreshes (startup, background)
  * never appear here on their own, so a UI showing it moves nothing the user did not ask for — except
  * one a user action joined because it was already running (a pull or Refresh All that found it in
- * flight), which then appears so that action gets its result. The iOS toolbar's status area shows it
- * (`external-spec.md` §9).
+ * flight), which then appears so that action gets its result (`external-spec.md` §9 "Refresh
+ * feedback"). The iOS toolbar's status area shows it (`external-spec.md` §9).
  *
  * Overlapping refreshes count as one check: it stays [Checking] until the last of them has finished,
  * and then reports their outcomes combined ([RefreshOutcome.plus]).

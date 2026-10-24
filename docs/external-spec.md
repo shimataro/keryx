@@ -135,8 +135,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   mid-list or past the stale end of what's on screen (an older publish date, or none at all); such
   an article is not counted, since scrolling to the fresh end would never bring it into view. This
   covers arrival while the list is already open: a manual/background refresh, pull-to-refresh, or a cloud sync merging in articles fetched on
-  another device (none of which otherwise raise an OS notification while the app is in the
-  foreground). It appears at every window width and on every platform, including Android's
+  another device (an automatic refresh or a sync raises no OS notification while the app is in
+  front — see "Refresh feedback" in §9). It appears at every window width and on every platform, including Android's
   single-pane layout, where the feed list's own unread badges are hidden behind the navigation
   drawer. It does **not** appear the first time a list that had no articles at all gets its first
   ones (a newly subscribed feed, an empty folder/tag that just gained a feed) — there was nothing
@@ -254,6 +254,40 @@ Decisions already made on this principle, as the model to follow:
   (below).
 - A notification's "show feed" action does not open the narrow layout's drawer
   (`ShowFeedDetail` in [error-design.md](error-design.md)).
+
+### Refresh feedback
+
+**Progress is shown for every refresh; a result is shown only for one the user started.** An
+automatic refresh is the one at launch, the periodic one while the app is open, and a background
+one; a user-started refresh is Refresh All, a pull, or a feed's own Refresh.
+
+| Feedback | Automatic refresh | User-started refresh |
+| --- | --- | --- |
+| In progress: the feed-list rows' spinners, the toolbar's Refresh spinner | Shown | Shown |
+| In progress: the pull indicator, iOS's "Checking for new articles…" | Not shown | Shown |
+| Result: iOS's status ("N new articles", "No new articles", or the failure) | Not shown | Shown — also when the action joined an automatic refresh already running |
+| Result: the new-article OS notification | Only while the app is not in front | Shown (Refresh All and a pull; a feed's own Refresh posts none) |
+| Failure: no feed could be reached | A notification-center entry | A notification-center entry |
+
+Why:
+
+- **Progress, always.** Seeing that a refresh is already running saves starting another (a pull,
+  Refresh All) for nothing — the toolbar's spinner alone sits at the edge of the screen and is easy to
+  miss. It also gives a visible cause when unread counts change under the user. Every one of these
+  sits in a slot of its own, so it moves nothing (Least surprise).
+- **A result, only when asked for.** An automatic refresh's result already shows on screen: unread
+  counts rise, the article list gains articles, and the new-articles pill appears (§7). A refresh that
+  found nothing needs no news, and one that reached no feed leaves a notification-center entry either
+  way. A result the user did not ask for would also move things: on iOS before 26 the status is the
+  bottom bar's only item, so the bar would come and go (Least surprise).
+- **The user's own action always gets its result**, since the result is the response to that action —
+  even when the action joined an automatic refresh that was already running instead of starting one.
+- **The OS notification is for when the app is not in front.** In front, the unread counts and the
+  pill already say the same thing, so an automatic refresh's notification is held back there. A
+  user-started refresh still posts it: on desktop and Android it is that action's only result.
+  "In front" means the main window has focus (desktop), the main window is key (macOS), the app's
+  activity is in the foreground (Android), or the app is active (iOS); a settings window in front does
+  not count (see [background-update.md](background-update.md)).
 
 ### Actions with more than one route
 
@@ -475,7 +509,7 @@ in both the sidebar and the article list. It shows only a refresh the user start
 either column, whatever it covers), Refresh All (⌘R), or a feed's own Refresh (its context menu,
 ⌘⇧R). The refresh at launch, a background refresh and the periodic one while the app is open show
 nothing: before iOS 26 the status is the only item in that bottom bar, so the bar itself appears and
-goes with it, and a refresh nobody asked for must not move the list (see "Least surprise"); after the
+goes with it, and a refresh nobody asked for must not move the list (see "Refresh feedback"); after the
 user's own action, the brief appearance is the response to that action. While new articles are being
 checked for, it shows a small spinner with "Checking for new articles…", and keeps it through the
 cloud sync that follows, as the pull's own indicator does. Refreshes the user starts while another is
@@ -504,7 +538,8 @@ updates as the spinner goes), so the spinners clear one by one as each feed fini
 the icon's own slot, so nothing on the row moves, and the unread count and error indicator stay as
 they are. A collapsed folder shows the same spinner in place of its folder icon while any of its feeds
 does; an expanded folder, a tag, All Feeds and Starred show none (the toolbar's refresh spinner covers
-the refresh as a whole). Screen readers hear the row's state as "Refreshing".
+the refresh as a whole). Screen readers hear the row's state as "Refreshing". Why this shows for an
+automatic refresh too, while a result does not: see "Refresh feedback".
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
