@@ -7,6 +7,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -147,6 +149,15 @@ internal val CHEVRON_MARKER_GAP = 4.dp
  * favicon starting at the same horizontal position regardless of which kind of row it is.
  */
 internal val FEED_LIST_MARKER_SLOT = 18.dp
+
+/** Corner radius as a fraction of a favicon's side — 4dp at 32dp, matching the SwiftUI app. */
+internal const val FAVICON_CORNER_RADIUS_RATIO = 1f / 8
+
+/**
+ * The shape every favicon (feed list, article list, reader header) is clipped to. Its corner is a
+ * percentage of the clipped size, so each favicon has the same roundness whatever size it is drawn at.
+ */
+internal val FaviconShape = RoundedCornerShape(CornerSize(FAVICON_CORNER_RADIUS_RATIO * 100f))
 
 /**
  * The minimum size a touch-only hit target may grow to without adding any layout footprint of its
