@@ -14,13 +14,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.WindowExceptionHandler
-import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import app.cash.sqldelight.db.SqlDriver
@@ -55,10 +52,12 @@ import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.appModule
 import works.merc.keryx.app.di.configureImageLoader
 import works.merc.keryx.app.di.platformModule
+import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.domain.SettingsRepository
+import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.UpdateRepository
 import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.domain.backgroundUpdateLoop
@@ -67,6 +66,8 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.LocalNativeWindow
 import works.merc.keryx.app.platform.LocalWindowDragArea
 import works.merc.keryx.app.platform.WindowChrome
+import works.merc.keryx.app.platform.applyMacMergedTitleBar
+import works.merc.keryx.app.platform.paintNativeSurface
 import works.merc.keryx.app.platform.isLinux
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.HomeViewModel
@@ -204,14 +205,7 @@ fun main(args: Array<String>) {
     // overridden the app's theme independently of the OS. Note: changing the in-app theme without
     // restarting won't update this — it's read once at startup.
     if (isMacOs) {
-        System.setProperty(
-            "apple.awt.application.appearance",
-            when (startupThemeMode) {
-                "light" -> "NSAppearanceNameAqua"
-                "dark" -> "NSAppearanceNameDarkAqua"
-                else -> "system"
-            },
-        )
+        System.setProperty("apple.awt.application.appearance", macAppearanceFor(startupThemeMode))
     }
 
     // Open the database before anything can reach it from a background coroutine (an .opml
@@ -282,16 +276,12 @@ fun main(args: Array<String>) {
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
-    Runtime.getRuntime().addShutdownHook(
-        Thread {
-            runCatching {
-                latestWindowState.get()?.let { observed ->
-                    settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
-                }
-                runBlocking { settingsRepository.flush() }
-            }
-        },
-    )
+    addShutdownHook {
+        latestWindowState.get()?.let { observed ->
+            settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
+        }
+        runBlocking { settingsRepository.flush() }
+    }
     val saved = settingsRepository.getLocalSettings()
 
     val appScope = koin.get<CoroutineScope>()
@@ -310,6 +300,7 @@ fun main(args: Array<String>) {
     // sink: TrayIcon.displayMessage, org.freedesktop.Notifications, or TrayState, which only
     // exists inside the application {} scope) and to the in-app UI (HomeViewModel).
     val newArticleNotifier = koin.get<NewArticleNotifier>()
+    val appForeground = koin.get<AppForeground>()
     val newArticleNotifications = newArticleNotifier.trayEvents
     appScope.launch { backgroundUpdateLoop(koin) }
 
@@ -375,7 +366,7 @@ fun main(args: Array<String>) {
     // Resolved here, before the window exists, so the tray is up even with startMinimized.
     val sniConnection = if (isLinux) SniConnection.tryCreate() else null
     if (sniConnection != null) {
-        Runtime.getRuntime().addShutdownHook(Thread { runCatching { sniConnection.close() } })
+        addShutdownHook { sniConnection.close() }
     }
 
     // Linux/KDE Global Menu: if the com.canonical.AppMenu.Registrar is present, export the app menu
@@ -385,9 +376,7 @@ fun main(args: Array<String>) {
     val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
     val resolvedAppMenuXid = java.util.concurrent.atomic.AtomicReference<Long?>(null)
     if (appMenuConnection != null) {
-        Runtime.getRuntime().addShutdownHook(
-            Thread { runCatching { appMenuConnection.close(resolvedAppMenuXid.get()) } },
-        )
+        addShutdownHook { appMenuConnection.close(resolvedAppMenuXid.get()) }
     }
 
     application {
@@ -422,6 +411,13 @@ fun main(args: Array<String>) {
             persistWindowStateImmediately()
             runBlocking { settingsRepository.flush() }
             exitApplication()
+        }
+        // Closing the window hides it to the tray (the window close button and the menu's Close
+        // Window alike), saving its state first as exitApp does.
+        val hideToTray = {
+            persistWindowStateImmediately()
+            runBlocking { settingsRepository.flush() }
+            windowVisible = false
         }
 
         // Tracks the window's placement/size/position and persists it (debounced, so a transient
@@ -475,6 +471,18 @@ fun main(args: Array<String>) {
         // so that effect can re-apply the icon after a visibility toggle.
         val dockBaseImage = rememberDrawableImage(Res.drawable.app_icon)
         val dockBadgedImage = remember(dockBaseImage, unreadCount) { dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
+
+        // Hiding the window to the tray (close button, the menu bar's Close, or the tray's Hide —
+        // every route ends in windowVisible = false) is when deferred reading-state changes should
+        // reach other devices. Quitting deliberately doesn't wait on the network for this: the
+        // next launch's startup sync uploads whatever is still pending.
+        // The flush runs on appScope, not the effect's own scope: the effect is cancelled when the
+        // composition leaves (on exit), and the upload should not be cut off with it. With
+        // startMinimized the effect also fires on the first composition; nothing is pending then, so
+        // flushPendingSync returns at once.
+        LaunchedEffect(windowVisible) {
+            if (!windowVisible) appScope.launch { koin.get<SyncRepository>().flushPendingSync() }
+        }
 
         // macOS only: the Dock icon / Cmd+Tab entry doesn't follow window visibility
         // on its own (apple.awt.UIElement is read once at AWT startup), so drive it
@@ -554,31 +562,11 @@ fun main(args: Array<String>) {
             newArticleNotifications = newArticleNotifications,
         )
 
-        // Log any exception surfaced during composition/rendering before the default
-        // handler runs; otherwise EDT crashes never reach keryx.N.log (background paths
-        // already log via runCatching). We capture the current (default) factory and
-        // delegate to it, so its existing behavior (error dialog + rethrow) is preserved
-        // unchanged - we only add the log line. Logging is guarded so a logger failure
-        // can't swallow the original crash. Remembered because LocalWindowExceptionHandlerFactory
-        // is a static CompositionLocal: providing a fresh value would force the whole
-        // Window/App subtree to recompose on every unrelated recomposition of this scope.
-        val defaultExceptionFactory = LocalWindowExceptionHandlerFactory.current
-        val exceptionHandlerFactory = remember(defaultExceptionFactory) {
-            WindowExceptionHandlerFactory { win ->
-                val downstream = defaultExceptionFactory.exceptionHandler(win)
-                WindowExceptionHandler { throwable ->
-                    runCatching { Log.error(LOG_TAG, "Uncaught exception in window", throwable) }
-                    downstream.onException(throwable)
-                }
-            }
-        }
+        // Logs window exceptions before the default handler — see rememberLoggingExceptionHandlerFactory.
+        val exceptionHandlerFactory = rememberLoggingExceptionHandlerFactory()
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
         Window(
-            onCloseRequest = {
-                persistWindowStateImmediately()
-                runBlocking { settingsRepository.flush() }
-                windowVisible = false
-            },
+            onCloseRequest = hideToTray,
             title = APP_NAME,
             state = windowState,
             visible = windowVisible,
@@ -599,9 +587,7 @@ fun main(args: Array<String>) {
                 // the window becoming visible and Compose's first (already-dark) frame. Which of
                 // the two actually fills the visible pixels is platform/timing dependent, so set
                 // both (an opaque dark fill is harmless on either).
-                val nativeSurface = java.awt.Color(windowSurface.toArgb())
-                window.background = nativeSurface
-                window.contentPane.background = nativeSurface
+                window.paintNativeSurface(windowSurface)
                 if (isMacOs) {
                     // Measure the OS's actual title bar height *before* switching to
                     // the transparent/merged style, since fullWindowContent changes
@@ -609,9 +595,7 @@ fun main(args: Array<String>) {
                     // to whatever the current macOS version/system settings use,
                     // instead of hardcoding a guessed constant.
                     WindowChrome.titleBarInsetDp = window.insets.top.toFloat()
-                    window.rootPane.putClientProperty("apple.awt.fullWindowContent", true)
-                    window.rootPane.putClientProperty("apple.awt.transparentTitleBar", true)
-                    window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
+                    window.rootPane.applyMacMergedTitleBar()
                 }
                 Unit
             }
@@ -636,11 +620,7 @@ fun main(args: Array<String>) {
             AppMenuBarHost(
                 appMenuConnection = appMenuConnection,
                 windowVisible = windowVisible,
-                onCloseWindow = {
-                    persistWindowStateImmediately()
-                    runBlocking { settingsRepository.flush() }
-                    windowVisible = false
-                },
+                onCloseWindow = hideToTray,
                 onQuit = exitApp,
                 resolvedXid = resolvedAppMenuXid,
             )
@@ -674,17 +654,10 @@ fun main(args: Array<String>) {
                             // transition - which recreates the Dock tile from scratch - time to
                             // settle first (guaranteed FIFO, after the tile is recreated).
                             SwingUtilities.invokeLater {
-                                window.isVisible = true
-                                window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
-                                applyBrandedDockIcon(dockBadgedImage)
-                                window.toFront()
-                                window.requestFocus()
+                                window.showRestoredAndFocus { applyBrandedDockIcon(dockBadgedImage) }
                             }
                         } else {
-                            window.isVisible = true
-                            window.extendedState = window.extendedState and Frame.ICONIFIED.inv()
-                            window.toFront()
-                            window.requestFocus()
+                            window.showRestoredAndFocus()
                         }
                     }
                 }
@@ -694,7 +667,13 @@ fun main(args: Array<String>) {
             // above (outside Window{}, where onTrayAction needs to read it) - LocalWindowInfo is
             // only resolvable inside Window{}'s own content, unlike windowState.size above.
             val currentWindowFocused = LocalWindowInfo.current.isWindowFocused
-            LaunchedEffect(currentWindowFocused) { windowFocused = currentWindowFocused }
+            // Also reported as the app's "in front" state, which holds back an automatic refresh's
+            // new-article notification (AppForeground). A settings window in front takes the focus
+            // and so counts as not in front.
+            LaunchedEffect(currentWindowFocused) {
+                windowFocused = currentWindowFocused
+                appForeground.set(currentWindowFocused)
+            }
 
             // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
             // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()
@@ -780,6 +759,18 @@ internal fun onUpdateMenuItemClicked(
         UpdateMenuAction.Primary -> performPrimaryAction()
         UpdateMenuAction.None -> Unit
     }
+}
+
+/**
+ * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
+ * after it is shown and restored, just before it is fronted.
+ */
+private fun Frame.showRestoredAndFocus(beforeToFront: () -> Unit = {}) {
+    isVisible = true
+    extendedState = extendedState and Frame.ICONIFIED.inv()
+    beforeToFront()
+    toFront()
+    requestFocus()
 }
 
 /**

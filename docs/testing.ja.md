@@ -8,7 +8,7 @@
   OPML、Dropbox ストレージ/認証、ローカル設定）。デスクトップターゲット上で動くため、`expect` 宣言は
   desktop の `actual` に解決される（`AppDirs` を一時ディレクトリで利用可能。`FileIO` は kotlinx-io による共通実装）。
 - `desktopTest/` — 実際の SQLDelight ドライバ（`JdbcSqliteDriver`）が必要なテスト（スキーマ、記事 upsert、
-  ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。`:shared` と `:composeApp` の両方のテストから使えるよう `:testing` モジュールに置いている。同じモジュールには `HoldingDispatcher.kt` もある。ディスパッチされた処理を止めておき、任意の時点で流せるコルーチンディスパッチャーで、コントローラや ViewModel のキャンセルのテスト（`OpmlTransferControllerTest`、`CloudSyncControllerTest`、`SettingsViewModelTest`）が、キャンセル済みのコルーチンを進ませずに、誰がそれを待つかを確かめるのに使う。さらに `AwaitCondition.kt`（`awaitCondition` / `awaitConditionBlocking`。`AWAIT_CONDITION_TIMEOUT_MS` でタイムアウト）もある。条件を `Dispatchers.Default` 上で実時間でポーリングするので、`runTest` の仮想時間スケジューラでは進められない、実ディスパッチャー上の処理（HTTP エンジンのスレッドや `Dispatchers.Default`）を待てる。その場しのぎの `delay` / `Thread.sleep` のループの代わりに使う。
+  ATTACH マージ）。ヘルパーは `DbTestSupport.kt`（`inMemoryDb()`, `fileDb()`, `insertFeed()`）。`:shared` と `:composeApp` の両方のテストから使えるよう `:testing` モジュールに置いている。同じモジュールには `HoldingDispatcher.kt` もある。ディスパッチされた処理を止めておき、任意の時点で流せるコルーチンディスパッチャーで、コントローラや ViewModel のキャンセルのテスト（`OpmlTransferControllerTest`、`CloudSyncControllerTest`、`SettingsViewModelTest`）が、キャンセル済みのコルーチンを進ませずに、誰がそれを待つかを確かめるのに使う。さらに `AwaitCondition.kt`（`awaitCondition` / `awaitConditionBlocking`。`AWAIT_CONDITION_TIMEOUT_MS` でタイムアウト）もある。条件を専用のスレッド上で実時間でポーリングする（共有の `Dispatchers.Default` ではないので、先行テストがそこに残した処理に止められない）ので、`runTest` の仮想時間スケジューラでは進められない、実ディスパッチャー上の処理（HTTP エンジンのスレッドや `Dispatchers.Default`）を待てる。その場しのぎの `delay` / `Thread.sleep` のループの代わりに使う。`TestThreadDispatcher.kt`（`testThreadDispatcher(name)`）は、テスト側が完了をブロッキングで待つ間、テスト対象のコードに専用のスレッドを 1 本与える。テスト JVM 全体で共有される `Dispatchers.Default` ではなくこちらを使い（テスト後に閉じる）、先行テストが残した処理に遅らされないようにする。テスト自体がコルーチン（`runBlocking`）なら、並行させる処理は、テストのスレッド上で素の `launch` / `async` によって起動する。
   同ディレクトリには、実際に Composable をレンダリングして検証する Compose UI テスト
   （`androidx.compose.ui.test.runDesktopComposeUiTest`、JUnit4 ルール不要）も置く
   （例: `ArticleListPaneTest.kt`）。実 Skia/AWT レンダラが必要なため `commonTest` ではなく
@@ -267,6 +267,7 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
     二度とレガシーを読まないこと、移行中の壊れたレガシーファイルと不正な（gzip ではない）`.gz`
     ペイロードのどちらも `CloudDataIncompatibleException` に分類されること、リセットが `.gz` のみを
     リネーム・再作成しレガシーファイルには一切触れないこと。
+- 読書状態の遅延同期（`SyncRepositoryTest.kt`）：`scheduleDeferredSync` は長い窓を待ち、`scheduleSync` は短い窓を使い満了後に短い窓へ戻ること、構成の変更が保留中の遅延窓を縮めて 1 回の同期にまとめること、`flushPendingSync` は保留があるときだけ同期し実行中の同期を待つこと、`flushOnLeavingForeground` がアプリ自身の起動の印をスキップすること（`ExternalAppLaunchTest`）、未同期フラグがエラー結果・例外・キャンセルを越えて残り同期中の変更で立て直されること。`SyncSchedulerTest` は既定の `scheduleDeferredSync` の委譲。`ArticleRepositoryTest` は状態が変わらない既読・スターの書き込みが打刻も同期予約もしないこと。`RefreshCycleRunnerTest` は起動時サイクルの更新後の `scheduleSync`
 - 自動同期の抑制ゲート（`SyncRepositoryTest.kt`：`AUTOMATIC` トリガーの同期が `autoSyncSuspended` 中はスキップされること、`MANUAL` は決してゲートされないこと、`scheduleSync()` も同様に抑制されること、成功した同期／リセット／`clearSyncFailureState()` でゲートがクリアされること——`SchemaVersionException` は意図的にゲートを一切起動しない）
 - アプリ内アップデートのパイプライン:
   - `UpdateCheckerTest.kt`：`assets[]`/`body` を `asset`/`releaseNotes` へパースすること、`sha256`
@@ -454,8 +455,8 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - そのアイドル同期を数回繰り返す（またはバックグラウンド間隔を数回またいで放置する）: 自発的に
   アップロードを再開しないこと。書き込みレスポンスからリビジョンを取れていないプロバイダがあると、
   毎サイクル黙って再ダウンロード・再アップロードするので、ここで判別できる。
-- 記事1件の既読状態を切り替えてデバウンスを待つ: アップロードだけが1回発生し、ダウンロードは
-  発生しないこと（クラウドのリビジョンはこのデバイスが書いたものと同じままのため）。
+- 記事1件の既読状態を切り替えて、読書状態の 5 分の窓を待つ（ウィンドウをトレイへ隠す・アプリをバックグラウンドへ送ると即座にフラッシュされる）: アップロードだけが1回発生し、ダウンロードは発生しないこと（クラウドのリビジョンはこのデバイスが書いたものと同じままのため）。代わりにフィードの名前を変更すると約 5 秒後に同期され、保留中の既読の変更も一緒に送られる。
+- 各プラットフォームで、記事を既読にしてからアプリを離れる（Android/iOS：ホームへ戻る。Compose デスクトップとネイティブ macOS アプリ：ウィンドウをトレイへ隠す）: 次の更新を待たずに変更が 2 台目のデバイスへ届くこと。Android と iOS では、記事をブラウザで開いて戻ってもアップロードが走って**はならない**。
 - **2台目のデバイス**で何かを変更してから1台目で同期する: ダウンロードが走り変更が反映されること
   （スキップが他デバイスの書き込みを隠してはならない）。
 - アカウントを接続し直して（切断 → 接続）その後の初回同期が正常に動くこと（保存済みのリビジョン／
@@ -498,6 +499,9 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
 - プロバイダの接続中・切断中・クラウドデータのリセット中・接続時の初回同期中、および何らかの更新や
   同期の実行中は、ツールバーのボタン・フィードメニューの項目・設定のボタンがすべて無効になり、終わると
   3 つそろって有効に戻ること（メニューバーは設定を開いたまま確認する）。
+- iOS: 同期中はサイドバーの同期ボタンがスピナーに変わり、終わると元に戻ること。その間、隣の「＋」
+  ボタン・設定ボタン・バーの glass のまとまりの位置や大きさが変わらず、VoiceOver はスピナーを
+  「同期中…」と読み上げること。
 - プロバイダにトークンを拒否させてから（例: プロバイダのアカウント設定でアプリのアクセス権を取り消す）
   同期する: 認可エラーが記録されると 3 つとも無効になり、ツールバーのボタンにホバー（Android では
   長押し）すると「サインインの有効期限が切れました — 設定から再接続してください」と表示されること。
@@ -545,7 +549,7 @@ Delete）は 1 つの規則 `feedListItemKeysActive`（`ui/home/HomePaneLayout.k
   移動」の順で並ぶこと。SwiftUI 版のフィードメニュー（「新しい…」の 2 項目）とサイドバー行のメニュー
   （macOS と iOS）も同様に確認する。
 
-記事リーダーのネイティブ WebView（`ui/home/ArticleDetailPane.kt`）はヘビーウェイトな AWT
+記事リーダーのネイティブ WebView（`ui/home/ArticleWebView.kt`）はヘビーウェイトな AWT
 サーフェスであり Compose UI テストでは一切ホストできないため、`ArticleDetailPaneTest` がカバーする
 バウンズ／無効化状態のチェックを超えた実際の画面上の挙動は目視で確認する必要がある:
 
@@ -744,7 +748,7 @@ Delete）は 1 つの規則 `feedListItemKeysActive`（`ui/home/HomePaneLayout.k
   ない）。ライト・ダーク両テーマで確認する。
 - 物理キーボードを接続した状態（エミュレータの Extended Controls、または実機に Bluetooth
   キーボードを接続）: 矢印キーを押すと `LocalKeyboardEngaged` がラッチされ、キーボードフォーカスを
-  持つペインの選択行に `secondary` のキーボードフォーカス輪郭（`listRowOutline`、`HomeCommon.kt`）
+  持つペインの選択行に `secondary` のキーボードフォーカス輪郭（`listRowOutline`、`ListRowSelection.kt`）
   が表示されること——*背景色*は上のブレット同様、フォーカスの有無で変わらない。`PaneLayout.Triple`
   （矢印キーでフィード一覧⇔記事一覧のペイン間を輪郭が移動すること）と、より狭いレイアウトの
   ドロワー内（↑/↓ でドロワーを閉じずにフィード選択が動くこと、→ でドロワーが閉じること）の
@@ -1426,6 +1430,26 @@ iOS のサイドバーは UIKit のコレクションビューである（[app-a
 - タップは今までどおり選択になる（iPhone では記事一覧を開く）。フォルダー、タグ、セクションの開閉状態は再起動
   後も残る。
 
+### （iOS）リーダーのページャー
+
+iOS のリーダーのスワイプページャーは `UIPageViewController` である（[app-architecture.ja.md](app-architecture.ja.md)
+の「Apple ネイティブアプリ（SwiftUI）」を参照）。前後の記事の引き当てと保持する範囲は `ReaderPageSourceTests` で
+確かめているが、ページ送りそのものはシミュレーターか実機で確かめる必要がある。iPhone と iPad（縦横とも）で、
+本文が 1 画面より長い記事が数十件あるフィードを使って：
+
+- スワイプすると、一覧と同じ順で次／前の記事に移る。先頭と末尾の記事では跳ね返るだけ。
+- 既読になるのはスワイプで止まった記事だけで、横に見えていた隣の記事は未読のまま。
+- 記事を下までスクロールし、1 つ隣へスワイプしてすぐ戻ると、元の位置のまま。2 つ離れてから戻ると先頭から。
+- 縦方向が強いドラッグはページ送りではなく記事のスクロールになる。フリックでスクロールした直後のスワイプでも
+  ページは送られない。
+- 一覧で別の記事を選ぶ、またはハードウェアキーボードの J/K で、ページャーがその記事に移る。検索結果を表示して
+  いる間は、スワイプで検索結果を順に移る。
+- VoiceOver をオンにすると、三本指スワイプでページが送られる。
+- 回転しても、また（iPad で）リーダーのみと 2 ペインの表示が切り替わっても、同じ記事が表示されている。
+- クラッシュしない（v0.26.0 のクラッシュの回帰確認）: 新しい記事が増えるフィードを引っ張って更新し、その
+  更新が反映される間に一覧の末尾近くの記事を開いて、すぐエッジスワイプで一覧へ戻る。これを繰り返す。更新
+  なしで、開いてすぐ戻るだけの繰り返しも行う。
+
 ### （SwiftUI）URL コピーのフィードバック
 
 SwiftUI 版で記事の「URL をコピー」を行う経路は、すべて `HomeObservable.copyArticleUrl` を通る
@@ -1485,6 +1509,19 @@ SwiftUI のファイルメニューのインポート／エクスポートは要
   結果テキスト（一部のフィードが失敗した場合は両方の件数）がデータタブに出る。エクスポート（⌘E）も同様に、
   結果テキストがデータタブに出て終わる。
 - インポート中はファイル ▸ インポート／エクスポートが無効になる。
+
+### （SwiftUI）小さな画面でのセットアップ
+
+`SetupView` は内容が収まらないときにスクロールする。このレイアウトは実際のアプリでしか確認できない。
+アプリを削除して再インストールし、初回セットアップを表示してから確認する:
+
+- （iOS）iPhone SE（第 3 世代）の縦・横で、Dynamic Type を最大にし、英語と日本語で: 文言が「…」で
+  省略されず折り返す。すべてのクラウドプロバイダーのボタンにスクロールで届く。画面の表示時にスクロール
+  インジケーターが一瞬出る。
+- （iOS）すべてが収まる大きな iPhone と iPad で: 従来どおり内容が縦中央に置かれ、ドラッグしてもバウンス
+  しない。
+- （macOS）ウィンドウを最小まで縮める: 2 つの選択肢のカードが省略も切れもなく全体表示される。既定の
+  ウィンドウサイズでは従来と同じ見た目になる。
 
 ### アプリ内アップデート
 

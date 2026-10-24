@@ -20,7 +20,8 @@ Strategy table above and "Android Implementation" below), but what it runs each 
 platform-independent commonMain code, so the Android worker calls the same implementations instead of
 duplicating them: `domain/RefreshCycleRunner.kt`'s `RefreshCycleRunner.run` (the refresh → new-article
 notification → sync cycle — also what the manual refresh and pull-to-refresh go through, via its
-`runIfIdle`), plus `checkForUpdateAndNotify` and `maybeRebuildFtsIndex` from
+`runIfIdle`; a manual refresh that finds an automatic cycle already running starts nothing but joins
+it, reporting that cycle's outcome — and getting its new-article notification — through `joinAutomaticCycle`), plus `checkForUpdateAndNotify` and `maybeRebuildFtsIndex` from
 `domain/StartupMaintenanceTasks.kt`.
 
 ```kotlin
@@ -46,6 +47,18 @@ while (true) {
   StatusNotifierItem host uses `LinuxTray`'s `org.freedesktop.Notifications.Notify`, and only the
   remaining case — Linux without an SNI host — falls through to Compose's own `Tray()` composable and
   its `TrayState.sendNotification`. See "Desktop Tray" in [app-architecture.md](app-architecture.md).
+- **An automatic refresh posts no new-article notification while the app is in front.** Every
+  automatic cycle (the startup refresh, this loop, Android's `FeedRefreshWorker`, iOS's background
+  refresh) checks `domain/AppForeground` in `RefreshCycleRunner` before notifying, and holds the
+  notification back while it reads "in front" — the user is already looking at the new articles
+  landing. A manual refresh (Refresh All, a pull) still notifies as before. Each UI only reports the
+  state: desktop while the main window has focus (`main.kt`, from `LocalWindowInfo.isWindowFocused`),
+  Android while `MainActivity` is resumed (`onResume`/`onPause`), macOS while the main window is the
+  key window (`AppDelegate`), and iOS while the scene phase is `active` (`KeryxApp`) — the Apple app
+  through `KeryxSdk.setAppForeground`. A settings window in front of the main window takes the focus
+  (desktop) or the key status (macOS), so it counts as not in front. A process with no UI (a
+  `WorkManager` or `BGAppRefreshTask` wakeup) starts as not in front. See "Refresh feedback" in
+  [external-spec.md](external-spec.md) §9.
 
 ## iOS Implementation (`KeryxSdk.runBackgroundRefresh` + `appleApp/Keryx/Platform/BackgroundRefresh.swift`)
 
@@ -60,11 +73,13 @@ changes, and at the start of every background run.
 The SwiftUI `.backgroundTask(.appRefresh(…))` handler calls `AppModel.runBackgroundRefresh`, which
 calls `KeryxSdk.runBackgroundRefresh`: one `RefreshCycleRunner.runIfIdle` cycle (refresh, the
 new-article OS notification through the same `OsNotificationPoster`, then sync if a provider is
-connected). It does nothing before setup completes — without even flushing settings, since the
+connected). Like every automatic cycle, it holds the notification back while the app is in front —
+on iOS, while the scene phase is `active` (see `AppForeground` above), which a background run never is. It does nothing before setup completes — without even flushing settings, since the
 settings file's existence is the setup-complete marker. It skips the startup sequence, the update
 check and the FTS full rebuild (a background slot lasts about 30 seconds); only
-`ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running,
-and cancelling the task at the end of its slot cancels the shared work with it.
+`ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running;
+conversely, a pull or Refresh All made while this automatic cycle runs joins it and shows its outcome
+(`joinAutomaticCycle`). Cancelling the task at the end of its slot cancels the shared work with it.
 
 For the same reason `AppModel` starts `startMaintenance()` (the startup sequence and the refresh
 loop) only when the scene first becomes active, not in `init`, which a background launch also runs
@@ -73,6 +88,13 @@ the app is in the foreground: `AppModel` stops it (`KeryxSdk.stopRefreshLoop`) w
 background and the next activation restarts it with a fresh interval, so a loop timer that expires while
 the OS has woken the suspended process for a background refresh cannot spend the slot on the update
 check or the FTS rebuild. The startup sequence is stopped the same way if it is still running then, and the next activation reruns it from the start; once it has completed, it is not run again in that process.
+
+**Metered networks and Low Data Mode.** A background run goes through the same `RefreshCycleRunner`
+gates as every other automatic cycle (see "Network Gate" in [sync-architecture.md](sync-architecture.md)):
+on cellular or tethering the sync is deferred unless the user allowed syncing over mobile data, and
+under Low Data Mode the refresh is skipped as well. iOS has no counterpart of Android's
+unmetered-network job: a sync deferred when the app was suspended happens in the next background run
+or foreground sync that the network allows.
 
 **App icon badge.** The app icon shows the total unread count (`setBadgeCount`, the same value as
 macOS's Dock badge), updated while running and after each background run. It needs the
@@ -111,6 +133,28 @@ returning a `Result.Err` instead is handled separately — `Result.retry()` only
 permanent failures it marks non-retryable (`CloudAuthException`/`SchemaVersionException`/
 `CloudDataIncompatibleException`) for the next regularly-scheduled run instead.
 
+**Metered networks and Data Saver.** The periodic job keeps its `NetworkType.CONNECTED` constraint:
+on a metered network the feed refresh still runs, and only the sync step is deferred (unless the
+user allowed syncing over mobile data); with Data Saver on, the cycle skips its refresh too — see
+"Network Gate" in [sync-architecture.md](sync-architecture.md). A user who allows the app
+unrestricted data in the OS is exempt from Data Saver, and is treated as such.
+
+**Deferred sync.** `KeryxApplication.onCreate` also calls `startDeferredSyncHandoff`
+(`background/DeferredSync.kt`), which watches `SyncRepository.syncDeferredForNetwork` for the rest of
+the process's life. Each time it goes up, it enqueues a unique one-time `DeferredSyncWorker`
+(`"deferred_sync"`, `ExistingWorkPolicy.KEEP`, so a burst of deferrals leaves one job) constrained to
+`NetworkType.UNMETERED` — or `NetworkType.CONNECTED` when the user allows syncing on a metered network
+(`NetworkUsagePolicy.deferredSyncNeedsUnmeteredNetwork`); the job is replaced if that opt-in changes
+while a deferral is pending. The worker just runs `SyncRepository.sync(SyncTrigger.AUTOMATIC)`, which
+on a network that allows it passes the network gate (and remains subject to `autoSyncSuspended`), retrying
+a `CloudStorageException` as `FeedRefreshWorker` does — and also when the flag is up again afterwards
+(the network turned restrictive before the gate ran, so the sync was deferred and this job is the only
+one left to run it; the retry keeps the job's network constraint). This is what syncs the pending changes once
+the device reaches Wi-Fi after the app has been closed — `SyncRepository`'s own in-process waiter
+covers only the time the process is alive. When the flag drops in this process (the in-process waiter took over, a sync succeeded, or
+the connection was removed), the job is cancelled; a job left by an earlier process is never cancelled
+at startup, since its changes have not been synced yet.
+
 `MainActivity.onCreate` calls `runAndroidStartupTasks` (`AndroidStartupTasks.kt`) — the Android
 counterpart to desktop's `runStartupTasks`, minus the macOS-specific translocation warning (which
 has no Android equivalent). It runs five steps, each in isolation (`runMaintenanceStep`) so one
@@ -144,7 +188,9 @@ New-article notifications reach the OS through `domain/OsNotificationSink.kt`, a
 desktop's `NewArticleNotifier.trayEvents` collection (see that class's own KDoc for why: a
 `WorkManager`-woken process has no guarantee a `trayEvents` collector is already attached by the
 time a refresh finishes, since `trayEvents` has replay 0 and silently drops anything emitted before
-a collector exists; desktop's own binding is a no-op for the same reason). `AndroidNotificationSink`
+a collector exists; desktop's own binding is a no-op for the same reason). An automatic refresh
+(startup or `FeedRefreshWorker`) posts nothing while `MainActivity` is resumed (`AppForeground`, see
+above); a `WorkManager`-woken process with no Activity reads as not in front. `AndroidNotificationSink`
 guards every post on `NotificationManagerCompat.areNotificationsEnabled()`, which alone covers both
 the Android 13+ `POST_NOTIFICATIONS` runtime permission and a user-level app/channel block — the
 permission itself is asked for through `platform/NotificationPermission.kt`'s
@@ -514,7 +560,9 @@ Every `feeds` write on the refresh path is also guarded on the value actually ch
 article-list query joins `feeds`, so SQLDelight re-runs it on any `feeds` write; a refresh where
 nothing changed now writes nothing and triggers no re-query.
 
-`FeedRepository.refreshAll` fetches feeds' network data **concurrently** (bounded to `REFRESH_FETCH_CONCURRENCY` simultaneous fetches), then applies each feed's DB writes **serially** in feed order. A large subscription list therefore refreshes in roughly the time of its slowest fetches rather than the sum of every fetch. DB writes stay single-threaded — the JVM SQLite driver opens a fresh connection per statement, so concurrent writes could contend — and each feed's articles are still committed one feed at a time, so they appear incrementally in the list as the refresh progresses.
+`FeedRepository.refreshAll` fetches feeds' network data **concurrently** (bounded to `REFRESH_FETCH_CONCURRENCY` simultaneous fetches), and applies each feed's DB writes **serially**, as soon as that feed's own fetch completes — so a slow feed never holds back the articles of the feeds that have already arrived. A large subscription list therefore refreshes in roughly the time of its slowest fetches rather than the sum of every fetch. DB writes stay single-threaded — one coroutine applies them all, since the JVM SQLite driver opens a fresh connection per statement and concurrent writes could contend — and each feed's articles are committed one feed at a time, so they appear incrementally in the list as the refresh progresses. The search index is brought up to date once, after every feed has been applied. A feed that still has no favicon gets its lookup only after its own articles are written (under a fetch slot of its own, so it never delays them); a lookup that finds none is not repeated for that feed for `FAVICON_RETRY_INTERVAL_MS` (24 hours), remembered in the device-local settings (`faviconMissedAt`) rather than in memory, since Android starts a new process for most background refreshes and a miss kept only in memory would not stop the next one probing the site again, and a favicon found is written only while the feed is still subscribed and still has none. The returned per-feed results are still in feed order.
+
+Each feed is also tracked in memory (`FeedRepository.refreshingFeedIds`) from the moment its refresh is requested — including while it waits for a fetch slot — until its articles are committed, whatever started the refresh — manual, pull-to-refresh, background or startup. The feed list shows it as the per-row refreshing indicator (see "Adaptive layout (width) and touch input" in [external-spec.md](external-spec.md)). It is never written to the DB, since any `feeds` write re-runs the article-list query.
 
 ## Startup Tasks (`runStartupTasks` / `runAndroidStartupTasks`)
 

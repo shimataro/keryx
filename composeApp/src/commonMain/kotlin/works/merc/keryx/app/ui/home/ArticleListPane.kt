@@ -47,14 +47,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -72,7 +69,9 @@ import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.ArticleListBody
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.articleListCatchingUp
 import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
@@ -181,7 +180,7 @@ fun ArticleListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val filter by vm.filter.collectAsState()
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val folders by vm.folders.collectAsState()
     val tags by vm.tags.collectAsState()
     val title = onOpenDrawer?.let {
@@ -194,13 +193,18 @@ fun ArticleListPane(
             starredLabel = stringResource(Res.string.home_starred),
         )
     }
-    val feedTitles = feeds.associate { it.id to it.displayTitle() }
-    val feedFavicons = feeds.associate { it.id to it.favicon_url }
+    val feedTitles = remember(feeds) { feeds.associate { it.id to it.displayTitle() } }
+    val feedFavicons = remember(feeds) { feeds.associate { it.id to it.favicon_url } }
 
     val query by vm.searchQuery.collectAsState()
     val searchBarVisible by vm.searchBarVisible.collectAsState()
     val searchActive by vm.searchActive.collectAsState()
-    val selected by vm.selectedArticle.collectAsState()
+    // The selection itself, not the hydrated article: the highlight and scroll-into-view follow the
+    // click at once rather than once the reader's body lookup returns (it can wait out a write lock).
+    val selectedId by vm.selectedArticleId.collectAsState()
+    // What scrolls the selection into view — not selectedId itself, which also moves back without
+    // the user acting (a selection found tombstoned) and must not move the list.
+    val revealRequest by vm.selectionRevealRequests.collectAsState()
     val unreadOnly by vm.unreadOnly.collectAsState()
     val canHideRead by vm.canHideRead.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
@@ -220,6 +224,17 @@ fun ArticleListPane(
             baseListState.scrollToItem(0)
             searchListState.scrollToItem(0)
             lastFilter = encoded
+        }
+    }
+    // The search results list goes back to the top when the user changes the query, as it does for a
+    // filter: the new results are a different list, and the position in the previous one (a long way
+    // down, say) means nothing in it. The first composition and a pane remount keep the position —
+    // `lastQuery` is saved, so coming back from an article leaves the results where they were.
+    var lastQuery by rememberSaveable { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (query != lastQuery) {
+            searchListState.scrollToItem(0)
+            lastQuery = query
         }
     }
 
@@ -277,20 +292,22 @@ fun ArticleListPane(
     // debounce state while search isn't even active, and vice versa.
     val articles: List<ArticleListRow>
     val listState: LazyListState
-    val branchReturnRipplePulse: Int
     val branchOnAddFeedClick: (() -> Unit)?
     val hasNoFeeds: Boolean
+    val loading: Boolean
     val sortEnabled: Boolean
     val titleMarkedById: Map<String, String>?
     val emptyContent: (@Composable () -> Unit)?
 
     if (!searchActive) {
         val baseArticles by vm.articles.collectAsState()
+        val body by vm.articleListBody.collectAsState()
+        val viewModelHasRows by vm.articleListHasRows.collectAsState()
         articles = baseArticles
         listState = baseListState
-        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = onAddFeedClick
-        hasNoFeeds = feeds.isEmpty()
+        hasNoFeeds = body == ArticleListBody.NoFeeds
+        loading = body == ArticleListBody.Pending || articleListCatchingUp(baseArticles.size, viewModelHasRows)
         sortEnabled = true
         titleMarkedById = null
         emptyContent = null
@@ -302,19 +319,22 @@ fun ArticleListPane(
         // word, or "a b" where every word is too short, count as no terms.
         val hasValidTerms = searchTerms(query).isNotEmpty()
 
-        // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's own
-        // scroll-to-selection effect for the base list).
-        LaunchedEffect(selected?.id, results) {
-            val index = results.indexOfFirst { it.article.id == selected?.id }
+        // Keep the keyboard-selected result in view — on the same rule as ArticleListPaneContent's
+        // own effect for the base list: when the user selects (revealRequest) and when results first
+        // arrive, never because their contents changed. A background write re-running the search,
+        // or a selection handed back after a tombstone, must not pull the list to the selection.
+        // `results` is read through its State delegate, so the effect sees the latest list.
+        LaunchedEffect(revealRequest, results.isNotEmpty()) {
+            val index = results.indexOfFirst { it.article.id == selectedId }
             if (index !in results.indices) return@LaunchedEffect
             searchListState.scrollToIndexIfNeeded(index)
         }
 
         articles = results.map { it.article }
         listState = searchListState
-        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = null
         hasNoFeeds = false
+        loading = false
         sortEnabled = false
         titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } }
         emptyContent = when {
@@ -367,7 +387,8 @@ fun ArticleListPane(
         articles = articles,
         feedTitles = feedTitles,
         feedFavicons = feedFavicons,
-        selectedId = selected?.id,
+        selectedId = selectedId,
+        revealRequest = revealRequest,
         unreadOnly = unreadOnly,
         canHideRead = canHideRead,
         // Deliberately the real sort direction even while search disables the button — search
@@ -387,13 +408,14 @@ fun ArticleListPane(
         onShareArticle = onShareArticle,
         modifier = modifier,
         listState = listState,
-        returnRipplePulse = branchReturnRipplePulse,
+        returnRipplePulse = returnRipplePulse,
         onActivated = onActivated,
         notifVm = notifVm,
         onOpenDrawer = if (barShown) null else onOpenDrawer,
         title = if (barShown) null else title,
         onSearchClick = if (barShown) null else onSearchClick,
         hasNoFeeds = hasNoFeeds,
+        loading = loading,
         onAddFeedClick = branchOnAddFeedClick,
         sortEnabled = sortEnabled,
         titleMarkedById = titleMarkedById,
@@ -608,6 +630,8 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
  * @param selectedId The identifier of the selected article, if any.
+ * @param revealRequest Bumped by each selection the user makes (`HomeViewModel.selectionRevealRequests`);
+ *   a change scrolls [selectedId]'s row into view. [selectedId] changing on its own does not.
  * @param unreadOnly Whether to show only unread articles.
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
@@ -625,6 +649,10 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   when there are no feeds at all — otherwise a narrow layout, where the "+" button lives inside
  *   the feed-list drawer, would leave a phone-width user with no visible way to add their first
  *   feed. Only consulted when [emptyContent] is `null`; a non-empty [articles] always wins over both.
+ * @param loading Whether the feed list or the article list has yet to load at launch
+ *   ([ArticleListBody.Pending]): an empty [articles] then shows no message at all, rather than
+ *   flashing "no feeds" / "no articles" before the first DB emission. Only consulted when
+ *   [emptyContent] is `null`.
  * @param onAddFeedClick Invoked from the "Add feed" button shown when [hasNoFeeds]. `null` (the
  *   default) omits the button, leaving just the message.
  * @param emptyContent Overrides the ordinary [hasNoFeeds]/`home_no_articles` empty-state message
@@ -647,6 +675,7 @@ internal fun ArticleListPaneContent(
     feedTitles: Map<String, String>,
     feedFavicons: Map<String, String?> = emptyMap(),
     selectedId: String?,
+    revealRequest: Int = 0,
     unreadOnly: Boolean,
     onToggleUnreadOnly: () -> Unit,
     canHideRead: Boolean = false,
@@ -670,6 +699,7 @@ internal fun ArticleListPaneContent(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
     hasNoFeeds: Boolean = false,
+    loading: Boolean = false,
     onAddFeedClick: (() -> Unit)? = null,
     sortEnabled: Boolean = true,
     titleMarkedById: Map<String, String>? = null,
@@ -680,7 +710,7 @@ internal fun ArticleListPaneContent(
     newArticleCount: Int = 0,
     onNewArticlesClick: () -> Unit = {},
 ) {
-    LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
+    LaunchedEffect(listState, revealRequest, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
         // Before the list's first measure pass layoutInfo is still empty, which
@@ -751,6 +781,8 @@ internal fun ArticleListPaneContent(
             if (articles.isEmpty()) {
                 if (emptyContent != null) {
                     emptyContent()
+                } else if (loading) {
+                    // Nothing yet — see ArticleListPaneContent's `loading`.
                 } else if (hasNoFeeds) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         // A narrow layout's "+" button lives inside the feed-list drawer (closed by
@@ -791,6 +823,12 @@ internal fun ArticleListPaneContent(
                     contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues(),
                 ) {
                     items(articles, key = { it.id }) { article ->
+                        // Kept across the row's recompositions (a selection change re-runs every
+                        // visible row) so the highlight isn't rebuilt character by character each time.
+                        val marked = titleMarkedById?.get(article.id)
+                        val titleOverride = remember(marked, article.title, searchHighlight) {
+                            marked?.let { markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight) }
+                        }
                         ArticleRow(
                             article = article,
                             feedTitle = feedTitles[article.feed_id].orEmpty(),
@@ -806,9 +844,7 @@ internal fun ArticleListPaneContent(
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
                             onShare = onShareArticle?.let { share -> { share(article) } },
                             onActivate = onActivated,
-                            titleOverride = titleMarkedById?.get(article.id)?.let {
-                                markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight)
-                            },
+                            titleOverride = titleOverride,
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
                         )

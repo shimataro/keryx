@@ -97,6 +97,9 @@
     <string name="home_unsubscribe_body">スター付き記事は引き続き閲覧できます。</string>
     <string name="home_refresh">更新</string>
     <string name="home_refreshing">新着を確認中…</string>
+    <string name="home_no_new_articles">新着記事はありません</string>
+    <string name="home_refresh_failed">新着を確認できませんでした。接続を確認するか、時間をおいて再度お試しください。</string>
+    <string name="home_feed_refreshing">更新中</string>
     <string name="home_refresh_this_list">この一覧を更新</string>
     <plurals name="home_new_articles">
         <item quantity="other">新着 %1$d 件</item>
@@ -218,6 +221,9 @@
     <string name="settings_cloud_reset_confirm_body">クラウド上の同期データを退避用の名前（keryx-日時.db.bak）に変更したうえで、この端末のデータで作り直します。退避できなかった場合は削除されます。退避したデータは自動では消えません。他の端末で未同期の変更がある場合は失われることがあります。</string>
     <string name="settings_cloud_reset_confirm_action">リセット</string>
     <string name="settings_last_synced">最終同期: %1$s</string>
+    <string name="settings_cloud_sync_on_metered">モバイルデータ通信でも自動で同期する</string>
+    <string name="settings_cloud_sync_on_metered_hint">従量制の Wi-Fi・テザリングを含みます。データセーバー / 低データモード中は自動同期しません。</string>
+    <string name="settings_cloud_sync_deferred_network">データ通信量を抑えるため同期を保留中です。制限のない回線に接続すると同期します</string>
     <string name="settings_cloud_syncing">同期中…</string>
     <string name="settings_cloud_phase_checking">クラウドを確認しています…</string>
     <string name="settings_cloud_phase_downloading">ダウンロードしています…</string>
@@ -295,6 +301,8 @@
     <string name="database_too_new_message">このデータは、より新しいバージョンの Keryx で更新されています。最新バージョンの Keryx を使用してください。</string>
     <string name="notification_app_translocated">Keryx が一時的な場所で実行されています。Dropbox 連携などが失敗する場合は、Keryx を「アプリケーション」フォルダへ移動してから起動し直してください。</string>
     <string name="notification_app_translocated_detail">macOS は、ディスクイメージ（DMG）や「ダウンロード」フォルダから直接起動されたアプリを、App Translocation という仕組みによって毎回ランダムな一時的な場所にコピーして実行します。\n\nこのとき Keryx の実体のパスが変わるため、OS が keryx:// のリンクを Keryx に届けられず、Dropbox や OneDrive の連携（OAuth 認証）が完了しないことがあります。\n\n対処方法: Keryx.app を「アプリケーション」フォルダにコピーし、コピーしたものから起動し直してください。</string>
+    <string name="notification_refresh_failed">新着を確認できませんでした。接続を確認するか、時間をおいて再度お試しください。</string>
+    <string name="notification_refresh_failed_detail">今回更新したフィードのどれにも接続できませんでした（タイムアウトしたか、応答がありませんでした）。多くの場合は端末がオフラインですが、フィードのサーバーが停止していることもあります。\n\n対処: インターネット接続を確認して、もう一度更新してください。接続に問題がない場合は、失敗したフィードにフィード一覧で印が付きます。時間をおいて再度試すか、そのフィードの URL を確認してください。</string>
     <string name="notification_token_storage_fallback">クラウド連携のサインイン情報が、OS の安全な認証情報ストアではなく、暗号化されていないローカルファイルに保存されています。</string>
     <string name="notification_token_storage_fallback_detail">Keryx はクラウド連携のサインイン情報（アクセストークン・リフレッシュトークン）を、可能なかぎり OS の安全な認証情報ストア（macOS のキーチェーン、Windows の資格情報マネージャー、Linux の Secret Service。Snap 版では、デスクトップの Secret portal から得たアプリ専用の鍵で暗号化されたローカルストア）に保存します。現在はローカルファイルに保存されています。認証情報ストアにアクセスできなかったか、アクセスはできたものの以前ローカルファイルに保存されたコピーを削除できなかったかのいずれかです。\n\nこのファイルには所有者だけが読み書きできる権限（0600）を設定していますが、暗号化はされていないため、同じユーザーアカウントで動作する他のプログラムからは読み取られる可能性があります。\n\n対処方法: Snap 版では、お使いのデスクトップ環境の Secret portal が利用できないことがほとんどです。`xdg-desktop-portal` とデスクトップ固有のバックエンド（`xdg-desktop-portal-gnome`/`-kde` など）を更新してから、Keryx を起動し直してクラウド連携を接続し直してください。\n\nそれ以外のインストール形態では、キーリングサービス（GNOME キーリング、KWallet など）が動作していないことが原因である場合がほとんどです。キーリングサービスを有効にしてから、クラウド連携を接続し直してください。\n\n認証情報ストアがすでに復旧している場合は、削除できずに残ったコピーが原因です。Keryx のデータディレクトリにある `*_tokens.json` ファイルを削除してください。</string>
     <string name="notification_token_storage_not_persisted">クラウド連携のサインイン情報を保存できませんでした。Keryx を再起動したあと、もう一度接続し直す必要があります。</string>

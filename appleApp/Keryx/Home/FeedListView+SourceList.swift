@@ -155,7 +155,7 @@ extension FeedListView {
                 .selectsOnContextMenu(id: selection.key) { selectForContextMenu(instance) }
                 .contextMenu {
                     // Opening the menu selects the row first, matching Compose's own
-                    // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
+                    // `onOpen = { if (!selected) onClick() }` (`FeedListRows.kt`) — the actual
                     // selection runs on a right-click/Control-click via `.selectsOnContextMenu` above,
                     // not as a side effect of this builder (see `ContextMenuSelectionTracker`'s own doc
                     // for why).
@@ -223,7 +223,7 @@ extension FeedListView {
     /// A feed row is only ever a drag *source*: a feed is dropped between feed rows (the
     /// enclosing `ForEach`'s `.onInsert`), never onto one. A copy nested under an expanded tag is
     /// draggable too, but its tag's `ForEach` takes no insertions — matching Compose's own
-    /// `FeedListRowKey.Other` classification for it (`FeedListDragAndDrop.kt`'s own
+    /// `FeedListRowKey.Other` classification for it (`FeedListRowKeys.kt`'s own
     /// `parseFeedListRowKey`).
     ///
     /// `item` is `.feed` for a feed in its folder group or among the unfoldered feeds, `.feedInTag`
@@ -245,10 +245,10 @@ extension FeedListView {
         .selectsOnContextMenu(id: selection.key) { selectForContextMenu(instance) }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
-            // `onOpen = { if (!selected) onClick() }` (`FeedListDragAndDrop.kt`) — the actual
+            // `onOpen = { if (!selected) onClick() }` (`FeedListRows.kt`) — the actual
             // selection runs on a right-click/Control-click via `.selectsOnContextMenu` above, not
             // as a side effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
-            // Order matches `FeedListDragAndDrop.kt` and the Feed menu (`HomeCommands.swift`) exactly:
+            // Order matches `FeedListRows.kt` and the Feed menu (`HomeCommands.swift`) exactly:
             // Refresh, Assign tags ▸, Move to Folder ▸, a separator, the URL/site actions, a
             // separator, Rename, a separator, Unsubscribe.
             Button(L("home_refresh")) { home.refreshFeed(feed) }
@@ -313,7 +313,7 @@ extension FeedListView {
 
     /// Selects `instance` if it isn't already the primary selection — called when a row's context
     /// menu opens, matching Compose's own `onOpen = { if (!selected) onClick() }`
-    /// (`FeedListDragAndDrop.kt`).
+    /// (`FeedListRows.kt`).
     private func selectForContextMenu(_ instance: FeedListRowSelection) {
         guard !feedListRowSelectionsEqual(instance, home.selectedRowInstance) else { return }
         home.selectFilter(instance.filter, instance: instance)
@@ -363,7 +363,7 @@ private struct TagRowLabel: View {
 
     var body: some View {
         // The highlight is `.drop` while a feed hovers for attachment — matches Compose's own
-        // `dropTargetBackground` (`FeedListPane.kt`'s tag row).
+        // `dropTargetBackground` (`FeedListTagRow.kt`'s tag row).
         SidebarSourceListRow(
             home: home,
             content: content,
@@ -382,7 +382,7 @@ private struct TagRowLabel: View {
         .selectsOnContextMenu(id: selection.key) { selectForContextMenu() }
         .contextMenu {
             // Opening the menu selects the row first, matching Compose's own
-            // `onOpen = { if (!selected) onClick() }` (`FeedListPane.kt`) — the actual selection
+            // `onOpen = { if (!selected) onClick() }` (`FeedListTagRow.kt`) — the actual selection
             // runs on a right-click/Control-click via `.selectsOnContextMenu` above, not as a side
             // effect of this builder (see `ContextMenuSelectionTracker`'s own doc for why).
             Button(L("home_edit_tag_menu")) { dialogs.startRename(selection.instance) }

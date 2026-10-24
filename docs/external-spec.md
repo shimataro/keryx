@@ -35,9 +35,23 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
+- Read/unread and star changes reach other devices in batches rather than one sync per article — once
+  reading pauses for a few minutes, when the app leaves the foreground (hidden to the tray on desktop; opening a link in the browser does not count),
+  or with the next refresh or manual sync — since every sync transfers the whole sync file. Subscription,
+  folder, tag and settings changes still sync within seconds. See [sync-architecture.md](sync-architecture.md).
 - While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its current
   progress (checking the cloud, downloading, merging, updating the search index, preparing the snapshot, uploading, or archiving) instead of just a plain spinner, so a long first-ever sync doesn't look stalled — see
   [sync-architecture.md](sync-architecture.md).
+- **On Android and iOS, automatic sync waits for Wi-Fi by default.** Each sync uploads the whole
+  database, so an automatic sync (after a change, a background refresh, or at startup) is held back
+  while the device is on a metered network — mobile data or tethering, and on Android also a Wi-Fi the user marked as metered — and while the OS's Data Saver / Low Data Mode is on. The Cloud Sync settings tab
+  offers "Sync automatically over mobile data" (off by default, device-local, shown only while a
+  provider is connected) to allow metered networks; Data Saver / Low Data Mode always defers. While a
+  sync is held back, the connected provider's row says the sync is paused to save data and will run on an unrestricted network (the reason is not distinguished: it may be a metered network, or Data Saver / Low Data Mode, which the opt-in does not override), and it
+  runs as soon as the network allows — on Android even with the app closed. "Sync now", "Refresh All"
+  and pull-to-refresh always sync immediately. Automatic feed refreshes continue on a metered network
+  (they are small conditional requests) and stop only under Data Saver / Low Data Mode. Desktop and
+  macOS are never restricted. See "Network Gate" in [sync-architecture.md](sync-architecture.md).
 - **OneDrive supports personal Microsoft accounts only** — a work/school (Microsoft 365 / Entra ID)
   account cannot be connected. Keryx keeps its sync file in OneDrive's hidden per-app folder, and the
   Graph permission that grants access to only that folder is offered for personal accounts alone;
@@ -121,8 +135,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   mid-list or past the stale end of what's on screen (an older publish date, or none at all); such
   an article is not counted, since scrolling to the fresh end would never bring it into view. This
   covers arrival while the list is already open: a manual/background refresh, pull-to-refresh, or a cloud sync merging in articles fetched on
-  another device (none of which otherwise raise an OS notification while the app is in the
-  foreground). It appears at every window width and on every platform, including Android's
+  another device (an automatic refresh or a sync raises no OS notification while the app is in
+  front — see "Refresh feedback" in §9). It appears at every window width and on every platform, including Android's
   single-pane layout, where the feed list's own unread badges are hidden behind the navigation
   drawer. It does **not** appear the first time a list that had no articles at all gets its first
   ones (a newly subscribed feed, an empty folder/tag that just gained a feed) — there was nothing
@@ -157,7 +171,9 @@ data exists in the cloud it is automatically merged (imported) during the initia
   context: an in-app explanation when the app opens with notifications on but not allowed (after which
   the setting matches the answer, so it is not asked again), or the system request directly when the setting is switched on — and the setting turns
   off if the permission is refused, with a link to the OS notification settings after a denial) and
-  background refresh runs on `WorkManager`, at roughly the interval configured in Settings; the
+  background refresh runs on `WorkManager`, at roughly the interval configured in Settings (on a
+  metered network or under Data Saver, its sync and refresh follow §4's rule, and a sync held back
+  for the network is handed to a job that waits for a network that allows it); the
   in-app "check for update" is hidden when the app was installed from an app store (currently just
   Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no
   equivalent of the digit badge — the platform has no API to set an app-icon badge count independent
@@ -165,7 +181,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   shows the OS's own notification dot (tied to the presence of an active notification) plus a
   long-press count via `setNumber` on launchers that support it, a deliberate asymmetry rather than an oversight; see
   `background-update.md` for the full comparison. The SwiftUI iOS app likewise refreshes in the
-  background (a `BGAppRefreshTask`; the OS picks the timing), posts the new-article notification, and shows the total
+  background (a `BGAppRefreshTask`; the OS picks the timing; on cellular, tethering or under Low Data
+  Mode it follows §4's rule), posts the new-article notification, and shows the total
   unread count as the app icon's badge.
 
 ### Behavior on Feed URL Change / Disappearance
@@ -237,6 +254,40 @@ Decisions already made on this principle, as the model to follow:
   (below).
 - A notification's "show feed" action does not open the narrow layout's drawer
   (`ShowFeedDetail` in [error-design.md](error-design.md)).
+
+### Refresh feedback
+
+**Progress is shown for every refresh; a result is shown only for one the user started.** An
+automatic refresh is the one at launch, the periodic one while the app is open, and a background
+one; a user-started refresh is Refresh All, a pull, or a feed's own Refresh.
+
+| Feedback | Automatic refresh | User-started refresh |
+| --- | --- | --- |
+| In progress: the feed-list rows' spinners, the toolbar's Refresh spinner | Shown | Shown |
+| In progress: the pull indicator, iOS's "Checking for new articles…" | Not shown | Shown |
+| Result: iOS's status ("N new articles", "No new articles", or the failure) | Not shown | Shown — also when the action joined an automatic refresh already running |
+| Result: the new-article OS notification | Only while the app is not in front | Shown (Refresh All and a pull; a feed's own Refresh posts none) — also when the action joined an automatic refresh already running |
+| Failure: no feed could be reached | A notification-center entry | A notification-center entry |
+
+Why:
+
+- **Progress, always.** Seeing that a refresh is already running saves starting another (a pull,
+  Refresh All) for nothing — the toolbar's spinner alone sits at the edge of the screen and is easy to
+  miss. It also gives a visible cause when unread counts change under the user. Every one of these
+  sits in a slot of its own, so it moves nothing (Least surprise).
+- **A result, only when asked for.** An automatic refresh's result already shows on screen: unread
+  counts rise, the article list gains articles, and the new-articles pill appears (§7). A refresh that
+  found nothing needs no news, and one that reached no feed leaves a notification-center entry either
+  way. A result the user did not ask for would also move things: on iOS before 26 the status is the
+  bottom bar's only item, so the bar would come and go (Least surprise).
+- **The user's own action always gets its result**, since the result is the response to that action —
+  even when the action joined an automatic refresh that was already running instead of starting one.
+- **The OS notification is for when the app is not in front.** In front, the unread counts and the
+  pill already say the same thing, so an automatic refresh's notification is held back there. A
+  user-started refresh still posts it: on desktop and Android it is that action's only result.
+  "In front" means the main window has focus (desktop), the main window is key (macOS), the app's
+  activity is in the foreground (Android), or the app is active (iOS); a settings window in front does
+  not count (see [background-update.md](background-update.md)).
 
 ### Actions with more than one route
 
@@ -428,7 +479,9 @@ has finished too, not just the feed fetches. On iOS, where the system starts the
 the pull crosses its threshold (with the finger still down), the indicator also stays up for at least
 about a second, so a refresh that finishes almost at once still shows it spinning.
 A pull made while a refresh or sync is already running (a background refresh, say) starts nothing
-new; the indicator simply stays up until the running one finishes. Selecting another item in the
+new; the indicator simply stays up until the running one finishes. When what is running is an
+automatic refresh, the pull joins it, so on iOS its result still appears in the status area described
+below. Selecting another item in the
 feed list while a pull's indicator is up leaves no indicator over the newly selected list, since
 that list is not the one being refreshed; the refresh itself carries on.
 On Android, the same refresh is also reachable without the gesture, wherever the gesture itself is
@@ -449,6 +502,44 @@ only sync (when a cloud is connected), add-feed and settings. This is how Mail's
 refreshed, and it leaves the bar's limited room to the other actions. Android's feed-list drawer has
 no pull — it is a modal navigation surface laid over the article list, and keeps its refresh button
 in its header. Neither does the macOS sidebar, which keeps its toolbar button.
+
+With no Refresh All button to spin, iOS shows a feed refresh in the toolbar's status area instead
+— the centre of the bottom bar, where Mail says "Checking for Mail…" and then "Updated Just Now" —
+in both the sidebar and the article list. It shows only a refresh the user started — a pull (of
+either column, whatever it covers), Refresh All (⌘R), or a feed's own Refresh (its context menu,
+⌘⇧R). The refresh at launch, a background refresh and the periodic one while the app is open show
+nothing: before iOS 26 the status is the only item in that bottom bar, so the bar itself appears and
+goes with it, and a refresh nobody asked for must not move the list (see "Refresh feedback"); after the
+user's own action, the brief appearance is the response to that action. While new articles are being
+checked for, it shows a small spinner with "Checking for new articles…", and keeps it through the
+cloud sync that follows, as the pull's own indicator does. Refreshes the user starts while another is
+still running (a feed's Refresh during a pull, say) count as one check: the spinner stays until the
+last has finished, and the result counts them all. A pull made while an automatic refresh is already
+running starts nothing new (see above), but it joins that refresh: the status shows it as checking and
+then shows its result, as if the pull had started it; Refresh All (⌘R) does the same. A pull or Refresh
+All made while only a sync is running, or while the user's own refresh (a feed's Refresh, say) is
+already running, adds no result of its own — the latter already shows here. Once that is done it shows the result for about two and a half seconds, without the spinner:
+"N new articles", "No new articles", or — when none of the feeds it covered could be reached (each
+timed out or got no response, most likely because the device is offline) — "Couldn't check for
+new articles. Check your connection or try again later." behind a warning symbol, so a failure reads as one at
+a glance without relying on its color. That failure also stays in the notification center, whose
+entry explains what to do. A sync on its own (the sync button, or the automatic sync after reading)
+never shows there: its button's spinning icon is its feedback, and an automatic sync is not worth
+interrupting anyone over. Idle shows nothing there, not a last-updated time, so the bar leaves the
+room to the list. The count covers the feeds just fetched; articles a sync brought in from another
+device are not counted. The status is never drawn as a pull indicator started by the app itself,
+which would pull the list down unasked, and VoiceOver is not told when it changes.
+
+While feeds refresh — whatever started it: Refresh All, a pull, a single feed's Refresh, or a
+background or startup refresh — **every feed the refresh covers shows a small spinner in place of
+its icon** in the feed list, on every platform, from the moment the refresh starts (including while
+the feed waits its turn to be fetched) until its own new articles have landed (the unread count
+updates as the spinner goes), so the spinners clear one by one as each feed finishes. The spinner sits inside
+the icon's own slot, so nothing on the row moves, and the unread count and error indicator stay as
+they are. A collapsed folder shows the same spinner in place of its folder icon while any of its feeds
+does; an expanded folder, a tag, All Feeds and Starred show none (the toolbar's refresh spinner covers
+the refresh as a whole). Screen readers hear the row's state as "Refreshing". Why this shows for an
+automatic refresh too, while a result does not: see "Refresh feedback".
 
 The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
 dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.

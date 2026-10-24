@@ -45,7 +45,7 @@ struct HomeCommands: Commands {
         #endif
 
         CommandGroup(replacing: .newItem) {
-            if let home = model.home, let state {
+            if model.home != nil, let state {
                 Button(L("menu_file_add_feed")) { model.sidebarDialogs.isAddingFeed = true }
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(!state.addItemsEnabled)
@@ -107,12 +107,12 @@ struct HomeCommands: Commands {
                 // article row's context menu (`ArticleRowView`) and the reader's toolbar (`ArticleDetailView`).
                 Divider()
                 Button(L("menu_article_open_in_browser")) {
-                    openInBrowserIfAllowed(home.selectedArticle?.url)
+                    openInBrowserIfAllowed(home.selectedArticleRow?.url)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(!state.openInBrowserEnabled)
                 Button(L("menu_article_copy_url")) {
-                    if let article = home.selectedArticle {
+                    if let article = home.selectedArticleRow {
                         home.copyArticleUrl(url: article.url, articleId: article.id)
                     }
                 }

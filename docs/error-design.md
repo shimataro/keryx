@@ -17,6 +17,22 @@
 | Invalid feed URL | Result type |
 | DB access failure / program bug | Exception |
 
+**Documented exception to the last row: best-effort writes and reads.** A DB access that only feeds
+something cosmetic or derived, and that is retried by the next ordinary run anyway, is logged
+(`Log.warn`) and carried on from rather than thrown — because throwing would cancel the work around it
+and lose more than the access itself is worth. The accesses that are, today:
+
+- The favicon write at the end of a feed refresh (`FeedRepository.applyFavicon`). A failure leaves the
+  feed without a favicon and without a "no favicon found" record, so the next refresh looks it up and
+  stores it again; propagating it would cancel the whole refresh, including feeds fetched but not yet
+  applied.
+- The FTS search query (`ArticleRepository.search`): a failing index returns no hits rather than an error.
+- The "last synced" read for the Cloud Sync settings tab (`CloudSyncController`): UI state only.
+
+Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
+operation the user started — an OPML import or export — that fails is not an exception to this: it is reported
+to the user as that operation's failure, not swallowed.)
+
 ## Error Types (`core/KeryxException.kt`, `core/Result.kt`)
 
 ```kotlin
@@ -123,7 +139,7 @@ Status labels that are not messages (a notification's level, such as "Error") ar
   - **macOS (the SwiftUI app):** the desktop convention — no toast, and the ✓ confirms. A copy of an article the
     reader does not show (a context menu opened from the keyboard or VoiceOver does not select its row) is
     announced by VoiceOver instead.
-- History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for both the background/startup refresh and a manual "Refresh All", via the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
+- History is kept only for the session (not persisted to DB). Only things worth looking back at are recorded: errors and warnings, plus `INFO` for a new app version. **New articles are NOT recorded in the notification center** — `NewArticleNotifier` only feeds the OS notification (tray), because their arrival is already durably visible in the article list and the unread badges. This OS notification fires for a manual refresh ("Refresh All", a pull) always — including one that joined an automatic refresh already running (`RefreshCycleRunner.joinAutomaticCycle`), which then posts that refresh's notification, or the one it held back — and for an automatic one (startup, the periodic loop, Android's `FeedRefreshWorker`, iOS's background refresh) only while the app is not in front (`domain/AppForeground`, checked by `RefreshCycleRunner`) — a user looking at the app already sees the new articles land, so a refresh they did not ask for is not worth interrupting them over (see "Refresh feedback" in [external-spec.md](external-spec.md) §9). Either way it goes through the shared `NewArticleNotifier.notifyIfEnabled` gate (new-article count > 0 and the `notificationEnabled` setting).
 - Bell icon with badge (count). The bell lives in `ArticleListPane`'s header row at every layout width, including the desktop 3-pane steady state (see the `ui-guidelines` skill for the exact rule). `ArticleDetailPane` deliberately has none.
 - Background-update warnings are recorded only in the notification center (because there is no UI context), and produce **no OS notification** — the OS notification channel is reserved for new articles (see above). On Android, `ForegroundAlertSnackbar` (`ui/home/HomeScreen.kt`) therefore also announces every `WARNING`/`ERROR` in a Snackbar the moment it is raised: a badge alone only reaches a user already looking at the pane hosting the bell, and these alerts are raised asynchronously by `runAndroidStartupTasks` and `FeedRefreshWorker`. `INFO` is excluded (a new-version notice is not an alert). Details:
   - Already-announced bookkeeping keys on `core/AppNotification.kt`'s `AlertKey` (level + text + action), not the notification id, which `NotificationCenter.addCoalescing` mints afresh on every recurrence — so a permanently failing sync announces itself once, not once per background attempt. Both go through the same helper so they cannot drift.
@@ -138,6 +154,7 @@ Status labels that are not messages (a notification's level, such as "Error") ar
 | `ShowFeedDetail(feedId)` | Feed gone (410) / URL changed (301/308) | Selects that feed in the feed list (same as clicking it there). At a narrow width the feed list is a modal navigation drawer rather than a pane, and opening it unprompted would be a surprising side effect of a background notification, so this advances to that feed's article list without touching the drawer — see `ui/home/HomePaneLayout.kt`'s `paneForFeedDetail` |
 | `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`); a new-version notification when an in-app update path applies here (`updates`) | Opens the settings dialog on that tab (on Android, directly on that category's screen rather than the category list). The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason, and — when that reason is an authentication failure (`SyncRepository.lastSyncAuthFailed`) — offers the connected provider a **reconnect** action in place of its reset-sync-data one; the `updates` tab auto-checks for an update when opened |
 | `ShowInfoDialog(detail)` | macOS translocated warning | Shows an explanatory dialog (cause + fix) without navigating |
+| `ShowInfoDialog(detail)` | A feed refresh that reached none of the feeds it covered — every one timed out or got no response at all (`RefreshCycleRunner`, via `reportRefreshOutcome`'s `isUnreachable`) — most likely offline. A feed that answered with an error (an HTTP status, 404/410, an unreadable body) does not count: checking the connection would not help, and the feed list already flags it. Coalesced, so a refresh that keeps failing stays one entry | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save left the tokens in the plaintext file (`CloudSession`) — `TokenStorage.save()` returned `TokenSaveOutcome.PLAINTEXT_FILE`, because the OS secure credential store was unreachable or (Android) because a secure write succeeded but a stale plaintext copy could not be deleted | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save persisted nothing (`CloudSession`) — neither the secure store nor the plaintext fallback file accepted the write (`TokenSaveOutcome.NOT_PERSISTED`), so the account has to be connected again after a restart | Shows an explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |
@@ -152,8 +169,8 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 
 | Error | Auto-retry | Notification Center |
 | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅ |
-| `FeedParseException` | ❌ | ✅ |
+| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅\*\*\* |
+| `FeedParseException` | ❌ | ✅\*\*\* |
 | `CloudStorageException` | ✅\*\* | ✅ |
 | `SyncConflictException` | ✅ (internal) | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
@@ -167,6 +184,10 @@ plain data classes/enums, `AlertKey` (level + text + action) compares them struc
 \*\* Within one `sync()` call, `repeat(SYNC_MAX_RETRY)` re-loops only on `SyncConflictException`; any other error
 (including `CloudStorageException`) returns immediately. "Auto-retry" here means the next scheduled sync attempt,
 not an in-loop retry.
+
+\*\*\* Not one entry per failed feed — the feed list already flags each failing feed. The bell gets a single
+coalesced `NotificationText.RefreshFailed` warning only when a refresh reached none of its feeds (see the next-action
+table above); a refresh where some feed answered — successfully or with an error — adds nothing.
 
 ## Constants (`core/Constants.kt`, excerpt)
 

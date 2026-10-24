@@ -8,6 +8,9 @@ import SwiftUI
 struct CloudSyncSettingsTab: View {
     let oauthCoordinator: OAuthSessionCoordinator
     let cloudSync: CloudSyncObservable
+    /// Writes the "sync automatically over mobile data" setting (its one setter is
+    /// `PreferencesController.setSyncOnMeteredNetwork`); the switch reads `cloudSync`'s mirror of it.
+    let preferences: PreferencesObservable
 
     @State private var confirmDisconnect: CloudStorageType?
     @State private var confirmReset = false
@@ -39,6 +42,14 @@ struct CloudSyncSettingsTab: View {
                 Text(L("settings_cloud_sync_hint"))
             }
 
+            if showsMeteredSetting {
+                Section {
+                    meteredToggle
+                } footer: {
+                    Text(L("settings_cloud_sync_on_metered_hint"))
+                }
+            }
+
             Section {
                 syncNowButton
             }
@@ -56,6 +67,13 @@ struct CloudSyncSettingsTab: View {
             Text(L("settings_cloud_sync_hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if showsMeteredSetting {
+                meteredToggle
+                Text(L("settings_cloud_sync_on_metered_hint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             syncNowButton
             #endif
@@ -108,6 +126,23 @@ struct CloudSyncSettingsTab: View {
             // (`CloudSyncTab.kt`'s `confirmingSwitchTo` dialog).
             Text(cloudSync.connectedType.map { LF("settings_cloud_switch_confirm_body", $0.brandLabel) } ?? "")
         }
+    }
+
+    /// Only where the platform reports metered networks (iOS — never macOS), and only once a provider
+    /// is connected: without one there is no automatic sync for it to govern. Matches Compose's own
+    /// `CloudSyncTabContent`.
+    private var showsMeteredSetting: Bool {
+        cloudSync.meteredSettingSupported && cloudSync.connectedType != nil
+    }
+
+    private var meteredToggle: some View {
+        Toggle(
+            L("settings_cloud_sync_on_metered"),
+            isOn: Binding(
+                get: { cloudSync.syncOnMeteredNetwork },
+                set: { preferences.controller.setSyncOnMeteredNetwork(enabled: $0) }
+            )
+        )
     }
 
     /// The provider's name leading, actions trailing, with the status and error lines stacked
@@ -224,7 +259,8 @@ struct CloudSyncSettingsTab: View {
     }
 
     /// Priority order: live progress (disconnecting, or the running sync's own phase) — only ever
-    /// non-null for the connected row — then the last-synced subtitle, then nothing. Mirrors
+    /// non-null for the connected row — then a sync deferred for the network, then the last-synced
+    /// subtitle, then nothing. Mirrors
     /// Compose's own `cloudProviderRowStatusText` (`CloudSyncTab.kt`).
     @ViewBuilder
     private func statusLine(for type: CloudStorageType) -> some View {
@@ -236,6 +272,10 @@ struct CloudSyncSettingsTab: View {
                     ProgressView().controlSize(.small)
                     Text(syncPhaseText).font(.caption).foregroundStyle(.secondary)
                 }
+            } else if cloudSync.syncDeferredForNetwork {
+                // An automatic sync is waiting for a network that allows it; "Sync Now" still runs
+                // at once. Compose shows the same notice (`deferredForNetwork`) as its own wrapping line.
+                Text(L("settings_cloud_sync_deferred_network")).font(.caption).foregroundStyle(.secondary)
             } else if let lastSynced = cloudSync.lastSyncedAtText {
                 Text(LF("settings_last_synced", lastSynced)).font(.caption).foregroundStyle(.secondary)
             }
@@ -297,7 +337,6 @@ struct CloudSyncSettingsTab: View {
         case .dropbox: return "settings_dropbox_connect"
         case .googleDrive: return "settings_google_drive_connect"
         case .onedrive: return "settings_onedrive_connect"
-        default: return ""
         }
     }
 
@@ -306,7 +345,6 @@ struct CloudSyncSettingsTab: View {
         case .dropbox: return "settings_dropbox_disconnect"
         case .googleDrive: return "settings_google_drive_disconnect"
         case .onedrive: return "settings_onedrive_disconnect"
-        default: return ""
         }
     }
 }

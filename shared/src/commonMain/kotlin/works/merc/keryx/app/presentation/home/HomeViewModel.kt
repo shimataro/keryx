@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,7 +18,6 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -30,11 +30,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS
 import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
 import works.merc.keryx.app.core.encode
-import works.merc.keryx.app.core.valueOrNull
+import works.merc.keryx.app.core.toDbFlag
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
@@ -56,7 +57,9 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SubscribeOutcome
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.TagRepository
+import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
+import works.merc.keryx.app.presentation.sameListOrBothEmpty
 
 /**
  * How long the article-change signal must stay quiet before an active search re-runs — short
@@ -102,17 +105,37 @@ class HomeViewModel(
     // already has real data instead of flashing empty lists.
     private val started = SharingStarted.Eagerly
 
-    val feeds: StateFlow<List<Feeds>> =
-        feedRepository.watchAllFeeds().stateIn(viewModelScope, started, emptyList())
+    // What [articleListBody] is decided from: small flags, so deciding it never compares a list.
+    // `null` / false until the first DB emission lands, which tells "not loaded yet" apart from
+    // "no feeds".
+    private val hasFeeds = MutableStateFlow<Boolean?>(null)
+    private val articlesLoaded = MutableStateFlow(false)
+    private val _articleListHasRows = MutableStateFlow(false)
+
+    // null until the first DB emission lands; every public view of it reads that as an empty list.
+    // flowOn directly upstream of stateIn, as for the article list: stateIn fuses it into its own
+    // coroutine, so the StateFlow's equality check of each new list — every row, on every feed write
+    // a refresh makes — runs on `dispatcher` rather than the main thread.
+    private val feedsSnapshot: StateFlow<List<Feeds>?> =
+        feedRepository.watchAllFeeds()
+            .onEach { hasFeeds.value = it.isNotEmpty() }
+            .flowOn(dispatcher)
+            .stateIn(viewModelScope, started, null)
+
+    val feeds: StateFlow<List<Feeds>> = DerivedStateFlow(
+        { feedsSnapshot.value.orEmpty() },
+        feedsSnapshot.map { it.orEmpty() },
+        areEquivalent = ::sameListOrBothEmpty,
+    )
 
     /**
      * [feeds], minus the emissions that change only `etag` / `last_modified` / `updated_at`
      * ([feedsStructurallyEqual]) — what a refresh rewrites once per fetched feed without anything on
-     * screen reading it. Consumed by the Apple app, which rebuilds its sidebar, feed lookups and
-     * article rows' feed info from this rather than from every [feeds] emission; the comparison
-     * runs on [dispatcher] instead of reading every field across the Swift bridge on the main
-     * thread. Its `Feeds` may therefore lag [feeds] in those three fields — anything needing the
-     * fresh conditional-request fields (a refresh) must resolve the row from [feeds].
+     * screen reading it. What both UIs render the feed list, the article rows' feed info and every
+     * feed lookup from (the Compose panes and menu bar, and the Apple app's sidebar), so a refresh
+     * that only moves those three fields recomposes / rebuilds nothing; the comparison runs on
+     * [dispatcher] instead of on the main thread. Its `Feeds` may therefore lag [feeds] in those
+     * three fields — which is why [refreshFeed] takes an id and re-reads the row itself.
      */
     val structuralFeeds: StateFlow<List<Feeds>> =
         feeds.distinctUntilChanged(::feedsStructurallyEqual)
@@ -328,75 +351,46 @@ class HomeViewModel(
                 }
         }
 
-    val articles: StateFlow<List<ArticleListRow>> =
+    // null until the first list emission lands — see [feedsSnapshot].
+    private val articlesSnapshot: StateFlow<List<ArticleListRow>?> =
         combine(
             filteredArticles, unreadOnly, _newestFirst, _pinnedReadStates, _pinnedUnstarredArticles,
         ) { list, unread, newest, pinnedReadStates, pinnedUnstarred ->
-            // Nothing pinned is the common case, and then neither a resolved copy nor the id set has
-            // a reader — skip building either rather than touching every row on every emission.
-            val resolvedList: List<ArticleListRow>
-            val extra: List<ArticleListRow>
-            if (pinnedReadStates.isEmpty() && pinnedUnstarred.isEmpty()) {
-                resolvedList = list
-                extra = emptyList()
-            } else {
-                // A pinned article can already be present in `list` — its own optimistic write just
-                // hasn't reached the raw query result yet (dbWriteDispatcher runs it asynchronously).
-                // Without this, the row would show the pre-toggle field for that window, exactly the
-                // gap the pin exists to paper over (e.g. is_starred still 1 for an article just
-                // unstarred while browsing Starred). Per-field resolution (rather than picking one
-                // map's snapshot outright) covers an article pinned in both at once, e.g. read and
-                // then unstarred while browsing Starred + unread-only.
-                //
-                // Only a pinned row whose resolved fields differ is replaced; every other row keeps
-                // its instance, and once the writes have landed the raw list itself is returned.
-                var resolved: MutableList<ArticleListRow>? = null
-                val presentPinnedIds = HashSet<String>()
-                list.forEachIndexed { index, row ->
-                    val readStatePin = pinnedReadStates[row.id]
-                    val unstarPin = pinnedUnstarred[row.id]
-                    if (readStatePin == null && unstarPin == null) return@forEachIndexed
-                    presentPinnedIds += row.id
-                    val isRead = readStatePin?.is_read ?: row.is_read
-                    val isStarred = unstarPin?.is_starred ?: row.is_starred
-                    if (isRead != row.is_read || isStarred != row.is_starred) {
-                        val target = resolved ?: list.toMutableList().also { resolved = it }
-                        target[index] = row.copy(is_read = isRead, is_starred = isStarred)
-                    }
-                }
-                resolvedList = resolved ?: list
-                // An unread pin only corrects a row the raw query still returns — while its write is in
-                // flight the row is still there, as read — and never re-adds one: a row the filter no
-                // longer returns (unstarred, moved out of the folder/tag) must leave rather than linger.
-                // That includes the selection: marked unread after leaving the query, it leaves the list
-                // while the reader keeps showing it.
-                val missingPinnedIds = (pinnedReadStates.readPins().keys + pinnedUnstarred.keys) - presentPinnedIds
-                extra = missingPinnedIds.map { id ->
-                    // A read-state pin, when there is one, already carries the row's read state.
-                    val base = pinnedReadStates[id] ?: pinnedUnstarred.getValue(id)
-                    pinnedUnstarred[id]?.let { base.copy(is_starred = it.is_starred) } ?: base
-                }
-            }
-            val merged = if (extra.isEmpty()) resolvedList else (resolvedList + extra).sortedWith(
-                compareByDescending<ArticleListRow> { it.published_at ?: 0L }
-                    .thenByDescending { it.created_at }
-                    .thenByDescending { it.id }
-            )
-            // Independent of the resolution above: a row with a read pin was resolved to is_read == 1,
-            // so this OR is what keeps a just-marked-read article visible for its grace period under
-            // unread-only — id membership, not staleness, is what this needs. A row with an unread pin
-            // was resolved to is_read == 0 and passes the first clause.
-            val filtered = if (unread) {
-                merged.filter { it.is_read == 0L || it.id in pinnedReadStates }
-            } else {
-                merged
-            }
-            // asReversed() is a view, not a second full copy: `filtered` is freshly derived
-            // per emission and never mutated afterwards, so it reads identically.
-            if (newest) filtered else filtered.asReversed()
+            resolvePinnedArticles(list, unread, newest, pinnedReadStates, pinnedUnstarred)
         }
+            // Before flowOn, not after: stateIn fuses a flowOn directly upstream of it into its own
+            // coroutine, and any operator in between would put a channel hop back.
+            .onEach {
+                articlesLoaded.value = true
+                _articleListHasRows.value = it.isNotEmpty()
+            }
             .flowOn(dispatcher)
-            .stateIn(viewModelScope, started, emptyList())
+            .stateIn(viewModelScope, started, null)
+
+    val articles: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
+        { articlesSnapshot.value.orEmpty() },
+        articlesSnapshot.map { it.orEmpty() },
+        areEquivalent = ::sameListOrBothEmpty,
+    )
+
+    /**
+     * Whether the article list the ViewModel holds has any rows — a flag a UI collects alongside
+     * [articles], so it can tell "still catching up" from "no articles" ([articleListCatchingUp]).
+     * A flow rather than a call that reads the current value: a UI must recompose when this changes,
+     * and a value read in passing never makes it — the last change (to `false`, after rows that
+     * never reached the UI) would leave the UI blank with no later emission to wake it.
+     */
+    val articleListHasRows: StateFlow<Boolean> = _articleListHasRows.asStateFlow()
+
+    /**
+     * What the article list shows in place of its rows before and without them — see
+     * [articleListBody]. [ArticleListBody.Pending] only until the feed list and the article list
+     * have each loaded once at launch; a filter switch never returns to it.
+     */
+    val articleListBody: StateFlow<ArticleListBody> = DerivedStateFlow(
+        { articleListBody(hasFeeds.value, articlesLoaded.value) },
+        combine(hasFeeds, articlesLoaded, ::articleListBody),
+    )
 
     // The article list's viewport as of its last markArticlesSeen report — what newArticleCount
     // measures "the fresh side" against. null until the list first reports.
@@ -451,23 +445,31 @@ class HomeViewModel(
     }
 
     private val _selectedArticle = MutableStateFlow<Articles?>(null)
-    val selectedArticle: StateFlow<Articles?> = _selectedArticle
 
-    /** The display title of the feed that owns the currently selected article, if any. */
-    val selectedFeedName: StateFlow<String?> = combine(feeds, selectedArticle) { feeds, article ->
-        article?.let { a -> feeds.find { it.id == a.feed_id }?.displayTitle() }
-    }.stateIn(viewModelScope, started, null)
-
-    /** The favicon URL of the feed that owns the currently selected article, if any. */
-    val selectedFeedFaviconUrl: StateFlow<String?> = combine(feeds, selectedArticle) { feeds, article ->
-        article?.let { a -> feeds.find { it.id == a.feed_id }?.favicon_url }
-    }.stateIn(viewModelScope, started, null)
+    /**
+     * The selected article, fully loaded (body included). It catches up with [selectedArticleId] only
+     * once [selectArticle]'s body lookup returns, so it is still the previous article until then —
+     * what the reader shows is [readerContent], and what the toolbar and every other per-selection
+     * action act on is [selectedArticleRow].
+     *
+     * Not a source for any UI, so not part of the API the UIs see: reading it for the toolbar or a
+     * shortcut is what made those act on the previous article while a selection's body loaded.
+     * Kept `internal` for this module's tests of the hydration.
+     */
+    internal val selectedArticle: StateFlow<Articles?> = _selectedArticle
 
     /**
      * Explicit read-state intents made while a [selectArticle] hydration is still loading — see
      * [SelectionReadIntents]. Recorded by [setRead] and [markAllRead].
      */
     private val readIntents = SelectionReadIntents()
+
+    /**
+     * The star counterpart of [readIntents] (its Boolean means "starred"), recorded by [setStarred]: a
+     * hydration's lookup runs on [dispatcher], outside [dbWriteDispatcher]'s FIFO, so it can read the
+     * row from before a star toggled while it was waiting, and this is what it lays back over it.
+     */
+    private val starIntents = SelectionReadIntents()
 
     /** Backing state of [selectionCursorId], kept observable for [selectedArticleShownUnread]. */
     private val _selectionCursor = MutableStateFlow<String?>(null)
@@ -480,7 +482,86 @@ class HomeViewModel(
     private val _cursorIntentSeq = MutableStateFlow(Long.MAX_VALUE)
 
     /**
-     * The list cursor for keyboard navigation.
+     * The list row the newest [selectArticle] was called with (as read, since selecting reads it), with
+     * the optimistic read/star writes made on it since — what [selectedArticleRow] and [readerContent]
+     * show for the selection until its body has loaded. Cleared once it has, and by [selectFilter].
+     */
+    private val _pendingSelectedRow = MutableStateFlow<ArticleListRow?>(null)
+
+    /**
+     * The article whose header [readerContent] shows while its body is still loading: set by
+     * [hydrateSelection]'s grace timer once [READER_HEADER_FIRST_GRACE_MS] has passed without the body,
+     * cleared once it lands, by [selectFilter], and by a tombstoned lookup.
+     */
+    private val _headerArticleId = MutableStateFlow<String?>(null)
+
+    /**
+     * The id of the article the user selected, updated the instant [selectArticle] is called — before
+     * its body has loaded, unlike [selectedArticle]. What the article list highlights and scrolls to,
+     * what the pager follows, and what a URL copy's ✓ is matched against.
+     */
+    val selectedArticleId: StateFlow<String?> = _selectionCursor.asStateFlow()
+
+    private val _selectionRevealRequests = MutableStateFlow(0)
+
+    /**
+     * Counts the user's selections that move to another article — one per such [selectArticle],
+     * whatever route made it (a click, J/K, a notification); choosing the article that is already
+     * selected is not counted — so the article list scrolls the selection into view when this changes, and
+     * not whenever [selectedArticleId] does. That id also moves without the user acting: a selection
+     * whose row turns out to have been tombstoned by a sync merge hands the cursor back to the
+     * article before it, and the list must not scroll back to that article on its own
+     * (external-spec §9, "Nothing happens unprompted").
+     */
+    val selectionRevealRequests: StateFlow<Int> = _selectionRevealRequests.asStateFlow()
+
+    /**
+     * The selected article's list row, current the instant [selectArticle] is called: the loaded
+     * article once its body has landed, the row it was selected with until then (see
+     * [resolveSelectedRow]), with every optimistic read/star write made on it either way. What the
+     * reader's toolbar (star, open, copy, share), the menu bar and the keyboard shortcuts act on, so
+     * none of them can act on — or show the feed of — the previous article while the body loads.
+     * The read/unread button's own state is [selectedArticleShownUnread], never this row's `is_read`.
+     */
+    val selectedArticleRow: StateFlow<ArticleListRow?> = DerivedStateFlow(
+        { resolveSelectedRow(_selectionCursor.value, _selectedArticle.value, _pendingSelectedRow.value) },
+        combine(_selectionCursor, _selectedArticle, _pendingSelectedRow, ::resolveSelectedRow),
+    )
+
+    /**
+     * What the single (non-pager) reader shows — see [resolveReaderContent]. Normally the previous
+     * article stays until the new one's body has loaded and then the new one is shown in full, a
+     * single document load; only a lookup that outlasts [READER_HEADER_FIRST_GRACE_MS] (one waiting
+     * out a sync merge's or an FTS rebuild's write lock) shows the new article's header first.
+     */
+    val readerContent: StateFlow<ReaderContent> = DerivedStateFlow(
+        { resolveReaderContent(_selectionCursor.value, _selectedArticle.value, _pendingSelectedRow.value, _headerArticleId.value) },
+        combine(_selectionCursor, _selectedArticle, _pendingSelectedRow, _headerArticleId, ::resolveReaderContent),
+    )
+
+    /** The feed [feedId] names among [feeds], if any. */
+    private fun selectedFeed(feeds: List<Feeds>, feedId: String?): Feeds? = feedId?.let { id -> feeds.find { it.id == id } }
+
+    /**
+     * The feed of [selectedArticleRow] — not of [selectedArticle] — so the reader's toolbar never names
+     * the previous article's feed while the new one's body loads.
+     */
+    private val selectedFeedId: Flow<String?> = selectedArticleRow.map { it?.feed_id }.distinctUntilChanged()
+
+    /** The display title of the feed that owns the currently selected article, if any. */
+    val selectedFeedName: StateFlow<String?> = selectedFeedField { it.displayTitle() }
+
+    /** The favicon URL of the feed that owns the currently selected article, if any. */
+    val selectedFeedFaviconUrl: StateFlow<String?> = selectedFeedField { it.favicon_url }
+
+    /** One field of the feed that owns the currently selected article (see [selectedFeedId]). */
+    private fun <T> selectedFeedField(pick: (Feeds) -> T?): StateFlow<T?> = DerivedStateFlow(
+        { selectedFeed(structuralFeeds.value, selectedArticleRow.value?.feed_id)?.let(pick) },
+        combine(structuralFeeds, selectedFeedId) { feeds, id -> selectedFeed(feeds, id)?.let(pick) },
+    )
+
+    /**
+     * The list cursor for keyboard navigation — the backing of [selectedArticleId].
      *
      * [selectArticle] loads the article body asynchronously, so [_selectedArticle] lags the user's
      * intent; this is updated synchronously instead, which keeps a held arrow key advancing at
@@ -502,7 +583,8 @@ class HomeViewModel(
      * Whether the reader's read/unread button should show the unread state (see [isShownUnread]).
      * An explicit unread made on the incoming article while its body loads (read back from [readIntents], the
      * same record the hydration applies, so every route that records one is covered), or a restored unread
-     * article, is shown as soon as it applies.
+     * article, is shown as soon as it applies. The button's one source — never [selectedArticleRow]'s
+     * `is_read`.
      */
     val selectedArticleShownUnread: StateFlow<Boolean> =
         combine(_selectedArticle, _selectionCursor, _cursorIntentSeq, readIntents.state) { article, cursor, seq, intents ->
@@ -556,7 +638,7 @@ class HomeViewModel(
             _searchRefreshTrigger,
             // Re-run search whenever the articles table changes (read/star toggles, refresh, sync
             // merge) so results stay in sync — search() reads a raw-SQL FTS index that SQLDelight
-            // doesn't auto-notify. search() absorbs the transient articles_fts-dropped case itself.
+            // doesn't auto-notify. search() absorbs an unavailable index (absent before the first startup catch-up) itself.
             // Debounced: a refresh commits once per fetched feed, and each commit would otherwise
             // re-run the whole FTS query while a search is showing.
             articleChangeSignal.debounce(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS),
@@ -584,30 +666,7 @@ class HomeViewModel(
         combine(
             _rawSearchResults, unreadOnly, _pinnedReadStates, _pinnedUnstarredArticles,
         ) { snapshot, unread, pinnedReadStates, pinnedUnstarred ->
-            val raw = snapshot.results
-            // Apply only the optimistic read-state from pinned (never the whole snapshot): other
-            // fields — notably is_starred — must come from the fresh re-search, or starring an
-            // already-read result would be hidden by the stale pinned copy. Field-wise merge of
-            // `is_read` from `pinnedReadStates` and `is_starred` from `pinnedUnstarred`, matching the
-            // merge in the `articles` flow above.
-            val merged = raw.map { result ->
-                val readStatePin = pinnedReadStates[result.article.id]
-                val unstarPin = pinnedUnstarred[result.article.id]
-                when {
-                    readStatePin != null && unstarPin != null -> result.copy(
-                        article = result.article.copy(
-                            is_read = readStatePin.is_read,
-                            is_starred = unstarPin.is_starred,
-                        ),
-                    )
-                    readStatePin != null -> result.copy(article = result.article.copy(is_read = readStatePin.is_read))
-                    unstarPin != null -> result.copy(article = result.article.copy(is_starred = unstarPin.is_starred))
-                    else -> result
-                }
-            }
-            // As in `articles`: a read pin keeps its row by membership, an unread pin's row passes on
-            // its own resolved is_read == 0.
-            if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedReadStates } else merged
+            resolvePinnedSearchResults(snapshot.results, unread, pinnedReadStates, pinnedUnstarred)
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
     /**
@@ -620,7 +679,7 @@ class HomeViewModel(
      */
     val pagerArticles: StateFlow<List<ArticleListRow>> =
         combine(searchActive, articles, searchResults) { active, rows, results ->
-            if (active) results.map { it.article } else rows
+            displayedRows(active, rows, results)
         }
             .flowOn(dispatcher)
             // The one flow here that is not `started` (Eagerly): only the reader's pager collects
@@ -638,8 +697,8 @@ class HomeViewModel(
      * whether that re-trim currently has anything left to do.
      */
     val canHideRead: StateFlow<Boolean> =
-        combine(unreadOnly, searchActive, articles, searchResults, _selectedArticle) { unread, active, rows, results, selected ->
-            unread && hasHideableRead(if (active) results.map { it.article } else rows, selected?.id)
+        combine(unreadOnly, searchActive, articles, searchResults, _selectionCursor) { unread, active, rows, results, selectedId ->
+            unread && hasHideableRead(displayedRows(active, rows, results), selectedId)
         }.stateIn(viewModelScope, started, false)
 
     /** Runs [ArticleListTopBar]'s "hide read" action — see [canHideRead]. */
@@ -693,10 +752,7 @@ class HomeViewModel(
         val expanded = expansion.toggleTag(tagId)
         // A collapsed tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row.
-        val instance = _selectedRowInstance.value
-        if (!expanded && instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
-            _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
-        }
+        if (!expanded) fallBackFromTagRow(tagId)
     }
 
     /**
@@ -776,6 +832,8 @@ class HomeViewModel(
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null
+        _pendingSelectedRow.value = null
+        _headerArticleId.value = null
         _pinnedReadStates.value = emptyMap()
         _pinnedUnstarredArticles.value = emptyMap()
         // Cancels any selection whose body is still loading: without this, a hydration in flight
@@ -847,10 +905,23 @@ class HomeViewModel(
         // deletion's last-write-wins runs on deleted_updated_at, which this write never touches, so
         // it cannot revive or otherwise disturb the deletion.
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.markAsRead(article.id) }
+        // Set before the cursor, so selectedArticleRow never resolves the new cursor against the
+        // previous selection's row.
+        _pendingSelectedRow.value = article.copy(is_read = 1L)
         // Synchronous, so keyboard navigation always steps from where the user actually is rather
         // than from whatever the last completed hydration left in _selectedArticle.
+        val movedSelection = selectionCursorId != article.id
         selectionCursorId = article.id
+        // After the cursor, so a collector that sees the new count already sees the new id. Only a
+        // selection that moves to another article is a request: choosing the one already selected
+        // (a second click, a right-click) leaves the list where it is, as it always has.
+        if (movedSelection) _selectionRevealRequests.update { it + 1 }
         _cursorIntentSeq.value = readIntents.currentSeq
+        // A header already standing in for a body still loading (a write lock is holding the
+        // lookups) moves straight to this selection, rather than the reader going back to the
+        // article before it for a new grace period. Otherwise this selection gets its own grace.
+        _headerArticleId.value =
+            article.id.takeIf { _headerArticleId.value != null && _selectedArticle.value?.id != it }
         // Selecting reads the article (its write is already enqueued above), so reselecting the one already
         // on screen shows it read at once rather than once its body has reloaded — otherwise the reader
         // toolbar's read/unread button would start out unread and then flip (which iOS animates).
@@ -875,11 +946,13 @@ class HomeViewModel(
         // first suspension even in an already-cancelled scope, so the `finally` — and with it end() —
         // always runs, keeping the two paired.
         val seqAtSelect = readIntents.begin()
+        val starSeqAtSelect = starIntents.begin()
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
-                hydrateSelection(article, token, epoch, pinnedAtSelect, seqAtSelect)
+                hydrateSelection(article, token, epoch, pinnedAtSelect, seqAtSelect, starSeqAtSelect)
             } finally {
                 readIntents.end()
+                starIntents.end()
             }
         }
     }
@@ -891,6 +964,32 @@ class HomeViewModel(
         epoch: Int,
         pinnedAtSelect: Boolean,
         seqAtSelect: Long,
+        starSeqAtSelect: Long,
+    ) {
+        // Shows this article's header in the reader if its body has not landed within the grace
+        // period. Cancelled in the `finally` below on every way out, and re-checks on firing that this
+        // is still the newest selection, still on the cursor and still not loaded.
+        val headerTimer = viewModelScope.launch {
+            delay(READER_HEADER_FIRST_GRACE_MS)
+            if (token == latestSelectionToken && selectionCursorId == article.id && _selectedArticle.value?.id != article.id) {
+                _headerArticleId.value = article.id
+            }
+        }
+        try {
+            applyHydratedSelection(article, token, epoch, pinnedAtSelect, seqAtSelect, starSeqAtSelect)
+        } finally {
+            headerTimer.cancel()
+        }
+    }
+
+    /** [hydrateSelection]'s body lookup, and the selection it applies once that returns. */
+    private suspend fun applyHydratedSelection(
+        article: ArticleListRow,
+        token: Long,
+        epoch: Int,
+        pinnedAtSelect: Boolean,
+        seqAtSelect: Long,
+        starSeqAtSelect: Long,
     ) {
         // The list row carries no body, so the detail pane's copy is loaded here — one PK lookup on
         // selection, in place of loading every article's body on every list emission. Off the UI
@@ -906,8 +1005,11 @@ class HomeViewModel(
         // this hydration's to touch.
         if (full == null || full.deleted_at != null) {
             if (pinnedAtSelect && epoch == browsingEpoch) _pinnedReadStates.update { it - article.id }
-            // Resume navigating from what is actually on screen, not from the dead article.
+            // Resume navigating from what is actually on screen, not from the dead article — and stop
+            // standing in for it in the reader and the toolbar.
             if (selectionCursorId == article.id) selectionCursorId = _selectedArticle.value?.id
+            if (_headerArticleId.value == article.id) _headerArticleId.value = null
+            if (_pendingSelectedRow.value?.id == article.id) _pendingSelectedRow.value = null
             return
         }
         // Nothing is selected any more (a filter switch, or an earlier hydration finding its own
@@ -920,8 +1022,18 @@ class HomeViewModel(
         // its own DB write was enqueued after selectArticle's markAsRead, so the DB agrees, and that
         // intent already updated the pin itself.
         val readNow = readIntents.since(article.id, seqAtSelect) ?: true
-        // Optimistic: show the intended read state immediately; its persist already went out.
-        _selectedArticle.value = full.copy(is_read = if (readNow) 1L else 0L)
+        // Likewise a star toggled since the selection, whose write the lookup may have read the row
+        // ahead of.
+        val starredNow = starIntents.since(article.id, starSeqAtSelect)
+        // Optimistic: show the intended read/star state immediately; its persist already went out.
+        _selectedArticle.value = full.copy(
+            is_read = readNow.toDbFlag(),
+            is_starred = starredNow?.toDbFlag() ?: full.is_starred,
+        )
+        // After the article itself, so the reader goes from the header (if one was showing) straight
+        // to the full article, and selectedArticleRow never resolves to nothing in between.
+        _headerArticleId.value = null
+        _pendingSelectedRow.value = null
         settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
     }
 
@@ -963,7 +1075,18 @@ class HomeViewModel(
      * @return Search-result rows while [searchActive], or the filtered article rows otherwise.
      */
     fun currentArticles(): List<ArticleListRow> =
-        if (searchActive.value) searchResults.value.map { it.article } else articles.value
+        displayedRows(searchActive.value, articles.value, searchResults.value)
+
+    /**
+     * The rows the article list shows: the search results' articles while [searchActive], the
+     * filter's own [rows] otherwise. The one resolution [currentArticles], [pagerArticles] and
+     * [canHideRead] share, so they can never disagree.
+     */
+    private fun displayedRows(
+        searchActive: Boolean,
+        rows: List<ArticleListRow>,
+        results: List<ArticleSearchResult>,
+    ): List<ArticleListRow> = if (searchActive) results.map { it.article } else rows
 
     /**
      * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end
@@ -1024,10 +1147,11 @@ class HomeViewModel(
         // lands the raw query still says "read", and an unread-only list that had lost the pin would
         // drop the row for that window — the reader's pager then collapses to the selected article and
         // rebuilds every page it holds, so the open article visibly reloads. Same reasoning as setStarred.
-        _pinnedReadStates.update { it + (article.id to article.copy(is_read = if (read) 1L else 0L)) }
+        _pinnedReadStates.update { it + (article.id to article.copy(is_read = read.toDbFlag())) }
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_read = if (read) 1L else 0L) }
+            _selectedArticle.update { it?.copy(is_read = read.toDbFlag()) }
         }
+        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_read = read.toDbFlag()) else it }
     }
 
     /**
@@ -1042,11 +1166,18 @@ class HomeViewModel(
      * never lands on a different article than the one the button is drawn for and a second tap undoes the first.
      */
     fun toggleReadSelected() {
-        val cursor = selectionCursorId ?: return
-        val target = currentArticles().firstOrNull { it.id == cursor }
-            ?: _selectedArticle.value?.takeIf { it.id == cursor }?.toListRow()
-            ?: return
+        val target = cursorArticle() ?: return
         setRead(target, read = isSelectedArticleShownUnread())
+    }
+
+    /**
+     * The article the selection cursor points at, as the list currently shows it — or, once it has
+     * left the list, as [selectedArticleRow] has it. The target of every "…selected" toggle, so none
+     * can land on the previous article while a newly selected one's body is still loading.
+     */
+    private fun cursorArticle(): ArticleListRow? {
+        val cursor = selectionCursorId ?: return null
+        return currentArticles().firstOrNull { it.id == cursor } ?: selectedArticleRow.value?.takeIf { it.id == cursor }
     }
 
     /**
@@ -1081,24 +1212,34 @@ class HomeViewModel(
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
         if (_filter.value == ArticleFilter.Starred) {
-            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = if (starred) 1L else 0L)) }
+            _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = starred.toDbFlag())) }
         } else if (starred) {
             _pinnedUnstarredArticles.update { it - article.id }
         }
         // A row the raw query no longer returns is drawn from its read pin (the `articles` combine's
         // extra rows), so that pin carries the star too. A fresh instance, as for any user write.
         _pinnedReadStates.update { pins ->
-            pins[article.id]?.let { pins + (article.id to it.copy(is_starred = if (starred) 1L else 0L)) } ?: pins
+            pins[article.id]?.let { pins + (article.id to it.copy(is_starred = starred.toDbFlag())) } ?: pins
         }
+        starIntents.record(article.id, starred)
         if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_starred = if (starred) 1L else 0L) }
+            _selectedArticle.update { it?.copy(is_starred = starred.toDbFlag()) }
         }
+        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_starred = starred.toDbFlag()) else it }
     }
 
     /**
-     * Toggles the starred state of the selected article.
+     * Toggles the starred state of the selected article — every route to it (the reader toolbar, the
+     * Article menu) on both UIs. Like [toggleReadSelected], the target is the article the cursor points
+     * at, even while its body is still loading, and the result is the opposite of the star the toolbar
+     * shows for it ([selectedArticleRow], which carries every optimistic star write), so a second tap
+     * undoes the first.
      */
-    fun toggleStarSelected() = _selectedArticle.value?.let { toggleStar(it.toListRow()) }
+    fun toggleStarSelected() {
+        val target = cursorArticle() ?: return
+        val shownStarred = selectedArticleRow.value?.takeIf { it.id == target.id }?.is_starred ?: target.is_starred
+        setStarred(target, starred = shownStarred == 0L)
+    }
 
     /**
      * Marks unread articles in the current filter as read.
@@ -1170,6 +1311,9 @@ class HomeViewModel(
             val newPins = visibleUnread.associate { it.id to it.copy(is_read = 1L) } +
                 listOfNotNull(updatedSelected).associate { it.id to it.toListRow() }
             if (updatedSelected != null) _selectedArticle.value = updatedSelected
+            // A selection still loading its body is marked too: markAllAsRead covers it (it is in the
+            // filter), and under search it is if it is among idsToMark.
+            _pendingSelectedRow.update { row -> if (row != null && (!active || row.id in idsToMark)) row.copy(is_read = 1L) else row }
             // Applied in one update so it composes with a concurrent reconcile pass rather than writing
             // back a snapshot taken before that pass dropped a pin. The new pins stay fresh instances:
             // they are new writes, which that pass's identity check must not judge.
@@ -1193,15 +1337,12 @@ class HomeViewModel(
         if (value) {
             retrimPinnedReadStates()
         }
-        when {
-            _filter.value == ArticleFilter.Starred -> {
-                _unreadOnlyStarred.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
-            }
-            else -> {
-                _unreadOnly.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
-            }
+        if (_filter.value == ArticleFilter.Starred) {
+            _unreadOnlyStarred.value = value
+            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
+        } else {
+            _unreadOnly.value = value
+            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
         }
     }
 
@@ -1215,39 +1356,38 @@ class HomeViewModel(
      * the selection, which that pass refreshes only after the pin, and whose copy its identity check
      * would also mistake for a fresh user write (see [retrimmedSelectionPin]).
      *
-     * @param verifyAlive Whether to check the selection is still alive first — a blocking DB read on
-     *   the caller's (main) thread. A tombstone a sync merge wrote does not necessarily tick the
+     * @param verifyAlive Whether to check the selection is still alive — a DB read, run afterwards on
+     *   [dbWriteDispatcher] rather than on the caller's thread, which then drops the selection's pin
+     *   if it was tombstoned. A tombstone a sync merge wrote does not necessarily tick the
      *   reconcile, so the refresh/sync edges and the user's own re-trims check; mark-all-read under
      *   Starred, which never did, skips it.
      */
     private fun retrimPinnedReadStates(verifyAlive: Boolean = true) {
         val before = _pinnedReadStates.value
-        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
-        // step re-adds any read-pinned id missing from the repository result, which would put
-        // deleted content back into the visible list.
         val candidate = selectionReadPinCandidate(before)
-            ?.takeIf { !verifyAlive || it.id in articleRepository.aliveArticleFlags(listOf(it.id)) }
+        var keptPin: ArticleListRow? = null
         _pinnedReadStates.update { current ->
             val kept = current.unreadPins()
             if (candidate == null) return@update kept
             val pin = retrimmedSelectionPin(before[candidate.id], current[candidate.id], candidate)
+            keptPin = pin
             if (pin == null) kept else kept + (candidate.id to pin)
         }
+        val pin = keptPin
+        if (!verifyAlive || candidate == null || pin == null) return
+        // A selected row tombstoned by a sync merge must not stay read-pinned: the `articles` merge
+        // step re-adds any read-pinned id missing from the repository result, which would put
+        // deleted content back into the visible list. Checked after the re-trim rather than before
+        // it, so the caller's (main) thread never waits on the DB — a write lock held by a merge
+        // would stall it for as long as the merge runs. Read through dbWriteDispatcher, behind any
+        // write already queued there. Only the very pin kept above is dropped: one a later
+        // selection or reconcile pass replaced since belongs to that newer state.
+        viewModelScope.launch {
+            val alive = withContext(dbWriteDispatcher) { candidate.id in articleRepository.aliveArticleFlags(listOf(candidate.id)) }
+            if (alive) return@launch
+            _pinnedReadStates.update { current -> if (current[candidate.id] === pin) current - candidate.id else current }
+        }
     }
-
-    /**
-     * The unread pins among a read-state pin map. Always kept by a re-trim: an unread pin never keeps
-     * a row on screen by membership (its row passes the unread-only filter on its own is_read == 0),
-     * but until its "mark as unread" write lands the raw query still says read, and dropping it would
-     * make an unread-only list lose the row for that window (see setRead).
-     */
-    private fun Map<String, ArticleListRow>.unreadPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 0L }
-
-    /**
-     * The read pins among a read-state pin map — the only ones that keep a row on screen by
-     * membership, and so the only ones the `articles` combine re-adds a row for.
-     */
-    private fun Map<String, ArticleListRow>.readPins(): Map<String, ArticleListRow> = filterValues { it.is_read == 1L }
 
     /**
      * The article the user has selected: the cursor while a newer selection is still loading its body
@@ -1428,7 +1568,7 @@ class HomeViewModel(
     private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Folder -> f.folderId
         is ArticleFilter.Feed -> feeds.value.firstOrNull { it.id == f.feedId }?.folder_id
-        else -> null
+        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Tag -> null
     }
 
     /**
@@ -1439,7 +1579,7 @@ class HomeViewModel(
      */
     private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
         is ArticleFilter.Feed -> f.feedId
-        else -> null
+        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Folder, is ArticleFilter.Tag -> null
     }
 
     /**
@@ -1462,7 +1602,9 @@ class HomeViewModel(
     private fun tagIdForNewFeed(): String? = when (val selection = _selectedRowInstance.value) {
         is FeedListRowSelection.Tag -> selection.tagId
         is FeedListRowSelection.FeedInTag -> selection.tagId
-        else -> null
+        FeedListRowSelection.All, FeedListRowSelection.Starred,
+        is FeedListRowSelection.FeedInFolderGroup, is FeedListRowSelection.Folder,
+        -> null
     }
 
     /**
@@ -1486,19 +1628,38 @@ class HomeViewModel(
      */
     val activity: StateFlow<ActivitySnapshot> = activityCenter.activity
 
+    /**
+     * The feeds whose row shows the refreshing indicator: those being refreshed by any route — see
+     * [FeedRepository.refreshingFeedIds].
+     */
+    val refreshingFeedIds: StateFlow<Set<String>> =
+        feedRepository.refreshingFeedIds.stateIn(viewModelScope, started, emptySet())
+
+    /**
+     * The collapsed folders whose row shows the refreshing indicator, since their feeds' own rows
+     * are hidden — see [collapsedFoldersRefreshing].
+     */
+    val refreshingFolderIds: StateFlow<Set<String>> =
+        combine(feeds, refreshingFeedIds, collapsedFolderIds, ::collapsedFoldersRefreshing)
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, started, emptySet())
+
     // Refresh / sync actions live in their own class; this ViewModel only delegates to it.
     private val refreshController = HomeRefreshController(
         scope = viewModelScope,
         dispatcher = dispatcher,
         runner = refreshCycleRunner,
-        feedRepository = feedRepository,
         activityCenter = activityCenter,
         currentFilter = { _filter.value },
         retrimPins = ::retrimPinnedReadStates,
     )
 
-    /** Refreshes the specified feed. See [HomeRefreshController.refreshFeed]. */
-    fun refreshFeed(feed: Feeds) = refreshController.refreshFeed(feed)
+    /**
+     * Refreshes the feed [feedId] names, from its current row. Takes the id rather than a row so no
+     * caller can hand over a copy whose conditional-request fields lag behind (as
+     * [structuralFeeds]' rows do). See [HomeRefreshController.refreshFeed].
+     */
+    fun refreshFeed(feedId: String) = refreshController.refreshFeed(feedId)
 
     /**
      * Refreshes all feeds, notifies about newly available articles when enabled, and synchronizes
@@ -1511,6 +1672,12 @@ class HomeViewModel(
      * [HomeRefreshController.pullRefreshingFilters].
      */
     val pullRefreshingFilters: StateFlow<Set<ArticleFilter>> get() = refreshController.pullRefreshingFilters
+
+    /**
+     * What the refreshes the user started (pull, Refresh All, a feed's Refresh) are doing — the iOS
+     * toolbar status. See [ManualRefreshStatus].
+     */
+    val manualRefreshStatus: StateFlow<ManualRefreshStatus> get() = refreshController.manualRefreshStatus
 
     /** Pull-to-refresh on the current selection. See [HomeRefreshController.pullToRefresh]. */
     fun pullToRefresh() = refreshController.pullToRefresh()
@@ -1584,11 +1751,16 @@ class HomeViewModel(
         if (_filter.value == ArticleFilter.Tag(id)) selectFilter(ArticleFilter.All)
         // A deleted tag no longer renders its nested feed rows, so a selection on one of them
         // falls back to that feed's canonical row (a no-op if the branch above already reset it).
+        fallBackFromTagRow(id)
+        expansion.forgetTag(id)
+    }
+
+    /** Moves a selection on a feed row nested under [tagId] to that feed's canonical row. */
+    private fun fallBackFromTagRow(tagId: String) {
         val instance = _selectedRowInstance.value
-        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == id) {
+        if (instance is FeedListRowSelection.FeedInTag && instance.tagId == tagId) {
             _selectedRowInstance.value = FeedListRowSelection.FeedInFolderGroup(instance.feedId)
         }
-        expansion.forgetTag(id)
     }
 
     /**

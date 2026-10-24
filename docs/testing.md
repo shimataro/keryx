@@ -5,7 +5,7 @@
 ## Structure
 
 - `commonTest/` — Pure logic and Ktor `MockEngine` tests (parsers, fetchers, URL resolvers, OPML, Dropbox storage/auth, local settings). Runs on the desktop target, so `expect` declarations resolve to desktop `actual`s (`AppDirs` available with temp directories; `FileIO` is plain kotlinx-io).
-- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. The same module also holds `HoldingDispatcher.kt`, a coroutine dispatcher that can hold dispatched blocks and release them on demand, used by controller and ViewModel cancellation tests (`OpmlTransferControllerTest`, `CloudSyncControllerTest`, `SettingsViewModelTest`) to keep a cancelled coroutine from making progress while they observe who waits for it, and `AwaitCondition.kt` (`awaitCondition` / `awaitConditionBlocking`, timing out after `AWAIT_CONDITION_TIMEOUT_MS`), which polls a condition in real time on `Dispatchers.Default` — so it can wait for work on a real dispatcher (an HTTP engine's threads, `Dispatchers.Default`) that `runTest`'s virtual-time scheduler cannot advance; use it instead of an ad-hoc `delay`/`Thread.sleep` loop. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
+- `desktopTest/` — Tests requiring the actual SQLDelight driver (`JdbcSqliteDriver`) (schema, article upsert, ATTACH merge). Helpers are in `DbTestSupport.kt` (`inMemoryDb()`, `fileDb()`, `insertFeed()`), in the `:testing` module so both `:shared`'s and `:composeApp`'s tests can use them. The same module also holds `HoldingDispatcher.kt`, a coroutine dispatcher that can hold dispatched blocks and release them on demand, used by controller and ViewModel cancellation tests (`OpmlTransferControllerTest`, `CloudSyncControllerTest`, `SettingsViewModelTest`) to keep a cancelled coroutine from making progress while they observe who waits for it, and `AwaitCondition.kt` (`awaitCondition` / `awaitConditionBlocking`, timing out after `AWAIT_CONDITION_TIMEOUT_MS`), which polls a condition in real time on a thread of its own (not the shared `Dispatchers.Default`, so work an earlier test left running there cannot stall it) — so it can wait for work on a real dispatcher (an HTTP engine's threads, `Dispatchers.Default`) that `runTest`'s virtual-time scheduler cannot advance; use it instead of an ad-hoc `delay`/`Thread.sleep` loop. `TestThreadDispatcher.kt` (`testThreadDispatcher(name)`) gives code under test a thread of its own, for when it needs a real thread while the test blocks waiting on it; use it (closing it after the test) rather than `Dispatchers.Default`, which the whole test JVM shares, so work an earlier test left running cannot delay it. Where the test is itself a coroutine (`runBlocking`), start the concurrent work with a plain `launch`/`async` on the test's own thread instead. This directory also contains Compose UI tests that render actual Composables (`androidx.compose.ui.test.runDesktopComposeUiTest`, no JUnit4 rule needed) (e.g. `ArticleListPaneTest.kt`). Requires the actual Skia/AWT renderer, so placed in `desktopTest` rather than `commonTest`.
 - **Apple targets (`:shared` only).** `commonTest` also runs natively as `:shared:macosArm64Test` and
   `:shared:iosSimulatorArm64Test` (both part of `./gradlew build` on a Mac with Xcode; skipped on
   Linux/Windows), so a common test must not use JVM APIs — temp files go through `:testing`'s
@@ -242,6 +242,7 @@ Project-wide, this is on top of the two Android suites above:
     corrupted; a corrupt legacy file during migration and an invalid (non-gzip) `.gz` payload both
     classified as `CloudDataIncompatibleException`; a reset renaming/recreating only `.gz` while
     leaving the legacy file untouched.
+- deferred reading-state syncs (`SyncRepositoryTest.kt`): `scheduleDeferredSync` waits the long window while `scheduleSync` uses the short one and returns to it after expiring, a structural change shortening a pending deferred window into one sync, `flushPendingSync` syncing only when changes are pending and waiting out a sync in flight, `flushOnLeavingForeground` skipping the app's own launch mark (`ExternalAppLaunchTest`), and the unsynced-changes flag surviving an error result, an exception and a cancellation and being re-armed by a change made mid-sync; `SyncSchedulerTest` for the default `scheduleDeferredSync` delegation; `ArticleRepositoryTest` for read/star writes that change nothing stamping and scheduling nothing; `RefreshCycleRunnerTest` for the startup cycle's post-refresh `scheduleSync`
 - the automatic-sync suspension gate (`SyncRepositoryTest.kt`: an `AUTOMATIC`-triggered sync skipped while `autoSyncSuspended`, a `MANUAL` one never gated, `scheduleSync()` likewise suppressed, and the gate clearing on a successful sync/reset/`clearSyncFailureState()` — `SchemaVersionException` deliberately never triggers the gate)
 - the in-app update pipeline:
   - `UpdateCheckerTest.kt`: `assets[]`/`body` parsing into `asset`/`releaseNotes`, a non-`sha256` or
@@ -416,7 +417,8 @@ The unchanged-transfer skip (see "Skipping Unchanged Transfers" in [sync-archite
 
 - Sync, then sync again immediately with nothing changed on either side: the second sync completes without transferring the database. The app log shows `Sync: nothing changed locally or remotely; skipping transfer`, and the provider's own activity/version history shows no new revision.
 - Repeat that idle sync several times (or just leave the app running across a few background intervals) and confirm it never starts uploading again on its own — a provider whose write response omitted the revision would silently re-download and re-upload every cycle instead.
-- Toggle one article's read state, wait out the debounce: exactly one upload happens and no download (the cloud revision is still the one this device wrote).
+- Toggle one article's read state and wait out the 5-minute reading-state window (or hide the window to the tray / send the app to the background to flush at once): exactly one upload happens and no download (the cloud revision is still the one this device wrote). Rename a feed instead: it syncs after about 5 seconds, and carries any pending read-state change with it.
+- On each platform, mark articles read, then leave the app (Android/iOS: go to the home screen; Compose desktop and the native macOS app: hide the window to the tray): the change reaches a second device without waiting for the next refresh. On Android and iOS, opening an article in the browser and coming back must *not* upload.
 - Change something on a *second* device, then sync on the first: the download happens and the change appears — the skip must not hide another device's writes.
 - Reconnect the account (disconnect → connect) and confirm the first sync afterwards still works: the stored revision/digest belong to the previous connection.
 
@@ -438,6 +440,9 @@ confirm the routes really agree on screen, with a provider connected:
   connect-time initial sync, and while any refresh or sync is running, the toolbar button, the Feed
   menu item and the Settings button are all disabled; once it ends all three are enabled again
   together. (Keep Settings open while checking the menu bar.)
+- iOS: while a sync runs, the sidebar's sync button turns into a spinner and comes back once it
+  ends, without the "+" button beside it, the settings button or the bar's glass group moving or
+  changing size; VoiceOver reads the spinner as "Syncing…".
 - Make the provider reject the token (e.g. revoke the app's access in the provider's account
   settings), then sync: once the authorization failure is recorded, all three are disabled, and
   hovering (long-pressing, on Android) the toolbar button shows "Sign-in expired — reconnect in
@@ -483,7 +488,7 @@ confirm on screen that the native menu really follows it:
   context menu lists Refresh, Tags, Move to Folder in that order — the Feed menu's order — on every platform;
   check the SwiftUI app's Feed menu (both "New …" items) and sidebar row menu (macOS and iOS) the same way.
 
-The article reader's native WebView (`ui/home/ArticleDetailPane.kt`) is a heavyweight AWT surface
+The article reader's native WebView (`ui/home/ArticleWebView.kt`) is a heavyweight AWT surface
 that Compose UI tests cannot host at all, so its actual on-screen behavior — beyond the bounds/
 enabled-state checks `ArticleDetailPaneTest` covers — needs manual confirmation:
 
@@ -685,7 +690,7 @@ on a device or emulator:
   focus). Confirm in both light and dark theme.
 - With a hardware keyboard attached (an emulator's Extended Controls, or a Bluetooth keyboard on a
   real tablet): pressing an arrow key latches `LocalKeyboardEngaged` and shows a `secondary`
-  keyboard-focus ring (`listRowOutline`, `HomeCommon.kt`) around the selected row in whichever pane
+  keyboard-focus ring (`listRowOutline`, `ListRowSelection.kt`) around the selected row in whichever pane
   holds keyboard focus — the *background* color stays the same either way (see the bullet above).
   Confirm at `PaneLayout.Triple` (the ring moves between the feed-list and article-list panes as
   arrow-key focus moves) and inside the drawer at a narrower layout (↑/↓ move the feed selection
@@ -1358,6 +1363,30 @@ device. On an iPhone and an iPad (both orientations), with folders, unfoldered f
 - Tapping still selects (and on iPhone opens the article list); folder, tag and section disclosure states
   survive a relaunch.
 
+### (iOS) The reader pager
+
+The iOS reader's swipe pager is a `UIPageViewController` (see "Apple Native Apps (SwiftUI)" in
+[app-architecture.md](app-architecture.md)); its neighbour lookup and retained range are covered by
+`ReaderPageSourceTests`, but the paging itself needs a simulator or device. On an iPhone and an iPad (both
+orientations), with a feed of a few dozen articles whose bodies are longer than a screen:
+
+- Swiping moves to the next/previous article in the list's own order; at the first and last article it only
+  springs back.
+- Only the article a swipe comes to rest on is marked read; the neighbour that was visible beside it stays
+  unread.
+- Scroll down an article, swipe one article away and straight back: it is where it was. Swipe two away and
+  back: it starts from the top.
+- A drag that is mostly vertical scrolls the article instead of turning the page, and a swipe right after a
+  flick scroll does not turn it either.
+- Selecting another article in the list, or J/K from a hardware keyboard, moves the pager to it. While
+  search results are showing, a swipe steps through the results.
+- With VoiceOver on, a three-finger swipe turns the page.
+- Rotating, or (iPad) switching between the reader-only and two-pane layouts, keeps the same article on
+  screen.
+- No crash (regression check for the v0.26.0 crash): pull to refresh a feed that gains new articles, open an
+  article near the end of the list while the refresh is landing, and edge-swipe back to the list straight
+  away; repeat, also opening and going back immediately, without a refresh.
+
 ### (SwiftUI) Copy URL feedback
 
 Every article "Copy URL" route in the SwiftUI app goes through `HomeObservable.copyArticleUrl`
@@ -1424,6 +1453,20 @@ by `OpmlTransferObservableTests`); confirm on macOS:
   spinner and the result text (both counts when some feeds failed) appear on the Data tab. Export
   (⌘E) likewise ends with the result text on the Data tab.
 - While an import runs, File ▸ Import/Export are disabled.
+
+### (SwiftUI) Setup on a small screen
+
+`SetupView` scrolls when its content does not fit; that layout can only be seen in the running app.
+Delete and reinstall the app to bring first-run Setup back, then confirm:
+
+- (iOS) On an iPhone SE (3rd generation) in portrait and landscape, at the largest Dynamic Type
+  size, in English and Japanese: no text is truncated with "…" (it wraps instead), every cloud
+  provider button can be reached by scrolling, and the scroll indicator flashes briefly as the
+  screen appears.
+- (iOS) On a large iPhone and an iPad, where everything fits: the content is vertically centered and
+  does not bounce when dragged, as before.
+- (macOS) Shrink the window to its minimum: both option cards are still shown in full, with nothing
+  truncated or cut off. At the default window size the screen looks as before.
 
 ### In-App Update
 

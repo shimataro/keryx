@@ -8,12 +8,14 @@ struct SidebarRowLabel<IconPopover: View>: View {
     let icon: SidebarRowIcon
     var isErroring = false
     var isGone = false
+    /// Shows a small spinner in the icon's place, keeping the icon's own size so the title never moves.
+    var isRefreshing = false
     #if os(macOS)
     /// Replaces the title while the row is being renamed in place (macOS only: iOS renames in a sheet).
     var editor: InlineRenameField?
     #endif
     /// Tapping a tag's color dot — opens its color picker directly, matching Compose's own dot
-    /// (`FeedListPane.kt`'s `clickable(onClickLabel = colorLabel)`), without also changing the list
+    /// (`FeedListTagRow.kt`'s `clickable(onClickLabel = colorLabel)`), without also changing the list
     /// selection. `nil` leaves the dot inert.
     var onIconTap: (() -> Void)?
     /// The color of a `.symbol` icon — `nil` leaves it to the enclosing list's own styling.
@@ -37,7 +39,7 @@ struct SidebarRowLabel<IconPopover: View>: View {
                 if isErroring {
                     Spacer(minLength: 0)
                     // The hover tooltip (`.help`) only appears for a gone (410) feed, matching
-                    // Compose's own `FeedErrorIndicator` (`FeedListDragAndDrop.kt:655-676`) — an
+                    // Compose's own `FeedErrorIndicator` (`FeedListRows.kt`) — an
                     // ordinary fetch error gets no tooltip, only the accessibility label below.
                     Group {
                         if isGone {
@@ -52,7 +54,12 @@ struct SidebarRowLabel<IconPopover: View>: View {
             }
         } icon: {
             iconView
+                .opacity(isRefreshing ? 0 : 1)
+                .overlay {
+                    if isRefreshing { RefreshingSpinner() }
+                }
         }
+        .accessibilityValue(isRefreshing ? L("home_feed_refreshing") : "")
     }
 
     @ViewBuilder
@@ -91,11 +98,12 @@ extension SidebarRowLabel where IconPopover == EmptyView {
         icon: SidebarRowIcon,
         isErroring: Bool = false,
         isGone: Bool = false,
+        isRefreshing: Bool = false,
         onIconTap: (() -> Void)? = nil,
         symbolTint: Color? = nil
     ) {
         self.init(
-            title: title, icon: icon, isErroring: isErroring, isGone: isGone,
+            title: title, icon: icon, isErroring: isErroring, isGone: isGone, isRefreshing: isRefreshing,
             onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
         )
     }
@@ -106,14 +114,36 @@ extension SidebarRowLabel where IconPopover == EmptyView {
         icon: SidebarRowIcon,
         isErroring: Bool = false,
         isGone: Bool = false,
+        isRefreshing: Bool = false,
         editor: InlineRenameField?,
         onIconTap: (() -> Void)? = nil,
         symbolTint: Color? = nil
     ) {
         self.init(
-            title: title, icon: icon, isErroring: isErroring, isGone: isGone, editor: editor,
+            title: title, icon: icon, isErroring: isErroring, isGone: isGone, isRefreshing: isRefreshing, editor: editor,
             onIconTap: onIconTap, symbolTint: symbolTint, iconPopoverPresented: nil, iconPopover: { EmptyView() }
         )
     }
     #endif
+}
+
+/// The spinner a refreshing row shows in its icon's place — drawn smaller than the icon, since a
+/// full-size ring reads heavier than a favicon of the same size. On a selected row's filled
+/// background (`backgroundProminence` `.increased`) it turns light like the row's title, since its
+/// default gray all but disappears against the fill.
+private struct RefreshingSpinner: View {
+    @Environment(\.backgroundProminence) private var backgroundProminence
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        #if os(macOS)
+        // The AppKit spinner ignores the foreground style and tint; only its appearance recolors it.
+        ProgressView().controlSize(.mini)
+            .environment(\.colorScheme, backgroundProminence == .increased ? .dark : colorScheme)
+        #else
+        // iOS's ProgressView has one fixed size (about 20pt); scaled to about 12pt.
+        ProgressView().scaleEffect(0.6)
+            .tint(backgroundProminence == .increased ? .white : nil)
+        #endif
+    }
 }

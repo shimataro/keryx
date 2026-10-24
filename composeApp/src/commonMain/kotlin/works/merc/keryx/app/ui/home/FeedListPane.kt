@@ -1,36 +1,26 @@
 package works.merc.keryx.app.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,7 +41,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -59,12 +48,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -83,46 +70,24 @@ import works.merc.keryx.app.presentation.home.reorderTargetWithinScope
 import works.merc.keryx.app.presentation.home.resolveFeedListSelectionTarget
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
-import works.merc.keryx.app.platform.NativeMenuItem
-import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
-import works.merc.keryx.app.platform.WindowChrome
-import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.app_icon
 import works.merc.keryx.app.resources.app_name
-import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_add_folder
 import works.merc.keryx.app.resources.home_add_tag
 import works.merc.keryx.app.resources.home_all_feeds
-import works.merc.keryx.app.resources.home_change_tag_color_menu
-import works.merc.keryx.app.resources.home_copy_feed_url
-import works.merc.keryx.app.resources.home_copy_site_url
-import works.merc.keryx.app.resources.home_delete_tag_menu
-import works.merc.keryx.app.resources.home_edit_tag_menu
 import works.merc.keryx.app.resources.home_folder_name_duplicate
 import works.merc.keryx.app.resources.home_folders
-import works.merc.keryx.app.resources.home_open_site
-import works.merc.keryx.app.resources.home_refresh
-import works.merc.keryx.app.resources.home_refreshing
-import works.merc.keryx.app.resources.home_rename_feed
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_starred
-import works.merc.keryx.app.resources.home_sync
-import works.merc.keryx.app.resources.home_sync_auth_failed
-import works.merc.keryx.app.resources.home_syncing
-import works.merc.keryx.app.resources.home_tag_color
 import works.merc.keryx.app.resources.home_tag_name_duplicate
 import works.merc.keryx.app.resources.home_tags
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
-import works.merc.keryx.app.ui.common.KeryxPaneTopBar
 import works.merc.keryx.app.ui.common.KeryxTextField
-import works.merc.keryx.app.ui.common.SmallSpinner
-import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 import works.merc.keryx.app.presentation.home.DropBoundary
 import works.merc.keryx.app.presentation.home.buildFeedListDropIndex
@@ -194,7 +159,7 @@ internal fun FeedListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val tags by vm.tags.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
     val folders by vm.folders.collectAsState()
@@ -203,6 +168,8 @@ internal fun FeedListPane(
     val unreadByFolder by vm.unreadByFolder.collectAsState()
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
     val expandedTagIds by vm.expandedTagIds.collectAsState()
+    val refreshingFeedIds by vm.refreshingFeedIds.collectAsState()
+    val refreshingFolderIds by vm.refreshingFolderIds.collectAsState()
     val totalUnread by vm.totalUnread.collectAsState()
     val starredUnread by vm.starredUnreadCount.collectAsState()
     val filter by vm.filter.collectAsState()
@@ -412,9 +379,12 @@ internal fun FeedListPane(
         if (reorderAllowed) reorderTargetWithinScope(orderedIds, index, delta) else null
 
     // The rendered index of the row the in-progress edit lives on, or null while that row isn't in
-    // the list — computed once per composition from the same collected state the rows render from.
-    val editRowIndex = inlineEdit?.let { target ->
-        feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+    // the list — derived from the same collected state the rows render from, and recomputed only when
+    // that state changes rather than on every keystroke's recomposition while the edit is open.
+    val editRowIndex = remember(inlineEdit?.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds) {
+        inlineEdit?.let { target ->
+            feedListRowIndex(target.rowInstance, feeds, folders, tags, collapsedFolderIds, feedTagMap, expandedTagIds)
+        }
     }
 
     // An edit can be started from the menu bar (or a shortcut) while its row is scrolled out of
@@ -606,13 +576,14 @@ internal fun FeedListPane(
                         val feedIdsInGroup = feedsInFolder.map { it.id }
                         itemsIndexed(
                             feedsInFolder,
-                            key = { _, feed -> "feed-${feed.id}" },
+                            key = { _, feed -> feedRowKey(feed.id) },
                             contentType = { _, _ -> "feed" },
                         ) { index, feed ->
                             val instance = FeedListRowSelection.FeedInFolderGroup(feed.id)
                             FeedRow(
                                 feed = feed,
                                 count = unreadByFeed[feed.id] ?: 0L,
+                                refreshing = feed.id in refreshingFeedIds,
                                 selectionTone = toneFor(instance),
                                 focused = focused,
                                 indented = indented,
@@ -625,7 +596,7 @@ internal fun FeedListPane(
                                 editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
                                 onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                                 onRenameCancel = { inlineEdit = null },
-                                onRefresh = { vm.refreshFeed(feed) },
+                                onRefresh = { vm.refreshFeed(feed.id) },
                                 tags = tags,
                                 attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                                 onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
@@ -671,7 +642,7 @@ internal fun FeedListPane(
                             ?.let { dropIndexState.value.feedZoneBoundaryFor(it.id) }
                         if (folder == null) {
                             if (folders.isNotEmpty()) {
-                                item(key = "no-folder-header", contentType = "folder-header") {
+                                item(key = NO_FOLDER_HEADER_KEY, contentType = "folder-header") {
                                     NoFolderHeader(
                                         firstFeedId = feedsInFolder.firstOrNull()?.id,
                                         feedIdsInNoFolder = feedsInFolder.mapTo(mutableSetOf()) { it.id },
@@ -685,10 +656,11 @@ internal fun FeedListPane(
                             val collapsed = folder.id in collapsedFolderIds
                             val folderIndex = folders.indexOf(folder)
                             val nextFolderId = folders.getOrNull(folderIndex + 1)?.id
-                            item(key = "folder-${folder.id}", contentType = "folder-header") {
+                            item(key = folderRowKey(folder.id), contentType = "folder-header") {
                                 FolderGroupHeader(
                                     folder = folder,
                                     count = unreadByFolder[folder.id] ?: 0L,
+                                    refreshing = folder.id in refreshingFolderIds,
                                     collapsed = collapsed,
                                     selected = filter == ArticleFilter.Folder(folder.id),
                                     focused = focused,
@@ -751,7 +723,7 @@ internal fun FeedListPane(
                         }
                     }
                     tags.forEach { tag ->
-                        item(key = "tag-${tag.id}", contentType = "tag") {
+                        item(key = tagRowKey(tag.id), contentType = "tag") {
                             TagRow(
                                 tag = tag,
                                 count = unreadByTag[tag.id] ?: 0L,
@@ -778,13 +750,14 @@ internal fun FeedListPane(
                             // once under its folder), so the key must be tag-scoped to stay unique.
                             items(
                                 feedsForTag(feeds, feedTagMap, tag.id),
-                                key = { "tag-${tag.id}-feed-${it.id}" },
+                                key = { tagFeedRowKey(tag.id, it.id) },
                                 contentType = { "tag-feed" },
                             ) { feed ->
                                 val instance = FeedListRowSelection.FeedInTag(feed.id, tag.id)
                                 FeedRow(
                                     feed = feed,
                                     count = unreadByFeed[feed.id] ?: 0L,
+                                    refreshing = feed.id in refreshingFeedIds,
                                     selectionTone = toneFor(instance),
                                     focused = focused,
                                     indented = true,
@@ -797,7 +770,7 @@ internal fun FeedListPane(
                                     editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
                                     onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
                                     onRenameCancel = { inlineEdit = null },
-                                    onRefresh = { vm.refreshFeed(feed) },
+                                    onRefresh = { vm.refreshFeed(feed.id) },
                                     tags = tags,
                                     attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
                                     onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
@@ -910,340 +883,4 @@ private fun FeedListAutoScrollEffect(
         }
     }
 }
-
-/**
- * [FeedListPane]'s top toolbar row: an `app_name` title on a platform with no native application
- * menu bar (see [hasNativeAppMenu] below — desktop's own window title bar already names the app,
- * so this stays untitled there), then add feed / refresh all / cloud sync (shown when
- * [cloudConnected], enabled by `HomeViewModel.canSyncNow` — the predicate every "Sync now" route
- * shares).
- * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
- * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
- *
- * The bell lives on `ArticleListPane`'s own header at every layout/depth this pane can be on
- * screen at (Triple's permanent pane, or the narrow drawer, which never displaces the article
- * list the way the old sliding-window Dual/depth-1-Single narrow layouts used to) — see
- * `HomePaneLayout.kt`'s `feedListIsDrawer`/`visiblePanes` — so this row never has to host one.
- *
- * Settings, this pane's other in-pane entry point on such a platform, is *not* rendered here —
- * see [FeedListPane]'s own settings footer row, below its drag-host `Box`.
- *
- * @param hasNativeAppMenu See [FeedListPane]'s own KDoc.
- */
-@Composable
-private fun FeedListToolbarRow(
-    vm: HomeViewModel,
-    cloudConnected: Boolean,
-    onAddFeedClick: () -> Unit,
-    hasNativeAppMenu: Boolean,
-) {
-    val activity by vm.activity.collectAsState()
-    // The whole refresh-then-sync cycle keeps the refresh spinner up, not just its fetch phase —
-    // otherwise it flickers off in the gap before the sync while the button is still disabled
-    // (activity.idle is false for the whole cycle). The sync phase hands over to the sync button's
-    // own spinner instead; see ActivitySnapshot.refreshIndicatorShown.
-    val refreshing = activity.refreshIndicatorShown
-    val syncing = activity.syncing
-    WindowDragArea(Modifier.fillMaxWidth()) {
-        KeryxPaneTopBar(
-            modifier = Modifier.padding(top = WindowChrome.titleBarInsetDp.dp, start = 4.dp, end = 4.dp),
-            titleContent = if (hasNativeAppMenu) null else {
-                {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(Res.drawable.app_icon),
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(Res.string.app_name))
-                    }
-                }
-            },
-        ) {
-            ToolbarIconGroup {
-                val addFeedTooltip = stringResource(Res.string.home_add_feed)
-                TooltipIconButton(tooltip = addFeedTooltip, onClick = onAddFeedClick) {
-                    KeryxIcon(KeryxIcons.Add, addFeedTooltip)
-                }
-                val refreshTooltip = stringResource(
-                    if (refreshing) Res.string.home_refreshing else Res.string.home_refresh,
-                )
-                TooltipIconButton(tooltip = refreshTooltip, onClick = { vm.refreshAll() }, enabled = activity.idle) {
-                    if (refreshing) {
-                        SmallSpinner()
-                    } else {
-                        KeryxIcon(KeryxIcons.Refresh, refreshTooltip)
-                    }
-                }
-                if (cloudConnected) {
-                    // Enabled exactly when every other "Sync now" route is (ManualSync.canSyncNow).
-                    // The one disabled state the user must act on — an expired sign-in — says so;
-                    // that decision is the shared ManualSync.disabledByAuth, not combined here.
-                    val canSyncNow by vm.canSyncNow.collectAsState()
-                    val syncDisabledByAuth by vm.syncDisabledByAuth.collectAsState()
-                    val syncTooltip = stringResource(
-                        when {
-                            syncing -> Res.string.home_syncing
-                            syncDisabledByAuth -> Res.string.home_sync_auth_failed
-                            else -> Res.string.home_sync
-                        },
-                    )
-                    TooltipIconButton(tooltip = syncTooltip, onClick = { vm.sync() }, enabled = canSyncNow) {
-                        if (syncing) {
-                            SmallSpinner()
-                        } else {
-                            KeryxIcon(KeryxIcons.Cloud, syncTooltip)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Renders a clickable sidebar row with an icon, label, optional count badge, and selection styling.
- *
- * @param icon The icon displayed in the row.
- * @param label The row label.
- * @param count The optional count shown when greater than zero.
- * @param selected Whether the row is selected.
- * @param focused Whether the sidebar is focused.
- * @param onClick The action invoked when the row is clicked.
- * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- */
-@Composable
-private fun SidebarRow(
-    icon: @Composable () -> Unit,
-    label: String,
-    count: Long?,
-    selected: Boolean,
-    focused: Boolean,
-    onClick: () -> Unit,
-    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-) {
-    val rowInteraction = remember { MutableInteractionSource() }
-    Row(
-        Modifier.fillMaxWidth()
-            .listRowClickable(rowInteraction, selected, onClick)
-            .listRowSurface(
-                selectionBackground(selected, focused),
-                ListRowKind.NavItem,
-                rowInteraction,
-                decoration = listRowOutline(ListRowKind.NavItem, selected, focused),
-            )
-            .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selected, focused) ?: LocalContentColor.current)) {
-            icon()
-            Spacer(Modifier.width(12.dp))
-            Text(
-                label,
-                Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                // Android follows M3's NavigationDrawerItem, whose label is labelLarge; desktop keeps
-                // the ambient text style it has always used.
-                style = if (isTouchPrimary) MaterialTheme.typography.labelLarge else LocalTextStyle.current,
-            )
-        }
-        if (count != null && count > 0) CountBadge(count, selected, focused)
-    }
-}
-
-/**
- * Renders a tag row: selection/filter target, expand toggle for its attached-feed list, and the
- * highlight for a feed drag currently hovering it (attach, handled by the pane's single centralized
- * drag host — see `FeedListPane`'s outer `Box`).
- *
- * The drop affordance is deliberately different from a folder's: attaching a tag is additive (a feed
- * may carry many tags) whereas dropping on a folder *moves* the feed, so this row tints itself and
- * its border `tertiary`/`tertiaryContainer` — not the `secondary`/`secondaryContainer` of
- * [FolderGroupHeader] — and additionally swaps its color dot for a filled "+" badge while hovered
- * (a folder gets no such badge, since a move has no equivalent "adding" semantics). This "attach,
- * not move" cue is deliberately drawn on the target row rather than on the drag ghost itself: an
- * affordance drawn on the target it applies to reads more clearly than one riding along with the
- * pointer, and it keeps the ghost identical no matter what is underneath it.
- *
- * @param tag The tag represented by the row.
- * @param count The number of unread articles associated with the tag.
- * @param expanded Whether attached feeds are displayed.
- * @param selected Whether the tag is the active filter.
- * @param focused Whether the sidebar currently has focus.
- * @param isDropTarget Whether a dragged feed is currently hovering this tag.
- * @param onToggleExpanded Toggles the attached-feed list.
- * @param onClick Selects the tag.
- * @param onEdit Starts inline editing of the tag's name.
- * @param onDelete Deletes the tag.
- * @param editingName Whether the name is currently open for inline editing (see [InlineRenameField]).
- * @param onRenameCommit Applies an edited tag name.
- * @param onRenameCancel Abandons an in-progress name edit.
- * @param nameError Produces a validation message for an edited name, or `null` when valid.
- * @param onSelectColor Applies a color picked from the color dot's popover, reachable either by
- *   tapping the dot directly or via the row's own context menu's "change color" entry (both open
- *   the same popover, anchored to the dot). Independent of name editing: the dot is clickable
- *   whether or not the row is currently being renamed.
- * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
- */
-@Composable
-private fun TagRow(
-    tag: Tags,
-    count: Long,
-    expanded: Boolean,
-    selected: Boolean,
-    focused: Boolean,
-    isDropTarget: Boolean,
-    onToggleExpanded: () -> Unit,
-    onClick: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    editingName: Boolean = false,
-    onRenameCommit: (String) -> Unit = {},
-    onRenameCancel: () -> Unit = {},
-    nameError: (String) -> String? = { null },
-    onSelectColor: (String?) -> Unit = {},
-    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
-) {
-    val editLabel = stringResource(Res.string.home_edit_tag_menu)
-    val changeColorLabel = stringResource(Res.string.home_change_tag_color_menu)
-    val deleteLabel = stringResource(Res.string.home_delete_tag_menu)
-    val colorLabel = stringResource(Res.string.home_tag_color)
-    var showColorPicker by remember { mutableStateOf(false) }
-    val contentColor = dropTargetContentColorOrNull(isDropTarget, selected, focused, MaterialTheme.colorScheme.onTertiaryContainer)
-    val rowInteraction = remember { MutableInteractionSource() }
-    Row(
-        Modifier.testTag(tagRowTestTag(tag.id))
-            .fillMaxWidth()
-            .listRowClickable(rowInteraction, selected, onClick)
-            .nativeContextMenu(
-                items = {
-                    listOf(
-                        NativeMenuItem(editLabel, renameNativeShortcut) { onEdit() },
-                        NativeMenuItem(changeColorLabel) { showColorPicker = true },
-                        NativeMenuItem(deleteLabel, deleteNativeShortcut) { onDelete() },
-                    )
-                },
-                onOpen = { if (!selected) onClick() },
-            )
-            .listRowSurface(
-                dropTargetBackground(isDropTarget, selected, focused, MaterialTheme.colorScheme.tertiaryContainer),
-                ListRowKind.NavItem,
-                rowInteraction,
-                decoration = listRowOutline(
-                    ListRowKind.NavItem,
-                    selected,
-                    focused,
-                    dropTargetColor = MaterialTheme.colorScheme.tertiary.takeIf { isDropTarget },
-                ),
-            )
-            .heightIn(min = listRowMinHeight(isTouchPrimary))
-            .padding(start = FEED_LIST_ROW_START_PADDING, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CompositionLocalProvider(LocalContentColor provides (contentColor ?: LocalContentColor.current)) {
-            ExpandCollapseChevron(expanded = expanded, onToggle = onToggleExpanded, isTouchPrimary = isTouchPrimary)
-            Spacer(Modifier.width(CHEVRON_MARKER_GAP))
-            Row(
-                Modifier.weight(1f).padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Anchors the color popover; sized by the click target inside it.
-                Box {
-                    Box(
-                        // The click target's *layout* footprint (TAG_COLOR_DOT_FOOTPRINT, 26x26 —
-                        // the FEED_LIST_MARKER_SLOT marker plus the padding below) is the same on
-                        // both platforms, so the tag row's own hierarchy geometry never depends on
-                        // touch density (see `feedRowIndent` in `FeedListDragAndDrop.kt`). A
-                        // touch-primary platform additionally grows the *hit target* past that
-                        // footprint to a full Material 48dp square via `layoutAs`, safe now that
-                        // the row's own listRowMinHeight() floor keeps this from stretching the row
-                        // taller than its neighbors. `clickable` must come after `layoutAs`/
-                        // `requiredSize` (like `ExpandCollapseChevron`'s own touch-primary branch)
-                        // — `layoutAs` always reports its own fixed size regardless of what a child
-                        // measures, so a `clickable` placed *before* it would only ever see the
-                        // 26dp footprint, not the enlarged 48dp target.
-                        Modifier
-                            .testTag(tagColorDotTestTag(tag.id))
-                            .then(
-                                if (isTouchPrimary) {
-                                    Modifier.layoutAs(TAG_COLOR_DOT_FOOTPRINT, TAG_COLOR_DOT_FOOTPRINT).requiredSize(TOUCH_TARGET_MIN_SIZE)
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .clickable(onClickLabel = colorLabel) { showColorPicker = true }
-                            .padding(top = 4.dp, bottom = 4.dp, end = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        // Fixed-size slot so swapping the dot for the "+" badge never shifts the tag name.
-                        Box(Modifier.size(FEED_LIST_MARKER_SLOT), contentAlignment = Alignment.Center) {
-                            if (isDropTarget) {
-                                Box(
-                                    Modifier.size(FEED_LIST_MARKER_SLOT).background(MaterialTheme.colorScheme.tertiary, CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    KeryxIcon(
-                                        KeryxIcons.Add,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onTertiary,
-                                        modifier = Modifier.size(12.dp),
-                                    )
-                                }
-                            } else {
-                                Box(Modifier.size(TAG_COLOR_DOT_SIZE_DP.dp).background(colorFromHex(tag.color), CircleShape))
-                            }
-                        }
-                    }
-                    if (showColorPicker) {
-                        TagColorPickerPopup(
-                            selected = tag.color,
-                            onSelect = { showColorPicker = false; onSelectColor(it) },
-                            onDismissRequest = { showColorPicker = false },
-                            anchorOffsetY = TAG_COLOR_DOT_FOOTPRINT,
-                        )
-                    }
-                }
-                // Same weighted slot either way, so the color dot on the left and the count badge on
-                // the right never move when editing starts or ends.
-                if (editingName) {
-                    Box(Modifier.weight(1f)) {
-                        InlineRenameField(
-                            value = tag.name,
-                            onCommit = onRenameCommit,
-                            onCancel = onRenameCancel,
-                            blockingError = nameError,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                } else {
-                    Text(tag.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        if (count > 0) CountBadge(count, selected, focused, isDropTarget, onContainerColor = MaterialTheme.colorScheme.onTertiaryContainer)
-    }
-}
-
-/** Diameter of the visible tag color dot inside the [FEED_LIST_MARKER_SLOT] marker slot. */
-private const val TAG_COLOR_DOT_SIZE_DP = 10
-
-/**
- * The color dot's click target *layout* footprint — [FEED_LIST_MARKER_SLOT] plus the same
- * `padding(top = 4.dp, bottom = 4.dp, end = 8.dp)` every [TagRow] applies around it, absorbing
- * what used to be a plain `Spacer` there so the dot's own hit area is not just a bare 10dp circle.
- * The same on every platform — a touch-primary platform's larger Material hit target is layered on
- * top of this footprint via `Modifier.layoutAs` rather than replacing it, so [TagRow]'s own
- * hierarchy geometry never depends on touch density (see `feedRowIndent` in
- * `FeedListDragAndDrop.kt`).
- */
-private val TAG_COLOR_DOT_FOOTPRINT = FEED_LIST_MARKER_SLOT + 8.dp
-
-/** Test tag on a tag row's color dot, which opens its color popover. */
-internal fun tagColorDotTestTag(tagId: String): String = "tag-color-dot-$tagId"
-
-/** Test tag on a [TagRow] itself, distinguishing its clickable band from its color dot. */
-internal fun tagRowTestTag(tagId: String): String = "tag-row-$tagId"
 

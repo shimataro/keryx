@@ -180,13 +180,18 @@ targets:
     sources:
       - path: KeryxTests
       - path: Keryx/Home/ReaderNavigationGate.swift
+      - path: Keryx/Home/ReaderRebuildThrottle.swift
+      - path: Keryx/Home/ReaderPageInputs.swift
+      - path: Keryx/Home/ArticleTableRevealTracker.swift
       - path: Keryx/Home/ReaderProcessRecovery.swift
+      - path: Keryx/Home/ReaderScrollIndicator.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/CompactSidebarSelection.swift
       - path: Keryx/Home/CompactSearchNavigation.swift
       - path: Keryx/Home/ArticleListHeaderIcon.swift
       - path: Keryx/Home/PullToRefreshAvailability.swift
       - path: Keryx/Home/PullRefreshHold.swift
+      - path: Keryx/Home/RefreshStatus.swift
       - path: Keryx/Home/AbandonableRefresh.swift
       - path: Keryx/Home/ArticleListRemount.swift
       - path: Keryx/Home/FeedListDropPresentation.swift
@@ -202,6 +207,7 @@ targets:
       - path: Keryx/Bridge/ArticleRowModel.swift
       - path: Keryx/Bridge/ArticleUrlCopy.swift
       - path: Keryx/Bridge/TransientToastState.swift
+      - path: Keryx/Bridge/HeldRefreshStatus.swift
       - path: Keryx/Bridge/ReaderPagerIndex.swift
       - path: Keryx/Bridge/SidebarModel.swift
       - path: Keryx/Bridge/ObservableAssignment.swift

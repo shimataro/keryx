@@ -2,7 +2,6 @@ package works.merc.keryx.app.presentation.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,6 +22,7 @@ import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.CloudConnectionService
@@ -30,6 +30,10 @@ import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.awaitCancellableConnect
+import works.merc.keryx.app.data.local.LocalSettings
+import works.merc.keryx.app.platform.NetworkConditionMonitor
+import works.merc.keryx.app.platform.UnrestrictedNetworkConditionMonitor
+import works.merc.keryx.app.presentation.DerivedStateFlow
 import works.merc.keryx.app.presentation.ManualSync
 import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
@@ -54,6 +58,8 @@ class CloudSyncController(
     // Token store / sync touch the OS Keychain (macOS shells out to `security`, which may
     // block and show an authorization dialog), so keep them off the Main/EDT dispatcher.
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    // Whether this platform reports metered networks at all (see [meteredSettingSupported]).
+    networkConditionMonitor: NetworkConditionMonitor = UnrestrictedNetworkConditionMonitor,
 ) : ViewModel(), ManualSync {
 
     /** Cloud providers configured in this build, in display order. */
@@ -149,6 +155,29 @@ class CloudSyncController(
     private val _syncPhase = MutableStateFlow(syncRepository.syncPhase.value)
     val syncPhase = _syncPhase.asStateFlow()
 
+    /**
+     * Whether to offer the "sync automatically over mobile data" setting
+     * ([LocalSettings.syncOnMeteredNetwork]) — only where the platform reports metered networks
+     * (Android, iOS). Both UIs also show it only while a provider is connected.
+     */
+    val meteredSettingSupported: Boolean = networkConditionMonitor.supported
+
+    /**
+     * The current [LocalSettings.syncOnMeteredNetwork] value, for the setting's switch. Written
+     * through `PreferencesController.setSyncOnMeteredNetwork`, the one setter for it.
+     */
+    val syncOnMeteredNetwork: StateFlow<Boolean> = DerivedStateFlow(
+        compute = { settingsRepository.localSettings.value.syncOnMeteredNetwork },
+        changes = settingsRepository.localSettings.map { it.syncOnMeteredNetwork },
+    )
+
+    /**
+     * True while an automatic sync is waiting for a network that allows it — the connected
+     * provider's row says it will sync once on Wi-Fi. Mirrors [SyncRepository.syncDeferredForNetwork];
+     * "sync now" stays available meanwhile and clears it by succeeding.
+     */
+    val syncDeferredForNetwork: StateFlow<Boolean> = syncRepository.syncDeferredForNetwork
+
     /** True while [disconnect] is tearing down the connected provider — see that function's KDoc. */
     private val _disconnecting = MutableStateFlow(false)
     val disconnecting = _disconnecting.asStateFlow()
@@ -239,13 +268,8 @@ class CloudSyncController(
                 // would silently stop all future last-synced refreshes) or leak as an uncaught
                 // exception. Best-effort UI state — log and carry on. Cancellation still propagates.
                 if (!isSyncing) {
-                    try {
-                        refreshLastSyncedAt()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Throwable) {
-                        Log.warn(TAG, "Failed to refresh last-synced time", e)
-                    }
+                    runCatchingUnlessCancelled { refreshLastSyncedAt() }
+                        .onFailure { e -> Log.warn(TAG, "Failed to refresh last-synced time", e) }
                 }
             }
         }
@@ -266,11 +290,8 @@ class CloudSyncController(
         viewModelScope.launch {
             try {
                 _runs.tryEmit(ManualSyncEdge.Started)
-                withContext(dispatcher) { syncRepository.sync() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                Log.error(TAG, "Manual sync failed", e)
+                runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
+                    .onFailure { e -> Log.error(TAG, "Manual sync failed", e) }
             } finally {
                 _manualSyncInFlight.value = false
                 _runs.tryEmit(ManualSyncEdge.Finished)
@@ -305,11 +326,8 @@ class CloudSyncController(
             if (!connected) return@launch
             _initialSyncingType.value = type
             try {
-                withContext(dispatcher) { syncRepository.sync() }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                Log.error(TAG, "Initial sync failed", e)
+                runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
+                    .onFailure { e -> Log.error(TAG, "Initial sync failed", e) }
             } finally {
                 _initialSyncingType.value = null
             }
@@ -400,11 +418,7 @@ class CloudSyncController(
      */
     fun reconnect() {
         val type = _connectedType.value ?: return
-        viewModelScope.launch {
-            _connectingType.value = type
-            tearDownConnection(type)
-            connect(type)
-        }
+        tearDownAndConnect(from = type, to = type)
     }
 
     /**
@@ -433,10 +447,15 @@ class CloudSyncController(
      */
     fun switchTo(newType: CloudStorageType) {
         val oldType = _connectedType.value ?: return
+        tearDownAndConnect(from = oldType, to = newType)
+    }
+
+    /** Tears down the connection to [from], then [connect]s to [to] — shared by [reconnect] and [switchTo]. */
+    private fun tearDownAndConnect(from: CloudStorageType, to: CloudStorageType) {
         viewModelScope.launch {
-            _connectingType.value = newType
-            tearDownConnection(oldType)
-            connect(newType)
+            _connectingType.value = to
+            tearDownConnection(from)
+            connect(to)
         }
     }
 

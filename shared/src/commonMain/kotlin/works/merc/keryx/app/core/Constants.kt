@@ -65,9 +65,24 @@ const val MAX_SYNC_DB_SIZE_BYTES = 1024L * 1024 * 1024 // 1 GiB
 const val SYNC_MAX_RETRY = 3
 const val FEED_TIMEOUT_RETRY_COUNT = 1
 const val SYNC_DEBOUNCE_MS = 5_000L
+
+/**
+ * Debounce window for a reading-state change (read / unread / star) — see
+ * [works.merc.keryx.app.domain.SyncScheduler.scheduleDeferredSync]. Every sync re-uploads the
+ * whole database, so syncing after each article read would cost one full upload per article.
+ */
+const val DEFERRED_SYNC_DEBOUNCE_MS = 5 * MILLIS_PER_MINUTE
 const val CONNECTION_TIMEOUT_MS = 10_000L
 const val READ_TIMEOUT_SECONDS_DEFAULT = 30
 const val MAX_REDIRECTS = 5 // redirect loop guard
+
+/**
+ * How long a refresh leaves a feed's favicon alone after a lookup found none, before looking again.
+ * The miss is recorded per feed by `FaviconMissStore` in the device-local settings, so it outlives the
+ * process: a site without any favicon isn't re-probed on every refresh or launch, while one that adds
+ * a favicon later still gets it.
+ */
+const val FAVICON_RETRY_INTERVAL_MS = MILLIS_PER_DAY
 
 /** HTTP request timeout for the shared client (distinct from [CONNECTION_TIMEOUT_MS], the connect phase). */
 const val REQUEST_TIMEOUT_MS = 60_000L
@@ -216,6 +231,15 @@ const val DUAL_PANE_MIN_WIDTH = ARTICLE_LIST_PANE_MIN_WIDTH + DETAIL_PANE_MIN_WI
 /** Must be `>= TRIPLE_PANE_MIN_WIDTH` — see [TRIPLE_PANE_MIN_WIDTH]'s KDoc. */
 const val WINDOW_MIN_WIDTH = 920
 
+/**
+ * How long a newly selected article's body lookup may take before the reader shows the article's
+ * header (from its list row) in place of the previous article. Long enough that an ordinary
+ * millisecond-scale lookup goes straight to the full article — one document load, never a header
+ * followed by a second load — and short enough that a lookup stuck behind a write lock (a sync
+ * merge, an FTS rebuild) shows the new article at once rather than after the busy_timeout.
+ */
+const val READER_HEADER_FIRST_GRACE_MS = 50L
+
 /** Debounce for re-running search as the user types, so every keystroke doesn't trigger an FTS query. */
 const val SEARCH_DEBOUNCE_MS = 250L
 
@@ -275,4 +299,4 @@ const val ONEDRIVE_SCOPES = "Files.ReadWrite.AppFolder offline_access"
 const val OAUTH_CUSTOM_URI_REDIRECT = "keryx://oauth2/callback"
 
 /** How long the interactive connect flow waits for the browser redirect before timing out. */
-const val OAUTH_CONNECT_TIMEOUT_MS = 3 * 60_000L
+const val OAUTH_CONNECT_TIMEOUT_MS = 3 * MILLIS_PER_MINUTE

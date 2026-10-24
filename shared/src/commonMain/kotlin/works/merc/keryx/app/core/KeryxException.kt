@@ -10,7 +10,16 @@ sealed class KeryxException(message: String) : Exception(message) {
 
 // --- Network / feed ---
 
-class FeedFetchException(message: String, val statusCode: Int? = null) : KeryxException(message)
+/**
+ * A fetch that failed other than by a timeout or a 404/410. [noResponse] is true when the request
+ * never got a response at all (unreachable host, refused connection, TLS failure) — unlike an HTTP
+ * error status or a malformed redirect, the device itself may be offline.
+ */
+class FeedFetchException(
+    message: String,
+    val statusCode: Int? = null,
+    val noResponse: Boolean = false,
+) : KeryxException(message)
 
 class FeedParseException(message: String) : KeryxException(message)
 

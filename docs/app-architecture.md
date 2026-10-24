@@ -21,7 +21,7 @@ and the same source-set names, so the tree below is their combined `src/` tree:
 
 | Module | Contents |
 | --- | --- |
-| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
+| `:shared` | Everything UI-framework-free: `core/`, `data/`, `domain/`, `presentation/` (the screen state holders every UI shares, e.g. `HomeViewModel`), `LaunchArg.kt`, the SQLDelight schema (`commonMain/sqldelight/`), `di/SharedModule.kt` (`sharedModule`, the optional `updateModule`, and `presentationModule` — the shared screen state holders, included by both `:composeApp`'s `appModule` and the Apple app's `KeryxSdk`) and `di/HttpClientFactory.kt`, the non-Compose `platform/` expects (AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor) with their desktop/Android/Apple actuals, plus `FileIO` (kotlinx-io, no expect), all of `jvmCommonMain`, and the generated `BuildConfig`/`DesktopBuildConfig`. Must never reference Compose, Compose Resources, AWT/Swing or an Android UI API — a native Apple app consumes it too (see "Apple Native Apps (SwiftUI)"). |
 | `:composeApp` | The Compose UI for desktop and Android: `ui/`, `App.kt`, `di/AppModule.kt` (`appModule` — includes `:shared`'s modules — and `expect val platformModule`), the Compose-typed `platform/` expects, `composeResources/`, and the desktop app shell (`main.kt`, tray, app menu, token storages, in-app update installer, Linux D-Bus). Depends on `:shared` via `api`. |
 | `:androidApp` | The Android application (manifest, `MainActivity`, `KeryxApplication`) — see below. |
 | `:androidGms` | Everything that needs Google Play services: Google Drive on Android (`PlayServicesGoogleDriveAuth.kt`). Its own module so the `fdroid` flavor can omit it — only `:androidApp`'s `github`/`play` flavors depend on it (see below). |
@@ -40,7 +40,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport (interface + CustomUri), AuthorizationLauncher (interface + schemeOf — how OAuthConnectFlow opens the authorize URL; desktop/Android default to the system browser, the Apple app hands it to Swift instead, see "KeryxSdk" below), OAuthCallbackParams, OAuthUriParser (parseOAuthUri, shared by every `keryx://` and loopback redirect handler), StartupMaintenanceTasks (runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex), BackgroundRefreshLoop (backgroundUpdateLoop — the desktop app's own polling loop, also used by the Apple app's `KeryxSdk.startMaintenance()`; Android has no equivalent, since it schedules through `WorkManager` instead), RefreshCycleRunner (the refresh → notify → sync cycle every refresh path shares), NetworkUsagePolicy (which automatic network work the current network allows — see "Network Gate" in sync-architecture.md), UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller(expect-like interface)/AvailableUpdate/UpdateState (in-app update — see "In-App Update" below)
     di/           SharedModule (sharedModule + updateModule + presentationModule) and HttpClientFactory [:shared]; AppModule (+ expect platformModule) and ImageLoaderSetup [:composeApp]
     presentation/ [:shared] UI-framework-free screen state shared by every UI: home/ (HomeViewModel — the
                   home screen's filter/selection/article list/search/unread-only/new-article state and
@@ -49,7 +49,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   the explicit read/unread actions taken while a selection's body is still loading, so they win
                   over that selection's implicit read; FeedListModel —
                   FeedListRowSelection and the feed-list ordering/grouping rules; ArticleListModel; ReaderPaging —
-                  the reader pager's page/selection rules; AddFeedController — the add-feed dialog's state machine;
+                  the reader pager's page/selection rules; ReaderContent — what the single (non-pager) reader
+                  shows (none / header-first / full) and the selected row every per-selection action acts on,
+                  decided once for both UIs; AddFeedController — the add-feed dialog's state machine;
                   HomeShortcuts — the keyboard-shortcut table over logical keys; NotificationAlerts —
                   which warning/error still needs announcing in a transient surface with no queue of
                   its own, e.g. Android's foreground Snackbar; NameValidation — the folder/tag
@@ -86,10 +88,12 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   Apple app's own reader), RelativeTime (relativeTimeOf — buckets a timestamp's age
                   into now/minutes/hours/days/absolute, shared by both apps' notification center
                   rows), ManualSync (the "Sync now" contract Home and Settings both depend on,
-                  implemented by `settings/CloudSyncController`). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
+                  implemented by `settings/CloudSyncController`), DerivedStateFlow (a read-only StateFlow computed from
+                  other state flows on every read, so a derived value can never be observed out of step with its
+                  inputs — used by HomeViewModel, CloudSyncController and OpmlTransferController). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
-                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
                   SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
                   one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
                   wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
@@ -180,7 +184,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     `onSelectionAdvance` nullness) — with selection colors from `rowSelectionColors()`'s
     `secondaryContainer`/`onSecondaryContainer` pair, unchanged by which pane holds keyboard
     focus (pane focus is instead shown as a `secondary` outline via
-    `RowSelectionColors.paneFocus`'s `PaneFocusIndication.Ring`, drawn by `HomeCommon.kt`'s
+    `RowSelectionColors.paneFocus`'s `PaneFocusIndication.Ring`, drawn by `ListRowSelection.kt`'s
     `listRowOutline` — see that file's own KDoc), TooltipIconButton/ToolbarIconGroup/
     FlatTooltipContent (M3's own icon-button family inside a `TooltipBox` with its own native
     long-press trigger — `IconButtonKind` picks the member: `IconButton` (`Standard`),
@@ -366,6 +370,27 @@ Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not inc
 - **Concurrency.** `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather
   than error on, the brief write lock of an incremental insert or a rebuild.
 
+### NetworkConditionMonitor (expect / actual)
+
+`platform/NetworkConditionMonitor.kt` declares an interface — `condition: Flow<NetworkCondition>`
+(`core/NetworkCondition(metered, dataSaver)`, the current value first, then every change) and
+`supported: Boolean` — plus `expect fun platformNetworkConditionMonitor()`, which `sharedModule`
+registers as a singleton. An interface rather than an `expect class` so tests can substitute
+`:testing`'s `FakeNetworkConditionMonitor`. The actuals:
+
+- **Android** (`androidMain`): `ConnectivityManager` through `AndroidAppContext`. The initial value
+  is read synchronously from `activeNetwork`'s capabilities, so a `WorkManager` wakeup never acts on
+  a placeholder; `registerDefaultNetworkCallback` and the runtime-registered
+  `ACTION_RESTRICT_BACKGROUND_CHANGED` receiver follow later changes. Needs `ACCESS_NETWORK_STATE`.
+- **iOS** (`iosMain`): `nw_path_monitor` (`isExpensive` / `isConstrained`); nothing is emitted until
+  the first path update.
+- **desktop / macOS** (`desktopMain`, `macosMain`): `UnrestrictedNetworkConditionMonitor` — always
+  unrestricted, `supported = false`.
+
+Its only consumer is `domain/NetworkUsagePolicy`, wired into `SyncRepository` and
+`RefreshCycleRunner` in `SharedModule` (and `CloudSyncController.meteredSettingSupported` reads
+`supported`); see "Network Gate" in [sync-architecture.md](sync-architecture.md).
+
 ### DatabaseMerger (expect / actual) — Key to Sync Merge
 
 ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight driver. SQLDelight's JVM `JdbcSqliteDriver` opens a fresh connection per statement for file DBs, so an `ATTACH` on one call is invisible to the merge statements on the next. `DatabaseMerger` does the whole attach → version check → merge → detach on a single dedicated JDBC connection.
@@ -470,7 +495,7 @@ ViewModels are registered as app-scope `single` and obtained via `koinInject()`.
 
 ### Article Reader (native WebView)
 
-`ui/home/ArticleDetailPane.kt`'s reader renders article HTML through a native WebView
+`ui/home/ArticleDetailPane.kt`'s reader renders article HTML through a native WebView (`ui/home/ArticleWebView.kt`)
 (`io.github.kdroidfilter.webview`, a heavyweight AWT `SwingPanel` wrapping a real OS browser view —
 Edge WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux), not a Compose-drawn texture. It is
 composed unconditionally for the pane's lifetime — never behind an `if` — because Compose Desktop's
@@ -524,6 +549,15 @@ color, so a theme change while an article is already open still repaints it. The
 a no-op: WebView2/WebKit/WebKitGTK already paint their own scrollbar from `color-scheme`, so nothing
 else is needed there.
 
+**`color-scheme` alone is not enough on iOS either.** The iOS reader's `WKWebView` is transparent
+(`isOpaque = false`, so the reader's own background shows through until the first document paints),
+and WebKit then no longer derives the scroll indicator's style from the page, leaving a dark
+indicator over the dark reader. `ArticleWebView.updateUIView` therefore sets
+`scrollView.indicatorStyle` from the in-app theme on every update (`ReaderScrollIndicator` decides
+which: a light indicator for a dark theme, a dark one for a light theme), so a theme change while an
+article is open — and a page the swipe pager reaches — is covered. macOS needs nothing: its
+`WKWebView` draws its scroller from the window's appearance and `color-scheme`.
+
 **The feed body is third-party content, and the document is built to survive it.** A body is
 embedded raw (so its rich markup renders) beneath a `<base href>` at the article's own origin,
 which also lets it reach the source site's own stylesheets — either a `<link rel="stylesheet">` it
@@ -562,8 +596,9 @@ pages either side of the one on screen are real, mounted `WebView`s, rendered th
 `ArticleWebViewCarousel` rather than the pager's own item content (see below for why).
 `PaneLayout.Triple` (every
 desktop window, and a wide tablet in landscape) keeps the single unconditionally-composed reader
-described above; the branch between the two forms checks `readerPaging != null && article != null
-&& isTouchPrimary` — all three, not `readerPaging` alone. `article != null` keeps a `PaneLayout.Dual`
+described above; the branch between the two forms checks `readerPaging != null && selectedRow != null
+&& isTouchPrimary` — all three, not `readerPaging` alone. `selectedRow != null` (`HomeViewModel.selectedArticleRow`,
+current the moment a selection is made) keeps a `PaneLayout.Dual`
 reader that has paging data but nothing selected yet on its HTML placeholder, rather than resting
 the pager on whatever page it last happened to show; `isTouchPrimary` is checked again at this level
 even though `ArticleDetailPane` (the ViewModel-facing wrapper) already only builds `readerPaging` on
@@ -575,7 +610,7 @@ caller above it.
 `ArticleSwipeNavigation` and `ArticleReaderPaging` are the same "null means `PaneLayout.Triple`"
 signal, kept as separate parameters because the first is a deliberately stable, `remember`ed
 callback bundle while the second carries data that changes as articles load — `ArticleDetailPane`
-wraps its own construction in `remember(pages, contents, article)` so building it does not
+wraps its own construction in `remember(pages, contents, selectedRow, loaded)` so building it does not
 recompose the whole reader on every article write. The signal is `swipeNavigation`, not
 `onNavigateUp` — at `PaneLayout.Dual` the reader has no back control (`onNavigateUp` is `null`) but
 swipe must still work there (see "Home's adaptive pane layout" below).
@@ -963,6 +998,43 @@ only intents made after that selection) so it shows at once whichever route made
 same value: `toggleReadSelected` acts on the cursor's article and sets it to the opposite of what the button
 shows, so a tap during that window can never land on the previous article, and a second tap undoes the first.
 
+Everything else about the selection follows the cursor too, through two values `HomeViewModel` derives from
+it (both `DerivedStateFlow`s — `presentation/DerivedStateFlow.kt` — so neither can be read out of step with the cursor):
+`selectedArticleId` (the cursor itself — what the article list highlights and scrolls to, what the narrow
+layouts' pager follows, and what a URL copy's ✓ is matched against) and `selectedArticleRow` (the loaded
+article once it is the cursor's, otherwise the list row the selection was made with, carrying every optimistic
+read/star write made on it meanwhile — what the reader toolbar's star, open, copy and share, the menu bar,
+the keyboard shortcuts and the toolbar's feed name act on). `toggleStarSelected` targets the cursor's article
+like `toggleReadSelected`, and a star toggled while the body loads is recorded (a second `SelectionReadIntents`)
+and laid over the hydrated row, since that lookup runs outside `dbWriteDispatcher`'s FIFO and can read the row
+from before the write. Only the read/unread button keeps `selectedArticleShownUnread` as its one source.
+
+The list scrolls the selection into view on `selectionRevealRequests`, not on `selectedArticleId`: that counts the
+selections the user moves to another article (one per such `selectArticle`, from any route; choosing the article
+that is already selected is not one), whereas the cursor also moves on its own —
+a selection whose row a sync merge has tombstoned hands it back to the article before it — and the list must not
+scroll back to that article unprompted. Clearing the selection with a filter switch and a restored selection are
+not requests either (the first composition brings a restored selection into view itself). The search results
+list follows the same rule: it scrolls to the selection on a request or when its results first arrive, never because
+its contents changed — a background write re-running the search, or a selection handed back after a tombstone,
+must not pull the list back to the selected row. Changing the query is the user asking for a different list, so the
+results go back to the top, as they do when the filter changes (a pane remount keeps the position).
+
+The single (non-pager) reader is driven by `readerContent` (`None` / `Header(row)` / `Full(article)`).
+Normally it goes straight from the previous article to the new one in `Full` — one document load. When there is no
+previously loaded article to keep on screen (the first selection after launch or after a filter switch), `Header`
+shows at once instead — never the "no article selected" placeholder, which the toolbar and the list highlight
+(already on the new selection) would contradict. Only when
+the body lookup has not returned within `READER_HEADER_FIRST_GRACE_MS` (50 ms — a lookup waiting out a sync
+merge's or an FTS rebuild's write lock) does the grace timer `hydrateSelection` starts publish `Header`: the
+new article's title, date and link from its list row over an empty body, the same document the pager draws for
+a page whose body has not loaded. The timer is cancelled on every exit from the hydration and re-checks on
+firing that its selection is still the newest, still the cursor's and still unloaded. The header is cleared
+once the body lands, by `selectFilter` and by a tombstoned lookup; a newer selection made while a header is
+showing takes the header over at once rather than returning the reader to the previously loaded article for
+another grace period. Compose's single reader and the macOS SwiftUI reader both render it; the iOS pager does
+not (a page with no body yet shows only the reader's background, as before).
+
 ## Navigation
 
 `ui/navigation/Navigator.kt` holds a single current `Screen` (`Setup` or `Home` — not a stack, and there is no
@@ -1281,7 +1353,10 @@ their "mark as unread" write may still be in flight, and dropping one would let 
 lose the row until that write lands. The selection's pin is decided inside one `update`, against the
 map being updated, so a re-trim composes with a concurrent reconcile pass. A pin that pass dropped
 since stays dropped, and an existing pin is kept as it is: it is never re-created from the
-selection, which the pass refreshes only after the pin.
+selection, which the pass refreshes only after the pin. Whether the selection still exists (a sync
+merge may have tombstoned it) is checked afterwards, by a read on `dbWriteDispatcher` rather than on
+the calling (main) thread, so a write lock held by a merge never stalls the UI; a tombstoned
+selection's pin is then dropped, but only if it is still the very pin the re-trim kept.
 
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
@@ -1501,6 +1576,17 @@ no separate iOS target to keep in sync.
   or the app becoming active again, earns a new reload, and a document given up on is loaded once
   more at that activation: the usual termination happens in the background, where the one reload
   may die too, and the reader must not still be blank when the user comes back.
+- **The iOS reader's swipe pager is a `UIPageViewController`, not a page-style `TabView`.**
+  `Home/ReaderPageController.swift` wraps one and asks for the article either side of the page on
+  screen by id (`ReaderPagerPages.id(before:)` / `id(after:)`) on every swipe, keeping only that page
+  and its two neighbours alive (`retainedIds(around:)`, which is what lets a swipe one away and back
+  keep its scroll position). The page set changes under the reader all the time — the one-page
+  fallback becoming the whole list once `pagerArticles` first emits, and every refresh or sync that
+  lands while it is open — and a page-style `TabView` keeps its item count and its current page
+  in step only loosely: v0.26.0 crashed when a layout forced during the interactive pop back to the
+  article list scrolled its collection view to a page past the end of its items, an
+  `NSInternalInconsistencyException`. Looking neighbours up by id leaves no count to fall out of
+  step with.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
@@ -1722,6 +1808,35 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 `AccentColor`'s `#4DB6AC`, on which white text would be unreadable (2.4:1). Unlike macOS it is not
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
+
+### iPhone Duo (iOS)
+
+iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and
+tab bar as one vertical bar on the trailing edge. The system does this by itself for toolbars built with
+`.toolbar` on a `NavigationSplitView`, which is all this app uses, so no Duo-specific layout code
+exists. What was measured on the iOS 27.1 simulator, and what follows from it:
+
+- **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
+  outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
+  circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
+  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the unread-only /
+  hide-read group `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
+  inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
+  so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
+  `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
+  `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups
+  even on iOS 27.
+- **The empty band above the outer display's lists** (82pt, against 24pt above the reader, which has no
+  navigation title) is the navigation title's own area: removing the article list's empty `.principal`
+  item shows the inline title there, and the system Settings app leaves the same band empty above its
+  own lists. It is left as is.
+- **The inner display in portrait** (669pt, a regular width) shows the reader alone, with the article
+  list over it on demand. That is the split view's own decision: neither `.balanced` with a
+  `.doubleColumn` visibility nor a 300pt ideal width for the list made the two columns tile, and the
+  HIG asks for the system container rather than a custom one. The half-folded pose needs nothing
+  either: the split view lines its columns up with the fold by itself.
+- **Not measured:** the narrowest width two apps get side by side on the inner display. The simulator's
+  resize mode works on the outer display only (where 466pt is already the minimum).
 
 ### `KeryxSdk`: the Swift entry point
 

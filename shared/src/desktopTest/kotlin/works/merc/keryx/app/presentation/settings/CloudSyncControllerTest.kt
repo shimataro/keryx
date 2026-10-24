@@ -12,10 +12,14 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -54,13 +58,18 @@ import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.multiProviderCloudSession
 import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.FakeNetworkConditionMonitor
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.NetworkConditionMonitor
+import works.merc.keryx.app.platform.UnrestrictedNetworkConditionMonitor
 import works.merc.keryx.app.presentation.ManualSyncEdge
 import works.merc.keryx.app.presentation.formatTimestamp
 import works.merc.keryx.app.singleProviderCloudSession
+import works.merc.keryx.app.testThreadDispatcher
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -157,6 +166,9 @@ class CloudSyncControllerTest {
     // them all (not just the latest) so tearDown() can cancel every one, same as createdControllers.
     private val createdSyncScopes = mutableListOf<CoroutineScope>()
 
+    /** Thread-backed dispatchers a test created ([testThreadDispatcher]), closed in [tearDown]. */
+    private val testDispatchers = mutableListOf<ExecutorCoroutineDispatcher>()
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -177,6 +189,8 @@ class CloudSyncControllerTest {
         }
         createdControllers.clear()
         createdSyncScopes.clear()
+        testDispatchers.forEach { it.close() }
+        testDispatchers.clear()
         Dispatchers.resetMain()
         driver.close()
         File(dir).deleteRecursively()
@@ -215,6 +229,9 @@ class CloudSyncControllerTest {
         // matches the rest of newController's Unconfined setup; a test can supply a CoroutineDispatcher
         // to assert it was actually used or to hold work in flight.
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        // The SyncRepository's network gate (default: always allowed) and the platform's monitor.
+        automaticSyncAllowedFlow: () -> Flow<Boolean> = { flowOf(true) },
+        networkConditionMonitor: NetworkConditionMonitor = UnrestrictedNetworkConditionMonitor,
     ): CloudSyncController {
         val syncScheduler = SyncScheduler {}
         // Unconfined write dispatcher so saveLocalSettings persists inline.
@@ -233,6 +250,7 @@ class CloudSyncControllerTest {
             notificationCenter = NotificationCenter(),
             localDbPath = "unused",
             tempDir = "unused",
+            automaticSyncAllowedFlow = automaticSyncAllowedFlow,
         )
         val session = cloudSession ?: run {
             val authClient = HttpClient(MockEngine { respond("{}", HttpStatusCode.OK) }) { expectSuccess = false }
@@ -249,7 +267,7 @@ class CloudSyncControllerTest {
         createdSettingsRepository = settingsRepository
         return CloudSyncController(
             session, syncRepository, CloudConnectionService(session, settingsRepository, syncRepository),
-            activityCenter, settingsRepository, dispatcher,
+            activityCenter, settingsRepository, dispatcher, networkConditionMonitor,
         ).also { createdControllers += it }
     }
 
@@ -315,6 +333,38 @@ class CloudSyncControllerTest {
      * which must not be gated on the same flag.
      */
     @Test
+    fun meteredSettingIsOfferedOnlyWhereThePlatformReportsMeteredNetworks() {
+        assertFalse(newController().meteredSettingSupported)
+        assertTrue(newController(networkConditionMonitor = FakeNetworkConditionMonitor(supported = true)).meteredSettingSupported)
+        assertFalse(newController(networkConditionMonitor = FakeNetworkConditionMonitor(supported = false)).meteredSettingSupported)
+    }
+
+    @Test
+    fun syncOnMeteredNetworkFollowsTheSettingWrittenThroughPreferences() {
+        val controller = newController()
+        assertFalse(controller.syncOnMeteredNetwork.value)
+
+        PreferencesController(createdSettingsRepository).setSyncOnMeteredNetwork(true)
+
+        assertTrue(controller.syncOnMeteredNetwork.value)
+    }
+
+    @Test
+    fun syncDeferredForNetworkMirrorsTheSyncRepositoryUntilTheDeferralClears() = runTest {
+        val controller = newController(
+            syncCloudProvider = { AlwaysFailingCloudStorage() },
+            automaticSyncAllowedFlow = { MutableStateFlow(false) },
+        )
+        assertFalse(controller.syncDeferredForNetwork.value)
+
+        createdSyncRepository.sync(SyncTrigger.AUTOMATIC)
+        assertTrue(controller.syncDeferredForNetwork.value)
+
+        createdSyncRepository.clearSyncFailureState()
+        assertFalse(controller.syncDeferredForNetwork.value)
+    }
+
+    @Test
     fun initialSyncKeepsConnectingTypeClearWhileSettingInitialSyncingType() = runTest {
         val gate = CompletableDeferred<Unit>()
         val controller = newController(syncCloudProvider = { GatedCloudStorage(gate) })
@@ -374,16 +424,16 @@ class CloudSyncControllerTest {
 
     // Note: this test deliberately avoids `runTest`'s virtual scheduler, same reason as
     // lastSyncedAtTextRefreshesWhenActivityCenterReportsSyncCompletion below — the controller's
-    // collector runs on the standalone UnconfinedTestDispatcher installed as Main, and the sync on a
-    // real Dispatchers.Default thread, neither on runTest's scheduler, so both the true and the false
-    // side of the transition are polled with real wall-clock waits.
+    // collector runs on the standalone UnconfinedTestDispatcher installed as Main, and the sync's
+    // delay resumes on the coroutines' real timer thread, neither on runTest's scheduler, so both the
+    // true and the false side of the transition are polled with real wall-clock waits.
     @Test
     fun syncingMirrorsActivityCenter() {
         val activityCenter = ActivityCenter()
         val controller = newController(activityCenter = activityCenter)
         assertFalse(controller.syncing.value)
 
-        val job = CoroutineScope(Dispatchers.Default).launch {
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
             activityCenter.trackSync { delay(200) }
         }
 
@@ -404,7 +454,7 @@ class CloudSyncControllerTest {
     fun syncingReflectsActivityCenterAcrossAFullCycleEvenWhenAlreadyRunningAtConstruction() {
         val activityCenter = ActivityCenter()
         val gate = CompletableDeferred<Unit>()
-        val job = CoroutineScope(Dispatchers.Default).launch {
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
             activityCenter.trackSync { gate.await() }
         }
         awaitConditionBlocking { activityCenter.activity.value.syncing }
@@ -738,7 +788,7 @@ class CloudSyncControllerTest {
         assertTrue(controller.canSyncNow.value)
 
         val gate = CompletableDeferred<Unit>()
-        val job = CoroutineScope(Dispatchers.Default).launch {
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
             activityCenter.trackSync { gate.await() }
         }
         awaitConditionBlocking { !controller.idle.value }
@@ -785,7 +835,7 @@ class CloudSyncControllerTest {
         val controller = newController(
             tokenStorage = tokenStorage,
             syncCloudProvider = { GatedCloudStorage(gate) },
-            dispatcher = Dispatchers.Default,
+            dispatcher = testThreadDispatcher("cloud-sync-controller-test").also { testDispatchers += it },
         )
         assertFalse(controller.syncing.value)
 

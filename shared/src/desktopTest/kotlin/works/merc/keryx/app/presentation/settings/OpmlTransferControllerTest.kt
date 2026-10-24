@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import java.util.Collections
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.awaitCondition
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
@@ -126,6 +127,7 @@ class OpmlTransferControllerTest {
         val feedRepository = FeedRepository(
             db, feedFetcher, FaviconResolver(faviconClient), articleRepository, ftsManagerIndexed(driver), syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -182,7 +184,7 @@ class OpmlTransferControllerTest {
         val controller = controller(fetcher(gate = CompletableDeferred(), started = started))
         assertTrue(controller.tryBegin(OpmlOperation.Importing))
         var thrown: Throwable? = null
-        val caller = launch(Dispatchers.Default) {
+        val caller = launch {
             try {
                 controller.importBegun(ONE_FEED_OPML)
             } catch (e: Throwable) {
@@ -296,7 +298,7 @@ class OpmlTransferControllerTest {
         val scopeJob = SupervisorJob()
         val controller = controller(fetcher(gate = CompletableDeferred(), started = started), appScope(scopeJob), importDispatcher)
         var thrown: Throwable? = null
-        val caller = launch(Dispatchers.Default) {
+        val caller = launch {
             try {
                 controller.importResult(ONE_FEED_OPML)
             } catch (e: Throwable) {
@@ -338,7 +340,7 @@ class OpmlTransferControllerTest {
         val started = CompletableDeferred<Unit>()
         val scope = appScope()
         val controller = controller(fetcher(gate = CompletableDeferred(), started = started), scope)
-        val run = launch(Dispatchers.Default) {
+        val run = launch {
             assertFailsWith<CancellationException> { controller.importResult(ONE_FEED_OPML) }
         }
         withTimeout(5_000) { started.await() }

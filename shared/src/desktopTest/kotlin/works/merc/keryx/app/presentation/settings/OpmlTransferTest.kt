@@ -8,6 +8,7 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.data.local.FtsSearch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
@@ -83,6 +84,7 @@ class OpmlTransferTest {
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)

@@ -24,12 +24,18 @@ final class HomeObservable: ObservableAssignment {
     /// cached, since `KeryxSdk.newAddFeedController()` itself returns a new instance every call.
     let makeAddFeedController: () -> AddFeedController
 
-    /// The latest `feeds` emission, always — the rows action-time lookups (`currentFeed(id:)`)
-    /// resolve through. Not observed: a refresh re-emits it once per fetched feed, so views read
+    /// The latest `feeds` emission, always — the rows action-time lookups (`requestDelete`'s
+    /// selection target) resolve through. Not observed: a refresh re-emits it once per fetched feed, so views read
     /// `hasFeeds` / `feedsById` / `sidebar` / `subscribedFeedUrls` instead, which only change with
     /// `HomeViewModel.structuralFeeds`.
     @ObservationIgnored private(set) var feeds: [Feeds] = []
     private(set) var hasFeeds = false
+    /// `HomeViewModel.articleListBody` — whether the article list has loaded at all yet, and
+    /// whether there are no feeds; what the list's empty states are decided from.
+    private(set) var listBody: ArticleListBody = .pending
+    /// `HomeViewModel.articleListHasRows` — whether the view model's article list has any rows, which
+    /// `articleListCatchingUp` compares with the rows this observable has built.
+    private(set) var listHasRows = false
     /// The latest `structuralFeeds` emission — what `sidebar`, `feedsById` and the selection target
     /// are built from. Its `Feeds` may lag behind `feeds` in `etag` / `last_modified` /
     /// `updated_at` (`feedsStructurallyEqual`). Not observed: views read what is derived from it.
@@ -88,6 +94,9 @@ final class HomeObservable: ObservableAssignment {
     /// per body evaluation, off the main actor (`ArticleRowList.buildInBackground`); assigned only
     /// when some row actually changed.
     private(set) var articleRows = ArticleRowList.empty
+    /// Whether an `articleRows` build is in flight. While it is, an empty `articleRows` may only
+    /// be the previous emission's, so the list shows no "no articles" message until it lands.
+    private(set) var articleRowsBuilding = false
     private(set) var searchRows = ArticleRowList.empty
     /// The in-flight background build of each list. A newer request cancels the older one, and a
     /// result is applied only if it is still the latest request's (`rowListGeneration`), so an
@@ -103,12 +112,22 @@ final class HomeObservable: ObservableAssignment {
     @ObservationIgnored private var sidebarRebuild: CoalescedAction?
     private(set) var newArticleCount: Int = 0
 
-    private(set) var selectedArticle: Articles?
+    /// `HomeViewModel.selectedArticleRow` — the selection's row, current the moment an article is
+    /// selected (before its body has loaded). What the reader's toolbar and the menu bar act on.
+    private(set) var selectedArticleRow: ArticleListRow?
+    /// `HomeViewModel.readerContent` — what the macOS reader shows: nothing, the selection's header
+    /// while its body is held up past the grace period, or the loaded article. The iOS pager reads
+    /// only its loaded article (`loadedArticle`).
+    private(set) var readerContent: ReaderContent = ReaderContentNone.shared
     // Narrow facts about the selection for the menu bar (`HomeCommands`) and the article list,
-    // assigned only when they change: reading `selectedArticle` / `filter` / the feed list there directly
+    // assigned only when they change: reading `selectedArticleRow` / `filter` / the feed list there directly
     // made every article selection, star/read toggle and feed refresh re-evaluate them all.
     private(set) var hasSelectedArticle = false
     private(set) var selectedArticleId: String?
+    /// `HomeViewModel.selectionRevealRequests` — one more per selection the user makes. The article
+    /// list scrolls the selection into view when this changes, not when `selectedArticleId` does: that
+    /// also moves back without the user acting (a selection found tombstoned).
+    private(set) var selectionRevealRequests = 0
     private(set) var selectedArticleHasUsableUrl = false
     /// `canOpenInBrowser` for the selected article's URL — Open in Browser's own (http(s)) rule.
     private(set) var selectedArticleCanOpenInBrowser = false
@@ -131,6 +150,10 @@ final class HomeObservable: ObservableAssignment {
     /// because of the sign-in (true implies `canSyncNow` is false).
     private(set) var syncDisabledByAuth: Bool = false
     private(set) var activity = ActivitySnapshot(feedRefreshCount: 0, syncCount: 0, refreshCycleCount: 0)
+    /// `HomeViewModel.refreshingFeedIds` — the feeds whose sidebar row shows the refreshing indicator.
+    private(set) var refreshingFeedIds: Set<String> = []
+    /// `HomeViewModel.refreshingFolderIds` — the collapsed folders whose row shows it.
+    private(set) var refreshingFolderIds: Set<String> = []
 
     /// Bumped by every copy of the displayed article's URL (`copyArticleUrl`, shared by the reader's
     /// own button, the menu bar's / keyboard's Copy URL command and the article row's context menu)
@@ -146,6 +169,10 @@ final class HomeObservable: ObservableAssignment {
     /// and the reader's ✓ is often off screen (a long-pressed row is not selected, and at iPhone width
     /// the reader is not shown) — that is every copy, as Android below API 33 does with its snackbar.
     let copyToast: TransientToastState
+    /// The toolbar status area's refresh status — "checking", then the result — for the refreshes the
+    /// user started, fed from `manualRefreshStatus` (`HeldRefreshStatus`). iOS only — macOS keeps its
+    /// spinning Refresh button.
+    let refreshStatus = HeldRefreshStatus()
     #endif
 
     /// How an in-app copy confirmation is delivered — see `ArticleUrlCopyConfirmation`.
@@ -192,16 +219,11 @@ final class HomeObservable: ObservableAssignment {
         updateFeedListSelectionTarget()
     }
 
-    /// The current row for `id`: the `Feeds` the sidebar and `feedsById` hold may carry a stale
-    /// `etag` / `last_modified` (see `structuralFeeds`), which a refresh sends as its conditional
-    /// request.
-    func currentFeed(id: String) -> Feeds? {
-        feeds.first { $0.id == id }
-    }
-
-    /// Refreshes `feed` from its current row — see `currentFeed(id:)`.
+    /// Refreshes `feed`. Only its id is passed on: `HomeViewModel.refreshFeed` re-reads the row,
+    /// since the `Feeds` the sidebar and `feedsById` hold may carry a stale `etag` /
+    /// `last_modified` (see `structuralFeeds`), which a refresh sends as its conditional request.
     func refreshFeed(_ feed: Feeds) {
-        viewModel.refreshFeed(feed: currentFeed(id: feed.id) ?? feed)
+        viewModel.refreshFeed(feedId: feed.id)
     }
 
     /// The one handler every route that selects an article goes through: it selects, then brings
@@ -220,10 +242,23 @@ final class HomeObservable: ObservableAssignment {
         selecting { viewModel.selectPrevious() }
     }
 
+    /// Runs a selection and brings every selection-derived value up to date in the same turn.
+    ///
+    /// Not unit-tested here: it needs a live `HomeViewModel`, which `KeryxTests` has no seam for. What
+    /// it syncs from is covered where it is decided — `HomeViewModelTest` and `ReaderContentTest`
+    /// (`selectedArticleRow` / `readerContent` / `selectedArticleShownUnread`), and the pure rules
+    /// that turn those into what the views show by `ReaderPageSourceTests` and `KotlinValuesEqualTests`.
     private func selecting(_ select: () -> Void) {
         select()
         syncSelectedArticleShownUnread()
+        // The highlight, the toolbar and the reader follow the selection at once rather than a turn later.
+        syncSelectedArticleRow()
+        syncReaderContent()
     }
+
+    /// The fully loaded article the reader holds (`ReaderContent.Full`), or nil — which, while a newly
+    /// selected article's body is still loading, is still the previous article.
+    var loadedArticle: Articles? { (readerContent as? ReaderContentFull)?.article }
 
     private func syncSelectedArticleShownUnread() {
         assignIfChanged(\.selectedArticleShownUnread, viewModel.isSelectedArticleShownUnread())
@@ -270,7 +305,7 @@ final class HomeObservable: ObservableAssignment {
         await PullRefreshHold.run {
             start()
             for await pending in viewModel.pullRefreshingFilters {
-                if !pending.contains(where: { ($0 as AnyObject).isEqual(filter) }) { return }
+                if !pending.contains(where: { kotlinValuesEqual($0 as AnyObject, filter) }) { return }
             }
         }
     }
@@ -310,7 +345,9 @@ final class HomeObservable: ObservableAssignment {
         async let t22: () = observeCanHideRead()
         async let t23: () = observeArticles()
         async let t24: () = observeNewArticleCount()
-        async let t25: () = observeSelectedArticle()
+        async let t25: () = observeSelectedArticleRow()
+        async let t25b: () = observeReaderContent()
+        async let t25c: () = observeSelectionRevealRequests()
         async let t26: () = observeSelectedFeedName()
         async let t27: () = observeSelectedFeedFaviconUrl()
         async let t28: () = observeArticleContents()
@@ -319,12 +356,22 @@ final class HomeObservable: ObservableAssignment {
         async let t31: () = observeCanSyncNow()
         async let t32: () = observeSyncDisabledByAuth()
         async let t33: () = observeSelectedArticleShownUnread()
+        async let t34: () = observeArticleListBody()
+        async let t35: () = observeArticleListHasRows()
+        async let t37: () = observeRefreshingFeedIds()
+        async let t38: () = observeRefreshingFolderIds()
+        #if os(iOS)
+        async let t36: () = observeManualRefreshStatus()
+        #endif
         _ = await (
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
-            t21, t22, t23, t24, t25, t26, t27, t28, t29, t30,
-            t31, t32, t33
+            t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
+            t31, t32, t33, t34, t35, t37, t38
         )
+        #if os(iOS)
+        await t36
+        #endif
     }
 
     private func observeFeeds() async {
@@ -494,6 +541,14 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.canHideRead { assignIfChanged(\.canHideRead, v.boolValue) }
     }
 
+    private func observeArticleListHasRows() async {
+        for await v in viewModel.articleListHasRows { assignIfChanged(\.listHasRows, v.boolValue) }
+    }
+
+    private func observeArticleListBody() async {
+        for await v in viewModel.articleListBody { assignIfChanged(\.listBody, v) }
+    }
+
     private func observeArticles() async {
         for await v in viewModel.articles {
             articles = v
@@ -503,12 +558,7 @@ final class HomeObservable: ObservableAssignment {
 
     private func updateFeedListSelectionTarget() {
         let target = FeedListModelKt.resolveFeedListSelectionTarget(filter: filter, feeds: structuralFeeds, folders: folders, tags: tags)
-        let unchanged = switch (feedListSelectionTarget, target) {
-        case (nil, nil): true
-        case let (old?, new?): (old as? NSObject)?.isEqual(new) ?? false
-        default: false
-        }
-        if !unchanged { feedListSelectionTarget = target }
+        if !kotlinValuesEqual(feedListSelectionTarget as AnyObject?, target as AnyObject?) { feedListSelectionTarget = target }
         assignIfChanged(\.articleListTitle, FeedListModelKt.articleListTitle(
             filter: filter, feeds: structuralFeeds, folders: folders, tags: tags,
             allLabel: L("home_all_feeds"), starredLabel: L("home_starred")
@@ -544,8 +594,10 @@ final class HomeObservable: ObservableAssignment {
             guard let self, !Task.isCancelled, articleRowsBuild?.generation == generation else { return }
             articleRowsBuild = nil
             if list.generation != articleRows.generation { articleRows = list }
+            assignIfChanged(\.articleRowsBuilding, false)
         }
         articleRowsBuild = (task, generation)
+        assignIfChanged(\.articleRowsBuilding, true)
     }
 
     private func rebuildSearchRows() {
@@ -574,16 +626,35 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.newArticleCount { assignIfChanged(\.newArticleCount, Int(v.int32Value)) }
     }
 
-    private func observeSelectedArticle() async {
-        for await v in viewModel.selectedArticle {
-            // Always assigned: a star/read toggle emits a new instance of the same article, which
-            // the reader keys its revision on.
-            selectedArticle = v
-            assignIfChanged(\.hasSelectedArticle, v != nil)
-            assignIfChanged(\.selectedArticleId, v?.id)
-            assignIfChanged(\.selectedArticleHasUsableUrl, ArticleListModelKt.hasUsableUrl(url: v?.url))
-            assignIfChanged(\.selectedArticleCanOpenInBrowser, ArticleListModelKt.canOpenInBrowser(url: v?.url))
-        }
+    /// Re-reads the value on each delivery, like `observeSelectedArticleShownUnread`: `selecting` has
+    /// already synced it, and an older queued emission must not put the previous selection back.
+    private func observeSelectedArticleRow() async {
+        for await _ in viewModel.selectedArticleRow { syncSelectedArticleRow() }
+    }
+
+    private func observeSelectionRevealRequests() async {
+        for await v in viewModel.selectionRevealRequests { assignIfChanged(\.selectionRevealRequests, Int(v.int32Value)) }
+    }
+
+    private func syncSelectedArticleRow() {
+        let v = viewModel.selectedArticleRow.value
+        assignIfChanged(\.selectedArticleRow, v)
+        assignIfChanged(\.hasSelectedArticle, v != nil)
+        assignIfChanged(\.selectedArticleId, v?.id)
+        assignIfChanged(\.selectedArticleHasUsableUrl, ArticleListModelKt.hasUsableUrl(url: v?.url))
+        assignIfChanged(\.selectedArticleCanOpenInBrowser, ArticleListModelKt.canOpenInBrowser(url: v?.url))
+    }
+
+    /// Re-reads the value on each delivery, for the same reason as `observeSelectedArticleRow`.
+    private func observeReaderContent() async {
+        for await _ in viewModel.readerContent { syncReaderContent() }
+    }
+
+    /// Assigned only when it changes by value: a star/read toggle publishes a new article instance
+    /// (which the reader keys its revision on), an unchanged re-read does not.
+    private func syncReaderContent() {
+        let v = viewModel.readerContent.value
+        if !kotlinValuesEqual(v as AnyObject, readerContent as AnyObject) { readerContent = v }
     }
 
     private func observeSelectedFeedName() async {
@@ -604,6 +675,33 @@ final class HomeObservable: ObservableAssignment {
 
     private func observeActivity() async {
         for await v in viewModel.activity { assignIfChanged(\.activity, v) }
+    }
+
+    #if os(iOS)
+    /// The refreshes the user started, for the toolbar status (`HeldRefreshStatus`).
+    private func observeManualRefreshStatus() async {
+        for await status in viewModel.manualRefreshStatus {
+            switch onEnum(of: status) {
+            case .idle:
+                refreshStatus.update(nil)
+            case .checking:
+                refreshStatus.update(.checking)
+            case .finished(let finished):
+                let outcome = finished.outcome
+                refreshStatus.update(
+                    RefreshStatus.result(newArticleCount: Int(outcome.newArticleCount), unreachable: outcome.unreachable)
+                )
+            }
+        }
+    }
+    #endif
+
+    private func observeRefreshingFeedIds() async {
+        for await v in viewModel.refreshingFeedIds { assignIfChanged(\.refreshingFeedIds, v) }
+    }
+
+    private func observeRefreshingFolderIds() async {
+        for await v in viewModel.refreshingFolderIds { assignIfChanged(\.refreshingFolderIds, v) }
     }
 
     /// Re-reads the value on each delivery instead of assigning the delivered one: a value emitted before a

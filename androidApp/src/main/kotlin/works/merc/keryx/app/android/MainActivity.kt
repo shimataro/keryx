@@ -12,10 +12,13 @@ import org.koin.core.Koin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.App
 import works.merc.keryx.app.dispatchOAuthCallbackIfPresent
+import works.merc.keryx.app.domain.AppForeground
+import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.handleOpmlOpenIfPresent
 import works.merc.keryx.app.handleSharedLinkIfPresent
 import works.merc.keryx.app.platform.AndroidAuthorizationHost
 import works.merc.keryx.app.platform.AndroidFilePickerHost
+import works.merc.keryx.app.platform.ExternalAppLaunch
 import works.merc.keryx.app.runAndroidStartupTasks
 
 /**
@@ -72,6 +75,38 @@ class MainActivity : ComponentActivity() {
         // FeedRefreshWorker) — and why it's safe to call again on every onCreate (rotation), since
         // the function guards itself to once per process.
         koin.get<CoroutineScope>().launch { runAndroidStartupTasks(koin) }
+    }
+
+    /**
+     * Back in front: a launch the app made itself (a browser tab) is over, and one that never took
+     * the app out of the foreground must not swallow a later real exit. Also reported as the app's
+     * "in front" state ([AppForeground]), which holds back an automatic refresh's new-article
+     * notification.
+     */
+    override fun onResume() {
+        super.onResume()
+        ExternalAppLaunch.clear()
+        KoinPlatform.getKoin().get<AppForeground>().set(true)
+    }
+
+    /** No longer in front ([AppForeground]): an automatic refresh's new-article notification is posted again. */
+    override fun onPause() {
+        super.onPause()
+        KoinPlatform.getKoin().get<AppForeground>().set(false)
+    }
+
+    /**
+     * Leaving the app is when deferred reading-state changes (marked read / starred, which wait out a
+     * long debounce window) should reach other devices — unless the app left only to open a link in
+     * the browser (see `SyncRepository.flushOnLeavingForeground`). Launched on the process-wide scope
+     * rather than `lifecycleScope`, which an Activity finishing right after this would cancel. A
+     * configuration change is not leaving the app.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (isChangingConfigurations) return
+        val koin = KoinPlatform.getKoin()
+        koin.get<CoroutineScope>().launch { koin.get<SyncRepository>().flushOnLeavingForeground() }
     }
 
     override fun onDestroy() {

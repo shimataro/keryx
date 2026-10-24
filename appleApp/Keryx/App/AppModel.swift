@@ -1,6 +1,9 @@
 import Foundation
 import KeryxShared
 import Observation
+#if os(iOS)
+import UIKit
+#endif
 
 /// Builds and holds the shared `KeryxSdk` graph for the lifetime of the app, and the
 /// `@Observable` adapters SwiftUI views read from. One instance per process — see
@@ -88,7 +91,7 @@ final class AppModel {
     /// `OAuthSessionCoordinator.open` (which itself hops to `@MainActor` internally).
     nonisolated private static func startSdk(oauthCoordinator: OAuthSessionCoordinator) throws -> KeryxSdk {
         try KeryxSdk.companion.start(
-            newArticlesText: { count in LF("home_new_articles", Int64(count)) },
+            newArticlesText: { count in LF("home_new_articles", count.int64Value) },
             postOsNotification: { message, _ in OsNotificationPoster.post(message: message) },
             // KERYX_DATA_DIR lets a manual verification run point at a scratch directory instead
             // of the real ~/Library/Application Support/Keryx — unset (nil) in every normal
@@ -126,6 +129,36 @@ final class AppModel {
         sdk?.stopRefreshLoop()
     }
     #endif
+
+    /// Sends local changes still waiting for their sync debounce window (marked read / starred) as the
+    /// app leaves the foreground (iOS) or its window hides to the menu bar (macOS), so they reach other
+    /// devices without waiting for the next refresh. Never called on quit: that must not wait on the
+    /// network, and the next launch's startup sync sends what is pending.
+    ///
+    /// On iOS it runs inside a background task so suspension doesn't cut the upload short, and skips
+    /// the exit the app caused itself by opening a link (`flushOnLeavingForeground`); if the OS ends
+    /// that grace period first, nothing is lost — the next sync uploads the same changes.
+    func flushPendingSync() {
+        guard let sdk else { return }
+        #if os(iOS)
+        var taskId = UIBackgroundTaskIdentifier.invalid
+        let endTask = {
+            guard taskId != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(taskId)
+            taskId = .invalid
+        }
+        taskId = UIApplication.shared.beginBackgroundTask(withName: "FlushPendingSync") { endTask() }
+        let flush = Task.detached(priority: .utility) {
+            try? await sdk.syncRepository.flushOnLeavingForeground()
+        }
+        Task {
+            _ = await flush.value
+            endTask()
+        }
+        #else
+        Task.detached(priority: .utility) { try? await sdk.syncRepository.flushPendingSync() }
+        #endif
+    }
 
     #if os(iOS)
     /// The iOS background refresh: schedules the next run (a request is one-shot), runs one

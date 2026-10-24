@@ -72,7 +72,7 @@ struct FeedListView: View {
         .modifier(SearchFocusModifier(focusedPane: focusedPane))
         // Spring-loaded folder: holding a dragged feed over a collapsed folder opens it after a
         // short pause, so its feeds become reachable drop targets mid-drag — matches Compose's own
-        // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListDragAndDrop.kt`). The pause and
+        // `LaunchedEffect(isFeedDragHighlight, collapsed)` (`FeedListRows.kt`). The pause and
         // whether to spring at all follow the system's own spring-loading setting, as Finder does.
         // Re-checks `hoveredKey` after the delay so releasing/moving away first cancels the expand.
         .onChange(of: hoveredKey) { _, key in
@@ -163,6 +163,9 @@ struct FeedListView: View {
                 Label(L("settings_title"), systemImage: "gearshape")
             }
         }
+        // With no Refresh All button here, the status area is what shows the result of a refresh
+        // the user started — the pull, ⌘R, a feed's Refresh.
+        RefreshStatusToolbarItem(home: home)
         #endif
         #if os(macOS)
         // macOS 26 right-aligns the sidebar's items by itself; earlier versions pack them against
@@ -182,7 +185,7 @@ struct FeedListView: View {
                 Label(L("home_add"), systemImage: "plus")
             }
         }
-        // Mirrors Compose's own `FeedListToolbarRow` (`FeedListPane.kt:883-943`): Refresh All is
+        // Mirrors Compose's own `FeedListToolbarRow` (`FeedListChrome.kt`): Refresh All is
         // always present, Sync only while a cloud provider is connected, and both disable while
         // either operation (or the refresh-then-sync cycle covering the gap between them) is
         // already in flight — `activity.refreshIndicatorShown`/`.syncing` pick which one's own
@@ -585,10 +588,10 @@ private struct SidebarRenameSheet: ViewModifier {
 ///
 /// On macOS a spinner replaces the icon inside the button's `Label`: `NSToolbar` hosts the view
 /// as-is, and the title stays fixed so VoiceOver and the collapsed-sidebar overflow menu still name
-/// the action. iOS's navigation bar cannot render a `ProgressView` as a button's icon — it falls
-/// back to the label's title text — so there the button stays and its icon animates instead
-/// (`BusySymbolEffect`), with the in-progress title for VoiceOver. The button is disabled while busy
-/// either way.
+/// the action. iOS's navigation bar renders a button's label as a static image — a `ProgressView`
+/// icon falls back to the title text, and a `.symbolEffect` never animates — so there the spinner
+/// takes the button's place, carrying the in-progress title for VoiceOver. Either way nothing
+/// tappable is offered while busy.
 private struct ToolbarActivityButton: View {
     let titleKey: String
     let busyTitleKey: String
@@ -607,16 +610,20 @@ private struct ToolbarActivityButton: View {
 
     var body: some View {
         #if os(iOS)
-        // The same button while busy — disabled, its icon animating, its VoiceOver name switched —
-        // rather than a spinner in its place: swapping views changed the bar's layout every time.
-        Button(action: action) {
-            Label {
-                Text(L(busy ? busyTitleKey : titleKey))
-            } icon: {
-                Image(systemName: systemImage).modifier(BusySymbolEffect(busy: busy))
+        // The spinner is a custom view, which the bar lays out narrower than an icon button; the
+        // fixed width (measured against the button on iOS 26) keeps the item and its glass group
+        // the same size as the button it replaces, so the bar doesn't shift each time an
+        // operation starts or ends.
+        if busy {
+            ProgressView()
+                .frame(width: 40)
+                .accessibilityLabel(L(busyTitleKey))
+        } else {
+            Button(action: action) {
+                Label(L(titleKey), systemImage: systemImage)
             }
+            .disabled(!enabled)
         }
-        .disabled(!enabled)
         #else
         Button(action: action) {
             // A `Label` rather than a bare icon so the toolbar's overflow menu (shown when the
@@ -636,19 +643,3 @@ private struct ToolbarActivityButton: View {
         #endif
     }
 }
-
-#if os(iOS)
-/// Animates a toolbar button's SF Symbol while its operation runs: a rotation (iOS 18 and later), or
-/// a pulse where the rotate effect does not exist.
-private struct BusySymbolEffect: ViewModifier {
-    let busy: Bool
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18, *) {
-            content.symbolEffect(.rotate, isActive: busy)
-        } else {
-            content.symbolEffect(.pulse, isActive: busy)
-        }
-    }
-}
-#endif
