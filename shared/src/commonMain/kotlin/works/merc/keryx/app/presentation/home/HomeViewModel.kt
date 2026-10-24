@@ -281,19 +281,40 @@ class HomeViewModel(
         settingsRepository.getLocalSettings().lastUnreadOnlyStarred ?: false,
     )
 
+    // ArticleListMode.Starred — session-only by design (never persisted), so a list narrowed to a
+    // handful of starred articles can't greet the next launch looking like the feeds stopped updating.
+    // Kept across filter switches (browsing several feeds' starred articles in turn), except into the
+    // Starred filter, where the mode can't apply and would otherwise linger out of sight.
+    private val _starredMode = MutableStateFlow(false)
+
     /** [Starred] uses its own dedicated toggle ([_unreadOnlyStarred]); every other filter shares
      * [_unreadOnly]. Search narrows whichever filter is already selected rather than displacing
      * it (see "Search is orthogonal to ArticleFilter" in app-architecture.md), so it reads the
      * same key as the filter underneath it — there is no separate search-specific toggle. */
-    private fun unreadOnlyFor(filter: ArticleFilter, general: Boolean, starred: Boolean): Boolean =
-        if (filter == ArticleFilter.Starred) starred else general
+    private fun currentMode(): ArticleListMode =
+        articleListModeFor(_filter.value, _unreadOnly.value, _unreadOnlyStarred.value, _starredMode.value)
 
+    /** The article list's mode — see [ArticleListMode]. Changed through [setMode]. */
+    val mode: StateFlow<ArticleListMode> =
+        combine(_filter, _unreadOnly, _unreadOnlyStarred, _starredMode, ::articleListModeFor)
+            .stateIn(viewModelScope, started, currentMode())
+
+    /** Whether [ArticleListMode.Starred] can be chosen right now (not under [ArticleFilter.Starred]). */
+    val starredModeEnabled: StateFlow<Boolean> =
+        _filter.map(::starredModeAvailable).stateIn(viewModelScope, started, starredModeAvailable(_filter.value))
+
+    /** Whether the list shows unread articles only — [mode] is [ArticleListMode.Unread]. */
     val unreadOnly: StateFlow<Boolean> =
-        combine(_filter, _unreadOnly, _unreadOnlyStarred, ::unreadOnlyFor).stateIn(
-            viewModelScope,
-            started,
-            unreadOnlyFor(_filter.value, _unreadOnly.value, _unreadOnlyStarred.value),
-        )
+        mode.map { it == ArticleListMode.Unread }
+            .stateIn(viewModelScope, started, currentMode() == ArticleListMode.Unread)
+
+    private val narrowing: StateFlow<ListNarrowing> =
+        mode.map { ListNarrowing(unreadOnly = it == ArticleListMode.Unread, starredOnly = it == ArticleListMode.Starred) }
+            .stateIn(
+                viewModelScope,
+                started,
+                currentMode().let { ListNarrowing(it == ArticleListMode.Unread, it == ArticleListMode.Starred) },
+            )
 
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
     val newestFirst: StateFlow<Boolean> = _newestFirst
@@ -354,9 +375,12 @@ class HomeViewModel(
     // null until the first list emission lands — see [feedsSnapshot].
     private val articlesSnapshot: StateFlow<List<ArticleListRow>?> =
         combine(
-            filteredArticles, unreadOnly, _newestFirst, _pinnedReadStates, _pinnedUnstarredArticles,
-        ) { list, unread, newest, pinnedReadStates, pinnedUnstarred ->
-            resolvePinnedArticles(list, unread, newest, pinnedReadStates, pinnedUnstarred)
+            filteredArticles, narrowing, _newestFirst, _pinnedReadStates, _pinnedUnstarredArticles,
+        ) { list, narrow, newest, pinnedReadStates, pinnedUnstarred ->
+            resolvePinnedArticles(
+                list, narrow.unreadOnly, newest, pinnedReadStates, pinnedUnstarred,
+                starredOnly = narrow.starredOnly,
+            )
         }
             // Before flowOn, not after: stateIn fuses a flowOn directly upstream of it into its own
             // coroutine, and any operator in between would put a channel hop back.
@@ -664,9 +688,12 @@ class HomeViewModel(
     // query stuck in results that no longer match would be surprising.
     val searchResults: StateFlow<List<ArticleSearchResult>> =
         combine(
-            _rawSearchResults, unreadOnly, _pinnedReadStates, _pinnedUnstarredArticles,
-        ) { snapshot, unread, pinnedReadStates, pinnedUnstarred ->
-            resolvePinnedSearchResults(snapshot.results, unread, pinnedReadStates, pinnedUnstarred)
+            _rawSearchResults, narrowing, _pinnedReadStates, _pinnedUnstarredArticles,
+        ) { snapshot, narrow, pinnedReadStates, pinnedUnstarred ->
+            resolvePinnedSearchResults(
+                snapshot.results, narrow.unreadOnly, pinnedReadStates, pinnedUnstarred,
+                starredOnly = narrow.starredOnly,
+            )
         }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
 
     /**
@@ -829,6 +856,8 @@ class HomeViewModel(
             _selectedRowInstance.value = instance
             return
         }
+        // Before _filter changes, so `mode` never passes through Starred-mode-under-Starred.
+        if (!starredModeAvailable(filter)) _starredMode.value = false
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null
@@ -1195,8 +1224,9 @@ class HomeViewModel(
      * @param starred Whether the article should end up starred.
      */
     fun setStarred(article: ArticleListRow, starred: Boolean) {
-        // Only the Starred filter's query excludes an unstarred article, so only pin there —
-        // switching into Starred later already starts from a fresh, un-pinned query (selectFilter).
+        // Only the Starred filter's query (and starred mode's narrowing) excludes an unstarred
+        // article, so only pin there — switching into Starred later already starts from a fresh,
+        // un-pinned query (selectFilter), and entering starred mode drops old pins (setMode).
         // Re-starring UPDATES the pin to the confirmed value rather than clearing it outright: the DB
         // write below is dispatched asynchronously, so clearing the pin immediately would leave a gap
         // — for at least one `articles` emission the article is in neither the raw query result (write
@@ -1211,7 +1241,7 @@ class HomeViewModel(
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) { articleRepository.setStarred(article.id, starred = starred) }
-        if (_filter.value == ArticleFilter.Starred) {
+        if (_filter.value == ArticleFilter.Starred || currentMode() == ArticleListMode.Starred) {
             _pinnedUnstarredArticles.update { it + (article.id to article.copy(is_starred = starred.toDbFlag())) }
         } else if (starred) {
             _pinnedUnstarredArticles.update { it - article.id }
@@ -1245,11 +1275,15 @@ class HomeViewModel(
      * Marks unread articles in the current filter as read.
      *
      * The starred filter preserves article read states, while other filters retain visible articles
-     * optimistically until the updated data is refreshed.
+     * optimistically until the updated data is refreshed. Under search or [ArticleListMode.Starred],
+     * only the rows on screen are marked: either narrows the filter to an explicit subset.
      */
     fun markAllRead() {
         val filter = _filter.value
         val active = searchActive.value
+        // Search results and starred mode both show a subset of the filter, so both mark exactly the
+        // rows shown rather than the whole filter. Only search has a snapshot to re-run afterwards.
+        val scoped = active || currentMode() == ArticleListMode.Starred
         // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
         // must not force the selected article read there — except while actively searching within
         // it: search results are an explicit, scoped-down selection the user chose to act on, not
@@ -1264,19 +1298,19 @@ class HomeViewModel(
         // no unread articles left to pin at all.
         val selected = _selectedArticle.value
         val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
-        // Under search, exactly the unread rows the update below pins: taken from the pin-resolved
+        // Under search (or starred mode), exactly the unread rows the update below pins: taken from the pin-resolved
         // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
         // (its re-run is debounced) and would leave such a row pinned read but never written. Pins
         // can outrun the DB, so the write itself skips any id whose row is already read or tombstoned
         // (updateReadStatusByIds).
-        val idsToMark = if (active) {
+        val idsToMark = if (scoped) {
             visibleUnread.map { it.id }.distinct()
         } else {
             emptyList()
         }
-        if (active && idsToMark.isEmpty()) {
-            // Nothing in the current search results needs marking read; skip both the DB write and
-            // the dependent search refresh.
+        if (scoped && idsToMark.isEmpty()) {
+            // Nothing on screen needs marking read; skip both the DB write and the dependent search
+            // refresh.
             return
         }
         // Dispatched before the optimistic state below, not after — see reconcilePinnedArticlesAndSelection's
@@ -1284,20 +1318,20 @@ class HomeViewModel(
         // pass can never observe (and revert) this optimistic pin/selection using DB flags from
         // before this write has landed.
         viewModelScope.launch(dbWriteDispatcher) {
-            if (active) {
+            if (scoped) {
                 articleRepository.markArticlesAsRead(idsToMark)
                 // Re-run search only after the write lands so the freshly-read state shows up.
-                _searchRefreshTrigger.update { it + 1 }
+                if (active) _searchRefreshTrigger.update { it + 1 }
             } else {
                 articleRepository.markAllAsRead(filter)
             }
         }
         // An explicit "read" for everything this writes, so a selection still loading its body cannot
-        // apply an earlier "mark as unread" over it (see SelectionReadIntents). Under search that is
+        // apply an earlier "mark as unread" over it (see SelectionReadIntents). When scoped that is
         // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every
         // visible row as well as the selection (including one still loading).
         if (marksSelectedRead) {
-            val marked = if (active) idsToMark else visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)
+            val marked = if (scoped) idsToMark else visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)
             marked.forEach { readIntents.record(it, read = true) }
         }
         // Optimistic update: pin every currently-visible unread article in its read state so the list
@@ -1306,7 +1340,7 @@ class HomeViewModel(
         if (marksSelectedRead) {
             val nowRead = clock.nowMillis()
             val updatedSelected = selected
-                ?.takeIf { !active || it.id in idsToMark }
+                ?.takeIf { !scoped || it.id in idsToMark }
                 ?.copy(is_read = 1L, read_at = nowRead)
             val newPins = visibleUnread.associate { it.id to it.copy(is_read = 1L) } +
                 listOfNotNull(updatedSelected).associate { it.id to it.toListRow() }
@@ -1328,23 +1362,54 @@ class HomeViewModel(
     }
 
     /**
-     * Enables or disables filtering the article list to unread articles.
+     * Enables or disables filtering the article list to unread articles — [setMode] with
+     * [ArticleListMode.Unread] or [ArticleListMode.All].
      *
      * @param value Whether to show only unread articles.
      */
-    fun setUnreadOnly(value: Boolean) {
-        if (value == unreadOnly.value) return
+    fun setUnreadOnly(value: Boolean) = setMode(if (value) ArticleListMode.Unread else ArticleListMode.All)
+
+    /**
+     * Switches the article list's [mode]. Every route (the toolbar selector, the View menu) calls this
+     * or [toggleUnreadMode].
+     *
+     * [ArticleListMode.Starred] is ignored while [starredModeEnabled] is false. Choosing it drops the
+     * unstarred pins left from earlier, so the list starts from exactly the starred rows.
+     *
+     * @param target The mode to show.
+     */
+    fun setMode(target: ArticleListMode) {
+        if (target == currentMode()) return
+        if (target == ArticleListMode.Starred) {
+            if (!starredModeAvailable(_filter.value)) return
+            _pinnedUnstarredArticles.value = emptyMap()
+            _starredMode.value = true
+            return
+        }
+        val value = target == ArticleListMode.Unread
         if (value) {
             retrimPinnedReadStates()
         }
-        if (_filter.value == ArticleFilter.Starred) {
-            _unreadOnlyStarred.value = value
-            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
-        } else {
-            _unreadOnly.value = value
-            settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+        _starredMode.value = false
+        when {
+            _filter.value == ArticleFilter.Starred -> {
+                if (_unreadOnlyStarred.value != value) {
+                    _unreadOnlyStarred.value = value
+                    settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
+                }
+            }
+            _unreadOnly.value != value -> {
+                _unreadOnly.value = value
+                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+            }
         }
     }
+
+    /**
+     * ⌘/Ctrl+U and the View menu's "unread only" item: from any other mode to
+     * [ArticleListMode.Unread], and from it back to [ArticleListMode.All].
+     */
+    fun toggleUnreadMode() = setMode(unreadModeToggled(currentMode()))
 
     /**
      * Re-trims the read-state pins: keeps every unread pin and the selection's own read pin, drops

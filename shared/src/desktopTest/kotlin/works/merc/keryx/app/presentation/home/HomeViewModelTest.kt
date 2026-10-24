@@ -6620,6 +6620,143 @@ class HomeViewModelTest {
         assertEquals(1, vm.newArticleCount.value)
     }
 
+    // --- ArticleListMode.Starred ---
+
+    /** Feed f1 in folder d1 and tag t1: s1 starred+read, s2 starred+unread, u1 unstarred+unread, newest first. */
+    private fun TestScope.starredModeViewModel(): HomeViewModel {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertTag("t1", "Tag")
+        db.insertFeedTag("f1", "t1")
+        db.insertArticle("s1", "f1", title = "Kotlin s1", content = "kotlin", isRead = 1L, isStarred = 1L, publishedAt = 3L, createdAt = 3L)
+        db.insertArticle("s2", "f1", title = "Kotlin s2", content = "kotlin", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
+        db.insertArticle("u1", "f1", title = "Kotlin u1", content = "kotlin", isRead = 0L, isStarred = 0L, publishedAt = 1L, createdAt = 1L)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        return vm
+    }
+
+    @Test
+    fun starredModeNarrowsEveryNonStarredFilterToStarredArticlesIncludingRead() = runTest {
+        val vm = starredModeViewModel()
+        vm.setMode(ArticleListMode.Starred)
+        for (filter in listOf(ArticleFilter.All, ArticleFilter.Feed("f1"), ArticleFilter.Folder("d1"), ArticleFilter.Tag("t1"))) {
+            vm.selectFilter(filter)
+            testScheduler.advanceUntilIdle()
+            assertEquals(ArticleListMode.Starred, vm.mode.value, "mode under $filter")
+            assertEquals(listOf("s1", "s2"), vm.articles.value.map { it.id }, "rows under $filter")
+            assertFalse(vm.unreadOnly.value)
+        }
+    }
+
+    @Test
+    fun starredModeIsUnavailableUnderTheStarredFilterAndLeavingItClearsTheMode() = runTest {
+        val vm = starredModeViewModel()
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.starredModeEnabled.value)
+
+        vm.selectFilter(ArticleFilter.Starred)
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.starredModeEnabled.value)
+        assertEquals(ArticleListMode.All, vm.mode.value)
+        // Choosing it there is ignored.
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.All, vm.mode.value)
+
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.starredModeEnabled.value)
+        assertEquals(ArticleListMode.All, vm.mode.value)
+        assertEquals(listOf("s1", "s2", "u1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun starredModeIsNotPersistedAndANewSessionStartsFromTheSavedUnreadState() = runTest {
+        val vm = starredModeViewModel()
+        vm.setMode(ArticleListMode.Unread)
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Starred, vm.mode.value)
+
+        val next = newViewModel()
+        subscribeAll(next)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Unread, next.mode.value)
+    }
+
+    @Test
+    fun leavingStarredModeRestoresTheSavedUnreadState() = runTest {
+        val vm = starredModeViewModel()
+        vm.setMode(ArticleListMode.Unread)
+        vm.setMode(ArticleListMode.Starred)
+        vm.setMode(ArticleListMode.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.All, vm.mode.value)
+        assertEquals(listOf("s1", "s2", "u1"), vm.articles.value.map { it.id })
+        assertEquals(false, LocalSettingsStore(dirOverride = dir).load().lastUnreadOnly)
+    }
+
+    @Test
+    fun toggleUnreadModeGoesToUnreadFromAnyOtherModeAndBackToAll() = runTest {
+        val vm = starredModeViewModel()
+        vm.toggleUnreadMode()
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Unread, vm.mode.value)
+        vm.toggleUnreadMode()
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.All, vm.mode.value)
+        vm.setMode(ArticleListMode.Starred)
+        vm.toggleUnreadMode()
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Unread, vm.mode.value)
+    }
+
+    @Test
+    fun articleUnstarredInStarredModeStaysUntilTheModeIsChosenAgain() = runTest {
+        val vm = starredModeViewModel()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+
+        vm.setStarred(vm.row("s2"), starred = false)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("s1", "s2"), vm.articles.value.map { it.id })
+        assertEquals(0L, vm.row("s2").is_starred)
+
+        vm.setMode(ArticleListMode.All)
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("s1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun starredModeNarrowsSearchResults() = runTest {
+        val vm = starredModeViewModel()
+        ftsManagerIndexed(driver)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(setOf("s1", "s2", "u1"), vm.searchResults.value.map { it.article.id }.toSet())
+
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(setOf("s1", "s2"), vm.searchResults.value.map { it.article.id }.toSet())
+    }
+
+    @Test
+    fun markAllReadInStarredModeMarksOnlyTheRowsShown() = runTest {
+        val vm = starredModeViewModel()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("s2"))
+        assertEquals(0L, dbIsRead("u1"))
+    }
 }
 
 private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>

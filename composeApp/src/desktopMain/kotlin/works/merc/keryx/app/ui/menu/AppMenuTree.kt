@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.home.renameKey
@@ -156,7 +157,7 @@ internal data class AppMenuActions(
     val openSettings: () -> Unit,
     val quit: () -> Unit,
     val focusSearch: () -> Unit,
-    val setUnreadOnly: (Boolean) -> Unit,
+    val toggleUnreadMode: () -> Unit,
     val toggleSort: () -> Unit,
     val markAllRead: () -> Unit,
     val toggleRead: () -> Unit,
@@ -250,10 +251,10 @@ internal fun buildAppMenuTree(
         add(
             AppMenuNode.CheckboxItem(
                 labels.unreadOnly,
-                ui.unreadOnlyEnabled,
-                ui.unreadOnlyChecked,
+                ui.listModeEnabled,
+                ui.listMode == ArticleListMode.Unread,
                 AppMenuShortcut.UnreadOnly,
-                onCheckedChange = actions.setUnreadOnly,
+                onCheckedChange = { actions.toggleUnreadMode() },
             ),
         )
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))

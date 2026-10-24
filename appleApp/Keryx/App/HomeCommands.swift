@@ -81,11 +81,11 @@ struct HomeCommands: Commands {
                 }
 
                 Toggle(L("menu_view_unread_only"), isOn: Binding(
-                    get: { home.unreadOnly },
-                    set: { home.viewModel.setUnreadOnly(value: $0) }
+                    get: { home.listMode == .unread },
+                    set: { _ in home.viewModel.toggleUnreadMode() }
                 ))
                 .keyboardShortcut("u", modifiers: .command)
-                .disabled(!state.unreadOnlyEnabled)
+                .disabled(!state.listModeEnabled)
 
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }
                     .disabled(!state.toggleSortEnabled)
@@ -232,8 +232,8 @@ struct HomeCommands: Commands {
         }
         guard let sdk = model.sdk else {
             return MenuUiState(
-                addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, unreadOnlyEnabled: false,
-                unreadOnlyChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
+                addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, listModeEnabled: false,
+                listMode: .all, starredModeEnabled: false, toggleSortEnabled: false, markAllReadEnabled: false,
                 articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
                 refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,
@@ -248,7 +248,8 @@ struct HomeCommands: Commands {
             selectedArticleCanOpenInBrowser: home.selectedArticleCanOpenInBrowser,
             canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
-            unreadOnly: home.unreadOnly,
+            listMode: home.listMode,
+            starredModeAvailable: home.starredModeEnabled,
             opmlBusy: model.opmlTransfer?.isBusy ?? false,
             hasSelectedFeed: hasSelectedFeed,
             feedListKeysActive: bareKeysActive,

@@ -4,6 +4,7 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.tray.TrayUpdateEntry
@@ -53,7 +54,7 @@ class AppMenuTreeTest {
 
     private fun actions() = AppMenuActions(
         addFeed = {}, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
-        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setUnreadOnly = {},
+        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, toggleUnreadMode = {},
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = {}, sync = {},
         refreshSelectedFeed = {},
@@ -68,7 +69,7 @@ class AppMenuTreeTest {
     private fun enabledUi(feedListKeysActive: Boolean = true) = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = true, opmlBusy = false,
+        searchActive = false, listMode = ArticleListMode.Unread, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = true, selectedFeedSiteCanOpenInBrowser = true,
     )
@@ -76,7 +77,7 @@ class AppMenuTreeTest {
     private fun disabledUi() = computeMenuUiState(
         onHome = false, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), canSyncNow = false,
-        searchActive = true, unreadOnly = false, opmlBusy = false,
+        searchActive = true, listMode = ArticleListMode.All, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = false,
         selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
@@ -85,7 +86,7 @@ class AppMenuTreeTest {
     private fun folderSelectedUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = false, opmlBusy = false,
+        searchActive = false, listMode = ArticleListMode.All, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
@@ -93,7 +94,7 @@ class AppMenuTreeTest {
     private fun starredFilterUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = true, opmlBusy = false,
+        searchActive = false, listMode = ArticleListMode.Unread, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
@@ -152,7 +153,7 @@ class AppMenuTreeTest {
         assertEquals(ui.addItemsEnabled, root.menu("File").item("AddFeed").enabled)
         assertEquals(ui.opmlEnabled, root.menu("File").item("Import").enabled)
         assertEquals(ui.searchEnabled, root.menu("View").item("Search").enabled)
-        assertEquals(ui.unreadOnlyEnabled, root.menu("View").checkbox("UnreadOnly")!!.enabled)
+        assertEquals(ui.listModeEnabled, root.menu("View").checkbox("UnreadOnly")!!.enabled)
         assertEquals(ui.toggleSortEnabled, root.menu("View").item("ToggleSort").enabled)
         assertEquals(ui.markAllReadEnabled, root.menu("View").item("MarkAllRead").enabled)
         assertEquals(ui.articleActionsEnabled, root.menu("Article").item("ToggleRead").enabled)
@@ -177,7 +178,7 @@ class AppMenuTreeTest {
         val ui = computeMenuUiState(
             onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = false,
             activity = ActivitySnapshot(), canSyncNow = true,
-            searchActive = false, unreadOnly = false, opmlBusy = false,
+            searchActive = false, listMode = ArticleListMode.All, starredModeAvailable = true, opmlBusy = false,
             hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
             selectedFeedSiteCanOpenInBrowser = false,
         )

@@ -131,7 +131,8 @@ internal fun FrameWindowScope.AppMenuBar(
     val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()
-    val unreadOnly by homeVm.unreadOnly.collectAsState()
+    val listMode by homeVm.mode.collectAsState()
+    val starredModeEnabled by homeVm.starredModeEnabled.collectAsState()
     val canSyncNow by homeVm.canSyncNow.collectAsState()
     val opmlBusy by opmlController.busy.collectAsState()
     val feeds by homeVm.structuralFeeds.collectAsState()
@@ -157,7 +158,8 @@ internal fun FrameWindowScope.AppMenuBar(
         activity = activity,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
-        unreadOnly = unreadOnly,
+        listMode = listMode,
+        starredModeAvailable = starredModeEnabled,
         opmlBusy = opmlBusy,
         hasSelectedFeed = selectedFeed != null,
         feedListKeysActive = feedListKeysActive,
@@ -237,7 +239,7 @@ internal fun FrameWindowScope.AppMenuBar(
         openSettings = { menuController.send(MenuCommand.OpenSettings) },
         quit = onQuit,
         focusSearch = { menuController.send(MenuCommand.FocusSearch) },
-        setUnreadOnly = { homeVm.setUnreadOnly(it) },
+        toggleUnreadMode = { homeVm.toggleUnreadMode() },
         toggleSort = { homeVm.toggleSort() },
         markAllRead = { homeVm.markAllRead() },
         toggleRead = { homeVm.toggleReadSelected() },
