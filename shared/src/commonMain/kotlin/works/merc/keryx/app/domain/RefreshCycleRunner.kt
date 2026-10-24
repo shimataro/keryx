@@ -57,9 +57,11 @@ class RefreshCycleRunner(
 ) {
     /**
      * The [SyncTrigger.AUTOMATIC] cycle now running, or `null` when none is — see
-     * [joinAutomaticCycle]. Set only once a cycle has claimed the [ActivityCenter], and cleared
-     * (by that same cycle alone, so an overlapping one's is never cleared by another) just before it
-     * is completed.
+     * [joinAutomaticCycle]. Set before a [run] claims the [ActivityCenter] (a [runIfIdle] once it has
+     * claimed it), and cleared after the cycle has released it — by that same cycle alone, so an
+     * overlapping one's is never cleared by another — just before it is completed. So while a [run]
+     * holds the center, it is always joinable; a [runIfIdle]'s is not for the instant between its
+     * claim and its publish.
      */
     private val runningAutomaticCycle = MutableStateFlow<AutomaticCycle?>(null)
 
@@ -89,8 +91,8 @@ class RefreshCycleRunner(
     }
 
     /**
-     * Joins the running [SyncTrigger.AUTOMATIC] cycle, for a user action that found it running
-     * ([CycleOutcome.Busy]) instead of starting nothing visible. Returns its outcome: the deferred
+     * Joins the running [SyncTrigger.AUTOMATIC] cycle, for a [SyncTrigger.MANUAL] [runIfIdle] that
+     * found it running ([CycleOutcome.Joined]) instead of starting nothing visible. Returns its outcome: the deferred
      * completes once that whole cycle, sync included, has ended, with its [RefreshOutcome] (`null`
      * when it refreshed no feed, or when it failed before reporting one). `null` when no automatic
      * cycle is running — including when what is in flight is a [SyncTrigger.MANUAL] cycle, which its
@@ -101,7 +103,7 @@ class RefreshCycleRunner(
      * posts it as a manual one would, and one joined after it was held back posts it now. Joining
      * the same cycle again posts nothing more. See `external-spec.md` §9 "Refresh feedback".
      */
-    suspend fun joinAutomaticCycle(): Deferred<RefreshOutcome?>? {
+    internal suspend fun joinAutomaticCycle(): Deferred<RefreshOutcome?>? {
         val cycle = runningAutomaticCycle.value ?: return null
         val before = cycle.notify.getAndUpdate {
             when (it) {
@@ -127,6 +129,12 @@ class RefreshCycleRunner(
     sealed interface CycleOutcome {
         /** Something was already in flight ([ActivitySnapshot.idle] was false); nothing was started. */
         data object Busy : CycleOutcome
+
+        /**
+         * A [SyncTrigger.MANUAL] call found an automatic cycle in flight and joined it
+         * ([joinAutomaticCycle]) instead of starting one; [cycle] completes with that cycle's outcome.
+         */
+        data class Joined(val cycle: Deferred<RefreshOutcome?>) : CycleOutcome
 
         /** A feed / folder / tag selection covered no subscribed feed; nothing was fetched or synced. */
         data object NothingToRefresh : CycleOutcome
@@ -156,8 +164,9 @@ class RefreshCycleRunner(
         trigger: SyncTrigger,
         step: suspend (name: String, block: suspend () -> Unit) -> Unit = { _, block -> block() },
     ): Result<Unit>? = reportingRefresh(trigger) { onRefreshed, claimed, cycle ->
+        // Published before the claim, so a busy check that sees this cycle can always join it.
+        claimed()
         activityCenter.trackRefreshCycle {
-            claimed()
             runStages(order, trigger, cycle, step, onRefreshed) { feedRepository.feedsCoveredBy(filter) }
         }
     }.first
@@ -173,26 +182,38 @@ class RefreshCycleRunner(
      * [ArticleFilter.Starred] always run, so a sync still happens with no feeds subscribed.
      *
      * [onStarted] is called once the cycle has claimed the idle center, before any of it runs — never
-     * for [CycleOutcome.Busy] or [CycleOutcome.NothingToRefresh] — on the caller's context.
+     * for [CycleOutcome.Busy], [CycleOutcome.Joined] or [CycleOutcome.NothingToRefresh] — on the
+     * caller's context.
+     *
+     * A [SyncTrigger.MANUAL] call that finds the center busy joins the automatic cycle running there
+     * in the same step ([CycleOutcome.Joined]), so no hand-off can let that cycle end unseen in
+     * between. Finding none to join, it claims again if the center has gone idle meanwhile (what was
+     * in flight ended, so starting is no longer starting alongside it), and otherwise returns
+     * [CycleOutcome.Busy] (a sync alone, or another manual cycle). An automatic call never joins.
      */
     suspend fun runIfIdle(filter: ArticleFilter, trigger: SyncTrigger, onStarted: () -> Unit = {}): CycleOutcome {
         val targets = feedRepository.feedsCoveredBy(filter)
         val coversEveryFeed = filter == ArticleFilter.All || filter == ArticleFilter.Starred
         if (!coversEveryFeed && targets.isEmpty()) return CycleOutcome.NothingToRefresh
-        // The outcome itself is the block's result, so a `null` sync result (not connected) stays
-        // distinguishable from tryTrackRefreshCycle's own `null` ("busy").
-        val (ran, refresh) = reportingRefresh(trigger) { onRefreshed, claimed, cycle ->
-            activityCenter.tryTrackRefreshCycle {
-                claimed()
-                onStarted()
-                CycleOutcome.Ran(
-                    runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, cycle, { _, block -> block() }, onRefreshed) {
-                        targets
-                    },
-                )
+        while (true) {
+            // The outcome itself is the block's result, so a `null` sync result (not connected) stays
+            // distinguishable from tryTrackRefreshCycle's own `null` ("busy").
+            val (ran, refresh) = reportingRefresh(trigger) { onRefreshed, claimed, cycle ->
+                activityCenter.tryTrackRefreshCycle {
+                    claimed()
+                    onStarted()
+                    CycleOutcome.Ran(
+                        runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, cycle, { _, block -> block() }, onRefreshed) {
+                            targets
+                        },
+                    )
+                }
             }
+            if (ran != null) return ran.copy(refresh = refresh)
+            if (trigger != SyncTrigger.MANUAL) return CycleOutcome.Busy
+            joinAutomaticCycle()?.let { return CycleOutcome.Joined(it) }
+            if (!activityCenter.activity.value.idle) return CycleOutcome.Busy
         }
-        return ran?.copy(refresh = refresh) ?: CycleOutcome.Busy
     }
 
     /**
@@ -211,11 +232,12 @@ class RefreshCycleRunner(
      * those results ([reportRefreshOutcome]) once [block] has ended — even when it throws, so a
      * failing later stage cannot lose them. Returns [block]'s value with the reported outcome.
      *
-     * [block] calls its second callback once it has claimed its cycle in the [ActivityCenter]; for a
+     * [block] calls its second callback to publish its cycle — once it has claimed it in the
+     * [ActivityCenter], or just before an unconditional claim; for a
      * [SyncTrigger.AUTOMATIC] [trigger] that publishes the cycle (its third argument) for
      * [joinAutomaticCycle], and the reported outcome completes it once [block] has ended (`null` if
      * [block] or the report threw), so a joiner never waits forever. A block that never claims (busy)
-     * publishes nothing. The cycle is `null` for a [SyncTrigger.MANUAL] [trigger].
+     * and so never calls it publishes nothing. The cycle is `null` for a [SyncTrigger.MANUAL] [trigger].
      */
     private suspend fun <T> reportingRefresh(
         trigger: SyncTrigger,

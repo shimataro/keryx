@@ -474,6 +474,26 @@ class RefreshCycleRunnerTest {
     }
 
     @Test
+    fun aManualRunIfIdleDuringAnAutomaticCycleJoinsItWithoutStarting() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(driver, db, fetchGate = gate)
+        val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        val running = assertNotNull(f.runner.joinableAutomaticCycle())
+        var started = false
+
+        val joined = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL) { started = true }
+
+        assertTrue(running === assertIs<RefreshCycleRunner.CycleOutcome.Joined>(joined).cycle)
+        assertFalse(started, "joining must not start a cycle of its own")
+        gate.complete(Unit)
+        cycle.await()
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), withTimeout(5_000) { joined.cycle.await() })
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    @Test
     fun aBusyAutomaticRunIfIdlePublishesNothingAndKeepsTheRunningCycle() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()

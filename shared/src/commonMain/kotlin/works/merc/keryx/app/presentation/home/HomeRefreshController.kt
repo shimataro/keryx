@@ -119,7 +119,10 @@ internal class HomeRefreshController(
         if (!added) return
         scope.launch {
             try {
-                if (runCycle(filter) == CycleOutcome.Busy) activityCenter.activity.first { it.idle }
+                val outcome = runCycle(filter)
+                if (outcome == CycleOutcome.Busy || outcome is CycleOutcome.Joined) {
+                    activityCenter.activity.first { it.idle }
+                }
             } finally {
                 _pullRefreshingFilters.update { it - filter }
             }
@@ -131,12 +134,13 @@ internal class HomeRefreshController(
      * it. Only the IO moves to [dispatcher]; the caller's coroutine stays on the ViewModel's
      * Main-confined scope, so the re-trims stay confined there too.
      *
-     * When the call finds work in flight ([CycleOutcome.Busy]) and that work is an automatic cycle
-     * ([RefreshCycleRunner.joinAutomaticCycle]), the action joins it: [manualRefreshStatus]
+     * When the call finds an automatic cycle in flight, it joins it in the same step
+     * ([CycleOutcome.Joined]), and the action awaits that cycle here: [manualRefreshStatus]
      * counts it as one more refresh until that cycle has ended, then reports its outcome, and the
      * cycle posts its new-article notification as a manual one would, so the user's action still gets
      * a result (`external-spec.md` §9 "Refresh feedback"). Anything else in
-     * flight — a sync alone, or another manual refresh already counted — leaves the status alone.
+     * flight ([CycleOutcome.Busy]: a sync alone, or another manual refresh already counted) leaves
+     * the status alone.
      */
     private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
         retrimPins()
@@ -156,7 +160,7 @@ internal class HomeRefreshController(
                 _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh, generation) }
             }
         }
-        if (outcome == CycleOutcome.Busy) runner.joinAutomaticCycle()?.let { joinAutomaticCycle(it) }
+        if (outcome is CycleOutcome.Joined) joinAutomaticCycle(outcome.cycle)
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
         if (outcome is CycleOutcome.Ran) retrimPins()
