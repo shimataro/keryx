@@ -27,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import works.merc.keryx.app.presentation.home.FAVICON_CORNER_RADIUS_RATIO
 
 /**
  * The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface].
@@ -149,9 +150,6 @@ internal val CHEVRON_MARKER_GAP = 4.dp
  * favicon starting at the same horizontal position regardless of which kind of row it is.
  */
 internal val FEED_LIST_MARKER_SLOT = 18.dp
-
-/** Corner radius as a fraction of a favicon's side — 4dp at 32dp, matching the SwiftUI app. */
-internal const val FAVICON_CORNER_RADIUS_RATIO = 1f / 8
 
 /**
  * The shape every favicon (feed list, article list, reader header) is clipped to. Its corner is a
