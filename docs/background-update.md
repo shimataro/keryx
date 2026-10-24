@@ -20,7 +20,8 @@ Strategy table above and "Android Implementation" below), but what it runs each 
 platform-independent commonMain code, so the Android worker calls the same implementations instead of
 duplicating them: `domain/RefreshCycleRunner.kt`'s `RefreshCycleRunner.run` (the refresh → new-article
 notification → sync cycle — also what the manual refresh and pull-to-refresh go through, via its
-`runIfIdle`), plus `checkForUpdateAndNotify` and `maybeRebuildFtsIndex` from
+`runIfIdle`; a manual refresh that finds an automatic cycle already running starts nothing but joins
+it, reporting that cycle's outcome through `joinableAutomaticCycle`), plus `checkForUpdateAndNotify` and `maybeRebuildFtsIndex` from
 `domain/StartupMaintenanceTasks.kt`.
 
 ```kotlin
@@ -63,8 +64,9 @@ new-article OS notification through the same `OsNotificationPoster`, then sync i
 connected). It does nothing before setup completes — without even flushing settings, since the
 settings file's existence is the setup-complete marker. It skips the startup sequence, the update
 check and the FTS full rebuild (a background slot lasts about 30 seconds); only
-`ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running,
-and cancelling the task at the end of its slot cancels the shared work with it.
+`ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running;
+conversely, a pull or Refresh All made while this automatic cycle runs joins it and shows its outcome
+(`joinableAutomaticCycle`). Cancelling the task at the end of its slot cancels the shared work with it.
 
 For the same reason `AppModel` starts `startMaintenance()` (the startup sequence and the refresh
 loop) only when the scene first becomes active, not in `init`, which a background launch also runs

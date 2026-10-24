@@ -1,5 +1,8 @@
 package works.merc.keryx.app.domain
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.Log
@@ -21,7 +24,9 @@ import works.merc.keryx.app.data.local.db.Feeds
  *
  * An [SyncTrigger.AUTOMATIC] cycle skips its refresh while the OS's data-saving mode is on
  * ([automaticRefreshAllowed]); its sync stage is then subject to [SyncRepository]'s own network
- * gate. A [SyncTrigger.MANUAL] cycle always refreshes.
+ * gate. A [SyncTrigger.MANUAL] cycle always refreshes. A running automatic cycle can be joined by
+ * a user action that finds it in flight ([joinableAutomaticCycle]), so that action still reports a
+ * result.
  *
  * The runner does no dispatcher switching of its own: it runs in the caller's context, so a caller
  * on the UI thread must move it off (the refresh, the sync, and [CloudSession.isConnected] all do
@@ -44,6 +49,25 @@ class RefreshCycleRunner(
      */
     private val automaticRefreshAllowed: suspend () -> Boolean = { true },
 ) {
+    /**
+     * The outcome of the [SyncTrigger.AUTOMATIC] cycle now running, or `null` when none is — see
+     * [joinableAutomaticCycle]. Set only once a cycle has claimed the [ActivityCenter], and cleared
+     * (by that same cycle alone, so an overlapping one's is never cleared by another) just before it
+     * is completed.
+     */
+    private val runningAutomaticCycle = MutableStateFlow<CompletableDeferred<RefreshOutcome?>?>(null)
+
+    /**
+     * The running [SyncTrigger.AUTOMATIC] cycle's outcome, for a user action that found it running
+     * ([CycleOutcome.Busy]) and joins it instead of starting nothing visible: the deferred completes
+     * once that whole cycle, sync included, has ended, with its [RefreshOutcome] (`null` when it
+     * refreshed no feed, or when it failed before reporting one). `null` when no automatic cycle is
+     * running — including when what is in flight is a [SyncTrigger.MANUAL] cycle, which its own
+     * caller already reports, so joining it would count it twice. See `external-spec.md` §9
+     * "Refresh feedback".
+     */
+    fun joinableAutomaticCycle(): Deferred<RefreshOutcome?>? = runningAutomaticCycle.value
+
     /** Which of a cycle's two stages runs first. */
     enum class CycleOrder { REFRESH_THEN_SYNC, SYNC_THEN_REFRESH }
 
@@ -79,8 +103,9 @@ class RefreshCycleRunner(
         order: CycleOrder = CycleOrder.REFRESH_THEN_SYNC,
         trigger: SyncTrigger,
         step: suspend (name: String, block: suspend () -> Unit) -> Unit = { _, block -> block() },
-    ): Result<Unit>? = reportingRefresh { onRefreshed ->
+    ): Result<Unit>? = reportingRefresh(trigger) { onRefreshed, claimed ->
         activityCenter.trackRefreshCycle {
+            claimed()
             runStages(order, trigger, step, onRefreshed) { feedRepository.feedsCoveredBy(filter) }
         }
     }.first
@@ -104,8 +129,9 @@ class RefreshCycleRunner(
         if (!coversEveryFeed && targets.isEmpty()) return CycleOutcome.NothingToRefresh
         // The outcome itself is the block's result, so a `null` sync result (not connected) stays
         // distinguishable from tryTrackRefreshCycle's own `null` ("busy").
-        val (ran, refresh) = reportingRefresh { onRefreshed ->
+        val (ran, refresh) = reportingRefresh(trigger) { onRefreshed, claimed ->
             activityCenter.tryTrackRefreshCycle {
+                claimed()
                 onStarted()
                 CycleOutcome.Ran(
                     runStages(CycleOrder.REFRESH_THEN_SYNC, trigger, { _, block -> block() }, onRefreshed) { targets },
@@ -130,16 +156,30 @@ class RefreshCycleRunner(
      * Runs [block], handing it the callback that records its refresh's per-feed results, and reports
      * those results ([reportRefreshOutcome]) once [block] has ended — even when it throws, so a
      * failing later stage cannot lose them. Returns [block]'s value with the reported outcome.
+     *
+     * [block] calls its second callback once it has claimed its cycle in the [ActivityCenter]; for a
+     * [SyncTrigger.AUTOMATIC] [trigger] that publishes the cycle as [joinableAutomaticCycle], and the
+     * reported outcome completes it once [block] has ended (`null` if [block] or the report threw), so
+     * a joiner never waits forever. A block that never claims (busy) publishes nothing.
      */
     private suspend fun <T> reportingRefresh(
-        block: suspend (onRefreshed: (Map<String, Result<Int>>) -> Unit) -> T,
+        trigger: SyncTrigger,
+        block: suspend (onRefreshed: (Map<String, Result<Int>>) -> Unit, claimed: () -> Unit) -> T,
     ): Pair<T, RefreshOutcome?> {
+        val joinable = if (trigger == SyncTrigger.AUTOMATIC) CompletableDeferred<RefreshOutcome?>() else null
         var refreshed: Map<String, Result<Int>>? = null
         var outcome: RefreshOutcome? = null
         val value = try {
-            block { refreshed = it }
+            block({ refreshed = it }, { if (joinable != null) runningAutomaticCycle.value = joinable })
         } finally {
-            outcome = refreshed?.let { reportRefreshOutcome(it, notificationCenter, clock) }
+            try {
+                outcome = refreshed?.let { reportRefreshOutcome(it, notificationCenter, clock) }
+            } finally {
+                if (joinable != null) {
+                    runningAutomaticCycle.compareAndSet(joinable, null)
+                    joinable.complete(outcome)
+                }
+            }
         }
         return value to outcome
     }

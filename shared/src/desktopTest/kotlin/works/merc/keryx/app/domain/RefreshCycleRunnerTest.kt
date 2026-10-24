@@ -51,6 +51,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -409,6 +410,138 @@ class RefreshCycleRunnerTest {
         }
 
         assertEquals(NotificationText.RefreshFailed, f.notificationCenter.items.value.single().text)
+    }
+
+    @Test
+    fun anAutomaticRunPublishesItsOutcomeUntilTheWholeCycleEnds() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(driver, db, fetchGate = gate)
+        assertNull(f.runner.joinableAutomaticCycle())
+
+        val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        val joinable = assertNotNull(f.runner.joinableAutomaticCycle())
+        assertFalse(joinable.isCompleted)
+
+        gate.complete(Unit)
+        cycle.await()
+
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), withTimeout(5_000) { joinable.await() })
+        assertTrue(f.log.contains("sync"))
+        assertNull(f.runner.joinableAutomaticCycle())
+    }
+
+    @Test
+    fun anAutomaticRunIfIdlePublishesItsOutcomeToo() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(driver, db, fetchGate = gate)
+
+        val cycle = async { f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        val joinable = assertNotNull(f.runner.joinableAutomaticCycle())
+
+        gate.complete(Unit)
+        assertIs<RefreshCycleRunner.CycleOutcome.Ran>(cycle.await())
+
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), withTimeout(5_000) { joinable.await() })
+        assertNull(f.runner.joinableAutomaticCycle())
+    }
+
+    @Test
+    fun aManualCycleNeverPublishesAJoinableCycle() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(driver, db, fetchGate = gate)
+
+        val run = async { f.runner.run(trigger = SyncTrigger.MANUAL) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        assertNull(f.runner.joinableAutomaticCycle())
+        gate.complete(Unit)
+        run.await()
+
+        val gate2 = CompletableDeferred<Unit>()
+        val f2 = fixture(driver, db, fetchGate = gate2)
+        val idle = async { f2.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL) }
+        withTimeout(5_000) { f2.activityCenter.activity.first { it.feedRefreshing } }
+        assertNull(f2.runner.joinableAutomaticCycle())
+        gate2.complete(Unit)
+        idle.await()
+        assertNull(f2.runner.joinableAutomaticCycle())
+    }
+
+    @Test
+    fun aBusyAutomaticRunIfIdlePublishesNothingAndKeepsTheRunningCycle() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(driver, db, fetchGate = gate)
+        val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        val running = assertNotNull(f.runner.joinableAutomaticCycle())
+
+        val busy = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC)
+
+        assertEquals(RefreshCycleRunner.CycleOutcome.Busy, busy)
+        assertTrue(running === f.runner.joinableAutomaticCycle(), "the busy attempt must not replace the running cycle")
+        gate.complete(Unit)
+        cycle.await()
+        // The busy attempt's own completion must not have cleared or completed anything of the real one.
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), running.await())
+        assertNull(f.runner.joinableAutomaticCycle())
+    }
+
+    @Test
+    fun aBusyAutomaticRunIfIdleDuringASyncAlonePublishesNothing() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db)
+        val gate = CompletableDeferred<Unit>()
+        val entered = CompletableDeferred<Unit>()
+        val busy = launch { f.activityCenter.trackSync { entered.complete(Unit); gate.await() } }
+        entered.await()
+
+        assertEquals(RefreshCycleRunner.CycleOutcome.Busy, f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC))
+
+        assertNull(f.runner.joinableAutomaticCycle())
+        gate.complete(Unit)
+        busy.join()
+    }
+
+    @Test
+    fun aStageThrowingStillCompletesAndClearsTheJoinableCycle() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db)
+        var joinable: kotlinx.coroutines.Deferred<RefreshOutcome?>? = null
+
+        assertFailsWith<IllegalStateException> {
+            f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+                joinable = f.runner.joinableAutomaticCycle()
+                block()
+                check(name != "feedRefresh") { "failed after the refresh" }
+            }
+        }
+
+        val published = assertNotNull(joinable)
+        // The refresh finished before the failure, so its outcome is still reported to a joiner.
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), withTimeout(5_000) { published.await() })
+        assertNull(f.runner.joinableAutomaticCycle())
+    }
+
+    @Test
+    fun aCycleFailingBeforeAnyRefreshCompletesTheJoinableCycleWithNull() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db)
+        var joinable: kotlinx.coroutines.Deferred<RefreshOutcome?>? = null
+
+        assertFailsWith<IllegalStateException> {
+            f.runner.run(trigger = SyncTrigger.AUTOMATIC) { _, _ ->
+                joinable = f.runner.joinableAutomaticCycle()
+                error("failed before the refresh")
+            }
+        }
+
+        assertNull(withTimeout(5_000) { assertNotNull(joinable).await() })
+        assertNull(f.runner.joinableAutomaticCycle())
     }
 
     @Test

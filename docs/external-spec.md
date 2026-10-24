@@ -445,7 +445,9 @@ has finished too, not just the feed fetches. On iOS, where the system starts the
 the pull crosses its threshold (with the finger still down), the indicator also stays up for at least
 about a second, so a refresh that finishes almost at once still shows it spinning.
 A pull made while a refresh or sync is already running (a background refresh, say) starts nothing
-new; the indicator simply stays up until the running one finishes. Selecting another item in the
+new; the indicator simply stays up until the running one finishes. When what is running is an
+automatic refresh, the pull joins it, so on iOS its result still appears in the status area described
+below. Selecting another item in the
 feed list while a pull's indicator is up leaves no indicator over the newly selected list, since
 that list is not the one being refreshed; the refresh itself carries on.
 On Android, the same refresh is also reachable without the gesture, wherever the gesture itself is
@@ -479,7 +481,10 @@ checked for, it shows a small spinner with "Checking for new articles…", and k
 cloud sync that follows, as the pull's own indicator does. Refreshes the user starts while another is
 still running (a feed's Refresh during a pull, say) count as one check: the spinner stays until the
 last has finished, and the result counts them all. A pull made while an automatic refresh is already
-running starts nothing new (see above), so it shows only the pull's own indicator and no result. Once that is done it shows the result for about two and a half seconds, without the spinner:
+running starts nothing new (see above), but it joins that refresh: the status shows it as checking and
+then shows its result, as if the pull had started it; Refresh All (⌘R) does the same. A pull or Refresh
+All made while only a sync is running, or while the user's own refresh (a feed's Refresh, say) is
+already running, adds no result of its own — the latter already shows here. Once that is done it shows the result for about two and a half seconds, without the spinner:
 "N new articles", "No new articles", or — when none of the feeds it covered could be reached (each
 timed out or got no response, most likely because the device is offline) — "Couldn't check for
 new articles. Check your connection or try again later." behind a warning symbol, so a failure reads as one at

@@ -18,7 +18,8 @@
 `PeriodicWorkRequest` — 上のプラットフォーム方針の表と後述の「Android 実装」を参照）だが、毎周回
 実行する処理はプラットフォーム非依存の commonMain のコードなので、Android 側の worker は重複実装せず
 同じ実装を呼んでいる: `domain/RefreshCycleRunner.kt` の `RefreshCycleRunner.run`（更新 → 新着記事通知 →
-同期のサイクル。手動更新と引っ張って更新も、その `runIfIdle` 経由で同じものを通る）と、
+同期のサイクル。手動更新と引っ張って更新も、その `runIfIdle` 経由で同じものを通る。手動更新は、自動のサイクルが
+すでに走っていれば何も始めずにそれに相乗りし、そのサイクルの結果を `joinableAutomaticCycle` 経由で報告する）と、
 `domain/StartupMaintenanceTasks.kt` の `checkForUpdateAndNotify` / `maybeRebuildFtsIndex` である。
 
 ```kotlin
@@ -59,8 +60,9 @@ SwiftUI の `.backgroundTask(.appRefresh(…))` ハンドラが `AppModel.runBac
 同じ `OsNotificationPoster` 経由の新着記事 OS 通知、接続中なら同期）。セットアップ完了前は何もしない——
 設定ファイルの存在がセットアップ完了の目印なので、設定の flush もしない。起動時シーケンス、アップデート確認、
 FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 秒）。実行するのは
-`ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もせず、
-枠の終了でタスクがキャンセルされると、共有している処理もキャンセルされる。
+`ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もしない。
+逆に、この自動のサイクルの実行中に引っ張るかすべて更新を実行すると、それに相乗りしてその結果を表示する
+（`joinableAutomaticCycle`）。枠の終了でタスクがキャンセルされると、共有している処理もキャンセルされる。
 
 同じ理由で、`AppModel` は `startMaintenance()`（起動時シーケンスと更新ループ）を `init` ではなく
 シーンが最初にアクティブになったときに開始する（`init` はバックグラウンド起動でも実行されるため。

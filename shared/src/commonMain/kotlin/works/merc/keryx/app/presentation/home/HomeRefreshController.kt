@@ -2,6 +2,7 @@ package works.merc.keryx.app.presentation.home
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -85,7 +86,8 @@ internal class HomeRefreshController(
 
     /**
      * Refreshes every feed, notifies about new articles when enabled, then syncs if connected —
-     * unless anything is already in flight, in which case nothing is started.
+     * unless anything is already in flight, in which case nothing is started (when that is an
+     * automatic cycle, its result is reported instead — see [runCycle]).
      */
     fun refreshAll() {
         scope.launch { runCycle(ArticleFilter.All) }
@@ -96,7 +98,8 @@ internal class HomeRefreshController(
      * ([FeedRepository.feedsCoveredBy]), then syncs, exactly like [refreshAll] otherwise. A
      * selection that covers no subscribed feed finishes at once without fetching or syncing. When a
      * refresh or sync is already in flight, no new one is started; the pull instead waits for it,
-     * keeping its filter in [pullRefreshingFilters] until everything in flight has finished. A
+     * keeping its filter in [pullRefreshingFilters] until everything in flight has finished (and,
+     * when that is an automatic cycle, reports its result — see [runCycle]). A
      * second pull on a selection whose pull is still pending is ignored; a pull on another
      * selection is tracked independently.
      */
@@ -127,6 +130,12 @@ internal class HomeRefreshController(
      * One [RefreshCycleRunner.runIfIdle] call for [filter], with the pinned-article re-trim around
      * it. Only the IO moves to [dispatcher]; the caller's coroutine stays on the ViewModel's
      * Main-confined scope, so the re-trims stay confined there too.
+     *
+     * When the call finds work in flight ([CycleOutcome.Busy]) and that work is an automatic cycle
+     * ([RefreshCycleRunner.joinableAutomaticCycle]), the action joins it: [manualRefreshStatus]
+     * counts it as one more refresh until that cycle has ended, then reports its outcome, so the
+     * user's action still gets a result (`external-spec.md` §9 "Refresh feedback"). Anything else in
+     * flight — a sync alone, or another manual refresh already counted — leaves the status alone.
      */
     private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
         retrimPins()
@@ -146,9 +155,35 @@ internal class HomeRefreshController(
                 _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh, generation) }
             }
         }
+        if (outcome == CycleOutcome.Busy) runner.joinableAutomaticCycle()?.let { joinAutomaticCycle(it) }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
         if (outcome is CycleOutcome.Ran) retrimPins()
         return outcome
+    }
+
+    /**
+     * The automatic cycles [joinAutomaticCycle] is currently counting. Main-confined like [endCount].
+     */
+    private val joinedCycles = mutableSetOf<Deferred<RefreshOutcome?>>()
+
+    /**
+     * Counts the automatic cycle behind [cycle] in [manualRefreshStatus] until it has ended, then
+     * reports its outcome. A cycle already joined (a pull, then Refresh All, during the same automatic
+     * cycle) is counted once, so its new-article count is not doubled. Runs on [scope], like every
+     * other start and end, so [endCount] stays Main-confined; awaiting does no IO, so nothing moves
+     * to [dispatcher].
+     */
+    private suspend fun joinAutomaticCycle(cycle: Deferred<RefreshOutcome?>) {
+        if (!joinedCycles.add(cycle)) return
+        _manualRefreshStatus.update { it.started() }
+        var refresh: RefreshOutcome? = null
+        try {
+            refresh = cycle.await()
+        } finally {
+            joinedCycles.remove(cycle)
+            val generation = ++endCount
+            _manualRefreshStatus.update { it.ended(refresh, generation) }
+        }
     }
 }
