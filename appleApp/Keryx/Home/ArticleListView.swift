@@ -269,7 +269,7 @@ struct ArticleListView: View {
             // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
             // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
             ToolbarItemGroup(placement: .navigation) {
-                unreadOnlyToggle
+                listModeMenu
                 hideReadButton
             }
             .visibilityPriority(.low)
@@ -299,7 +299,7 @@ struct ArticleListView: View {
         // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
         ToolbarItemGroup(placement: .navigation) {
-            unreadOnlyToggle
+            listModeMenu
             hideReadButton
         }
 
@@ -314,20 +314,37 @@ struct ArticleListView: View {
         }
     }
 
-    private var unreadOnlyToggle: some View {
-        Toggle(isOn: Binding(
-            get: { home.unreadOnly },
-            set: { home.viewModel.setUnreadOnly(value: $0) }
-        )) {
+    private var listModeMenu: some View {
+        // A pop-up button (HIG): the current mode names the button, the menu offers all three.
+        // The icon fills whenever the mode narrows the list.
+        Menu {
+            Picker(selection: Binding(
+                get: { home.listMode },
+                set: { home.viewModel.setMode(target: $0) }
+            )) {
+                ForEach(Self.listModes, id: \.self) { mode in
+                    Text(L(Self.listModeLabelKey(mode)))
+                        .tag(mode)
+                        .disabled(mode == .starred && !home.starredModeEnabled)
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.inline)
+        } label: {
             Label(
-                L("home_unread_only"),
-                systemImage: home.unreadOnly
-                    ? "line.3.horizontal.decrease.circle.fill"
-                    : "line.3.horizontal.decrease.circle"
+                L(Self.listModeLabelKey(home.listMode)),
+                systemImage: home.listMode == .all
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill"
             )
+            #if os(macOS)
+            .labelStyle(.titleAndIcon)
+            #endif
         }
-        .toggleStyle(.button)
-        .help(L("home_unread_only"))
+        .help(L("home_list_mode"))
+        .accessibilityLabel(L("home_list_mode"))
+        .accessibilityValue(L(Self.listModeLabelKey(home.listMode)))
     }
 
     private var hideReadButton: some View {
@@ -425,11 +442,29 @@ struct ArticleListView: View {
         }
     }
 
+    private static let listModes: [ArticleListMode] = [.all, .unread, .starred]
+
+    /// The label naming `mode` on the toolbar's mode menu (Compose: `listModeLabel`).
+    private static func listModeLabelKey(_ mode: ArticleListMode) -> String {
+        switch mode {
+        case .all: "home_list_mode_all"
+        case .unread: "home_list_mode_unread"
+        case .starred: "home_list_mode_starred"
+        }
+    }
+
     /// Scrollable on iOS so an empty list can still be pulled to refresh (`external-spec.md` §9:
     /// "The gesture works on an empty list too", e.g. unread-only with nothing unread).
     @ViewBuilder
     private var noArticlesView: some View {
-        let emptyState = ContentUnavailableView(L("home_no_articles"), systemImage: "doc.text")
+        // Starred mode can narrow a list to nothing; say so and offer the way out (as Compose does).
+        let emptyState = home.listMode == .starred
+            ? AnyView(ContentUnavailableView {
+                Label(L("home_no_starred_articles"), systemImage: "star")
+            } actions: {
+                Button(L("home_show_all_articles")) { home.viewModel.setMode(target: .all) }
+            })
+            : AnyView(ContentUnavailableView(L("home_no_articles"), systemImage: "doc.text"))
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {

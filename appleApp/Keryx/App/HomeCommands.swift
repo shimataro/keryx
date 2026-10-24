@@ -80,12 +80,26 @@ struct HomeCommands: Commands {
                     .disabled(!state.searchEnabled)
                 }
 
-                Toggle(L("menu_view_unread_only"), isOn: Binding(
+                // The article list's mode, with only the current one checked. Re-choosing the checked
+                // item changes nothing; "unread only" keeps ⌘U, which flips between Unread and All.
+                Toggle(L("menu_view_list_mode_all"), isOn: Binding(
+                    get: { home.listMode == .all },
+                    set: { if $0 { home.viewModel.setMode(target: .all) } }
+                ))
+                .disabled(!state.listModeEnabled)
+
+                Toggle(L("menu_view_list_mode_unread"), isOn: Binding(
                     get: { home.listMode == .unread },
                     set: { _ in home.viewModel.toggleUnreadMode() }
                 ))
                 .keyboardShortcut("u", modifiers: .command)
                 .disabled(!state.listModeEnabled)
+
+                Toggle(L("menu_view_list_mode_starred"), isOn: Binding(
+                    get: { home.listMode == .starred },
+                    set: { if $0 { home.viewModel.setMode(target: .starred) } }
+                ))
+                .disabled(!state.starredModeEnabled)
 
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }
                     .disabled(!state.toggleSortEnabled)

@@ -111,7 +111,6 @@
     <string name="home_no_feeds">フィードが登録されていません</string>
     <string name="home_no_articles">記事がありません</string>
     <string name="home_open_feed_list">フィード一覧を開く</string>
-    <string name="home_unread_only">未読のみ</string>
     <string name="home_list_mode">表示する記事</string>
     <string name="home_list_mode_all">すべて</string>
     <string name="home_list_mode_unread">未読</string>
@@ -331,7 +330,6 @@
     <string name="menu_file_quit">Keryx を終了</string>
     <string name="menu_view">表示</string>
     <string name="menu_view_search">検索…</string>
-    <string name="menu_view_unread_only">未読のみ表示</string>
     <string name="menu_view_list_mode_all">すべての記事を表示</string>
     <string name="menu_view_list_mode_unread">未読のみ表示</string>
     <string name="menu_view_list_mode_starred">スター付きのみ表示</string>
