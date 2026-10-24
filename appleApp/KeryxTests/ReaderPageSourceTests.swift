@@ -80,6 +80,73 @@ struct ReaderPageSourceTests {
         #expect(ReaderPagerPages(rows: [listRow("a")], index: ReaderPagerIndex(ids: ["a"])).neighbourIds(of: "a").isEmpty)
     }
 
+    // MARK: - ReaderPagerPages.id(before:) / id(after:)
+
+    @Test
+    func aSwipeUncoversThePageEitherSideAndNothingPastTheEnds() {
+        let rows = [listRow("a"), listRow("b"), listRow("c")]
+        let pages = ReaderPagerPages(rows: rows, index: ReaderPagerIndex(rows: rows))
+
+        #expect(pages.id(before: "b") == "a")
+        #expect(pages.id(after: "b") == "c")
+        #expect(pages.id(before: "a") == nil)
+        #expect(pages.id(after: "c") == nil)
+    }
+
+    @Test
+    func aPageThatIsNotInTheListUncoversNothing() {
+        let rows = [listRow("a"), listRow("b")]
+        let pages = ReaderPagerPages(rows: rows, index: ReaderPagerIndex(rows: rows))
+
+        #expect(pages.id(before: "zzz") == nil)
+        #expect(pages.id(after: "zzz") == nil)
+    }
+
+    @Test
+    func theOnePageFallbackUncoversNothing() {
+        // Before the first emission the pager holds just the selection.
+        let pages = ReaderPagerPages.resolve(pagerRows: [], index: .empty, selected: listRow("z"))
+
+        #expect(pages.id(before: "z") == nil)
+        #expect(pages.id(after: "z") == nil)
+    }
+
+    @Test
+    func neighboursFollowTheLatestList() {
+        // The crash this guards against: the list changing under the pager. Neighbours are asked of
+        // the current list, so new articles in between are what a swipe uncovers.
+        let before = [listRow("a"), listRow("b"), listRow("c")]
+        let after = [listRow("new1"), listRow("a"), listRow("new2"), listRow("b")]
+        let old = ReaderPagerPages(rows: before, index: ReaderPagerIndex(rows: before))
+        let new = ReaderPagerPages(rows: after, index: ReaderPagerIndex(rows: after))
+
+        #expect(old.id(before: "b") == "a")
+        #expect(new.id(before: "b") == "new2")
+        #expect(new.id(after: "b") == nil)
+        #expect(new.id(before: "a") == "new1")
+    }
+
+    // MARK: - ReaderPagerPages.retainedIds
+
+    @Test
+    func thePagerKeepsThePageAndOneEitherSide() {
+        let rows = [listRow("a"), listRow("b"), listRow("c"), listRow("d")]
+        let pages = ReaderPagerPages(rows: rows, index: ReaderPagerIndex(rows: rows))
+
+        #expect(pages.retainedIds(around: "b") == ["a", "b", "c"])
+        #expect(pages.retainedIds(around: "a") == ["a", "b"])
+        #expect(pages.retainedIds(around: "d") == ["c", "d"])
+    }
+
+    @Test
+    func thePagerKeepsJustAPageThatIsNotInTheListAndNothingForNoSelection() {
+        let rows = [listRow("a"), listRow("b")]
+        let pages = ReaderPagerPages(rows: rows, index: ReaderPagerIndex(rows: rows))
+
+        #expect(pages.retainedIds(around: "zzz") == ["zzz"])
+        #expect(pages.retainedIds(around: nil).isEmpty)
+    }
+
     // MARK: - ReaderPageSource.resolve
 
     @Test
