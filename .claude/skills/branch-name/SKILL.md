@@ -53,13 +53,49 @@ No branch named '<arg>' (and no similarly named branch) found.
 
 ### Without an argument
 
-- **Not on `v*`** (including detached `HEAD`) → the default branch:
+- **Not on `v*`** (including detached `HEAD`) → the parent branch if one can be detected, otherwise
+  the default branch. This keeps a branch cut from a release branch or another unmerged feature
+  branch (a stacked branch) from being named after its parent's changes too.
 
-  ```bash
-  git symbolic-ref --short refs/remotes/origin/HEAD   # e.g. origin/v0
+  1. Resolve the default branch:
+
+     ```bash
+     git symbolic-ref --short refs/remotes/origin/HEAD   # e.g. origin/v0
+     ```
+
+     If this fails, tell the user to pass the base branch as an argument and stop.
+
+  2. List parent candidates — branches that `HEAD` contains but the default branch does not:
+
+     ```bash
+     git for-each-ref --merged=HEAD --no-merged="<default>" \
+       --format='%(refname:short)' refs/heads refs/remotes
+     ```
+
+     Exclude the current branch itself, a remote branch of the same name (`<remote>/<current
+     branch>` — basing on it would cover only what has not been pushed yet), and `*/HEAD`. Do not
+     exclude `@{u}`: a stacked branch created with `--track` has its parent as its upstream.
+
+  3. Measure each candidate's distance and pick the nearest as the base:
+
+     ```bash
+     git rev-list --count "<candidate>"..HEAD
+     ```
+
+     Treat a local and a remote branch at the same commit (e.g. `releases/v0.27.0` and
+     `origin/releases/v0.27.0`) as one candidate, shown by its local name.
+
+     - If several candidates at different commits share the smallest distance, present them and
+       the default branch via `AskUserQuestion` and use the one picked.
+     - If there are no candidates, use the default branch.
+
+  When a parent branch is used, say so in the base line, naming the default branch and how to
+  override it (a stale `origin/<default>` that was never fetched can make an already-merged branch
+  look like a parent):
+
+  ```text
+  Base: releases/v0.27.0 (detected parent branch; default branch: origin/v0 — pass a base branch as an argument to override)
   ```
-
-  If this fails, tell the user to pass the base branch as an argument and stop.
 
 - **On `v*`** → `origin/<current branch>`, so the proposal covers what has not been pushed yet:
 
