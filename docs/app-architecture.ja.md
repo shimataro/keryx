@@ -1542,6 +1542,15 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   アプリが再びアクティブになったときで、諦めた文書はそのアクティブ化の時点でもう一度読み込まれる：よくある
   終了はバックグラウンドで起き、1度きりの再読み込みもそこで一緒に落ちることがあるので、ユーザーが戻ってきた
   ときにリーダーが白紙のままであってはならないため。
+- **iOS のリーダーのスワイプページャーは page スタイルの `TabView` ではなく `UIPageViewController` である。**
+  `Home/ReaderPageController.swift` がこれを包み、スワイプのたびに表示中のページの前後の記事を id で引く
+  （`ReaderPagerPages.id(before:)` / `id(after:)`）。保持するのは表示中のページとその両隣だけ
+  （`retainedIds(around:)`。1 つ隣へ行って戻ってもスクロール位置が残るのはこのため）。リーダーの表示中も
+  ページ集合は絶えず変わる——`pagerArticles` の最初の発行で 1 ページのフォールバックが一覧全体に置き換わるときや、
+  開いている間に反映される更新・同期のたびに——が、page スタイルの `TabView` は項目数と現在のページの対応を
+  ゆるくしか保たない：v0.26.0 では、記事一覧へ戻るインタラクティブな pop の間に強制されたレイアウトで、
+  コレクションビューが項目の末尾より先のページへスクロールしようとして `NSInternalInconsistencyException` で
+  落ちた。前後を id で引けば、ずれる件数そのものがない。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS

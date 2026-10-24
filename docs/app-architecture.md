@@ -1576,6 +1576,17 @@ no separate iOS target to keep in sync.
   or the app becoming active again, earns a new reload, and a document given up on is loaded once
   more at that activation: the usual termination happens in the background, where the one reload
   may die too, and the reader must not still be blank when the user comes back.
+- **The iOS reader's swipe pager is a `UIPageViewController`, not a page-style `TabView`.**
+  `Home/ReaderPageController.swift` wraps one and asks for the article either side of the page on
+  screen by id (`ReaderPagerPages.id(before:)` / `id(after:)`) on every swipe, keeping only that page
+  and its two neighbours alive (`retainedIds(around:)`, which is what lets a swipe one away and back
+  keep its scroll position). The page set changes under the reader all the time — the one-page
+  fallback becoming the whole list once `pagerArticles` first emits, and every refresh or sync that
+  lands while it is open — and a page-style `TabView` keeps its item count and its current page
+  in step only loosely: v0.26.0 crashed when a layout forced during the interactive pop back to the
+  article list scrolled its collection view to a page past the end of its items, an
+  `NSInternalInconsistencyException`. Looking neighbours up by id leaves no count to fall out of
+  step with.
 - **`KeryxTests` is a standalone (non-hosted) Swift Testing bundle** — it does not declare
   `dependencies: [{target: Keryx}]`/`TEST_HOST`. A hosted test bundle on a
   `supportedDestinations: [macOS, iOS]` target hits a real XcodeGen/Xcode bug: `TEST_HOST` path
