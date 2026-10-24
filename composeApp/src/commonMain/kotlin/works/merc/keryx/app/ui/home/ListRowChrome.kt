@@ -17,10 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -152,10 +154,20 @@ internal val CHEVRON_MARKER_GAP = 4.dp
 internal val FEED_LIST_MARKER_SLOT = 18.dp
 
 /**
- * The shape every favicon (feed list, article list, reader header) is clipped to. Its corner is a
- * percentage of the clipped size, so each favicon has the same roundness whatever size it is drawn at.
+ * The shape every favicon (feed list, article list, reader header) is clipped to. Its corner is
+ * [FAVICON_CORNER_RADIUS_RATIO] of the clipped size's shorter side, so each favicon has the same
+ * roundness whatever size it is drawn at.
  */
-internal val FaviconShape = RoundedCornerShape(CornerSize(FAVICON_CORNER_RADIUS_RATIO * 100f))
+internal val FaviconShape = RoundedCornerShape(FaviconCornerSize)
+
+/**
+ * [FAVICON_CORNER_RADIUS_RATIO] of the shape's shorter side. `CornerSize(Float)` would be a fixed
+ * pixel radius, and `CornerSize(percent: Int)` would round 12.5% down to 12%.
+ */
+private object FaviconCornerSize : CornerSize {
+    override fun toPx(shapeSize: Size, density: Density): Float =
+        shapeSize.minDimension * FAVICON_CORNER_RADIUS_RATIO
+}
 
 /**
  * The minimum size a touch-only hit target may grow to without adding any layout footprint of its
