@@ -62,9 +62,10 @@ No branch named '<arg>' (and no similarly named branch) found.
 
      ```bash
      git symbolic-ref --short refs/remotes/origin/HEAD   # e.g. origin/v0
+     git rev-parse --verify --quiet "<default>^{commit}" # the target must exist (origin/HEAD can go stale)
      ```
 
-     If this fails, tell the user to pass the base branch as an argument and stop.
+     If either fails, tell the user to pass the base branch as an argument and stop.
 
   2. List parent candidates — branches that `HEAD` contains but the default branch does not:
 
