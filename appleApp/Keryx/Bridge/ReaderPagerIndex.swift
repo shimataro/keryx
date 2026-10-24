@@ -71,6 +71,27 @@ struct ReaderPagerPages {
         guard let id, let index = indexById[id] else { return [] }
         return [index - 1, index + 1].filter(ids.indices.contains).map { ids[$0] }
     }
+
+    /// The page a swipe back from `id` uncovers, or nil at the first page or when `id` is not one of
+    /// the pages — asked afresh on every swipe, so a list that changed since is never stale.
+    func id(before id: String) -> String? {
+        guard let index = indexById[id], index > 0 else { return nil }
+        return ids[index - 1]
+    }
+
+    /// The page a swipe forward from `id` uncovers — see `id(before:)`.
+    func id(after id: String) -> String? {
+        guard let index = indexById[id], index + 1 < ids.count else { return nil }
+        return ids[index + 1]
+    }
+
+    /// The pages whose views the pager keeps alive around `id`: the page itself and one either side,
+    /// so swiping one away and straight back returns to where it was being read (`external-spec.md`
+    /// §9), while anything further is built afresh. Just `id` when it is not one of the pages.
+    func retainedIds(around id: String?) -> Set<String> {
+        guard let id else { return [] }
+        return Set([id] + neighbourIds(of: id))
+    }
 }
 
 /// What one pager page shows, resolved from where its content may come from — `readerContents`' own
