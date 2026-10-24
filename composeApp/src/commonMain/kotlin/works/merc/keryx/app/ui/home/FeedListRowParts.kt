@@ -61,15 +61,17 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
  * full-diameter ring reads heavier than a favicon of the same size.
  *
  * @param refreshing Whether the row's feed (or, for a collapsed folder, one of its feeds) is being refreshed.
+ * @param selectedColor The row's content color while it is selected (or a drop target), so the
+ *   spinner stays visible on that fill; `null` for the row's ordinary, unfilled state.
  * @param marker The marker shown when not refreshing.
  */
 @Composable
-internal fun RefreshingMarkerSlot(refreshing: Boolean, marker: @Composable () -> Unit) {
+internal fun RefreshingMarkerSlot(refreshing: Boolean, selectedColor: Color?, marker: @Composable () -> Unit) {
     Box(Modifier.size(FEED_LIST_MARKER_SLOT), contentAlignment = Alignment.Center) {
         if (refreshing) {
             SmallSpinner(
                 size = REFRESHING_SPINNER_SIZE,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = selectedColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                 strokeWidth = REFRESHING_SPINNER_STROKE,
             )
         } else {

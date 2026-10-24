@@ -237,12 +237,12 @@ internal fun FolderGroupHeader(
                 Modifier.weight(1f).padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RefreshingMarkerSlot(refreshing) {
+                val filledContentColor = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
+                RefreshingMarkerSlot(refreshing, filledContentColor) {
                     KeryxIcon(
                         KeryxIcons.Folder,
                         contentDescription = null,
-                        tint = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
-                            ?: MaterialTheme.colorScheme.primary,
+                        tint = filledContentColor ?: MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(FEED_LIST_MARKER_SLOT),
                     )
                 }
@@ -493,7 +493,9 @@ internal fun FeedRow(
             .semantics { if (refreshing) stateDescription = refreshingStateLabel },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RefreshingMarkerSlot(refreshing) { FeedAvatar(feed.displayTitle(), feed.favicon_url) }
+        RefreshingMarkerSlot(refreshing, selectionContentColorOrNull(selectionTone, focused)) {
+            FeedAvatar(feed.displayTitle(), feed.favicon_url)
+        }
         Spacer(Modifier.width(12.dp))
         // Same weighted slot either way, so the favicon on the left and the error indicator /
         // count badge on the right never move when editing starts or ends. A blank value is

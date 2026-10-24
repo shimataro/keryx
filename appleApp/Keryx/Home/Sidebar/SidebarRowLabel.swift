@@ -128,14 +128,22 @@ extension SidebarRowLabel where IconPopover == EmptyView {
 }
 
 /// The spinner a refreshing row shows in its icon's place — drawn smaller than the icon, since a
-/// full-size ring reads heavier than a favicon of the same size.
+/// full-size ring reads heavier than a favicon of the same size. On a selected row's filled
+/// background (`backgroundProminence` `.increased`) it turns light like the row's title, since its
+/// default gray all but disappears against the fill.
 private struct RefreshingSpinner: View {
+    @Environment(\.backgroundProminence) private var backgroundProminence
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         #if os(macOS)
+        // The AppKit spinner ignores the foreground style and tint; only its appearance recolors it.
         ProgressView().controlSize(.mini)
+            .environment(\.colorScheme, backgroundProminence == .increased ? .dark : colorScheme)
         #else
         // iOS's ProgressView has one fixed size (about 20pt); scaled to about 12pt.
         ProgressView().scaleEffect(0.6)
+            .tint(backgroundProminence == .increased ? .white : nil)
         #endif
     }
 }

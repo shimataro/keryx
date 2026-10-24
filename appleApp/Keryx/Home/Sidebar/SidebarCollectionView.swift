@@ -254,6 +254,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
             SidebarCellContent(
                 content: content,
                 isRefreshing: isRefreshing,
+                isFilled: filled,
                 color: Color(uiColor: textColor),
                 onMove: { [weak self] in self?.actions.moveRow(item, $0) }
             )
@@ -562,6 +563,8 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 private struct SidebarCellContent: View {
     let content: SidebarRowContent
     let isRefreshing: Bool
+    /// Whether the cell paints the teal fill (selected or a drop target).
+    let isFilled: Bool
     let color: Color
     let onMove: (SidebarMoveDirection) -> Void
 
@@ -575,6 +578,8 @@ private struct SidebarCellContent: View {
             symbolTint: color
         )
         .foregroundStyle(color)
+        // What a `List` row sets for its selection, so the label's spinner reads on the fill.
+        .environment(\.backgroundProminence, isFilled ? .increased : .standard)
         .frame(maxWidth: .infinity, alignment: .leading)
         // One element per row for VoiceOver, with the reorder a drag would do offered as actions (a
         // screen reader cannot drag): each only where the row can move that way.
