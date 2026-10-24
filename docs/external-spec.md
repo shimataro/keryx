@@ -266,7 +266,7 @@ one; a user-started refresh is Refresh All, a pull, or a feed's own Refresh.
 | In progress: the feed-list rows' spinners, the toolbar's Refresh spinner | Shown | Shown |
 | In progress: the pull indicator, iOS's "Checking for new articles…" | Not shown | Shown |
 | Result: iOS's status ("N new articles", "No new articles", or the failure) | Not shown | Shown — also when the action joined an automatic refresh already running |
-| Result: the new-article OS notification | Only while the app is not in front | Shown (Refresh All and a pull; a feed's own Refresh posts none) |
+| Result: the new-article OS notification | Only while the app is not in front | Shown (Refresh All and a pull; a feed's own Refresh posts none) — also when the action joined an automatic refresh already running |
 | Failure: no feed could be reached | A notification-center entry | A notification-center entry |
 
 Why:

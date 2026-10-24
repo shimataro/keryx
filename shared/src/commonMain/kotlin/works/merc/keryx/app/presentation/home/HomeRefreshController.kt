@@ -132,9 +132,10 @@ internal class HomeRefreshController(
      * Main-confined scope, so the re-trims stay confined there too.
      *
      * When the call finds work in flight ([CycleOutcome.Busy]) and that work is an automatic cycle
-     * ([RefreshCycleRunner.joinableAutomaticCycle]), the action joins it: [manualRefreshStatus]
-     * counts it as one more refresh until that cycle has ended, then reports its outcome, so the
-     * user's action still gets a result (`external-spec.md` §9 "Refresh feedback"). Anything else in
+     * ([RefreshCycleRunner.joinAutomaticCycle]), the action joins it: [manualRefreshStatus]
+     * counts it as one more refresh until that cycle has ended, then reports its outcome, and the
+     * cycle posts its new-article notification as a manual one would, so the user's action still gets
+     * a result (`external-spec.md` §9 "Refresh feedback"). Anything else in
      * flight — a sync alone, or another manual refresh already counted — leaves the status alone.
      */
     private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
@@ -155,7 +156,7 @@ internal class HomeRefreshController(
                 _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh, generation) }
             }
         }
-        if (outcome == CycleOutcome.Busy) runner.joinableAutomaticCycle()?.let { joinAutomaticCycle(it) }
+        if (outcome == CycleOutcome.Busy) runner.joinAutomaticCycle()?.let { joinAutomaticCycle(it) }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
         if (outcome is CycleOutcome.Ran) retrimPins()

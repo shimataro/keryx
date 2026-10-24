@@ -688,4 +688,60 @@ class RefreshCycleRunnerTest {
 
         assertTrue(f.log.none { it.startsWith("notify:") }, "${f.log}")
     }
+
+    @Test
+    fun aUserActionJoiningBeforeTheRefreshFinishesGetsTheNotificationInFront() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+            if (name == "feedRefresh") assertNotNull(f.runner.joinAutomaticCycle())
+            block()
+        }
+
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    @Test
+    fun aUserActionJoiningAfterTheNotificationWasHeldBackPostsIt() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+            block()
+            if (name == "feedRefresh") {
+                assertTrue(f.log.none { it.startsWith("notify:") }, "held back until joined")
+                assertNotNull(f.runner.joinAutomaticCycle())
+            }
+        }
+
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    @Test
+    fun joiningTheSameCycleTwicePostsTheNotificationOnce() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+            if (name == "feedRefresh") assertNotNull(f.runner.joinAutomaticCycle())
+            block()
+            if (name == "feedRefresh") assertNotNull(f.runner.joinAutomaticCycle())
+        }
+
+        assertEquals(1, f.log.count { it.startsWith("notify:") }, "${f.log}")
+    }
+
+    @Test
+    fun joiningAnAutomaticCycleNotInFrontDoesNotPostASecondNotification() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixture(driver, db)
+
+        f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+            block()
+            if (name == "feedRefresh") assertNotNull(f.runner.joinAutomaticCycle())
+        }
+
+        assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
 }
