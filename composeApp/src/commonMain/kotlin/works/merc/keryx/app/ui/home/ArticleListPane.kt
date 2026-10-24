@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.encode
@@ -66,10 +67,14 @@ import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.ClipboardEntries
+import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuAnchor
+import works.merc.keryx.app.platform.NativeMenuEntry
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.home.ArticleListBody
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListCatchingUp
 import works.merc.keryx.app.presentation.home.articleListTitle
@@ -77,10 +82,15 @@ import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
 import works.merc.keryx.app.resources.home_hide_read
+import works.merc.keryx.app.resources.home_list_mode
+import works.merc.keryx.app.resources.home_list_mode_all
+import works.merc.keryx.app.resources.home_list_mode_starred
+import works.merc.keryx.app.resources.home_list_mode_unread
 import works.merc.keryx.app.resources.home_mark_all_read
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_no_articles
 import works.merc.keryx.app.resources.home_no_feeds
+import works.merc.keryx.app.resources.home_no_starred_articles
 import works.merc.keryx.app.resources.home_open_feed_list
 import works.merc.keryx.app.resources.home_refresh_this_list
 import works.merc.keryx.app.resources.home_search_clear
@@ -88,18 +98,19 @@ import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_search_too_short
 import works.merc.keryx.app.resources.home_search_try_all_feeds
+import works.merc.keryx.app.resources.home_show_all_articles
 import works.merc.keryx.app.resources.home_sort_disabled_search
 import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
 import works.merc.keryx.app.resources.home_starred
-import works.merc.keryx.app.resources.home_unread_only
 import works.merc.keryx.app.ui.common.FlatButton
+import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
-import works.merc.keryx.app.ui.common.ToggleChip
+import works.merc.keryx.app.ui.common.MenuChip
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
@@ -205,7 +216,8 @@ fun ArticleListPane(
     // What scrolls the selection into view — not selectedId itself, which also moves back without
     // the user acting (a selection found tombstoned) and must not move the list.
     val revealRequest by vm.selectionRevealRequests.collectAsState()
-    val unreadOnly by vm.unreadOnly.collectAsState()
+    val listMode by vm.mode.collectAsState()
+    val starredModeEnabled by vm.starredModeEnabled.collectAsState()
     val canHideRead by vm.canHideRead.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
 
@@ -298,6 +310,7 @@ fun ArticleListPane(
     val sortEnabled: Boolean
     val titleMarkedById: Map<String, String>?
     val emptyContent: (@Composable () -> Unit)?
+    val onShowAllArticles: (() -> Unit)?
 
     if (!searchActive) {
         val baseArticles by vm.articles.collectAsState()
@@ -311,6 +324,12 @@ fun ArticleListPane(
         sortEnabled = true
         titleMarkedById = null
         emptyContent = null
+        // Starred mode can narrow a list to nothing; its empty state says so and offers the way out.
+        onShowAllArticles = if (listMode == ArticleListMode.Starred) {
+            { vm.setMode(ArticleListMode.All) }
+        } else {
+            null
+        }
     } else {
         val results by vm.searchResults.collectAsState()
         val searching by vm.searching.collectAsState()
@@ -337,6 +356,7 @@ fun ArticleListPane(
         loading = false
         sortEnabled = false
         titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } }
+        onShowAllArticles = null
         emptyContent = when {
             !hasValidTerms -> {
                 { CenteredHint(stringResource(Res.string.home_search_too_short)) }
@@ -389,14 +409,15 @@ fun ArticleListPane(
         feedFavicons = feedFavicons,
         selectedId = selectedId,
         revealRequest = revealRequest,
-        unreadOnly = unreadOnly,
+        listMode = listMode,
+        starredModeEnabled = starredModeEnabled,
         canHideRead = canHideRead,
         // Deliberately the real sort direction even while search disables the button — search
         // order is always FTS5 relevance rank, but sortDirectionIcon's own KDoc says the button
         // still reflects the current direction while disabled, it just can't be toggled.
         newestFirst = newestFirst,
         focused = focused,
-        onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
+        onSelectListMode = vm::setMode,
         onHideRead = { vm.hideRead() },
         onToggleSort = { vm.toggleSort() },
         onMarkAllRead = { vm.markAllRead() },
@@ -420,6 +441,7 @@ fun ArticleListPane(
         sortEnabled = sortEnabled,
         titleMarkedById = titleMarkedById,
         emptyContent = emptyContent,
+        onShowAllArticles = onShowAllArticles,
         header = header,
         // Gated by pullRefreshAvailable (touch-primary only, never over search results or with no
         // feeds). The scope is the current selection's own feeds; see HomeRefreshController.pullToRefresh.
@@ -496,17 +518,21 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
 
 /**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): unread-only toggle, hide-read, notifications bell, sort, mark-all-read.
+ * or its search results): list-mode chip, hide-read, notifications bell, sort, mark-all-read.
  * When [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance
  * rank, or recency when every term is too short to be ranked, see FtsSearch), the sort button is
  * disabled and its tooltip explains why instead of showing the usual "sort by ...".
  *
+ * The list mode ([listMode]) is a pop-up button — a [MenuChip] naming the current mode, opening a
+ * native menu of all three ([listModeMenuEntries]) — rather than a segmented control: three labelled
+ * segments do not fit the pane's 240dp minimum width beside the other controls. The chip is filled
+ * whenever the mode narrows the list, so a narrowed list never looks like the whole filter.
+ *
  * The hide-read action ([onHideRead]) is always present, enabled only while [canHideRead] — per
  * "Layout stability under state changes" in the `ui-guidelines` skill, a control whose availability
  * depends on state is shown disabled rather than hidden, so it never shifts its neighbors. Unlike
- * [unreadOnly] (a toggle: pressing it again reverses it), this is a one-shot action — see
- * `HomeViewModel.canHideRead`'s own KDoc for what it does and why it's separate from the
- * unread-only toggle itself. It sits directly beside the unread-only chip rather than in the
+ * the mode chip, this is a one-shot action — see `HomeViewModel.canHideRead`'s own KDoc for what it
+ * does and why it's separate from the unread mode itself. It sits directly beside the mode chip rather than in the
  * trailing [ToolbarIconGroup]: its enabled state depends on that chip alone, so adjacency makes
  * the dependency visible, and it keeps this view-only action away from the bulk-mutating
  * mark-all-read it would otherwise be easy to mistake it for. As a lone icon it stays bare (no
@@ -516,7 +542,7 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
  * list is a modal navigation drawer rather than an on-screen pane — see `ArticleListPane`'s KDoc),
  * a leading hamburger-button-and-[title] row is added above the controls row rather than folded
  * into it: the controls row is unchanged from [PaneLayout.Triple]/[PaneLayout.Dual] so the
- * unread-only toggle stays reachable at every width instead of being dropped for space. That row
+ * mode chip stays reachable at every width instead of being dropped for space. That row
  * is laid out for the whole time the pane stays at a narrow layout — unlike a "back" button,
  * opening the drawer is never contextually unavailable, so there is no enabled/disabled state to
  * track and the row's presence depends only on [onOpenDrawer]'s own nullness.
@@ -532,11 +558,12 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
  */
 @Composable
 internal fun ArticleListTopBar(
-    unreadOnly: Boolean,
-    onToggleUnreadOnly: () -> Unit,
+    listMode: ArticleListMode,
+    onSelectListMode: (ArticleListMode) -> Unit,
     newestFirst: Boolean,
     onToggleSort: () -> Unit,
     onMarkAllRead: () -> Unit,
+    starredModeEnabled: Boolean = true,
     canHideRead: Boolean = false,
     onHideRead: () -> Unit = {},
     sortEnabled: Boolean = true,
@@ -570,11 +597,17 @@ internal fun ArticleListTopBar(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToggleChip(
-                label = stringResource(Res.string.home_unread_only),
-                checked = unreadOnly,
-                onCheckedChange = { onToggleUnreadOnly() },
-            )
+            val modeLabels = ArticleListMode.entries.associateWith { stringResource(listModeLabel(it)) }
+            NativeMenuAnchor(
+                items = { listModeMenuEntries(listMode, starredModeEnabled, modeLabels, onSelectListMode) },
+            ) { open ->
+                MenuChip(
+                    label = modeLabels.getValue(listMode),
+                    accessibilityLabel = stringResource(Res.string.home_list_mode),
+                    highlighted = listMode != ArticleListMode.All,
+                    onClick = open,
+                )
+            }
             Spacer(Modifier.width(4.dp))
             val hideReadTooltip = stringResource(Res.string.home_hide_read)
             TooltipIconButton(tooltip = hideReadTooltip, onClick = onHideRead, enabled = canHideRead) {
@@ -601,6 +634,31 @@ internal fun ArticleListTopBar(
         }
     }
     }
+}
+
+/** The label naming [mode] on the article list's mode chip and in its menu. */
+internal fun listModeLabel(mode: ArticleListMode): StringResource = when (mode) {
+    ArticleListMode.All -> Res.string.home_list_mode_all
+    ArticleListMode.Unread -> Res.string.home_list_mode_unread
+    ArticleListMode.Starred -> Res.string.home_list_mode_starred
+}
+
+/**
+ * The mode chip's menu: one checked item per [ArticleListMode], [ArticleListMode.Starred] greyed
+ * out while [starredModeEnabled] is false. Choosing the current mode again is a no-op
+ * (`HomeViewModel.setMode`).
+ */
+internal fun listModeMenuEntries(
+    mode: ArticleListMode,
+    starredModeEnabled: Boolean,
+    labels: Map<ArticleListMode, String>,
+    onSelect: (ArticleListMode) -> Unit,
+): List<NativeMenuEntry> = ArticleListMode.entries.map { entry ->
+    NativeCheckMenuItem(
+        labels.getValue(entry),
+        checked = entry == mode,
+        enabled = entry != ArticleListMode.Starred || starredModeEnabled,
+    ) { onSelect(entry) }
 }
 
 /**
@@ -632,7 +690,9 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param selectedId The identifier of the selected article, if any.
  * @param revealRequest Bumped by each selection the user makes (`HomeViewModel.selectionRevealRequests`);
  *   a change scrolls [selectedId]'s row into view. [selectedId] changing on its own does not.
- * @param unreadOnly Whether to show only unread articles.
+ * @param listMode Which of the filter's articles the list shows — see [ArticleListMode].
+ * @param onSelectListMode Chooses another mode from [ArticleListTopBar]'s mode menu.
+ * @param starredModeEnabled Whether [ArticleListMode.Starred] can be chosen (not under the Starred filter).
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
  * @param sortEnabled Whether the sort button in [ArticleListTopBar] can be toggled — `false` while
@@ -659,6 +719,8 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   when [articles] is empty — search's own "too short a query"/"no matching articles" hints, which
  *   have nothing to do with whether the user has any feeds at all. `null` (the default) falls back
  *   to that ordinary message.
+ * @param onShowAllArticles When non-null (starred mode), the ordinary empty state is replaced by
+ *   "no starred articles here" and a button invoking this to show every article again.
  * @param onPullRefresh Invoked when the list (or its "no articles" empty state) is pulled down past
  *   the refresh threshold. `null` (the default) disables the gesture entirely — desktop, search
  *   results, and a user with no feeds all pass `null`.
@@ -676,8 +738,9 @@ internal fun ArticleListPaneContent(
     feedFavicons: Map<String, String?> = emptyMap(),
     selectedId: String?,
     revealRequest: Int = 0,
-    unreadOnly: Boolean,
-    onToggleUnreadOnly: () -> Unit,
+    listMode: ArticleListMode,
+    onSelectListMode: (ArticleListMode) -> Unit,
+    starredModeEnabled: Boolean = true,
     canHideRead: Boolean = false,
     onHideRead: () -> Unit = {},
     onToggleSort: () -> Unit,
@@ -705,6 +768,7 @@ internal fun ArticleListPaneContent(
     titleMarkedById: Map<String, String>? = null,
     header: (@Composable () -> Unit)? = null,
     emptyContent: (@Composable () -> Unit)? = null,
+    onShowAllArticles: (() -> Unit)? = null,
     onPullRefresh: (() -> Unit)? = null,
     pullRefreshing: Boolean = false,
     newArticleCount: Int = 0,
@@ -738,8 +802,9 @@ internal fun ArticleListPaneContent(
     ) {
         header?.invoke()
         ArticleListTopBar(
-            unreadOnly = unreadOnly,
-            onToggleUnreadOnly = onToggleUnreadOnly,
+            listMode = listMode,
+            onSelectListMode = onSelectListMode,
+            starredModeEnabled = starredModeEnabled,
             canHideRead = canHideRead,
             onHideRead = onHideRead,
             newestFirst = newestFirst,
@@ -808,7 +873,17 @@ internal fun ArticleListPaneContent(
                                 .heightIn(min = maxHeight),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (onShowAllArticles != null) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Text(stringResource(Res.string.home_no_starred_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    FlatTonalButton(onClick = onShowAllArticles) { Text(stringResource(Res.string.home_show_all_articles)) }
+                                }
+                            } else {
+                                Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }

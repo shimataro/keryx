@@ -65,7 +65,9 @@ import works.merc.keryx.app.resources.menu_view_mark_all_read
 import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
-import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.resources.menu_view_list_mode_all
+import works.merc.keryx.app.resources.menu_view_list_mode_starred
+import works.merc.keryx.app.resources.menu_view_list_mode_unread
 import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.tray.updateMenuEntry
 import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
@@ -198,7 +200,9 @@ internal fun FrameWindowScope.AppMenuBar(
         quit = stringResource(Res.string.menu_file_quit),
         viewMenu = stringResource(Res.string.menu_view),
         search = stringResource(Res.string.menu_view_search),
-        unreadOnly = stringResource(Res.string.menu_view_unread_only),
+        allArticles = stringResource(Res.string.menu_view_list_mode_all),
+        unreadOnly = stringResource(Res.string.menu_view_list_mode_unread),
+        starredOnly = stringResource(Res.string.menu_view_list_mode_starred),
         toggleSort = stringResource(Res.string.menu_view_toggle_sort),
         markAllRead = stringResource(Res.string.menu_view_mark_all_read),
         showMenuBar = stringResource(Res.string.menu_view_show_menu_bar),
@@ -239,6 +243,7 @@ internal fun FrameWindowScope.AppMenuBar(
         openSettings = { menuController.send(MenuCommand.OpenSettings) },
         quit = onQuit,
         focusSearch = { menuController.send(MenuCommand.FocusSearch) },
+        setListMode = { homeVm.setMode(it) },
         toggleUnreadMode = { homeVm.toggleUnreadMode() },
         toggleSort = { homeVm.toggleSort() },
         markAllRead = { homeVm.markAllRead() },

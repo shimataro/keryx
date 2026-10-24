@@ -114,7 +114,9 @@ internal data class AppMenuLabels(
     val quit: String,
     val viewMenu: String,
     val search: String,
+    val allArticles: String,
     val unreadOnly: String,
+    val starredOnly: String,
     val toggleSort: String,
     val markAllRead: String,
     val showMenuBar: String,
@@ -157,6 +159,7 @@ internal data class AppMenuActions(
     val openSettings: () -> Unit,
     val quit: () -> Unit,
     val focusSearch: () -> Unit,
+    val setListMode: (ArticleListMode) -> Unit,
     val toggleUnreadMode: () -> Unit,
     val toggleSort: () -> Unit,
     val markAllRead: () -> Unit,
@@ -248,6 +251,17 @@ internal fun buildAppMenuTree(
 
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
+        // The article list's mode, as three check items with only the current one checked (the
+        // toolbar's mode chip offers the same three). Re-choosing the checked one changes nothing;
+        // the unread item keeps ⌘/Ctrl+U, which flips between Unread and All.
+        add(
+            AppMenuNode.CheckboxItem(
+                labels.allArticles,
+                ui.listModeEnabled,
+                ui.listMode == ArticleListMode.All,
+                onCheckedChange = { if (it) actions.setListMode(ArticleListMode.All) },
+            ),
+        )
         add(
             AppMenuNode.CheckboxItem(
                 labels.unreadOnly,
@@ -255,6 +269,14 @@ internal fun buildAppMenuTree(
                 ui.listMode == ArticleListMode.Unread,
                 AppMenuShortcut.UnreadOnly,
                 onCheckedChange = { actions.toggleUnreadMode() },
+            ),
+        )
+        add(
+            AppMenuNode.CheckboxItem(
+                labels.starredOnly,
+                ui.starredModeEnabled,
+                ui.listMode == ArticleListMode.Starred,
+                onCheckedChange = { if (it) actions.setListMode(ArticleListMode.Starred) },
             ),
         )
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))

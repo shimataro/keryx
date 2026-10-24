@@ -6,6 +6,7 @@ import androidx.compose.foundation.ContextMenuState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalContextMenuRepresentation
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.text.LocalTextContextMenu
 import androidx.compose.foundation.text.TextContextMenu
 import androidx.compose.foundation.text.TextContextMenuArea
@@ -172,8 +173,8 @@ internal class AwtPopupHandle(
         // representation at all: the class always bakes in the platform's primary modifier, so it
         // can only show a modifier'd combo correctly. Those items render with no native hint here;
         // see NativeMenuShortcut's doc comment.
+        item.isEnabled = entry.isEnabled
         if (entry is NativeMenuItem) {
-            item.isEnabled = entry.enabled
             entry.shortcut?.takeIf { it.ctrl }?.let { item.shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
         }
         return item
@@ -187,7 +188,7 @@ internal class AwtPopupHandle(
         if (component is java.awt.CheckboxMenuItem && entry is NativeCheckMenuItem) {
             component.state = entry.checked
         }
-        if (entry is NativeMenuItem) component.isEnabled = entry.enabled
+        if (entry is NativeMenuLeaf) component.isEnabled = entry.isEnabled
     }
 
     // An AWT PopupMenu is only showable once it belongs to a component's menu hierarchy.
@@ -279,8 +280,8 @@ internal class SwingPopupHandle(
         // WHEN_IN_FOCUSED_WINDOW global keybinding registration — which only walks from a
         // JMenuBar's structure — never reaches it. Setting `accelerator` here is purely cosmetic:
         // it renders in Swing's own native accelerator column with no live global keybinding.
+        item.isEnabled = entry.isEnabled
         if (entry is NativeMenuItem) {
-            item.isEnabled = entry.enabled
             entry.shortcut?.let { shortcut ->
                 // Never macOS (see defaultPopupHandle), so the primary modifier is always Ctrl —
                 // never Cmd.
@@ -300,7 +301,7 @@ internal class SwingPopupHandle(
         if (component is JCheckBoxMenuItem && entry is NativeCheckMenuItem) {
             component.isSelected = entry.checked
         }
-        if (entry is NativeMenuItem) component.isEnabled = entry.enabled
+        if (entry is NativeMenuLeaf) component.isEnabled = entry.isEnabled
     }
 
     // JPopupMenu.show takes the invoker directly, so unlike AWT there is nothing to add to the
@@ -398,7 +399,7 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
      * @return The entry's rendered label and optional checked state.
      */
     private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
-    LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked, (entry as? NativeMenuItem)?.enabled ?: true)
+    LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked, entry.isEnabled)
 
 /**
  * Builds the backend appropriate to the current platform: [AwtPopupHandle] on macOS, where AWT's
@@ -551,6 +552,42 @@ actual fun Modifier.nativeContextMenu(
                 }
             }
         }
+}
+
+/**
+ * Desktop `actual`: the same [LazyNativePopup] [nativeContextMenu] uses, shown at the anchor's
+ * bottom-left corner instead of at the pointer.
+ */
+@Composable
+actual fun NativeMenuAnchor(
+    items: () -> List<NativeMenuEntry>,
+    content: @Composable (open: () -> Unit) -> Unit,
+) {
+    val window = LocalNativeWindow.current
+    val density = LocalDensity.current
+    val currentItems by rememberUpdatedState(items)
+    // Bottom-left corner in window pixels; a plain holder for the same reason as nativeContextMenu's.
+    val anchorCorner = remember { FloatArray(2) }
+    val popup = remember(window) { LazyNativePopup(window = window) }
+    DisposableEffect(popup) { onDispose { popup.dispose() } }
+
+    Box(
+        Modifier.onGloballyPositioned { coordinates ->
+            val position = coordinates.positionInWindow()
+            anchorCorner[0] = position.x
+            anchorCorner[1] = position.y + coordinates.size.height
+        },
+    ) {
+        content {
+            val entries = currentItems()
+            val win = window
+            if (entries.isNotEmpty() && win != null) {
+                val x = (anchorCorner[0] / density.density).toInt()
+                val y = (anchorCorner[1] / density.density).toInt()
+                popup.showFor(entries, win.contentPane, x, y)
+            }
+        }
+    }
 }
 
 /**

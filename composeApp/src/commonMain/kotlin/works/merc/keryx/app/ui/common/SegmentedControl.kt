@@ -13,10 +13,15 @@ import androidx.compose.runtime.Composable
 expect fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit)
 
 /**
- * A single boolean toggle rendered with the same visual language as [SegmentedControl]'s selected
- * segment on desktop — replaces Material3's `FilterChip` for standalone on/off controls (e.g.
- * `ArticleListPane`'s "unread only" toggle). `expect`/`actual` per platform, same rationale as
- * [SegmentedControl]: the Android `actual` delegates to M3's own `FilterChip`.
+ * A pop-up button rendered with the same visual language as [SegmentedControl]'s selected segment
+ * on desktop: [label] names the current choice, a trailing chevron says it opens a menu, and
+ * [onClick] opens it (typically `NativeMenuAnchor`'s `open`). [highlighted] fills it as a checked
+ * chip, for a choice that narrows what is shown — `ArticleListPane`'s list mode (`HomeViewModel.mode`)
+ * whenever it is not "All". `expect`/`actual` per platform: the Android `actual` is M3's own
+ * `FilterChip` with a dropdown arrow, M3's chip-with-menu idiom.
+ *
+ * @param label The current choice, shown on the chip.
+ * @param accessibilityLabel What the chip chooses, announced with [label] as its state.
  */
 @Composable
-expect fun ToggleChip(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true)
+expect fun MenuChip(label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit)

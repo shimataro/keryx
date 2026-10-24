@@ -46,8 +46,16 @@ data class NativeMenuItem(
 data class NativeCheckMenuItem(
     override val label: String,
     val checked: Boolean,
+    val enabled: Boolean = true,
     override val onClick: () -> Unit,
 ) : NativeMenuLeaf
+
+/** Whether [this] leaf can be chosen — greyed out rather than omitted when it can't. */
+val NativeMenuLeaf.isEnabled: Boolean
+    get() = when (this) {
+        is NativeMenuItem -> enabled
+        is NativeCheckMenuItem -> enabled
+    }
 
 /** A native context menu entry that expands into a nested submenu of [items]. */
 data class NativeSubMenu(override val label: String, val items: List<NativeMenuLeaf>) : NativeMenuEntry
@@ -106,6 +114,21 @@ expect fun Modifier.nativeContextMenu(
     onOpen: () -> Unit = {},
     hitTest: ((Offset) -> Boolean)? = null,
 ): Modifier
+
+/**
+ * Hosts [content] as the anchor of a native menu that opens just below it whenever [content]
+ * calls the `open` it is handed — a pop-up button's menu (pick one of a few options shown as the
+ * button's own label), as opposed to [nativeContextMenu]'s right-click / long-press one. The same
+ * widgets as [nativeContextMenu]: a real OS menu on desktop, an M3 `DropdownMenu` on Android.
+ *
+ * [items] is evaluated on each `open`, never on composition, and a click performs exactly what the
+ * menu displayed (the same contract as [nativeContextMenu]). An empty list opens nothing.
+ */
+@Composable
+expect fun NativeMenuAnchor(
+    items: () -> List<NativeMenuEntry>,
+    content: @Composable (open: () -> Unit) -> Unit,
+)
 
 /**
  * Wraps [content] so that any `SelectionContainer` inside it shows its selection's own context

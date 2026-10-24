@@ -41,7 +41,7 @@ class MenuBarVisibilityTest {
     private fun labels() = AppMenuLabels(
         fileMenu = "File", addFeed = "AddFeed", addFolder = "AddFolder", addTag = "AddTag",
         importOpml = "Import", exportOpml = "Export", closeWindow = "Close", settings = "Settings", quit = "Quit",
-        viewMenu = "View", search = "Search", unreadOnly = "UnreadOnly", toggleSort = "ToggleSort",
+        viewMenu = "View", search = "Search", allArticles = "AllArticles", unreadOnly = "UnreadOnly", starredOnly = "StarredOnly", toggleSort = "ToggleSort",
         markAllRead = "MarkAllRead", showMenuBar = "ShowMenuBar",
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
@@ -54,7 +54,7 @@ class MenuBarVisibilityTest {
 
     private fun actions() = AppMenuActions(
         addFeed = { addFeedCalled = true }, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
-        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, toggleUnreadMode = {},
+        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = {}, toggleUnreadMode = {},
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},

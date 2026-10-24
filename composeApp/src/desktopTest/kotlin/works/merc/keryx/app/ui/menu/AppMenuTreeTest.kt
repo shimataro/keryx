@@ -33,7 +33,7 @@ class AppMenuTreeTest {
     private fun labels() = AppMenuLabels(
         fileMenu = "File", addFeed = "AddFeed", addFolder = "AddFolder", addTag = "AddTag",
         importOpml = "Import", exportOpml = "Export", closeWindow = "Close", settings = "Settings", quit = "Quit",
-        viewMenu = "View", search = "Search", unreadOnly = "UnreadOnly", toggleSort = "ToggleSort",
+        viewMenu = "View", search = "Search", allArticles = "AllArticles", unreadOnly = "UnreadOnly", starredOnly = "StarredOnly", toggleSort = "ToggleSort",
         markAllRead = "MarkAllRead", showMenuBar = "ShowMenuBar",
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
@@ -51,10 +51,12 @@ class AppMenuTreeTest {
     private var newFolderInvoked = false
     private var newTagInvoked = false
     private var updateActionInvoked = false
+    private val listModesSet = mutableListOf<ArticleListMode>()
+    private var unreadModeToggles = 0
 
     private fun actions() = AppMenuActions(
         addFeed = {}, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
-        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, toggleUnreadMode = {},
+        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = { listModesSet += it }, toggleUnreadMode = { unreadModeToggles++ },
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = {}, sync = {},
         refreshSelectedFeed = {},
@@ -456,4 +458,45 @@ class AppMenuTreeTest {
         // Modified (Ctrl/⌘+Shift) selected-item accelerators are unaffected.
         assertEquals(AppMenuShortcut.FeedRefresh, feed.item("FeedRefresh").shortcut)
     }
+
+    @Test
+    fun viewMenuListsTheThreeListModesWithOnlyTheCurrentOneChecked() {
+        val view = tree(enabledUi()).menu("View")
+        val modes = listOf("AllArticles", "UnreadOnly", "StarredOnly").map { view.checkbox(it)!! }
+
+        assertEquals(listOf(false, true, false), modes.map { it.checked })
+        assertEquals(AppMenuShortcut.UnreadOnly, modes[1].shortcut)
+        assertEquals(listOf(null, null), listOf(modes[0].shortcut, modes[2].shortcut))
+    }
+
+    @Test
+    fun viewMenuListModeItemsRouteToTheSharedHandlers() {
+        val view = tree(enabledUi()).menu("View")
+
+        view.checkbox("AllArticles")!!.onCheckedChange(true)
+        view.checkbox("StarredOnly")!!.onCheckedChange(true)
+        // Re-choosing the checked item (the toolkit reports it as an uncheck) changes nothing.
+        view.checkbox("AllArticles")!!.onCheckedChange(false)
+        view.checkbox("UnreadOnly")!!.onCheckedChange(false)
+
+        assertEquals(listOf(ArticleListMode.All, ArticleListMode.Starred), listModesSet)
+        assertEquals(1, unreadModeToggles)
+    }
+
+    @Test
+    fun viewMenuStarredOnlyIsDisabledUnderTheStarredFilter() {
+        val ui = computeMenuUiState(
+            onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
+            activity = ActivitySnapshot(), canSyncNow = true,
+            searchActive = false, listMode = ArticleListMode.All, starredModeAvailable = false, opmlBusy = false,
+            hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = false,
+            selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
+        )
+        val view = tree(ui).menu("View")
+
+        assertFalse(view.checkbox("StarredOnly")!!.enabled)
+        assertTrue(view.checkbox("AllArticles")!!.enabled)
+        assertTrue(view.checkbox("UnreadOnly")!!.enabled)
+    }
+
 }
