@@ -31,9 +31,19 @@ git for-each-ref --format='%(refname:short)' refs/heads refs/remotes
 
 Exclude `origin/HEAD` (and any bare remote name such as `origin`). Do not decide existence with
 `git rev-parse` alone: on a case-insensitive filesystem (macOS by default) it resolves `V0` to the
-loose ref file of `v0`, hiding the typo. If no branch matches exactly, no branch matches
-case-insensitively either, and `git rev-parse --verify --quiet "<arg>^{commit}"` resolves (a tag or a
-commit hash), use the argument as the base as-is.
+loose ref file of `v0`, hiding the typo.
+
+If no branch matches exactly and none matches case-insensitively either, use the argument as the
+base as-is only when it is one of:
+
+- exactly (case-sensitively) one of the tag names — `git for-each-ref --format='%(refname:short)' refs/tags`
+  (not `rev-parse`, for the same case-insensitivity reason);
+- a commit hash — 4 to 64 hexadecimal characters — that `git rev-parse --verify --quiet "<arg>^{commit}"`
+  resolves to a hash starting with the argument (compared case-insensitively; `rev-parse` tries ref
+  names before object names, so a hex-looking name can still resolve through a ref).
+
+Any other revision expression (`HEAD`, `HEAD~1`, `@{u}`, `origin`, `origin/HEAD`, …) is not a base
+even though `rev-parse` resolves it: handle it like an unknown name below.
 
 Otherwise, look for similarly named branches in that list — a wrong plural, case, or separator is an
 easy mistake to make. Judge closeness yourself, closest first:
