@@ -1363,6 +1363,30 @@ device. On an iPhone and an iPad (both orientations), with folders, unfoldered f
 - Tapping still selects (and on iPhone opens the article list); folder, tag and section disclosure states
   survive a relaunch.
 
+### (iOS) The reader pager
+
+The iOS reader's swipe pager is a `UIPageViewController` (see "Apple Native Apps (SwiftUI)" in
+[app-architecture.md](app-architecture.md)); its neighbour lookup and retained range are covered by
+`ReaderPageSourceTests`, but the paging itself needs a simulator or device. On an iPhone and an iPad (both
+orientations), with a feed of a few dozen articles whose bodies are longer than a screen:
+
+- Swiping moves to the next/previous article in the list's own order; at the first and last article it only
+  springs back.
+- Only the article a swipe comes to rest on is marked read; the neighbour that was visible beside it stays
+  unread.
+- Scroll down an article, swipe one article away and straight back: it is where it was. Swipe two away and
+  back: it starts from the top.
+- A drag that is mostly vertical scrolls the article instead of turning the page, and a swipe right after a
+  flick scroll does not turn it either.
+- Selecting another article in the list, or J/K from a hardware keyboard, moves the pager to it. While
+  search results are showing, a swipe steps through the results.
+- With VoiceOver on, a three-finger swipe turns the page.
+- Rotating, or (iPad) switching between the reader-only and two-pane layouts, keeps the same article on
+  screen.
+- No crash (regression check for the v0.26.0 crash): pull to refresh a feed that gains new articles, open an
+  article near the end of the list while the refresh is landing, and edge-swipe back to the list straight
+  away; repeat, also opening and going back immediately, without a refresh.
+
 ### (SwiftUI) Copy URL feedback
 
 Every article "Copy URL" route in the SwiftUI app goes through `HomeObservable.copyArticleUrl`
