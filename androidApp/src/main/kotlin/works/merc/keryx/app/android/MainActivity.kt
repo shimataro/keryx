@@ -12,6 +12,7 @@ import org.koin.core.Koin
 import org.koin.mp.KoinPlatform
 import works.merc.keryx.app.App
 import works.merc.keryx.app.dispatchOAuthCallbackIfPresent
+import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.handleOpmlOpenIfPresent
 import works.merc.keryx.app.handleSharedLinkIfPresent
@@ -78,11 +79,20 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Back in front: a launch the app made itself (a browser tab) is over, and one that never took
-     * the app out of the foreground must not swallow a later real exit.
+     * the app out of the foreground must not swallow a later real exit. Also reported as the app's
+     * "in front" state ([AppForeground]), which holds back an automatic refresh's new-article
+     * notification.
      */
     override fun onResume() {
         super.onResume()
         ExternalAppLaunch.clear()
+        KoinPlatform.getKoin().get<AppForeground>().set(true)
+    }
+
+    /** No longer in front ([AppForeground]): an automatic refresh's new-article notification is posted again. */
+    override fun onPause() {
+        super.onPause()
+        KoinPlatform.getKoin().get<AppForeground>().set(false)
     }
 
     /**

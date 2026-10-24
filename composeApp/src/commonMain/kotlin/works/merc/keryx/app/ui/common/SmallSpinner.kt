@@ -16,8 +16,9 @@ import androidx.compose.ui.unit.dp
  * @param color The indicator's own color. The `primary` default is invisible inside a
  *   `primary`-filled container, so a call site sitting in one should pass
  *   `LocalContentColor.current` to follow its container's foreground instead.
+ * @param strokeWidth The ring's line width.
  */
 @Composable
-fun SmallSpinner(size: Dp = 16.dp, color: Color = MaterialTheme.colorScheme.primary) {
-    CircularProgressIndicator(Modifier.size(size), color = color, strokeWidth = 2.dp)
+fun SmallSpinner(size: Dp = 16.dp, color: Color = MaterialTheme.colorScheme.primary, strokeWidth: Dp = 2.dp) {
+    CircularProgressIndicator(Modifier.size(size), color = color, strokeWidth = strokeWidth)
 }

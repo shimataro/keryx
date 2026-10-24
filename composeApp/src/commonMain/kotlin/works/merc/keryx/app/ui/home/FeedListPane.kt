@@ -168,6 +168,8 @@ internal fun FeedListPane(
     val unreadByFolder by vm.unreadByFolder.collectAsState()
     val collapsedFolderIds by vm.collapsedFolderIds.collectAsState()
     val expandedTagIds by vm.expandedTagIds.collectAsState()
+    val refreshingFeedIds by vm.refreshingFeedIds.collectAsState()
+    val refreshingFolderIds by vm.refreshingFolderIds.collectAsState()
     val totalUnread by vm.totalUnread.collectAsState()
     val starredUnread by vm.starredUnreadCount.collectAsState()
     val filter by vm.filter.collectAsState()
@@ -581,6 +583,7 @@ internal fun FeedListPane(
                             FeedRow(
                                 feed = feed,
                                 count = unreadByFeed[feed.id] ?: 0L,
+                                refreshing = feed.id in refreshingFeedIds,
                                 selectionTone = toneFor(instance),
                                 focused = focused,
                                 indented = indented,
@@ -657,6 +660,7 @@ internal fun FeedListPane(
                                 FolderGroupHeader(
                                     folder = folder,
                                     count = unreadByFolder[folder.id] ?: 0L,
+                                    refreshing = folder.id in refreshingFolderIds,
                                     collapsed = collapsed,
                                     selected = filter == ArticleFilter.Folder(folder.id),
                                     focused = focused,
@@ -753,6 +757,7 @@ internal fun FeedListPane(
                                 FeedRow(
                                     feed = feed,
                                     count = unreadByFeed[feed.id] ?: 0L,
+                                    refreshing = feed.id in refreshingFeedIds,
                                     selectionTone = toneFor(instance),
                                     focused = focused,
                                     indented = true,

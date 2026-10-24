@@ -3,6 +3,7 @@ package works.merc.keryx.app.domain
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -73,6 +78,18 @@ class FeedRepository(
     // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
     // two need their own shared guard here where they converge.
     private val subscribePlacementMutex = Mutex()
+
+    // Per-feed reference count of in-flight refreshes. A count rather than a set membership because a
+    // single-feed refresh can overlap a refresh of every feed, and the feed must stay marked until both end.
+    private val _refreshingFeedCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    /**
+     * Ids of the feeds currently being refreshed — from the moment a feed's refresh is requested
+     * (including while it is queued for a fetch slot) until its articles are committed — by any route
+     * ([refreshFeed], [refreshFeeds]: manual, pull-to-refresh, background, startup). Session-only,
+     * never persisted.
+     */
+    val refreshingFeedIds: Flow<Set<String>> = _refreshingFeedCounts.map { it.keys }.distinctUntilChanged()
 
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
@@ -382,8 +399,12 @@ class FeedRepository(
 
     /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
     private sealed interface RefreshStep {
-        /** [feed]'s fetch finished — apply it ([applyFetch]). */
-        class Fetched(val feed: Feeds, val fetch: Result<FetchedFeed>) : RefreshStep
+        /** [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. */
+        class Fetched(
+            val feed: Feeds,
+            val fetch: Result<FetchedFeed>,
+            val committed: CompletableDeferred<Unit>,
+        ) : RefreshStep
 
         /** A favicon lookup for [feedId] finished; [url] is null when it found none. */
         class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
@@ -569,11 +590,15 @@ class FeedRepository(
      * fetch completes — serially, from this one coroutine — and finally indexing any new articles
      * for search.
      *
+     * Applying in completion order rather than list order keeps one slow feed from holding back
+     * every faster feed's articles (and its [refreshingFeedIds] entry) until the slowest fetch ends.
+     *
      * Pass rows freshly read from the DB (as [feedsCoveredBy] returns them) rather than a
      * long-lived UI snapshot, so a stale etag / URL is never used for the fetch.
      *
      * @param feedList The feeds to refresh.
-     * @return A map from feed ID to the result containing the number of newly processed articles.
+     * @return A map from feed ID to the result containing the number of newly processed articles,
+     * in [feedList]'s order.
      */
     suspend fun refreshFeeds(feedList: List<Feeds>): Map<String, Result<Int>> {
         val state = RefreshApplyState(total = feedList.size)
@@ -597,16 +622,25 @@ class FeedRepository(
 
     /**
      * Network phase of [refreshFeeds]: every feed's fetch runs concurrently (bounded by a
-     * semaphore), with NO DB writes, handing its result to [steps]. A favicon lookup follows the
-     * feed's own fetch under a permit of its own, so it never delays that feed's articles. [steps]
+     * semaphore), with NO DB writes, handing its result to [steps]. Each feed stays in
+     * [refreshingFeedIds] from the start, including while queued for a fetch slot, until the writer
+     * has committed it — so every feed the refresh covers is marked at once and clears as its own
+     * articles land. A favicon lookup
+     * follows that commit under a permit of its own, so it never delays that feed's articles. [steps]
      * is closed once every fetch has finished.
      */
     private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
         val fetches = feedList.map { feed ->
             launch(dispatcher) {
-                val fetch = semaphore.withPermit { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) }
-                steps.send(RefreshStep.Fetched(feed, fetch))
+                val fetch = trackRefreshing(feed.id) {
+                    val fetch = semaphore.withPermit { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) }
+                    // Holds no permit while waiting, so the writer's pace never caps the fetch concurrency.
+                    val committed = CompletableDeferred<Unit>()
+                    steps.send(RefreshStep.Fetched(feed, fetch, committed))
+                    committed.await()
+                    fetch
+                }
                 if (fetch is Result.Ok && needsFaviconLookup(feed)) {
                     val url = semaphore.withPermit {
                         faviconResolver.resolve(fetch.value.siteUrl ?: feed.site_url, feed.url)
@@ -633,7 +667,9 @@ class FeedRepository(
             when (step) {
                 is RefreshStep.Fetched -> {
                     val outcome = applyFetch(step.feed, step.fetch)
-                    if (state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)) indexIfNeeded(state)
+                    val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
+                    step.committed.complete(Unit)
+                    if (wasLast) indexIfNeeded(state)
                 }
                 is RefreshStep.FaviconResolved -> applyFavicon(step)
             }
@@ -684,6 +720,19 @@ class FeedRepository(
         /** The results keyed in [feedList]'s order, as callers have always received them. */
         fun resultsInOrder(feedList: List<Feeds>): Map<String, Result<Int>> =
             feedList.associateTo(LinkedHashMap()) { it.id to results.getValue(it.id) }
+    }
+
+    /** Runs [block] with [feedId] counted in [refreshingFeedIds], releasing it however [block] ends. */
+    private suspend fun <T> trackRefreshing(feedId: String, block: suspend () -> T): T {
+        _refreshingFeedCounts.update { it + (feedId to (it[feedId] ?: 0) + 1) }
+        try {
+            return block()
+        } finally {
+            _refreshingFeedCounts.update {
+                val remaining = (it[feedId] ?: 1) - 1
+                if (remaining > 0) it + (feedId to remaining) else it - feedId
+            }
+        }
     }
 
     /**

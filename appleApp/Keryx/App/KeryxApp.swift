@@ -145,6 +145,9 @@ struct KeryxApp: App {
         // which a background launch also runs), keeps its refresh loop to the foreground, and keeps
         // the next background refresh scheduled.
         .onChange(of: scenePhase, initial: true) { _, phase in
+            // The app's "in front" state (an automatic refresh posts no new-article notification
+            // while it is). macOS reports the main window's key state instead (`AppDelegate`).
+            model.sdk?.setAppForeground(inForeground: phase == .active)
             switch phase {
             case .active:
                 ExternalAppLaunch.shared.clear()

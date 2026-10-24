@@ -23,6 +23,7 @@ import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
@@ -75,6 +76,7 @@ fun sharedModule(): Module = module {
     single<Clock> { SystemClock }
     single { NotificationCenter() }
     single { ActivityCenter() }
+    single { AppForeground() }
     single { NewArticleNotifier(get()) }
     single<NetworkConditionMonitor> { platformNetworkConditionMonitor() }
     // The gate on whether [updateModule] may be used at all (checkForUpdateAndNotify reads it
@@ -135,7 +137,7 @@ fun sharedModule(): Module = module {
     single { OpmlImporter(get(), get(), get()) }
     single {
         val monitor = get<NetworkConditionMonitor>()
-        RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get(), get(), get()) {
+        RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get(), get(), get(), appForeground = get()) {
             NetworkUsagePolicy.automaticRefreshAllowed(monitor.condition.first())
         }
     }

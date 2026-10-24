@@ -64,6 +64,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
+import works.merc.keryx.app.domain.SyncTrigger
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.CountingSqlDriver
 import works.merc.keryx.app.HoldingDispatcher
@@ -154,6 +155,9 @@ class HomeViewModelTest {
     // collectors (SharingStarted.Eagerly) outlive the test and can throw against the closed driver,
     // surfacing (flakily, on another test) as kotlinx.coroutines.test.UncaughtExceptionsBeforeTest.
     private val createdViewModels = mutableListOf<HomeViewModel>()
+
+    /** The runner the most recent [newViewModel] built, so a test can run an automatic cycle on it. */
+    private var lastRunner: RefreshCycleRunner? = null
 
     @BeforeTest
     fun setUp() {
@@ -263,7 +267,7 @@ class HomeViewModelTest {
         val refreshCycleRunner = RefreshCycleRunner(
             activityCenter, feedRepository, syncRepository, cloudSession, newArticleNotifier,
             settingsRepository, FakeNotificationMessages(), NotificationCenter(), clock,
-        )
+        ).also { lastRunner = it }
         return HomeViewModel(
             feedRepository, articleRepository, tagRepository, folderRepository, settingsRepository,
             syncRepository, activityCenter, clock, refreshCycleRunner, manualSync,
@@ -571,6 +575,136 @@ class HomeViewModelTest {
 
             gate.complete(Unit)
             job.join()
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+        } finally {
+            activityScope.cancel()
+        }
+    }
+
+    /** Starts an AUTOMATIC cycle on the view model's own runner and waits until it is joinable. */
+    private fun TestScope.startAutomaticCycle(scope: CoroutineScope, activityCenter: ActivityCenter) {
+        val runner = checkNotNull(lastRunner)
+        scope.launch { runner.run(trigger = SyncTrigger.AUTOMATIC) }
+        pumpUntil { activityCenter.activity.value.feedRefreshing && runner.joinableAutomaticCycle() != null }
+        assertNotNull(runner.joinableAutomaticCycle())
+    }
+
+    private fun TestScope.finishWithOutcome(vm: HomeViewModel): RefreshOutcome {
+        pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Finished }
+        return assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value).outcome
+    }
+
+    @Test
+    fun aPullDuringAnAutomaticCycleChecksThenReportsThatCyclesOutcome() = runTest {
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val activityCenter = ActivityCenter()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { gate.await(); respond(RSS, HttpStatusCode.OK) },
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+            startAutomaticCycle(scope, activityCenter)
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+
+            vm.pullToRefresh()
+            pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Checking }
+            assertEquals(ManualRefreshStatus.Checking(running = 1, pending = null), vm.manualRefreshStatus.value)
+
+            gate.complete(Unit)
+            assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), finishWithOutcome(vm))
+            pumpUntil { !vm.pulling }
+        } finally {
+            gate.complete(Unit)
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun refreshAllDuringAnAutomaticCycleChecksThenReportsThatCyclesOutcome() = runTest {
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val activityCenter = ActivityCenter()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { gate.await(); respond(RSS, HttpStatusCode.OK) },
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+            startAutomaticCycle(scope, activityCenter)
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
+
+            vm.refreshAll()
+            pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Checking }
+            assertIs<ManualRefreshStatus.Checking>(vm.manualRefreshStatus.value)
+
+            gate.complete(Unit)
+            assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), finishWithOutcome(vm))
+        } finally {
+            gate.complete(Unit)
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun aPullAndRefreshAllDuringTheSameAutomaticCycleCountItOnce() = runTest {
+        db.insertFeed("f1")
+        val gate = CompletableDeferred<Unit>()
+        val activityCenter = ActivityCenter()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val vm = newViewModel(
+                feedFetcher = fetcherWith { gate.await(); respond(RSS, HttpStatusCode.OK) },
+                activityCenter = activityCenter,
+            )
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+            startAutomaticCycle(scope, activityCenter)
+
+            vm.pullToRefresh()
+            pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Checking }
+            vm.refreshAll()
+            testScheduler.advanceUntilIdle()
+            assertEquals(
+                ManualRefreshStatus.Checking(running = 1, pending = null),
+                vm.manualRefreshStatus.value,
+                "the second join of the same cycle must not add a second check",
+            )
+
+            gate.complete(Unit)
+            assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), finishWithOutcome(vm))
+        } finally {
+            gate.complete(Unit)
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun aPullDuringASyncAloneLeavesTheStatusIdle() = runTest {
+        db.insertFeed("f1")
+        val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val activityCenter = ActivityCenter()
+        try {
+            val vm = newViewModel(activityCenter = activityCenter)
+            subscribeAll(vm)
+            testScheduler.advanceUntilIdle()
+
+            val gate = CompletableDeferred<Unit>()
+            val job = activityScope.launch { activityCenter.trackSync { gate.await() } }
+            testScheduler.advanceUntilIdle()
+            vm.pullToRefresh()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.pulling)
+            assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value, "a sync alone is not joinable")
+
+            gate.complete(Unit)
+            job.join()
+            pumpUntil { !vm.pulling }
             assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
         } finally {
             activityScope.cancel()

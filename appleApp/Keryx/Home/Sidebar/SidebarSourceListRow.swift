@@ -37,6 +37,7 @@ struct SidebarSourceListRow<IconPopover: View>: View, Equatable {
             icon: content.icon,
             isErroring: content.isErroring,
             isGone: content.isGone,
+            isRefreshing: isRefreshing,
             editor: editor,
             onIconTap: onIconTap,
             iconPopoverPresented: iconPopoverPresented,
@@ -44,6 +45,10 @@ struct SidebarSourceListRow<IconPopover: View>: View, Equatable {
         )
         .sidebarRowHighlight(highlight)
         .badge(Int(unreadCount))
+    }
+
+    private var isRefreshing: Bool {
+        SidebarRefreshing(feeds: home.refreshingFeedIds, folders: home.refreshingFolderIds).isRefreshing(unread)
     }
 
     private var unreadCount: Int64 {
