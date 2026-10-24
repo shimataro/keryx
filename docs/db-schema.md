@@ -199,7 +199,7 @@ Setup completion = file exists.
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
 | `lastFocusedPane` | string\|null | null |
-| `lastUnreadOnly` | boolean\|null | null |
+| `lastUnreadOnly` | boolean\|null | null (the article list's All/Unread mode; its Starred mode is session-only and never saved) |
 | `lastUnreadOnlyStarred` | boolean\|null | null (scoped to the Starred filter alone, independent of `lastUnreadOnly`) |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null (Linux KDE Global Menu: null=auto (shown until `RegisterWindow` succeeds, then hidden); true/false=explicit override via Ctrl+M / the exported "Show Menu Bar" checkbox. No effect where no `com.canonical.AppMenu.Registrar` is present) |

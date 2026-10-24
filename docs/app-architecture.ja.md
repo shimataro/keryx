@@ -1360,6 +1360,20 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 組み合わせた `StateFlow`）でゲートされているため、選択中の記事以外に既読の行が画面に残っていない状態では
 この操作は何もしない。
 
+**記事一覧のモード。** `HomeViewModel.mode` は `ArticleListMode`（`All` / `Unread` / `Starred`、
+`presentation/home/ArticleListMode.kt`）で、2 つの独立したトグルではなく 3 つから 1 つを選ぶ形である——理由は
+`external-spec.md` §7 を参照。これは 3 つの状態から導かれる：保存される `_unreadOnly`（`lastUnreadOnly`）と
+`_unreadOnlyStarred`（`lastUnreadOnlyStarred`、Starred フィルタの下でだけ読む）、そしてセッション中のみで
+保存されない `_starredMode`。`selectFilter` はフィルタを切り替えても `_starredMode` を維持するが、
+`ArticleFilter.Starred` へ切り替えるときだけは解除する。そこでは `starredModeEnabled` が false で、このモードは
+適用できないからである。スター付きモードも未読のみと同じく、フィルタの生クエリ結果（と検索結果）をメモリ上で
+絞り込む——`articles` の combine が `is_starred` で絞り込み、未読のみが既読ピンで行を残すのと同じように、
+スターを外したピンで行を残す——ので、モードを変えても一覧のクエリは再実行されない。`setStarred` は Starred
+フィルタかスター付きモードが適用されているときにスターを外した記事をピン留めし、`setMode(Starred)` はそれ以前の
+ピンを捨て、スター付きモードでの `markAllRead` は検索と同じ ID リストの経路で表示中の行だけを既読にする。
+両 UI のツールバーのモードメニュー、表示メニュー（`computeMenuUiState` の `listMode` / `starredModeEnabled`）の
+どの経路も `setMode` を呼び、⌘/Ctrl+U は `toggleUnreadMode` を呼ぶ。
+
 ## Apple ネイティブアプリ（SwiftUI）
 
 `external-spec.md` §2 では、macOS 向け（のちに iOS/iPadOS 向け）のネイティブ SwiftUI アプリを計画している。この節は、共有

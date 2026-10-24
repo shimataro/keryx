@@ -126,7 +126,24 @@ data exists in the cloud it is automatically merged (imported) during the initia
   update's EdDSA signature verified before it is installed (Sparkle; see "Distribution and
   coexistence" in [app-architecture.md](app-architecture.md)).
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available, and the reader toolbar's button for it is a read/unread toggle that shows the article's state (a filled dot while it is unread, like the article list's own unread dot) — so a tap on a reader shown alone, with the list out of sight, is visibly acknowledged and can be undone. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
-- **Unread-only deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the unread-only toggle (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected — and running it never turns unread-only off.
+- **The article list shows one of three modes: All, Unread, or Starred.** They are mutually exclusive
+  rather than two independent filters: an article is marked read the moment it is selected, so almost
+  every starred article is already read, and "unread and starred" would show an empty list that reads
+  as "nothing is starred here". The current mode names a pop-up button at the start of the article
+  list's toolbar (filled whenever the mode narrows the list), and the View menu lists the three as
+  check items; ⌘/Ctrl+U goes from any other mode to Unread, and from Unread back to All.
+  - **Starred** narrows whatever is selected — a feed, a folder, a tag or All Feeds — to its starred
+    articles, read or not, and applies to search results as well. It lasts for the session only:
+    switching to another feed, folder or tag keeps it, so several sources' starred articles can be
+    looked through in turn, but the next launch starts again from the saved All/Unread mode. It is
+    unavailable (shown disabled) while the subscription list's own Starred item is selected, which
+    already shows nothing else and is the only place starred articles of an unsubscribed feed remain;
+    selecting that item leaves Starred mode. An article unstarred while in it stays in the list until
+    the selection or the mode changes, and "Mark all as read" marks only the articles shown. A
+    starred-mode list with nothing in it says so, with a button that shows all articles again.
+  - **All / Unread** are saved and restored at the next launch, as before (the Starred item keeps a
+    choice of its own).
+- **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the mode button (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread — and running it never leaves Unread mode.
 - **New articles that land beyond the current scroll position, toward the list's fresh end, surface
   as a floating pill** (e.g. "12 new articles") rather than silently piling up unseen past where the
   list happens to be scrolled — tapping it jumps straight to them. The fresh end follows the sort

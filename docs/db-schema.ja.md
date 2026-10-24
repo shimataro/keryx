@@ -220,7 +220,7 @@ SQLite を使う。理由と撤退条件は `.claude/rules/android-sqlite-bundli
 | `lastFilter` | string\|null | null |
 | `lastArticleId` | string\|null | null |
 | `lastFocusedPane` | string\|null | null |
-| `lastUnreadOnly` | boolean\|null | null |
+| `lastUnreadOnly` | boolean\|null | null（記事一覧の「すべて」/「未読」モード。「スター付き」モードはセッション中のみで保存しない） |
 | `lastUnreadOnlyStarred` | boolean\|null | null（スター付きフィルタ専用。`lastUnreadOnly` とは独立） |
 | `lastNewestFirst` | boolean\|null | null |
 | `appMenuBarVisible` | boolean\|null | null（Linux KDE Global Menu: null=自動（`RegisterWindow` が成功するまで表示し、その後非表示）。true/false は Ctrl+M またはエクスポートされた「メニューバーを表示」チェックボックスによる明示的な上書き。`com.canonical.AppMenu.Registrar` が存在しない環境では効果なし） |
