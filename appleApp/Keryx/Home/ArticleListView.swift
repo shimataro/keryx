@@ -316,12 +316,13 @@ struct ArticleListView: View {
 
     private var listModeMenu: some View {
         // A pop-up button (HIG): the current mode names the button, the menu offers all three.
-        // The icon fills whenever the mode narrows the list. Toggles rather than an inline Picker:
+        // Each mode has its own icon (`listModeSymbol`), filled whenever it narrows the list, on the
+        // button and beside each item. Toggles rather than an inline Picker:
         // a Picker option's own `.disabled` is not honored inside a menu, so Starred stayed
         // choosable under the Starred filter. Same items as the View menu (`HomeCommands`).
         Menu {
             ForEach(Self.listModes, id: \.self) { mode in
-                Toggle(L(Self.listModeLabelKey(mode)), isOn: Binding(
+                Toggle(L(Self.listModeLabelKey(mode)), systemImage: Self.listModeSymbol(mode), isOn: Binding(
                     get: { home.listMode == mode },
                     set: { if $0 { home.viewModel.setMode(target: mode) } }
                 ))
@@ -330,9 +331,7 @@ struct ArticleListView: View {
         } label: {
             Label(
                 L(Self.listModeLabelKey(home.listMode)),
-                systemImage: home.listMode == .all
-                    ? "line.3.horizontal.decrease.circle"
-                    : "line.3.horizontal.decrease.circle.fill"
+                systemImage: Self.listModeSymbol(home.listMode)
             )
             #if os(macOS)
             .labelStyle(.titleAndIcon)
@@ -446,6 +445,15 @@ struct ArticleListView: View {
         case .all: "home_list_mode_all"
         case .unread: "home_list_mode_unread"
         case .starred: "home_list_mode_starred"
+        }
+    }
+
+    /// The icon for `mode`: the app's unread dot and star, in the same circle as All's filter icon.
+    private static func listModeSymbol(_ mode: ArticleListMode) -> String {
+        switch mode {
+        case .all: "line.3.horizontal.decrease.circle"
+        case .unread: "circle.inset.filled"
+        case .starred: "star.circle.fill"
         }
     }
 
