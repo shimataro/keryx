@@ -471,6 +471,27 @@ class AppMenuTreeTest {
     }
 
     @Test
+    fun `the View menu sets the list modes apart with separators`() {
+        val view = tree(enabledUi(), toggle = null).menu("View")
+
+        val actual = view.items.map { node ->
+            when (node) {
+                is AppMenuNode.Item -> node.label
+                is AppMenuNode.CheckboxItem -> node.label
+                AppMenuNode.Separator -> "<separator>"
+                else -> "<other>"
+            }
+        }
+        assertEquals(
+            listOf(
+                "Search", "<separator>", "AllArticles", "UnreadOnly", "StarredOnly", "<separator>",
+                "ToggleSort", "<separator>", "MarkAllRead",
+            ),
+            actual,
+        )
+    }
+
+    @Test
     fun viewMenuListModeItemsRouteToTheSharedHandlers() {
         val view = tree(enabledUi()).menu("View")
 

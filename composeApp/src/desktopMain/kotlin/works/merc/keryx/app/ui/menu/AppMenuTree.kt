@@ -252,9 +252,10 @@ internal fun buildAppMenuTree(
 
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
+        add(AppMenuNode.Separator)
         // The article list's mode, as three check items with only the current one checked (the
         // toolbar's mode chip offers the same three, with the same Ctrl/⌘+1–3). Re-choosing the
-        // checked one changes nothing.
+        // checked one changes nothing. Separators on both sides set them apart as one choice.
         listOf(
             Triple(labels.allArticles, ArticleListMode.All, AppMenuShortcut.ListModeAll),
             Triple(labels.unreadOnly, ArticleListMode.Unread, AppMenuShortcut.ListModeUnread),
@@ -270,6 +271,7 @@ internal fun buildAppMenuTree(
                 ),
             )
         }
+        add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))

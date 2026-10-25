@@ -78,11 +78,14 @@ struct HomeCommands: Commands {
                     }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(!state.searchEnabled)
+                    // Inside the check, so macOS 14 doesn't open the group with a separator.
+                    Divider()
                 }
 
                 // The article list's mode, with only the current one checked and ⌘1–3 choosing
                 // each (Compose's `AppMenuTree.kt` uses the same keys). Re-choosing the checked
-                // item changes nothing.
+                // item changes nothing. Separators on both sides set them apart as one choice, as
+                // in Compose's View menu.
                 Toggle(L("menu_view_list_mode_all"), isOn: Binding(
                     get: { home.listMode == .all },
                     set: { if $0 { home.viewModel.setMode(target: .all) } }
@@ -104,8 +107,12 @@ struct HomeCommands: Commands {
                 .keyboardShortcut("3", modifiers: .command)
                 .disabled(!state.starredModeEnabled)
 
+                Divider()
+
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }
                     .disabled(!state.toggleSortEnabled)
+
+                Divider()
 
                 Button(L("menu_view_mark_all_read")) { home.viewModel.markAllRead() }
                     .disabled(!state.markAllReadEnabled)
