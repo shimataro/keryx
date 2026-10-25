@@ -1384,7 +1384,10 @@ starred mode or the Starred filter marks exactly the rows shown, through the sam
 search uses (the Starred filter can still show an article just unstarred, which its own query no
 longer reaches). Every route —
 the toolbar's mode menu on both UIs, the View menu (`computeMenuUiState`'s `listMode` /
-`starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`.
+`starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`. Which items those menus
+check is likewise one shared rule, `listModeChecked`: the current mode, plus Starred under the
+Starred filter (checked and disabled there — see `external-spec.md` §7); the menu bar reads it as
+`MenuUiState.starredModeChecked`, and both UIs' toolbar menus call it directly.
 
 ## Apple Native Apps (SwiftUI)
 

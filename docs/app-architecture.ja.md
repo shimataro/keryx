@@ -1374,7 +1374,10 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 （Starred フィルタには、スターを外した直後の記事がまだ表示されていることがあり、そのフィルタ自身のクエリでは
 届かないため）。
 両 UI のツールバーのモードメニュー、表示メニュー（`computeMenuUiState` の `listMode` / `starredModeEnabled`）の
-どの経路も、その ⌘/Ctrl+1〜3 のショートカットも含めて `setMode` を呼ぶ。
+どの経路も、その ⌘/Ctrl+1〜3 のショートカットも含めて `setMode` を呼ぶ。これらのメニューでどの項目にチェックを
+付けるかも、1 つの共通ルール `listModeChecked` で決める：現在のモードと、Starred フィルタの下での Starred
+（そこではチェック付きで無効——`external-spec.md` §7 を参照）。メニューバーは `MenuUiState.starredModeChecked`
+としてこれを読み、両 UI のツールバーのメニューは直接呼ぶ。
 
 ## Apple ネイティブアプリ（SwiftUI）
 

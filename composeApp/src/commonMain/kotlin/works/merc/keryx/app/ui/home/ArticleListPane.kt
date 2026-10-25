@@ -77,6 +77,7 @@ import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
 import works.merc.keryx.app.presentation.home.ArticleListBody
 import works.merc.keryx.app.presentation.home.ArticleListMode
+import works.merc.keryx.app.presentation.home.listModeChecked
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.articleListCatchingUp
 import works.merc.keryx.app.presentation.home.articleListTitle
@@ -646,9 +647,9 @@ internal fun listModeLabel(mode: ArticleListMode): StringResource = when (mode) 
 }
 
 /**
- * The mode chip's menu: one checked item per [ArticleListMode], [ArticleListMode.Starred] greyed
- * out while [starredModeEnabled] is false. Choosing the current mode again is a no-op
- * (`HomeViewModel.setMode`).
+ * The mode chip's menu: one check item per [ArticleListMode], checked by [listModeChecked]
+ * ([ArticleListMode.Starred] stays checked, greyed out, while [starredModeEnabled] is false).
+ * Choosing the current mode again is a no-op (`HomeViewModel.setMode`).
  */
 internal fun listModeMenuEntries(
     mode: ArticleListMode,
@@ -658,7 +659,7 @@ internal fun listModeMenuEntries(
 ): List<NativeMenuEntry> = ArticleListMode.entries.map { entry ->
     NativeCheckMenuItem(
         labels.getValue(entry),
-        checked = entry == mode,
+        checked = listModeChecked(entry, mode, starredModeEnabled),
         shortcut = NativeMenuShortcut(listModeShortcutKey(entry), ctrl = true),
         enabled = entry != ArticleListMode.Starred || starredModeEnabled,
     ) { onSelect(entry) }

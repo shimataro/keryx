@@ -805,7 +805,8 @@ class ArticleListPaneTest {
             .map { it as NativeCheckMenuItem }
 
         assertEquals(listOf("All", "Unread", "Starred"), entries.map { it.label })
-        assertEquals(listOf(false, true, false), entries.map { it.checked })
+        // Starred stays checked (greyed out) while it cannot be chosen.
+        assertEquals(listOf(false, true, true), entries.map { it.checked })
         assertEquals(listOf(true, true, false), entries.map { it.enabled })
         assertEquals(
             listOf(Key.One, Key.Two, Key.Three).map { NativeMenuShortcut(it, ctrl = true) },

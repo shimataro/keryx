@@ -2,6 +2,7 @@ package works.merc.keryx.app.presentation.menu
 
 import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.presentation.home.ArticleListMode
+import works.merc.keryx.app.presentation.home.listModeChecked
 
 /**
  * Enabled/checked state for every dynamic item in the desktop application menu bar (and, for the
@@ -25,6 +26,9 @@ data class MenuUiState(
     val listMode: ArticleListMode,
     /** The "Starred only" item — additionally off under the Starred filter (`HomeViewModel.starredModeEnabled`). */
     val starredModeEnabled: Boolean,
+    /** Whether the "Starred only" item is checked — also under the Starred filter, where it is fixed
+     * on ([listModeChecked]). */
+    val starredModeChecked: Boolean,
     val toggleSortEnabled: Boolean,
     val markAllReadEnabled: Boolean,
     /** Toggle read / star — require a selected article. Not gated on pane focus: the real
@@ -119,6 +123,7 @@ fun computeMenuUiState(
     listModeEnabled = onHome,
     listMode = listMode,
     starredModeEnabled = onHome && starredModeAvailable,
+    starredModeChecked = listModeChecked(ArticleListMode.Starred, listMode, starredModeAvailable),
     toggleSortEnabled = onHome && !searchActive,
     markAllReadEnabled = onHome,
     articleActionsEnabled = onHome && hasSelectedArticle,

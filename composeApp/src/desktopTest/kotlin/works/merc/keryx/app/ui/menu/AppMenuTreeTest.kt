@@ -507,7 +507,7 @@ class AppMenuTreeTest {
     }
 
     @Test
-    fun viewMenuStarredOnlyIsDisabledUnderTheStarredFilter() {
+    fun viewMenuStarredOnlyIsCheckedAndDisabledUnderTheStarredFilter() {
         val ui = computeMenuUiState(
             onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
             activity = ActivitySnapshot(), canSyncNow = true,
@@ -520,6 +520,11 @@ class AppMenuTreeTest {
         assertFalse(view.checkbox("StarredOnly")!!.enabled)
         assertTrue(view.checkbox("AllArticles")!!.enabled)
         assertTrue(view.checkbox("UnreadOnly")!!.enabled)
+        // Starred stays checked beside the All/Unread choice made within it.
+        assertEquals(
+            listOf(true, false, true),
+            listOf("AllArticles", "UnreadOnly", "StarredOnly").map { view.checkbox(it)!!.checked },
+        )
     }
 
 }

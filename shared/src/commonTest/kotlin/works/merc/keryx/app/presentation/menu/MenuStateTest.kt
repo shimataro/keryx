@@ -181,6 +181,17 @@ class MenuStateTest {
         assertTrue(state(starredModeAvailable = false).listModeEnabled)
     }
 
+    @Test
+    fun starred_mode_is_checked_when_chosen_or_fixed_by_the_starred_filter() {
+        assertTrue(state(listMode = ArticleListMode.Starred).starredModeChecked)
+        assertTrue(state(starredModeAvailable = false).starredModeChecked)
+        assertTrue(state(listMode = ArticleListMode.Unread, starredModeAvailable = false).starredModeChecked)
+        // State, not enablement: away from Home the item is disabled but still shows it.
+        assertTrue(state(onHome = false, starredModeAvailable = false).starredModeChecked)
+        assertFalse(state(listMode = ArticleListMode.All).starredModeChecked)
+        assertFalse(state(listMode = ArticleListMode.Unread).starredModeChecked)
+    }
+
     // --- Refresh / sync gating ---
 
     @Test

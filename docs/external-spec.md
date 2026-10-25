@@ -137,10 +137,14 @@ data exists in the cloud it is automatically merged (imported) during the initia
   - **Starred** narrows whatever is selected — a feed, a folder, a tag or All Feeds — to its starred
     articles, read or not, and applies to search results as well. It lasts for the session only:
     switching to another feed, folder or tag keeps it, so several sources' starred articles can be
-    looked through in turn, but the next launch starts again from the saved All/Unread mode. It is
-    unavailable (shown disabled) while the subscription list's own Starred item is selected, which
-    already shows nothing else and is the only place starred articles of an unsubscribed feed remain;
-    selecting that item leaves Starred mode. An article unstarred while in it stays in the list until
+    looked through in turn, but the next launch starts again from the saved All/Unread mode. It
+    cannot be chosen while the subscription list's own Starred item is selected, which already shows
+    nothing else and is the only place starred articles of an unsubscribed feed remain; selecting that
+    item leaves Starred mode. There it is shown **checked and disabled**, beside the All or Unread
+    check that still chooses among the starred articles, and the toolbar's button names that All or
+    Unread. This is the one place two of the three are checked at once — a deliberate exception to
+    their being mutually exclusive: a list of starred articles only, with Starred unchecked in its
+    own menus, read as if Starred did not apply there, so the check says it always does. An article unstarred while in it stays in the list until
     the selection or the mode changes, and "Mark all as read" marks only the articles shown. A
     starred-mode list with nothing in it says so, with a button that shows all articles again.
   - **All / Unread** are saved and restored at the next launch, as before (the Starred item keeps a

@@ -82,8 +82,8 @@ struct HomeCommands: Commands {
                     Divider()
                 }
 
-                // The article list's mode, with only the current one checked and ⌘1–3 choosing
-                // each (Compose's `AppMenuTree.kt` uses the same keys). Re-choosing the checked
+                // The article list's mode, with the current one checked (plus Starred, fixed on under
+                // the Starred filter — `listModeChecked`) and ⌘1–3 choosing each (Compose's `AppMenuTree.kt` uses the same keys). Re-choosing the checked
                 // item changes nothing. Separators on both sides set them apart as one choice, as
                 // in Compose's View menu.
                 Toggle(L("menu_view_list_mode_all"), isOn: Binding(
@@ -101,7 +101,7 @@ struct HomeCommands: Commands {
                 .disabled(!state.listModeEnabled)
 
                 Toggle(L("menu_view_list_mode_starred"), isOn: Binding(
-                    get: { home.listMode == .starred },
+                    get: { state.starredModeChecked },
                     set: { if $0 { home.viewModel.setMode(target: .starred) } }
                 ))
                 .keyboardShortcut("3", modifiers: .command)
@@ -257,7 +257,7 @@ struct HomeCommands: Commands {
         guard let sdk = model.sdk else {
             return MenuUiState(
                 addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, listModeEnabled: false,
-                listMode: .all, starredModeEnabled: false, toggleSortEnabled: false, markAllReadEnabled: false,
+                listMode: .all, starredModeEnabled: false, starredModeChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
                 articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
                 refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,

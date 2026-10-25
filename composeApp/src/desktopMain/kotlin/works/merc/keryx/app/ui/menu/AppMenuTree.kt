@@ -253,8 +253,9 @@ internal fun buildAppMenuTree(
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
         add(AppMenuNode.Separator)
-        // The article list's mode, as three check items with only the current one checked (the
-        // toolbar's mode chip offers the same three, with the same Ctrl/⌘+1–3). Re-choosing the
+        // The article list's mode, as three check items with the current one checked, plus Starred
+        // while the Starred filter fixes it on (starredModeChecked; the toolbar's mode chip offers
+        // the same three, with the same Ctrl/⌘+1–3). Re-choosing the
         // checked one changes nothing. Separators on both sides set them apart as one choice.
         listOf(
             Triple(labels.allArticles, ArticleListMode.All, AppMenuShortcut.ListModeAll),
@@ -265,7 +266,7 @@ internal fun buildAppMenuTree(
                 AppMenuNode.CheckboxItem(
                     label,
                     if (mode == ArticleListMode.Starred) ui.starredModeEnabled else ui.listModeEnabled,
-                    ui.listMode == mode,
+                    if (mode == ArticleListMode.Starred) ui.starredModeChecked else ui.listMode == mode,
                     shortcut,
                     onCheckedChange = { if (it) actions.setListMode(mode) },
                 ),

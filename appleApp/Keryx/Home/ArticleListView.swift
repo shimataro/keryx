@@ -323,7 +323,7 @@ struct ArticleListView: View {
         Menu {
             ForEach(Self.listModes, id: \.self) { mode in
                 Toggle(L(Self.listModeLabelKey(mode)), systemImage: Self.listModeSymbol(mode), isOn: Binding(
-                    get: { home.listMode == mode },
+                    get: { ArticleListModeKt.listModeChecked(item: mode, mode: home.listMode, starredModeAvailable: home.starredModeEnabled) },
                     set: { if $0 { home.viewModel.setMode(target: mode) } }
                 ))
                 .disabled(mode == .starred && !home.starredModeEnabled)

@@ -42,5 +42,17 @@ internal fun articleListModeFor(
     else -> ArticleListMode.All
 }
 
+/**
+ * Whether [item] shows a check in the mode menus: the current [mode], plus Starred wherever it cannot
+ * be chosen because the Starred filter already shows starred articles only. There, and only there,
+ * two items are checked (All or Unread, and Starred), so the menus say Starred always applies.
+ *
+ * @param item The menu item being drawn.
+ * @param mode The article list's current mode.
+ * @param starredModeAvailable Whether [ArticleListMode.Starred] can be chosen ([starredModeAvailable]).
+ */
+fun listModeChecked(item: ArticleListMode, mode: ArticleListMode, starredModeAvailable: Boolean): Boolean =
+    item == mode || (item == ArticleListMode.Starred && !starredModeAvailable)
+
 /** Whether [ArticleListMode.Starred] can be chosen under [filter]. */
 internal fun starredModeAvailable(filter: ArticleFilter): Boolean = filter != ArticleFilter.Starred
