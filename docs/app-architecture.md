@@ -1380,7 +1380,9 @@ filter's raw query result (and over search results) — `articles`' combine filt
 keeping a row by its unstarred pin the way unread-only keeps one by its read pin — so changing mode
 never re-runs the list query. `setStarred` pins an unstarred article whenever the Starred filter or
 starred mode applies, `setMode(Starred)` drops the pins left from before, and `markAllRead` under
-starred mode marks exactly the rows shown, through the same id-list path search uses. Every route —
+starred mode or the Starred filter marks exactly the rows shown, through the same id-list path
+search uses (the Starred filter can still show an article just unstarred, which its own query no
+longer reaches). Every route —
 the toolbar's mode menu on both UIs, the View menu (`computeMenuUiState`'s `listMode` /
 `starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`.
 

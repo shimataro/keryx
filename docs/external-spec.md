@@ -144,7 +144,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
     the selection or the mode changes, and "Mark all as read" marks only the articles shown. A
     starred-mode list with nothing in it says so, with a button that shows all articles again.
   - **All / Unread** are saved and restored at the next launch, as before (the Starred item keeps a
-    choice of its own).
+    choice of its own). Under the Starred item, "Mark all as read" likewise marks the articles shown.
 - **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the mode button (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread — and running it never leaves Unread mode.
 - **New articles that land beyond the current scroll position, toward the list's fresh end, surface
   as a floating pill** (e.g. "12 new articles") rather than silently piling up unseen past where the

@@ -2781,9 +2781,9 @@ class HomeViewModelTest {
         assertEquals(0L, vm.row("a3").is_read)
     }
 
-    /** Under Starred, markAllRead re-trims the read-state pins too, and must keep an in-flight unread pin. */
+    /** Under Starred, a row just marked unread whose write is still in flight is read again, not left unread. */
     @Test
-    fun markAllReadUnderStarredKeepsAnUnreadPinWhileItsWriteIsInFlight() = runTest {
+    fun markAllReadUnderStarredMarksARowJustMarkedUnreadBeforeItsWriteLands() = runTest {
         val writes = ParkingDispatcher()
         val vm = starredViewModel(unreadOnly = true, writes = writes)
         vm.selectArticle(listRow("a1"))
@@ -2793,16 +2793,38 @@ class HomeViewModelTest {
         vm.toggleRead(listRow("a2"))
         vm.markAllRead()
         testScheduler.advanceUntilIdle()
-
-        // The unread write has not landed: the DB (and so the raw query) still says read.
-        assertEquals(1L, dbIsRead("a2"))
-        assertEquals(0L, vm.row("a2").is_read)
-
         writes.release()
         testScheduler.advanceUntilIdle()
 
-        assertEquals(0L, dbIsRead("a2"))
-        assertEquals(0L, vm.row("a2").is_read)
+        assertEquals(1L, dbIsRead("a2"))
+        assertTrue(vm.articles.value.none { it.id == "a2" && it.is_read == 0L })
+    }
+
+    @Test
+    fun markAllReadUnderStarredMarksAnArticleUnstarredThereToo() = runTest {
+        val vm = starredViewModel(unreadOnly = false)
+        vm.setStarred(vm.row("a1"), starred = false)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a1", "a2"), vm.articles.value.map { it.id })
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(1L, vm.row("a1").is_read)
+    }
+
+    @Test
+    fun markAllReadUnderStarredAndUnreadOnlyKeepsTheRowsAsReadPins() = runTest {
+        val vm = starredViewModel(unreadOnly = true)
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1L, dbIsRead("a1"))
+        assertEquals(listOf("a1"), vm.articles.value.map { it.id })
+        assertEquals(1L, vm.row("a1").is_read)
     }
 
     /**
@@ -4165,7 +4187,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun markAllReadOnStarredFilterDoesNotForceSelectedArticleReadState() = runTest {
+    fun markAllReadOnStarredFilterMarksTheShownRowsAndTheSelection() = runTest {
         db.insertFeed("f1")
         db.insertArticle("a1", "f1", isRead = 0L, isStarred = 1L)
         val vm = newViewModel()
@@ -4181,12 +4203,11 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(0L, vm.selectedArticle.value?.is_read)
 
-        // Starred filter: markAllAsRead is a no-op, so the DB row (and selected state) must stay unread.
         vm.markAllRead()
         testScheduler.advanceUntilIdle()
 
-        assertEquals(0L, db.articlesQueries.getById("a1").executeAsOne().is_read)
-        assertEquals(0L, vm.selectedArticle.value?.is_read)
+        assertEquals(1L, db.articlesQueries.getById("a1").executeAsOne().is_read)
+        assertEquals(1L, vm.selectedArticle.value?.is_read)
     }
 
     @Test

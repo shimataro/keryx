@@ -1274,31 +1274,26 @@ class HomeViewModel(
     /**
      * Marks unread articles in the current filter as read.
      *
-     * The starred filter preserves article read states, while other filters retain visible articles
-     * optimistically until the updated data is refreshed. Under search or [ArticleListMode.Starred],
-     * only the rows on screen are marked: either narrows the filter to an explicit subset.
+     * Visible articles are retained optimistically until the updated data is refreshed. Under search,
+     * [ArticleListMode.Starred] or the Starred filter, only the rows on screen are marked: the first two
+     * narrow the filter to an explicit subset, and the Starred filter can still show an article just
+     * unstarred (its pin) that no query over starred articles would reach.
      */
     fun markAllRead() {
         val filter = _filter.value
         val active = searchActive.value
-        // Search results and starred mode both show a subset of the filter, so both mark exactly the
-        // rows shown rather than the whole filter. Only search has a snapshot to re-run afterwards.
-        val scoped = active || currentMode() == ArticleListMode.Starred
-        // Starred's markAllAsRead is a no-op (you don't "read" the starred view), so mark-all-read
-        // must not force the selected article read there — except while actively searching within
-        // it: search results are an explicit, scoped-down selection the user chose to act on, not
-        // the plain Starred list, so idsToMark below marks them regardless of the filter beneath.
-        // Without the `active ||` here, marksSelectedRead would say "false" while idsToMark still
-        // marked every matched id — leaving the selected article inconsistently unmarked among them.
-        val marksSelectedRead = active || filter != ArticleFilter.Starred
+        // Search results and starred mode both show a subset of the filter, and the Starred filter
+        // can show unstarred pins its own query no longer reaches, so all three mark exactly the rows
+        // shown rather than the whole filter. Only search has a snapshot to re-run afterwards.
+        val scoped = active || currentMode() == ArticleListMode.Starred || filter == ArticleFilter.Starred
         // Everything the optimistic update below needs is read here, *before* the write is
         // dispatched — not after. dbWriteDispatcher is Dispatchers.Unconfined in tests (and could
         // race a real write landing before this reads it in production), so reading `articles`
         // after the dispatch below could already observe the post-write, all-read snapshot and see
         // no unread articles left to pin at all.
         val selected = _selectedArticle.value
-        val visibleUnread = if (marksSelectedRead) currentArticles().filter { it.is_read == 0L } else emptyList()
-        // Under search (or starred mode), exactly the unread rows the update below pins: taken from the pin-resolved
+        val visibleUnread = currentArticles().filter { it.is_read == 0L }
+        // When scoped, exactly the unread rows the update below pins: taken from the pin-resolved
         // results rather than the raw search snapshot, which can lag an optimistic "mark as unread"
         // (its re-run is debounced) and would leave such a row pinned read but never written. Pins
         // can outrun the DB, so the write itself skips any id whose row is already read or tombstoned
@@ -1330,35 +1325,25 @@ class HomeViewModel(
         // apply an earlier "mark as unread" over it (see SelectionReadIntents). When scoped that is
         // exactly idsToMark; otherwise markAllAsRead marks the whole filter, which holds every
         // visible row as well as the selection (including one still loading).
-        if (marksSelectedRead) {
-            val marked = if (scoped) idsToMark else visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)
-            marked.forEach { readIntents.record(it, read = true) }
-        }
+        val marked = if (scoped) idsToMark else visibleUnread.map { it.id } + listOfNotNull(selected?.id, selectionCursorId)
+        marked.forEach { readIntents.record(it, read = true) }
         // Optimistic update: pin every currently-visible unread article in its read state so the list
         // doesn't collapse the instant the user presses "mark all read" under unread-only.
         // All pins are cleared on filter switch / refresh, so articles disappear naturally later.
-        if (marksSelectedRead) {
-            val nowRead = clock.nowMillis()
-            val updatedSelected = selected
-                ?.takeIf { !scoped || it.id in idsToMark }
-                ?.copy(is_read = 1L, read_at = nowRead)
-            val newPins = visibleUnread.associate { it.id to it.copy(is_read = 1L) } +
-                listOfNotNull(updatedSelected).associate { it.id to it.toListRow() }
-            if (updatedSelected != null) _selectedArticle.value = updatedSelected
-            // A selection still loading its body is marked too: markAllAsRead covers it (it is in the
-            // filter), and under search it is if it is among idsToMark.
-            _pendingSelectedRow.update { row -> if (row != null && (!active || row.id in idsToMark)) row.copy(is_read = 1L) else row }
-            // Applied in one update so it composes with a concurrent reconcile pass rather than writing
-            // back a snapshot taken before that pass dropped a pin. The new pins stay fresh instances:
-            // they are new writes, which that pass's identity check must not judge.
-            _pinnedReadStates.update { it + newPins }
-        } else {
-            // Starred: markAllAsRead is a no-op, don't alter read state — just the same re-trim every
-            // other "drop what has accumulated" moment runs, which keeps the unread pins and the
-            // selection (or a selection still loading its body) as it does there. Without the alive
-            // check, so the button never blocks the main thread on a DB read.
-            retrimPinnedReadStates(verifyAlive = false)
-        }
+        val nowRead = clock.nowMillis()
+        val updatedSelected = selected
+            ?.takeIf { !scoped || it.id in idsToMark }
+            ?.copy(is_read = 1L, read_at = nowRead)
+        val newPins = visibleUnread.associate { it.id to it.copy(is_read = 1L) } +
+            listOfNotNull(updatedSelected).associate { it.id to it.toListRow() }
+        if (updatedSelected != null) _selectedArticle.value = updatedSelected
+        // A selection still loading its body is marked too: markAllAsRead covers it (it is in the
+        // filter), and when scoped it is if it is among idsToMark.
+        _pendingSelectedRow.update { row -> if (row != null && (!scoped || row.id in idsToMark)) row.copy(is_read = 1L) else row }
+        // Applied in one update so it composes with a concurrent reconcile pass rather than writing
+        // back a snapshot taken before that pass dropped a pin. The new pins stay fresh instances:
+        // they are new writes, which that pass's identity check must not judge.
+        _pinnedReadStates.update { it + newPins }
     }
 
     /**
