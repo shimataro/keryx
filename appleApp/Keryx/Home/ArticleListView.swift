@@ -316,21 +316,17 @@ struct ArticleListView: View {
 
     private var listModeMenu: some View {
         // A pop-up button (HIG): the current mode names the button, the menu offers all three.
-        // The icon fills whenever the mode narrows the list.
+        // The icon fills whenever the mode narrows the list. Toggles rather than an inline Picker:
+        // a Picker option's own `.disabled` is not honored inside a menu, so Starred stayed
+        // choosable under the Starred filter. Same items as the View menu (`HomeCommands`).
         Menu {
-            Picker(selection: Binding(
-                get: { home.listMode },
-                set: { home.viewModel.setMode(target: $0) }
-            )) {
-                ForEach(Self.listModes, id: \.self) { mode in
-                    Text(L(Self.listModeLabelKey(mode)))
-                        .tag(mode)
-                        .disabled(mode == .starred && !home.starredModeEnabled)
-                }
-            } label: {
-                EmptyView()
+            ForEach(Self.listModes, id: \.self) { mode in
+                Toggle(L(Self.listModeLabelKey(mode)), isOn: Binding(
+                    get: { home.listMode == mode },
+                    set: { if $0 { home.viewModel.setMode(target: mode) } }
+                ))
+                .disabled(mode == .starred && !home.starredModeEnabled)
             }
-            .pickerStyle(.inline)
         } label: {
             Label(
                 L(Self.listModeLabelKey(home.listMode)),
