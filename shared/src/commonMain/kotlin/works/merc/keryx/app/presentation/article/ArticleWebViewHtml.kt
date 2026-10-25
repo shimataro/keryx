@@ -2,6 +2,7 @@ package works.merc.keryx.app.presentation.article
 
 import com.fleeksoft.ksoup.Ksoup
 import works.merc.keryx.app.data.remote.UrlResolver
+import works.merc.keryx.app.presentation.home.FAVICON_CORNER_RADIUS_RATIO
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import kotlin.math.pow
 
@@ -202,7 +203,7 @@ private fun articleDocument(theme: ArticleHtmlTheme, content: String, bodyClass:
           .article-title a:hover { opacity: 0.7 !important; }
           .article-title a:active { opacity: 0.5 !important; }
           .article-meta { font-size: 0.85em !important; color: ${theme.mutedColor.toCssHex()} !important; margin: 0 0 16px !important; }
-          .article-meta-icon { height: 1.1em !important; width: 1.1em !important; vertical-align: -0.2em !important; margin-right: 0.4em !important; border-radius: 3px !important; }
+          .article-meta-icon { height: 1.1em !important; width: 1.1em !important; vertical-align: -0.2em !important; margin-right: 0.4em !important; border-radius: ${FAVICON_CORNER_RADIUS_RATIO * 100}% !important; }
           .article-notice { color: ${theme.mutedColor.toCssHex()} !important; margin: 0 !important; }
           .article-placeholder {
             position: fixed !important;

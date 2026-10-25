@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,7 +48,7 @@ internal fun FeedAvatar(title: String, faviconUrl: String?) {
             contentDescription = null,
             contentScale = ContentScale.Crop,
             error = painterResource(KeryxIcons.PublicFilled),
-            modifier = Modifier.size(FEED_LIST_MARKER_SLOT).clip(RoundedCornerShape(4.dp)),
+            modifier = Modifier.size(FEED_LIST_MARKER_SLOT).clip(FaviconShape),
         )
     }
 }

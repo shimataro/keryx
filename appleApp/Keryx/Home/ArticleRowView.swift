@@ -86,8 +86,7 @@ struct ArticleRowView: View, Equatable {
                 // Announced as the row's accessibility value instead (see `stateAccessibilityValue`).
                 .accessibilityHidden(true)
                 FaviconView(url: model.faviconUrl, letter: model.title?.first, blankWithoutUrl: true)
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .faviconFrame(32)
                     .padding(.leading, 6)
                 VStack(alignment: .leading, spacing: 2) {
                     titleText
