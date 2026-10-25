@@ -1,5 +1,6 @@
 package works.merc.keryx.app.presentation.article
 
+import works.merc.keryx.app.presentation.home.FAVICON_CORNER_RADIUS_RATIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -394,11 +395,7 @@ class ArticleWebViewHtmlTest {
             ".article-placeholder",
             "body.placeholder",
         )
-        val document = wrapArticleHtml(theme, title = "My Title", meta = "meta", body = "<p>body</p>")
-        val style = document.substring(document.indexOf("<style>") + "<style>".length, document.indexOf("</style>"))
-        val rules = Regex("""([^{}]+)\{([^}]*)}""").findAll(style).associate { match ->
-            match.groupValues[1].trim().replace(Regex("""\s+"""), " ") to match.groupValues[2]
-        }
+        val rules = styleRules(wrapArticleHtml(theme, title = "My Title", meta = "meta", body = "<p>body</p>"))
         for (selector in chromeSelectors) {
             val ruleBody = assertNotNull(rules[selector], "no rule found for selector `$selector`")
             val declarations = ruleBody.split(";").map { it.trim() }.filter { it.isNotEmpty() }
@@ -406,6 +403,25 @@ class ArticleWebViewHtmlTest {
             for (declaration in declarations) {
                 assertTrue(declaration.endsWith("!important"), "`$selector` declaration is not !important: $declaration")
             }
+        }
+    }
+
+    @Test
+    fun bylineFaviconCornerFollowsSharedRatio() {
+        // The byline favicon is rounded in proportion to its size, like every other favicon in both UIs.
+        val rules = styleRules(wrapArticleHtml(theme, title = "My Title", meta = "meta", body = "<p>body</p>"))
+        val ruleBody = assertNotNull(rules[".article-meta-icon"])
+        assertTrue(
+            ruleBody.contains("border-radius: ${FAVICON_CORNER_RADIUS_RATIO * 100}% !important"),
+            "unexpected .article-meta-icon rule: $ruleBody",
+        )
+    }
+
+    /** The reader document's `<style>` rules, as selector (whitespace-normalized) → declaration block. */
+    private fun styleRules(document: String): Map<String, String> {
+        val style = document.substring(document.indexOf("<style>") + "<style>".length, document.indexOf("</style>"))
+        return Regex("""([^{}]+)\{([^}]*)}""").findAll(style).associate { match ->
+            match.groupValues[1].trim().replace(Regex("""\s+"""), " ") to match.groupValues[2]
         }
     }
 

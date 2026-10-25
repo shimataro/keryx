@@ -96,8 +96,7 @@ struct ArticleDetailView: View {
                     .lineLimit(1)
             } icon: {
                 FaviconView(url: feedFaviconUrl, letter: feedName.first)
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .faviconFrame(18)
             }
             .labelStyle(.titleAndIcon)
         }

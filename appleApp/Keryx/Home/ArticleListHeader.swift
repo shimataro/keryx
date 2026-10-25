@@ -29,7 +29,7 @@ struct ArticleListHeader: View {
             Image(systemName: name).font(.title3)
         case .favicon(let url):
             FaviconView(url: url, letter: title.first)
-                .frame(width: 24, height: 24)
+                .faviconFrame(24)
         case .tagColor(let hex):
             Circle().fill(colorFromHex(hex)).frame(width: 12, height: 12)
         }

@@ -73,7 +73,7 @@ struct SidebarRowLabel<IconPopover: View>: View {
             }
         case .favicon(let url):
             FaviconView(url: url, letter: title.first)
-                .frame(width: 16, height: 16)
+                .faviconFrame(16)
         case .tagColor(let hex):
             tagColorDot(hex)
         }
