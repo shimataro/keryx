@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.ui.common.KeryxIcons
 import kotlinx.coroutines.CompletableDeferred
@@ -805,6 +807,10 @@ class ArticleListPaneTest {
         assertEquals(listOf("All", "Unread", "Starred"), entries.map { it.label })
         assertEquals(listOf(false, true, false), entries.map { it.checked })
         assertEquals(listOf(true, true, false), entries.map { it.enabled })
+        assertEquals(
+            listOf(Key.One, Key.Two, Key.Three).map { NativeMenuShortcut(it, ctrl = true) },
+            entries.map { it.shortcut },
+        )
         entries[0].onClick()
         entries[2].onClick()
         assertEquals(listOf(ArticleListMode.All, ArticleListMode.Starred), chosen)

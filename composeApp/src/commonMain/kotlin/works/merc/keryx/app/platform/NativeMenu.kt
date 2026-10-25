@@ -46,6 +46,7 @@ data class NativeMenuItem(
 data class NativeCheckMenuItem(
     override val label: String,
     val checked: Boolean,
+    val shortcut: NativeMenuShortcut? = null,
     val enabled: Boolean = true,
     override val onClick: () -> Unit,
 ) : NativeMenuLeaf
@@ -55,6 +56,13 @@ val NativeMenuLeaf.isEnabled: Boolean
     get() = when (this) {
         is NativeMenuItem -> enabled
         is NativeCheckMenuItem -> enabled
+    }
+
+/** The shortcut hint [this] leaf shows beside its label, if any. */
+val NativeMenuLeaf.shortcut: NativeMenuShortcut?
+    get() = when (this) {
+        is NativeMenuItem -> shortcut
+        is NativeCheckMenuItem -> shortcut
     }
 
 /** A native context menu entry that expands into a nested submenu of [items]. */

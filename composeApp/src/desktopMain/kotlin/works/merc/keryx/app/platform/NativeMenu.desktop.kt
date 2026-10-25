@@ -44,8 +44,9 @@ import javax.swing.SwingUtilities
 
 /**
  * The AWT virtual-key code for [NativeMenuShortcut.key]. Covers only the keys actually used by a
- * [NativeMenuItem] shortcut today (R/U/S/O/C for the Ctrl+Shift app-menu-mirrored actions, F2/
- * Enter/Delete for the bare rename/delete family) — deliberately not a general `Key` → `VK_*`
+ * menu shortcut today (R/U/S/O/C for the Ctrl+Shift app-menu-mirrored actions, 1/2/3 for the
+ * article list modes, F2/Enter/Delete for the bare rename/delete family) — deliberately not a
+ * general `Key` → `VK_*`
  * mapping. `appmenu/MenuBarVisibility.kt` has its own, separate `awtKeyCode()` for `AppMenuShortcut`;
  * that lives in the KDE-Global-Menu-specific `appmenu/` package, so pulling `platform/` code from
  * it would be a backwards layering dependency — this is kept local instead.
@@ -56,6 +57,9 @@ private fun NativeMenuShortcut.awtKeyCode(): Int = when (key) {
     Key.S -> KeyEvent.VK_S
     Key.O -> KeyEvent.VK_O
     Key.C -> KeyEvent.VK_C
+    Key.One -> KeyEvent.VK_1
+    Key.Two -> KeyEvent.VK_2
+    Key.Three -> KeyEvent.VK_3
     Key.F2 -> KeyEvent.VK_F2
     Key.Enter -> KeyEvent.VK_ENTER
     Key.Delete -> KeyEvent.VK_DELETE
@@ -174,9 +178,7 @@ internal class AwtPopupHandle(
         // can only show a modifier'd combo correctly. Those items render with no native hint here;
         // see NativeMenuShortcut's doc comment.
         item.isEnabled = entry.isEnabled
-        if (entry is NativeMenuItem) {
-            entry.shortcut?.takeIf { it.ctrl }?.let { item.shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
-        }
+        entry.shortcut?.takeIf { it.ctrl }?.let { item.shortcut = MenuShortcut(it.awtKeyCode(), it.shift) }
         return item
     }
 
@@ -281,15 +283,13 @@ internal class SwingPopupHandle(
         // JMenuBar's structure — never reaches it. Setting `accelerator` here is purely cosmetic:
         // it renders in Swing's own native accelerator column with no live global keybinding.
         item.isEnabled = entry.isEnabled
-        if (entry is NativeMenuItem) {
-            entry.shortcut?.let { shortcut ->
-                // Never macOS (see defaultPopupHandle), so the primary modifier is always Ctrl —
-                // never Cmd.
-                var modifiers = 0
-                if (shortcut.ctrl) modifiers = modifiers or InputEvent.CTRL_DOWN_MASK
-                if (shortcut.shift) modifiers = modifiers or InputEvent.SHIFT_DOWN_MASK
-                item.accelerator = KeyStroke.getKeyStroke(shortcut.awtKeyCode(), modifiers)
-            }
+        entry.shortcut?.let { shortcut ->
+            // Never macOS (see defaultPopupHandle), so the primary modifier is always Ctrl —
+            // never Cmd.
+            var modifiers = 0
+            if (shortcut.ctrl) modifiers = modifiers or InputEvent.CTRL_DOWN_MASK
+            if (shortcut.shift) modifiers = modifiers or InputEvent.SHIFT_DOWN_MASK
+            item.accelerator = KeyStroke.getKeyStroke(shortcut.awtKeyCode(), modifiers)
         }
         return item
     }
@@ -364,8 +364,7 @@ internal sealed interface MenuEntrySignature
 
 /**
  * What a leaf renders. [checked] is null for a plain item, so an entry's kind and its check state
- * are one unambiguous field rather than something encoded into text. [enabled] is always `true`
- * for a [NativeCheckMenuItem] (only [NativeMenuItem] currently supports disabling).
+ * are one unambiguous field rather than something encoded into text.
  */
 internal data class LeafSignature(val label: String, val checked: Boolean?, val enabled: Boolean) : MenuEntrySignature
 

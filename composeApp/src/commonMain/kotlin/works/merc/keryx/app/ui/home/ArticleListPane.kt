@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
@@ -70,6 +71,7 @@ import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuAnchor
 import works.merc.keryx.app.platform.NativeMenuEntry
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
@@ -657,8 +659,16 @@ internal fun listModeMenuEntries(
     NativeCheckMenuItem(
         labels.getValue(entry),
         checked = entry == mode,
+        shortcut = NativeMenuShortcut(listModeShortcutKey(entry), ctrl = true),
         enabled = entry != ArticleListMode.Starred || starredModeEnabled,
     ) { onSelect(entry) }
+}
+
+/** The key of the View menu's Ctrl/⌘ accelerator for [mode] (`AppMenuShortcut.ListMode*`). */
+private fun listModeShortcutKey(mode: ArticleListMode): Key = when (mode) {
+    ArticleListMode.All -> Key.One
+    ArticleListMode.Unread -> Key.Two
+    ArticleListMode.Starred -> Key.Three
 }
 
 /**
