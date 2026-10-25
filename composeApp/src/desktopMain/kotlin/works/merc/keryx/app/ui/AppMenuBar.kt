@@ -244,7 +244,6 @@ internal fun FrameWindowScope.AppMenuBar(
         quit = onQuit,
         focusSearch = { menuController.send(MenuCommand.FocusSearch) },
         setListMode = { homeVm.setMode(it) },
-        toggleUnreadMode = { homeVm.toggleUnreadMode() },
         toggleSort = { homeVm.toggleSort() },
         markAllRead = { homeVm.markAllRead() },
         toggleRead = { homeVm.toggleReadSelected() },

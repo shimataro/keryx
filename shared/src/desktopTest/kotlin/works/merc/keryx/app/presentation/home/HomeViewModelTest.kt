@@ -6700,18 +6700,19 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun toggleUnreadModeGoesToUnreadFromAnyOtherModeAndBackToAll() = runTest {
+    fun choosingTheCurrentModeAgainChangesNothing() = runTest {
         val vm = starredModeViewModel()
-        vm.toggleUnreadMode()
-        testScheduler.advanceUntilIdle()
-        assertEquals(ArticleListMode.Unread, vm.mode.value)
-        vm.toggleUnreadMode()
-        testScheduler.advanceUntilIdle()
-        assertEquals(ArticleListMode.All, vm.mode.value)
+        vm.selectFilter(ArticleFilter.Feed("f1"))
         vm.setMode(ArticleListMode.Starred)
-        vm.toggleUnreadMode()
         testScheduler.advanceUntilIdle()
-        assertEquals(ArticleListMode.Unread, vm.mode.value)
+        vm.setStarred(vm.row("s2"), starred = false)
+        testScheduler.advanceUntilIdle()
+
+        // ⌘/Ctrl+3 while already starred: the unstarred row is not dropped.
+        vm.setMode(ArticleListMode.Starred)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Starred, vm.mode.value)
+        assertEquals(true, "s2" in vm.articles.value.map { it.id })
     }
 
     @Test

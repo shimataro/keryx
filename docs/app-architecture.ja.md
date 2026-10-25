@@ -1372,7 +1372,7 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 フィルタかスター付きモードが適用されているときにスターを外した記事をピン留めし、`setMode(Starred)` はそれ以前の
 ピンを捨て、スター付きモードでの `markAllRead` は検索と同じ ID リストの経路で表示中の行だけを既読にする。
 両 UI のツールバーのモードメニュー、表示メニュー（`computeMenuUiState` の `listMode` / `starredModeEnabled`）の
-どの経路も `setMode` を呼び、⌘/Ctrl+U は `toggleUnreadMode` を呼ぶ。
+どの経路も、その ⌘/Ctrl+1〜3 のショートカットも含めて `setMode` を呼ぶ。
 
 ## Apple ネイティブアプリ（SwiftUI）
 

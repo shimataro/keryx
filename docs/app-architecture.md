@@ -1382,7 +1382,7 @@ never re-runs the list query. `setStarred` pins an unstarred article whenever th
 starred mode applies, `setMode(Starred)` drops the pins left from before, and `markAllRead` under
 starred mode marks exactly the rows shown, through the same id-list path search uses. Every route —
 the toolbar's mode menu on both UIs, the View menu (`computeMenuUiState`'s `listMode` /
-`starredModeEnabled`) — calls `setMode`, and ⌘/Ctrl+U calls `toggleUnreadMode`.
+`starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`.
 
 ## Apple Native Apps (SwiftUI)
 

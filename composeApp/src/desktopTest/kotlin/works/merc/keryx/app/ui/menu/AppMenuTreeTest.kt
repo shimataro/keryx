@@ -52,11 +52,10 @@ class AppMenuTreeTest {
     private var newTagInvoked = false
     private var updateActionInvoked = false
     private val listModesSet = mutableListOf<ArticleListMode>()
-    private var unreadModeToggles = 0
 
     private fun actions() = AppMenuActions(
         addFeed = {}, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
-        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = { listModesSet += it }, toggleUnreadMode = { unreadModeToggles++ },
+        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = { listModesSet += it },
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = {}, sync = {},
         refreshSelectedFeed = {},
@@ -429,7 +428,7 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.Search, root.menu("View").item("Search").shortcut)
         assertEquals(AppMenuShortcut.ImportOpml, root.menu("File").item("Import").shortcut)
         assertEquals(AppMenuShortcut.ExportOpml, root.menu("File").item("Export").shortcut)
-        assertEquals(AppMenuShortcut.UnreadOnly, root.menu("View").checkbox("UnreadOnly")!!.shortcut)
+        assertEquals(AppMenuShortcut.ListModeUnread, root.menu("View").checkbox("UnreadOnly")!!.shortcut)
     }
 
     @Test
@@ -465,8 +464,10 @@ class AppMenuTreeTest {
         val modes = listOf("AllArticles", "UnreadOnly", "StarredOnly").map { view.checkbox(it)!! }
 
         assertEquals(listOf(false, true, false), modes.map { it.checked })
-        assertEquals(AppMenuShortcut.UnreadOnly, modes[1].shortcut)
-        assertEquals(listOf(null, null), listOf(modes[0].shortcut, modes[2].shortcut))
+        assertEquals(
+            listOf(AppMenuShortcut.ListModeAll, AppMenuShortcut.ListModeUnread, AppMenuShortcut.ListModeStarred),
+            modes.map { it.shortcut },
+        )
     }
 
     @Test
@@ -474,13 +475,14 @@ class AppMenuTreeTest {
         val view = tree(enabledUi()).menu("View")
 
         view.checkbox("AllArticles")!!.onCheckedChange(true)
+        view.checkbox("UnreadOnly")!!.onCheckedChange(true)
         view.checkbox("StarredOnly")!!.onCheckedChange(true)
         // Re-choosing the checked item (the toolkit reports it as an uncheck) changes nothing.
         view.checkbox("AllArticles")!!.onCheckedChange(false)
         view.checkbox("UnreadOnly")!!.onCheckedChange(false)
+        view.checkbox("StarredOnly")!!.onCheckedChange(false)
 
-        assertEquals(listOf(ArticleListMode.All, ArticleListMode.Starred), listModesSet)
-        assertEquals(1, unreadModeToggles)
+        assertEquals(listOf(ArticleListMode.All, ArticleListMode.Unread, ArticleListMode.Starred), listModesSet)
     }
 
     @Test

@@ -59,7 +59,9 @@ internal enum class AppMenuShortcut(
     Search(Key.F, "F"),
     ImportOpml(Key.I, "I"),
     ExportOpml(Key.E, "E"),
-    UnreadOnly(Key.U, "U"),
+    ListModeAll(Key.One, "1"),
+    ListModeUnread(Key.Two, "2"),
+    ListModeStarred(Key.Three, "3"),
     ToggleRead(Key.U, "U", shift = true),
     ToggleStar(Key.S, "S", shift = true),
     OpenInBrowser(Key.O, "O", shift = true),
@@ -160,7 +162,6 @@ internal data class AppMenuActions(
     val quit: () -> Unit,
     val focusSearch: () -> Unit,
     val setListMode: (ArticleListMode) -> Unit,
-    val toggleUnreadMode: () -> Unit,
     val toggleSort: () -> Unit,
     val markAllRead: () -> Unit,
     val toggleRead: () -> Unit,
@@ -252,33 +253,23 @@ internal fun buildAppMenuTree(
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
         // The article list's mode, as three check items with only the current one checked (the
-        // toolbar's mode chip offers the same three). Re-choosing the checked one changes nothing;
-        // the unread item keeps ⌘/Ctrl+U, which flips between Unread and All.
-        add(
-            AppMenuNode.CheckboxItem(
-                labels.allArticles,
-                ui.listModeEnabled,
-                ui.listMode == ArticleListMode.All,
-                onCheckedChange = { if (it) actions.setListMode(ArticleListMode.All) },
-            ),
-        )
-        add(
-            AppMenuNode.CheckboxItem(
-                labels.unreadOnly,
-                ui.listModeEnabled,
-                ui.listMode == ArticleListMode.Unread,
-                AppMenuShortcut.UnreadOnly,
-                onCheckedChange = { actions.toggleUnreadMode() },
-            ),
-        )
-        add(
-            AppMenuNode.CheckboxItem(
-                labels.starredOnly,
-                ui.starredModeEnabled,
-                ui.listMode == ArticleListMode.Starred,
-                onCheckedChange = { if (it) actions.setListMode(ArticleListMode.Starred) },
-            ),
-        )
+        // toolbar's mode chip offers the same three, with the same Ctrl/⌘+1–3). Re-choosing the
+        // checked one changes nothing.
+        listOf(
+            Triple(labels.allArticles, ArticleListMode.All, AppMenuShortcut.ListModeAll),
+            Triple(labels.unreadOnly, ArticleListMode.Unread, AppMenuShortcut.ListModeUnread),
+            Triple(labels.starredOnly, ArticleListMode.Starred, AppMenuShortcut.ListModeStarred),
+        ).forEach { (label, mode, shortcut) ->
+            add(
+                AppMenuNode.CheckboxItem(
+                    label,
+                    if (mode == ArticleListMode.Starred) ui.starredModeEnabled else ui.listModeEnabled,
+                    ui.listMode == mode,
+                    shortcut,
+                    onCheckedChange = { if (it) actions.setListMode(mode) },
+                ),
+            )
+        }
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))

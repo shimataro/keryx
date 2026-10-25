@@ -44,7 +44,3 @@ internal fun articleListModeFor(
 
 /** Whether [ArticleListMode.Starred] can be chosen under [filter]. */
 internal fun starredModeAvailable(filter: ArticleFilter): Boolean = filter != ArticleFilter.Starred
-
-/** The mode ⌘/Ctrl+U (and the menu's "unread only" item) switches to from [current]. */
-internal fun unreadModeToggled(current: ArticleListMode): ArticleListMode =
-    if (current == ArticleListMode.Unread) ArticleListMode.All else ArticleListMode.Unread

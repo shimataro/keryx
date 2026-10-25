@@ -1370,8 +1370,8 @@ class HomeViewModel(
     fun setUnreadOnly(value: Boolean) = setMode(if (value) ArticleListMode.Unread else ArticleListMode.All)
 
     /**
-     * Switches the article list's [mode]. Every route (the toolbar selector, the View menu) calls this
-     * or [toggleUnreadMode].
+     * Switches the article list's [mode]. Every route (the toolbar selector, the View menu and its
+     * ⌘/Ctrl+1–3 accelerators) calls this.
      *
      * [ArticleListMode.Starred] is ignored while [starredModeEnabled] is false. Choosing it drops the
      * unstarred pins left from earlier, so the list starts from exactly the starred rows.
@@ -1404,12 +1404,6 @@ class HomeViewModel(
             }
         }
     }
-
-    /**
-     * ⌘/Ctrl+U and the View menu's "unread only" item: from any other mode to
-     * [ArticleListMode.Unread], and from it back to [ArticleListMode.All].
-     */
-    fun toggleUnreadMode() = setMode(unreadModeToggled(currentMode()))
 
     /**
      * Re-trims the read-state pins: keeps every unread pin and the selection's own read pin, drops

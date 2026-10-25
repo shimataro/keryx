@@ -80,25 +80,28 @@ struct HomeCommands: Commands {
                     .disabled(!state.searchEnabled)
                 }
 
-                // The article list's mode, with only the current one checked. Re-choosing the checked
-                // item changes nothing; "unread only" keeps ⌘U, which flips between Unread and All.
+                // The article list's mode, with only the current one checked and ⌘1–3 choosing
+                // each (Compose's `AppMenuTree.kt` uses the same keys). Re-choosing the checked
+                // item changes nothing.
                 Toggle(L("menu_view_list_mode_all"), isOn: Binding(
                     get: { home.listMode == .all },
                     set: { if $0 { home.viewModel.setMode(target: .all) } }
                 ))
+                .keyboardShortcut("1", modifiers: .command)
                 .disabled(!state.listModeEnabled)
 
                 Toggle(L("menu_view_list_mode_unread"), isOn: Binding(
                     get: { home.listMode == .unread },
-                    set: { _ in home.viewModel.toggleUnreadMode() }
+                    set: { if $0 { home.viewModel.setMode(target: .unread) } }
                 ))
-                .keyboardShortcut("u", modifiers: .command)
+                .keyboardShortcut("2", modifiers: .command)
                 .disabled(!state.listModeEnabled)
 
                 Toggle(L("menu_view_list_mode_starred"), isOn: Binding(
                     get: { home.listMode == .starred },
                     set: { if $0 { home.viewModel.setMode(target: .starred) } }
                 ))
+                .keyboardShortcut("3", modifiers: .command)
                 .disabled(!state.starredModeEnabled)
 
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }

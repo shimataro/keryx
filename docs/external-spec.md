@@ -131,7 +131,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   every starred article is already read, and "unread and starred" would show an empty list that reads
   as "nothing is starred here". The current mode names a pop-up button at the start of the article
   list's toolbar (filled whenever the mode narrows the list), and the View menu lists the three as
-  check items; ⌘/Ctrl+U goes from any other mode to Unread, and from Unread back to All.
+  check items, which ⌘/Ctrl+1, 2 and 3 choose (All, Unread, Starred). Choosing the current mode again
+  changes nothing.
   - **Starred** narrows whatever is selected — a feed, a folder, a tag or All Feeds — to its starred
     articles, read or not, and applies to search results as well. It lasts for the session only:
     switching to another feed, folder or tag keeps it, so several sources' starred articles can be
