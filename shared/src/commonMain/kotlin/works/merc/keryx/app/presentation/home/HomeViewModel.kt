@@ -856,8 +856,6 @@ class HomeViewModel(
             _selectedRowInstance.value = instance
             return
         }
-        // Before _filter changes, so `mode` never passes through Starred-mode-under-Starred.
-        if (!starredModeAvailable(filter)) _starredMode.value = false
         _filter.value = filter
         _selectedRowInstance.value = instance
         _selectedArticle.value = null
@@ -1359,7 +1357,9 @@ class HomeViewModel(
      * ⌘/Ctrl+1–3 accelerators) calls this.
      *
      * [ArticleListMode.Starred] is ignored while [starredModeEnabled] is false. Choosing it drops the
-     * unstarred pins left from earlier, so the list starts from exactly the starred rows.
+     * unstarred pins left from earlier, so the list starts from exactly the starred rows. Under the
+     * Starred filter, All/Unread choose among its starred articles and leave starred mode as it was:
+     * Starred stays checked there, so leaving the filter returns to the mode it was entered with.
      *
      * @param target The mode to show.
      */
@@ -1375,7 +1375,6 @@ class HomeViewModel(
         if (value) {
             retrimPinnedReadStates()
         }
-        _starredMode.value = false
         when {
             _filter.value == ArticleFilter.Starred -> {
                 if (_unreadOnlyStarred.value != value) {
@@ -1383,9 +1382,12 @@ class HomeViewModel(
                     settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnlyStarred = value) }
                 }
             }
-            _unreadOnly.value != value -> {
-                _unreadOnly.value = value
-                settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+            else -> {
+                _starredMode.value = false
+                if (_unreadOnly.value != value) {
+                    _unreadOnly.value = value
+                    settingsRepository.mutateLocalSettings { it.copy(lastUnreadOnly = value) }
+                }
             }
         }
     }

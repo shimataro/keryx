@@ -87,6 +87,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -6672,7 +6673,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun starredModeIsUnavailableUnderTheStarredFilterAndLeavingItClearsTheMode() = runTest {
+    fun starredModeIsUnavailableUnderTheStarredFilterAndSurvivesAVisitToIt() = runTest {
         val vm = starredModeViewModel()
         vm.setMode(ArticleListMode.Starred)
         testScheduler.advanceUntilIdle()
@@ -6690,8 +6691,58 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Feed("f1"))
         testScheduler.advanceUntilIdle()
         assertTrue(vm.starredModeEnabled.value)
+        assertEquals(ArticleListMode.Starred, vm.mode.value)
+        assertEquals(listOf("s1", "s2"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun choosingUnreadUnderTheStarredFilterKeepsStarredModeForTheWayBack() = runTest {
+        val vm = starredModeViewModel()
+        vm.setMode(ArticleListMode.Starred)
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.setMode(ArticleListMode.Unread)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Unread, vm.mode.value)
+
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleListMode.Starred, vm.mode.value)
+        val saved = LocalSettingsStore(dirOverride = dir).load()
+        assertEquals(true, saved.lastUnreadOnlyStarred)
+        assertNotEquals(true, saved.lastUnreadOnly)
+    }
+
+    @Test
+    fun aVisitToTheStarredFilterLeavesStarredModeOffWhenItWasOff() = runTest {
+        val vm = starredModeViewModel()
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+
         assertEquals(ArticleListMode.All, vm.mode.value)
         assertEquals(listOf("s1", "s2", "u1"), vm.articles.value.map { it.id })
+    }
+
+    /** The reported round trip must still bring Unread back, whatever is chosen inside Starred. */
+    @Test
+    fun unreadModeSurvivesAVisitToTheStarredFilterWithOrWithoutStarredMode() = runTest {
+        val vm = starredModeViewModel()
+        vm.setMode(ArticleListMode.Unread)
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.setMode(ArticleListMode.Unread)
+        vm.setMode(ArticleListMode.All)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Unread, vm.mode.value)
+        assertEquals(true, LocalSettingsStore(dirOverride = dir).load().lastUnreadOnly)
+
+        vm.setMode(ArticleListMode.Starred)
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.selectFilter(ArticleFilter.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleListMode.Starred, vm.mode.value)
+        assertEquals(true, LocalSettingsStore(dirOverride = dir).load().lastUnreadOnly)
     }
 
     @Test

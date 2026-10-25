@@ -12,7 +12,8 @@ import works.merc.keryx.app.core.ArticleFilter
  *
  * [All]/[Unread] are persisted (`lastUnreadOnly`, or `lastUnreadOnlyStarred` under
  * [ArticleFilter.Starred]); [Starred] lasts for the session only. It narrows a feed, folder, tag or
- * All Feeds, and is unavailable under [ArticleFilter.Starred], which already shows nothing else.
+ * All Feeds, and is unavailable under [ArticleFilter.Starred], which already shows nothing else —
+ * yet it survives a visit there, where the menus show it checked.
  */
 enum class ArticleListMode { All, Unread, Starred }
 

@@ -1374,8 +1374,9 @@ screen.
 `external-spec.md` §7 for why. It is derived from three pieces of state: the persisted `_unreadOnly`
 (`lastUnreadOnly`) and `_unreadOnlyStarred` (`lastUnreadOnlyStarred`, read only under the Starred
 filter), plus `_starredMode`, which is session-only and never persisted. `selectFilter` keeps
-`_starredMode` across filter switches except into `ArticleFilter.Starred`, where `starredModeEnabled`
-is false and the mode cannot apply. Like unread-only, starred mode narrows in memory over the
+`_starredMode` across every filter switch, `ArticleFilter.Starred` included: there
+`starredModeEnabled` is false and `articleListModeFor` ignores it, and `setMode(All/Unread)` leaves
+it as it was, so leaving the filter returns to the mode it was entered with. Like unread-only, starred mode narrows in memory over the
 filter's raw query result (and over search results) — `articles`' combine filters on `is_starred`,
 keeping a row by its unstarred pin the way unread-only keeps one by its read pin — so changing mode
 never re-runs the list query. `setStarred` pins an unstarred article whenever the Starred filter or
