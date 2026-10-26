@@ -6833,12 +6833,15 @@ class HomeViewModelTest {
 
     @Test
     fun markAllReadRightAfterEnteringStarredModeLeavesUnstarredArticlesUnread() = runTest {
-        val vm = starredModeViewModel()
+        // A lagging background dispatcher, as in production: the starred rows land after the switch.
+        val vm = starredModeViewModel(dispatcher = StandardTestDispatcher(testScheduler))
         vm.selectFilter(ArticleFilter.Feed("f1"))
         testScheduler.advanceUntilIdle()
 
-        // No advance in between: the list still shows the All-mode rows when markAllRead runs.
+        // No advance in between: the mode is switched at its source, but the derived mode (and the
+        // list on screen) still say All when markAllRead runs — its wait must not take that for a match.
         vm.setMode(ArticleListMode.Starred)
+        assertEquals(ArticleListMode.All, vm.mode.value)
         vm.markAllRead()
         testScheduler.advanceUntilIdle()
         assertEquals(1L, dbIsRead("s2"))

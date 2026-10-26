@@ -1318,8 +1318,12 @@ class HomeViewModel(
         val requested = currentScope()
         if (displayedScope() == requested) return markShownRead()
         viewModelScope.launch {
-            combine(displayedScopes, _filter, mode) { shown, filter, m -> shown == ListScope(filter, narrowingFor(m)) }
-                .first { it }
+            // From the source flows, as currentScope() is: the derived mode/narrowing lag behind them.
+            combine(
+                displayedScopes, _filter, _unreadOnly, _unreadOnlyStarred, _starredMode,
+            ) { shown, filter, unread, unreadStarred, starred ->
+                shown == ListScope(filter, narrowingFor(articleListModeFor(filter, unread, unreadStarred, starred)))
+            }.first { it }
             if (currentScope() == requested) markShownRead()
         }
     }
