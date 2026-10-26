@@ -6645,7 +6645,7 @@ class HomeViewModelTest {
     // --- ArticleListMode.Starred ---
 
     /** Feed f1 in folder d1 and tag t1: s1 starred+read, s2 starred+unread, u1 unstarred+unread, newest first. */
-    private fun TestScope.starredModeViewModel(): HomeViewModel {
+    private fun TestScope.starredModeViewModel(dispatcher: CoroutineDispatcher = Dispatchers.Unconfined): HomeViewModel {
         db.insertFolder("d1", "Folder")
         db.insertFeed("f1", folderId = "d1")
         db.insertTag("t1", "Tag")
@@ -6653,7 +6653,7 @@ class HomeViewModelTest {
         db.insertArticle("s1", "f1", title = "Kotlin s1", content = "kotlin", isRead = 1L, isStarred = 1L, publishedAt = 3L, createdAt = 3L)
         db.insertArticle("s2", "f1", title = "Kotlin s2", content = "kotlin", isRead = 0L, isStarred = 1L, publishedAt = 2L, createdAt = 2L)
         db.insertArticle("u1", "f1", title = "Kotlin u1", content = "kotlin", isRead = 0L, isStarred = 0L, publishedAt = 1L, createdAt = 1L)
-        val vm = newViewModel()
+        val vm = newViewModel(dispatcher = dispatcher)
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
         return vm
@@ -6828,6 +6828,65 @@ class HomeViewModelTest {
         vm.markAllRead()
         testScheduler.advanceUntilIdle()
         assertEquals(1L, dbIsRead("s2"))
+        assertEquals(0L, dbIsRead("u1"))
+    }
+
+    @Test
+    fun markAllReadRightAfterEnteringStarredModeLeavesUnstarredArticlesUnread() = runTest {
+        val vm = starredModeViewModel()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        // No advance in between: the list still shows the All-mode rows when markAllRead runs.
+        vm.setMode(ArticleListMode.Starred)
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("s2"))
+        assertEquals(0L, dbIsRead("u1"))
+    }
+
+    @Test
+    fun markAllReadRightAfterSwitchingToTheStarredFilterMarksOnlyItsRows() = runTest {
+        // A lagging background dispatcher, as in production: the new filter's query lands after the switch.
+        val vm = starredModeViewModel(dispatcher = StandardTestDispatcher(testScheduler))
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.selectFilter(ArticleFilter.Starred)
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("s2"))
+        assertEquals(0L, dbIsRead("u1"))
+    }
+
+    @Test
+    fun markAllReadRightAfterAFilterSwitchDoesNotPinThePreviousFiltersRows() = runTest {
+        db.insertFeed("f2")
+        db.insertArticle("x1", "f2", isRead = 0L, publishedAt = 5L, createdAt = 5L)
+        // A lagging background dispatcher, as in production: the new filter's query lands after the switch.
+        val vm = starredModeViewModel(dispatcher = StandardTestDispatcher(testScheduler))
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.selectFilter(ArticleFilter.Feed("f2"))
+        vm.markAllRead()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1L, dbIsRead("x1"))
+        assertEquals(0L, dbIsRead("u1"))
+        assertEquals(listOf("x1"), vm.articles.value.map { it.id })
+    }
+
+    @Test
+    fun markAllReadIsDroppedWhenTheSelectionMovesOnBeforeTheListCatchesUp() = runTest {
+        val vm = starredModeViewModel()
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        testScheduler.advanceUntilIdle()
+
+        vm.setMode(ArticleListMode.Starred)
+        vm.markAllRead()
+        vm.setMode(ArticleListMode.All)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0L, dbIsRead("s2"))
         assertEquals(0L, dbIsRead("u1"))
     }
 }

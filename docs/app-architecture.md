@@ -1383,7 +1383,9 @@ never re-runs the list query. `setStarred` pins an unstarred article whenever th
 starred mode applies, `setMode(Starred)` drops the pins left from before, and `markAllRead` under
 starred mode or the Starred filter marks exactly the rows shown, through the same id-list path
 search uses (the Starred filter can still show an article just unstarred, which its own query no
-longer reaches). Every route —
+longer reaches). Since the list catches up with a filter or mode switch asynchronously, `markAllRead`
+acts only once the rows on screen belong to the current filter and mode (`ListScope`), and does
+nothing if the selection moves on again before then. Every route —
 the toolbar's mode menu on both UIs, the View menu (`computeMenuUiState`'s `listMode` /
 `starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`. Which items those menus
 check is likewise one shared rule, `listModeChecked`: the current mode, plus Starred under the

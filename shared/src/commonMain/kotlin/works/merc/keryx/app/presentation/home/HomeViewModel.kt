@@ -78,6 +78,19 @@ private data class SearchSnapshot(
     val results: List<ArticleSearchResult>,
 )
 
+/**
+ * The filter and narrowing a displayed list was produced from. The list's flows catch up with a
+ * filter or mode change asynchronously, so for a moment the rows on screen can still belong to the
+ * previous one — [HomeViewModel.markAllRead] waits until this matches the current selection.
+ */
+private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarrowing)
+
+/** Rows tagged with the [ListScope] that produced them. */
+private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
+
+private fun narrowingFor(mode: ArticleListMode) =
+    ListNarrowing(unreadOnly = mode == ArticleListMode.Unread, starredOnly = mode == ArticleListMode.Starred)
+
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class HomeViewModel(
     private val feedRepository: FeedRepository,
@@ -309,12 +322,7 @@ class HomeViewModel(
             .stateIn(viewModelScope, started, currentMode() == ArticleListMode.Unread)
 
     private val narrowing: StateFlow<ListNarrowing> =
-        mode.map { ListNarrowing(unreadOnly = it == ArticleListMode.Unread, starredOnly = it == ArticleListMode.Starred) }
-            .stateIn(
-                viewModelScope,
-                started,
-                currentMode().let { ListNarrowing(it == ArticleListMode.Unread, it == ArticleListMode.Starred) },
-            )
+        mode.map(::narrowingFor).stateIn(viewModelScope, started, narrowingFor(currentMode()))
 
     private val _newestFirst = MutableStateFlow(settingsRepository.getLocalSettings().lastNewestFirst ?: true)
     val newestFirst: StateFlow<Boolean> = _newestFirst
@@ -346,7 +354,7 @@ class HomeViewModel(
     // sort and pinned inputs are pure display transforms over whatever that query returned. Keeping
     // them in the flatMapLatest key made every article selection (which pins the article it marks
     // read) cancel and re-execute the whole unbounded list query.
-    private val filteredArticles: Flow<List<ArticleListRow>> =
+    private val filteredArticles: Flow<Pair<ArticleFilter, List<ArticleListRow>>> =
         _filter.flatMapLatest { filter ->
             articleRepository.watchArticles(filter)
                 // A filter change re-keys flatMapLatest, so this runs before the new filter's first
@@ -370,30 +378,32 @@ class HomeViewModel(
                     }
                     _newArticleTracking.update { it.withList(ids, inserted) }
                 }
+                .map { filter to it }
         }
 
     // null until the first list emission lands — see [feedsSnapshot].
-    private val articlesSnapshot: StateFlow<List<ArticleListRow>?> =
+    private val articlesSnapshot: StateFlow<ScopedRows<ArticleListRow>?> =
         combine(
             filteredArticles, narrowing, _newestFirst, _pinnedReadStates, _pinnedUnstarredArticles,
-        ) { list, narrow, newest, pinnedReadStates, pinnedUnstarred ->
-            resolvePinnedArticles(
+        ) { (filter, list), narrow, newest, pinnedReadStates, pinnedUnstarred ->
+            val rows = resolvePinnedArticles(
                 list, narrow.unreadOnly, newest, pinnedReadStates, pinnedUnstarred,
                 starredOnly = narrow.starredOnly,
             )
+            ScopedRows(rows, ListScope(filter, narrow))
         }
             // Before flowOn, not after: stateIn fuses a flowOn directly upstream of it into its own
             // coroutine, and any operator in between would put a channel hop back.
             .onEach {
                 articlesLoaded.value = true
-                _articleListHasRows.value = it.isNotEmpty()
+                _articleListHasRows.value = it.rows.isNotEmpty()
             }
             .flowOn(dispatcher)
             .stateIn(viewModelScope, started, null)
 
     val articles: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
-        { articlesSnapshot.value.orEmpty() },
-        articlesSnapshot.map { it.orEmpty() },
+        { articlesSnapshot.value?.rows.orEmpty() },
+        articlesSnapshot.map { it?.rows.orEmpty() },
         areEquivalent = ::sameListOrBothEmpty,
     )
 
@@ -686,15 +696,37 @@ class HomeViewModel(
     // Unlike `articles`, this also never merges pinned-but-absent-from-raw articles back in —
     // a changed query text means a new search, so leaving a pinned article from the previous
     // query stuck in results that no longer match would be surprising.
-    val searchResults: StateFlow<List<ArticleSearchResult>> =
+    private val searchResultsSnapshot: StateFlow<ScopedRows<ArticleSearchResult>> =
         combine(
             _rawSearchResults, narrowing, _pinnedReadStates, _pinnedUnstarredArticles,
         ) { snapshot, narrow, pinnedReadStates, pinnedUnstarred ->
-            resolvePinnedSearchResults(
+            val results = resolvePinnedSearchResults(
                 snapshot.results, narrow.unreadOnly, pinnedReadStates, pinnedUnstarred,
                 starredOnly = narrow.starredOnly,
             )
-        }.flowOn(dispatcher).stateIn(viewModelScope, started, emptyList())
+            ScopedRows(results, ListScope(snapshot.filter, narrow))
+        }.flowOn(dispatcher).stateIn(
+            viewModelScope,
+            started,
+            ScopedRows(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
+        )
+
+    val searchResults: StateFlow<List<ArticleSearchResult>> = DerivedStateFlow(
+        { searchResultsSnapshot.value.rows },
+        searchResultsSnapshot.map { it.rows },
+    )
+
+    /** The scope of the rows on screen — see [ListScope]; null before the article list first loads. */
+    private fun displayedScope(): ListScope? =
+        if (searchActive.value) searchResultsSnapshot.value.scope else articlesSnapshot.value?.scope
+
+    /** The Flow form of [displayedScope]. */
+    private val displayedScopes: Flow<ListScope?> =
+        combine(searchActive, articlesSnapshot, searchResultsSnapshot) { active, rows, results ->
+            if (active) results.scope else rows?.scope
+        }
+
+    private fun currentScope() = ListScope(_filter.value, narrowingFor(currentMode()))
 
     /**
      * The article rows the reader's pager pages through, in the order the list itself shows them.
@@ -1276,8 +1308,24 @@ class HomeViewModel(
      * [ArticleListMode.Starred] or the Starred filter, only the rows on screen are marked: the first two
      * narrow the filter to an explicit subset, and the Starred filter can still show an article just
      * unstarred (its pin) that no query over starred articles would reach.
+     *
+     * Acts once the rows on screen belong to the current filter and mode ([ListScope]): right after
+     * a switch they can still be the previous list's, and marking (or pinning) those would reach
+     * articles the current list does not show. If the selection moves on again before the list
+     * catches up, nothing is marked — the list the action was made for is gone.
      */
     fun markAllRead() {
+        val requested = currentScope()
+        if (displayedScope() == requested) return markShownRead()
+        viewModelScope.launch {
+            combine(displayedScopes, _filter, mode) { shown, filter, m -> shown == ListScope(filter, narrowingFor(m)) }
+                .first { it }
+            if (currentScope() == requested) markShownRead()
+        }
+    }
+
+    /** [markAllRead] over the rows on screen, once they belong to the current [ListScope]. */
+    private fun markShownRead() {
         val filter = _filter.value
         val active = searchActive.value
         // Search results and starred mode both show a subset of the filter, and the Starred filter
