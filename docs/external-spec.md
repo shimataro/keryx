@@ -132,8 +132,10 @@ data exists in the cloud it is automatically merged (imported) during the initia
   as "nothing is starred here". The current mode names a pop-up button at the start of the article
   list's toolbar (filled whenever the mode narrows the list), and the View menu lists the three as
   check items, which ⌘/Ctrl+1, 2 and 3 choose (All, Unread, Starred); on Windows, Linux and the
-  Compose macOS build the pop-up button's own menu shows the same keys. Choosing the current mode
-  again changes nothing.
+  Compose macOS build the pop-up button's own menu shows the same keys. On iOS / iPadOS, where the
+  toolbar has no room for the mode's name, the button shows the mode's icon with the pop-up button's
+  up-and-down chevrons, in a toolbar group of its own, so it does not read as a button that acts at
+  once. Choosing the current mode again changes nothing.
   - **Starred** narrows whatever is selected — a feed, a folder, a tag or All Feeds — to its starred
     articles, read or not, and applies to search results as well. It lasts for the session only:
     switching to another feed, folder or tag keeps it, so several sources' starred articles can be
