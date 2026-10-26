@@ -26,19 +26,3 @@ struct FlexibleToolbarSpacer: ToolbarContent {
         #endif
     }
 }
-
-#if os(iOS)
-/// A fixed gap that splits the toolbar items on either side of it into separate glass groups, for
-/// neighbors that belong together but behave differently. Nothing before iOS 26, which draws no
-/// groups to split. iOS only: macOS keeps such items in one group.
-struct FixedToolbarSpacer: ToolbarContent {
-    /// The placement of the items it sits between; a spacer left at `.automatic` lands elsewhere.
-    var placement: ToolbarItemPlacement = .automatic
-
-    var body: some ToolbarContent {
-        if #available(iOS 26, *) {
-            ToolbarSpacer(.fixed, placement: placement)
-        }
-    }
-}
-#endif

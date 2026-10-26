@@ -268,13 +268,11 @@ struct ArticleListView: View {
             // from the bottom up, which hid Mark All as Read first and squeezed the search button
             // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
             // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
-            // Separate items around a fixed spacer: the mode menu opens a menu, unlike the
-            // one-tap hide-read beside it, so it gets a glass group of its own.
-            ToolbarItem(placement: .navigation) { listModeMenu }
-                .visibilityPriority(.low)
-            FixedToolbarSpacer(placement: .navigation)
-            ToolbarItem(placement: .navigation) { hideReadButton }
-                .visibilityPriority(.low)
+            ToolbarItemGroup(placement: .navigation) {
+                listModeMenu
+                hideReadButton
+            }
+            .visibilityPriority(.low)
 
             FlexibleToolbarSpacer()
 
@@ -301,17 +299,10 @@ struct ArticleListView: View {
         // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
         // into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
-        #if os(iOS)
-        // iOS splits the mode menu into a glass group of its own (see `toolbarContent`).
-        ToolbarItem(placement: .navigation) { listModeMenu }
-        FixedToolbarSpacer(placement: .navigation)
-        ToolbarItem(placement: .navigation) { hideReadButton }
-        #else
         ToolbarItemGroup(placement: .navigation) {
             listModeMenu
             hideReadButton
         }
-        #endif
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
         // pushes the trailing cluster to the column's right edge.
