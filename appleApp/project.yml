@@ -191,6 +191,7 @@ targets:
       - path: Keryx/Home/CompactSidebarSelection.swift
       - path: Keryx/Home/CompactSearchNavigation.swift
       - path: Keryx/Home/CompactColumnRestoration.swift
+      - path: Keryx/Home/HomeRestoration.swift
       - path: Keryx/Home/ArticleListHeaderIcon.swift
       - path: Keryx/Home/PullToRefreshAvailability.swift
       - path: Keryx/Home/PullRefreshHold.swift

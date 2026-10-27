@@ -31,11 +31,6 @@ struct HomeView: View {
         nonmutating set { storedCompactColumn = CompactColumnRestoration.storageValue(HomeView.compactSearchColumn(newValue)) }
     }
     @SceneStorage("home.compactColumn") private var storedCompactColumn = CompactColumnRestoration.storageValue(.sidebar)
-    /// Whether the restored column has been checked against the restored selection — once per view.
-    @State private var compactColumnRestored = false
-    /// Set when that check moved the column, so the move is not taken for the user's own navigation
-    /// (`onChange(of: compactColumn)`).
-    @State private var ignoreRestoredColumnChange = false
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> {
         Binding(get: { compactColumn }, set: { compactColumn = $0 })
     }
@@ -43,13 +38,10 @@ struct HomeView: View {
     /// relaunch reopens the reader where the user left it (see `ReaderScrollPosition`).
     @SceneStorage("reader.scrollArticleId") private var readerScrollArticleId = ""
     @SceneStorage("reader.scrollFraction") private var readerScrollFraction = 0.0
-    /// Whether the stored position is still offered to the reader: only until the user selects
-    /// another article or navigates the stack, so it restores the relaunch rather than every later
-    /// reopening of the same article.
-    @State private var readerScrollRestorePending = true
+    /// When the restored column and reader position are checked and withdrawn.
+    @State private var restoration = HomeRestoration()
     private var restoredReaderScroll: ReaderScrollPosition? {
-        guard readerScrollRestorePending else { return nil }
-        return ReaderScrollPosition.stored(articleId: readerScrollArticleId, fraction: readerScrollFraction)
+        restoration.readerScroll(articleId: readerScrollArticleId, fraction: readerScrollFraction)
     }
     #else
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
@@ -179,11 +171,7 @@ struct HomeView: View {
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
             #if os(iOS)
-            if ignoreRestoredColumnChange {
-                ignoreRestoredColumnChange = false
-                return
-            }
-            readerScrollRestorePending = false
+            guard restoration.columnChanged() else { return }
             if ArticleListRemount.isNeeded(
                 isCompact: horizontalSizeClass == .compact,
                 from: HomeView.compactSearchColumn(old),
@@ -224,7 +212,7 @@ struct HomeView: View {
         // opened), so WebKit can start while the app is idle rather than on the first article.
         .task { await ReaderWebViewWarmUp.scheduleOnce() }
         .onAppear { restoreCompactColumn() }
-        .onChange(of: home.selectedArticleId) { _, _ in readerScrollRestorePending = false }
+        .onChange(of: home.selectedArticleId) { old, new in restoration.selectionChanged(from: old, to: new) }
         #endif
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
@@ -255,12 +243,10 @@ struct HomeView: View {
     /// Checks the column scene storage restored against the selection `HomeViewModel` restored, once:
     /// a reader restored without its article shows the article list instead.
     private func restoreCompactColumn() {
-        guard !compactColumnRestored else { return }
-        compactColumnRestored = true
-        let stored = HomeView.compactSearchColumn(compactColumn)
-        let restored = CompactColumnRestoration.restored(stored, hasSelectedArticle: home.selectedArticleId != nil)
-        guard restored != stored else { return }
-        ignoreRestoredColumnChange = true
+        guard let restored = restoration.appeared(
+            storedColumn: HomeView.compactSearchColumn(compactColumn),
+            hasSelectedArticle: home.selectedArticleId != nil
+        ) else { return }
         compactColumn = HomeView.splitViewColumn(restored)
     }
     #endif
