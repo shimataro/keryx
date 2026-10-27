@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -26,6 +27,7 @@ import io.github.kdroidfilter.webview.request.WebRequestInterceptResult
 import io.github.kdroidfilter.webview.web.LoadingState
 import io.github.kdroidfilter.webview.web.NativeWebView
 import io.github.kdroidfilter.webview.web.WebView
+import io.github.kdroidfilter.webview.web.WebViewFactoryParam
 import io.github.kdroidfilter.webview.web.WebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
@@ -107,107 +109,124 @@ internal fun ArticleWebView(html: String, body: String, articleUrl: String?, act
         )
     }
     key(rendererGeneration) {
-        val scope = rememberCoroutineScope()
-        val interceptor = remember {
-            object : RequestInterceptor {
-                override fun onInterceptUrlRequest(request: WebRequest, navigator: WebViewNavigator): WebRequestInterceptResult {
-                    // A page the reader is only holding ready has no business navigating anywhere: the
-                    // library reports a script-driven `location.href` or a meta refresh through this
-                    // same callback as a real tap, so without this an article the user has never opened
-                    // could send them to an attacker-chosen page in their browser, or walk its own
-                    // off-screen WebView onto an arbitrary remote origin in the shared profile.
-                    if (!isActive.value) return WebRequestInterceptResult.Reject
-                    return if (request.url in knownLinks.value) {
-                        BrowserOpener.open(request.url)
-                        WebRequestInterceptResult.Reject
-                    } else {
-                        WebRequestInterceptResult.Allow
-                    }
-                }
-            }
-        }
-        val navigator = rememberWebViewNavigator(scope, interceptor)
-        val webViewState = rememberWebViewStateWithHTMLData(data = html)
-
-        // Without an explicit data directory, WebView2 tries to create its own data folder next to
-        // the host executable, which fails with HRESULT(0x80070005) Access Denied when that
-        // location isn't user-writable (e.g. java.exe under Program Files during `gradlew run`, or
-        // a per-machine install under Program Files) — see docs/known-issues.md. The failed creation
-        // throws WebViewException, which extends Exception rather than RuntimeException, so the
-        // library's own `catch (e: RuntimeException)` around the native call doesn't catch it; it
-        // propagates uncaught and the library's creation retry timer never gets a chance to stop
-        // itself, retrying indefinitely. Setting this is harmless on macOS/Linux, which already
-        // resolve a writable default, so no OS branch is needed.
-        remember(webViewState) {
-            webViewState.webSettings.desktopWebSettings.dataDirectory = webViewDataDirectory(AppDirs.cacheDir())
-        }
-
-        // Workaround: this (beta) library's rememberWebViewStateWithHTMLData doesn't reliably
-        // navigate past its initial "about:blank" on desktop — confirmed during the spike. Push
-        // the HTML manually once the WebView reports it's idle. Guarded on the rendered *document*
-        // rather than an article id: this one WebView also renders the "no article selected"
-        // placeholder and the "no content" notice, which have no article id, and comparing the HTML
-        // also picks up a theme/font-scale change for an otherwise-unchanged article.
-        val loadedHtml = remember { mutableStateOf<String?>(null) }
-        val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
-        LaunchedEffect(webViewState.loadingState, html) {
-            if (shouldLoadArticleHtml(webViewState.loadingState, loadedHtml.value, html)) {
-                scrollRestoration.documentReplaced(readerDocumentKey(html))
-                loadedHtml.value = html
-                navigator.loadHtml(html)
-            } else if (webViewState.loadingState is LoadingState.Finished && loadedHtml.value == html) {
-                nativePanel.value?.let { restoreReaderScroll(it, scrollRestoration) }
-            }
-        }
-
-        // The native webview (a heavyweight AWT component wrapping a real OS-native browser
-        // window, not a Compose-composited texture) briefly paints at its default (0,0) position
-        // before Compose's SwingPanel interop applies the real layout bounds — a known Compose
-        // Desktop interop limitation (JetBrains YouTrack CMP-5780), not specific to this app. Hide
-        // the panel from the moment it's created and only reveal it once this composable's own
-        // layout position is known, giving Compose's own bounds sync a frame to catch up first.
-        // Revealed once, not on every article switch, since the panel is reused after creation.
-        val hasPositioned = remember { mutableStateOf(false) }
-        val revealed = remember { mutableStateOf(false) }
-        LaunchedEffect(hasPositioned.value, nativePanel.value) {
-            val panel = nativePanel.value
-            if (hasPositioned.value && panel != null && !revealed.value) {
-                withFrameNanos {}
-                revealed.value = true
-                setNativeWebViewVisible(panel, true)
-            }
-        }
-        // A page the reader is only holding ready must not be reachable by a screen reader's linear
-        // traversal — see setNativeWebViewImportantForAccessibility's own KDoc for why the surrounding
-        // Box's clearAndSetSemantics{} is not enough on its own to guarantee that.
-        LaunchedEffect(active, nativePanel.value) {
-            nativePanel.value?.let { setNativeWebViewImportantForAccessibility(it, active) }
-        }
-        // See setNativeWebViewScrollbarColor's own KDoc — a no-op on desktop, where the document's own
-        // `color-scheme` already paints the scrollbar; load-bearing on Android, whose root-frame
-        // scrollbar the CSS never reaches.
-        val scrollbarColor = MaterialTheme.colorScheme.outline
-        LaunchedEffect(scrollbarColor, nativePanel.value) {
-            nativePanel.value?.let { setNativeWebViewScrollbarColor(it, scrollbarColor) }
-        }
-
-        WebView(
-            state = webViewState,
-            modifier = Modifier.fillMaxSize().onGloballyPositioned {
-                if (!hasPositioned.value && it.size.width > 0 && it.size.height > 0) {
-                    hasPositioned.value = true
-                }
-            },
-            navigator = navigator,
-            factory = webViewFactory,
-            onCreated = { panel ->
-                setNativeWebViewVisible(panel, false)
-                setNativeWebViewImportantForAccessibility(panel, active)
-                observeNativeWebViewScroll(panel, readerScrollListener(scrollRestoration))
-                nativePanel.value = panel
-            },
-        )
+        ReaderWebViewHost(html, active, isActive, knownLinks, scrollRestoration, webViewFactory)
     }
+}
+
+/**
+ * One native WebView for [ArticleWebView], with everything bound to it — rebuilt as a whole when its
+ * renderer dies (under [ArticleWebView]'s renderer key). [isActive] and [knownLinks] are read by the
+ * request interceptor, remembered once per view; [scrollRestoration] outlives the view.
+ */
+@Composable
+private fun ReaderWebViewHost(
+    html: String,
+    active: Boolean,
+    isActive: State<Boolean>,
+    knownLinks: State<Set<String>>,
+    scrollRestoration: ReaderScrollRestoration,
+    webViewFactory: ((WebViewFactoryParam) -> NativeWebView)?,
+) {
+    val scope = rememberCoroutineScope()
+    val interceptor = remember {
+        object : RequestInterceptor {
+            override fun onInterceptUrlRequest(request: WebRequest, navigator: WebViewNavigator): WebRequestInterceptResult {
+                // A page the reader is only holding ready has no business navigating anywhere: the
+                // library reports a script-driven `location.href` or a meta refresh through this
+                // same callback as a real tap, so without this an article the user has never opened
+                // could send them to an attacker-chosen page in their browser, or walk its own
+                // off-screen WebView onto an arbitrary remote origin in the shared profile.
+                if (!isActive.value) return WebRequestInterceptResult.Reject
+                return if (request.url in knownLinks.value) {
+                    BrowserOpener.open(request.url)
+                    WebRequestInterceptResult.Reject
+                } else {
+                    WebRequestInterceptResult.Allow
+                }
+            }
+        }
+    }
+    val navigator = rememberWebViewNavigator(scope, interceptor)
+    val webViewState = rememberWebViewStateWithHTMLData(data = html)
+
+    // Without an explicit data directory, WebView2 tries to create its own data folder next to
+    // the host executable, which fails with HRESULT(0x80070005) Access Denied when that
+    // location isn't user-writable (e.g. java.exe under Program Files during `gradlew run`, or
+    // a per-machine install under Program Files) — see docs/known-issues.md. The failed creation
+    // throws WebViewException, which extends Exception rather than RuntimeException, so the
+    // library's own `catch (e: RuntimeException)` around the native call doesn't catch it; it
+    // propagates uncaught and the library's creation retry timer never gets a chance to stop
+    // itself, retrying indefinitely. Setting this is harmless on macOS/Linux, which already
+    // resolve a writable default, so no OS branch is needed.
+    remember(webViewState) {
+        webViewState.webSettings.desktopWebSettings.dataDirectory = webViewDataDirectory(AppDirs.cacheDir())
+    }
+
+    // Workaround: this (beta) library's rememberWebViewStateWithHTMLData doesn't reliably
+    // navigate past its initial "about:blank" on desktop — confirmed during the spike. Push
+    // the HTML manually once the WebView reports it's idle. Guarded on the rendered *document*
+    // rather than an article id: this one WebView also renders the "no article selected"
+    // placeholder and the "no content" notice, which have no article id, and comparing the HTML
+    // also picks up a theme/font-scale change for an otherwise-unchanged article.
+    val loadedHtml = remember { mutableStateOf<String?>(null) }
+    val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
+    LaunchedEffect(webViewState.loadingState, html) {
+        if (shouldLoadArticleHtml(webViewState.loadingState, loadedHtml.value, html)) {
+            scrollRestoration.documentReplaced(readerDocumentKey(html))
+            loadedHtml.value = html
+            navigator.loadHtml(html)
+        } else if (webViewState.loadingState is LoadingState.Finished && loadedHtml.value == html) {
+            nativePanel.value?.let { restoreReaderScroll(it, scrollRestoration) }
+        }
+    }
+
+    // The native webview (a heavyweight AWT component wrapping a real OS-native browser
+    // window, not a Compose-composited texture) briefly paints at its default (0,0) position
+    // before Compose's SwingPanel interop applies the real layout bounds — a known Compose
+    // Desktop interop limitation (JetBrains YouTrack CMP-5780), not specific to this app. Hide
+    // the panel from the moment it's created and only reveal it once this composable's own
+    // layout position is known, giving Compose's own bounds sync a frame to catch up first.
+    // Revealed once, not on every article switch, since the panel is reused after creation.
+    val hasPositioned = remember { mutableStateOf(false) }
+    val revealed = remember { mutableStateOf(false) }
+    LaunchedEffect(hasPositioned.value, nativePanel.value) {
+        val panel = nativePanel.value
+        if (hasPositioned.value && panel != null && !revealed.value) {
+            withFrameNanos {}
+            revealed.value = true
+            setNativeWebViewVisible(panel, true)
+        }
+    }
+    // A page the reader is only holding ready must not be reachable by a screen reader's linear
+    // traversal — see setNativeWebViewImportantForAccessibility's own KDoc for why the surrounding
+    // Box's clearAndSetSemantics{} is not enough on its own to guarantee that.
+    LaunchedEffect(active, nativePanel.value) {
+        nativePanel.value?.let { setNativeWebViewImportantForAccessibility(it, active) }
+    }
+    // See setNativeWebViewScrollbarColor's own KDoc — a no-op on desktop, where the document's own
+    // `color-scheme` already paints the scrollbar; load-bearing on Android, whose root-frame
+    // scrollbar the CSS never reaches.
+    val scrollbarColor = MaterialTheme.colorScheme.outline
+    LaunchedEffect(scrollbarColor, nativePanel.value) {
+        nativePanel.value?.let { setNativeWebViewScrollbarColor(it, scrollbarColor) }
+    }
+
+    WebView(
+        state = webViewState,
+        modifier = Modifier.fillMaxSize().onGloballyPositioned {
+            if (!hasPositioned.value && it.size.width > 0 && it.size.height > 0) {
+                hasPositioned.value = true
+            }
+        },
+        navigator = navigator,
+        factory = webViewFactory,
+        onCreated = { panel ->
+            setNativeWebViewVisible(panel, false)
+            setNativeWebViewImportantForAccessibility(panel, active)
+            observeNativeWebViewScroll(panel, readerScrollListener(scrollRestoration))
+            nativePanel.value = panel
+        },
+    )
 }
 
 /** Feeds the reader WebView's scrolling and the user's input to [restoration]. */

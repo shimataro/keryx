@@ -73,4 +73,12 @@ struct HomeRestorationTests {
         let restoration = HomeRestoration()
         #expect(restoration.readerScroll(articleId: "", fraction: 0.5) == nil)
     }
+
+    /// Scene storage from an earlier launch is read back by these keys: renaming one would lose it.
+    @Test
+    func theSceneStorageKeysStayAsTheyWere() {
+        #expect(HomeRestoration.compactColumnKey == "home.compactColumn")
+        #expect(HomeRestoration.readerScrollArticleIdKey == "reader.scrollArticleId")
+        #expect(HomeRestoration.readerScrollFractionKey == "reader.scrollFraction")
+    }
 }

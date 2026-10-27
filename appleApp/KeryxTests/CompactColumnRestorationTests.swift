@@ -4,8 +4,15 @@ import Testing
 struct CompactColumnRestorationTests {
     @Test(arguments: [CompactSearchNavigation.Column.sidebar, .content, .detail])
     func everyColumnRoundTripsThroughStorage(column: CompactSearchNavigation.Column) {
-        let stored = CompactColumnRestoration.storageValue(column)
-        #expect(CompactColumnRestoration.column(storageValue: stored) == column)
+        #expect(CompactColumnRestoration.column(storageValue: column.rawValue) == column)
+    }
+
+    /// Scene storage holds these values from earlier launches: renaming one would lose the column.
+    @Test
+    func theStoredValuesStayAsTheyWere() {
+        #expect(CompactSearchNavigation.Column.sidebar.rawValue == "sidebar")
+        #expect(CompactSearchNavigation.Column.content.rawValue == "content")
+        #expect(CompactSearchNavigation.Column.detail.rawValue == "detail")
     }
 
     @Test

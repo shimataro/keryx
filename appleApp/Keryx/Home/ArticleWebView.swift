@@ -86,6 +86,21 @@ struct ArticleWebView {
     /// The name the page posts scroll messages under (`scrollReporter`).
     private static let scrollMessageName = "keryxReaderScroll"
 
+    /// The kinds of message `scrollReporter` posts — the one definition its script and
+    /// `Coordinator.didReceiveScrollMessage` both use.
+    fileprivate enum ScrollMessageKind: String {
+        /// The page scrolled; carries the position as `fraction`.
+        case scroll
+        /// The user's own (trusted) scroll, tap or key input.
+        case user
+        /// The content's height changed.
+        case resize
+    }
+
+    /// How long `scrollReporter` waits after a scroll before reporting the position, so a fling posts
+    /// a few messages rather than one per frame.
+    private static let scrollReportThrottleMilliseconds = 200
+
     /// Reports the main frame's vertical scroll position to `Coordinator` as a fraction of its
     /// scrollable height (throttled), the user's own scroll/tap/key input, and the content's height
     /// changing, and defines the function the restore scrolls with. Its handler is registered in the
@@ -104,12 +119,12 @@ struct ArticleWebView {
                 timer = setTimeout(() => {
                   timer = null;
                   const scrollable = range();
-                  post({ kind: 'scroll', fraction: scrollable > 0 ? window.scrollY / scrollable : 0 });
-                }, 200);
+                  post({ kind: '\(ScrollMessageKind.scroll.rawValue)', fraction: scrollable > 0 ? window.scrollY / scrollable : 0 });
+                }, \(scrollReportThrottleMilliseconds));
               }, { passive: true });
               for (const type of ['touchstart', 'wheel', 'keydown', 'mousedown']) {
                 window.addEventListener(type, (event) => {
-                  if (event.isTrusted) post({ kind: 'user' });
+                  if (event.isTrusted) post({ kind: '\(ScrollMessageKind.user.rawValue)' });
                 }, { capture: true, passive: true });
               }
               let height = root().scrollHeight;
@@ -117,7 +132,7 @@ struct ArticleWebView {
                 const current = root().scrollHeight;
                 if (current === height) return;
                 height = current;
-                post({ kind: 'resize' });
+                post({ kind: '\(ScrollMessageKind.resize.rawValue)' });
               }).observe(document.body || document.documentElement);
               window.keryxScrollToFraction = (fraction) => {
                 const scrollable = range();
@@ -275,19 +290,18 @@ struct ArticleWebView {
 
         /// Handles a message from `scrollReporter`.
         fileprivate func didReceiveScrollMessage(_ body: Any) {
-            guard let message = body as? [String: Any], let kind = message["kind"] as? String else { return }
+            guard let message = body as? [String: Any],
+                  let kind = (message["kind"] as? String).flatMap(ScrollMessageKind.init(rawValue:)) else { return }
             switch kind {
-            case "scroll":
+            case .scroll:
                 guard let fraction = (message["fraction"] as? NSNumber)?.doubleValue else { return }
                 guard let recorded = scrollRestoration.scrolled(fraction: fraction, nowMillis: Self.nowMillis()) else { return }
                 onScroll?(recorded.doubleValue)
-            case "user":
+            case .user:
                 scrollRestoration.userInteracted()
-            case "resize":
+            case .resize:
                 guard let fraction = scrollRestoration.contentResized(nowMillis: Self.nowMillis()), let webView else { return }
                 scroll(webView, to: fraction.doubleValue)
-            default:
-                break
             }
         }
 

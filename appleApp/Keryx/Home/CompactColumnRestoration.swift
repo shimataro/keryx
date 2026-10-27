@@ -10,23 +10,10 @@
 enum CompactColumnRestoration {
     typealias Column = CompactSearchNavigation.Column
 
-    /// What `column` is kept as in scene storage.
-    static func storageValue(_ column: Column) -> String {
-        switch column {
-        case .sidebar: "sidebar"
-        case .content: "content"
-        case .detail: "detail"
-        }
-    }
-
-    /// The column a stored `value` names; anything unrecognised is the sidebar, where a fresh launch
-    /// starts.
+    /// The column a stored `value` (a `Column` raw value) names; anything unrecognised is the
+    /// sidebar, where a fresh launch starts.
     static func column(storageValue value: String) -> Column {
-        switch value {
-        case "content": .content
-        case "detail": .detail
-        default: .sidebar
-        }
+        Column(rawValue: value) ?? .sidebar
     }
 
     /// The column to show for a restored `column`, given whether an article is selected.

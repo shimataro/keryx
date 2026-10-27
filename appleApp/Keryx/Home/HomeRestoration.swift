@@ -10,6 +10,15 @@
 struct HomeRestoration {
     typealias Column = CompactSearchNavigation.Column
 
+    // The scene storage keys `HomeView` keeps the restored state under. Scene storage from an earlier
+    // launch is read back by these exact strings, so they must not change.
+    /// The collapsed stack's column, as a `Column` raw value.
+    static let compactColumnKey = "home.compactColumn"
+    /// The article the stored reader position belongs to.
+    static let readerScrollArticleIdKey = "reader.scrollArticleId"
+    /// The stored reader position, as a fraction of the article's scrollable height.
+    static let readerScrollFractionKey = "reader.scrollFraction"
+
     /// Whether the restored column has been checked against the restored selection — once per view.
     private var columnChecked = false
     /// Set when that check moved the column, so the move is not taken for the user's own navigation.

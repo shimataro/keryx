@@ -28,16 +28,16 @@ struct HomeView: View {
     /// on the same column from the first frame (see `CompactColumnRestoration`).
     private var compactColumn: NavigationSplitViewColumn {
         get { HomeView.splitViewColumn(CompactColumnRestoration.column(storageValue: storedCompactColumn)) }
-        nonmutating set { storedCompactColumn = CompactColumnRestoration.storageValue(HomeView.compactSearchColumn(newValue)) }
+        nonmutating set { storedCompactColumn = HomeView.compactSearchColumn(newValue).rawValue }
     }
-    @SceneStorage("home.compactColumn") private var storedCompactColumn = CompactColumnRestoration.storageValue(.sidebar)
+    @SceneStorage(HomeRestoration.compactColumnKey) private var storedCompactColumn = CompactSearchNavigation.Column.sidebar.rawValue
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> {
         Binding(get: { compactColumn }, set: { compactColumn = $0 })
     }
     /// The selected article's reader scroll position, kept in scene storage like the column so the
     /// relaunch reopens the reader where the user left it (see `ReaderScrollPosition`).
-    @SceneStorage("reader.scrollArticleId") private var readerScrollArticleId = ""
-    @SceneStorage("reader.scrollFraction") private var readerScrollFraction = 0.0
+    @SceneStorage(HomeRestoration.readerScrollArticleIdKey) private var readerScrollArticleId = ""
+    @SceneStorage(HomeRestoration.readerScrollFractionKey) private var readerScrollFraction = 0.0
     /// When the restored column and reader position are checked and withdrawn.
     @State private var restoration = HomeRestoration()
     private var restoredReaderScroll: ReaderScrollPosition? {
