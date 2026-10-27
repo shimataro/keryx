@@ -166,4 +166,25 @@ class ReaderScrollRestorationTest {
         restored.documentReplaced(1)
         assertEquals(0.4f, restored.documentFinished(start))
     }
+
+    @Test
+    fun aViewRebuiltAfterItsRendererDiedReturnsToThePosition() {
+        val restoration = ReaderScrollRestoration()
+        restoration.documentReplaced(1)
+        restoration.scrolled(0.4f, start)
+        restoration.reloadStarted()
+        // The rebuilt WebView loads the same document again: not a replacement.
+        restoration.documentReplaced(1)
+        assertEquals(0.4f, restoration.documentFinished(start))
+    }
+
+    @Test
+    fun aDifferentDocumentArrivingDuringTheRebuildStartsAtTheTop() {
+        val restoration = ReaderScrollRestoration()
+        restoration.documentReplaced(1)
+        restoration.scrolled(0.4f, start)
+        restoration.reloadStarted()
+        restoration.documentReplaced(2)
+        assertNull(restoration.documentFinished(start))
+    }
 }

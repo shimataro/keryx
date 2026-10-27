@@ -61,9 +61,11 @@ internal class ReaderScrollRestoration(restored: SavedReaderScroll? = null) {
     /**
      * The reader is about to load the document keyed [key] because its content changed. Where the
      * restored offer is for that document, [documentFinished] then scrolls it there; otherwise it
-     * starts at the top.
+     * starts at the top. The current document loaded again (into a WebView rebuilt after its
+     * renderer died) is no replacement, and leaves a pending [reloadStarted] in place.
      */
     fun documentReplaced(key: Int) {
+        if (key == documentKey) return
         documentKey = key
         val target = offer?.takeIf { it.documentKey == key }?.let { restorable(it.fraction) }
         if (target != null) offer = null

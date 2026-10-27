@@ -610,6 +610,19 @@ as the SwiftUI reader's). Within a running app nothing changes: another document
 starts at the top. The desktop `actual`s are no-ops — `WryWebViewPanel` exposes no scroll position,
 and the process is never killed under a live window there.
 
+**A dead Android renderer rebuilds the reader instead of taking the app down.** Android's WebView
+renderer is a separate process the OS can kill (memory pressure) or that can crash, and unless a
+`WebViewClient.onRenderProcessGone` returns true for every WebView it hosted, Android kills the app
+process with it. The web view library's own client (1.0.0-beta-02) does not implement that callback,
+so `ArticleWebView` passes the library a `factory` (`platform/ReaderWebViewFactory.kt`'s
+`readerWebViewFactory`) whose Android `actual` builds a `WebView` subclass that wraps whatever client
+the library assigns in one delegating the library's five callbacks and adding `onRenderProcessGone`,
+which reports the death and returns true. A WebView whose renderer died cannot be reused, so
+`ArticleWebView` then rebuilds it under a new `key` — the HTML is loaded again and the reading position
+restored through the same `ReaderScrollRestoration` as above. The renderer is shared by every reader
+WebView, so each carousel slot rebuilds its own. The subclass can go once the library handles the
+callback itself. Desktop's `actual` returns null, keeping the library's default factory.
+
 **At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
 shared `commonMain` composable) — a horizontal drag moves to the next/previous article, and the
 pages either side of the one on screen are real, mounted `WebView`s, rendered through

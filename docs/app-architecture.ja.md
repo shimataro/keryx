@@ -602,6 +602,19 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 何もしない — `WryWebViewPanel` はスクロール位置を公開しておらず、そもそもウィンドウが開いたままプロセスが
 終了させられることがない。
 
+**Android のレンダラーが落ちても、アプリごと落ちずにリーダーを作り直す。** Android の WebView のレンダラーは
+別プロセスで、OS が（メモリ不足で）終了させたりクラッシュしたりすることがある。それをホストしていたすべての
+WebView で `WebViewClient.onRenderProcessGone` が true を返さないと、Android はアプリのプロセスも一緒に終了させる。
+WebView ライブラリ自身のクライアント（1.0.0-beta-02）はこのコールバックを実装していないため、`ArticleWebView` は
+ライブラリに `factory`（`platform/ReaderWebViewFactory.kt` の `readerWebViewFactory`）を渡す。その Android の
+`actual` は `WebView` のサブクラスを作り、ライブラリが設定するクライアントを、ライブラリの 5 つのコールバックを
+委譲しつつ `onRenderProcessGone` を加えたクライアントで包む。これはレンダラーの終了を通知して true を返す。
+レンダラーが落ちた WebView は再利用できないので、`ArticleWebView` は新しい `key` でそれを作り直す — HTML を
+読み込み直し、上記と同じ `ReaderScrollRestoration` で読んでいた位置に戻す。レンダラーはリーダーのすべての
+WebView で共有されるので、カルーセルの各スロットがそれぞれ自分の WebView を作り直す。このサブクラスは、
+ライブラリ自身がこのコールバックを扱うようになれば不要になる。デスクトップの `actual` は null を返し、
+ライブラリ既定の factory を使う。
+
 **狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
 commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
 両隣は実際にマウントされた `WebView` であり、それはページャ自身の item content ではなく
