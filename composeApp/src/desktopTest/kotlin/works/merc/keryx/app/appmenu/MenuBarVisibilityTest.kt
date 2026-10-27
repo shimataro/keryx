@@ -4,6 +4,7 @@ import works.merc.keryx.app.data.local.LocalSettings
 import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.menu.AppMenuActions
 import works.merc.keryx.app.ui.menu.AppMenuLabels
@@ -35,12 +36,13 @@ class MenuBarVisibilityTest {
     private var addFeedCalled = false
     private var refreshCalled = false
     private var unsubscribeCalled = false
+    private val listModesSet = mutableListOf<ArticleListMode>()
     private var toggledTo: Boolean? = null
 
     private fun labels() = AppMenuLabels(
         fileMenu = "File", addFeed = "AddFeed", addFolder = "AddFolder", addTag = "AddTag",
         importOpml = "Import", exportOpml = "Export", closeWindow = "Close", settings = "Settings", quit = "Quit",
-        viewMenu = "View", search = "Search", unreadOnly = "UnreadOnly", toggleSort = "ToggleSort",
+        viewMenu = "View", search = "Search", allArticles = "AllArticles", unreadOnly = "UnreadOnly", starredOnly = "StarredOnly", toggleSort = "ToggleSort",
         markAllRead = "MarkAllRead", showMenuBar = "ShowMenuBar",
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
@@ -53,7 +55,7 @@ class MenuBarVisibilityTest {
 
     private fun actions() = AppMenuActions(
         addFeed = { addFeedCalled = true }, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
-        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setUnreadOnly = {},
+        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = { listModesSet += it },
         toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
@@ -69,12 +71,13 @@ class MenuBarVisibilityTest {
         menuBarVisible: Boolean = false,
         feedListKeysActive: Boolean = true,
         onHome: Boolean = true,
+        starredModeAvailable: Boolean = true,
     ) = buildAppMenuTree(
         ui = computeMenuUiState(
             onHome = onHome, hasSelectedArticle = true, selectedArticleHasUrl = true,
             selectedArticleCanOpenInBrowser = true,
             activity = ActivitySnapshot(), canSyncNow = true,
-            searchActive = false, unreadOnly = false, opmlBusy = false,
+            searchActive = false, listMode = ArticleListMode.All, starredModeAvailable = starredModeAvailable, opmlBusy = false,
             hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
             selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
         ),
@@ -98,7 +101,9 @@ class MenuBarVisibilityTest {
         assertEquals(KeyEvent.VK_F, AppMenuShortcut.Search.awtKeyCode())
         assertEquals(KeyEvent.VK_I, AppMenuShortcut.ImportOpml.awtKeyCode())
         assertEquals(KeyEvent.VK_E, AppMenuShortcut.ExportOpml.awtKeyCode())
-        assertEquals(KeyEvent.VK_U, AppMenuShortcut.UnreadOnly.awtKeyCode())
+        assertEquals(KeyEvent.VK_1, AppMenuShortcut.ListModeAll.awtKeyCode())
+        assertEquals(KeyEvent.VK_2, AppMenuShortcut.ListModeUnread.awtKeyCode())
+        assertEquals(KeyEvent.VK_3, AppMenuShortcut.ListModeStarred.awtKeyCode())
     }
 
     // --- shortcut matching ---
@@ -117,8 +122,12 @@ class MenuBarVisibilityTest {
         val importOpml = matchMenuShortcut(tree(), KeyEvent.VK_I, ctrl = true, meta = false)
         assertTrue(importOpml is AppMenuNode.Item && importOpml.label == "Import")
 
-        val unreadOnly = matchMenuShortcut(tree(), KeyEvent.VK_U, ctrl = true, meta = false)
-        assertTrue(unreadOnly is AppMenuNode.CheckboxItem && unreadOnly.label == "UnreadOnly")
+        val modes = listOf(KeyEvent.VK_1, KeyEvent.VK_2, KeyEvent.VK_3)
+            .map { (matchMenuShortcut(tree(), it, ctrl = true, meta = false) as AppMenuNode.CheckboxItem).label }
+        assertEquals(listOf("AllArticles", "UnreadOnly", "StarredOnly"), modes)
+
+        // Ctrl+U no longer switches the list mode (only Ctrl+Shift+U, toggle read, uses U).
+        assertNull(matchMenuShortcut(tree(), KeyEvent.VK_U, ctrl = true, meta = false))
     }
 
     @Test
@@ -258,6 +267,16 @@ class MenuBarVisibilityTest {
 
         assertFalse(handled)
         assertFalse(addFeedCalled)
+    }
+
+    @Test
+    fun `ctrl 3 is not consumed while starred mode is unavailable`() {
+        val component = Panel().also { Frame().add(it) }
+        val dispatcher = MenuShortcutDispatcher(currentTree = { tree(starredModeAvailable = false) })
+
+        assertFalse(dispatcher.dispatchKeyEvent(ctrlKeyEvent(component, KeyEvent.VK_3)))
+        assertTrue(dispatcher.dispatchKeyEvent(ctrlKeyEvent(component, KeyEvent.VK_2)))
+        assertEquals(listOf(ArticleListMode.Unread), listModesSet)
     }
 
     @Test

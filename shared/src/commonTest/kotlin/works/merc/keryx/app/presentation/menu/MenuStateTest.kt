@@ -1,6 +1,7 @@
 package works.merc.keryx.app.presentation.menu
 
 import works.merc.keryx.app.domain.ActivitySnapshot
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -16,7 +17,8 @@ class MenuStateTest {
         activity: ActivitySnapshot = ActivitySnapshot(),
         canSyncNow: Boolean = false,
         searchActive: Boolean = false,
-        unreadOnly: Boolean = false,
+        listMode: ArticleListMode = ArticleListMode.All,
+        starredModeAvailable: Boolean = true,
         opmlBusy: Boolean = false,
         hasSelectedFeed: Boolean = false,
         feedListKeysActive: Boolean = false,
@@ -31,7 +33,8 @@ class MenuStateTest {
         activity = activity,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
-        unreadOnly = unreadOnly,
+        listMode = listMode,
+        starredModeAvailable = starredModeAvailable,
         opmlBusy = opmlBusy,
         hasSelectedFeed = hasSelectedFeed,
         feedListKeysActive = feedListKeysActive,
@@ -57,7 +60,7 @@ class MenuStateTest {
         assertTrue(ui.addItemsEnabled)
         assertTrue(ui.opmlEnabled)
         assertTrue(ui.searchEnabled)
-        assertTrue(ui.unreadOnlyEnabled)
+        assertTrue(ui.listModeEnabled)
         assertTrue(ui.markAllReadEnabled)
         assertTrue(ui.toggleSortEnabled)
         assertTrue(ui.openSettingsEnabled)
@@ -79,7 +82,7 @@ class MenuStateTest {
         assertFalse(ui.addItemsEnabled)
         assertFalse(ui.opmlEnabled)
         assertFalse(ui.searchEnabled)
-        assertFalse(ui.unreadOnlyEnabled)
+        assertFalse(ui.listModeEnabled)
         assertFalse(ui.markAllReadEnabled)
         assertFalse(ui.toggleSortEnabled)
         assertFalse(ui.openSettingsEnabled)
@@ -156,17 +159,37 @@ class MenuStateTest {
         assertTrue(state(searchActive = false).toggleSortEnabled)
     }
 
-    // --- Unread-only is enabled uniformly regardless of filter/search state ---
+    // --- List mode is enabled uniformly regardless of filter/search state ---
 
     @Test
-    fun unread_only_enabled_regardless_of_search_state() {
-        assertTrue(state(searchActive = false).unreadOnlyEnabled)
-        assertTrue(state(searchActive = true).unreadOnlyEnabled)
+    fun list_mode_enabled_regardless_of_search_state() {
+        assertTrue(state(searchActive = false).listModeEnabled)
+        assertTrue(state(searchActive = true).listModeEnabled)
     }
 
     @Test
-    fun unread_only_disabled_away_from_home() {
-        assertFalse(state(onHome = false).unreadOnlyEnabled)
+    fun list_mode_disabled_away_from_home() {
+        assertFalse(state(onHome = false).listModeEnabled)
+        assertFalse(state(onHome = false).starredModeEnabled)
+    }
+
+    @Test
+    fun starred_mode_follows_availability() {
+        assertTrue(state(starredModeAvailable = true).starredModeEnabled)
+        assertFalse(state(starredModeAvailable = false).starredModeEnabled)
+        // The other two modes stay available under the Starred filter.
+        assertTrue(state(starredModeAvailable = false).listModeEnabled)
+    }
+
+    @Test
+    fun starred_mode_is_checked_when_chosen_or_fixed_by_the_starred_filter() {
+        assertTrue(state(listMode = ArticleListMode.Starred).starredModeChecked)
+        assertTrue(state(starredModeAvailable = false).starredModeChecked)
+        assertTrue(state(listMode = ArticleListMode.Unread, starredModeAvailable = false).starredModeChecked)
+        // State, not enablement: away from Home the item is disabled but still shows it.
+        assertTrue(state(onHome = false, starredModeAvailable = false).starredModeChecked)
+        assertFalse(state(listMode = ArticleListMode.All).starredModeChecked)
+        assertFalse(state(listMode = ArticleListMode.Unread).starredModeChecked)
     }
 
     // --- Refresh / sync gating ---
@@ -314,14 +337,13 @@ class MenuStateTest {
     // --- Checkbox passthrough ---
 
     @Test
-    fun unread_only_checked_mirrors_input() {
-        assertTrue(state(unreadOnly = true).unreadOnlyChecked)
-        assertFalse(state(unreadOnly = false).unreadOnlyChecked)
+    fun list_mode_mirrors_input() {
+        ArticleListMode.entries.forEach { assertEquals(it, state(listMode = it).listMode) }
     }
 
     @Test
-    fun unread_only_checked_reflects_state_even_off_home() {
-        // The checkbox reflects the persisted toggle regardless of the active screen.
-        assertEquals(true, state(onHome = false, unreadOnly = true).unreadOnlyChecked)
+    fun list_mode_reflects_state_even_off_home() {
+        // The checked item reflects the mode regardless of the active screen.
+        assertEquals(ArticleListMode.Unread, state(onHome = false, listMode = ArticleListMode.Unread).listMode)
     }
 }

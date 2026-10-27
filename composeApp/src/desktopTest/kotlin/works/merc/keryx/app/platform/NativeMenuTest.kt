@@ -245,6 +245,14 @@ class NativeMenuTest {
     }
 
     @Test
+    fun swingSetsAnAcceleratorOnACheckItemShortcut() {
+        val handle = handleOf(NativeCheckMenuItem("All", checked = true, NativeMenuShortcut(Key.One, ctrl = true)) {})
+
+        val item = handle.popupMenu.getComponent(0) as javax.swing.JCheckBoxMenuItem
+        assertEquals(KeyStroke.getKeyStroke(KeyEvent.VK_1, InputEvent.CTRL_DOWN_MASK), item.accelerator)
+    }
+
+    @Test
     fun swingLeavesAcceleratorNullWithNoShortcut() {
         val handle = handleOf(NativeMenuItem("Refresh") {})
 
@@ -303,6 +311,15 @@ class NativeMenuTest {
         val shortcut = handle.popupMenu.getItem(0).shortcut
         assertEquals(KeyEvent.VK_R, shortcut?.key)
         assertTrue(shortcut?.usesShiftModifier() == true)
+    }
+
+    @Test
+    fun awtSetsAMenuShortcutOnACheckItemShortcut() {
+        val handle = awtHandleOf(NativeCheckMenuItem("Starred", checked = false, NativeMenuShortcut(Key.Three, ctrl = true)) {})
+
+        val shortcut = handle.popupMenu.getItem(0).shortcut
+        assertEquals(KeyEvent.VK_3, shortcut?.key)
+        assertTrue(shortcut?.usesShiftModifier() == false)
     }
 
     @Test

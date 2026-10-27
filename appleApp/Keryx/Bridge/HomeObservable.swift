@@ -82,7 +82,8 @@ final class HomeObservable: ObservableAssignment {
     private(set) var hasSearchResults = false
     private(set) var pendingSearchFocus: Bool = false
 
-    private(set) var unreadOnly: Bool = false
+    private(set) var listMode: ArticleListMode = .all
+    private(set) var starredModeEnabled: Bool = true
     private(set) var newestFirst: Bool = true
     private(set) var canHideRead: Bool = false
 
@@ -340,7 +341,7 @@ final class HomeObservable: ObservableAssignment {
         async let t17: () = observeSearching()
         async let t18: () = observeSearchResults()
         async let t19: () = observePendingSearchFocus()
-        async let t20: () = observeUnreadOnly()
+        async let t20: () = observeListMode()
         async let t21: () = observeNewestFirst()
         async let t22: () = observeCanHideRead()
         async let t23: () = observeArticles()
@@ -360,6 +361,7 @@ final class HomeObservable: ObservableAssignment {
         async let t35: () = observeArticleListHasRows()
         async let t37: () = observeRefreshingFeedIds()
         async let t38: () = observeRefreshingFolderIds()
+        async let t39: () = observeStarredModeEnabled()
         #if os(iOS)
         async let t36: () = observeManualRefreshStatus()
         #endif
@@ -367,7 +369,7 @@ final class HomeObservable: ObservableAssignment {
             t1, t1b, t2, t3, t4, t5, t6, t7, t8, t9, t10,
             t11, t12, t13, t14, t15, t16, t17, t18, t19, t20,
             t21, t22, t23, t24, t25, t25b, t25c, t26, t27, t28, t29, t30,
-            t31, t32, t33, t34, t35, t37, t38
+            t31, t32, t33, t34, t35, t37, t38, t39
         )
         #if os(iOS)
         await t36
@@ -529,8 +531,12 @@ final class HomeObservable: ObservableAssignment {
         for await v in viewModel.pendingSearchFocus { assignIfChanged(\.pendingSearchFocus, v.boolValue) }
     }
 
-    private func observeUnreadOnly() async {
-        for await v in viewModel.unreadOnly { assignIfChanged(\.unreadOnly, v.boolValue) }
+    private func observeListMode() async {
+        for await v in viewModel.mode { assignIfChanged(\.listMode, v) }
+    }
+
+    private func observeStarredModeEnabled() async {
+        for await v in viewModel.starredModeEnabled { assignIfChanged(\.starredModeEnabled, v.boolValue) }
     }
 
     private func observeNewestFirst() async {
