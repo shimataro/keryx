@@ -1361,8 +1361,8 @@ selection's pin is then dropped, but only if it is still the very pin the re-tri
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
 (`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
-started from the settings screen counts too), and the article list toolbar's explicit "hide
-read" action (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
+started from the settings screen counts too), and the View menu's explicit "Hide Read Articles"
+command (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
 gates on `canHideRead` (a `StateFlow` combining `unreadOnly`, the list currently on screen — search
 results while searching, the filter's own list otherwise, the same resolution `pagerArticles` uses
@@ -1842,8 +1842,8 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
 - **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
   outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
   circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
-  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the unread-only /
-  hide-read group `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
+  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the list mode
+  menu `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
   inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
   `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
