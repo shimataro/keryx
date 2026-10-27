@@ -280,12 +280,14 @@ next/previous article, following the finger and settling once released. A swipe 
 scroll when its vertical travel is not clearly smaller than its horizontal travel, and ignored for
 a moment after scrolling so a flick meant to scroll does not change the article. This applies
 whenever the reader is on screen at a narrower-than-desktop width. At the 3-pane desktop width the
-reader is keyboard-driven (J/K) and the swipe does not apply.
+reader is keyboard-driven (J/K) and the swipe does not apply. See "Home's adaptive pane layout" in
+[app-architecture.md](app-architecture.md).
 
 **Pull-to-refresh.** On Android and the native iOS / iPadOS app, pulling the article list down
 refreshes only the feeds behind the current list (unlike Refresh All). On iOS, pulling the sidebar
 refreshes every feed. The gesture is disabled while search results are showing or there are no
-feeds. See [app-architecture.md](app-architecture.md) for the full table and platform differences.
+feeds. See "Refresh indicators and pull-to-refresh" in [app-architecture.md](app-architecture.md) for
+the full table and platform differences.
 
 **iOS refresh status.** With no Refresh All button to spin, iOS shows a refresh the user started (a
 pull, Refresh All, or a feed's own Refresh) in the centre of the bottom bar: "Checking for new
@@ -293,7 +295,7 @@ articles…" with a spinner while it runs (through the cloud sync that follows),
 about two and a half seconds — "N new articles", "No new articles", or, when no feed could be
 reached, a failure message behind a warning symbol that also stays in the notification center. An
 automatic refresh and a sync on their own show nothing there; idle shows nothing. See "Refresh
-feedback" above.
+feedback" above, and "Refresh indicators and pull-to-refresh" in [app-architecture.md](app-architecture.md).
 
 **Per-feed refresh spinner.** While feeds refresh, whatever started it, every feed the refresh
 covers shows a small spinner in place of its icon in the feed list, on every platform, until its
