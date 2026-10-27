@@ -27,51 +27,35 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
 
 ## 4. Sync Method
 
-- No account registration in Keryx. The user's own cloud storage (Dropbox / OneDrive / Google Drive) is used as the sync bus. Only one active connection is allowed at a time; the user selects and switches providers (no simultaneous connections).
-- The sync file is a gzip-compressed `VACUUM INTO` snapshot of `keryx.db` (excluding the local-only
-  `articles_fts` search index, the four `idx_articles_*` indexes, and the `sync_state` table) — see
-  [sync-architecture.md](sync-architecture.md).
+- No account registration in Keryx. The user's own cloud storage (Dropbox / OneDrive / Google Drive)
+  is used as the sync bus. Only one active connection is allowed at a time; the user selects and
+  switches providers (no simultaneous connections).
+- **OneDrive supports personal Microsoft accounts only** — work/school accounts cannot be connected.
+  See "Cloud Authentication" in [sync-architecture.md](sync-architecture.md).
+- **Google Drive on Android** is offered only where Google Play services is installed, enabled and
+  up to date. Android uses Google's Play services `AuthorizationClient`; devices without working Play
+  services, and the F-Droid build, are not offered Google Drive. The same account and sync file are
+  shared with desktop. See "Google Drive on Android" in [sync-architecture.md](sync-architecture.md).
+- The sync file format, `VACUUM INTO` snapshot, excluded local-only tables/indexes, OAuth details,
+  token storage, and merge behavior are described in [sync-architecture.md](sync-architecture.md).
 - Sync targets: subscription list, folders, read state, stars, tag structure, article body, global
   settings.
 - Non-sync targets: device-local settings, cloud authentication info.
 - Import / export is OPML.
 - Read/unread and star changes reach other devices in batches rather than one sync per article — once
-  reading pauses for a few minutes, when the app leaves the foreground (hidden to the tray on desktop; opening a link in the browser does not count),
-  or with the next refresh or manual sync — since every sync transfers the whole sync file. Subscription,
-  folder, tag and settings changes still sync within seconds. See [sync-architecture.md](sync-architecture.md).
-- While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its current
-  progress (checking the cloud, downloading, merging, updating the search index, preparing the snapshot, uploading, or archiving) instead of just a plain spinner, so a long first-ever sync doesn't look stalled — see
+  reading pauses for a few minutes, when the app leaves the foreground, or with the next refresh or
+  manual sync. Subscription, folder, tag and settings changes still sync within seconds. See
   [sync-architecture.md](sync-architecture.md).
+- While a sync is running, the connected provider's row in the Cloud Sync settings tab shows its
+  current progress instead of just a plain spinner, so a long first sync doesn't look stalled.
 - **On Android and iOS, automatic sync waits for Wi-Fi by default.** Each sync uploads the whole
-  database, so an automatic sync (after a change, a background refresh, or at startup) is held back
-  while the device is on a metered network — mobile data or tethering, and on Android also a Wi-Fi the user marked as metered — and while the OS's Data Saver / Low Data Mode is on. The Cloud Sync settings tab
-  offers "Sync automatically over mobile data" (off by default, device-local, shown only while a
-  provider is connected) to allow metered networks; Data Saver / Low Data Mode always defers. While a
-  sync is held back, the connected provider's row says the sync is paused to save data and will run on an unrestricted network (the reason is not distinguished: it may be a metered network, or Data Saver / Low Data Mode, which the opt-in does not override), and it
-  runs as soon as the network allows — on Android even with the app closed. "Sync now", "Refresh All"
-  and pull-to-refresh always sync immediately. Automatic feed refreshes continue on a metered network
-  (they are small conditional requests) and stop only under Data Saver / Low Data Mode. Desktop and
-  macOS are never restricted. See "Network Gate" in [sync-architecture.md](sync-architecture.md).
-- **OneDrive supports personal Microsoft accounts only** — a work/school (Microsoft 365 / Entra ID)
-  account cannot be connected. Keryx keeps its sync file in OneDrive's hidden per-app folder, and the
-  Graph permission that grants access to only that folder is offered for personal accounts alone;
-  supporting an organizational account would mean requesting access to the user's entire drive
-  instead. See "Cloud Authentication" in [sync-architecture.md](sync-architecture.md).
-- **Android reaches Google Drive differently, and only where Google Play services is installed, enabled and up to date.**
-  Dropbox and OneDrive are PKCE public clients using the same `keryx://oauth2/callback` custom-URI
-  redirect as desktop, but Google's OAuth policy deprecates both redirect styles for its Android
-  client type, so the desktop configuration (a "Desktop app" client using loopback redirect +
-  `client_secret`) cannot be reused there. Android uses Google's own recommended replacement
-  instead — Play services' `AuthorizationClient`, which needs neither a client secret nor a backend
-  server. A device whose Play services is missing (a de-Googled ROM), disabled, or too old to serve
-  an authorization request is therefore not offered Google Drive at all, while Dropbox, OneDrive and
-  local-only work as usual. The same account and the same sync file
-  are shared with the desktop app. See "Google Drive on Android" in
-  [sync-architecture.md](sync-architecture.md).
-- **The F-Droid build has no Google Drive at all.** F-Droid's inclusion policy forbids Google Play
-  services, so the build F-Droid makes (the `fdroid` flavor — see [build.md](build.md)) ships none of
-  it and never offers Google Drive — the same as on a device without Play services: Dropbox,
-  OneDrive and local-only work as usual.
+  database, so an automatic sync is held back on a metered network (mobile data, tethering, a Wi-Fi
+  marked as metered) and under the OS's Data Saver / Low Data Mode, and runs as soon as the network
+  allows. The Cloud Sync settings tab offers "Sync automatically over mobile data" (off by default,
+  device-local) to allow metered networks; Data Saver / Low Data Mode always defers. "Sync now"
+  and "Refresh All" always sync immediately; pull-to-refresh does too when the selected scope has
+  feeds and a provider is connected. Desktop and macOS are never restricted.
+  See "Network Gate" in [sync-architecture.md](sync-architecture.md).
 
 ## 5. Conflict Resolution Policy
 
@@ -105,71 +89,31 @@ data exists in the cloud it is automatically merged (imported) during the initia
   "Narrower widths" has the exact condition), so the button is reachable without the user having to
   find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
-- In-app update (download and install, not just a link to the release page). The macOS app updates
-  through its own route, described at the end of this item; everywhere else it is supported for
-  a Windows MSI install or portable ZIP, a Linux portable ZIP (a deb/rpm or Snap install
-  falls back to opening the release page, as does any install form the app can't recognize), and a sideloaded
-  Android install (never through Google Play, which already updates the app itself, nor through
-  F-Droid, whose client does the same — the F-Droid build omits the feature altogether). Presented from
-  the moment an update is detected, via the notification-center bell, the desktop task tray, and
-  the application menu's Help menu — the latter two showing one and the same entry, which is also
-  where a check can be asked for on demand ("Check for updates" whenever nothing is pending).
-  Clicking that entry always opens Settings ▸ Updates, which runs the check, download, retry or
-  install and shows its result there — the same feedback as the tab's own buttons, whether the
-  outcome is a find, "up to date", a failure, or an update this install can't apply itself;
-  every download and every install remains a separate, explicit user action — nothing installs
-  silently or automatically. The downloaded file is verified against the GitHub release's own
-  SHA-256 digest before anything is installed. See [background-update.md](background-update.md)
-  for the full design and [SECURITY.md](../SECURITY.md) for what that verification does and does
-  not guarantee. The macOS app updates through its own route instead — the app menu's "Check for
-  Updates…", plus a periodic automatic check that Settings ▸ General can turn off — with the
-  update's EdDSA signature verified before it is installed (Sparkle; see "Distribution and
-  coexistence" in [app-architecture.md](app-architecture.md)).
+- In-app update on Windows, Linux, and Android (download and install, not just a link to the release
+  page), and through Sparkle on macOS. Updates are surfaced via the notification-center bell, desktop
+  task tray, and application menu; clicking any of those routes opens Settings ▸ Updates. Every
+  download and install is an explicit user action; downloaded files are verified against the GitHub
+  release's SHA-256 digest (EdDSA signature on macOS) before installation. Install forms the app
+  cannot update in-place (deb/rpm/Snap on Linux, Google Play or F-Droid builds on Android) open the
+  release page instead. The F-Droid build omits the feature altogether. See
+  [background-update.md](background-update.md) and [SECURITY.md](../SECURITY.md).
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available, and the reader toolbar's button for it is a read/unread toggle that shows the article's state (a filled dot while it is unread, like the article list's own unread dot) — so a tap on a reader shown alone, with the list out of sight, is visibly acknowledged and can be undone. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
 - **The article list shows one of three modes: All, Unread, or Starred.** They are mutually exclusive
-  rather than two independent filters: an article is marked read the moment it is selected, so almost
-  every starred article is already read, and "unread and starred" would show an empty list that reads
-  as "nothing is starred here". The current mode names a pop-up button at the start of the article
-  list's toolbar (filled whenever the mode narrows the list), and the View menu lists the three as
-  check items, which ⌘/Ctrl+1, 2 and 3 choose (All, Unread, Starred); on Windows, Linux and the
-  Compose macOS build the pop-up button's own menu shows the same keys. On iOS / iPadOS, where the
-  toolbar has no room for the mode's name, the button shows the mode's icon with the pop-up button's
-  up-and-down chevrons, so it does not read as a button that acts at once. Choosing the current mode again changes nothing.
-  - **Starred** narrows whatever is selected — a feed, a folder, a tag or All Feeds — to its starred
-    articles, read or not, and applies to search results as well. It lasts for the session only:
-    switching to another feed, folder or tag keeps it, so several sources' starred articles can be
-    looked through in turn, but the next launch starts again from the saved All/Unread mode. It
-    cannot be chosen while the subscription list's own Starred item is selected, which already shows
-    nothing else and is the only place starred articles of an unsubscribed feed remain. Selecting that
-    item does not leave Starred mode: going back to a feed, folder, tag or All Feeds shows it starred
-    again, whatever was chosen there — with Starred checked there throughout, finding it gone on the
-    way back would not be intuitive. There it is shown **checked and disabled**, beside the All or Unread
-    check that still chooses among the starred articles, and the toolbar's button names that All or
-    Unread. This is the one place two of the three are checked at once — a deliberate exception to
-    their being mutually exclusive: a list of starred articles only, with Starred unchecked in its
-    own menus, read as if Starred did not apply there, so the check says it always does. An article unstarred while in it stays in the list until
-    the selection or the mode changes, and "Mark all as read" marks only the articles shown. A
-    starred-mode list with nothing in it says so, with a button that shows all articles again.
-  - **All / Unread** are saved and restored at the next launch, as before (the Starred item keeps a
-    choice of its own). Under the Starred item, "Mark all as read" likewise marks the articles shown.
+  rather than two independent filters, since almost every starred article is already read. The
+  current mode names a pop-up button at the start of the article list's toolbar, and the View menu
+  lists the three as check items chosen with ⌘/Ctrl+1, 2 and 3. **Starred** narrows whatever is
+  selected (a feed, folder, tag or All Feeds, including search results) to its starred articles and
+  lasts for the session only; while the subscription list's own Starred item is selected it is shown
+  checked and disabled. **All / Unread** are saved and restored at the next launch. See
+  [app-architecture.md](app-architecture.md) for the details.
 - **Unread mode deliberately does not hide an article the instant it becomes read** (so the list doesn't shift under the reader while reading down it) — the article list's own toolbar carries a separate "hide read" action for pulling the list back to strictly-unread on demand, placed directly beside the mode button (and away from mark-all-read, so the two aren't mistaken for each other). It stays visible but disabled whenever there's nothing to hide — no read article other than the one currently selected, or a mode other than Unread — and running it never leaves Unread mode.
-- **New articles that land beyond the current scroll position, toward the list's fresh end, surface
-  as a floating pill** (e.g. "12 new articles") rather than silently piling up unseen past where the
-  list happens to be scrolled — tapping it jumps straight to them. The fresh end follows the sort
-  direction (the top when newest first, the bottom when oldest first), and scrolling all the way to
-  it always clears the pill. The list is ordered by publish date, so a new article can also land
-  mid-list or past the stale end of what's on screen (an older publish date, or none at all); such
-  an article is not counted, since scrolling to the fresh end would never bring it into view. This
-  covers arrival while the list is already open: a manual/background refresh, pull-to-refresh, or a cloud sync merging in articles fetched on
-  another device (an automatic refresh or a sync raises no OS notification while the app is in
-  front — see "Refresh feedback" in §9). It appears at every window width and on every platform, including Android's
-  single-pane layout, where the feed list's own unread badges are hidden behind the navigation
-  drawer. It does **not** appear the first time a list that had no articles at all gets its first
-  ones (a newly subscribed feed, an empty folder/tag that just gained a feed) — there was nothing
-  to have missed yet — nor for a feed's own articles right after subscribing to it, since those are
-  already right there in front of the person who just added it. Nor does an existing article that merely
-  re-enters a list (starred again after being unstarred, or its feed moved into the folder/tag being
-  viewed) count as new — only an article that has actually just arrived does.
+- **New articles that arrive beyond the current scroll position, toward the list's fresh end, surface
+  as a floating pill** (e.g. "12 new articles") rather than silently piling up; tapping it jumps to
+  them. The fresh end follows the sort direction, and scrolling to it clears the pill. Articles that
+  land mid-list or past the stale end are not counted. The pill appears for foreground arrivals
+  (manual/background refresh, pull-to-refresh, cloud sync) at every width and platform. It does **not**
+  appear the first time an empty list gets articles, nor when an existing article merely re-enters a
+  list (re-starred, feed moved) — only an article that has actually just arrived counts.
 - Stars (persistent), open in external browser. "Open in browser" (and a feed's "Open site") applies to
   `http`/`https` links only: a link of any other scheme, or a relative one, is never handed to the OS — the
   action stays visible but disabled on every route (toolbar, menu bar, shortcut, context menu), while "Copy URL"
@@ -187,29 +131,17 @@ data exists in the cloud it is automatically merged (imported) during the initia
   filled in; anything else in the text, and any other scheme, is ignored. Nothing is subscribed until the
   user confirms in the dialog. A link shared during first-run Setup waits until Setup is done; one shared
   while the dialog is already open replaces what was typed there.
-- Local full-text search with SQLite FTS5 (trigram, 2+ characters — terms of 3+ characters use the trigram index, a query made up only of 2-character terms falls back to a `LIKE` scan ordered by recency; mixed queries with any 3+ character term use FTS5 relevance ranking; see [db-schema.md](db-schema.md)). Search narrows whichever subscription-list selection (all feeds, starred, a single feed, a folder, or a tag) is already active, rather than always searching everything — to search across every feed, select "All Feeds" first.
-- Desktop notifications, task tray residence (close minimizes to tray), notification center.
-  On Linux the tray uses the D-Bus `org.kde.StatusNotifierItem` + `com.canonical.dbusmenu` protocols
-  and notifications use `org.freedesktop.Notifications`, falling back to the AWT system tray when no
-  StatusNotifierItem host is running. Desktop also composites the unread count directly onto the
-  Dock/taskbar/window icon as a digit badge. On Android, new-article notifications are posted through
-  `NotificationManagerCompat` (on Android 13+ the OS notification permission is asked for once, in
-  context: an in-app explanation when the app opens with notifications on but not allowed (after which
-  the setting matches the answer, so it is not asked again), or the system request directly when the setting is switched on — and the setting turns
-  off if the permission is refused, with a link to the OS notification settings after a denial) and
-  background refresh runs on `WorkManager`, at roughly the interval configured in Settings (on a
-  metered network or under Data Saver, its sync and refresh follow §4's rule, and a sync held back
-  for the network is handed to a job that waits for a network that allows it); the
-  in-app "check for update" is hidden when the app was installed from an app store (currently just
-  Google Play) rather than sideloaded, since that store already auto-updates the app. Android has no
-  equivalent of the digit badge — the platform has no API to set an app-icon badge count independent
-  of an active notification (unlike iOS's `setApplicationIconBadgeNumber`) — so the app icon instead
-  shows the OS's own notification dot (tied to the presence of an active notification) plus a
-  long-press count via `setNumber` on launchers that support it, a deliberate asymmetry rather than an oversight; see
-  `background-update.md` for the full comparison. The SwiftUI iOS app likewise refreshes in the
-  background (a `BGAppRefreshTask`; the OS picks the timing; on cellular, tethering or under Low Data
-  Mode it follows §4's rule), posts the new-article notification, and shows the total
-  unread count as the app icon's badge.
+- Local full-text search with SQLite FTS5, scoped to the currently selected subscription-list item
+  (all feeds, starred, a feed, folder, or tag). Search terms and ranking details are in
+  [db-schema.md](db-schema.md).
+- Desktop notifications, task tray residence (close minimizes to tray), notification center, and
+  unread badge. Background refresh is followed by a cloud sync when connected. On a metered network or under
+  Data Saver / Low Data Mode, background sync and refresh follow §4's rule. On Android, new-article
+  notifications and background refresh run through the OS channels; the in-app "check for update" is
+  hidden when the app was installed from Google Play or via the F-Droid build, rather than sideloaded.
+  iOS likewise refreshes in the background and posts notifications. Platform-level details (D-Bus
+  protocols on Linux, WorkManager on Android, BGAppRefreshTask on iOS, badge counts, notification
+  permissions) are in [background-update.md](background-update.md).
 
 ### Behavior on Feed URL Change / Disappearance
 
@@ -236,50 +168,35 @@ data exists in the cloud it is automatically merged (imported) during the initia
 ## 9. UI Direction
 
 **Each platform follows its own native UI idiom rather than one shared design system.** macOS gets
-a flat, SF-leaning look; Android gets Material 3's own components, shapes, and ripple feedback; iOS
-is getting native SwiftUI (in development — see §2). **Windows and Linux are the deliberate exception**: Java/Swing's
-own platform integration is too limited to give either OS a comparably native treatment (see the
-Look & Feel, context-menu, and file-dialog specifics below, and `known-issues.md`), so both
-share macOS's flat look instead of getting one of their own. Material 3 is Android's concrete
-instantiation of this principle — where this document says "Material 3", read it as Android-specific
-unless stated otherwise. Android's own color scheme is not always the app's fixed teal palette:
-on Android 12+ (API 31+) the app uses Material You dynamic color, derived from the system wallpaper
-(`dynamicLightColorScheme`/`dynamicDarkColorScheme`), falling back to the fixed teal scheme on older
-versions. Light / dark / system support. 3-pane layout (feed list / article list /
-article detail) + keyboard navigation, adapting down to fewer simultaneous panes on narrower widths
-(see below).
+a flat, SF-leaning look; Android uses Material 3's components, shapes, and ripple feedback; the
+native iOS / iPadOS app is built in SwiftUI (see §2). **Windows and Linux are the deliberate exception**:
+Java/Swing's platform integration is too limited for a comparably native treatment, so both share
+macOS's flat look. Android 12+ uses Material You dynamic color, falling back to the fixed teal
+palette on older versions. Light / dark / system support. The layout is a 3-pane arrangement
+(feed list / article list / article detail) with keyboard navigation, adapting to fewer panes on
+narrower widths (see below).
 
 ### Least surprise
 
 **The app does what the user expects, and nothing the user did not ask for.**
 
-- **Nothing happens unprompted.** Without the user's own action, the app does not navigate, open a
-  drawer or dialog, take focus, move the scroll position, reorder or remove items from the list being
-  read, or change the user's own selection, filters or settings. This holds for background work and
-  notifications too. Data arriving in the background — a refresh's new articles, a cloud sync bringing
-  in what was done on another device — is not such a change, but it lands without disturbing what the
-  user is doing (new articles surface as a pill rather than shifting the list, §7).
-- **An action does what its label or icon says**, with no hidden side effect alongside.
-- **An action that loses data or settings asks first** — unsubscribing, deleting a folder or tag,
-  resetting the cloud sync data, overwriting a file. An action that only changes reading state (marking
-  read, including "Mark all as read") deliberately does not ask.
-- **Platform conventions win.** Shortcuts, back, menu placement, and gestures follow the OS's own
-  standard (see the start of this section); a deliberate departure records its reason in this document.
+- **Nothing happens unprompted.** Without the user's action, the app does not navigate, open drawers
+  or dialogs, move scroll position, reorder or remove items, or change selection, filters or settings.
+  Background work arrives without disturbing the user (new articles surface as a pill rather than
+  shifting the list, §7).
+- **An action does what its label or icon says**, with no hidden side effect.
+- **An action that loses data or settings asks first** — unsubscribing, deleting a folder/tag,
+  resetting cloud sync data, overwriting a file. Actions that only change reading state do not ask.
+- **Platform conventions win.** Shortcuts, back, menu placement, and gestures follow the OS's
+  standard; deliberate departures are recorded in this document.
 - **The same action behaves the same from every route** — see "Actions with more than one route" below.
-- **At a boundary, nothing happens** — doing nothing is not filled in with a different effect.
+- **At a boundary, nothing happens.**
 
-Decisions already made on this principle, as the model to follow:
-
-- Unread-only does not hide an article the instant it becomes read, so the list does not shift under
-  the reader (§7).
-- "Open in browser" stays visible but disabled for a link it cannot open, rather than disappearing (§7).
-- The keyboard-focus outline appears only once a hardware key has been pressed (below).
-- A swipe is ignored for a moment after scrolling, so a flick meant to scroll does not change the
-  article (below).
-- J/K at the first or last article do nothing, rather than re-selecting it and marking it read again
-  (below).
-- A notification's "show feed" action does not open the narrow layout's drawer
-  (`ShowFeedDetail` in [error-design.md](error-design.md)).
+Examples already decided on this principle: Unread mode does not hide an article the instant it
+becomes read; "Open in browser" stays visible but disabled for a link it cannot open; the
+keyboard-focus outline appears only once a hardware key has been pressed; a swipe is ignored for a
+moment after scrolling; J/K at the first or last article do nothing; a notification's "show feed"
+action does not open the narrow layout's drawer (`ShowFeedDetail` in [error-design.md](error-design.md)).
 
 ### Refresh feedback
 
@@ -317,272 +234,79 @@ Why:
 
 ### Actions with more than one route
 
-**An action reachable by more than one route — a toolbar button, the application menu, a context
-menu, a keyboard shortcut, a gesture — behaves identically whichever route invokes it**: the same
-effect, the same enabled/disabled state, and the same feedback. For example, the ✓ the reader's
-copy button shows after a URL copy appears whether the copy came from that button,
-⌘/Ctrl+Shift+C, the menu bar, or the article row's context menu; likewise "Sync now" is enabled
-in the feed list toolbar, the Feed menu and Settings ▸ Cloud sync at exactly the same moments
-(disabled during a connect, disconnect, reset or initial sync, while anything else is running, and
-after a sign-in expires). "Share" (Android only — §7) is enabled in the reader's toolbar and the
-article row's long-press menu under the same rule, and opens the same system share sheet from both.
-
-Routes may differ only in *which item* they act on — a context menu acts on the row it was opened
-on — never in what happens to it; feedback tied to a particular on-screen control appears whenever
-that control is showing the item acted on. For a URL copy that means the reader's ✓ shows only when the copied article is the one the
-reader displays. A platform whose OS does not confirm a copy itself and whose reader is often off
-screen (Android below 13, iOS) also confirms every copy in the app, with a snackbar or a toast; on
-desktop the ✓ is the confirmation, and only a copy of an article the reader does not display — which
-the native macOS app allows from a context menu opened with the keyboard or VoiceOver — is confirmed
-in the app instead, by a VoiceOver announcement (details: "Notification Center" in
-[error-design.md](error-design.md)).
+**An action reachable by more than one route — toolbar button, application menu, context menu,
+keyboard shortcut, gesture — behaves identically whichever route invokes it**: the same effect,
+enabled/disabled state, and feedback. Routes may differ only in *which item* they act on, never in
+what happens to it. The implementation is shared so every route calls the same handler; feedback
+tied to a particular control appears when that control is showing the acted-on item. See
+[error-design.md](error-design.md) "Notification Center" for how copy confirmation is handled per
+platform.
 
 A key that works only in one pane is shown beside a menu item only while it would work:
 Feed ▸ Rename and Delete stay clickable whenever a feed-list item is selected, but the list
-shortcuts F2 (Return on macOS) and Delete are shown, and respond, only while the feed list has
-keyboard focus and no text field is being typed into.
+shortcuts F2 (Return on macOS) and Delete respond only while the feed list has keyboard focus and
+no text field is being typed into.
 
 ### Adaptive layout (width) and touch input
 
-**3-pane width (desktop's steady state).** The window can never narrow below the width all three
-panes need, so it always shows all three, with the feed list as a permanent sidebar pane. "The width
-all three panes need" is measured at the panes' intended sizes rather than their bare minimums: a
-screen just wide enough to cram all three onto their floors at once — an Android tablet held in
-portrait, say — counts as narrower and shows two, while a large Android tablet in landscape is
-genuinely wide enough and does get all three.
+**3-pane width.** The window never narrows below the width all three panes need, so the feed list
+stays a permanent sidebar and the article list and reader are shown beside it.
 
-**Narrower widths.** The feed list instead becomes a Gmail-style navigation drawer — reached via a
-hamburger button, and opened automatically the very first time the app has no feeds and no cloud
-account yet, so a new user sees it (and the "+" button to add a first feed) without having to find
-it themselves. A phone-width screen shows one of the two remaining panes (article list, article
-detail) at a time as a hierarchical stack with its own back control; a tablet-width screen shows
-both together, permanently — there is no narrower state where the reader loses its own back control
-without the article list gaining a permanent one beside it (see the note on the swipe gesture
-below). Nothing about either pane's own content changes between these — only how many are on screen
-together — with one exception: search. On Android, going back from the reader to the article list
-at phone width is a predictive back: while the back gesture is still in progress, the reader slides
-aside to preview the article list behind it (at its scroll position), and releasing completes the
-transition or cancelling slides the reader back. Where the system shows no preview (3-button
-navigation, Android before 14) back simply returns to the list at once. Every other back — closing
-the search bar, the drawer, dialogs, settings, and leaving the app from the article list — is
-unchanged.
+**Narrower widths.** The feed list becomes a navigation drawer, opened via a hamburger button; it
+opens automatically the first time the app has no feeds and no cloud account, so a new user sees
+the "Add feed" button. A phone-width screen shows one of the two remaining panes (article list,
+reader) at a time with its own back control; a tablet-width screen shows both together. Only the
+number of simultaneous panes changes—their content stays the same. On Android, going back from the
+reader to the article list uses predictive back where the system supports it.
 
-**Search field placement.** At the 3-pane width the search field stays where it has always been, in
-the feed list's sidebar, with results appearing reactively in the article list beside it. At a
-narrower width the drawer has no search field of its own at all — a phone- or tablet-width screen
-both reach search through the article list's own header, which is the one pane every narrower width
-always keeps on screen and therefore the one place the field can live without duplicating an
-editable copy of the same query. Tapping it moves the field to sit directly above the results it
-filters, in the same header a hamburger button normally occupies, and it stays put there when the
-device is rotated between phone and tablet width.
+**Search field placement.** At the 3-pane width the search field lives in the feed-list sidebar and
+filters the article list beside it. At narrower widths the drawer has no search field; search is
+reached through the article list header, the pane that is always on screen. Tapping it expands the
+field above the results, where it stays across rotation. The iOS app follows the same principle:
+search always belongs to the article list, using the system search field. Clearing the query returns
+to the selected subscription-list item's unfiltered list. See
+[app-architecture.md](app-architecture.md) for the full layout rules.
 
-The native iOS / iPadOS app places search by the same principle at every width: the field always
-belongs to the article list — the column whose contents it narrows — and never to the sidebar, even
-on an iPad wide enough to show all three columns. This follows Apple's Human Interface Guidelines,
-which put a search that filters the current view in that view's own bar, and matches Mail, whose
-search sits on the message list rather than the mailbox list. It uses the system search field, so
-its exact position follows the iOS version (a pull-down field under the article list's title before
-iOS 26, the toolbar from iOS 26 — at the bottom of the screen on iPhone). On iPhone, ⌘F from a
-hardware keyboard while the sidebar or the reader is showing first moves to the article list. The
-article list's heading shows the selected subscription-list item — its name beside the icon the
-subscription list gives it — at every width, as Android's narrower-width header does, so the
-selection a search narrows stays on screen while searching. The native iOS reader's toolbar has
-no room for a feed name beside its four actions on a phone, so it does not show one; the feed
-name leads the article's own byline ("feed · author · date"), behind its favicon, instead, and each swiped-to article
-names its own feed. Android's reader does the same, at every width (its toolbar likewise has no room
-beside a back button and five actions on a phone, and the name stays in one place on a device
-whose layout changes on rotation); desktop and the native macOS reader keep the feed name in the
-toolbar. The
-native macOS app is always 3-pane and keeps the field in the sidebar, as above.
+**Mouse and touch affordances.** Where a mouse and touchscreen need different gestures, both are
+supported without changing the underlying action: click-and-drag with a mouse, drag from a handle
+with touch; right-click context menu on desktop, long-press menu on Android. The same keyboard
+shortcuts work on Android tablets with hardware keyboards. See [app-architecture.md](app-architecture.md).
 
-**What search narrows.** At every width, search narrows whatever subscription-list item is
-currently selected rather than being a separate destination of its own. At the 3-pane width this
-selection stays visible and highlighted in the sidebar throughout, showing plainly what the query is
-being matched against; at a narrower width the feed list is a drawer that is normally already closed
-by the time search is reached (through the article list's own header), so the selection isn't on
-screen while searching there. Either way, clearing the query (or, at a narrower width, backing out
-of the expanded field) simply returns to that same selection's own unfiltered list.
+**Scrolling and the reader.** Scroll indicators follow each platform's own idiom. The article reader
+uses a native web view; on Linux arm64 a Compose fallback is used because no native web-view binary
+is available. See [app-architecture.md](app-architecture.md) and [known-issues.md](known-issues.md).
 
-Where a mouse and a touchscreen need different affordances, both are supported without changing
-the underlying action: reordering a feed or folder is a plain click-and-drag with a mouse, and a
-drag from a dedicated handle icon with touch (touch needs a distinct starting gesture so the rest
-of the row can still be scrolled normally) — both work the same way inside the drawer as they did
-in the sidebar it replaced; a right-click context menu on desktop is a long-press menu on Android.
-On Android the lifted row follows Material 3's dragged-item look (an opaque, elevated row that moves
-along the list only, with the row it came from dimmed in place), the drag gives haptic feedback as it
-lifts, reaches each new drop position and lands, and — since a drag is not something every user can
-perform — the same long-press menu (and TalkBack's custom actions) offers "Move up" / "Move down"
-for any feed or folder that has room to move in that direction.
-Settings — reached from the desktop application menu — gets its own entry point on Android, which
-has no menu bar: a labelled row fixed to the bottom of the feed list/drawer, below the scrolling
-folder/tag/feed list, with the drawer's own header showing the app's name in its place. The settings
-screen itself follows Android's own settings pattern rather than desktop's tabs: it opens on a list
-of the categories (General, Notifications, Cloud sync, Data, Updates — whichever this build has), and
-tapping one opens that category's own screen. A notification or action that leads to a particular
-category (a sync error, a new version, an OPML import/export) opens that category's screen directly.
-Both screens carry their own back arrow, since the near-fullscreen dialog otherwise leaves no other
-tappable way out; the arrow and the system back alike return from a category to the list, and close
-Settings from the list. List rows (feeds, folders, tags, articles) grow to a taller, M3-minimum
-touch density on Android. Keyboard navigation (arrow keys between panes, J/K between articles,
-F2/Delete on the selected feed-list item) is not desktop-exclusive: an Android tablet can have a
-physical keyboard attached, and the same shortcuts work there too, including reaching into the
-feed-list drawer at a narrower layout. Renaming a feed whose row is hidden inside a collapsed folder
-(selected before the folder was collapsed) — with F2/Return or Feed ▸ Rename — first expands that
-folder so the name can be edited in its row; like any expand/collapse, that state is kept on this
-device only and is not synced. At the first or last article, J/K (and ↑/↓ in the article list)
-do nothing — exactly like the reader's swipe and its screen-reader actions — rather than re-selecting the
-same article, which would mark it read again. The selected row in whichever pane holds keyboard focus
-gets a `secondary` outline to show where a keypress will land — Android's own M3 selection color
-does not change with pane focus the way desktop's dimming does, so the outline is the only
-on-screen difference between the focused and unfocused pane's own selection there. This outline
-only ever appears once a hardware key has actually been pressed, so a touch-only session never
-shows a focus indicator meant for keyboard navigation. Pressing ↓/↑ while the search field itself
-is focused moves down into the result list instead of typing a caret movement the field has no use
-for, so a keyboard can move straight from typing a query to browsing its results without an
-intermediate tap.
+**Swipe between articles.** At narrow layouts, a horizontal swipe on the reader moves to the
+next/previous article, following the finger and settling once released. A swipe is treated as a
+scroll when its vertical travel is not clearly smaller than its horizontal travel, and ignored for
+a moment after scrolling so a flick meant to scroll does not change the article. This applies
+whenever the reader is on screen at a narrower-than-desktop width. At the 3-pane desktop width the
+reader is keyboard-driven (J/K) and the swipe does not apply. See "Home's adaptive pane layout" in
+[app-architecture.md](app-architecture.md).
 
-Scroll position is shown differently on each platform, following each one's own idiom, on the feed
-list, the article list, and the setup screen (a dialog's own scrollable content has no indicator on
-either platform). Desktop keeps a permanent, draggable scrollbar beside each. Android instead shows
-a thin indicator that appears while a list is actually scrolling and fades away shortly after it stops,
-deliberately **not** draggable — the same overlay behavior Android's own lists use, where scrolling
-is done by dragging the content rather than a scrollbar. It never covers the navigation bar. The
-article reader's own body scrolls inside a real web view instead, which follows that engine's own
-default scroll-indicator behavior — see `app-architecture.md`'s "Article Reader (native WebView)"
-for how that differs per OS. Either way, it follows the in-app light/dark setting rather than the
-OS's, including the colors it paints its own scrollbar and form controls in — on Android that
-coloring reaches the scrollbar through a native call rather than through CSS, since that platform's
-WebView draws its own scrollbar outside the page's rendering engine (see `app-architecture.md`).
-**On Linux arm64**, no native web view is available at all for the desktop build, so the reader
-falls back to a Compose-drawn simplified view (block structure, inline decorations, and images;
-content needing a real browser engine opens externally instead) — see `known-issues.md`.
+**Pull-to-refresh.** On Android and the native iOS / iPadOS app, pulling the article list down
+refreshes only the feeds behind the current list (unlike Refresh All). On iOS, pulling the sidebar
+refreshes every feed. The gesture is disabled while search results are showing or there are no
+feeds. See "Refresh indicators and pull-to-refresh" in [app-architecture.md](app-architecture.md) for
+the full table and platform differences.
 
-At a narrow layout (both phone- and tablet-width), the article detail pane also gains a touch-only
-affordance with no desktop counterpart: a horizontal swipe on the reader moves to the next/previous
-article in the same order the list itself shows, following the finger as it drags and settling into
-place once released; the article being swiped towards is really there as the drag uncovers it,
-rather than a gap opening where the current one used to be. Dragging past either end of the list
-still moves the content a little before springing back, so the boundary is felt rather than the
-gesture simply doing nothing. **Swiping away from an article and straight back returns to where it
-was being read**, rather than to its top — the immediate neighbours on either side are kept ready,
-so the one just left is still exactly as it was. That memory covers one article in each direction
-and lasts as long as the reader stays on screen: swiping two or more articles away and back, going
-back to the article list, or rotating the device between phone and tablet width all start the
-article from the top again, as does reopening it later. A swipe whose vertical travel isn't clearly
-smaller than its horizontal travel is treated as a scroll rather than a page turn (a horizontal-
-dominant diagonal drag still turns the page), and a swipe is ignored for a moment after scrolling,
-so a flick meant to scroll does not change the article. This applies whenever the reader is on
-screen at all at a narrower-than-desktop width, since the same reader, the same list order, and the
-same next/previous action apply regardless of whether the reader happens to have a back button
-beside it. That covers two cases: a phone-width screen drilled into an article, and a tablet-width
-screen (in portrait, and in landscape on any tablet not wide enough for all three panes) where the
-reader is a permanent neighbor of the article list with no back control of its own, the same as the
-tablet's own reading pane in Gmail. At the desktop-width 3-pane layout — which a large
-tablet in landscape also reaches — the reader is a permanent, keyboard-driven pane instead (J/K —
-see `app-architecture.md`), and the swipe gesture does not apply there.
+**iOS refresh status.** With no Refresh All button to spin, iOS shows a refresh the user started (a
+pull, Refresh All, or a feed's own Refresh) in the centre of the bottom bar: "Checking for new
+articles…" with a spinner while it runs (through the cloud sync that follows), then the result for
+about two and a half seconds — "N new articles", "No new articles", or, when no feed could be
+reached, a failure message behind a warning symbol that also stays in the notification center. An
+automatic refresh and a sync on their own show nothing there; idle shows nothing. See "Refresh
+feedback" above, and "Refresh indicators and pull-to-refresh" in [app-architecture.md](app-architecture.md).
 
-The article list has one more touch-only affordance, on Android at **every** width (including the
-3-pane layout a large tablet reaches) and in the native iOS / iPadOS app, with no desktop
-counterpart (the Compose desktop app or the native macOS one), since a mouse has no pull gesture:
-**pulling the list down refreshes it**, using each platform's own indicator (Material 3's
-pull-to-refresh on Android, the system refresh control on iOS). Unlike Refresh All — which keeps
-refreshing every feed, unchanged — a pull refreshes only the feeds behind the list currently on
-screen:
+**Per-feed refresh spinner.** While feeds refresh, whatever started it, every feed the refresh
+covers shows a small spinner in place of its icon in the feed list, on every platform, until its
+own new articles have landed. A collapsed folder shows it while any of its feeds does. Nothing on
+the row moves, and screen readers hear the row's state as "Refreshing".
 
-| Selected in the feed list | Feeds a pull refreshes |
-| --- | --- |
-| All Feeds / Starred | Every feed (starred articles can come from any feed) |
-| A feed | That feed alone |
-| A folder | The feeds filed in that folder |
-| A tag | The feeds carrying that tag |
-
-A selection that covers no subscribed feed at all (an empty folder or tag) finishes at once, fetching
-and syncing nothing. The gesture works on an empty list too (e.g. "unread only" with nothing unread),
-but is disabled while search results are showing — pulling a result list isn't a request to refresh
-the feeds behind it — and while there are no feeds at all. As with Refresh All, a
-pull is followed by a cloud sync when one is connected, and the indicator stays up until that sync
-has finished too, not just the feed fetches. On iOS, where the system starts the refresh the moment
-the pull crosses its threshold (with the finger still down), the indicator also stays up for at least
-about a second, so a refresh that finishes almost at once still shows it spinning.
-A pull made while a refresh or sync is already running (a background refresh, say) starts nothing
-new; the indicator simply stays up until the running one finishes. When what is running is an
-automatic refresh, the pull joins it, so on iOS its result still appears in the status area described
-below. Selecting another item in the
-feed list while a pull's indicator is up leaves no indicator over the newly selected list, since
-that list is not the one being refreshed; the refresh itself carries on.
-On Android, the same refresh is also reachable without the gesture, wherever the gesture itself is
-available: as a TalkBack custom action on the list ("Refresh this list"), and from a
-physical keyboard with Ctrl+Shift+R while the article list is on screen — not while a phone-width
-screen shows the reader alone, and not while the feed-list drawer covers the list. On desktop the
-same chord is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a
-different platform (desktop has no pull gesture to mirror, and its menu bar already owns the chord),
-not two routes to one action. The native iOS app has no non-gesture route to this scoped refresh; an
-iPad's hardware keyboard instead reaches the Feed menu's Refresh All (⌘R) and Refresh (⌘⇧R, the
-selected feed alone) — likewise different actions, not routes to the pull.
-
-On iOS the sidebar (the feed list) can be pulled down as well, and that pull is Refresh All rather
-than the scoped refresh above: it refreshes every feed whatever is selected, followed by a cloud sync
-when one is connected, with the indicator staying up until both have finished; it is disabled while
-there are no feeds. It takes the place of a Refresh All button in the iOS navigation bar, which keeps
-only sync (when a cloud is connected), add-feed and settings. This is how Mail's mailbox list is
-refreshed, and it leaves the bar's limited room to the other actions. Android's feed-list drawer has
-no pull — it is a modal navigation surface laid over the article list, and keeps its refresh button
-in its header. Neither does the macOS sidebar, which keeps its toolbar button.
-
-With no Refresh All button to spin, iOS shows a feed refresh in the toolbar's status area instead
-— the centre of the bottom bar, where Mail says "Checking for Mail…" and then "Updated Just Now" —
-in both the sidebar and the article list. It shows only a refresh the user started — a pull (of
-either column, whatever it covers), Refresh All (⌘R), or a feed's own Refresh (its context menu,
-⌘⇧R). The refresh at launch, a background refresh and the periodic one while the app is open show
-nothing: before iOS 26 the status is the only item in that bottom bar, so the bar itself appears and
-goes with it, and a refresh nobody asked for must not move the list (see "Refresh feedback"); after the
-user's own action, the brief appearance is the response to that action. While new articles are being
-checked for, it shows a small spinner with "Checking for new articles…", and keeps it through the
-cloud sync that follows, as the pull's own indicator does. Refreshes the user starts while another is
-still running (a feed's Refresh during a pull, say) count as one check: the spinner stays until the
-last has finished, and the result counts them all. A pull made while an automatic refresh is already
-running starts nothing new (see above), but it joins that refresh: the status shows it as checking and
-then shows its result, as if the pull had started it; Refresh All (⌘R) does the same. A pull or Refresh
-All made while only a sync is running, or while the user's own refresh (a feed's Refresh, say) is
-already running, adds no result of its own — the latter already shows here. Once that is done it shows the result for about two and a half seconds, without the spinner:
-"N new articles", "No new articles", or — when none of the feeds it covered could be reached (each
-timed out or got no response, most likely because the device is offline) — "Couldn't check for
-new articles. Check your connection or try again later." behind a warning symbol, so a failure reads as one at
-a glance without relying on its color. That failure also stays in the notification center, whose
-entry explains what to do. A sync on its own (the sync button, or the automatic sync after reading)
-never shows there: its button's spinning icon is its feedback, and an automatic sync is not worth
-interrupting anyone over. Idle shows nothing there, not a last-updated time, so the bar leaves the
-room to the list. The count covers the feeds just fetched; articles a sync brought in from another
-device are not counted. The status is never drawn as a pull indicator started by the app itself,
-which would pull the list down unasked, and VoiceOver is not told when it changes.
-
-While feeds refresh — whatever started it: Refresh All, a pull, a single feed's Refresh, or a
-background or startup refresh — **every feed the refresh covers shows a small spinner in place of
-its icon** in the feed list, on every platform, from the moment the refresh starts (including while
-the feed waits its turn to be fetched) until its own new articles have landed (the unread count
-updates as the spinner goes), so the spinners clear one by one as each feed finishes. The spinner sits inside
-the icon's own slot, so nothing on the row moves, and the unread count and error indicator stay as
-they are. A collapsed folder shows the same spinner in place of its folder icon while any of its feeds
-does; an expanded folder, a tag, All Feeds and Starred show none (the toolbar's refresh spinner covers
-the refresh as a whole). Screen readers hear the row's state as "Refreshing". Why this shows for an
-automatic refresh too, while a result does not: see "Refresh feedback".
-
-The surfaces that are not drawn by Compose — the application menu bar, context menus, and the
-dialog button row — are real Swing/AWT widgets, so they follow the platform's Look & Feel.
-macOS and Windows use the system one; Linux uses FlatLaf tinted to the app's own teal theme,
-because Java's Linux system L&F is a GTK2-era emulation that looks dated next to a modern
-desktop. Light / dark follows the in-app theme setting without a restart. Context menus are
-`java.awt.PopupMenu` (a genuine `NSMenu`) on macOS and `javax.swing.JPopupMenu` on Windows and
-Linux — on Linux because AWT's popup ignores the Look & Feel entirely, and on Windows because the
-JDK's AWT menu peer ignores display scaling, so above 100% it opens away from the cursor and paints
-its own labels on top of each other (see `known-issues.md`). The tray menu follows the same split,
-which is why Windows has its own `WindowsTray` instead of Compose's `Tray()`. The OPML
-import/export file dialog follows a different split: `java.awt.FileDialog` on macOS **and
-Windows**, and `javax.swing.JFileChooser` only on Linux, where AWT's own file dialog routes
-through GTK native code that can crash the app (see `app-architecture.md` and `known-issues.md`).
-The UI font is the OS's own: SF Pro on macOS, Segoe UI on Windows, and on Linux the font resolved by
-the Look & Feel, then the desktop's configured font from XSettings, falling back to Adwaita Sans /
-Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
+**Native menus, tray, file dialogs, and font.** The desktop app uses native Swing/AWT widgets for
+the menu bar, context menus, tray menu, and file dialogs. Platform-specific choices
+(macOS/Windows/Linux, FlatLaf, JFileChooser on Linux, etc.) are detailed in
+[app-architecture.md](app-architecture.md) and [known-issues.md](known-issues.md).
 
 ## 10. Privacy & Security
 
@@ -608,7 +332,7 @@ Cantarell / Ubuntu / Noto Sans / DejaVu Sans.
 
 | Layer | Technology |
 | --- | --- |
-| UI | Compose Multiplatform (Material 3 on Android; platform-specific UI elsewhere — see §9) |
+| UI | Compose Multiplatform (Material 3 on Android; native SwiftUI on macOS/iOS; Windows/Linux share a flat desktop look — see §9) |
 | State management | androidx.lifecycle ViewModel + Koin |
 | DB | SQLDelight (SQLite) + FTS5 (raw SQL) |
 | HTTP | Ktor client (CIO on desktop, OkHttp on Android) |
