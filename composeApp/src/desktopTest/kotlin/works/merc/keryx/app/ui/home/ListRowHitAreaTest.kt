@@ -45,6 +45,7 @@ import works.merc.keryx.app.insertTag
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.home.HomeViewModel
 
 /**
@@ -106,8 +107,8 @@ class ListRowHitAreaTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selected = it },
@@ -199,8 +200,8 @@ class ListRowHitAreaTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selected = it },

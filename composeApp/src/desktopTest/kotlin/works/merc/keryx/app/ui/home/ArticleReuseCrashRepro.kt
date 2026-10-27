@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.fail
@@ -74,8 +75,8 @@ class ArticleReuseCrashRepro {
                         articles = items,
                         feedTitles = mapOf("f1" to "Some Feed With A Fairly Long Title"),
                         selectedId = selected?.id,
-                        unreadOnly = false,
-                        onToggleUnreadOnly = {},
+                        listMode = ArticleListMode.All,
+                        onSelectListMode = {},
                         onToggleSort = {},
                         onMarkAllRead = {},
                         onSelectArticle = {},

@@ -123,6 +123,32 @@ actual fun Modifier.nativeContextMenu(
 }
 
 /**
+ * Android `actual`: an M3 [DropdownMenu] anchored to the [Box] around [content] — the standard M3
+ * pop-up menu placement, rendering [items] exactly as [nativeContextMenu]'s long-press menu does.
+ */
+@Composable
+actual fun NativeMenuAnchor(
+    items: () -> List<NativeMenuEntry>,
+    content: @Composable (open: () -> Unit) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var menuItems by remember { mutableStateOf<List<NativeMenuEntry>>(emptyList()) }
+    val currentItems by rememberUpdatedState(items)
+    Box {
+        content {
+            val resolved = currentItems()
+            if (resolved.isNotEmpty()) {
+                menuItems = resolved
+                expanded = true
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            NativeMenuContent(items = menuItems, onDismiss = { expanded = false })
+        }
+    }
+}
+
+/**
  * Android `actual`: a pass-through. Text selection here already opens the platform's own floating
  * selection toolbar — an OS widget, not a Compose-drawn popup — so there is nothing to replace and
  * no separate native menu system to route it through.
@@ -165,6 +191,7 @@ private fun NativeMenuContent(items: List<NativeMenuEntry>, onDismiss: () -> Uni
                 DropdownMenuItem(
                     text = { Text(entry.label) },
                     modifier = Modifier.semantics { this.stateDescription = stateDescription },
+                    enabled = entry.enabled,
                     leadingIcon = {
                         // Fixed-size slot so the checkmark's presence never shifts the label (ui-guidelines).
                         Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {

@@ -115,9 +115,15 @@ not in global chrome:
   "Adaptive pane layout & touch affordances" below).
 - Sort / mark all read — header row of `ArticleListPane`, unchanged at every
   layout.
-- Hide read — the same header row, directly after the "unread only"
-  `ToggleChip` (4dp gap) rather than in the trailing icon cluster: its
-  enabled state depends on that chip alone, and keeping it away from mark all
+- List mode — the same header row, leading: a `MenuChip` naming the current
+  `ArticleListMode` (All / Unread / Starred) inside a `NativeMenuAnchor`, whose
+  native menu offers all three. A pop-up button rather than a
+  `SegmentedControl`, because three labelled segments do not fit the pane's
+  240dp minimum width beside the other controls; the chip is filled whenever
+  the mode narrows the list.
+- Hide read — the same header row, directly after the mode chip (4dp gap)
+  rather than in the trailing icon cluster: its
+  enabled state depends on the mode alone, and keeping it away from mark all
   read avoids confusing a view-only action with a bulk mutation. A lone icon,
   so bare (no `ToolbarIconGroup` capsule).
 - Notifications (the bell) — `ArticleListPane`'s own header row, at every
@@ -1286,7 +1292,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   large/extra-large ones into a capsule (WWDC25 "Build an AppKit app with the new design"), so a
   capsule would drift further from the dialogs' native `JButton` row, not closer. Keep the
   secondary fill neutral too — painting it `primary` would make a button indistinguishable from a
-  selected `SegmentedControl` segment or a checked `ToggleChip`, and erase the primary/secondary
+  selected `SegmentedControl` segment or a highlighted `MenuChip`, and erase the primary/secondary
   distinction.
   **A button whose action destroys data takes `FlatTonalButton(destructive = true)`**
   (`CloudSyncTab`'s "reset sync data", `NotificationCenterSheet`'s
@@ -1313,18 +1319,22 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   the flag, since its confirm button is a native Swing `JButton`. The confirm
   label itself always names the action ("Delete", "Reset"), so color is again
   not the only signal.
-- **`SegmentedControl<T>` / `ToggleChip`**
+- **`SegmentedControl<T>` / `MenuChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
   by `SettingsDialog`'s theme/font-size/cache/timeout/refresh-interval rows)
-  and standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
-  "unread only"), **at a `commonMain` call site** — reach for these, not
-  `FilterChip`, there. The desktop `actual`s render as a bordered
+  and a pop-up button naming the current choice of a menu (`MenuChip`, used by
+  `ArticleListPane`'s list mode inside a `NativeMenuAnchor` — a native menu
+  opened by a click rather than a right-click), **at a `commonMain` call site**
+  — reach for these, not `FilterChip`, there. `MenuChip`'s desktop `actual` is
+  the bordered block described below with a trailing chevron, filled when
+  `highlighted`; its Android `actual` is M3's `FilterChip` with a dropdown
+  arrow. The desktop `actual`s render as a bordered
   (`outlineVariant`) block that, when selected/checked, fills solid with
   `primary` and switches its label to `onPrimary`, using
-  `Modifier.selectable`/`Modifier.toggleable` rather than `FilterChip`'s pill
+  `Modifier.selectable`/`Modifier.clickable` rather than `FilterChip`'s pill
   shape. The label is always `FontWeight.Bold` (selected and unselected
-  alike) rather than only bolding on selection — `ToggleChip` sits before a
+  alike) rather than only bolding on selection — `MenuChip` sits before a
   `weight(1f)` `Spacer` in `ArticleListPane`'s header row, so a
   selection-only weight change would shift the icons after it by a few px
   each time it's toggled; keeping the weight constant avoids that jitter, and

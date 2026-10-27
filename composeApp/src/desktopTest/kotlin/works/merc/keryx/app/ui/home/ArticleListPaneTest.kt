@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -35,6 +36,9 @@ import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuShortcut
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.ui.common.KeryxIcons
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -72,8 +76,8 @@ class ArticleListPaneTest {
             articles = items,
             feedTitles = emptyMap(),
             selectedId = null,
-            unreadOnly = false,
-            onToggleUnreadOnly = {},
+            listMode = ArticleListMode.All,
+            onSelectListMode = {},
             onToggleSort = {},
             onMarkAllRead = {},
             onSelectArticle = {},
@@ -131,8 +135,8 @@ class ArticleListPaneTest {
             articles = articles(5),
             feedTitles = emptyMap(),
             selectedId = null,
-            unreadOnly = false,
-            onToggleUnreadOnly = {},
+            listMode = ArticleListMode.All,
+            onSelectListMode = {},
             onToggleSort = {},
             onMarkAllRead = {},
             onSelectArticle = {},
@@ -277,8 +281,8 @@ class ArticleListPaneTest {
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
                 revealRequest = revealRequest,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -317,8 +321,8 @@ class ArticleListPaneTest {
                 feedTitles = emptyMap(),
                 selectedId = selectedId,
                 revealRequest = revealRequest,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -358,8 +362,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = items[22].id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -386,8 +390,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -423,8 +427,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -454,8 +458,8 @@ class ArticleListPaneTest {
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
                 revealRequest = revealRequest,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -502,8 +506,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
@@ -529,8 +533,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -556,8 +560,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -579,8 +583,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -608,8 +612,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
@@ -662,8 +666,8 @@ class ArticleListPaneTest {
 
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = { toggleSortCount++ },
                 onMarkAllRead = {},
@@ -686,8 +690,8 @@ class ArticleListPaneTest {
 
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = { toggleSortCount++ },
                 onMarkAllRead = {},
@@ -710,8 +714,8 @@ class ArticleListPaneTest {
 
         setContent {
             ArticleListTopBar(
-                unreadOnly = true,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.Unread,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -734,8 +738,8 @@ class ArticleListPaneTest {
 
         setContent {
             ArticleListTopBar(
-                unreadOnly = true,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.Unread,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -771,13 +775,12 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarUnreadOnlyEnabledInvokesCallback() = runDesktopComposeUiTest {
-        var toggleUnreadCount = 0
-
+    fun articleListTopBarModeChipNamesTheCurrentMode() = runDesktopComposeUiTest {
+        var mode by mutableStateOf(ArticleListMode.Unread)
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = { toggleUnreadCount++ },
+                listMode = mode,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -785,11 +788,58 @@ class ArticleListPaneTest {
         }
         waitForIdle()
 
-        onNodeWithText("未読のみ").assertIsEnabled()
-        onNodeWithText("未読のみ").performClick()
+        onNodeWithContentDescription("表示する記事").assertIsEnabled()
+        onNodeWithText("未読").assertIsDisplayed()
+
+        mode = ArticleListMode.Starred
+        waitForIdle()
+        onNodeWithText("スター付き").assertIsDisplayed()
+    }
+
+    @Test
+    fun listModeMenuEntriesCheckTheCurrentModeAndGreyOutStarredWhenUnavailable() {
+        val labels = ArticleListMode.entries.associateWith { it.name }
+        val chosen = mutableListOf<ArticleListMode>()
+
+        val entries = listModeMenuEntries(ArticleListMode.Unread, starredModeEnabled = false, labels) { chosen += it }
+            .map { it as NativeCheckMenuItem }
+
+        assertEquals(listOf("All", "Unread", "Starred"), entries.map { it.label })
+        // Starred stays checked (greyed out) while it cannot be chosen.
+        assertEquals(listOf(false, true, true), entries.map { it.checked })
+        assertEquals(listOf(true, true, false), entries.map { it.enabled })
+        assertEquals(
+            listOf(Key.One, Key.Two, Key.Three).map { NativeMenuShortcut(it, ctrl = true) },
+            entries.map { it.shortcut },
+        )
+        entries[0].onClick()
+        entries[2].onClick()
+        assertEquals(listOf(ArticleListMode.All, ArticleListMode.Starred), chosen)
+        assertTrue(listModeMenuEntries(ArticleListMode.All, starredModeEnabled = true, labels) {}.all { (it as NativeCheckMenuItem).enabled })
+    }
+
+    @Test
+    fun anEmptyStarredModeListOffersToShowAllArticles() = runDesktopComposeUiTest {
+        var showAllCount = 0
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                listMode = ArticleListMode.Starred,
+                onSelectListMode = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                onShowAllArticles = { showAllCount++ },
+            )
+        }
         waitForIdle()
 
-        assertEquals(1, toggleUnreadCount)
+        onNodeWithText("ここにはスター付きの記事がありません").assertIsDisplayed()
+        onNodeWithText("すべての記事を表示").performClick()
+        waitForIdle()
+        assertEquals(1, showAllCount)
     }
 
     /**
@@ -802,8 +852,8 @@ class ArticleListPaneTest {
     fun articleListTopBarOmitsTheNavigationRowWhenNoDrawerCallbackIsGivenAtAll() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -812,11 +862,11 @@ class ArticleListPaneTest {
         waitForIdle()
 
         onNodeWithContentDescription("フィード一覧を開く").assertDoesNotExist()
-        onNodeWithText("未読のみ").assertIsDisplayed()
+        onNodeWithContentDescription("表示する記事").assertIsDisplayed()
     }
 
     @Test
-    fun articleListPaneUnreadOnlyEnabledForStarredFilter() = runDesktopComposeUiTest {
+    fun articleListPaneModeChipStaysEnabledForStarredFilter() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
@@ -827,11 +877,11 @@ class ArticleListPaneTest {
 
             vm.selectFilter(ArticleFilter.Starred)
             waitForIdle()
-            onNodeWithText("未読のみ").assertIsEnabled()
+            onNodeWithContentDescription("表示する記事").assertIsEnabled()
 
             vm.selectFilter(ArticleFilter.All)
             waitForIdle()
-            onNodeWithText("未読のみ").assertIsEnabled()
+            onNodeWithContentDescription("表示する記事").assertIsEnabled()
         }
     }
 
@@ -916,8 +966,8 @@ class ArticleListPaneTest {
         var clicked = false
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -936,8 +986,8 @@ class ArticleListPaneTest {
     fun articleListTopBarOmitsTheSearchIconWhenNotProvidedEvenWithTheDrawerRowPresent() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -955,8 +1005,8 @@ class ArticleListPaneTest {
         // icon has nowhere to sit even if onSearchClick were supplied alongside it.
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -1076,14 +1126,14 @@ class ArticleListPaneTest {
 
             vm.setSearchBarVisible(true)
             waitForIdle()
-            val boundsWhenEmpty = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
+            val boundsWhenEmpty = onNodeWithContentDescription("表示する記事").fetchSemanticsNode().boundsInRoot
 
             vm.setSearchQuery("kotlin")
             waitForIdle()
 
             assertEquals(
                 boundsWhenEmpty,
-                onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
+                onNodeWithContentDescription("表示する記事").fetchSemanticsNode().boundsInRoot,
                 "the controls row must not move when the search field's clear button appears",
             )
         }

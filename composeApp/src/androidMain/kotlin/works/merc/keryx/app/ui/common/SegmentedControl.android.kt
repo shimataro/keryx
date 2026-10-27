@@ -10,6 +10,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 
 /** Slot ids for [SegmentedControl]'s two subcomposition passes — see its own KDoc. */
@@ -113,11 +118,16 @@ actual fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onS
 }
 
 @Composable
-actual fun ToggleChip(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean) {
+actual fun MenuChip(label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit) {
     FilterChip(
-        selected = checked,
-        onClick = { onCheckedChange(!checked) },
+        selected = highlighted,
+        onClick = onClick,
         label = { Text(label) },
-        enabled = enabled,
+        trailingIcon = { KeryxIcon(KeryxIcons.ExpandMore, contentDescription = null) },
+        modifier = Modifier.semantics {
+            role = Role.DropdownList
+            contentDescription = accessibilityLabel
+            stateDescription = label
+        },
     )
 }

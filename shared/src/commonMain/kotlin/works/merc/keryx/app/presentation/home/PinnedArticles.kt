@@ -20,8 +20,8 @@ internal fun Map<String, ArticleListRow>.readPins(): Map<String, ArticleListRow>
 /**
  * The article list [HomeViewModel] shows for one raw query emission [list], with the optimistic
  * pins applied: [pinnedReadStates] (read state the user just set) and [pinnedUnstarred] (articles
- * unstarred while browsing Starred). Then filtered to unread when [unread], and ordered newest
- * first unless [newest] is false.
+ * unstarred while browsing Starred or starred mode). Then filtered to unread when [unread] or to
+ * starred when [starredOnly], and ordered newest first unless [newest] is false.
  */
 internal fun resolvePinnedArticles(
     list: List<ArticleListRow>,
@@ -29,6 +29,7 @@ internal fun resolvePinnedArticles(
     newest: Boolean,
     pinnedReadStates: Map<String, ArticleListRow>,
     pinnedUnstarred: Map<String, ArticleListRow>,
+    starredOnly: Boolean = false,
 ): List<ArticleListRow> {
     // Nothing pinned is the common case, and then neither a resolved copy nor the id set has
     // a reader — skip building either rather than touching every row on every emission.
@@ -84,10 +85,12 @@ internal fun resolvePinnedArticles(
     // so this OR is what keeps a just-marked-read article visible for its grace period under
     // unread-only — id membership, not staleness, is what this needs. A row with an unread pin
     // was resolved to is_read == 0 and passes the first clause.
-    val filtered = if (unread) {
-        merged.filter { it.is_read == 0L || it.id in pinnedReadStates }
-    } else {
-        merged
+    // Starred mode keeps a just-unstarred row by its pin the same way, until the filter or mode
+    // changes (setStarred pins it while the mode applies).
+    val filtered = when {
+        unread -> merged.filter { it.is_read == 0L || it.id in pinnedReadStates }
+        starredOnly -> merged.filter { it.is_starred == 1L || it.id in pinnedUnstarred }
+        else -> merged
     }
     // asReversed() is a view, not a second full copy: `filtered` is freshly derived
     // per emission and never mutated afterwards, so it reads identically.
@@ -96,7 +99,7 @@ internal fun resolvePinnedArticles(
 
 /**
  * The search results [HomeViewModel] shows for one raw search emission [raw], with the optimistic
- * pins applied and filtered to unread when [unread].
+ * pins applied and filtered to unread when [unread] or to starred when [starredOnly].
  *
  * Applies only the optimistic read-state from pinned (never the whole snapshot): other fields —
  * notably is_starred — must come from the fresh re-search, or starring an already-read result
@@ -109,6 +112,7 @@ internal fun resolvePinnedSearchResults(
     unread: Boolean,
     pinnedReadStates: Map<String, ArticleListRow>,
     pinnedUnstarred: Map<String, ArticleListRow>,
+    starredOnly: Boolean = false,
 ): List<ArticleSearchResult> {
     val merged = raw.map { result ->
         val readStatePin = pinnedReadStates[result.article.id]
@@ -126,5 +130,9 @@ internal fun resolvePinnedSearchResults(
     }
     // As in resolvePinnedArticles: a read pin keeps its row by membership, an unread pin's row
     // passes on its own resolved is_read == 0.
-    return if (unread) merged.filter { it.article.is_read == 0L || it.article.id in pinnedReadStates } else merged
+    return when {
+        unread -> merged.filter { it.article.is_read == 0L || it.article.id in pinnedReadStates }
+        starredOnly -> merged.filter { it.article.is_starred == 1L || it.article.id in pinnedUnstarred }
+        else -> merged
+    }
 }

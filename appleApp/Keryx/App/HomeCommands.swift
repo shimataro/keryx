@@ -78,17 +78,41 @@ struct HomeCommands: Commands {
                     }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(!state.searchEnabled)
+                    // Inside the check, so macOS 14 doesn't open the group with a separator.
+                    Divider()
                 }
 
-                Toggle(L("menu_view_unread_only"), isOn: Binding(
-                    get: { home.unreadOnly },
-                    set: { home.viewModel.setUnreadOnly(value: $0) }
+                // The article list's mode, with the current one checked (plus Starred, fixed on under
+                // the Starred filter — `listModeChecked`) and ⌘1–3 choosing each (Compose's `AppMenuTree.kt` uses the same keys). Re-choosing the checked
+                // item changes nothing. Separators on both sides set them apart as one choice, as
+                // in Compose's View menu.
+                Toggle(L("menu_view_list_mode_all"), isOn: Binding(
+                    get: { home.listMode == .all },
+                    set: { if $0 { home.viewModel.setMode(target: .all) } }
                 ))
-                .keyboardShortcut("u", modifiers: .command)
-                .disabled(!state.unreadOnlyEnabled)
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(!state.listModeEnabled)
+
+                Toggle(L("menu_view_list_mode_unread"), isOn: Binding(
+                    get: { home.listMode == .unread },
+                    set: { if $0 { home.viewModel.setMode(target: .unread) } }
+                ))
+                .keyboardShortcut("2", modifiers: .command)
+                .disabled(!state.listModeEnabled)
+
+                Toggle(L("menu_view_list_mode_starred"), isOn: Binding(
+                    get: { state.starredModeChecked },
+                    set: { if $0 { home.viewModel.setMode(target: .starred) } }
+                ))
+                .keyboardShortcut("3", modifiers: .command)
+                .disabled(!state.starredModeEnabled)
+
+                Divider()
 
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }
                     .disabled(!state.toggleSortEnabled)
+
+                Divider()
 
                 Button(L("menu_view_mark_all_read")) { home.viewModel.markAllRead() }
                     .disabled(!state.markAllReadEnabled)
@@ -232,8 +256,8 @@ struct HomeCommands: Commands {
         }
         guard let sdk = model.sdk else {
             return MenuUiState(
-                addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, unreadOnlyEnabled: false,
-                unreadOnlyChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
+                addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, listModeEnabled: false,
+                listMode: .all, starredModeEnabled: false, starredModeChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
                 articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
                 refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,
@@ -248,7 +272,8 @@ struct HomeCommands: Commands {
             selectedArticleCanOpenInBrowser: home.selectedArticleCanOpenInBrowser,
             canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
-            unreadOnly: home.unreadOnly,
+            listMode: home.listMode,
+            starredModeAvailable: home.starredModeEnabled,
             opmlBusy: model.opmlTransfer?.isBusy ?? false,
             hasSelectedFeed: hasSelectedFeed,
             feedListKeysActive: bareKeysActive,

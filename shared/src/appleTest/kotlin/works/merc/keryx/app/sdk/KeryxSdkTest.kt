@@ -33,6 +33,7 @@ import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
 import works.merc.keryx.app.platform.FileSystemExtras
 import works.merc.keryx.app.platform.RawSqliteConnection
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.tempFilePath
 import works.merc.keryx.app.presentation.settings.OpmlRequest
 import works.merc.keryx.app.presentation.settings.OpmlResult
@@ -371,7 +372,8 @@ class KeryxSdkTest {
                 selectedArticleCanOpenInBrowser = false,
                 canSyncNow = false,
                 searchActive = false,
-                unreadOnly = false,
+                listMode = ArticleListMode.All,
+                starredModeAvailable = true,
                 opmlBusy = false,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,
@@ -388,7 +390,8 @@ class KeryxSdkTest {
                 selectedArticleCanOpenInBrowser = false,
                 canSyncNow = false,
                 searchActive = false,
-                unreadOnly = false,
+                listMode = ArticleListMode.All,
+                starredModeAvailable = true,
                 opmlBusy = false,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,
@@ -406,7 +409,8 @@ class KeryxSdkTest {
                 selectedArticleCanOpenInBrowser = false,
                 canSyncNow = canSyncNow,
                 searchActive = false,
-                unreadOnly = false,
+                listMode = ArticleListMode.All,
+                starredModeAvailable = true,
                 opmlBusy = false,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,
@@ -427,7 +431,8 @@ class KeryxSdkTest {
                 selectedArticleCanOpenInBrowser = false,
                 canSyncNow = false,
                 searchActive = false,
-                unreadOnly = false,
+                listMode = ArticleListMode.All,
+                starredModeAvailable = true,
                 opmlBusy = false,
                 hasSelectedFeed = true,
                 feedListKeysActive = feedListKeysActive,
@@ -447,7 +452,8 @@ class KeryxSdkTest {
                 selectedArticleCanOpenInBrowser = false,
                 canSyncNow = false,
                 searchActive = false,
-                unreadOnly = false,
+                listMode = ArticleListMode.All,
+                starredModeAvailable = true,
                 opmlBusy = opmlBusy,
                 hasSelectedFeed = false,
                 feedListKeysActive = false,

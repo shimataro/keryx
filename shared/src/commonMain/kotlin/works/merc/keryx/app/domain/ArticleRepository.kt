@@ -270,6 +270,8 @@ class ArticleRepository(
         syncScheduler.scheduleDeferredSync()
     }
 
+    /** Marks every unread article of [filter] read. The Starred filter's rows are marked by id
+     * instead ([markArticlesAsRead]) — `HomeViewModel.markAllRead` marks exactly the rows it shows. */
     fun markAllAsRead(filter: ArticleFilter) {
         val now = clock.nowMillis()
         when (filter) {

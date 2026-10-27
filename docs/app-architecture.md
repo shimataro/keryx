@@ -1369,6 +1369,29 @@ results while searching, the filter's own list otherwise, the same resolution `p
 — and the selection), so the action is a no-op once no read row other than the selection is left on
 screen.
 
+**Article list modes.** `HomeViewModel.mode` is an `ArticleListMode` (`All` / `Unread` / `Starred`,
+`presentation/home/ArticleListMode.kt`), one of three rather than two independent toggles — see
+`external-spec.md` §7 for why. It is derived from three pieces of state: the persisted `_unreadOnly`
+(`lastUnreadOnly`) and `_unreadOnlyStarred` (`lastUnreadOnlyStarred`, read only under the Starred
+filter), plus `_starredMode`, which is session-only and never persisted. `selectFilter` keeps
+`_starredMode` across every filter switch, `ArticleFilter.Starred` included: there
+`starredModeEnabled` is false and `articleListModeFor` ignores it, and `setMode(All/Unread)` leaves
+it as it was, so leaving the filter returns to the mode it was entered with. Like unread-only, starred mode narrows in memory over the
+filter's raw query result (and over search results) — `articles`' combine filters on `is_starred`,
+keeping a row by its unstarred pin the way unread-only keeps one by its read pin — so changing mode
+never re-runs the list query. `setStarred` pins an unstarred article whenever the Starred filter or
+starred mode applies, `setMode(Starred)` drops the pins left from before, and `markAllRead` under
+starred mode or the Starred filter marks exactly the rows shown, through the same id-list path
+search uses (the Starred filter can still show an article just unstarred, which its own query no
+longer reaches). Since the list catches up with a filter or mode switch asynchronously, `markAllRead`
+acts only once the rows on screen belong to the current filter and mode (`ListScope`), and does
+nothing if the selection moves on again before then. Every route —
+the toolbar's mode menu on both UIs, the View menu (`computeMenuUiState`'s `listMode` /
+`starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`. Which items those menus
+check is likewise one shared rule, `listModeChecked`: the current mode, plus Starred under the
+Starred filter (checked and disabled there — see `external-spec.md` §7); the menu bar reads it as
+`MenuUiState.starredModeChecked`, and both UIs' toolbar menus call it directly.
+
 ## Apple Native Apps (SwiftUI)
 
 `external-spec.md` §2 plans a native SwiftUI app for macOS, and later iOS/iPadOS. This section

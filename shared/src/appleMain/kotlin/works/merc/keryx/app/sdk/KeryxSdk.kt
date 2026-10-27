@@ -47,6 +47,7 @@ import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.domain.schemeOf
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.presentation.home.AddFeedController
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
 import works.merc.keryx.app.presentation.menu.MenuUiState
@@ -136,7 +137,8 @@ class KeryxSdk private constructor(private val koin: Koin) {
         selectedArticleCanOpenInBrowser: Boolean,
         canSyncNow: Boolean,
         searchActive: Boolean,
-        unreadOnly: Boolean,
+        listMode: ArticleListMode,
+        starredModeAvailable: Boolean,
         opmlBusy: Boolean,
         hasSelectedFeed: Boolean,
         feedListKeysActive: Boolean,
@@ -151,7 +153,8 @@ class KeryxSdk private constructor(private val koin: Koin) {
         activity = homeViewModel.activity.value,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
-        unreadOnly = unreadOnly,
+        listMode = listMode,
+        starredModeAvailable = starredModeAvailable,
         opmlBusy = opmlBusy,
         hasSelectedFeed = hasSelectedFeed,
         feedListKeysActive = feedListKeysActive,
