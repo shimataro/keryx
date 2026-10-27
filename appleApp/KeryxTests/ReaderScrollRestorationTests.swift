@@ -121,4 +121,15 @@ struct ReaderScrollRestorationTests {
         restoration.reloadStarted()
         #expect(restoration.documentFinished(now: start) == 0.4)
     }
+
+    @Test
+    func aRecordedScrollIsReportedBackAndAnIgnoredOneIsNot() {
+        let restoration = ReaderScrollRestoration()
+        restoration.documentReplaced()
+        #expect(restoration.scrolled(to: 0.4, now: start) == 0.4)
+        #expect(restoration.scrolled(to: 0, now: start) == 0)
+        #expect(restoration.scrolled(to: 1.2, now: start) == 1)
+        restoration.reloadStarted()
+        #expect(restoration.scrolled(to: 0.4, now: start) == nil)
+    }
 }

@@ -13,6 +13,11 @@ struct ArticleWebView {
     let html: String
     /// The in-app theme, which picks the iOS scroll indicator (see `ReaderScrollIndicator`).
     let isDarkTheme: Bool
+    /// Where to scroll the first document this view loads once it has finished loading (a position
+    /// restored from before the app was terminated — `ReaderScrollPosition`), or nil for the top.
+    var initialScrollFraction: Double?
+    /// Told each position the user scrolls the document to, as a fraction of its scrollable height.
+    var onScroll: ((Double) -> Void)?
 
     @MainActor
     func makeCoordinator() -> Coordinator {
@@ -22,6 +27,7 @@ struct ArticleWebView {
     @MainActor
     private func configure(_ webView: WKWebView, coordinator: Coordinator) {
         webView.navigationDelegate = coordinator
+        coordinator.onScroll = onScroll
         // An empty document is `ReaderDocument.empty`, held only until the first real one is built.
         guard !html.isEmpty else { return }
         // SwiftUI calls update on every re-evaluation; reloading an unchanged document would reset
@@ -29,7 +35,9 @@ struct ArticleWebView {
         guard html != coordinator.loadedHtml else { return }
         coordinator.reloadedHtml = nil
         coordinator.recovery.documentReplaced()
-        coordinator.scrollRestoration.documentReplaced()
+        coordinator.scrollRestoration.documentReplaced(
+            restoring: coordinator.loadedHtml == nil ? initialScrollFraction : nil
+        )
         coordinator.load(html, in: webView)
     }
 
@@ -142,6 +150,7 @@ struct ArticleWebView {
         let recovery = ReaderProcessRecovery()
         let scrollRestoration = ReaderScrollRestoration()
         var loadedHtml: String?
+        var onScroll: ((Double) -> Void)?
         /// The document `load` last retried after a foreign commit replaced it, so a page that keeps
         /// replacing itself is retried once rather than forever.
         var reloadedHtml: String?
@@ -242,7 +251,8 @@ struct ArticleWebView {
             switch kind {
             case "scroll":
                 guard let fraction = (message["fraction"] as? NSNumber)?.doubleValue else { return }
-                scrollRestoration.scrolled(to: fraction, now: .now)
+                guard let recorded = scrollRestoration.scrolled(to: fraction, now: .now) else { return }
+                onScroll?(recorded)
             case "user":
                 scrollRestoration.userInteracted()
             case "resize":

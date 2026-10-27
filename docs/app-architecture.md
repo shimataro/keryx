@@ -1586,7 +1586,13 @@ platform:
   the background reopens on that column from the first frame — the reader only together with the
   article `HomeViewModel` restores as selected, otherwise the article list
   (`Home/CompactColumnRestoration.swift`); quitting from the app switcher discards scene storage, so
-  that launch starts at the sidebar. Pane widths follow each platform's input: the macOS app
+  that launch starts at the sidebar. The reader's scroll position in the selected article is kept the
+  same way (article id plus a fraction of the scrollable height, `Home/ReaderScrollPosition.swift`)
+  and applied once that article's document has loaded, through the same restore the WebContent
+  recovery uses (see "The SwiftUI reader reloads its document when WebKit's content process dies"
+  below). It is offered only to the selected article's own page, never to the neighbours kept ready
+  for a swipe, and only until the user selects another article or moves the stack. No
+  `local_settings` key is involved. Pane widths follow each platform's input: the macOS app
   saves the widths the dividers are dragged to and restores them, like desktop, while the iPad app,
   like Android's touch layouts, asks for the default widths every time and saves nothing, leaving
   `NavigationSplitView` to fit them into the screen without going below each column's minimum.

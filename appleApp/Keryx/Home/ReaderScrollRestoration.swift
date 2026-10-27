@@ -48,11 +48,14 @@ final class ReaderScrollRestoration {
         phase = .pending(target: target)
     }
 
-    /// The page reports it is now scrolled to `fraction`.
-    func scrolled(to fraction: Double, now: ContinuousClock.Instant) {
+    /// The page reports it is now scrolled to `fraction`. Returns the position recorded (clamped to
+    /// 0...1), or nil when it was not recorded because a restore is running.
+    @discardableResult
+    func scrolled(to fraction: Double, now: ContinuousClock.Instant) -> Double? {
         expireIfDue(now: now)
-        guard case .idle = phase, fraction.isFinite else { return }
+        guard case .idle = phase, fraction.isFinite else { return nil }
         lastFraction = Self.restorable(fraction)
+        return lastFraction ?? 0
     }
 
     /// The document finished loading: the fraction to scroll it to now, if any.

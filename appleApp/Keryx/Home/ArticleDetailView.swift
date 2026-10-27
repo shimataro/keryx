@@ -26,6 +26,12 @@ struct ArticleDetailView: View {
     /// previous article's buttons through the whole push and then animate them to the new state. Built
     /// afresh on each push instead, the toolbar starts out in the new article's state.
     var isOnScreen: Bool = true
+    #if os(iOS)
+    /// See `ReaderPageController.restoredScroll`.
+    var restoredScroll: ReaderScrollPosition?
+    /// See `ReaderPageController.onScroll`.
+    var onScroll: (String, Double) -> Void = { _, _ in }
+    #endif
 
     @State private var copyConfirmed = false
 
@@ -41,7 +47,7 @@ struct ArticleDetailView: View {
             // A swipe pager only while there is an article to page from — a pager with nothing
             // selected would still show its first page (see `ArticlePagerView`).
             if hasArticle {
-                ArticlePagerView(home: home, preferences: preferences)
+                ArticlePagerView(home: home, preferences: preferences, restoredScroll: restoredScroll, onScroll: onScroll)
             }
             #else
             let reader = ReaderPageInputs.resolve(home.readerContent)

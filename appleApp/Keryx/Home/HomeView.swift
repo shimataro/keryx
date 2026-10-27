@@ -39,6 +39,18 @@ struct HomeView: View {
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> {
         Binding(get: { compactColumn }, set: { compactColumn = $0 })
     }
+    /// The selected article's reader scroll position, kept in scene storage like the column so the
+    /// relaunch reopens the reader where the user left it (see `ReaderScrollPosition`).
+    @SceneStorage("reader.scrollArticleId") private var readerScrollArticleId = ""
+    @SceneStorage("reader.scrollFraction") private var readerScrollFraction = 0.0
+    /// Whether the stored position is still offered to the reader: only until the user selects
+    /// another article or navigates the stack, so it restores the relaunch rather than every later
+    /// reopening of the same article.
+    @State private var readerScrollRestorePending = true
+    private var restoredReaderScroll: ReaderScrollPosition? {
+        guard readerScrollRestorePending else { return nil }
+        return ReaderScrollPosition.stored(articleId: readerScrollArticleId, fraction: readerScrollFraction)
+    }
     #else
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> { $compactColumn }
@@ -146,7 +158,23 @@ struct HomeView: View {
                 }
                 #endif
         } detail: {
+            #if os(iOS)
+            ArticleDetailView(
+                home: home,
+                preferences: preferences,
+                focusedPane: $focusedPane,
+                isOnScreen: !(sidebarIsTopmost || articleListIsTopmost),
+                restoredScroll: restoredReaderScroll,
+                onScroll: { id, fraction in
+                    // Only the article on screen; a neighbour kept ready for a swipe is not the one to restore.
+                    guard id == home.selectedArticleId else { return }
+                    readerScrollArticleId = id
+                    readerScrollFraction = fraction
+                }
+            )
+            #else
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane, isOnScreen: !(sidebarIsTopmost || articleListIsTopmost))
+            #endif
         }
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
@@ -155,6 +183,7 @@ struct HomeView: View {
                 ignoreRestoredColumnChange = false
                 return
             }
+            readerScrollRestorePending = false
             if ArticleListRemount.isNeeded(
                 isCompact: horizontalSizeClass == .compact,
                 from: HomeView.compactSearchColumn(old),
@@ -195,6 +224,7 @@ struct HomeView: View {
         // opened), so WebKit can start while the app is idle rather than on the first article.
         .task { await ReaderWebViewWarmUp.scheduleOnce() }
         .onAppear { restoreCompactColumn() }
+        .onChange(of: home.selectedArticleId) { _, _ in readerScrollRestorePending = false }
         #endif
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
