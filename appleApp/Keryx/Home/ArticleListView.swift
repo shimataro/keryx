@@ -1,7 +1,7 @@
 import KeryxShared
 import SwiftUI
 
-/// The center pane: toolbar (unread-only, hide-read, sort, mark-all-read, the notification bell),
+/// The center pane: toolbar (list mode, sort, mark-all-read, the notification bell),
 /// the article rows themselves (search-highlighted when a query is active), the "new articles"
 /// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
 /// research notes.
@@ -268,11 +268,8 @@ struct ArticleListView: View {
             // from the bottom up, which hid Mark All as Read first and squeezed the search button
             // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
             // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
-            ToolbarItemGroup(placement: .navigation) {
-                listModeMenu
-                hideReadButton
-            }
-            .visibilityPriority(.low)
+            ToolbarItem(placement: .navigation) { listModeMenu }
+                .visibilityPriority(.low)
 
             FlexibleToolbarSpacer()
 
@@ -299,10 +296,7 @@ struct ArticleListView: View {
         // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
         // into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
-        ToolbarItemGroup(placement: .navigation) {
-            listModeMenu
-            hideReadButton
-        }
+        ToolbarItem(placement: .navigation) { listModeMenu }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
         // pushes the trailing cluster to the column's right edge.
@@ -352,16 +346,6 @@ struct ArticleListView: View {
         .help(L("home_list_mode"))
         .accessibilityLabel(L("home_list_mode"))
         .accessibilityValue(L(Self.listModeLabelKey(home.listMode)))
-    }
-
-    private var hideReadButton: some View {
-        Button {
-            home.viewModel.hideRead()
-        } label: {
-            Label(L("home_hide_read"), systemImage: "eye.slash")
-        }
-        .disabled(!home.canHideRead)
-        .help(L("home_hide_read"))
     }
 
     private var notificationBellButton: some View {

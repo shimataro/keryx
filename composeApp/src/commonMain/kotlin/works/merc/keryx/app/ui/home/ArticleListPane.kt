@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -84,7 +83,6 @@ import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
-import works.merc.keryx.app.resources.home_hide_read
 import works.merc.keryx.app.resources.home_list_mode
 import works.merc.keryx.app.resources.home_list_mode_all
 import works.merc.keryx.app.resources.home_list_mode_starred
@@ -221,7 +219,6 @@ fun ArticleListPane(
     val revealRequest by vm.selectionRevealRequests.collectAsState()
     val listMode by vm.mode.collectAsState()
     val starredModeEnabled by vm.starredModeEnabled.collectAsState()
-    val canHideRead by vm.canHideRead.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
@@ -414,14 +411,12 @@ fun ArticleListPane(
         revealRequest = revealRequest,
         listMode = listMode,
         starredModeEnabled = starredModeEnabled,
-        canHideRead = canHideRead,
         // Deliberately the real sort direction even while search disables the button — search
         // order is always FTS5 relevance rank, but sortDirectionIcon's own KDoc says the button
         // still reflects the current direction while disabled, it just can't be toggled.
         newestFirst = newestFirst,
         focused = focused,
         onSelectListMode = vm::setMode,
-        onHideRead = { vm.hideRead() },
         onToggleSort = { vm.toggleSort() },
         onMarkAllRead = { vm.markAllRead() },
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
@@ -521,7 +516,9 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
 
 /**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): list-mode chip, hide-read, notifications bell, sort, mark-all-read.
+ * or its search results): list-mode chip, notifications bell, sort, mark-all-read. Hide read is a
+ * View-menu command rather than a toolbar button: it is rarely needed, since a manual refresh or
+ * sync, a filter switch and choosing Unread all clear the read rows the same way.
  * When [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance
  * rank, or recency when every term is too short to be ranked, see FtsSearch), the sort button is
  * disabled and its tooltip explains why instead of showing the usual "sort by ...".
@@ -530,16 +527,6 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
  * native menu of all three ([listModeMenuEntries]) — rather than a segmented control: three labelled
  * segments do not fit the pane's 240dp minimum width beside the other controls. The chip is filled
  * whenever the mode narrows the list, so a narrowed list never looks like the whole filter.
- *
- * The hide-read action ([onHideRead]) is always present, enabled only while [canHideRead] — per
- * "Layout stability under state changes" in the `ui-guidelines` skill, a control whose availability
- * depends on state is shown disabled rather than hidden, so it never shifts its neighbors. Unlike
- * the mode chip, this is a one-shot action — see `HomeViewModel.canHideRead`'s own KDoc for what it
- * does and why it's separate from the unread mode itself. It sits directly beside the mode chip rather than in the
- * trailing [ToolbarIconGroup]: its enabled state depends on that chip alone, so adjacency makes
- * the dependency visible, and it keeps this view-only action away from the bulk-mutating
- * mark-all-read it would otherwise be easy to mistake it for. As a lone icon it stays bare (no
- * capsule), per the `ui-guidelines` skill's `ToolbarIconGroup` rule.
  *
  * When [onOpenDrawer] is non-null (this pane is shown at a narrow [PaneLayout], where the feed
  * list is a modal navigation drawer rather than an on-screen pane — see `ArticleListPane`'s KDoc),
@@ -567,8 +554,6 @@ internal fun ArticleListTopBar(
     onToggleSort: () -> Unit,
     onMarkAllRead: () -> Unit,
     starredModeEnabled: Boolean = true,
-    canHideRead: Boolean = false,
-    onHideRead: () -> Unit = {},
     sortEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
     onOpenDrawer: (() -> Unit)? = null,
@@ -610,11 +595,6 @@ internal fun ArticleListTopBar(
                     highlighted = listMode != ArticleListMode.All,
                     onClick = open,
                 )
-            }
-            Spacer(Modifier.width(4.dp))
-            val hideReadTooltip = stringResource(Res.string.home_hide_read)
-            TooltipIconButton(tooltip = hideReadTooltip, onClick = onHideRead, enabled = canHideRead) {
-                KeryxIcon(KeryxIcons.VisibilityOff, contentDescription = hideReadTooltip)
             }
             Spacer(Modifier.weight(1f))
             ToolbarIconGroup {
@@ -752,8 +732,6 @@ internal fun ArticleListPaneContent(
     listMode: ArticleListMode,
     onSelectListMode: (ArticleListMode) -> Unit,
     starredModeEnabled: Boolean = true,
-    canHideRead: Boolean = false,
-    onHideRead: () -> Unit = {},
     onToggleSort: () -> Unit,
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
@@ -816,8 +794,6 @@ internal fun ArticleListPaneContent(
             listMode = listMode,
             onSelectListMode = onSelectListMode,
             starredModeEnabled = starredModeEnabled,
-            canHideRead = canHideRead,
-            onHideRead = onHideRead,
             newestFirst = newestFirst,
             onToggleSort = onToggleSort,
             onMarkAllRead = onMarkAllRead,

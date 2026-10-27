@@ -709,9 +709,8 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarHideReadButtonDisabledByDefaultDoesNotInvokeCallback() = runDesktopComposeUiTest {
-        var hideReadCount = 0
-
+    fun articleListTopBarHasNoHideReadButton() = runDesktopComposeUiTest {
+        // Hide read is a View-menu command (AppMenuTree), not a toolbar button.
         setContent {
             ArticleListTopBar(
                 listMode = ArticleListMode.Unread,
@@ -719,41 +718,11 @@ class ArticleListPaneTest {
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
-                onHideRead = { hideReadCount++ },
             )
         }
         waitForIdle()
 
-        // canHideRead defaults to false, so the button is present but disabled.
-        onNodeWithContentDescription("既読記事を非表示").assertIsNotEnabled()
-        onNodeWithContentDescription("既読記事を非表示").performClick()
-        waitForIdle()
-
-        assertEquals(0, hideReadCount)
-    }
-
-    @Test
-    fun articleListTopBarHideReadButtonEnabledInvokesCallback() = runDesktopComposeUiTest {
-        var hideReadCount = 0
-
-        setContent {
-            ArticleListTopBar(
-                listMode = ArticleListMode.Unread,
-                onSelectListMode = {},
-                newestFirst = true,
-                onToggleSort = {},
-                onMarkAllRead = {},
-                canHideRead = true,
-                onHideRead = { hideReadCount++ },
-            )
-        }
-        waitForIdle()
-
-        onNodeWithContentDescription("既読記事を非表示").assertIsEnabled()
-        onNodeWithContentDescription("既読記事を非表示").performClick()
-        waitForIdle()
-
-        assertEquals(1, hideReadCount)
+        onNodeWithContentDescription("既読記事を非表示").assertDoesNotExist()
     }
 
     @Test
