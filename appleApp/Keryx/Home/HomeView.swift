@@ -34,15 +34,8 @@ struct HomeView: View {
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> {
         Binding(get: { compactColumn }, set: { compactColumn = $0 })
     }
-    /// The selected article's reader scroll position, kept in scene storage like the column so the
-    /// relaunch reopens the reader where the user left it (see `ReaderScrollPosition`).
-    @SceneStorage(HomeRestoration.readerScrollArticleIdKey) private var readerScrollArticleId = ""
-    @SceneStorage(HomeRestoration.readerScrollFractionKey) private var readerScrollFraction = 0.0
     /// When the restored column and reader position are checked and withdrawn.
     @State private var restoration = HomeRestoration()
-    private var restoredReaderScroll: ReaderScrollPosition? {
-        restoration.readerScroll(articleId: readerScrollArticleId, fraction: readerScrollFraction)
-    }
     #else
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
     private var compactColumnBinding: Binding<NavigationSplitViewColumn> { $compactColumn }
@@ -151,18 +144,12 @@ struct HomeView: View {
                 #endif
         } detail: {
             #if os(iOS)
-            ArticleDetailView(
+            RestoringArticleDetailView(
                 home: home,
                 preferences: preferences,
                 focusedPane: $focusedPane,
                 isOnScreen: !(sidebarIsTopmost || articleListIsTopmost),
-                restoredScroll: restoredReaderScroll,
-                onScroll: { id, fraction in
-                    // Only the article on screen; a neighbour kept ready for a swipe is not the one to restore.
-                    guard id == home.selectedArticleId else { return }
-                    readerScrollArticleId = id
-                    readerScrollFraction = fraction
-                }
+                restoration: restoration
             )
             #else
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane, isOnScreen: !(sidebarIsTopmost || articleListIsTopmost))
@@ -520,6 +507,40 @@ struct HomeView: View {
         }
     }
 }
+
+#if os(iOS)
+/// The reader column, together with the scene storage its scroll position is kept in. Held here rather
+/// than in `HomeView`, since the reader writes the position several times a second while it scrolls:
+/// each write re-renders only this view, not the whole split view around it.
+private struct RestoringArticleDetailView: View {
+    let home: HomeObservable
+    let preferences: PreferencesObservable
+    var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    let isOnScreen: Bool
+    let restoration: HomeRestoration
+
+    /// The selected article's reader scroll position, kept in scene storage like the column so the
+    /// relaunch reopens the reader where the user left it (see `ReaderScrollPosition`).
+    @SceneStorage(HomeRestoration.readerScrollArticleIdKey) private var readerScrollArticleId = ""
+    @SceneStorage(HomeRestoration.readerScrollFractionKey) private var readerScrollFraction = 0.0
+
+    var body: some View {
+        ArticleDetailView(
+            home: home,
+            preferences: preferences,
+            focusedPane: focusedPane,
+            isOnScreen: isOnScreen,
+            restoredScroll: restoration.readerScroll(articleId: readerScrollArticleId, fraction: readerScrollFraction),
+            onScroll: { id, fraction in
+                // Only the article on screen; a neighbour kept ready for a swipe is not the one to restore.
+                guard id == home.selectedArticleId else { return }
+                readerScrollArticleId = id
+                readerScrollFraction = fraction
+            }
+        )
+    }
+}
+#endif
 
 /// Compose's window shows no title over the panes; `NavigationSplitView` draws the window's name as
 /// a toolbar item of its own, which `NSWindow.titleVisibility` does not reach. The window itself
