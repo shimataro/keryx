@@ -96,7 +96,9 @@ section heading, and read only that section. Then ask whether the change re-ente
 section describes. In particular:
 
 - The article reader's WebView is composed unconditionally for the pane's lifetime, never behind an
-  `if` — adding or removing a heavyweight component revalidates the whole window.
+  `if` — adding or removing a heavyweight component revalidates the whole window. Android's
+  renderer-death rebuild (`key(rendererGeneration)` in `ui/home/ArticleWebView.kt`) is the one
+  sanctioned exception — desktop never triggers it.
 - The toolbar keeps its Compose structure across states (actions disabled, not hidden), so the
   reader's measured bounds do not change.
 

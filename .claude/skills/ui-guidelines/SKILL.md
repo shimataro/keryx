@@ -1700,7 +1700,10 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   revalidate and repaint the *entire window*, not just this pane (see `docs/app-architecture.md`'s
   "Article Reader (native WebView)"). A narrow layout renders a `HorizontalPager` instead, where
   pages legitimately mount and unmount — that is an Android-only path, and Android's `WebView` is
-  an ordinary in-tree view with no such interop cost. Consequently, empty/error states for this pane (no article selected, no content) are
+  an ordinary in-tree view with no such interop cost. The one exception is `ArticleWebView`'s
+  `key(rendererGeneration)`, which rebuilds the reader's WebView when Android's renderer process
+  dies (`platform/ReaderWebViewFactory`). It only ever happens on Android — desktop's
+  `readerWebViewFactory` returns `null`, so the generation never changes there. Consequently, empty/error states for this pane (no article selected, no content) are
   rendered as HTML *inside* the WebView (`presentation/article/ArticleWebViewHtml.kt` (`:shared`)), not as Compose
   `Text`, and the toolbar above it keeps the exact same Compose structure (same buttons, only
   `enabled` toggles) across every state rather than conditionally hiding an action — hiding one
