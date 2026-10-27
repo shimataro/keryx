@@ -119,6 +119,7 @@ internal data class AppMenuLabels(
     val allArticles: String,
     val unreadOnly: String,
     val starredOnly: String,
+    val hideRead: String,
     val toggleSort: String,
     val markAllRead: String,
     val showMenuBar: String,
@@ -162,6 +163,7 @@ internal data class AppMenuActions(
     val quit: () -> Unit,
     val focusSearch: () -> Unit,
     val setListMode: (ArticleListMode) -> Unit,
+    val hideRead: () -> Unit,
     val toggleSort: () -> Unit,
     val markAllRead: () -> Unit,
     val toggleRead: () -> Unit,
@@ -273,6 +275,9 @@ internal fun buildAppMenuTree(
             )
         }
         add(AppMenuNode.Separator)
+        // Unread-only keeps rows read since it was chosen on screen; this pulls the list back to
+        // strictly unread on demand, as a manual refresh or sync also does.
+        add(AppMenuNode.Item(labels.hideRead, ui.hideReadEnabled, onClick = actions.hideRead))
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))

@@ -748,7 +748,7 @@ class HomeViewModel(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
     /**
-     * Whether the article list toolbar's "hide read" action currently has anything to do: unread
+     * Whether the View menu's "hide read" command currently has anything to do: unread
      * only is on, and the list currently on screen (search results while searching, the filter's
      * own list otherwise — the same resolution [pagerArticles] uses) has a read row other than the
      * selected one. Pressing the action re-runs the same re-trim [setUnreadOnly] already applies
@@ -760,7 +760,7 @@ class HomeViewModel(
             unread && hasHideableRead(displayedRows(active, rows, results), selectedId)
         }.stateIn(viewModelScope, started, false)
 
-    /** Runs [ArticleListTopBar]'s "hide read" action — see [canHideRead]. */
+    /** Runs the View menu's "Hide Read Articles" command — see [canHideRead]. */
     fun hideRead() {
         if (canHideRead.value) retrimPinnedReadStates()
     }

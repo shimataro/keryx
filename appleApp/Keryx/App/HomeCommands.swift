@@ -109,6 +109,11 @@ struct HomeCommands: Commands {
 
                 Divider()
 
+                // Unread-only keeps rows read since it was chosen on screen; this pulls the list
+                // back to strictly unread on demand, as a manual refresh or sync also does.
+                Button(L("menu_view_hide_read")) { home.viewModel.hideRead() }
+                    .disabled(!state.hideReadEnabled)
+
                 Button(L("menu_view_toggle_sort")) { home.viewModel.toggleSort() }
                     .disabled(!state.toggleSortEnabled)
 
@@ -257,7 +262,7 @@ struct HomeCommands: Commands {
         guard let sdk = model.sdk else {
             return MenuUiState(
                 addItemsEnabled: false, opmlEnabled: false, searchEnabled: false, listModeEnabled: false,
-                listMode: .all, starredModeEnabled: false, starredModeChecked: false, toggleSortEnabled: false, markAllReadEnabled: false,
+                listMode: .all, starredModeEnabled: false, starredModeChecked: false, toggleSortEnabled: false, hideReadEnabled: false, markAllReadEnabled: false,
                 articleActionsEnabled: false, copyUrlEnabled: false, openInBrowserEnabled: false,
                 refreshAllEnabled: false,
                 syncEnabled: false, openSettingsEnabled: false, feedActionsEnabled: false,
@@ -272,6 +277,7 @@ struct HomeCommands: Commands {
             selectedArticleCanOpenInBrowser: home.selectedArticleCanOpenInBrowser,
             canSyncNow: home.canSyncNow,
             searchActive: home.searchActive,
+            canHideRead: home.canHideRead,
             listMode: home.listMode,
             starredModeAvailable: home.starredModeEnabled,
             opmlBusy: model.opmlTransfer?.isBusy ?? false,

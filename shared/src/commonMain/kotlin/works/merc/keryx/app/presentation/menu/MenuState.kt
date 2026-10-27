@@ -30,6 +30,9 @@ data class MenuUiState(
      * on ([listModeChecked]). */
     val starredModeChecked: Boolean,
     val toggleSortEnabled: Boolean,
+    /** Hide read articles — the same rule as the action itself (`HomeViewModel.canHideRead`):
+     * unread-only, with a read row other than the selected one on screen. */
+    val hideReadEnabled: Boolean,
     val markAllReadEnabled: Boolean,
     /** Toggle read / star — require a selected article. Not gated on pane focus: the real
      * article-detail toolbar stays clickable for the selected article regardless of which pane
@@ -108,6 +111,7 @@ fun computeMenuUiState(
     activity: ActivitySnapshot,
     canSyncNow: Boolean,
     searchActive: Boolean,
+    canHideRead: Boolean,
     listMode: ArticleListMode,
     starredModeAvailable: Boolean,
     opmlBusy: Boolean,
@@ -125,6 +129,7 @@ fun computeMenuUiState(
     starredModeEnabled = onHome && starredModeAvailable,
     starredModeChecked = listModeChecked(ArticleListMode.Starred, listMode, starredModeAvailable),
     toggleSortEnabled = onHome && !searchActive,
+    hideReadEnabled = onHome && canHideRead,
     markAllReadEnabled = onHome,
     articleActionsEnabled = onHome && hasSelectedArticle,
     copyUrlEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,

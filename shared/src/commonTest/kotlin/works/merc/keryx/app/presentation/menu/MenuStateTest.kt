@@ -17,6 +17,7 @@ class MenuStateTest {
         activity: ActivitySnapshot = ActivitySnapshot(),
         canSyncNow: Boolean = false,
         searchActive: Boolean = false,
+        canHideRead: Boolean = false,
         listMode: ArticleListMode = ArticleListMode.All,
         starredModeAvailable: Boolean = true,
         opmlBusy: Boolean = false,
@@ -33,6 +34,7 @@ class MenuStateTest {
         activity = activity,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
+        canHideRead = canHideRead,
         listMode = listMode,
         starredModeAvailable = starredModeAvailable,
         opmlBusy = opmlBusy,
@@ -152,6 +154,13 @@ class MenuStateTest {
     }
 
     // --- Sort / search interaction ---
+
+    @Test
+    fun hide_read_follows_the_shared_predicate_on_home_only() {
+        assertTrue(state(canHideRead = true).hideReadEnabled)
+        assertFalse(state(canHideRead = false).hideReadEnabled)
+        assertFalse(state(onHome = false, canHideRead = true).hideReadEnabled)
+    }
 
     @Test
     fun toggle_sort_disabled_while_searching() {

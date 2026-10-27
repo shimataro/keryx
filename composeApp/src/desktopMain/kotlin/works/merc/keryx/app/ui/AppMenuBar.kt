@@ -61,6 +61,7 @@ import works.merc.keryx.app.resources.menu_help_project_page
 import works.merc.keryx.app.resources.menu_help_website
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.resources.menu_view
+import works.merc.keryx.app.resources.menu_view_hide_read
 import works.merc.keryx.app.resources.menu_view_mark_all_read
 import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
@@ -133,6 +134,7 @@ internal fun FrameWindowScope.AppMenuBar(
     val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()
+    val canHideRead by homeVm.canHideRead.collectAsState()
     val listMode by homeVm.mode.collectAsState()
     val starredModeEnabled by homeVm.starredModeEnabled.collectAsState()
     val canSyncNow by homeVm.canSyncNow.collectAsState()
@@ -160,6 +162,7 @@ internal fun FrameWindowScope.AppMenuBar(
         activity = activity,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
+        canHideRead = canHideRead,
         listMode = listMode,
         starredModeAvailable = starredModeEnabled,
         opmlBusy = opmlBusy,
@@ -203,6 +206,7 @@ internal fun FrameWindowScope.AppMenuBar(
         allArticles = stringResource(Res.string.menu_view_list_mode_all),
         unreadOnly = stringResource(Res.string.menu_view_list_mode_unread),
         starredOnly = stringResource(Res.string.menu_view_list_mode_starred),
+        hideRead = stringResource(Res.string.menu_view_hide_read),
         toggleSort = stringResource(Res.string.menu_view_toggle_sort),
         markAllRead = stringResource(Res.string.menu_view_mark_all_read),
         showMenuBar = stringResource(Res.string.menu_view_show_menu_bar),
@@ -244,6 +248,7 @@ internal fun FrameWindowScope.AppMenuBar(
         quit = onQuit,
         focusSearch = { menuController.send(MenuCommand.FocusSearch) },
         setListMode = { homeVm.setMode(it) },
+        hideRead = { homeVm.hideRead() },
         toggleSort = { homeVm.toggleSort() },
         markAllRead = { homeVm.markAllRead() },
         toggleRead = { homeVm.toggleReadSelected() },
