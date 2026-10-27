@@ -589,6 +589,19 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
 原因でもあった）。
 
+**Android がバックグラウンドでプロセスを終了させても、読んでいた位置は残る。** `ArticleWebView` は
+ネイティブビューの縦スクロール位置をスクロール可能な高さに対する割合として記録し
+（`platform/NativeWebViewScroll.kt` の `observeNativeWebViewScroll`。`android.webkit.WebView` 自身のスクロール・
+タッチ・マウスホイール・キーのリスナーを使う）、それが属する文書をキーにして `rememberSaveable` で保存する
+（キーは HTML のハッシュ。読み込みガードが記事 id ではなく文書で比較するのと同じ理由）。プロセスが復元されると、
+その位置はその文書が最初に読み込まれたときに提示される — 先に別の文書（本文の読み込み中に表示する
+プレースホルダー）が読み込まれても提示は残る — そして `loadingState` が `Finished` になった時点で適用し、
+内容が伸びる間（画像の到着など）`READER_SCROLL_SETTLE_WINDOW` まで適用し直す。ユーザーがタッチ・スクロール・
+キー入力をした時点ですぐにやめる（`ui/home/ReaderScrollRestoration.kt`。SwiftUI のリーダーと同じ規則）。
+動作中のアプリでは何も変わらず、同じビューで別の文書を表示すれば先頭から始まる。デスクトップの `actual` は
+何もしない — `WryWebViewPanel` はスクロール位置を公開しておらず、そもそもウィンドウが開いたままプロセスが
+終了させられることがない。
+
 **狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
 commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
 両隣は実際にマウントされた `WebView` であり、それはページャ自身の item content ではなく

@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -28,7 +29,11 @@ import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.platform.NativeWebViewScrollListener
 import works.merc.keryx.app.platform.isNativeWebViewSupported
+import works.merc.keryx.app.platform.nativeWebViewContentHeight
+import works.merc.keryx.app.platform.observeNativeWebViewScroll
+import works.merc.keryx.app.platform.scrollNativeWebViewTo
 import works.merc.keryx.app.platform.setNativeWebViewImportantForAccessibility
 import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
@@ -36,6 +41,8 @@ import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.ui.article.ArticleContentView
 import works.merc.keryx.app.presentation.article.extractLinks
 import works.merc.keryx.app.presentation.article.wrapArticleHtml
+import kotlinx.coroutines.delay
+import kotlin.time.TimeSource
 
 /**
  * Displays a prebuilt HTML [html] document in a native web view.
@@ -118,10 +125,18 @@ internal fun ArticleWebView(html: String, body: String, articleUrl: String?, act
     // placeholder and the "no content" notice, which have no article id, and comparing the HTML
     // also picks up a theme/font-scale change for an otherwise-unchanged article.
     val loadedHtml = remember { mutableStateOf<String?>(null) }
+    val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
+    // The reading position, saved across the process being killed in the background (Android) so
+    // the document comes back where the user left it — see ReaderScrollRestoration. Keyed by the
+    // document's HTML rather than an article id, for the same reason as the load guard above.
+    val scrollRestoration = rememberSaveable(saver = ReaderScrollRestorationSaver) { ReaderScrollRestoration() }
     LaunchedEffect(webViewState.loadingState, html) {
         if (shouldLoadArticleHtml(webViewState.loadingState, loadedHtml.value, html)) {
+            scrollRestoration.documentReplaced(html.hashCode())
             loadedHtml.value = html
             navigator.loadHtml(html)
+        } else if (webViewState.loadingState is LoadingState.Finished && loadedHtml.value == html) {
+            nativePanel.value?.let { restoreReaderScroll(it, scrollRestoration) }
         }
     }
 
@@ -132,7 +147,6 @@ internal fun ArticleWebView(html: String, body: String, articleUrl: String?, act
     // the panel from the moment it's created and only reveal it once this composable's own
     // layout position is known, giving Compose's own bounds sync a frame to catch up first.
     // Revealed once, not on every article switch, since the panel is reused after creation.
-    val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
     val hasPositioned = remember { mutableStateOf(false) }
     val revealed = remember { mutableStateOf(false) }
     LaunchedEffect(hasPositioned.value, nativePanel.value) {
@@ -168,9 +182,40 @@ internal fun ArticleWebView(html: String, body: String, articleUrl: String?, act
         onCreated = { panel ->
             setNativeWebViewVisible(panel, false)
             setNativeWebViewImportantForAccessibility(panel, active)
+            observeNativeWebViewScroll(panel, readerScrollListener(scrollRestoration))
             nativePanel.value = panel
         },
     )
+}
+
+/** Feeds the reader WebView's scrolling and the user's input to [restoration]. */
+private fun readerScrollListener(restoration: ReaderScrollRestoration) = object : NativeWebViewScrollListener {
+    override fun onScrolled(fraction: Float) {
+        restoration.scrolled(fraction, TimeSource.Monotonic.markNow())
+    }
+
+    override fun onUserInput() = restoration.userInteracted()
+}
+
+/** How often a settling restore checks whether the document grew. */
+private const val READER_SCROLL_GROWTH_POLL_MS = 100L
+
+/**
+ * Scrolls [webView]'s just-finished document to the position [restoration] restores, if any, then
+ * re-applies it each time the content grows until the restore ends (the settle window passes or the
+ * user takes over). Runs in the load effect, so a newer document cancels it.
+ */
+private suspend fun restoreReaderScroll(webView: NativeWebView, restoration: ReaderScrollRestoration) {
+    val target = restoration.documentFinished(TimeSource.Monotonic.markNow()) ?: return
+    scrollNativeWebViewTo(webView, target)
+    var height = nativeWebViewContentHeight(webView)
+    while (restoration.isRestoring(TimeSource.Monotonic.markNow())) {
+        delay(READER_SCROLL_GROWTH_POLL_MS)
+        val current = nativeWebViewContentHeight(webView)
+        if (current == height) continue
+        height = current
+        restoration.contentResized(TimeSource.Monotonic.markNow())?.let { scrollNativeWebViewTo(webView, it) }
+    }
 }
 
 /**

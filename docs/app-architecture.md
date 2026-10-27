@@ -596,6 +596,20 @@ to the host executable, which fails with Access Denied whenever that location is
 running forever, which was the cause of an
 app-wide freeze on click).
 
+**The reading position survives Android killing the process in the background.** `ArticleWebView`
+records the native view's vertical scroll position as a fraction of its scrollable height
+(`platform/NativeWebViewScroll.kt`'s `observeNativeWebViewScroll`, through `android.webkit.WebView`'s
+own scroll, touch, mouse-wheel and key listeners) and saves it with `rememberSaveable`, keyed by the
+document it belongs to (the hash of its HTML, for the same reason the load guard compares documents
+rather than article ids). After the process is restored, that position is offered to its document
+the first time it loads — a document loading first (the placeholder shown while the body is still
+loading) leaves the offer in place — and applied once `loadingState` is `Finished`, then re-applied
+while the content grows (images arriving) for up to `READER_SCROLL_SETTLE_WINDOW`, stopping at once
+when the user touches, scrolls or presses a key (`ui/home/ReaderScrollRestoration.kt`, the same rule
+as the SwiftUI reader's). Within a running app nothing changes: another document in the same view
+starts at the top. The desktop `actual`s are no-ops — `WryWebViewPanel` exposes no scroll position,
+and the process is never killed under a live window there.
+
 **At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
 shared `commonMain` composable) — a horizontal drag moves to the next/previous article, and the
 pages either side of the one on screen are real, mounted `WebView`s, rendered through
