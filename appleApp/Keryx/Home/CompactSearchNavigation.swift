@@ -8,8 +8,9 @@
 /// screen together and nothing needs to move.
 enum CompactSearchNavigation {
     /// The collapsed stack's columns — mirrors `NavigationSplitViewColumn`, which the test bundle
-    /// cannot use without SwiftUI.
-    enum Column: Equatable {
+    /// cannot use without SwiftUI. The raw value is what the iOS relaunch restoration keeps in scene
+    /// storage (`CompactColumnRestoration`), so it must not change.
+    enum Column: String {
         case sidebar
         case content
         case detail

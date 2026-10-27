@@ -208,6 +208,12 @@ final class HomeObservable: ObservableAssignment {
         self.copyConfirmation = copyConfirmation
             ?? ArticleUrlCopyConfirmation(announce: VoiceOverAnnouncement.post, showToast: showToast)
         sidebarRebuild = CoalescedAction { [weak self] in self?.rebuildSidebar() }
+        // `HomeViewModel` restores the selection synchronously in its own init, so it is already
+        // there: mirror it now rather than on the observers' first delivery, so the first frame
+        // already shows the restored article — the iOS relaunch restoration checks the restored
+        // column and reader position against it (`HomeRestoration`).
+        syncSelectedArticleRow()
+        syncReaderContent()
     }
 
     /// Selects a filter and mirrors the result into the observed state at once. The `for await`

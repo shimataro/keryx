@@ -24,6 +24,11 @@ struct ReaderPageView: View {
     /// The owning feed's favicon URL, shown before the byline; nil on macOS.
     var feedFaviconUrl: String?
     let preferences: PreferencesObservable
+    /// Where to scroll this page's first document once loaded (iOS, a restored position — see
+    /// `ReaderScrollPosition`); nil for the top.
+    var initialScrollFraction: Double?
+    /// Told each position the user scrolls this page's document to.
+    var onScroll: ((Double) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     /// The page's current document, built by `rebuildDocument()` off the main thread. Held here
@@ -38,7 +43,12 @@ struct ReaderPageView: View {
     @State private var rebuildThrottle = ReaderRebuildThrottle()
 
     var body: some View {
-        ArticleWebView(html: document.html, isDarkTheme: colorScheme == .dark)
+        ArticleWebView(
+            html: document.html,
+            isDarkTheme: colorScheme == .dark,
+            initialScrollFraction: initialScrollFraction,
+            onScroll: onScroll
+        )
             #if os(iOS)
             // Shows through the WebView until its first document paints (see `ArticleWebView`).
             .background(.background)

@@ -1341,6 +1341,23 @@ animations"), 14, 15 and 16:
   expanded search bar, dismisses dialogs and bottom sheets, steps through Settings (category screen →
   list → closed), and on the article list itself leaves the app (with the system's back-to-home preview).
 
+### (Android) Restoring the reader after the process dies
+
+`ReaderScrollRestorationTest` (`:shared`) covers the restore rule and `ReaderScrollRestorationSaverTest` the
+saved state, but the process and renderer deaths themselves need an emulator or device. With an article whose
+body is several screens long and contains images:
+
+- Open the article, scroll about halfway down, press Home, then run `adb shell am kill works.merc.keryx`.
+  Reopen Keryx from the recents screen: the same article is shown at the same position, and it stays there
+  while the images load.
+- Scroll the restored article (or tap it) while its images are still arriving: it stays where you moved it
+  rather than jumping back.
+- Kill the WebView renderer while the article is on screen (on a rootable emulator: `adb root`, then
+  `adb shell pidof` the `sandboxed_process` running the WebView renderer and `adb shell kill` it): Keryx does
+  not crash, and the article is shown again at the position it was at.
+- With TalkBack on, repeat the first step, then scroll the restored article with TalkBack's two-finger swipe
+  before its images finish loading: the page is not pulled back to the restored position.
+
 ### (iOS) The sidebar
 
 The iOS sidebar is a UIKit collection view (see "Sidebar (iOS)" in [app-architecture.md](app-architecture.md));
@@ -1386,6 +1403,25 @@ orientations), with a feed of a few dozen articles whose bodies are longer than 
 - No crash (regression check for the v0.26.0 crash): pull to refresh a feed that gains new articles, open an
   article near the end of the list while the refresh is landing, and edge-swipe back to the list straight
   away; repeat, also opening and going back immediately, without a refresh.
+
+### (iOS) Restoring Home after termination
+
+`HomeRestorationTests` covers when the restored column and reader position are used and withdrawn, and
+`ReaderScrollRestorationTest` (`:shared`) the restore rule, but iOS's own termination and scene restoration
+need a simulator or device. On an iPhone, with an article whose body is several screens long and contains
+images, run Keryx from Xcode:
+
+- Open the article, scroll about halfway down, go to the Home Screen, then stop the app from Xcode (iOS's
+  own background termination keeps the scene's state the same way). Launch it again: the reader is shown at
+  once — not the article list — on the same article at the same position, and it stays there while the
+  images load.
+- Do the same from the article list (no reader open): the relaunch shows the article list.
+- Quit Keryx from the app switcher instead, then launch it again: it starts at the sidebar.
+- With the article open, kill its WebContent process (on the simulator, `pkill -f com.apple.WebKit.WebContent`
+  on the Mac; on a device, open enough other apps that iOS reclaims it), then return to Keryx: the article is
+  shown again at the position it was at.
+- With VoiceOver on, repeat the first step, then scroll the restored article with a three-finger swipe before
+  its images finish loading: the page is not pulled back to the restored position.
 
 ### (SwiftUI) Copy URL feedback
 
