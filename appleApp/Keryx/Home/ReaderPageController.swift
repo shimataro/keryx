@@ -33,6 +33,11 @@ struct ReaderPageController: UIViewControllerRepresentable {
     /// Resolves a page outside `inputs` — one a swipe reaches before the next update arrives.
     let input: (String) -> ReaderPageInput
     let preferences: PreferencesObservable
+    /// The scroll position restored from before the app was terminated, offered to its own page only
+    /// (`ReaderScrollPosition.initialFraction`).
+    let restoredScroll: ReaderScrollPosition?
+    /// A page's document was scrolled by the user: the page's id and the position.
+    let onScroll: (String, Double) -> Void
     /// A swipe came to rest on this page; whether that made it the selection.
     let onSettle: (String) -> Bool
 
@@ -104,7 +109,9 @@ struct ReaderPageController: UIViewControllerRepresentable {
                 revision: input.revision,
                 feedName: input.feedName,
                 feedFaviconUrl: input.feedFaviconUrl,
-                preferences: parent.preferences
+                preferences: parent.preferences,
+                initialScrollFraction: parent.restoredScroll?.initialFraction(forPage: id, selectedId: parent.selectedId),
+                onScroll: { [onScroll = parent.onScroll] in onScroll(id, $0) }
             )
         }
 

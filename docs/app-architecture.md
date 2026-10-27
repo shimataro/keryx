@@ -60,7 +60,9 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   resolveFeedListDropHighlight, the feed-list drag-and-drop drop-target resolution
                   shared by Compose and the Apple app; TagColors — TAG_COLOR_PALETTE, the tag
                   color-picker's shared 8-color palette), article/ (ArticleWebViewHtml —
-                  the reader's HTML document, CSP and theme CSS), setup/ (SetupController — choosing
+                  the reader's HTML document, CSP and theme CSS; ReaderScrollRestoration — where the
+                  reader scrolls a document back to after loading it again, the one rule the Compose
+                  and SwiftUI readers both follow), setup/ (SetupController — choosing
                   local-only vs. a cloud provider and running the connect flow through to the initial
                   sync), settings/ (CloudSyncController — connect/disconnect/switch/reconnect/reset/
                   sync-now and `canSyncNow`, re-reading the connected provider whenever
@@ -93,8 +95,8 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
                   inputs — used by HomeViewModel, CloudSyncController and OpmlTransferController). Pane layout/focus/widths stay per UI (`ui/home/HomeLayoutViewModel`)
     platform/     AppDirs, FileIO (kotlinx-io, no expect), BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
-                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
-                  SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
+                  NativeWebViewScroll, NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  ReaderWebViewFactory, SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea (mostly `expect` declarations, though InstallLocation.kt already mixes its
                   one `expect fun` with plain data types — see also `ScrollIndicatorOverlay.kt`/`ScrollIndicatorGeometry.kt` in "Android" below,
                   wholly platform-independent shared Compose code with no `expect` of their own that happens to live in this same directory)
     ui/           theme/, navigation/ (Navigator; SettingsOpenRequests — the one router every "open Settings"
@@ -118,7 +120,7 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     AppInfo (just reads the shared generated BuildConfig), FileSystemExtras, ZipExtractor (in-app
     update — see "In-App Update" below), di/CloudPlatformModule.kt (the shared cloud-provider DI
     wiring both platformModules call — cloudSessionSingles, dropboxProvider, oneDriveProvider)
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting quartet NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt (runStartupTasks/handleOpenedOpmlFile — the desktop-only orchestration; the actual maintenance work, and the periodic loop, both live in commonMain's StartupMaintenanceTasks/BackgroundRefreshLoop) + actual implementations of the `platform/` expects not covered by jvmCommonMain (e.g. AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome, and the WebView-hosting set NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory — the last two no-ops / the library's default factory there, see "Article Reader" below) + LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage implementation (KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage — the first and third inherit shared outcome-composition logic from commonMain's SecretStoreTokenStorage; SecurityCliTokenStorage re-implements it inline), DesktopOs (isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true), DesktopLookAndFeel (Swing L&F: FlatLaf on Linux, plus text-antialiasing hint normalization — missing hint, VALUE_TEXT_ANTIALIAS_DEFAULT, and VALUE_TEXT_ANTIALIAS_OFF are resolved to greyscale antialiasing so Swing surfaces do not look jagged next to the Compose-rendered UI), plus package-root, non-`expect`-backed desktop-only classes: IconBadge (Dock/taskbar/window-icon unread digit badge — see external-spec.md §7), MacActivationPolicy (raw `objc_msgSend` calls — see "What a real fix would need" under "macOS: clicking a notification banner does not restore a tray-hidden window" in known-issues.md), WindowStatePersistence
     tray/      KeryxTray (platform branch), MacTray, LinuxTray, WindowsTray + the
                StatusNotifierItem/dbusmenu D-Bus objects; TrayActionPolicy (what a tray icon/menu
                click and the update entry do — pure), TrayMenuModel (the tray menu's pure,
@@ -148,6 +150,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     headers/folder headers/dividers/feed rows) the thumb visibly breathes a little as scrolling
     brings different rows into view — the same estimate Android's own lists make, and accepted for
     the same reason: it's a non-interactive indicator, not a precise position),
+    NativeWebViewScroll (the reader's scroll position and the user's own input, through
+    `android.webkit.WebView`'s own listeners, and whether TalkBack's touch exploration is on),
+    ReaderWebViewFactory (a `WebView` subclass that survives its renderer process dying — both in
+    "Article Reader" below),
     AppDirs/BrowserOpener/ClipboardEntries (via AndroidAppContext, a
     static Context holder set once from KeryxApplication.onCreate, which also weakly tracks the
     resumed Activity so BrowserOpener can launch an http(s) link's Custom Tab — androidx.browser —
@@ -595,6 +601,38 @@ to the host executable, which fails with Access Denied whenever that location is
 (an uncaught exception from the failed creation also left the library's creation-retry timer
 running forever, which was the cause of an
 app-wide freeze on click).
+
+**The reading position survives Android killing the process in the background.** `ArticleWebView`
+records the native view's vertical scroll position as a fraction of its scrollable height
+(`platform/NativeWebViewScroll.kt`'s `observeNativeWebViewScroll`, through `android.webkit.WebView`'s
+own scroll, touch, mouse-wheel and key listeners) and saves it with `rememberSaveable`, keyed by the
+document it belongs to (the hash of its HTML, for the same reason the load guard compares documents
+rather than article ids). After the process is restored, that position is offered to its document
+the first time it loads — a document loading first (the placeholder shown while the body is still
+loading) leaves the offer in place — and applied once `loadingState` is `Finished`, then re-applied
+while the content grows (images arriving) for up to `READER_SCROLL_SETTLE_WINDOW_MS`, stopping at once
+when the user touches, scrolls or presses a key. The rule is `:shared`'s
+`presentation/article/ReaderScrollRestoration.kt`, the one the SwiftUI reader follows too;
+`ui/home/ReaderScrollRestoration.kt` holds only its `Saver`, which restores a saved value of any other
+shape (one from an older build) as no position at all. While TalkBack's touch exploration is on
+(`isNativeWebViewScreenReaderActive`), the position is applied once when the load finishes and never
+re-applied: TalkBack's own scrolling inside the page reaches none of the view's listeners, so it cannot
+be told apart from the reader's, and re-applying would pull the page back from it. Within a running
+app nothing changes: another document in the same view starts at the top. The desktop `actual`s are no-ops — `WryWebViewPanel` exposes no scroll position,
+and the process is never killed under a live window there.
+
+**A dead Android renderer rebuilds the reader instead of taking the app down.** Android's WebView
+renderer is a separate process the OS can kill (memory pressure) or that can crash, and unless a
+`WebViewClient.onRenderProcessGone` returns true for every WebView it hosted, Android kills the app
+process with it. The web view library's own client (at the `composewebview` version in
+`gradle/libs.versions.toml`) does not implement that callback, so `ArticleWebView` passes the library a `factory` (`platform/ReaderWebViewFactory.kt`'s
+`readerWebViewFactory`) whose Android `actual` builds a `WebView` subclass that wraps whatever client
+the library assigns in one delegating the library's five callbacks and adding `onRenderProcessGone`,
+which reports the death and returns true. A WebView whose renderer died cannot be reused, so
+`ArticleWebView` then rebuilds it under a new `key` — the HTML is loaded again and the reading position
+restored through the same `ReaderScrollRestoration` as above. The renderer is shared by every reader
+WebView, so each carousel slot rebuilds its own. The subclass can go once the library handles the
+callback itself. Desktop's `actual` returns null, keeping the library's default factory.
 
 **At a narrow layout the reader is a `HorizontalPager` instead** (`ui/home/ArticleDetailPane.kt`,
 shared `commonMain` composable) — a horizontal drag moves to the next/previous article, and the
@@ -1581,7 +1619,21 @@ platform:
   window restoration, and all rendering. Search-bar visibility is an input the UI sets on the shared
   state (it decides whether a query is showing results), not state it owns. SwiftUI covers these
   with `NavigationSplitView`, `@FocusState`, `@SceneStorage` and its own window restoration; the
-  Compose app keeps its own implementations. Pane widths follow each platform's input: the macOS app
+  Compose app keeps its own implementations. On an iPhone the collapsed stack's column (sidebar,
+  article list or reader) is kept in `@SceneStorage`, so a relaunch after iOS terminated the app in
+  the background reopens on that column from the first frame — the reader only together with the
+  article `HomeViewModel` restores as selected, otherwise the article list
+  (`Home/CompactColumnRestoration.swift`). `HomeObservable` mirrors that restored selection in its own
+  init, so it is already there on the first frame the check runs against; `Home/HomeRestoration.swift`
+  decides when the restored state is used and withdrawn. Quitting from the app switcher discards scene
+  storage, so that launch starts at the sidebar. The reader's scroll position in the selected article is
+  kept the same way (article id plus a fraction of the scrollable height, `Home/ReaderScrollPosition.swift`)
+  and applied once that article's document has loaded, through the same restore the WebContent
+  recovery uses (see "The SwiftUI reader reloads its document when WebKit's content process dies"
+  below). It is offered only to the selected article's own page, never to the neighbours kept ready
+  for a swipe, and only until the user selects another article or moves the stack — the restored
+  selection arriving is not such a change. No
+  `local_settings` key is involved. Pane widths follow each platform's input: the macOS app
   saves the widths the dividers are dragged to and restores them, like desktop, while the iPad app,
   like Android's touch layouts, asks for the default widths every time and saves nothing, leaving
   `NavigationSplitView` to fit them into the screen without going below each column's minimum.
@@ -1692,13 +1744,22 @@ no separate iOS target to keep in sync.
 - **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
   the `WKWebView`'s WebContent process while the app is in the background — while the external
   browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s
-  `webViewWebContentProcessDidTerminate` loads the HTML it holds again (from the top; the scroll
-  position died with the process). `Home/ReaderProcessRecovery.swift` allows one such reload per
+  `webViewWebContentProcessDidTerminate` loads the HTML it holds again and scrolls it back to where
+  the user was. The page reports its scroll position, as a fraction of its scrollable height, to a
+  message handler registered in the same content world as the synthetic-click script above (so the page's own
+  scripts cannot post to it); once the reloaded document finishes loading the reader scrolls it to
+  the last fraction, and re-applies it for a few seconds while the content grows (images arriving),
+  stopping at once when the user scrolls, taps or presses a key (`:shared`'s
+  `presentation/article/ReaderScrollRestoration.kt`, the same rule as the Compose reader's, on iOS and
+  macOS alike). While VoiceOver is running the position is applied once and not re-applied as the
+  content grows, since VoiceOver's own scrolling inside the page cannot be told apart from the
+  reader's. `Home/ReaderProcessRecovery.swift` allows one such reload per
   document: if the process dies again — before or after the reloaded document commits, so a page
   that crashes WebContent cannot loop — the reader gives up and stays blank. A different document,
   or the app becoming active again, earns a new reload, and a document given up on is loaded once
   more at that activation: the usual termination happens in the background, where the one reload
-  may die too, and the reader must not still be blank when the user comes back.
+  may die too, and the reader must not still be blank when the user comes back. That load returns to
+  the last position too.
 - **The iOS reader's swipe pager is a `UIPageViewController`, not a page-style `TabView`.**
   `Home/ReaderPageController.swift` wraps one and asks for the article either side of the page on
   screen by id (`ReaderPagerPages.id(before:)` / `id(after:)`) on every swipe, keeping only that page

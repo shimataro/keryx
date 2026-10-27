@@ -184,10 +184,13 @@ targets:
       - path: Keryx/Home/ReaderPageInputs.swift
       - path: Keryx/Home/ArticleTableRevealTracker.swift
       - path: Keryx/Home/ReaderProcessRecovery.swift
+      - path: Keryx/Home/ReaderScrollPosition.swift
       - path: Keryx/Home/ReaderScrollIndicator.swift
       - path: Keryx/Home/FeedListSelectionEquality.swift
       - path: Keryx/Home/CompactSidebarSelection.swift
       - path: Keryx/Home/CompactSearchNavigation.swift
+      - path: Keryx/Home/CompactColumnRestoration.swift
+      - path: Keryx/Home/HomeRestoration.swift
       - path: Keryx/Home/ArticleListHeaderIcon.swift
       - path: Keryx/Home/PullToRefreshAvailability.swift
       - path: Keryx/Home/PullRefreshHold.swift

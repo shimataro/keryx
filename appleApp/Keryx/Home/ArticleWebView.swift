@@ -1,3 +1,4 @@
+import KeryxShared
 import SwiftUI
 import WebKit
 
@@ -6,11 +7,18 @@ import WebKit
 /// `ArticleWebViewHtml.kt`) and gates navigation: a click that would replace the top-level page is
 /// opened in the external browser, while a top-level navigation nobody clicked is dropped. Only an SNS
 /// embed's own navigation inside an iframe loads in place (see `ReaderNavigationGate`). A click a
-/// script synthesizes is cancelled in the page (`syntheticClickGuard`).
+/// script synthesizes is cancelled in the page (`syntheticClickGuard`). The page reports its scroll
+/// position (`scrollReporter`), so a document loaded again after WebContent died returns to where the
+/// user was (`ReaderScrollRestoration`, the rule `:shared` holds for both UIs).
 struct ArticleWebView {
     let html: String
     /// The in-app theme, which picks the iOS scroll indicator (see `ReaderScrollIndicator`).
     let isDarkTheme: Bool
+    /// Where to scroll the first document this view loads once it has finished loading (a position
+    /// restored from before the app was terminated — `ReaderScrollPosition`), or nil for the top.
+    var initialScrollFraction: Double?
+    /// Told each position the user scrolls the document to, as a fraction of its scrollable height.
+    var onScroll: ((Double) -> Void)?
 
     @MainActor
     func makeCoordinator() -> Coordinator {
@@ -20,6 +28,7 @@ struct ArticleWebView {
     @MainActor
     private func configure(_ webView: WKWebView, coordinator: Coordinator) {
         webView.navigationDelegate = coordinator
+        coordinator.onScroll = onScroll
         // An empty document is `ReaderDocument.empty`, held only until the first real one is built.
         guard !html.isEmpty else { return }
         // SwiftUI calls update on every re-evaluation; reloading an unchanged document would reset
@@ -27,7 +36,20 @@ struct ArticleWebView {
         guard html != coordinator.loadedHtml else { return }
         coordinator.reloadedHtml = nil
         coordinator.recovery.documentReplaced()
+        let key = Self.documentKey(html)
+        if coordinator.loadedHtml == nil {
+            // The first document is the one a restored position is for: offer it to that document.
+            coordinator.scrollRestoration = ReaderScrollRestoration(
+                restored: initialScrollFraction.map { SavedReaderScroll(documentKey: key, fraction: $0) }
+            )
+        }
+        coordinator.scrollRestoration.documentReplaced(key: key)
         coordinator.load(html, in: webView)
+    }
+
+    /// The key `ReaderScrollRestoration` tells documents apart by — compared only within this process.
+    private static func documentKey(_ html: String) -> String {
+        String(html.hashValue)
     }
 
     /// Cancels a link activation no person caused — a feed body's or an embed's script calling
@@ -61,16 +83,100 @@ struct ArticleWebView {
         in: .defaultClient
     )
 
+    /// The name the page posts scroll messages under (`scrollReporter`).
+    private static let scrollMessageName = "keryxReaderScroll"
+
+    /// The kinds of message `scrollReporter` posts — the one definition its script and
+    /// `Coordinator.didReceiveScrollMessage` both use.
+    fileprivate enum ScrollMessageKind: String {
+        /// The page scrolled; carries the position as `fraction`.
+        case scroll
+        /// The user's own (trusted) scroll, tap or key input.
+        case user
+        /// The content's height changed.
+        case resize
+    }
+
+    /// How long `scrollReporter` waits after a scroll before reporting the position, so a fling posts
+    /// a few messages rather than one per frame.
+    private static let scrollReportThrottleMilliseconds = 200
+
+    /// Reports the main frame's vertical scroll position to `Coordinator` as a fraction of its
+    /// scrollable height (throttled), the user's own scroll/tap/key input, and the content's height
+    /// changing, and defines the function the restore scrolls with. Its handler is registered in the
+    /// same content world, so the page's own scripts can neither post to it nor call that function;
+    /// only trusted (person-caused) input counts as the user's.
     @MainActor
-    private static func installSyntheticClickGuard(on webView: WKWebView) {
-        webView.configuration.userContentController.addUserScript(syntheticClickGuard)
+    private static let scrollReporter = WKUserScript(
+        source: """
+            (() => {
+              const post = (message) => window.webkit.messageHandlers.\(scrollMessageName).postMessage(message);
+              const root = () => document.scrollingElement || document.documentElement;
+              const range = () => root().scrollHeight - window.innerHeight;
+              let timer = null;
+              window.addEventListener('scroll', () => {
+                if (timer !== null) return;
+                timer = setTimeout(() => {
+                  timer = null;
+                  const scrollable = range();
+                  post({ kind: '\(ScrollMessageKind.scroll.rawValue)', fraction: scrollable > 0 ? window.scrollY / scrollable : 0 });
+                }, \(scrollReportThrottleMilliseconds));
+              }, { passive: true });
+              for (const type of ['touchstart', 'wheel', 'keydown', 'mousedown']) {
+                window.addEventListener(type, (event) => {
+                  if (event.isTrusted) post({ kind: '\(ScrollMessageKind.user.rawValue)' });
+                }, { capture: true, passive: true });
+              }
+              let height = root().scrollHeight;
+              new ResizeObserver(() => {
+                const current = root().scrollHeight;
+                if (current === height) return;
+                height = current;
+                post({ kind: '\(ScrollMessageKind.resize.rawValue)' });
+              }).observe(document.body || document.documentElement);
+              window.keryxScrollToFraction = (fraction) => {
+                const scrollable = range();
+                if (scrollable > 0) window.scrollTo(0, fraction * scrollable);
+              };
+            })();
+            """,
+        injectionTime: .atDocumentEnd,
+        forMainFrameOnly: true,
+        in: .defaultClient
+    )
+
+    @MainActor
+    private static func installUserScripts(on webView: WKWebView, coordinator: Coordinator) {
+        let controller = webView.configuration.userContentController
+        controller.addUserScript(syntheticClickGuard)
+        controller.addUserScript(scrollReporter)
+        // The controller retains its handlers for as long as the view lives; the weak proxy keeps it
+        // from also keeping the coordinator alive.
+        controller.add(ScrollMessageProxy(coordinator), contentWorld: .defaultClient, name: scrollMessageName)
+    }
+
+    /// Forwards the page's scroll messages to the coordinator without retaining it.
+    @MainActor
+    private final class ScrollMessageProxy: NSObject, WKScriptMessageHandler {
+        private weak var coordinator: Coordinator?
+
+        init(_ coordinator: Coordinator) {
+            self.coordinator = coordinator
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame else { return }
+            coordinator?.didReceiveScrollMessage(message.body)
+        }
     }
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
         let recovery = ReaderProcessRecovery()
+        var scrollRestoration = ReaderScrollRestoration(restored: nil)
         var loadedHtml: String?
+        var onScroll: ((Double) -> Void)?
         /// The document `load` last retried after a foreign commit replaced it, so a page that keeps
         /// replacing itself is retried once rather than forever.
         var reloadedHtml: String?
@@ -141,6 +247,7 @@ struct ArticleWebView {
             guard let html = loadedHtml else { return }
             switch recovery.processTerminated() {
             case .reload:
+                scrollRestoration.reloadStarted()
                 load(html, in: webView)
             case .giveUp:
                 // It went down again after its one reload: stop here. `loadedHtml` is kept, so an
@@ -153,7 +260,55 @@ struct ArticleWebView {
         /// have died with it: coming back loads a document given up on once more.
         @objc private func appDidBecomeActive() {
             guard recovery.appBecameActive(), let html = loadedHtml, let webView else { return }
+            scrollRestoration.reloadStarted()
             load(html, in: webView)
+        }
+
+        /// A document loaded to restore a position (`ReaderScrollRestoration`) is scrolled there once
+        /// it has finished loading.
+        /// While VoiceOver runs it is applied once only: its scrolling inside the page cannot be told
+        /// apart from the reader's own, so re-applying on growth could pull the page back from it.
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard let fraction = scrollRestoration.documentFinished(
+                nowMillis: Self.nowMillis(), reapplyOnGrowth: !Self.isVoiceOverRunning
+            ) else { return }
+            scroll(webView, to: fraction.doubleValue)
+        }
+
+        /// The monotonic milliseconds `ReaderScrollRestoration` measures its settle window in.
+        private static func nowMillis() -> Int64 {
+            Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        }
+
+        private static var isVoiceOverRunning: Bool {
+            #if os(macOS)
+            NSWorkspace.shared.isVoiceOverEnabled
+            #else
+            UIAccessibility.isVoiceOverRunning
+            #endif
+        }
+
+        /// Handles a message from `scrollReporter`.
+        fileprivate func didReceiveScrollMessage(_ body: Any) {
+            guard let message = body as? [String: Any],
+                  let kind = (message["kind"] as? String).flatMap(ScrollMessageKind.init(rawValue:)) else { return }
+            switch kind {
+            case .scroll:
+                guard let fraction = (message["fraction"] as? NSNumber)?.doubleValue else { return }
+                guard let recorded = scrollRestoration.scrolled(fraction: fraction, nowMillis: Self.nowMillis()) else { return }
+                onScroll?(recorded.doubleValue)
+            case .user:
+                scrollRestoration.userInteracted()
+            case .resize:
+                guard let fraction = scrollRestoration.contentResized(nowMillis: Self.nowMillis()), let webView else { return }
+                scroll(webView, to: fraction.doubleValue)
+            }
+        }
+
+        private func scroll(_ webView: WKWebView, to fraction: Double) {
+            webView.evaluateJavaScript(
+                "window.keryxScrollToFraction?.(\(fraction))", in: nil, in: .defaultClient, completionHandler: nil
+            )
         }
 
         func webView(
@@ -183,7 +338,7 @@ struct ArticleWebView {
 extension ArticleWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView()
-        Self.installSyntheticClickGuard(on: webView)
+        Self.installUserScripts(on: webView, coordinator: context.coordinator)
         return webView
     }
 
@@ -195,7 +350,7 @@ extension ArticleWebView: NSViewRepresentable {
 extension ArticleWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let webView = ReaderWebViewWarmUp.takeWarmedWebView() ?? WKWebView()
-        Self.installSyntheticClickGuard(on: webView)
+        Self.installUserScripts(on: webView, coordinator: context.coordinator)
         // Transparent until the first document paints, so a page whose body is still loading shows
         // the reader's own background (`ReaderPageView`) rather than WebKit's default white — the
         // document itself paints the same background once loaded.

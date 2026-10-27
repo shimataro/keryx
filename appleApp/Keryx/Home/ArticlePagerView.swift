@@ -13,14 +13,25 @@ import SwiftUI
 struct ArticlePagerView: View {
     let home: HomeObservable
     let preferences: PreferencesObservable
+    /// See `ReaderPageController.restoredScroll`.
+    let restoredScroll: ReaderScrollPosition?
+    /// See `ReaderPageController.onScroll`.
+    let onScroll: (String, Double) -> Void
 
     /// Collects `pagerArticles` only while this pager is on screen (`.task` below), so the flow's
     /// `WhileSubscribed` sharing stops it whenever the reader is gone.
     @State private var pager: ReaderPagerObservable
 
-    init(home: HomeObservable, preferences: PreferencesObservable) {
+    init(
+        home: HomeObservable,
+        preferences: PreferencesObservable,
+        restoredScroll: ReaderScrollPosition?,
+        onScroll: @escaping (String, Double) -> Void
+    ) {
         self.home = home
         self.preferences = preferences
+        self.restoredScroll = restoredScroll
+        self.onScroll = onScroll
         self._pager = State(initialValue: ReaderPagerObservable(viewModel: home.viewModel))
     }
 
@@ -40,6 +51,8 @@ struct ArticlePagerView: View {
             inputs: inputs,
             input: input,
             preferences: preferences,
+            restoredScroll: restoredScroll,
+            onScroll: onScroll,
             onSettle: { settle(on: $0, pages: pages, selectedId: selectedId) }
         )
         .task { await pager.startObserving() }
