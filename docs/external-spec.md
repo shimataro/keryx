@@ -52,8 +52,9 @@ RSS 2.0 / Atom 1.0 (RSS 1.0/RDF parsed loosely). JSON Feed will come after α.
   database, so an automatic sync is held back on a metered network (mobile data, tethering, a Wi-Fi
   marked as metered) and under the OS's Data Saver / Low Data Mode, and runs as soon as the network
   allows. The Cloud Sync settings tab offers "Sync automatically over mobile data" (off by default,
-  device-local) to allow metered networks; Data Saver / Low Data Mode always defers. "Sync now",
-  "Refresh All" and pull-to-refresh always sync immediately. Desktop and macOS are never restricted.
+  device-local) to allow metered networks; Data Saver / Low Data Mode always defers. "Sync now"
+  and "Refresh All" always sync immediately; pull-to-refresh does too when the selected scope has
+  feeds and a provider is connected. Desktop and macOS are never restricted.
   See "Network Gate" in [sync-architecture.md](sync-architecture.md).
 
 ## 5. Conflict Resolution Policy
