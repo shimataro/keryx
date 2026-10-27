@@ -391,6 +391,12 @@ Its only consumer is `domain/NetworkUsagePolicy`, wired into `SyncRepository` an
 `RefreshCycleRunner` in `SharedModule` (and `CloudSyncController.meteredSettingSupported` reads
 `supported`); see "Network Gate" in [sync-architecture.md](sync-architecture.md).
 
+On Android and iOS the Cloud Sync settings tab shows "Sync automatically over mobile data" only while a
+provider is connected. While `SyncRepository.syncDeferredForNetwork` is up, the connected provider's row
+says the sync is paused to save data and will run on an unrestricted network; it does not say which
+restriction applies, since it may be a metered network or Data Saver / Low Data Mode, which the opt-in
+does not override.
+
 ### DatabaseMerger (expect / actual) — Key to Sync Merge
 
 ATTACH DATABASE merge runs through `platform/DatabaseMerger`, NOT the SQLDelight driver. SQLDelight's JVM `JdbcSqliteDriver` opens a fresh connection per statement for file DBs, so an `ATTACH` on one call is invisible to the merge statements on the next. `DatabaseMerger` does the whole attach → version check → merge → detach on a single dedicated JDBC connection.
@@ -1255,6 +1261,14 @@ all declared unconditionally at the top, so switching in and out of search never
 list's scroll position — there is no snapshot/restore step needed to make a round trip through
 search leave the filter's own list exactly where it was.
 
+**Swiping away from an article and straight back returns to where it was being read**, rather than to
+its top: the reader keeps the immediate neighbours on either side ready, so the one just left is still
+exactly as it was. That memory covers one article in each direction and lasts as long as the reader
+stays on screen — swiping two or more articles away and back, going back to the article list, or
+rotating the device between phone and tablet width all start the article from the top again, as does
+reopening it later. Dragging past either end of the list still moves the content a little before
+springing back, so the boundary is felt rather than the gesture simply doing nothing.
+
 #### iOS
 
 `external-spec.md` plans iOS/iPadOS as Compose first, then native SwiftUI later. This section's
@@ -1389,8 +1403,94 @@ nothing if the selection moves on again before then. Every route —
 the toolbar's mode menu on both UIs, the View menu (`computeMenuUiState`'s `listMode` /
 `starredModeEnabled`) and its ⌘/Ctrl+1–3 accelerators — calls `setMode`. Which items those menus
 check is likewise one shared rule, `listModeChecked`: the current mode, plus Starred under the
-Starred filter (checked and disabled there — see `external-spec.md` §7); the menu bar reads it as
+Starred filter (checked and disabled there — see below); the menu bar reads it as
 `MenuUiState.starredModeChecked`, and both UIs' toolbar menus call it directly.
+
+What the user sees of the modes, beyond `external-spec.md` §7's summary:
+
+- Choosing the current mode again changes nothing. The pop-up button is filled whenever the mode
+  narrows the list. On Windows, Linux and the Compose macOS build its own menu shows the same
+  ⌘/Ctrl+1–3 keys; on iOS / iPadOS, where the toolbar has no room for the mode's name, it shows the
+  mode's icon with the pop-up button's up-and-down chevrons, so it does not read as a button that acts
+  at once.
+- Starred mode cannot be chosen while the subscription list's own Starred item is selected, which
+  already shows nothing else and is the only place starred articles of an unsubscribed feed remain.
+  Selecting that item does not leave Starred mode: going back to a feed, folder, tag or All Feeds shows
+  it starred again. There Starred is shown **checked and disabled**, beside the All or Unread check that
+  still chooses among the starred articles, and the toolbar's button names that All or Unread. This is
+  the one place two of the three are checked at once — a deliberate exception to their being mutually
+  exclusive: a list of starred articles only, with Starred unchecked in its own menus, would read as if
+  Starred did not apply there.
+- An article unstarred while in Starred mode (or under the Starred item) stays in the list until the
+  selection or the mode changes, and "Mark all as read" marks only the articles shown.
+- A Starred-mode list with nothing in it says so, with a button that shows all articles again.
+
+### Refresh indicators and pull-to-refresh
+
+`external-spec.md` §9 summarizes these; "Refresh feedback" there sets which feedback each kind of
+refresh gets.
+
+**Pull-to-refresh** works on Android at every width (including the 3-pane layout a large tablet
+reaches) and in the native iOS / iPadOS app, using each platform's own indicator (Material 3's
+pull-to-refresh on Android, the system refresh control on iOS); desktop has no pull gesture. Unlike
+Refresh All, a pull refreshes only the feeds behind the list currently on screen:
+
+| Selected in the feed list | Feeds a pull refreshes |
+| --- | --- |
+| All Feeds / Starred | Every feed (starred articles can come from any feed) |
+| A feed | That feed alone |
+| A folder | The feeds filed in that folder |
+| A tag | The feeds carrying that tag |
+
+- A selection that covers no subscribed feed at all (an empty folder or tag) finishes at once, fetching
+  and syncing nothing. The gesture works on an empty list too, but is disabled while search results are
+  showing — pulling a result list isn't a request to refresh the feeds behind it — and while there are
+  no feeds at all.
+- As with Refresh All, a pull is followed by a cloud sync when one is connected, and the indicator
+  stays up until that sync has finished too. On iOS, where the system starts the refresh the moment the
+  pull crosses its threshold, the indicator also stays up for at least about a second.
+- A pull made while a refresh or sync is already running starts nothing new; the indicator stays up
+  until the running one finishes. When what is running is an automatic refresh, the pull joins it, so on
+  iOS its result still appears in the status described below. Selecting another item in the feed list
+  while a pull's indicator is up leaves no indicator over the newly selected list; the refresh itself
+  carries on.
+- On Android the same refresh is also reachable as a TalkBack custom action on the list ("Refresh this
+  list") and with Ctrl+Shift+R while the article list is on screen — not while a phone-width screen
+  shows the reader alone, and not while the feed-list drawer covers the list. On desktop the same chord
+  is Feed ▸ Refresh, which refreshes only the selected feed: a different action on a different
+  platform, not two routes to one action. The native iOS app has no non-gesture route to this scoped
+  refresh; an iPad's hardware keyboard reaches the Feed menu's Refresh All (⌘R) and Refresh (⌘⇧R, the
+  selected feed alone) instead — likewise different actions.
+- On iOS the sidebar can be pulled down as well, and that pull is Refresh All: it refreshes every feed
+  whatever is selected, followed by a cloud sync when one is connected, with the indicator staying up
+  until both have finished; it is disabled while there are no feeds. It takes the place of a Refresh All
+  button in the iOS navigation bar, as Mail's mailbox list is refreshed. Android's feed-list drawer has
+  no pull (it is a modal surface laid over the article list and keeps its refresh button in its
+  header), and neither does the macOS sidebar, which keeps its toolbar button.
+
+**iOS refresh status.** iOS shows a refresh the user started in the toolbar's status area — the centre
+of the bottom bar, where Mail says "Checking for Mail…" — in both the sidebar and the article list:
+
+- Refreshes the user starts while another is still running (a feed's Refresh during a pull, say)
+  count as one check: the spinner stays until the last has finished, and the result counts them all.
+  A pull or Refresh All made while an automatic refresh is running joins it and shows its result, as if
+  it had started it. One made while only a sync is running, or while the user's own refresh is already
+  running, adds no result of its own.
+- The count covers the feeds just fetched; articles a sync brought in from another device are not
+  counted.
+- A sync on its own (the sync button, or the automatic sync after reading) never shows there: its
+  button's spinning icon is its feedback. Idle shows nothing, not a last-updated time, so the bar
+  leaves the room to the list.
+- The status is never drawn as a pull indicator started by the app itself, which would pull the list
+  down unasked, and VoiceOver is not told when it changes.
+
+**Per-feed refresh spinner.** Every feed a refresh covers shows its spinner from the moment the
+refresh starts — including while the feed waits its turn to be fetched — until its own new articles
+have landed, so the spinners clear one by one and the unread count updates as each goes
+(`FeedRepository.refreshingFeedIds`; see [background-update.md](background-update.md)). The spinner
+sits inside the icon's own slot, and the unread count and error indicator stay as they are. A
+collapsed folder shows it while any of its feeds does; an expanded folder, a tag, All Feeds and Starred
+show none (the toolbar's refresh spinner covers the refresh as a whole).
 
 ## Apple Native Apps (SwiftUI)
 
