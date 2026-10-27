@@ -1692,13 +1692,19 @@ no separate iOS target to keep in sync.
 - **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
   the `WKWebView`'s WebContent process while the app is in the background — while the external
   browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s
-  `webViewWebContentProcessDidTerminate` loads the HTML it holds again (from the top; the scroll
-  position died with the process). `Home/ReaderProcessRecovery.swift` allows one such reload per
+  `webViewWebContentProcessDidTerminate` loads the HTML it holds again and scrolls it back to where
+  the user was. The page reports its scroll position, as a fraction of its scrollable height, to a
+  message handler registered in the same content world as the synthetic-click script above (so the page's own
+  scripts cannot post to it); once the reloaded document finishes loading the reader scrolls it to
+  the last fraction, and re-applies it for a few seconds while the content grows (images arriving),
+  stopping at once when the user scrolls, taps or presses a key (`Home/ReaderScrollRestoration.swift`,
+  the same on iOS and macOS). `Home/ReaderProcessRecovery.swift` allows one such reload per
   document: if the process dies again — before or after the reloaded document commits, so a page
   that crashes WebContent cannot loop — the reader gives up and stays blank. A different document,
   or the app becoming active again, earns a new reload, and a document given up on is loaded once
   more at that activation: the usual termination happens in the background, where the one reload
-  may die too, and the reader must not still be blank when the user comes back.
+  may die too, and the reader must not still be blank when the user comes back. That load returns to
+  the last position too.
 - **The iOS reader's swipe pager is a `UIPageViewController`, not a page-style `TabView`.**
   `Home/ReaderPageController.swift` wraps one and asks for the article either side of the page on
   screen by id (`ReaderPagerPages.id(before:)` / `id(after:)`) on every swipe, keeping only that page
