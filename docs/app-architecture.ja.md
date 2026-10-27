@@ -54,7 +54,8 @@
                   resolveFeedListDropAction/resolveFeedListDropHighlight。フィードリストのドラッグ＆
                   ドロップにおけるドロップ先の判定で、Compose と Apple アプリが共有する。TagColors——
                   TAG_COLOR_PALETTE。タグの色選択が共有する 8 色のパレット）、article/（ArticleWebViewHtml——
-                  リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
+                  リーダーの HTML 文書・CSP・テーマ CSS。ReaderScrollRestoration——文書を読み込み直した後に
+                  リーダーがどこまでスクロールして戻すか。Compose と SwiftUI の両リーダーが従う唯一の規則）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。接続中のプロバイダは
                   `cloudStorageType` が変わるたびに読み直すので、セットアップでの接続も反映される。これは
@@ -83,8 +84,8 @@
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
-                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
-                  SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
+                  NativeWebViewScroll, NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  ReaderWebViewFactory, SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
     ui/           theme/, navigation/（Navigator、SettingsOpenRequests——設定を開くすべての経路が通る唯一の
                   窓口。Setup 中の要求は Home が表示されるまで保留する）, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
                   通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
@@ -107,7 +108,7 @@
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
                メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
@@ -136,6 +137,9 @@
     スティッキーヘッダー／フォルダーヘッダー／区切り線／フィード行の混在）ではスクロールに伴って
     どの行が画面に入るかでつまみの長さがわずかに揺れる——Android 自身の一覧が使うのと同じ推定であり、
     理由も同じ: これは非操作のインジケーターであって正確な位置指示ではないため受け入れる）,
+    NativeWebViewScroll（リーダーのスクロール位置とユーザー自身の入力を `android.webkit.WebView` 自身の
+    リスナーで受け取り、TalkBack のタッチ探索が有効かどうかも返す）, ReaderWebViewFactory（レンダラー
+    プロセスが落ちても生き残る `WebView` のサブクラス。どちらも下記「Article Reader」を参照）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ。再開中の Activity も弱参照で追跡しており、BrowserOpener は
     http(s) リンクの Custom Tab（androidx.browser）を application context ではなくその Activity から
@@ -596,16 +600,21 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 （キーは HTML のハッシュ。読み込みガードが記事 id ではなく文書で比較するのと同じ理由）。プロセスが復元されると、
 その位置はその文書が最初に読み込まれたときに提示される — 先に別の文書（本文の読み込み中に表示する
 プレースホルダー）が読み込まれても提示は残る — そして `loadingState` が `Finished` になった時点で適用し、
-内容が伸びる間（画像の到着など）`READER_SCROLL_SETTLE_WINDOW` まで適用し直す。ユーザーがタッチ・スクロール・
-キー入力をした時点ですぐにやめる（`ui/home/ReaderScrollRestoration.kt`。SwiftUI のリーダーと同じ規則）。
-動作中のアプリでは何も変わらず、同じビューで別の文書を表示すれば先頭から始まる。デスクトップの `actual` は
+内容が伸びる間（画像の到着など）`READER_SCROLL_SETTLE_WINDOW_MS` まで適用し直す。ユーザーがタッチ・スクロール・
+キー入力をした時点ですぐにやめる。この規則は `:shared` の `presentation/article/ReaderScrollRestoration.kt` にあり、
+SwiftUI のリーダーも同じものに従う。`ui/home/ReaderScrollRestoration.kt` にはその `Saver` だけを置き、これは
+別の形の保存値（古いビルドのもの）を位置なしとして復元する。TalkBack のタッチ探索が有効な間
+（`isNativeWebViewScreenReaderActive`）は、読み込み完了時に 1 回だけ位置を適用し、適用し直さない: TalkBack 自身による
+ページ内のスクロールはビューのどのリスナーにも届かないのでリーダー自身のスクロールと区別できず、適用し直すと
+そこから引き戻してしまうため。動作中のアプリでは何も変わらず、同じビューで別の文書を表示すれば先頭から始まる。デスクトップの `actual` は
 何もしない — `WryWebViewPanel` はスクロール位置を公開しておらず、そもそもウィンドウが開いたままプロセスが
 終了させられることがない。
 
 **Android のレンダラーが落ちても、アプリごと落ちずにリーダーを作り直す。** Android の WebView のレンダラーは
 別プロセスで、OS が（メモリ不足で）終了させたりクラッシュしたりすることがある。それをホストしていたすべての
 WebView で `WebViewClient.onRenderProcessGone` が true を返さないと、Android はアプリのプロセスも一緒に終了させる。
-WebView ライブラリ自身のクライアント（1.0.0-beta-02）はこのコールバックを実装していないため、`ArticleWebView` は
+WebView ライブラリ自身のクライアント（`gradle/libs.versions.toml` の `composewebview` のバージョン）はこのコールバックを
+実装していないため、`ArticleWebView` は
 ライブラリに `factory`（`platform/ReaderWebViewFactory.kt` の `readerWebViewFactory`）を渡す。その Android の
 `actual` は `WebView` のサブクラスを作り、ライブラリが設定するクライアントを、ライブラリの 5 つのコールバックを
 委譲しつつ `onRenderProcessGone` を加えたクライアントで包む。これはレンダラーの終了を通知して true を返す。
@@ -1571,12 +1580,14 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
   これらを担い、Compose アプリは独自の実装を持ち続ける。iPhone では、1 列に畳まれたスタックで表示中の列（サイドバー・記事リスト・
   リーダー）を `@SceneStorage` に保持するので、iOS がバックグラウンドでアプリを終了させた後の再起動では最初のフレームから
   その列で開く。リーダーは `HomeViewModel` が選択として復元した記事があるときだけ復元し、なければ記事リストで開く
-  （`Home/CompactColumnRestoration.swift`）。App スイッチャーから終了するとシーンの保存内容は破棄されるので、その起動は
+  （`Home/CompactColumnRestoration.swift`）。`HomeObservable` は復元されたその選択を自身の init で反映するので、
+  この確認が行われる最初のフレームの時点で選択はそろっている。復元した状態をいつ使い、いつ取り消すかは
+  `Home/HomeRestoration.swift` が決める。App スイッチャーから終了するとシーンの保存内容は破棄されるので、その起動は
   サイドバーから始まる。選択中の記事のリーダーのスクロール位置も同じ方法で保持し（記事 id とスクロール可能な高さに対する割合、
   `Home/ReaderScrollPosition.swift`）、その記事の文書の読み込みが終わった時点で、WebContent からの復旧と同じ復元処理で適用する
   （下記「SwiftUI のリーダーは WebKit のコンテンツプロセスが落ちたら文書を読み込み直す」を参照）。適用するのは選択中の記事自身の
-  ページだけで、スワイプ用に準備しておく前後のページには適用せず、ユーザーが別の記事を選ぶかスタックを移動するまでに限る。
-  `local_settings` のキーは使わない。ペイン幅は各プラットフォームの入力方法に合わせる。macOS アプリは、デスクトップと同じく、
+  ページだけで、スワイプ用に準備しておく前後のページには適用せず、ユーザーが別の記事を選ぶかスタックを移動するまでに限る
+  （復元された選択が届くことはこの変化に当たらない）。`local_settings` のキーは使わない。ペイン幅は各プラットフォームの入力方法に合わせる。macOS アプリは、デスクトップと同じく、
   境界をドラッグした幅を保存して次回に復元する。iPad アプリは、Android のタッチ向けレイアウトと同じく、毎回既定の幅を求めて何も保存せず、
   各列の最小幅を下回らないように画面へ収めるのは `NavigationSplitView` に任せる。
 - Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
@@ -1683,7 +1694,9 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   戻す。ページはスクロール位置をスクロール可能な高さに対する割合として、上記の合成クリック用スクリプトと同じコンテンツワールドに
   登録したメッセージハンドラへ送る（ページ自身のスクリプトからは送れない）。読み込み直した文書の読み込みが終わると、
   リーダーは最後の割合までスクロールし、内容が伸びる間（画像の到着など）数秒間それを適用し直す。ユーザーがスクロール・
-  タップ・キー入力をした時点ですぐにやめる（`Home/ReaderScrollRestoration.swift`、iOS と macOS で共通）。
+  タップ・キー入力をした時点ですぐにやめる（`:shared` の `presentation/article/ReaderScrollRestoration.kt`。
+  Compose のリーダーと同じ規則で、iOS と macOS で共通）。VoiceOver の動作中は、ページ内での VoiceOver 自身の
+  スクロールをリーダーのものと区別できないので、位置は 1 回だけ適用し、内容が伸びても適用し直さない。
   `Home/ReaderProcessRecovery.swift` はこの再読み込みを文書1つにつき1度だけ許す：
   再びプロセスが落ちたら（読み込み直した文書の commit の前でも後でも。WebContent を落とすページでもループしない）、
   リーダーはそこで諦めて白紙のままにする。新しい再読み込みの機会が得られるのは、別の文書に替わったときと、
