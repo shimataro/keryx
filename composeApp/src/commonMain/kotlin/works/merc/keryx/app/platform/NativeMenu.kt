@@ -16,9 +16,9 @@ sealed interface NativeMenuLeaf : NativeMenuEntry {
 }
 
 /**
- * A shortcut-key hint rendered alongside a [NativeMenuItem], right-aligned in the platform's own
- * native style (never baked into the label as parenthetical text). [ctrl] means "use the
- * platform's primary modifier" (Ctrl elsewhere, ⌘ on macOS) — same convention as
+ * A shortcut-key hint rendered alongside a [NativeMenuItem] or [NativeCheckMenuItem], right-aligned
+ * in the platform's own native style (never baked into the label as parenthetical text). [ctrl]
+ * means "use the platform's primary modifier" (Ctrl elsewhere, ⌘ on macOS) — same convention as
  * `AppMenuShortcut.ctrl` in `ui/menu/AppMenuTree.kt`, kept as a separate, smaller type here since
  * that one is desktopMain-only and this needs to be constructible from commonMain call sites.
  *
@@ -26,7 +26,11 @@ sealed interface NativeMenuLeaf : NativeMenuEntry {
  * items — can only be shown natively on Linux (`SwingPopupHandle`, via `JMenuItem.accelerator`):
  * AWT's `java.awt.MenuShortcut` (macOS/Windows' `AwtPopupHandle`) has no way to represent a
  * shortcut without the primary modifier, so those items render with no hint at all there. A
- * modifier'd key (`ctrl = true`) renders on every platform.
+ * modifier'd key (`ctrl = true`) renders on every desktop platform.
+ *
+ * A hint is shown only where the matching keyboard handler is active. Android's M3 `DropdownMenu`
+ * (`NativeMenu.android.kt`) therefore renders none: these chords are handled through the desktop
+ * application menu, not on Android, so a hint there would advertise a shortcut that does nothing.
  */
 data class NativeMenuShortcut(val key: Key, val ctrl: Boolean = false, val shift: Boolean = false)
 
