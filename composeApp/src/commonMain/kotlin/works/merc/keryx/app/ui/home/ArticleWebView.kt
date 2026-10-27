@@ -31,6 +31,7 @@ import io.github.kdroidfilter.webview.web.rememberWebViewNavigator
 import io.github.kdroidfilter.webview.web.rememberWebViewStateWithHTMLData
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.BrowserOpener
+import works.merc.keryx.app.platform.isNativeWebViewScreenReaderActive
 import works.merc.keryx.app.platform.NativeWebViewScrollListener
 import works.merc.keryx.app.platform.isNativeWebViewSupported
 import works.merc.keryx.app.platform.nativeWebViewContentHeight
@@ -42,10 +43,10 @@ import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.ui.article.ArticleContentView
+import works.merc.keryx.app.presentation.article.ReaderScrollRestoration
 import works.merc.keryx.app.presentation.article.extractLinks
 import works.merc.keryx.app.presentation.article.wrapArticleHtml
 import kotlinx.coroutines.delay
-import kotlin.time.TimeSource
 
 /**
  * Displays a prebuilt HTML [html] document in a native web view.
@@ -151,7 +152,7 @@ internal fun ArticleWebView(html: String, body: String, articleUrl: String?, act
         val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
         LaunchedEffect(webViewState.loadingState, html) {
             if (shouldLoadArticleHtml(webViewState.loadingState, loadedHtml.value, html)) {
-                scrollRestoration.documentReplaced(html.hashCode())
+                scrollRestoration.documentReplaced(readerDocumentKey(html))
                 loadedHtml.value = html
                 navigator.loadHtml(html)
             } else if (webViewState.loadingState is LoadingState.Finished && loadedHtml.value == html) {
@@ -211,8 +212,8 @@ internal fun ArticleWebView(html: String, body: String, articleUrl: String?, act
 
 /** Feeds the reader WebView's scrolling and the user's input to [restoration]. */
 private fun readerScrollListener(restoration: ReaderScrollRestoration) = object : NativeWebViewScrollListener {
-    override fun onScrolled(fraction: Float) {
-        restoration.scrolled(fraction, TimeSource.Monotonic.markNow())
+    override fun onScrolled(fraction: Double) {
+        restoration.scrolled(fraction, readerScrollNowMillis())
     }
 
     override fun onUserInput() = restoration.userInteracted()
@@ -224,18 +225,22 @@ private const val READER_SCROLL_GROWTH_POLL_MS = 100L
 /**
  * Scrolls [webView]'s just-finished document to the position [restoration] restores, if any, then
  * re-applies it each time the content grows until the restore ends (the settle window passes or the
- * user takes over). Runs in the load effect, so a newer document cancels it.
+ * user takes over) — except while a screen reader is running, which gets the position once only.
+ * Runs in the load effect, so a newer document cancels it.
  */
 private suspend fun restoreReaderScroll(webView: NativeWebView, restoration: ReaderScrollRestoration) {
-    val target = restoration.documentFinished(TimeSource.Monotonic.markNow()) ?: return
+    val target = restoration.documentFinished(
+        nowMillis = readerScrollNowMillis(),
+        reapplyOnGrowth = !isNativeWebViewScreenReaderActive(webView),
+    ) ?: return
     scrollNativeWebViewTo(webView, target)
     var height = nativeWebViewContentHeight(webView)
-    while (restoration.isRestoring(TimeSource.Monotonic.markNow())) {
+    while (restoration.isRestoring(readerScrollNowMillis())) {
         delay(READER_SCROLL_GROWTH_POLL_MS)
         val current = nativeWebViewContentHeight(webView)
         if (current == height) continue
         height = current
-        restoration.contentResized(TimeSource.Monotonic.markNow())?.let { scrollNativeWebViewTo(webView, it) }
+        restoration.contentResized(readerScrollNowMillis())?.let { scrollNativeWebViewTo(webView, it) }
     }
 }
 

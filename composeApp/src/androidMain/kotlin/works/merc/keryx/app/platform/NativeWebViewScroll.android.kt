@@ -1,7 +1,9 @@
 package works.merc.keryx.app.platform
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.view.MotionEvent
+import android.view.accessibility.AccessibilityManager
 import io.github.kdroidfilter.webview.web.NativeWebView
 import kotlin.math.roundToInt
 
@@ -13,7 +15,7 @@ import kotlin.math.roundToInt
 actual fun observeNativeWebViewScroll(webView: NativeWebView, listener: NativeWebViewScrollListener) {
     webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
         val range = scrollRange(webView)
-        listener.onScrolled(if (range > 0) scrollY.toFloat() / range else 0f)
+        listener.onScrolled(if (range > 0) scrollY.toDouble() / range else 0.0)
     }
     webView.setOnTouchListener { _, event ->
         if (event.actionMasked == MotionEvent.ACTION_DOWN) listener.onUserInput()
@@ -31,7 +33,7 @@ actual fun observeNativeWebViewScroll(webView: NativeWebView, listener: NativeWe
 
 actual fun nativeWebViewContentHeight(webView: NativeWebView): Int = webView.contentHeight
 
-actual fun scrollNativeWebViewTo(webView: NativeWebView, fraction: Float) {
+actual fun scrollNativeWebViewTo(webView: NativeWebView, fraction: Double) {
     val range = scrollRange(webView)
     if (range > 0) webView.scrollTo(webView.scrollX, (fraction * range).roundToInt())
 }
@@ -40,3 +42,12 @@ actual fun scrollNativeWebViewTo(webView: NativeWebView, fraction: Float) {
 @Suppress("DEPRECATION") // `scale` is the only public way to map `contentHeight` (CSS px) to view pixels.
 private fun scrollRange(webView: NativeWebView): Int =
     (webView.contentHeight * webView.scale).roundToInt() - webView.height
+
+/**
+ * TalkBack's touch exploration: its scroll gestures move the page without any touch reaching the
+ * view's own listeners, so they would look like the reader's own scrolling.
+ */
+actual fun isNativeWebViewScreenReaderActive(webView: NativeWebView): Boolean {
+    val manager = webView.context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    return manager?.isTouchExplorationEnabled == true
+}

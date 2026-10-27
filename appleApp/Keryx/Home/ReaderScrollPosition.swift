@@ -1,3 +1,5 @@
+import KeryxShared
+
 /// The iOS reader's scroll position as `HomeView` keeps it in scene storage, so a relaunch after iOS
 /// terminated the app in the background reopens the restored article where the user left it — kept
 /// free of SwiftUI so the standalone `KeryxTests` bundle can compile it directly.
@@ -15,8 +17,9 @@ struct ReaderScrollPosition: Equatable {
     }
 
     /// The fraction page `pageId` scrolls to once its first document has loaded, if any.
+    /// Clamped by the shared rule (`restorableScrollFraction`); nil for the top or an invalid value.
     func initialFraction(forPage pageId: String, selectedId: String?) -> Double? {
-        guard pageId == articleId, pageId == selectedId, fraction.isFinite, fraction > 0 else { return nil }
-        return min(fraction, 1)
+        guard pageId == articleId, pageId == selectedId else { return nil }
+        return ReaderScrollRestorationKt.restorableScrollFraction(fraction: fraction)?.doubleValue
     }
 }

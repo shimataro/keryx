@@ -1,3 +1,4 @@
+import KeryxShared
 import SwiftUI
 import WebKit
 
@@ -8,7 +9,7 @@ import WebKit
 /// embed's own navigation inside an iframe loads in place (see `ReaderNavigationGate`). A click a
 /// script synthesizes is cancelled in the page (`syntheticClickGuard`). The page reports its scroll
 /// position (`scrollReporter`), so a document loaded again after WebContent died returns to where the
-/// user was (`ReaderScrollRestoration`).
+/// user was (`ReaderScrollRestoration`, the rule `:shared` holds for both UIs).
 struct ArticleWebView {
     let html: String
     /// The in-app theme, which picks the iOS scroll indicator (see `ReaderScrollIndicator`).
@@ -35,10 +36,20 @@ struct ArticleWebView {
         guard html != coordinator.loadedHtml else { return }
         coordinator.reloadedHtml = nil
         coordinator.recovery.documentReplaced()
-        coordinator.scrollRestoration.documentReplaced(
-            restoring: coordinator.loadedHtml == nil ? initialScrollFraction : nil
-        )
+        let key = Self.documentKey(html)
+        if coordinator.loadedHtml == nil {
+            // The first document is the one a restored position is for: offer it to that document.
+            coordinator.scrollRestoration = ReaderScrollRestoration(
+                restored: initialScrollFraction.map { SavedReaderScroll(documentKey: key, fraction: $0) }
+            )
+        }
+        coordinator.scrollRestoration.documentReplaced(key: key)
         coordinator.load(html, in: webView)
+    }
+
+    /// The key `ReaderScrollRestoration` tells documents apart by — compared only within this process.
+    private static func documentKey(_ html: String) -> String {
+        String(html.hashValue)
     }
 
     /// Cancels a link activation no person caused — a feed body's or an embed's script calling
@@ -148,7 +159,7 @@ struct ArticleWebView {
     final class Coordinator: NSObject, WKNavigationDelegate {
         let gate = ReaderNavigationGate()
         let recovery = ReaderProcessRecovery()
-        let scrollRestoration = ReaderScrollRestoration()
+        var scrollRestoration = ReaderScrollRestoration(restored: nil)
         var loadedHtml: String?
         var onScroll: ((Double) -> Void)?
         /// The document `load` last retried after a foreign commit replaced it, so a page that keeps
@@ -240,9 +251,26 @@ struct ArticleWebView {
 
         /// A document loaded to restore a position (`ReaderScrollRestoration`) is scrolled there once
         /// it has finished loading.
+        /// While VoiceOver runs it is applied once only: its scrolling inside the page cannot be told
+        /// apart from the reader's own, so re-applying on growth could pull the page back from it.
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard let fraction = scrollRestoration.documentFinished(now: .now) else { return }
-            scroll(webView, to: fraction)
+            guard let fraction = scrollRestoration.documentFinished(
+                nowMillis: Self.nowMillis(), reapplyOnGrowth: !Self.isVoiceOverRunning
+            ) else { return }
+            scroll(webView, to: fraction.doubleValue)
+        }
+
+        /// The monotonic milliseconds `ReaderScrollRestoration` measures its settle window in.
+        private static func nowMillis() -> Int64 {
+            Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        }
+
+        private static var isVoiceOverRunning: Bool {
+            #if os(macOS)
+            NSWorkspace.shared.isVoiceOverEnabled
+            #else
+            UIAccessibility.isVoiceOverRunning
+            #endif
         }
 
         /// Handles a message from `scrollReporter`.
@@ -251,13 +279,13 @@ struct ArticleWebView {
             switch kind {
             case "scroll":
                 guard let fraction = (message["fraction"] as? NSNumber)?.doubleValue else { return }
-                guard let recorded = scrollRestoration.scrolled(to: fraction, now: .now) else { return }
-                onScroll?(recorded)
+                guard let recorded = scrollRestoration.scrolled(fraction: fraction, nowMillis: Self.nowMillis()) else { return }
+                onScroll?(recorded.doubleValue)
             case "user":
                 scrollRestoration.userInteracted()
             case "resize":
-                guard let fraction = scrollRestoration.contentResized(now: .now), let webView else { return }
-                scroll(webView, to: fraction)
+                guard let fraction = scrollRestoration.contentResized(nowMillis: Self.nowMillis()), let webView else { return }
+                scroll(webView, to: fraction.doubleValue)
             default:
                 break
             }

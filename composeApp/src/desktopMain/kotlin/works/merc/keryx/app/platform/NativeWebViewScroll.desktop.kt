@@ -7,4 +7,6 @@ actual fun observeNativeWebViewScroll(webView: NativeWebView, listener: NativeWe
 
 actual fun nativeWebViewContentHeight(webView: NativeWebView): Int = 0
 
-actual fun scrollNativeWebViewTo(webView: NativeWebView, fraction: Float) = Unit
+actual fun scrollNativeWebViewTo(webView: NativeWebView, fraction: Double) = Unit
+
+actual fun isNativeWebViewScreenReaderActive(webView: NativeWebView): Boolean = false
