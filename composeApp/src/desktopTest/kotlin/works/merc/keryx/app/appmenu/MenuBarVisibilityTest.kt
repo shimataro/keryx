@@ -42,7 +42,7 @@ class MenuBarVisibilityTest {
     private fun labels() = AppMenuLabels(
         fileMenu = "File", addFeed = "AddFeed", addFolder = "AddFolder", addTag = "AddTag",
         importOpml = "Import", exportOpml = "Export", closeWindow = "Close", settings = "Settings", quit = "Quit",
-        viewMenu = "View", search = "Search", allArticles = "AllArticles", unreadOnly = "UnreadOnly", starredOnly = "StarredOnly", toggleSort = "ToggleSort",
+        viewMenu = "View", search = "Search", allArticles = "AllArticles", unreadOnly = "UnreadOnly", starredOnly = "StarredOnly", hideRead = "HideRead", toggleSort = "ToggleSort",
         markAllRead = "MarkAllRead", showMenuBar = "ShowMenuBar",
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
@@ -56,7 +56,7 @@ class MenuBarVisibilityTest {
     private fun actions() = AppMenuActions(
         addFeed = { addFeedCalled = true }, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
         closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = { listModesSet += it },
-        toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
+        hideRead = {}, toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = { refreshCalled = true }, sync = {},
         refreshSelectedFeed = {}, toggleFeedTag = { _, _ -> }, moveFeedToFolder = {},
         newFolderForSelectedFeed = {}, newTagForSelectedFeed = {},
@@ -77,7 +77,7 @@ class MenuBarVisibilityTest {
             onHome = onHome, hasSelectedArticle = true, selectedArticleHasUrl = true,
             selectedArticleCanOpenInBrowser = true,
             activity = ActivitySnapshot(), canSyncNow = true,
-            searchActive = false, listMode = ArticleListMode.All, starredModeAvailable = starredModeAvailable, opmlBusy = false,
+            searchActive = false, canHideRead = false, listMode = ArticleListMode.All, starredModeAvailable = starredModeAvailable, opmlBusy = false,
             hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
             selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
         ),

@@ -341,6 +341,7 @@
     <string name="menu_view_list_mode_all">Show All Articles</string>
     <string name="menu_view_list_mode_unread">Show Unread Only</string>
     <string name="menu_view_list_mode_starred">Show Starred Only</string>
+    <string name="menu_view_hide_read">Hide Read Articles</string>
     <string name="menu_view_toggle_sort">Toggle Sort Order</string>
     <string name="menu_view_mark_all_read">Mark All as Read</string>
     <string name="menu_view_show_menu_bar">Show Menu Bar</string>

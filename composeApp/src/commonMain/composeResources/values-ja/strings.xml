@@ -333,6 +333,7 @@
     <string name="menu_view_list_mode_all">すべての記事を表示</string>
     <string name="menu_view_list_mode_unread">未読のみ表示</string>
     <string name="menu_view_list_mode_starred">スター付きのみ表示</string>
+    <string name="menu_view_hide_read">既読記事を非表示</string>
     <string name="menu_view_toggle_sort">表示順を切り替え</string>
     <string name="menu_view_mark_all_read">すべて既読にする</string>
     <string name="menu_view_show_menu_bar">メニューバーを表示</string>
