@@ -23,7 +23,26 @@ struct HomeView: View {
     /// width). Driven explicitly rather than left to the sidebar `List`'s own selection: an article
     /// row is a plain button, which never navigates by itself, and re-tapping the current sidebar row
     /// is no selection change at all. The system writes it back on a back button / edge swipe.
+    #if os(iOS)
+    /// Kept in scene storage, so a relaunch after iOS terminated the app in the background comes back
+    /// on the same column from the first frame (see `CompactColumnRestoration`).
+    private var compactColumn: NavigationSplitViewColumn {
+        get { HomeView.splitViewColumn(CompactColumnRestoration.column(storageValue: storedCompactColumn)) }
+        nonmutating set { storedCompactColumn = CompactColumnRestoration.storageValue(HomeView.compactSearchColumn(newValue)) }
+    }
+    @SceneStorage("home.compactColumn") private var storedCompactColumn = CompactColumnRestoration.storageValue(.sidebar)
+    /// Whether the restored column has been checked against the restored selection — once per view.
+    @State private var compactColumnRestored = false
+    /// Set when that check moved the column, so the move is not taken for the user's own navigation
+    /// (`onChange(of: compactColumn)`).
+    @State private var ignoreRestoredColumnChange = false
+    private var compactColumnBinding: Binding<NavigationSplitViewColumn> {
+        Binding(get: { compactColumn }, set: { compactColumn = $0 })
+    }
+    #else
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
+    private var compactColumnBinding: Binding<NavigationSplitViewColumn> { $compactColumn }
+    #endif
     /// Bumped each time a phone-width split view brings the article list forward from the sidebar —
     /// see `ArticleListView.remountGeneration`.
     @State private var articleListRemountGeneration = 0
@@ -81,7 +100,7 @@ struct HomeView: View {
     }
 
     var body: some View {
-        NavigationSplitView(preferredCompactColumn: $compactColumn) {
+        NavigationSplitView(preferredCompactColumn: compactColumnBinding) {
             FeedListView(
                 home: home,
                 dialogs: sidebarDialogs,
@@ -132,6 +151,10 @@ struct HomeView: View {
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
             #if os(iOS)
+            if ignoreRestoredColumnChange {
+                ignoreRestoredColumnChange = false
+                return
+            }
             if ArticleListRemount.isNeeded(
                 isCompact: horizontalSizeClass == .compact,
                 from: HomeView.compactSearchColumn(old),
@@ -171,6 +194,7 @@ struct HomeView: View {
         // Mounted on every layout (the detail column is not, at a compact width until an article is
         // opened), so WebKit can start while the app is idle rather than on the first article.
         .task { await ReaderWebViewWarmUp.scheduleOnce() }
+        .onAppear { restoreCompactColumn() }
         #endif
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
@@ -196,6 +220,20 @@ struct HomeView: View {
             }
         }
     }
+
+    #if os(iOS)
+    /// Checks the column scene storage restored against the selection `HomeViewModel` restored, once:
+    /// a reader restored without its article shows the article list instead.
+    private func restoreCompactColumn() {
+        guard !compactColumnRestored else { return }
+        compactColumnRestored = true
+        let stored = HomeView.compactSearchColumn(compactColumn)
+        let restored = CompactColumnRestoration.restored(stored, hasSelectedArticle: home.selectedArticleId != nil)
+        guard restored != stored else { return }
+        ignoreRestoredColumnChange = true
+        compactColumn = HomeView.splitViewColumn(restored)
+    }
+    #endif
 
     /// Shows `id`'s row in the gray highlight at once, then fades it out.
     private func flashReturnedRow(_ id: String) {

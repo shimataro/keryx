@@ -1581,7 +1581,12 @@ platform:
   window restoration, and all rendering. Search-bar visibility is an input the UI sets on the shared
   state (it decides whether a query is showing results), not state it owns. SwiftUI covers these
   with `NavigationSplitView`, `@FocusState`, `@SceneStorage` and its own window restoration; the
-  Compose app keeps its own implementations. Pane widths follow each platform's input: the macOS app
+  Compose app keeps its own implementations. On an iPhone the collapsed stack's column (sidebar,
+  article list or reader) is kept in `@SceneStorage`, so a relaunch after iOS terminated the app in
+  the background reopens on that column from the first frame — the reader only together with the
+  article `HomeViewModel` restores as selected, otherwise the article list
+  (`Home/CompactColumnRestoration.swift`); quitting from the app switcher discards scene storage, so
+  that launch starts at the sidebar. Pane widths follow each platform's input: the macOS app
   saves the widths the dividers are dragged to and restores them, like desktop, while the iPad app,
   like Android's touch layouts, asks for the default widths every time and saves nothing, leaving
   `NavigationSplitView` to fit them into the screen without going below each column's minimum.
