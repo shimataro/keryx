@@ -121,11 +121,9 @@ not in global chrome:
   `SegmentedControl`, because three labelled segments do not fit the pane's
   240dp minimum width beside the other controls; the chip is filled whenever
   the mode narrows the list.
-- Hide read — the same header row, directly after the mode chip (4dp gap)
-  rather than in the trailing icon cluster: its
-  enabled state depends on the mode alone, and keeping it away from mark all
-  read avoids confusing a view-only action with a bulk mutation. A lone icon,
-  so bare (no `ToolbarIconGroup` capsule).
+- Hide read — not in the header row: a View-menu command only (`AppMenuTree`,
+  the SwiftUI `HomeCommands`), since a manual refresh or sync, a filter switch
+  and choosing Unread already clear the kept read rows (`external-spec.md` §7).
 - Notifications (the bell) — `ArticleListPane`'s own header row, at every
   layout and every reachable depth: the article list is visible everywhere
   except `PaneLayout.Single`'s article-detail depth (see `visiblePanes` in
