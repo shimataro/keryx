@@ -55,7 +55,7 @@ private const val REFRESH_FETCH_CONCURRENCY = 6
  * subscription list fetch its whole contents into memory at once. Twice the fetch concurrency, so a
  * writer that keeps up never stalls a fetch slot.
  */
-private const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
+internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
 
 private const val TAG = "FeedRepository"
 

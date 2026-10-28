@@ -1,5 +1,6 @@
 package works.merc.keryx.app.domain
 
+import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandler
@@ -40,12 +41,18 @@ private fun rssWith(guid: String) = """<?xml version="1.0"?><rss version="2.0"><
 <item><title>Post $guid</title><link>https://ex.com/$guid</link><guid>$guid</guid></item>
 </channel></rss>"""
 
+/** More feeds than both the fetch slots and the pending-apply bound hold at once. */
+private const val FEEDS_BEYOND_THE_BOUND = REFRESH_PENDING_APPLY_LIMIT + 8
+
+/** How long a paused refresh is watched for a fetch starting past the bound. */
+private const val PAUSE_OBSERVATION_MS = 300L
+
 /**
  * Blocks the thread that makes the first write notification — the refresh's single writer, right
  * after it commits its first feed — until [release] is counted down, and passes everything through.
  */
-private class StallFirstWriteDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
-    app.cash.sqldelight.db.SqlDriver by delegate {
+private class StallFirstWriteDriver(private val delegate: SqlDriver) :
+    SqlDriver by delegate {
     val release = CountDownLatch(1)
     private val stalled = AtomicBoolean(false)
 
@@ -79,7 +86,7 @@ class FeedRepositoryRefreshProgressTest {
             install(HttpTimeout)
         })
 
-    private fun newRepo(db: KeryxDatabase, driver: app.cash.sqldelight.db.SqlDriver, fetcher: FeedFetcher): FeedRepository {
+    private fun newRepo(db: KeryxDatabase, driver: SqlDriver, fetcher: FeedFetcher): FeedRepository {
         val sync = SyncScheduler {}
         val clock = Clock { 1000L }
         val articles = ArticleRepository(db, FtsSearch(driver), sync, clock, Dispatchers.Unconfined)
@@ -95,7 +102,7 @@ class FeedRepositoryRefreshProgressTest {
     /** Subscribes the given paths (each serving [initial]) and returns the stored feed rows by path. */
     private suspend fun subscribe(
         db: KeryxDatabase,
-        driver: app.cash.sqldelight.db.SqlDriver,
+        driver: SqlDriver,
         vararg paths: String,
     ): Map<String, Feeds> {
         val setup = newRepo(db, driver, fetcherWith { respond(rssWith("initial"), HttpStatusCode.OK) })
@@ -352,7 +359,7 @@ class FeedRepositoryRefreshProgressTest {
         // either must already show as refreshing.
         val (_, driver, db) = fileDb()
         try {
-            val feeds = subscribe(db, driver, *Array(20) { "f$it" })
+            val feeds = subscribe(db, driver, *Array(FEEDS_BEYOND_THE_BOUND) { "f$it" })
             val gate = CompletableDeferred<Unit>()
             val started = AtomicInteger(0)
             val repo = newRepo(db, driver, fetcherWith {
@@ -380,7 +387,7 @@ class FeedRepositoryRefreshProgressTest {
     fun aStalledWriterPausesFetchesAtThePendingApplyLimit(): Unit = runBlocking {
         val (_, driver, db) = fileDb()
         try {
-            val feeds = subscribe(db, driver, *Array(20) { "f$it" })
+            val feeds = subscribe(db, driver, *Array(FEEDS_BEYOND_THE_BOUND) { "f$it" })
             val stalling = StallFirstWriteDriver(driver)
             val started = AtomicInteger(0)
             val repo = newRepo(KeryxDatabase(stalling), stalling, fetcherWith { request ->
@@ -392,9 +399,9 @@ class FeedRepositoryRefreshProgressTest {
             val results = try {
                 // The writer is stuck on its first commit, so no feed can leave the pending-apply
                 // window: fetching stops once it is full instead of running through every feed.
-                awaitCondition { started.get() >= 12 }
-                delay(300)
-                assertEquals(12, started.get(), "fetches must pause while the writer is held back")
+                awaitCondition { started.get() >= REFRESH_PENDING_APPLY_LIMIT }
+                delay(PAUSE_OBSERVATION_MS)
+                assertEquals(REFRESH_PENDING_APPLY_LIMIT, started.get(), "fetches must pause while the writer is held back")
                 assertFalse(call.isCompleted)
                 stalling.release.countDown()
                 withTimeout(10_000) { call.await() }
@@ -403,7 +410,7 @@ class FeedRepositoryRefreshProgressTest {
             }
 
             assertTrue(results.values.all { it is Result.Ok })
-            assertEquals(20, started.get())
+            assertEquals(FEEDS_BEYOND_THE_BOUND, started.get())
             assertEquals(feeds.keys.map { "Post $it-new" }.toSet(), articleGuids(db).filter { it.endsWith("-new") }.toSet())
         } finally {
             driver.close()
