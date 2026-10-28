@@ -663,16 +663,11 @@ class FeedRepository(
                     // ahead of any favicon lookup (which queues for the same slots), and is marked
                     // refreshing from the start. A writer more than REFRESH_PENDING_APPLY_LIMIT behind
                     // holds the fetch slots until it catches up — the point of the bound.
-                    val fetch = semaphore.withPermit {
-                        pendingApply.acquire()
-                        try {
-                            feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)
-                        } catch (e: Throwable) {
-                            pendingApply.release()
-                            throw e
-                        }
-                    }
-                    try {
+                    fetchHoldingPendingApply(
+                        semaphore,
+                        pendingApply,
+                        fetch = { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) },
+                    ) { fetch ->
                         // Holds no fetch permit while waiting, so a writer within
                         // REFRESH_PENDING_APPLY_LIMIT of the fetches never caps the fetch concurrency.
                         val committed = CompletableDeferred<Unit>()
@@ -681,9 +676,11 @@ class FeedRepository(
                         // Only the site URL outlives the commit: the lookup below can wait on a permit
                         // and the network for a while, and must not keep every parsed article resident
                         // meanwhile.
-                        if (fetch is Result.Ok && needsFaviconLookup(feed)) FaviconLookup(fetch.value.siteUrl ?: feed.site_url) else null
-                    } finally {
-                        pendingApply.release()
+                        if (fetch is Result.Ok && needsFaviconLookup(feed)) {
+                            FaviconLookup(fetch.value.siteUrl ?: feed.site_url)
+                        } else {
+                            null
+                        }
                     }
                 }
                 if (faviconLookup != null) {
@@ -695,6 +692,30 @@ class FeedRepository(
         launch {
             fetches.joinAll()
             steps.close()
+        }
+    }
+
+    /**
+     * Runs [fetch] under a [fetchSlots] permit, taking a [pendingApply] permit inside it, then hands
+     * the result to [untilCommitted] with only the pending-apply permit still held. That permit is
+     * acquired and released here alone, on every path — a cancelled fetch and a failed writer too.
+     */
+    private suspend fun <T, R> fetchHoldingPendingApply(
+        fetchSlots: Semaphore,
+        pendingApply: Semaphore,
+        fetch: suspend () -> T,
+        untilCommitted: suspend (T) -> R,
+    ): R {
+        var holdsPendingApply = false
+        try {
+            val fetched = fetchSlots.withPermit {
+                pendingApply.acquire()
+                holdsPendingApply = true
+                fetch()
+            }
+            return untilCommitted(fetched)
+        } finally {
+            if (holdsPendingApply) pendingApply.release()
         }
     }
 
