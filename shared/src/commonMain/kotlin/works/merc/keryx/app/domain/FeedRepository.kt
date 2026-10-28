@@ -474,10 +474,14 @@ class FeedRepository(
                     // the reason in last_error instead — that's what keeps the feed list flagged after
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
                     feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    // Coalesced: a gone feed is still refreshed every cycle, and each one would otherwise
+                    // add another copy of the same warning for as long as the session runs. The key
+                    // includes the title, so a feed renamed in between gets an entry of its own.
                     notify(
                         NotificationText.FeedGone(feed.displayTitle()),
                         AppNotificationLevel.WARNING,
                         action = AppNotificationAction.ShowFeedDetail(feed.id),
+                        coalesce = true,
                     )
                 }
                 return RefreshOutcome(r, hadArticles = false)
@@ -776,17 +780,23 @@ class FeedRepository(
      * @param text What the notification says.
      * @param level The notification severity level.
      * @param action The next action offered when the user acts on the notification.
+     * @param coalesce Whether this replaces an entry already saying the same thing
+     *   ([NotificationCenter.addCoalescing]) rather than adding another.
      */
-    private suspend fun notify(text: NotificationText, level: AppNotificationLevel, action: AppNotificationAction? = null) {
-        notificationCenter.add(
-            AppNotification(
-                id = IdGenerator.newId(),
-                level = level,
-                text = text,
-                timestampMillis = clock.nowMillis(),
-                action = action,
-            ),
+    private suspend fun notify(
+        text: NotificationText,
+        level: AppNotificationLevel,
+        action: AppNotificationAction? = null,
+        coalesce: Boolean = false,
+    ) {
+        val notification = AppNotification(
+            id = IdGenerator.newId(),
+            level = level,
+            text = text,
+            timestampMillis = clock.nowMillis(),
+            action = action,
         )
+        if (coalesce) notificationCenter.addCoalescing(notification) else notificationCenter.add(notification)
     }
 }
 

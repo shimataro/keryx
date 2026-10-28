@@ -825,6 +825,28 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun aFeedThatStaysGoneKeepsASingleNotification(): Unit = runBlocking {
+        // A gone feed is still refreshed every cycle; the bell must not gain a copy per cycle.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val notificationCenter = NotificationCenter()
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, notificationCenter = notificationCenter)
+            repeat(3) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+
+            val notifications = notificationCenter.items.value
+            assertEquals(1, notifications.size)
+            assertIs<NotificationText.FeedGone>(notifications.single().text)
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun goneMarkerIsClearedWhenTheFeedComesBack(): Unit = runBlocking {
         // The Gone marker is a live state, not a permanent brand: a feed that starts answering again
         // must lose its feed-list flag, via the existing resetErrorCount on the success path.
