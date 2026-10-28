@@ -384,6 +384,55 @@ class FeedRepositoryRefreshProgressTest {
     }
 
     @Test
+    fun failedFetchesStillHandOnTheirPendingApplySlots(): Unit = runBlocking {
+        // FeedFetcher reports a failure as a Result.Err, which the writer applies like any other
+        // result: a failed feed that kept its slot would stop the refresh at the bound.
+        val (_, driver, db) = fileDb()
+        try {
+            val feeds = subscribe(db, driver, *Array(FEEDS_BEYOND_THE_BOUND) { "f$it" })
+            val repo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.InternalServerError) })
+
+            val results = withTimeout(10_000) { repo.refreshFeeds(feeds.values.toList()) }
+
+            assertEquals(FEEDS_BEYOND_THE_BOUND, results.size)
+            assertTrue(results.values.all { it is Result.Err })
+            assertEquals(emptySet(), repo.refreshing())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun cancellingARefreshWithAFullPendingApplyWindowReleasesEveryFeed(): Unit = runBlocking {
+        // Cancelled while the writer is held back: feeds waiting on the writer and feeds still
+        // queued for a slot must all leave refreshingFeedIds.
+        val (_, driver, db) = fileDb()
+        try {
+            val feeds = subscribe(db, driver, *Array(FEEDS_BEYOND_THE_BOUND) { "f$it" })
+            val stalling = StallFirstWriteDriver(driver)
+            val started = AtomicInteger(0)
+            val repo = newRepo(KeryxDatabase(stalling), stalling, fetcherWith { request ->
+                started.incrementAndGet()
+                respond(rssWith(request.url.encodedPath.trim('/') + "-new"), HttpStatusCode.OK)
+            })
+
+            val call = async(Dispatchers.Default) { repo.refreshFeeds(feeds.values.toList()) }
+            try {
+                awaitCondition { started.get() >= REFRESH_PENDING_APPLY_LIMIT }
+                call.cancel()
+            } finally {
+                stalling.release.countDown()
+            }
+            withTimeout(10_000) { call.join() }
+
+            assertTrue(call.isCancelled)
+            assertEquals(emptySet(), repo.refreshing())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun aStalledWriterPausesFetchesAtThePendingApplyLimit(): Unit = runBlocking {
         val (_, driver, db) = fileDb()
         try {

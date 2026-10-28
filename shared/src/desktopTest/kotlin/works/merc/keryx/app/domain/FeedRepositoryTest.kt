@@ -847,6 +847,30 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun renamingAGoneFeedStartsASecondNotification(): Unit = runBlocking {
+        // The coalescing key includes the title (see error-design.md), so a rename between cycles
+        // adds an entry under the new name rather than rewriting the old one.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val notificationCenter = NotificationCenter()
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, notificationCenter = notificationCenter)
+            goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+            goneRepo.renameFeed(feed.id, "Renamed")
+            repeat(2) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+
+            val titles = notificationCenter.items.value.map { assertIs<NotificationText.FeedGone>(it.text).feedTitle }
+            assertEquals(2, titles.size)
+            assertTrue("Renamed" in titles)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun aFeedThatStaysGoneIsNotRewrittenEachRefresh(): Unit = runBlocking {
         // Any feeds write re-runs the article-list query, so only the transition to gone writes.
         val (driver, db) = inMemoryDb()
