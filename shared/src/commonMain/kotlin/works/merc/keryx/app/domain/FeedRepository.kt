@@ -48,6 +48,15 @@ import works.merc.keryx.app.data.remote.FetchedFeed
  */
 private const val REFRESH_FETCH_CONCURRENCY = 6
 
+/**
+ * Max feeds a refresh holds between starting their fetch and the writer committing them — the
+ * fetched results queued for the single writer included. Every queued result keeps its feed's parsed
+ * articles resident, so without this a writer held back (a sync merge's write lock) would let a large
+ * subscription list fetch its whole contents into memory at once. Twice the fetch concurrency, so a
+ * writer that keeps up never stalls a fetch slot.
+ */
+internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
+
 private const val TAG = "FeedRepository"
 
 /**
@@ -410,6 +419,9 @@ class FeedRepository(
         class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
     }
 
+    /** A favicon lookup a fetched feed is due, from [siteUrl] (null when the feed names no site). */
+    private class FaviconLookup(val siteUrl: String?)
+
     /**
      * Whether a refresh that fetched [feed] should look its favicon up: it has none yet, and no
      * lookup found none within [FAVICON_RETRY_INTERVAL_MS].
@@ -461,11 +473,23 @@ class FeedRepository(
                     // error_count stays untouched (410 is permanent, not a retry candidate), so record
                     // the reason in last_error instead — that's what keeps the feed list flagged after
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
-                    feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    // Written only on the transition: a gone feed is still refreshed every cycle, and
+                    // any feeds write re-runs the article-list query. The check reads the row taken
+                    // before the fetch, so a marker cleared meanwhile (a single-feed Refresh that
+                    // succeeded, or a sync merge) is not rewritten this cycle; the next one rereads the
+                    // row and restores it — the same assumption as the resetErrorCount guard below. Not
+                    // checked in SQL instead: SQLDelight re-runs the queries even when no row changes.
+                    if (feed.last_error != FEED_ERROR_REASON_GONE) {
+                        feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    }
+                    // Coalesced: a gone feed is still refreshed every cycle, and each one would otherwise
+                    // add another copy of the same warning for as long as the session runs. The key
+                    // includes the title, so a feed renamed in between gets an entry of its own.
                     notify(
                         NotificationText.FeedGone(feed.displayTitle()),
                         AppNotificationLevel.WARNING,
                         action = AppNotificationAction.ShowFeedDetail(feed.id),
+                        coalesce = true,
                     )
                 }
                 return RefreshOutcome(r, hadArticles = false)
@@ -604,10 +628,10 @@ class FeedRepository(
         val state = RefreshApplyState(total = feedList.size)
         try {
             coroutineScope {
-                // Unlimited, and sent to only after the permit is released (see launchFetches): a
-                // fetch that finishes while the writer is busy applying another feed must free its
-                // permit for the next fetch rather than wait for the writer, or the writer's pace
-                // would cap the fetch concurrency.
+                // Unlimited, and sent to only after the fetch permit is released (see launchFetches):
+                // a fetch that finishes while the writer is busy applying another feed must free its
+                // permit for the next fetch rather than wait for the writer. How many results can
+                // queue here is bounded separately, by REFRESH_PENDING_APPLY_LIMIT.
                 val steps = Channel<RefreshStep>(Channel.UNLIMITED)
                 launchFetches(feedList, steps)
                 applySteps(steps, state)
@@ -622,7 +646,10 @@ class FeedRepository(
 
     /**
      * Network phase of [refreshFeeds]: every feed's fetch runs concurrently (bounded by a
-     * semaphore), with NO DB writes, handing its result to [steps]. Each feed stays in
+     * semaphore), with NO DB writes, handing its result to [steps]. A second semaphore bounds how
+     * many feeds sit between starting their fetch and being committed
+     * ([REFRESH_PENDING_APPLY_LIMIT]): a writer that falls that far behind pauses further fetches
+     * rather than letting their parsed articles pile up in memory. Each feed stays in
      * [refreshingFeedIds] from the start, including while queued for a fetch slot, until the writer
      * has committed it — so every feed the refresh covers is marked at once and clears as its own
      * articles land. A favicon lookup
@@ -631,20 +658,37 @@ class FeedRepository(
      */
     private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
+        val pendingApply = Semaphore(REFRESH_PENDING_APPLY_LIMIT)
         val fetches = feedList.map { feed ->
             launch(dispatcher) {
-                val fetch = trackRefreshing(feed.id) {
-                    val fetch = semaphore.withPermit { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) }
-                    // Holds no permit while waiting, so the writer's pace never caps the fetch concurrency.
-                    val committed = CompletableDeferred<Unit>()
-                    steps.send(RefreshStep.Fetched(feed, fetch, committed))
-                    committed.await()
-                    fetch
-                }
-                if (fetch is Result.Ok && needsFaviconLookup(feed)) {
-                    val url = semaphore.withPermit {
-                        faviconResolver.resolve(fetch.value.siteUrl ?: feed.site_url, feed.url)
+                val faviconLookup = trackRefreshing(feed.id) {
+                    // The pending-apply permit is taken only once this feed's turn for a fetch slot
+                    // comes, and inside trackRefreshing: every feed keeps its place in the fetch queue
+                    // ahead of any favicon lookup (which queues for the same slots), and is marked
+                    // refreshing from the start. A writer more than REFRESH_PENDING_APPLY_LIMIT behind
+                    // holds the fetch slots until it catches up — the point of the bound.
+                    fetchHoldingPendingApply(
+                        semaphore,
+                        pendingApply,
+                        fetch = { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) },
+                    ) { fetch ->
+                        // Holds no fetch permit while waiting, so a writer within
+                        // REFRESH_PENDING_APPLY_LIMIT of the fetches never caps the fetch concurrency.
+                        val committed = CompletableDeferred<Unit>()
+                        steps.send(RefreshStep.Fetched(feed, fetch, committed))
+                        committed.await()
+                        // Only the site URL outlives the commit: the lookup below can wait on a permit
+                        // and the network for a while, and must not keep every parsed article resident
+                        // meanwhile.
+                        if (fetch is Result.Ok && needsFaviconLookup(feed)) {
+                            FaviconLookup(fetch.value.siteUrl ?: feed.site_url)
+                        } else {
+                            null
+                        }
                     }
+                }
+                if (faviconLookup != null) {
+                    val url = semaphore.withPermit { faviconResolver.resolve(faviconLookup.siteUrl, feed.url) }
                     steps.send(RefreshStep.FaviconResolved(feed.id, url))
                 }
             }
@@ -652,6 +696,30 @@ class FeedRepository(
         launch {
             fetches.joinAll()
             steps.close()
+        }
+    }
+
+    /**
+     * Runs [fetch] under a [fetchSlots] permit, taking a [pendingApply] permit inside it, then hands
+     * the result to [untilCommitted] with only the pending-apply permit still held. That permit is
+     * acquired and released here alone, on every path — a cancelled fetch and a failed writer too.
+     */
+    private suspend fun <T, R> fetchHoldingPendingApply(
+        fetchSlots: Semaphore,
+        pendingApply: Semaphore,
+        fetch: suspend () -> T,
+        untilCommitted: suspend (T) -> R,
+    ): R {
+        var holdsPendingApply = false
+        try {
+            val fetched = fetchSlots.withPermit {
+                pendingApply.acquire()
+                holdsPendingApply = true
+                fetch()
+            }
+            return untilCommitted(fetched)
+        } finally {
+            if (holdsPendingApply) pendingApply.release()
         }
     }
 
@@ -741,17 +809,23 @@ class FeedRepository(
      * @param text What the notification says.
      * @param level The notification severity level.
      * @param action The next action offered when the user acts on the notification.
+     * @param coalesce Whether this replaces an entry already saying the same thing
+     *   ([NotificationCenter.addCoalescing]) rather than adding another.
      */
-    private suspend fun notify(text: NotificationText, level: AppNotificationLevel, action: AppNotificationAction? = null) {
-        notificationCenter.add(
-            AppNotification(
-                id = IdGenerator.newId(),
-                level = level,
-                text = text,
-                timestampMillis = clock.nowMillis(),
-                action = action,
-            ),
+    private suspend fun notify(
+        text: NotificationText,
+        level: AppNotificationLevel,
+        action: AppNotificationAction? = null,
+        coalesce: Boolean = false,
+    ) {
+        val notification = AppNotification(
+            id = IdGenerator.newId(),
+            level = level,
+            text = text,
+            timestampMillis = clock.nowMillis(),
+            action = action,
         )
+        if (coalesce) notificationCenter.addCoalescing(notification) else notificationCenter.add(notification)
     }
 }
 
