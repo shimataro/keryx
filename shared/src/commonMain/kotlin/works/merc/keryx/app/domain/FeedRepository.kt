@@ -410,6 +410,9 @@ class FeedRepository(
         class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
     }
 
+    /** A favicon lookup a fetched feed is due, from [siteUrl] (null when the feed names no site). */
+    private class FaviconLookup(val siteUrl: String?)
+
     /**
      * Whether a refresh that fetched [feed] should look its favicon up: it has none yet, and no
      * lookup found none within [FAVICON_RETRY_INTERVAL_MS].
@@ -633,18 +636,18 @@ class FeedRepository(
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
         val fetches = feedList.map { feed ->
             launch(dispatcher) {
-                val fetch = trackRefreshing(feed.id) {
+                val faviconLookup = trackRefreshing(feed.id) {
                     val fetch = semaphore.withPermit { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) }
                     // Holds no permit while waiting, so the writer's pace never caps the fetch concurrency.
                     val committed = CompletableDeferred<Unit>()
                     steps.send(RefreshStep.Fetched(feed, fetch, committed))
                     committed.await()
-                    fetch
+                    // Only the site URL outlives the commit: the lookup below can wait on a permit and
+                    // the network for a while, and must not keep every parsed article resident meanwhile.
+                    if (fetch is Result.Ok && needsFaviconLookup(feed)) FaviconLookup(fetch.value.siteUrl ?: feed.site_url) else null
                 }
-                if (fetch is Result.Ok && needsFaviconLookup(feed)) {
-                    val url = semaphore.withPermit {
-                        faviconResolver.resolve(fetch.value.siteUrl ?: feed.site_url, feed.url)
-                    }
+                if (faviconLookup != null) {
+                    val url = semaphore.withPermit { faviconResolver.resolve(faviconLookup.siteUrl, feed.url) }
                     steps.send(RefreshStep.FaviconResolved(feed.id, url))
                 }
             }
