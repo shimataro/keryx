@@ -474,7 +474,11 @@ class FeedRepository(
                     // the reason in last_error instead — that's what keeps the feed list flagged after
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
                     // Written only on the transition: a gone feed is still refreshed every cycle, and
-                    // any feeds write re-runs the article-list query.
+                    // any feeds write re-runs the article-list query. The check reads the row taken
+                    // before the fetch, so a marker cleared meanwhile (a single-feed Refresh that
+                    // succeeded, or a sync merge) is not rewritten this cycle; the next one rereads the
+                    // row and restores it — the same assumption as the resetErrorCount guard below. Not
+                    // checked in SQL instead: SQLDelight re-runs the queries even when no row changes.
                     if (feed.last_error != FEED_ERROR_REASON_GONE) {
                         feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
                     }
