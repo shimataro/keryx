@@ -174,7 +174,7 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 | ネクストアクション | 発生源 | 挙動 |
 | --- | --- | --- |
 | `OpenUrl(url)` | 新バージョン通知（アプリ内アップデート経路が無い場合——`UpdatePlan.OpenReleasePage`/`NotOffered`。[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照） | リリースページを外部ブラウザで開く |
-| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
+| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308)。消えたフィードも毎回更新されるため、410 の通知はまとめて 1 フィード 1 件のままにする（タイトルで判定するので、名前を変えると別の 1 件になる）。URL 変更は発生時に 1 回だけ通知する | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く（Android ではカテゴリ一覧ではなく、該当カテゴリの画面を直接開く）。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、その理由が認証失敗のとき（`SyncRepository.lastSyncAuthFailed`）は接続済みプロバイダの「同期データをリセット」に代えて**連携し直す**アクションを提示する。`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | フィード更新で、対象のどのフィードにも接続できなかったとき——すべてがタイムアウトしたか、応答をまったく得られなかった（`RefreshCycleRunner` から `reportRefreshOutcome` の `isUnreachable` 経由）——多くはオフライン。エラーで応答したフィード（HTTP ステータス、404/410、読めない内容）は数えない: 接続を確認しても解決せず、フィード一覧がすでに印を付けているため。同じ内容はまとめるので、失敗が続いても 1 件のまま | 原因と対処法の説明ダイアログを表示（画面遷移しない） |

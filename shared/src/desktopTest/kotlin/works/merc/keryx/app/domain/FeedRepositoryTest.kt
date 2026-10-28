@@ -825,6 +825,76 @@ class FeedRepositoryTest {
     }
 
     @Test
+    fun aFeedThatStaysGoneKeepsASingleNotification(): Unit = runBlocking {
+        // A gone feed is still refreshed every cycle; the bell must not gain a copy per cycle.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val notificationCenter = NotificationCenter()
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, notificationCenter = notificationCenter)
+            repeat(3) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+
+            val notifications = notificationCenter.items.value
+            assertEquals(1, notifications.size)
+            assertIs<NotificationText.FeedGone>(notifications.single().text)
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun renamingAGoneFeedStartsASecondNotification(): Unit = runBlocking {
+        // The coalescing key includes the title (see error-design.md), so a rename between cycles
+        // adds an entry under the new name rather than rewriting the old one.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val notificationCenter = NotificationCenter()
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, notificationCenter = notificationCenter)
+            goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+            goneRepo.renameFeed(feed.id, "Renamed")
+            repeat(2) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+
+            val titles = notificationCenter.items.value.map { assertIs<NotificationText.FeedGone>(it.text).feedTitle }
+            assertEquals(2, titles.size)
+            assertTrue("Renamed" in titles)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aFeedThatStaysGoneIsNotRewrittenEachRefresh(): Unit = runBlocking {
+        // Any feeds write re-runs the article-list query, so only the transition to gone writes.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            var now = 2000L
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, clock = Clock { now++ })
+            goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+            val afterFirst = db.feedsQueries.getById(feed.id).executeAsOne()
+            repeat(2) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+            val afterThird = db.feedsQueries.getById(feed.id).executeAsOne()
+
+            assertEquals(FEED_ERROR_REASON_GONE, afterFirst.last_error)
+            assertEquals(afterFirst.last_error, afterThird.last_error)
+            assertEquals(afterFirst.updated_at, afterThird.updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun goneMarkerIsClearedWhenTheFeedComesBack(): Unit = runBlocking {
         // The Gone marker is a live state, not a permanent brand: a feed that starts answering again
         // must lose its feed-list flag, via the existing resetErrorCount on the success path.
