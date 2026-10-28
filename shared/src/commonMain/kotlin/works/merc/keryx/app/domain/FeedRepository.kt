@@ -473,7 +473,11 @@ class FeedRepository(
                     // error_count stays untouched (410 is permanent, not a retry candidate), so record
                     // the reason in last_error instead — that's what keeps the feed list flagged after
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
-                    feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    // Written only on the transition: a gone feed is still refreshed every cycle, and
+                    // any feeds write re-runs the article-list query.
+                    if (feed.last_error != FEED_ERROR_REASON_GONE) {
+                        feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    }
                     // Coalesced: a gone feed is still refreshed every cycle, and each one would otherwise
                     // add another copy of the same warning for as long as the session runs. The key
                     // includes the title, so a feed renamed in between gets an entry of its own.
