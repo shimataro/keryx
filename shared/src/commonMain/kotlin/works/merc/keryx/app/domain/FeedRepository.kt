@@ -48,6 +48,15 @@ import works.merc.keryx.app.data.remote.FetchedFeed
  */
 private const val REFRESH_FETCH_CONCURRENCY = 6
 
+/**
+ * Max feeds a refresh holds between starting their fetch and the writer committing them — the
+ * fetched results queued for the single writer included. Every queued result keeps its feed's parsed
+ * articles resident, so without this a writer held back (a sync merge's write lock) would let a large
+ * subscription list fetch its whole contents into memory at once. Twice the fetch concurrency, so a
+ * writer that keeps up never stalls a fetch slot.
+ */
+private const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
+
 private const val TAG = "FeedRepository"
 
 /**
@@ -607,10 +616,10 @@ class FeedRepository(
         val state = RefreshApplyState(total = feedList.size)
         try {
             coroutineScope {
-                // Unlimited, and sent to only after the permit is released (see launchFetches): a
-                // fetch that finishes while the writer is busy applying another feed must free its
-                // permit for the next fetch rather than wait for the writer, or the writer's pace
-                // would cap the fetch concurrency.
+                // Unlimited, and sent to only after the fetch permit is released (see launchFetches):
+                // a fetch that finishes while the writer is busy applying another feed must free its
+                // permit for the next fetch rather than wait for the writer. How many results can
+                // queue here is bounded separately, by REFRESH_PENDING_APPLY_LIMIT.
                 val steps = Channel<RefreshStep>(Channel.UNLIMITED)
                 launchFetches(feedList, steps)
                 applySteps(steps, state)
@@ -625,7 +634,10 @@ class FeedRepository(
 
     /**
      * Network phase of [refreshFeeds]: every feed's fetch runs concurrently (bounded by a
-     * semaphore), with NO DB writes, handing its result to [steps]. Each feed stays in
+     * semaphore), with NO DB writes, handing its result to [steps]. A second semaphore bounds how
+     * many feeds sit between starting their fetch and being committed
+     * ([REFRESH_PENDING_APPLY_LIMIT]): a writer that falls that far behind pauses further fetches
+     * rather than letting their parsed articles pile up in memory. Each feed stays in
      * [refreshingFeedIds] from the start, including while queued for a fetch slot, until the writer
      * has committed it — so every feed the refresh covers is marked at once and clears as its own
      * articles land. A favicon lookup
@@ -634,17 +646,37 @@ class FeedRepository(
      */
     private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
+        val pendingApply = Semaphore(REFRESH_PENDING_APPLY_LIMIT)
         val fetches = feedList.map { feed ->
             launch(dispatcher) {
                 val faviconLookup = trackRefreshing(feed.id) {
-                    val fetch = semaphore.withPermit { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) }
-                    // Holds no permit while waiting, so the writer's pace never caps the fetch concurrency.
-                    val committed = CompletableDeferred<Unit>()
-                    steps.send(RefreshStep.Fetched(feed, fetch, committed))
-                    committed.await()
-                    // Only the site URL outlives the commit: the lookup below can wait on a permit and
-                    // the network for a while, and must not keep every parsed article resident meanwhile.
-                    if (fetch is Result.Ok && needsFaviconLookup(feed)) FaviconLookup(fetch.value.siteUrl ?: feed.site_url) else null
+                    // The pending-apply permit is taken only once this feed's turn for a fetch slot
+                    // comes, and inside trackRefreshing: every feed keeps its place in the fetch queue
+                    // ahead of any favicon lookup (which queues for the same slots), and is marked
+                    // refreshing from the start. A writer more than REFRESH_PENDING_APPLY_LIMIT behind
+                    // holds the fetch slots until it catches up — the point of the bound.
+                    val fetch = semaphore.withPermit {
+                        pendingApply.acquire()
+                        try {
+                            feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)
+                        } catch (e: Throwable) {
+                            pendingApply.release()
+                            throw e
+                        }
+                    }
+                    try {
+                        // Holds no fetch permit while waiting, so a writer within
+                        // REFRESH_PENDING_APPLY_LIMIT of the fetches never caps the fetch concurrency.
+                        val committed = CompletableDeferred<Unit>()
+                        steps.send(RefreshStep.Fetched(feed, fetch, committed))
+                        committed.await()
+                        // Only the site URL outlives the commit: the lookup below can wait on a permit
+                        // and the network for a while, and must not keep every parsed article resident
+                        // meanwhile.
+                        if (fetch is Result.Ok && needsFaviconLookup(feed)) FaviconLookup(fetch.value.siteUrl ?: feed.site_url) else null
+                    } finally {
+                        pendingApply.release()
+                    }
                 }
                 if (faviconLookup != null) {
                     val url = semaphore.withPermit { faviconResolver.resolve(faviconLookup.siteUrl, feed.url) }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -24,6 +25,9 @@ import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.awaitCondition
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManagerIndexed
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,6 +39,22 @@ private fun rssWith(guid: String) = """<?xml version="1.0"?><rss version="2.0"><
 <title>Feed</title><link>https://ex.com</link>
 <item><title>Post $guid</title><link>https://ex.com/$guid</link><guid>$guid</guid></item>
 </channel></rss>"""
+
+/**
+ * Blocks the thread that makes the first write notification — the refresh's single writer, right
+ * after it commits its first feed — until [release] is counted down, and passes everything through.
+ */
+private class StallFirstWriteDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    val release = CountDownLatch(1)
+    private val stalled = AtomicBoolean(false)
+
+    override fun notifyListeners(vararg queryKeys: String) {
+        delegate.notifyListeners(queryKeys = queryKeys)
+        // Bounded: a failing assertion before release.countDown() must not hang the test worker.
+        if (stalled.compareAndSet(false, true)) release.await(10, TimeUnit.SECONDS)
+    }
+}
 
 /**
  * [FeedRepository.refreshFeeds] applies each feed as soon as its own fetch completes, and
@@ -321,6 +341,70 @@ class FeedRepositoryRefreshProgressTest {
             runCatching { repo.refreshFeeds(listOf(feed)) }
 
             assertEquals(emptySet(), repo.refreshing())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun everyFeedIsMarkedRefreshingEvenBeyondThePendingApplyLimit(): Unit = runBlocking {
+        // More feeds than both the fetch slots and the pending-apply bound: a feed still waiting for
+        // either must already show as refreshing.
+        val (_, driver, db) = fileDb()
+        try {
+            val feeds = subscribe(db, driver, *Array(20) { "f$it" })
+            val gate = CompletableDeferred<Unit>()
+            val started = AtomicInteger(0)
+            val repo = newRepo(db, driver, fetcherWith {
+                started.incrementAndGet()
+                gate.await()
+                respond(rssWith("new"), HttpStatusCode.OK)
+            })
+
+            val call = async(Dispatchers.Default) { repo.refreshFeeds(feeds.values.toList()) }
+            try {
+                awaitCondition { started.get() > 0 && runBlocking { repo.refreshing() }.size == feeds.size }
+                assertEquals(feeds.values.map { it.id }.toSet(), repo.refreshing())
+                assertTrue(started.get() < feeds.size, "the fetches beyond the fetch slots must still be queued")
+            } finally {
+                gate.complete(Unit)
+            }
+            withTimeout(10_000) { call.await() }
+            assertEquals(emptySet(), repo.refreshing())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aStalledWriterPausesFetchesAtThePendingApplyLimit(): Unit = runBlocking {
+        val (_, driver, db) = fileDb()
+        try {
+            val feeds = subscribe(db, driver, *Array(20) { "f$it" })
+            val stalling = StallFirstWriteDriver(driver)
+            val started = AtomicInteger(0)
+            val repo = newRepo(KeryxDatabase(stalling), stalling, fetcherWith { request ->
+                started.incrementAndGet()
+                respond(rssWith(request.url.encodedPath.trim('/') + "-new"), HttpStatusCode.OK)
+            })
+
+            val call = async(Dispatchers.Default) { repo.refreshFeeds(feeds.values.toList()) }
+            val results = try {
+                // The writer is stuck on its first commit, so no feed can leave the pending-apply
+                // window: fetching stops once it is full instead of running through every feed.
+                awaitCondition { started.get() >= 12 }
+                delay(300)
+                assertEquals(12, started.get(), "fetches must pause while the writer is held back")
+                assertFalse(call.isCompleted)
+                stalling.release.countDown()
+                withTimeout(10_000) { call.await() }
+            } finally {
+                stalling.release.countDown()
+            }
+
+            assertTrue(results.values.all { it is Result.Ok })
+            assertEquals(20, started.get())
+            assertEquals(feeds.keys.map { "Post $it-new" }.toSet(), articleGuids(db).filter { it.endsWith("-new") }.toSet())
         } finally {
             driver.close()
         }
