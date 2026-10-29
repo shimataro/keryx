@@ -339,12 +339,35 @@ class ArticleRepository(
      * @param parsed The articles fetched from the feed.
      * @return The prepared article rows, their count of newly encountered articles, and a shared timestamp.
      */
-    internal fun prepareParsed(feedId: String, parsed: List<ParsedArticle>): PreparedArticles {
-        if (parsed.isEmpty()) return PreparedArticles(feedId, emptyList(), newCount = 0, now = clock.nowMillis())
+    internal fun prepareParsed(feedId: String, parsed: List<ParsedArticle>): PreparedArticles =
+        countPrepared(feedId, prepareRows(feedId, parsed))
+
+    /**
+     * The DB-reading half of [prepareParsed]: counts the rows not previously stored for the feed and
+     * takes the shared timestamp. Called by the writer right before its transaction, so the count
+     * and the timestamp reflect the moment the rows are applied rather than when they were prepared.
+     *
+     * @param feedId The identifier of the feed containing the articles.
+     * @param rows The rows built by [prepareRows] for the feed.
+     * @return The prepared article rows, their count of newly encountered articles, and a shared timestamp.
+     */
+    internal fun countPrepared(feedId: String, rows: List<PreparedInsert>): PreparedArticles {
+        if (rows.isEmpty()) return PreparedArticles(feedId, emptyList(), newCount = 0, now = clock.nowMillis())
         val seenGuids = HashSet(articles.getGuidsByFeed(feedId).executeAsList())
-        var newCount = 0
-        val rows = parsed.map { p ->
-            if (seenGuids.add(p.guid)) newCount++
+        val newCount = rows.count { seenGuids.add(it.parsed.guid) }
+        return PreparedArticles(feedId, rows, newCount, clock.nowMillis())
+    }
+
+    /**
+     * The pure CPU half of [prepareParsed]: builds each article's row without touching the database,
+     * so it can run off the refresh's single writer.
+     *
+     * @param feedId The identifier of the feed containing the articles.
+     * @param parsed The articles fetched from the feed.
+     * @return One row per parsed article, in order.
+     */
+    internal fun prepareRows(feedId: String, parsed: List<ParsedArticle>): List<PreparedInsert> =
+        parsed.map { p ->
             // search_text is the FTS body target: strip HTML so tag names/attributes don't match.
             // content/summary keep their raw HTML for reader rendering.
             val searchText = (p.content ?: p.summary)?.let { HtmlText.toPlainText(it) } ?: ""
@@ -363,8 +386,6 @@ class ArticleRepository(
                 searchText = searchText,
             )
         }
-        return PreparedArticles(feedId, rows, newCount, clock.nowMillis())
-    }
 
     /**
      * Inserts prepared articles into the database while preserving existing article state.

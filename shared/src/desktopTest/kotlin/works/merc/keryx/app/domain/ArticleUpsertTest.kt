@@ -198,4 +198,44 @@ class ArticleUpsertTest {
             driver.close()
         }
     }
+
+    @Test
+    fun preparingRowsThenCountingThemMatchesPrepareParsed() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L })
+            db.insertFeed("f1")
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "A")))
+            // An already-stored guid, a duplicate within the batch, HTML content and a summary-only
+            // article: the refresh's split preparation must build exactly what prepareParsed does.
+            val parsed = listOf(
+                ParsedArticle(guid = "g1", title = "A2", content = "<p>one</p>"),
+                ParsedArticle(guid = "g2", title = "B", summary = "<b>sum</b>"),
+                ParsedArticle(guid = "g2", title = "B again", content = "two", summary = "dropped"),
+            )
+            assertEquals(repo.prepareParsed("f1", parsed), repo.countPrepared("f1", repo.prepareRows("f1", parsed)))
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun preparedRowsAreCountedAgainstWhatIsStoredWhenCounted() {
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L })
+            db.insertFeed("f1")
+            // A refresh prepares its rows on the fetch's coroutine, then counts them on the writer. A
+            // write landing in between (another refresh of the feed, a sync merge) must be seen by the
+            // count, so the article it stored is not reported as new a second time.
+            val rows = repo.prepareRows(
+                "f1",
+                listOf(ParsedArticle(guid = "g1", title = "A"), ParsedArticle(guid = "g2", title = "B")),
+            )
+            repo.upsertParsed("f1", listOf(ParsedArticle(guid = "g1", title = "A")))
+            assertEquals(1, repo.countPrepared("f1", rows).newCount)
+        } finally {
+            driver.close()
+        }
+    }
 }
