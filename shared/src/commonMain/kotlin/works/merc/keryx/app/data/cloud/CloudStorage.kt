@@ -10,7 +10,6 @@ import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * A cloud file's revision, without its contents.
@@ -58,19 +57,6 @@ internal suspend fun <T> withCloudToken(
 internal fun cloudStorageError(providerName: String, status: Int, body: String): Result.Err = when (status) {
     401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
     else -> Result.Err(CloudStorageException("$providerName error (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}"))
-}
-
-/**
- * Maps an HTTP response to a successful result, a sync conflict, or a cloud storage error.
- *
- * @param providerName The name of the cloud storage provider.
- * @param conflictStatus The HTTP status code representing a sync conflict.
- * @return A successful result for 2xx responses, a sync conflict for the configured status, or a cloud storage error otherwise.
- */
-internal suspend fun HttpResponse.okOrConflictOr(providerName: String, conflictStatus: Int): Result<Unit> = when {
-    status.value in 200..299 -> Result.Ok(Unit)
-    status.value == conflictStatus -> Result.Err(SyncConflictException())
-    else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
 
 /**
