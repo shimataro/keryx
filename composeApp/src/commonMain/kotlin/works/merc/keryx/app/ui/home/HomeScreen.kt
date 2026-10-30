@@ -826,7 +826,7 @@ internal fun PendingNotificationActionHost(
                 confirmText = stringResource(Res.string.common_ok),
                 onConfirm = { notifVm.clearPendingAction() },
             )
-        else -> Unit
+        is AppNotificationAction.OpenUrl, is AppNotificationAction.ShowSettingsTab -> Unit
     }
 }
 
