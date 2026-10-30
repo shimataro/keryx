@@ -385,7 +385,7 @@ private fun extractionFailed(extractDir: File, e: Exception): InstallLaunchResul
  * so this costs nothing legitimate — it exists because the value ends up inside an
  * [InstallLaunchResult.Failed] reason, which `UpdateRepository` logs.
  */
-private const val MAX_PLIST_VALUE_LENGTH = 64
+internal const val MAX_PLIST_VALUE_LENGTH = 64
 
 /** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain
  * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,

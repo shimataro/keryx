@@ -692,8 +692,8 @@ class DesktopUpdateInstallerTest {
 
     @Test
     fun readPlistStringValueStripsControlCharactersAndCapsTheLength() {
-        val plist = plistWith("<key>Wanted</key><string>1.2\n.3${"x".repeat(100)}</string>")
+        val plist = plistWith("<key>Wanted</key><string>1.2\n.3${"x".repeat(MAX_PLIST_VALUE_LENGTH * 2)}</string>")
 
-        assertEquals("1.2.3" + "x".repeat(59), readPlistStringValue(plist, "Wanted"))
+        assertEquals("1.2.3" + "x".repeat(MAX_PLIST_VALUE_LENGTH - "1.2.3".length), readPlistStringValue(plist, "Wanted"))
     }
 }
