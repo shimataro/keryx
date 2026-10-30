@@ -1,9 +1,9 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
-import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -11,6 +11,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -60,7 +61,7 @@ class GoogleDriveStorage(
      */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
         val response = client.get("$apiBase/files") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             url {
                 parameters.append("spaces", APP_DATA_FOLDER)
                 parameters.append("pageSize", "1")
@@ -83,10 +84,10 @@ class GoogleDriveStorage(
             is Result.Ok -> f.value ?: return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
         }
         val response = client.get("$apiBase/files/${file.id}") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             url { parameters.append("alt", "media") }
         }
-        if (response.status.value !in 200..299) {
+        if (!response.status.isSuccess()) {
             return@withToken mapError(response.status.value, response.bodyAsText())
         }
         response.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
@@ -223,7 +224,7 @@ class GoogleDriveStorage(
     /** Deletes a file by its Drive ID. 404 is treated as success (idempotent). */
     private suspend fun deleteById(token: String, fileId: String): Result<Unit> {
         val response = client.delete("$apiBase/files/$fileId") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
         }
         return response.okOrAbsentOr("Google Drive")
     }
@@ -266,7 +267,7 @@ class GoogleDriveStorage(
         // The *metadata* endpoint ($apiBase), not $uploadBase: updateFile()'s uploadType=media PATCH
         // replaces content, this one only changes the name.
         val response = client.patch("$apiBase/files/$fileId") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("name", name) }.toString())
         }
@@ -285,14 +286,14 @@ class GoogleDriveStorage(
     /** Lists all app-data files matching [name] (there should be at most one). */
     private suspend fun listFilesByName(token: String, name: String): Result<List<DriveFile>> {
         val response = client.get("$apiBase/files") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             url {
                 parameters.append("spaces", APP_DATA_FOLDER)
                 parameters.append("q", "name = '${name.replace("'", "\\'")}' and trashed = false")
                 parameters.append("fields", "files(id,version)")
             }
         }
-        if (response.status.value !in 200..299) {
+        if (!response.status.isSuccess()) {
             return mapError(response.status.value, response.bodyAsText())
         }
         val files = (json.parseToJsonElement(response.bodyAsText()) as? JsonObject)
@@ -336,7 +337,7 @@ class GoogleDriveStorage(
         val closing = "\r\n--$boundary--\r\n".encodeToByteArray()
 
         val response = client.post("$uploadBase/files") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             url {
                 parameters.append("uploadType", "multipart")
                 parameters.append("fields", "id,version")
@@ -352,7 +353,7 @@ class GoogleDriveStorage(
                 )
             )
         }
-        if (response.status.value !in 200..299) {
+        if (!response.status.isSuccess()) {
             return mapError(response.status.value, response.bodyAsText())
         }
         return parseDriveFile(response.bodyAsText())
@@ -361,14 +362,14 @@ class GoogleDriveStorage(
     /** Overwrites the file's content with a simple media upload. Returns the resulting version. */
     private suspend fun updateFile(token: String, fileId: String, sourcePath: String): Result<CloudFileMeta> {
         val response = client.patch("$uploadBase/files/$fileId") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             url {
                 parameters.append("uploadType", "media")
                 parameters.append("fields", "id,version")
             }
             setBody(FileUploadContent(sourcePath))
         }
-        if (response.status.value !in 200..299) {
+        if (!response.status.isSuccess()) {
             return mapError(response.status.value, response.bodyAsText())
         }
         // `fields=id,version` is already requested, so the write's own response carries the new
@@ -399,7 +400,7 @@ class GoogleDriveStorage(
      * @return `Result.Ok` for a successful status, or a mapped error result otherwise.
      */
     private suspend fun okOrError(response: HttpResponse): Result<Unit> = when {
-        response.status.value in 200..299 -> Result.Ok(Unit)
+        response.status.isSuccess() -> Result.Ok(Unit)
         else -> mapError(response.status.value, response.bodyAsText())
     }
 

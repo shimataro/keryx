@@ -1,6 +1,7 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -11,6 +12,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -49,7 +51,7 @@ class OneDriveStorage(
      * @return A successful result when access is authorized or the app folder has not been provisioned; otherwise, a mapped storage error.
      */
     override suspend fun authenticate(): Result<Unit> = withToken { token ->
-        val response = client.get(appRootUrl) { header("Authorization", "Bearer $token") }
+        val response = client.get(appRootUrl) { bearerAuth(token) }
         when (response.status.value) {
             in 200..299 -> Result.Ok(Unit)
             // The token is valid but the app folder has not been provisioned yet — still connected.
@@ -59,11 +61,11 @@ class OneDriveStorage(
     }
 
     override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
-        val meta = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
+        val meta = client.get(itemUrl(path)) { bearerAuth(token) }
         if (meta.status.value == 404) {
             return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
         }
-        if (meta.status.value !in 200..299) {
+        if (!meta.status.isSuccess()) {
             return@withToken mapError(meta.status.value, meta.bodyAsText())
         }
         val obj = json.parseToJsonElement(meta.bodyAsText()) as? JsonObject
@@ -81,7 +83,7 @@ class OneDriveStorage(
                 ?: return@withToken Result.Err(CloudStorageException("Redirect without Location header"))
             content = client.get(location)
         }
-        if (content.status.value !in 200..299) {
+        if (!content.status.isSuccess()) {
             return@withToken mapError(content.status.value, content.bodyAsText())
         }
         content.writeBodyToFile(destPath, MAX_SYNC_DB_SIZE_BYTES)
@@ -104,7 +106,7 @@ class OneDriveStorage(
         expectedRev: String?,
     ): Result<CloudFileMeta> = withToken { token ->
         val response = client.put("${itemUrl(path)}:/content") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             if (expectedRev != null) header("If-Match", expectedRev)
             setBody(FileUploadContent(sourcePath))
         }
@@ -124,7 +126,7 @@ class OneDriveStorage(
         // instead of being overwritten, which we surface as a conflict so the caller falls back
         // to the merge path. encodedParameters keeps the "@"/"." literal (already URL-safe).
         val response = client.put("${itemUrl(path)}:/content") {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             url { encodedParameters.append("@microsoft.graph.conflictBehavior", "fail") }
             setBody(FileUploadContent(sourcePath))
         }
@@ -142,7 +144,7 @@ class OneDriveStorage(
      * @return The written revision, a conflict, or a mapped storage error.
      */
     private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
-        status.value in 200..299 -> {
+        status.isSuccess() -> {
             val eTag = json.topLevelString(bodyAsText(), "eTag")
                 ?: return Result.Err(CloudStorageException("Missing eTag in upload response"))
             Result.Ok(CloudFileMeta(eTag))
@@ -160,7 +162,7 @@ class OneDriveStorage(
      * @return A successful result when the file is deleted or already absent; otherwise, the mapped storage error.
      */
     override suspend fun delete(path: String): Result<Unit> = withToken { token ->
-        val response = client.delete(itemUrl(path)) { header("Authorization", "Bearer $token") }
+        val response = client.delete(itemUrl(path)) { bearerAuth(token) }
         // Already absent counts as deleted — delete is idempotent.
         response.okOrAbsentOr("OneDrive")
     }
@@ -180,7 +182,7 @@ class OneDriveStorage(
      */
     override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
         val response = client.patch(itemUrl(from)) {
-            header("Authorization", "Bearer $token")
+            bearerAuth(token)
             contentType(ContentType.Application.Json)
             setBody(buildJsonObject { put("name", fileName(to)) }.toString())
         }
@@ -195,9 +197,9 @@ class OneDriveStorage(
      * @return The item's metadata, `null` if it is not found, or an error result for other failures.
      */
     override suspend fun metadata(path: String): Result<CloudFileMeta?> = withToken { token ->
-        val response = client.get(itemUrl(path)) { header("Authorization", "Bearer $token") }
+        val response = client.get(itemUrl(path)) { bearerAuth(token) }
         when {
-            response.status.value in 200..299 -> {
+            response.status.isSuccess() -> {
                 // The DriveItem `eTag` is the rev this provider guards uploads with (`If-Match`).
                 // It comes from the same item GET that used to be read only for its status code.
                 val eTag = json.topLevelString(response.bodyAsText(), "eTag")

@@ -2,6 +2,7 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -66,7 +67,7 @@ internal fun cloudStorageError(providerName: String, status: Int, body: String):
  * @param providerName The name of the cloud storage provider.
  */
 internal suspend fun HttpResponse.okOrAbsentOr(providerName: String): Result<Unit> = when {
-    status.value in 200..299 -> Result.Ok(Unit)
+    status.isSuccess() -> Result.Ok(Unit)
     status.value == 404 -> Result.Ok(Unit)
     else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
