@@ -1655,11 +1655,12 @@ class HomeViewModel(
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
+        val folderId = folderIdForNewFeed()
         val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
-            folderIdForNewFeed(),
+            folderId,
             afterFeedIdForNewFeed(),
-            beforeFeedIdForNewFeed(),
+            beforeFeedIdForNewFeed(folderId),
             tagIdForNewFeed(),
         )
         // Subscribing is the user's own action, and whatever it fetched is right there in front of
@@ -1700,14 +1701,15 @@ class HomeViewModel(
 
     /**
      * The feed a newly subscribed feed should be inserted directly before: the current first feed
-     * in the target group (the selected folder, the selected feed's folder, or the "no folder" group
-     * when no folder/feed context is selected), or `null` if that group is empty. Only consulted when
+     * in the target group [folderId] (the selected folder, the selected feed's folder, or the
+     * "no folder" group when no folder/feed context is selected — see [folderIdForNewFeed]), or
+     * `null` if that group is empty. Only consulted when
      * [afterFeedIdForNewFeed] is null or its target isn't in the group (see
      * [FeedRepository.insertionSortOrderForNewFeed]), so this doesn't affect the "insert directly
      * after the selected feed" behavior.
      */
-    private fun beforeFeedIdForNewFeed(): String? =
-        feeds.value.filter { it.folder_id == folderIdForNewFeed() }.minByOrNull { it.sort_order }?.id
+    private fun beforeFeedIdForNewFeed(folderId: String?): String? =
+        feeds.value.filter { it.folder_id == folderId }.minByOrNull { it.sort_order }?.id
 
     /**
      * The tag a newly subscribed feed should be tagged with: the currently selected tag, whether
