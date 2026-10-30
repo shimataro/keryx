@@ -121,7 +121,7 @@ class AddFeedController(
         val outcome = when (val p = s.preview) {
             is AddFeedPreview.Single -> subscribeFeeds(listOf(p.resolvedUrl))
             is AddFeedPreview.Multiple -> subscribeFeeds(s.selectedCandidates.toList())
-            else -> null
+            is AddFeedPreview.Failed, null -> null
         }
         _state.update { it.copy(phase = null) }
         if (outcome == null) return false
