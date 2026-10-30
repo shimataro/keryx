@@ -103,6 +103,7 @@ import java.awt.Taskbar
 import java.awt.desktop.AppReopenedListener
 import java.io.File
 import java.net.URI
+import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
 private const val LOG_TAG = "Main"
@@ -273,7 +274,7 @@ fun main(args: Array<String>) {
     // goes through exitApp/persistWindowStateImmediately — terminates the JVM directly without ever
     // calling back into application code, so the shutdown hook is the only chance to persist a
     // resize/move/maximize that happened just before quitting that way.
-    val latestWindowState = java.util.concurrent.atomic.AtomicReference<ObservedWindowState?>(null)
+    val latestWindowState = AtomicReference<ObservedWindowState?>(null)
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
@@ -375,7 +376,7 @@ fun main(args: Array<String>) {
     // null (every non-KDE environment) leaves the in-window menu bar behaving exactly as before.
     // Independent of the tray (own connection, own lifecycle).
     val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
-    val resolvedAppMenuXid = java.util.concurrent.atomic.AtomicReference<Long?>(null)
+    val resolvedAppMenuXid = AtomicReference<Long?>(null)
     if (appMenuConnection != null) {
         addShutdownHook { appMenuConnection.close(resolvedAppMenuXid.get()) }
     }
@@ -408,16 +409,18 @@ fun main(args: Array<String>) {
             settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
         }
 
-        val exitApp = {
+        val persistAndFlushSettings = {
             persistWindowStateImmediately()
             runBlocking { settingsRepository.flush() }
+        }
+        val exitApp = {
+            persistAndFlushSettings()
             exitApplication()
         }
         // Closing the window hides it to the tray (the window close button and the menu's Close
         // Window alike), saving its state first as exitApp does.
         val hideToTray = {
-            persistWindowStateImmediately()
-            runBlocking { settingsRepository.flush() }
+            persistAndFlushSettings()
             windowVisible = false
         }
 
@@ -450,10 +453,6 @@ fun main(args: Array<String>) {
         val unreadCountFlow = remember { koin.get<ArticleRepository>().watchUnreadCount() }
         val unreadCount by unreadCountFlow.collectAsState(0L)
 
-        // Deliberately NOT collected here (`.collectAsState()`) — this application {} scope
-        // composes the window, the Dock icon, and single-instance/reopen handling, all of which
-        // would otherwise recompose on every download-progress tick. KeryxTray collects the flow
-        // itself, confining that recomposition to the tray's own composable.
         // Exit only once the OS installer / self-replace script has actually been launched — that
         // process is already waiting for this one to exit (see UpdateInstaller's own KDoc on
         // desktop), and nothing else in this state needs the app still running.
@@ -526,6 +525,10 @@ fun main(args: Array<String>) {
             // every tray offers "Show" for it and showing goes through activationRequests, which
             // un-minimizes, raises and focuses it — the one path every "show" route takes.
             windowShown = trayWindowShown(windowVisible, windowState.isMinimized),
+            // Deliberately NOT collected here (`.collectAsState()`) — this application {} scope
+            // composes the window, the Dock icon, and single-instance/reopen handling, all of which
+            // would otherwise recompose on every download-progress tick. KeryxTray collects the flow
+            // itself, confining that recomposition to the tray's own composable.
             updateStateFlow = updateRepository.state,
             settingsReachable = currentScreen == Screen.Home,
             onToggle = { applyTrayWindowAction(trayMenuToggleAction(windowVisible, windowState.isMinimized)) },
@@ -537,11 +540,7 @@ fun main(args: Array<String>) {
                 )
             },
             onQuit = exitApp,
-            onUpdateAction = {
-                onUpdateMenuItemClicked(
-                    updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
-                )
-            },
+            onUpdateAction = { onUpdateMenuItemClicked(updateRepository, settingsOpenRequests, settingsVm::checkForUpdate) },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.
@@ -696,10 +695,10 @@ fun main(args: Array<String>) {
                 if (Taskbar.isTaskbarSupported()) {
                     val taskbar = Taskbar.getTaskbar()
                     SwingUtilities.invokeLater {
-                        when {
-                            taskbar.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW) ->
-                                taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount))
-                            else -> applyBrandedDockIcon(dockBadgedImage)
+                        if (taskbar.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW)) {
+                            taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount))
+                        } else {
+                            applyBrandedDockIcon(dockBadgedImage)
                         }
                     }
                 }
@@ -761,6 +760,21 @@ internal fun onUpdateMenuItemClicked(
         UpdateMenuAction.None -> Unit
     }
 }
+
+/**
+ * [onUpdateMenuItemClicked] over [updateRepository]'s state at click time, with its primary action —
+ * the wiring the tray's and the menu bar's update entries share.
+ */
+internal fun onUpdateMenuItemClicked(
+    updateRepository: UpdateRepository,
+    settingsOpenRequests: SettingsOpenRequests,
+    checkForUpdate: () -> Unit,
+) = onUpdateMenuItemClicked(
+    updateRepository.state.value,
+    settingsOpenRequests,
+    checkForUpdate,
+    updateRepository::performPrimaryAction,
+)
 
 /**
  * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
