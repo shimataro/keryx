@@ -447,8 +447,13 @@ fun main(args: Array<String>) {
                     Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW),
             )
         }
-        val dockBaseImage = if (needsDockImage) rememberDrawableImage(Res.drawable.app_icon) else null
-        val dockBadgedImage = remember(dockBaseImage, unreadCount) { dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
+        // Decoded on every platform: besides the badged icon below, it is the Linux notification
+        // icon (KeryxTray's notificationIcon). Only the per-unread-count redraw is skipped where
+        // the badged icon is never applied.
+        val dockBaseImage = rememberDrawableImage(Res.drawable.app_icon)
+        val dockBadgedImage = remember(dockBaseImage, unreadCount) {
+            if (needsDockImage) dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } else null
+        }
 
         // Hiding the window to the tray (close button, the menu bar's Close, or the tray's Hide —
         // every route ends in windowVisible = false) is when deferred reading-state changes should

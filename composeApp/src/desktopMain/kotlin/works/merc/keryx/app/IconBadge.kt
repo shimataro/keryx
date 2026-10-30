@@ -97,8 +97,9 @@ private fun paintBadge(graphics: Graphics2D, anchorRightX: Float, anchorTopY: Fl
  * Whether the full-size badged app icon (`drawUnreadBadge` over the branded icon) is ever applied on
  * this platform: on macOS, as the Dock icon, and elsewhere only where a taskbar exists but cannot take
  * a per-window badge image (`Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW`, which Windows uses instead).
- * Mirrors the branches in `main.kt` that apply it, so a platform that never shows the image neither
- * decodes the icon nor redraws it on every unread-count change.
+ * Mirrors the branches in `main.kt` that apply it, so a platform that never shows the image does not
+ * redraw it on every unread-count change. (The base icon itself is still decoded everywhere — it is
+ * also the Linux notification icon.)
  *
  * @param isMacOs Whether this is macOS.
  * @param taskbarSupported `Taskbar.isTaskbarSupported()`.
