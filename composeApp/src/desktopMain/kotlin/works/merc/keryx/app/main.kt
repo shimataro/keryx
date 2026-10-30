@@ -13,8 +13,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
@@ -473,7 +471,7 @@ fun main(args: Array<String>) {
 
         val windowBaseImage = rememberDrawableImage(Res.drawable.tray_icon)
         val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
-        val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
+        val windowBadgedPainter = rememberBitmapPainter(windowBadgedImage)
 
         // The tray's update entry acts on the settings dialog's Updates tab, so it is disabled while
         // Settings is unreachable (first-run Setup) — the same gate the Help menu's copy follows.

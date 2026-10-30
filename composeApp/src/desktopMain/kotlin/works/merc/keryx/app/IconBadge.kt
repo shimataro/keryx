@@ -2,6 +2,9 @@ package works.merc.keryx.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.ExperimentalResourceApi
@@ -167,6 +170,11 @@ fun drawBadgeOnlyImage(count: Long, size: Int = DEFAULT_BADGE_ONLY_IMAGE_SIZE_PX
  * `runBlocking` on desktop) so the result is available from the very first
  * composition - callers must not skip rendering while waiting for it.
  */
+/** Remembers [image] as a [Painter] (rebuilt only when the image itself changes), or `null` without one. */
+@Composable
+fun rememberBitmapPainter(image: BufferedImage?): Painter? =
+    remember(image) { image?.let { BitmapPainter(it.toComposeImageBitmap()) } }
+
 @OptIn(ExperimentalResourceApi::class)
 @Composable
 fun rememberDrawableImage(resource: DrawableResource): BufferedImage? = remember(resource) {
