@@ -18,7 +18,6 @@ import kotlinx.serialization.json.put
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Dropbox v2 REST API. [accessTokenProvider]
@@ -90,17 +89,7 @@ class DropboxStorage(
         } else {
             buildJsonObject { put(".tag", "overwrite") }
         }
-        val arg = buildJsonObject {
-            put("path", path)
-            put("mode", mode)
-            put("autorename", false)
-        }.toString()
-
-        val response = client.post("$contentBase/2/files/upload") {
-            bearerAuth(token)
-            header("Dropbox-API-Arg", arg)
-            setBody(FileUploadContent(sourcePath))
-        }
+        val response = postUpload(token, path, mode, sourcePath)
         // A rev-guarded update that loses the race returns 409 (conflict).
         response.metaOrConflictOr(conflictStatus = 409)
     }
@@ -116,39 +105,39 @@ class DropboxStorage(
         // WriteMode "add" is create-only: if the file already exists Dropbox returns 409
         // (with autorename=false it does not silently create a copy), which we surface as a
         // conflict so the caller falls back to the merge path instead of overwriting.
-        val arg = buildJsonObject {
-            put("path", path)
-            put("mode", buildJsonObject { put(".tag", "add") })
-            put("autorename", false)
-        }.toString()
-
-        val response = client.post("$contentBase/2/files/upload") {
-            bearerAuth(token)
-            header("Dropbox-API-Arg", arg)
-            setBody(FileUploadContent(sourcePath))
-        }
+        val response = postUpload(token, path, buildJsonObject { put(".tag", "add") }, sourcePath)
         response.metaOrConflictOr(conflictStatus = 409)
     }
 
     /**
-     * Maps a write response to the revision it produced, a sync conflict, or a storage error.
+     * Uploads [sourcePath] to [path] through `files/upload` with the given write [mode].
      *
-     * A successful `files/upload` answers with the new FileMetadata, so the resulting `rev` is
-     * read straight from the write itself — no follow-up metadata request, which could otherwise
-     * observe another device's later write.
+     * `autorename` is always false, so a create-only or rev-guarded write that loses answers 409
+     * instead of silently writing a renamed copy.
+     *
+     * @return The raw upload response.
+     */
+    private suspend fun postUpload(token: String, path: String, mode: JsonObject, sourcePath: String): HttpResponse {
+        val arg = buildJsonObject {
+            put("path", path)
+            put("mode", mode)
+            put("autorename", false)
+        }.toString()
+        return client.post("$contentBase/2/files/upload") {
+            bearerAuth(token)
+            header("Dropbox-API-Arg", arg)
+            setBody(FileUploadContent(sourcePath))
+        }
+    }
+
+    /**
+     * Maps a `files/upload` response to the `rev` it produced (read from the FileMetadata the
+     * write answers with), a sync conflict, or a storage error.
      *
      * @param conflictStatus The HTTP status Dropbox uses to report a lost rev guard.
-     * @return The written revision, a conflict, or a mapped storage error.
      */
-    private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
-        status.isSuccess() -> {
-            val rev = json.topLevelString(bodyAsText(), "rev")
-                ?: return Result.Err(CloudStorageException("Missing rev in upload response"))
-            Result.Ok(CloudFileMeta(rev))
-        }
-        status.value == conflictStatus -> Result.Err(SyncConflictException())
-        else -> mapError(status.value, bodyAsText())
-    }
+    private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> =
+        writtenMetaOrConflictOr(json, "Dropbox", "rev", conflictStatus)
 
     /**
      * Fetches a file's revision without its contents.

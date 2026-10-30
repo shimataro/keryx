@@ -22,7 +22,6 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.ONEDRIVE_GRAPH_BASE
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * [CloudStorage] backed by the Microsoft Graph API, storing the sync DB in
@@ -143,15 +142,8 @@ class OneDriveStorage(
      * @param conflictStatus The HTTP status Graph uses to report the lost write (412 for `If-Match`, 409 for create-only).
      * @return The written revision, a conflict, or a mapped storage error.
      */
-    private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> = when {
-        status.isSuccess() -> {
-            val eTag = json.topLevelString(bodyAsText(), "eTag")
-                ?: return Result.Err(CloudStorageException("Missing eTag in upload response"))
-            Result.Ok(CloudFileMeta(eTag))
-        }
-        status.value == conflictStatus -> Result.Err(SyncConflictException())
-        else -> mapError(status.value, bodyAsText())
-    }
+    private suspend fun HttpResponse.metaOrConflictOr(conflictStatus: Int): Result<CloudFileMeta> =
+        writtenMetaOrConflictOr(json, "OneDrive", "eTag", conflictStatus)
 
     /**
      * Deletes the file at the specified path.

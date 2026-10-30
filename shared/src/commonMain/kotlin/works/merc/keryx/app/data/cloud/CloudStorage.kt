@@ -11,6 +11,7 @@ import works.merc.keryx.app.core.CLOUD_ERROR_BODY_PREVIEW_LENGTH
 import works.merc.keryx.app.core.CloudAuthException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SyncConflictException
 
 /**
  * A cloud file's revision, without its contents.
@@ -58,6 +59,34 @@ internal suspend fun <T> withCloudToken(
 internal fun cloudStorageError(providerName: String, status: Int, body: String): Result.Err = when (status) {
     401, 403 -> Result.Err(CloudAuthException("Authentication failed"))
     else -> Result.Err(CloudStorageException("$providerName error (HTTP $status): ${body.take(CLOUD_ERROR_BODY_PREVIEW_LENGTH)}"))
+}
+
+/**
+ * Maps a file-write response to the revision it produced, a sync conflict, or a storage error.
+ *
+ * Every provider's successful content write answers with the written item's metadata, so the new
+ * revision is read straight from the write itself rather than from a follow-up metadata request,
+ * which could otherwise observe another device's later write.
+ *
+ * @param json The JSON parser used to read the response body.
+ * @param providerName The name of the cloud storage provider.
+ * @param revKey The top-level response field holding the written revision.
+ * @param conflictStatus The HTTP status the provider uses to report a lost write guard.
+ * @return The written revision, a conflict, or a mapped storage error.
+ */
+internal suspend fun HttpResponse.writtenMetaOrConflictOr(
+    json: Json,
+    providerName: String,
+    revKey: String,
+    conflictStatus: Int,
+): Result<CloudFileMeta> = when {
+    status.isSuccess() -> {
+        val rev = json.topLevelString(bodyAsText(), revKey)
+            ?: return Result.Err(CloudStorageException("Missing $revKey in upload response"))
+        Result.Ok(CloudFileMeta(rev))
+    }
+    status.value == conflictStatus -> Result.Err(SyncConflictException())
+    else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
 
 /**
