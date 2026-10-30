@@ -8,6 +8,9 @@ import java.awt.Taskbar
 
 private const val LOG_TAG = "Main"
 
+// These helpers act on the real AWT Frame / Taskbar / Desktop, which a headless test run cannot
+// provide, so they have no unit tests; verify them by running the app.
+
 /**
  * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
  * after it is shown and restored, just before it is fronted.
