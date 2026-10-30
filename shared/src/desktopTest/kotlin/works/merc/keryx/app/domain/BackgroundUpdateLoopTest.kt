@@ -17,26 +17,36 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.platform.SelfUpdateCheckSupport
+import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 /**
  * Tests [backgroundUpdateLoop]'s scheduling: the wait before each iteration, the setup gate, and
- * the per-step failure isolation. `RefreshCycleRunner` and the update-check dependencies are
- * deliberately left unbound so those steps throw inside `runMaintenanceStep`; the observable
- * effect used here is the last step, the FTS rebuild, which stamps `lastFtsRebuiltAt`.
+ * the per-step failure isolation. The refresh-cycle and update-check steps resolve bindings that
+ * count each attempt and then throw, so a test can tell a step was attempted and failed inside
+ * `runMaintenanceStep`; the last step, the FTS rebuild, is observed through `lastFtsRebuiltAt`.
  */
 class BackgroundUpdateLoopTest {
     private val dir = FileIO.join(AppDirs.tempDir(), "background-update-loop-test-${Random.nextInt()}")
     private val settingsFile = FileIO.join(dir, "local_settings.json")
 
+    /** How often the refresh-cycle step resolved its [RefreshCycleRunner] — each attempt throws. */
+    private val refreshCycleAttempts = AtomicInteger()
+
+    /** How often the update-check step asked [SelfUpdateCheckSupport] — each attempt throws. */
+    private val updateCheckAttempts = AtomicInteger()
+
     @AfterTest
     fun cleanup() {
-        FileIO.delete(settingsFile)
+        File(dir).deleteRecursively()
     }
 
     private fun testKoin(db: KeryxDatabase, driver: app.cash.sqldelight.db.SqlDriver): Koin {
@@ -51,6 +61,16 @@ class BackgroundUpdateLoopTest {
                     single { settingsRepository }
                     single { activityCenter }
                     single { fts }
+                    factory<RefreshCycleRunner> {
+                        refreshCycleAttempts.incrementAndGet()
+                        error("refresh cycle failed (test)")
+                    }
+                    single<SelfUpdateCheckSupport> {
+                        SelfUpdateCheckSupport {
+                            updateCheckAttempts.incrementAndGet()
+                            error("update check failed (test)")
+                        }
+                    }
                 },
             )
         }.koin
@@ -85,6 +105,8 @@ class BackgroundUpdateLoopTest {
 
             assertNull(koin.ftsRebuiltAt())
             assertFalse(FileIO.exists(settingsFile))
+            assertEquals(0, refreshCycleAttempts.get())
+            assertEquals(0, updateCheckAttempts.get())
         } finally {
             driver.close()
         }
@@ -103,6 +125,8 @@ class BackgroundUpdateLoopTest {
 
             advanceMillis(1)
             assertNotNull(koin.ftsRebuiltAt())
+            // A non-positive interval runs maintenance only: the refresh cycle is never attempted.
+            assertEquals(0, refreshCycleAttempts.get())
         } finally {
             driver.close()
         }
@@ -132,13 +156,14 @@ class BackgroundUpdateLoopTest {
         val (driver, db) = inMemoryDb()
         try {
             val koin = testKoin(db, driver)
-            // Interval > 0 so the refresh-cycle step is attempted; its RefreshCycleRunner (and the
-            // update check's dependencies) are unbound, so both steps throw.
+            // Interval > 0 so the refresh-cycle step is attempted; it and the update check both throw.
             koin.completeSetup(1)
             startLoop(koin)
 
             advanceMillis(MILLIS_PER_MINUTE)
 
+            assertEquals(1, refreshCycleAttempts.get(), "the refresh-cycle step was not attempted")
+            assertEquals(1, updateCheckAttempts.get(), "the update-check step was not attempted")
             assertNotNull(koin.ftsRebuiltAt())
         } finally {
             driver.close()
