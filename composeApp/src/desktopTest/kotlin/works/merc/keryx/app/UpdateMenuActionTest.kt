@@ -71,7 +71,7 @@ private class RecordingInstaller(private val canInstall: Boolean) : UpdateInstal
 }
 
 /**
- * Covers `main.kt`'s [onUpdateMenuItemClicked] — the one click handler behind both the system
+ * Covers `UpdateMenuActions.kt`'s [onUpdateMenuItemClicked] — the one click handler behind both the system
  * tray's and the Help menu's single update entry. Every state with something to do must land on
  * the Updates tab (via the [SettingsOpenRequests] router, raising the window through
  * [activationRequests]) and run exactly one of the two actions; the in-flight states must do
