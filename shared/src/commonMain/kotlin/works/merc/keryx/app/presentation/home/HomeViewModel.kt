@@ -88,6 +88,16 @@ private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarro
 /** Rows tagged with the [ListScope] that produced them. */
 private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
 
+/**
+ * Search results tagged with the [ListScope] that produced them, plus their article rows. The rows
+ * are mapped once here, when the snapshot is produced, rather than on every read of the list on
+ * screen — the reader's swipe asks for it on every drag event. [articleRows] is a body property, so
+ * it stays out of [equals]: it is derived from [rows] alone.
+ */
+private data class ScopedSearchResults(val rows: List<ArticleSearchResult>, val scope: ListScope) {
+    val articleRows: List<ArticleListRow> = rows.map { it.article }
+}
+
 private fun narrowingFor(mode: ArticleListMode) =
     ListNarrowing(unreadOnly = mode == ArticleListMode.Unread, starredOnly = mode == ArticleListMode.Starred)
 
@@ -696,7 +706,7 @@ class HomeViewModel(
     // Unlike `articles`, this also never merges pinned-but-absent-from-raw articles back in —
     // a changed query text means a new search, so leaving a pinned article from the previous
     // query stuck in results that no longer match would be surprising.
-    private val searchResultsSnapshot: StateFlow<ScopedRows<ArticleSearchResult>> =
+    private val searchResultsSnapshot: StateFlow<ScopedSearchResults> =
         combine(
             _rawSearchResults, narrowing, _pinnedReadStates, _pinnedUnstarredArticles,
         ) { snapshot, narrow, pinnedReadStates, pinnedUnstarred ->
@@ -704,11 +714,11 @@ class HomeViewModel(
                 snapshot.results, narrow.unreadOnly, pinnedReadStates, pinnedUnstarred,
                 starredOnly = narrow.starredOnly,
             )
-            ScopedRows(results, ListScope(snapshot.filter, narrow))
+            ScopedSearchResults(results, ListScope(snapshot.filter, narrow))
         }.flowOn(dispatcher).stateIn(
             viewModelScope,
             started,
-            ScopedRows(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
+            ScopedSearchResults(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
         )
 
     val searchResults: StateFlow<List<ArticleSearchResult>> = DerivedStateFlow(
@@ -742,7 +752,7 @@ class HomeViewModel(
      * steps from where the user actually is, not from whatever a Flow last emitted).
      */
     val pagerArticles: StateFlow<List<ArticleListRow>> =
-        combine(searchActive, articles, searchResults) { active, rows, results ->
+        combine(searchActive, articles, searchResultsSnapshot) { active, rows, results ->
             displayedRows(active, rows, results)
         }
             .flowOn(dispatcher)
@@ -761,7 +771,7 @@ class HomeViewModel(
      * whether that re-trim currently has anything left to do.
      */
     val canHideRead: StateFlow<Boolean> =
-        combine(unreadOnly, searchActive, articles, searchResults, _selectionCursor) { unread, active, rows, results, selectedId ->
+        combine(unreadOnly, searchActive, articles, searchResultsSnapshot, _selectionCursor) { unread, active, rows, results, selectedId ->
             unread && hasHideableRead(displayedRows(active, rows, results), selectedId)
         }.stateIn(viewModelScope, started, false)
 
@@ -1139,7 +1149,7 @@ class HomeViewModel(
      * @return Search-result rows while [searchActive], or the filtered article rows otherwise.
      */
     fun currentArticles(): List<ArticleListRow> =
-        displayedRows(searchActive.value, articles.value, searchResults.value)
+        displayedRows(searchActive.value, articles.value, searchResultsSnapshot.value)
 
     /**
      * The rows the article list shows: the search results' articles while [searchActive], the
@@ -1149,8 +1159,8 @@ class HomeViewModel(
     private fun displayedRows(
         searchActive: Boolean,
         rows: List<ArticleListRow>,
-        results: List<ArticleSearchResult>,
-    ): List<ArticleListRow> = if (searchActive) results.map { it.article } else rows
+        results: ScopedSearchResults,
+    ): List<ArticleListRow> = if (searchActive) results.articleRows else rows
 
     /**
      * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end

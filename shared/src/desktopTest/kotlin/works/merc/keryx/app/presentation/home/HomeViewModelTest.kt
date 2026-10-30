@@ -6134,6 +6134,34 @@ class HomeViewModelTest {
     }
 
     /**
+     * While a search runs, [HomeViewModel.currentArticles] — what keyboard and swipe navigation step
+     * through — is the search results' own articles, in their order, and follows a read toggle the
+     * results pin (the rows are derived after pin resolution, not from the raw search).
+     */
+    @Test
+    fun currentArticlesFollowsSearchResultsIncludingTheirPinnedReadState() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a3", "f1", title = "Swift Three", content = "swift content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertTrue(vm.searchActive.value)
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+        assertEquals(vm.searchResults.value.map { it.article }, vm.currentArticles())
+
+        vm.selectArticle(vm.currentArticles().first())
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(vm.searchResults.value.map { it.article }, vm.currentArticles())
+        assertEquals(1L, vm.currentArticles().first().is_read)
+    }
+
+    /**
      * The whole point of hydrating a neighbouring page separately from selecting it: the pager
      * composes the articles either side of the one on screen, and those must not be marked read —
      * `selectArticle` is the only path allowed to do that (external-spec §7).
