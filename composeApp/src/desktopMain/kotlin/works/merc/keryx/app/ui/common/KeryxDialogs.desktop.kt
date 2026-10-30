@@ -615,7 +615,6 @@ actual fun KeryxAlertDialog(
         containerColor = containerColor,
     ) {
         val maxHeightDp = LocalDialogMaxContentHeight.current
-        val titleBarAllowanceDp = LocalDialogTitleBarAllowance.current
         val dialogWindow = LocalDialogWindowOwner.current
         val resolvedContainerColor = containerColor.takeOrElse { MaterialTheme.colorScheme.surface }
 
@@ -630,19 +629,7 @@ actual fun KeryxAlertDialog(
                 // lights. On Windows/Linux the native title bar already shows `title` as-is, so
                 // nothing is drawn here for it.
                 if (isMacOs && (title != null || titleAction != null)) {
-                    Row(
-                        Modifier.fillMaxWidth().height(titleBarAllowanceDp).padding(start = MAC_TRAFFIC_LIGHT_PADDING, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (title != null) {
-                            ProvideTextStyle(MaterialTheme.typography.titleSmall) {
-                                Text(title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        } else {
-                            Spacer(Modifier.weight(1f))
-                        }
-                        titleAction?.invoke()
-                    }
+                    MacMergedTitleRow(title, titleAction)
                 }
 
                 // Non-mac: titleAction can't be embedded in the native title bar, so it's drawn
@@ -652,7 +639,7 @@ actual fun KeryxAlertDialog(
 
                 Column(
                     Modifier
-                        .let { if (maxHeightDp != null) it.heightIn(max = maxHeightDp) else it }
+                        .heightInIfNotNull(max = maxHeightDp)
                         .padding(24.dp),
                 ) {
                     if (showBodyTitleAction) {
@@ -671,7 +658,7 @@ actual fun KeryxAlertDialog(
                         // while long content still gets clamped and scrollable exactly as before.
                         Column(
                             Modifier
-                                .let { if (maxHeightDp != null) it.heightIn(max = maxHeightDp) else it }
+                                .heightInIfNotNull(max = maxHeightDp)
                                 .verticalScroll(rememberScrollState()),
                         ) {
                             ProvideTextStyle(MaterialTheme.typography.bodyMedium) { it() }
@@ -741,15 +728,7 @@ actual fun KeryxTabDialog(
                 // selected tab's label is redrawn here next to the traffic lights. On Windows/Linux
                 // the native title bar already shows it (the DialogWindow title follows recomposition).
                 if (isMacOs && selectedLabel != null) {
-                    Row(
-                        Modifier.fillMaxWidth().height(MAC_TITLE_BAR_HEIGHT)
-                            .padding(start = MAC_TRAFFIC_LIGHT_PADDING, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ProvideTextStyle(MaterialTheme.typography.titleSmall) {
-                            Text(selectedLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
+                    MacMergedTitleRow(selectedLabel)
                 }
 
                 // Tab bar: Material3 SecondaryScrollableTabRow with shared KeryxDialogTabs items.
@@ -794,3 +773,30 @@ actual fun KeryxTabDialog(
         }
     }
 }
+
+/**
+ * macOS only: a dialog's title redrawn in the merged title bar (the native title text is hidden —
+ * see [DesktopModalWindow]), at the measured title-bar height with room reserved on the left for
+ * the traffic lights, plus an optional trailing [action].
+ */
+@Composable
+private fun MacMergedTitleRow(title: String?, action: (@Composable () -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth()
+            .height(LocalDialogTitleBarAllowance.current)
+            .padding(start = MAC_TRAFFIC_LIGHT_PADDING, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (title != null) {
+            ProvideTextStyle(MaterialTheme.typography.titleSmall) {
+                Text(title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        action?.invoke()
+    }
+}
+
+/** Caps the height at [max] when there is one; otherwise leaves the modifier unchanged. */
+private fun Modifier.heightInIfNotNull(max: Dp?): Modifier = if (max != null) heightIn(max = max) else this
