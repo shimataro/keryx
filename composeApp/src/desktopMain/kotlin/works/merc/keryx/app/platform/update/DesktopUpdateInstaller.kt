@@ -391,7 +391,7 @@ private const val MAX_PLIST_VALUE_LENGTH = 64
  * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
  * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
  * avoids pulling in a plist/XML dependency for a single field. */
-private fun readPlistStringValue(plistPath: String, key: String): String? {
+internal fun readPlistStringValue(plistPath: String, key: String): String? {
     val file = File(plistPath)
     if (!file.isFile) return null
     val text = file.readText()
