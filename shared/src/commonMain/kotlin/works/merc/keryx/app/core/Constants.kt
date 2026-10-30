@@ -8,6 +8,14 @@ const val DB_FILE_NAME = "keryx.db"
 const val LOCAL_SETTINGS_FILE_NAME = "local_settings.json"
 
 /**
+ * Settings tab ids that `:shared` addresses through `AppNotificationAction.ShowSettingsTab` — the same
+ * ids `composeApp`'s `ui/settings/SettingsDialog.kt` declares its tabs under, and that the SwiftUI app's
+ * `SettingsNavigation.swift` maps from.
+ */
+const val SETTINGS_TAB_CLOUD_SYNC = "cloud_sync"
+const val SETTINGS_TAB_UPDATES = "updates"
+
+/**
  * SQLite `busy_timeout`, applied everywhere the DB is opened (main driver, `DatabaseMerger`'s ATTACH
  * connection, `DatabaseSnapshot`'s `VACUUM INTO`). Lets a reader/writer wait out — rather than error
  * on `SQLITE_BUSY` against — the brief write lock held by an incremental FTS insert, a full index

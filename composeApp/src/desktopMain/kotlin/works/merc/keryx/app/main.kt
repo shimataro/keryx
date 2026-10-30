@@ -42,6 +42,7 @@ import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
@@ -753,7 +754,7 @@ internal fun onUpdateMenuItemClicked(
     val action = updateMenuAction(state)
     if (action == UpdateMenuAction.None) return
     activationRequests.tryEmit(Unit)
-    settingsOpenRequests.request("updates")
+    settingsOpenRequests.request(SETTINGS_TAB_UPDATES)
     when (action) {
         UpdateMenuAction.Check -> checkForUpdate()
         UpdateMenuAction.Primary -> performPrimaryAction()

@@ -29,6 +29,7 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_INTERVAL_MS
 import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
@@ -303,7 +304,7 @@ class UpdateRepository(
             // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
             // one live query, one fact, shared with whatever the Updates tab/tray display for it.
             val action = if (after.update.installable) {
-                AppNotificationAction.ShowSettingsTab("updates")
+                AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
             } else {
                 AppNotificationAction.OpenUrl(status.url)
             }
@@ -510,7 +511,7 @@ class UpdateRepository(
                     // "ready" row next to an Available state.
                     postNotification(
                         NotificationText.UpdateReadyToInstall(update.version),
-                        AppNotificationAction.ShowSettingsTab("updates"),
+                        AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES),
                     )
                     _state.value = UpdateState.Ready(update, destPath)
                 }
