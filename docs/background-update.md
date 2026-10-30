@@ -506,7 +506,7 @@ app (whose `.zip` passes those same checks) and internal builds.
   non-installable `Available` run a check (through `SettingsViewModel.checkForUpdate`, the same
   in-flight-guarded call as the tab's button and its check-on-open, so the two never start a second
   check between them); an installable `Available`, `Failed` (per-stage retry) and `Ready` run
-  `UpdateRepository.performPrimaryAction` — see `main.kt`'s `onUpdateMenuItemClicked` and
+  `UpdateRepository.performPrimaryAction` — see `UpdateMenuActions.kt`'s `onUpdateMenuItemClicked` and
   `tray/TrayActionPolicy.kt`'s `updateMenuAction`. A click from a hidden window brings it to front
   first. The Updates tab's own headline row follows the
   same rule — no "Download" button renders there at all for that plan, rather than a disabled one

@@ -42,7 +42,6 @@ import works.merc.keryx.app.appmenu.AppMenuBarHost
 import works.merc.keryx.app.appmenu.AppMenuConnection
 import works.merc.keryx.app.core.APP_NAME
 import works.merc.keryx.app.core.Log
-import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.WINDOW_MIN_HEIGHT
 import works.merc.keryx.app.core.WINDOW_MIN_WIDTH
@@ -81,11 +80,9 @@ import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.NO_NOTIFICATION_MILLIS
 import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.tray.TrayWindowAction
-import works.merc.keryx.app.tray.UpdateMenuAction
 import works.merc.keryx.app.tray.trayIconAction
 import works.merc.keryx.app.tray.trayMenuToggleAction
 import works.merc.keryx.app.tray.trayWindowShown
-import works.merc.keryx.app.tray.updateMenuAction
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.navigation.Screen
@@ -97,8 +94,6 @@ import works.merc.keryx.app.ui.theme.resolveDarkTheme
 import works.merc.keryx.app.ui.theme.updateLookAndFeel
 import java.awt.Desktop
 import java.awt.Dimension
-import java.awt.Frame
-import java.awt.Image
 import java.awt.Taskbar
 import java.awt.desktop.AppReopenedListener
 import java.io.File
@@ -114,30 +109,6 @@ private const val LOG_TAG = "Main"
 // (see kotlinx.coroutines SharedFlow docs), which would leave the window hidden if startMinimized is
 // set. replay = 1 guarantees the first subscriber still receives it regardless of ordering.
 internal val activationRequests = MutableSharedFlow<Unit>(replay = 1)
-
-/**
- * Converts a `file://`-URI launch argument into a plain filesystem path, leaving every other
- * argument (a `keryx://` URI, an already-plain path, an unrelated flag) unchanged. The Linux Snap
- * desktop entry's `Exec=keryx %u` field code covers both the `keryx://` callback and an `.opml`
- * file with a single field code, but some desktop environments hand a local file to `%u` as a
- * `file://` URI rather than a bare path — [classifyLaunchArg] itself stays a pure, JVM-independent
- * string check (it lives in commonMain), so the URI decoding happens here instead. A `null` or
- * `localhost` authority (e.g. `file://localhost/...`, RFC 8089's equivalent of `file:///...`) is
- * normalized to empty before constructing the `File`, since `File(URI)` otherwise rejects any
- * non-empty authority outright.
- */
-internal fun normalizeFileUriArg(arg: String): String {
-    if (!arg.startsWith("file://")) return arg
-    return runCatching {
-        val uri = URI(arg)
-        val localUri = if (uri.authority == null || uri.authority.equals("localhost", ignoreCase = true)) {
-            URI(uri.scheme, null, uri.path, uri.query, uri.fragment)
-        } else {
-            uri
-        }
-        File(localUri).path
-    }.getOrDefault(arg)
-}
 
 /**
  * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,
@@ -725,94 +696,3 @@ fun main(args: Array<String>) {
         } // CompositionLocalProvider(LocalWindowExceptionHandlerFactory)
     }
 }
-
-/**
- * Runs whatever the single update menu entry currently stands for — the one shown in the system
- * tray and, identically, in the application menu bar's Help menu (see `tray/UpdateMenuEntry.kt`'s
- * `updateMenuEntry`, which resolves the matching label and enabled flag from the same [state]).
- *
- * Whatever [updateMenuAction] maps [state] to — other than [UpdateMenuAction.None], an action
- * already in flight (the entry is disabled then; a click from a stale menu is a deliberate no-op) —
- * the window is brought to front and the settings dialog opened on its Updates tab through the
- * [SettingsOpenRequests] router every Settings route uses, and then the action runs:
- * [checkForUpdate] (meant to be `SettingsViewModel.checkForUpdate`, the same in-flight-guarded check
- * the tab's own "check now" button and auto-check-on-open use) or [performPrimaryAction]
- * (`UpdateRepository.performPrimaryAction`: download, per-stage retry, or install). The tab's inline
- * status is the entry's only feedback, so an up-to-date, failed or non-installable result reads the
- * same as it does after pressing "check now" there.
- *
- * [state] is passed in rather than read here so each call site can decide how fresh a value it
- * wants; both existing ones read `updateRepository.state.value` at click time.
- */
-internal fun onUpdateMenuItemClicked(
-    state: UpdateState,
-    settingsOpenRequests: SettingsOpenRequests,
-    checkForUpdate: () -> Unit,
-    performPrimaryAction: () -> Unit,
-) {
-    val action = updateMenuAction(state)
-    if (action == UpdateMenuAction.None) return
-    activationRequests.tryEmit(Unit)
-    settingsOpenRequests.request(SETTINGS_TAB_UPDATES)
-    when (action) {
-        UpdateMenuAction.Check -> checkForUpdate()
-        UpdateMenuAction.Primary -> performPrimaryAction()
-        UpdateMenuAction.None -> Unit
-    }
-}
-
-/**
- * [onUpdateMenuItemClicked] over [updateRepository]'s state at click time, with its primary action —
- * the wiring the tray's and the menu bar's update entries share.
- */
-internal fun onUpdateMenuItemClicked(
-    updateRepository: UpdateRepository,
-    settingsOpenRequests: SettingsOpenRequests,
-    checkForUpdate: () -> Unit,
-) = onUpdateMenuItemClicked(
-    updateRepository.state.value,
-    settingsOpenRequests,
-    checkForUpdate,
-    updateRepository::performPrimaryAction,
-)
-
-/**
- * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
- * after it is shown and restored, just before it is fronted.
- */
-private fun Frame.showRestoredAndFocus(beforeToFront: () -> Unit = {}) {
-    isVisible = true
-    extendedState = extendedState and Frame.ICONIFIED.inv()
-    beforeToFront()
-    toFront()
-    requestFocus()
-}
-
-/**
- * Applies the provided image as the taskbar or Dock icon when supported.
- *
- * @param image The icon image to apply, or `null` if no image is available.
- */
-private fun applyBrandedDockIcon(image: Image?) {
-    if (image == null || !Taskbar.isTaskbarSupported()) return
-    val taskbar = Taskbar.getTaskbar()
-    if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
-        taskbar.iconImage = image
-    }
-}
-
-/**
- * Registers a desktop handler when the requested action is supported.
- *
- * @param action The desktop action required for registration.
- * @param label The handler name used in failure logs.
- * @param install Registers the handler on the supported desktop instance.
- */
-private fun installDesktopHandler(action: Desktop.Action, label: String, install: (Desktop) -> Unit) {
-    runCatching {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(action)) {
-            install(Desktop.getDesktop())
-        }
-    }.onFailure { Log.warn(LOG_TAG, "Could not install the $label handler", it) }
-}
-
