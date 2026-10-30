@@ -408,10 +408,14 @@ class FeedRepository(
 
     /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
     private sealed interface RefreshStep {
-        /** [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. */
+        /**
+         * [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. [rows] holds
+         * the fetched articles' rows, already prepared off the writer, exactly when [fetch] is Ok.
+         */
         class Fetched(
             val feed: Feeds,
             val fetch: Result<FetchedFeed>,
+            val rows: List<ArticleRepository.PreparedInsert>?,
             val committed: CompletableDeferred<Unit>,
         ) : RefreshStep
 
@@ -461,7 +465,11 @@ class FeedRepository(
      * @param fetch The feed's fetch result.
      * @return The article update result and whether the fetch contained articles.
      */
-    private suspend fun applyFetch(feed: Feeds, fetch: Result<FetchedFeed>): RefreshOutcome {
+    private suspend fun applyFetch(
+        feed: Feeds,
+        fetch: Result<FetchedFeed>,
+        rows: List<ArticleRepository.PreparedInsert>?,
+    ): RefreshOutcome {
         val fetched = when (val r = fetch) {
             is Result.Ok -> r.value
             is Result.Err -> {
@@ -496,9 +504,12 @@ class FeedRepository(
             }
         }
 
-        // CPU-heavy preparation stays outside the transaction below, so it doesn't hold the write
-        // lock (the same reason upsertParsed precomputes before opening its own transaction).
-        val prepared = articleRepository.prepareParsed(feed.id, fetched.articles)
+        // The CPU-heavy half of the preparation already ran on the fetch's own coroutine (see
+        // launchFetches), so it neither holds the write lock nor queues behind other feeds' writes.
+        // Only the half that reads the DB runs here, outside the transaction below (the same reason
+        // upsertParsed precomputes before opening its own transaction), so the new-article count
+        // compares against what is stored now, not when the fetch finished.
+        val prepared = articleRepository.countPrepared(feed.id, checkNotNull(rows))
         // The target itself rather than a boolean: the write below and the notification after the
         // commit both need the value, and carrying it keeps its non-nullness with it at both sites.
         // Non-null exactly when the fetch reported a permanent redirect somewhere we are not already.
@@ -674,8 +685,15 @@ class FeedRepository(
                     ) { fetch ->
                         // Holds no fetch permit while waiting, so a writer within
                         // REFRESH_PENDING_APPLY_LIMIT of the fetches never caps the fetch concurrency.
+                        // The articles' rows are built here, concurrently across feeds and holding
+                        // no fetch permit, rather than on the single writer, which would otherwise
+                        // parse every feed's article HTML one after another. Only an Ok fetch has
+                        // any; an exception propagates like any other failure of this coroutine.
+                        val rows = (fetch as? Result.Ok)?.let {
+                            articleRepository.prepareRows(feed.id, it.value.articles)
+                        }
                         val committed = CompletableDeferred<Unit>()
-                        steps.send(RefreshStep.Fetched(feed, fetch, committed))
+                        steps.send(RefreshStep.Fetched(feed, fetch, rows, committed))
                         committed.await()
                         // Only the site URL outlives the commit: the lookup below can wait on a permit
                         // and the network for a while, and must not keep every parsed article resident
@@ -734,7 +752,7 @@ class FeedRepository(
         for (step in steps) {
             when (step) {
                 is RefreshStep.Fetched -> {
-                    val outcome = applyFetch(step.feed, step.fetch)
+                    val outcome = applyFetch(step.feed, step.fetch, step.rows)
                     val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
                     step.committed.complete(Unit)
                     if (wasLast) indexIfNeeded(state)
