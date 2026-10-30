@@ -181,13 +181,9 @@ class GoogleDriveStorage(
                 continue
             }
             // We are the winner — safely delete every duplicate.
-            for (file in files) {
-                if (file.id != winner.id) {
-                    when (val del = deleteById(token, file.id)) {
-                        is Result.Err -> return del
-                        is Result.Ok -> Unit
-                    }
-                }
+            when (val del = deleteAll(token, files, keepId = winner.id)) {
+                is Result.Err -> return del
+                is Result.Ok -> Unit
             }
             // We won, so the retained file is the one we created — report the version its *own*
             // write returned, not the one this listing just read. The listing happens up to
@@ -211,14 +207,24 @@ class GoogleDriveStorage(
         val listResult = listFilesByName(token, name)
         if (listResult is Result.Err) return@withToken listResult
         val files = (listResult as Result.Ok).value
-        if (files.isEmpty()) return@withToken Result.Ok(Unit)
+        deleteAll(token, files)
+    }
+
+    /**
+     * Deletes every file in [files] except the one whose id is [keepId], in list order.
+     *
+     * @return `Result.Ok` once all are deleted (or there was nothing to delete); otherwise, the first
+     * deletion error, leaving the remaining files untouched.
+     */
+    private suspend fun deleteAll(token: String, files: List<DriveFile>, keepId: String? = null): Result<Unit> {
         for (file in files) {
+            if (file.id == keepId) continue
             when (val del = deleteById(token, file.id)) {
-                is Result.Err -> return@withToken del
+                is Result.Err -> return del
                 is Result.Ok -> Unit
             }
         }
-        Result.Ok(Unit)
+        return Result.Ok(Unit)
     }
 
     /** Deletes a file by its Drive ID. 404 is treated as success (idempotent). */
@@ -252,14 +258,7 @@ class GoogleDriveStorage(
             is Result.Err -> return@withToken renamed
             is Result.Ok -> Unit
         }
-        for (file in files) {
-            if (file.id == winner.id) continue
-            when (val del = deleteById(token, file.id)) {
-                is Result.Err -> return@withToken del
-                is Result.Ok -> Unit
-            }
-        }
-        Result.Ok(Unit)
+        deleteAll(token, files, keepId = winner.id)
     }
 
     /** Renames a file by its Drive ID via a metadata PATCH. 404 is treated as success (idempotent). */
@@ -300,12 +299,10 @@ class GoogleDriveStorage(
             ?.get("files")?.jsonArray
             ?: return Result.Err(CloudStorageException("Missing files array in response"))
         val result = files.map { fileObj ->
-            val obj = fileObj.jsonObject
-            val id = obj["id"]?.jsonPrimitive?.content
-                ?: return Result.Err(CloudStorageException("File metadata missing id"))
-            val version = obj["version"]?.jsonPrimitive?.content
-                ?: return Result.Err(CloudStorageException("File metadata missing version"))
-            DriveFile(id, version)
+            when (val file = parseDriveFile(fileObj.jsonObject)) {
+                is Result.Err -> return file
+                is Result.Ok -> file.value
+            }
         }
         return Result.Ok(result)
     }
@@ -386,6 +383,16 @@ class GoogleDriveStorage(
     private fun parseDriveFile(body: String): Result<DriveFile> {
         val obj = json.parseToJsonElement(body) as? JsonObject
             ?: return Result.Err(CloudStorageException("Malformed file metadata response"))
+        return parseDriveFile(obj)
+    }
+
+    /**
+     * Reads a Drive file resource's `id` and `version` fields.
+     *
+     * @param obj The file resource object.
+     * @return The file's id and version, or an error when either field is absent.
+     */
+    private fun parseDriveFile(obj: JsonObject): Result<DriveFile> {
         val id = obj["id"]?.jsonPrimitive?.content
             ?: return Result.Err(CloudStorageException("File metadata missing id"))
         val version = obj["version"]?.jsonPrimitive?.content
