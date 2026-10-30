@@ -4,6 +4,7 @@ import java.awt.Color
 import java.awt.image.BufferedImage
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class IconBadgeTest {
@@ -123,5 +124,26 @@ class IconBadgeTest {
             (0 until size).any { y -> (image.getRGB(x, y) ushr 24) != 0 }
         }
         assertTrue(hasOpaquePixel, "expected at least one non-transparent pixel")
+    }
+
+    @Test
+    fun `macOS always needs the badged dock icon`() {
+        assertTrue(needsDockBadgedImage(isMacOs = true, taskbarSupported = true, windowBadgeSupported = false))
+        assertTrue(needsDockBadgedImage(isMacOs = true, taskbarSupported = false, windowBadgeSupported = false))
+    }
+
+    @Test
+    fun `a taskbar with per-window badge images does not need the badged icon`() {
+        assertFalse(needsDockBadgedImage(isMacOs = false, taskbarSupported = true, windowBadgeSupported = true))
+    }
+
+    @Test
+    fun `no taskbar does not need the badged icon`() {
+        assertFalse(needsDockBadgedImage(isMacOs = false, taskbarSupported = false, windowBadgeSupported = false))
+    }
+
+    @Test
+    fun `a taskbar without per-window badge images needs the badged icon`() {
+        assertTrue(needsDockBadgedImage(isMacOs = false, taskbarSupported = true, windowBadgeSupported = false))
     }
 }

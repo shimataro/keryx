@@ -438,7 +438,16 @@ fun main(args: Array<String>) {
         // small transparent tray glyph windowBaseImage uses for the window's own
         // title-bar/taskbar icon. Declared here (before the Dock activation-policy effect)
         // so that effect can re-apply the icon after a visibility toggle.
-        val dockBaseImage = rememberDrawableImage(Res.drawable.app_icon)
+        val needsDockImage = remember {
+            val taskbarSupported = Taskbar.isTaskbarSupported()
+            needsDockBadgedImage(
+                isMacOs = isMacOs,
+                taskbarSupported = taskbarSupported,
+                windowBadgeSupported = taskbarSupported &&
+                    Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW),
+            )
+        }
+        val dockBaseImage = if (needsDockImage) rememberDrawableImage(Res.drawable.app_icon) else null
         val dockBadgedImage = remember(dockBaseImage, unreadCount) { dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
 
         // Hiding the window to the tray (close button, the menu bar's Close, or the tray's Hide —

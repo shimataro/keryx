@@ -94,6 +94,20 @@ private fun paintBadge(graphics: Graphics2D, anchorRightX: Float, anchorTopY: Fl
 }
 
 /**
+ * Whether the full-size badged app icon (`drawUnreadBadge` over the branded icon) is ever applied on
+ * this platform: on macOS, as the Dock icon, and elsewhere only where a taskbar exists but cannot take
+ * a per-window badge image (`Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW`, which Windows uses instead).
+ * Mirrors the branches in `main.kt` that apply it, so a platform that never shows the image neither
+ * decodes the icon nor redraws it on every unread-count change.
+ *
+ * @param isMacOs Whether this is macOS.
+ * @param taskbarSupported `Taskbar.isTaskbarSupported()`.
+ * @param windowBadgeSupported Whether the taskbar supports `ICON_BADGE_IMAGE_WINDOW`.
+ */
+fun needsDockBadgedImage(isMacOs: Boolean, taskbarSupported: Boolean, windowBadgeSupported: Boolean): Boolean =
+    isMacOs || (taskbarSupported && !windowBadgeSupported)
+
+/**
  * Draws an unread-count badge at the top-right corner of a copy of [base].
  *
  * @param base The image to copy and decorate.
