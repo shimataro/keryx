@@ -130,7 +130,7 @@ internal fun NativeButtonRow(
  * Last layout-affecting inputs seen by [NativeButtonRow]'s `update` block. Intentionally *not*
  * Compose snapshot state — see the comment at its construction site.
  */
-private class ButtonRowLayoutInputs {
+internal class ButtonRowLayoutInputs {
     private var recorded: Pair<String, String?>? = null
 
     /**
