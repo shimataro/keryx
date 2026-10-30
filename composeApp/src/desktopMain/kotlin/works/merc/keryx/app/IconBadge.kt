@@ -170,11 +170,6 @@ fun drawBadgeOnlyImage(count: Long, size: Int = DEFAULT_BADGE_ONLY_IMAGE_SIZE_PX
  * `runBlocking` on desktop) so the result is available from the very first
  * composition - callers must not skip rendering while waiting for it.
  */
-/** Remembers [image] as a [Painter] (rebuilt only when the image itself changes), or `null` without one. */
-@Composable
-fun rememberBitmapPainter(image: BufferedImage?): Painter? =
-    remember(image) { image?.let { BitmapPainter(it.toComposeImageBitmap()) } }
-
 @OptIn(ExperimentalResourceApi::class)
 @Composable
 fun rememberDrawableImage(resource: DrawableResource): BufferedImage? = remember(resource) {
@@ -182,3 +177,8 @@ fun rememberDrawableImage(resource: DrawableResource): BufferedImage? = remember
     val bytes = runBlocking { getDrawableResourceBytes(environment, resource) }
     ImageIO.read(ByteArrayInputStream(bytes))
 }
+
+/** Remembers [image] as a [Painter] (rebuilt only when the image itself changes), or `null` without one. */
+@Composable
+fun rememberBitmapPainter(image: BufferedImage?): Painter? =
+    remember(image) { image?.let { BitmapPainter(it.toComposeImageBitmap()) } }
