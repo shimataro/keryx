@@ -311,12 +311,14 @@ class UpdateRepository(
             postNotification(text, action)
         }
 
+        val availableStatus = status as? UpdateStatus.Available
+        val availableAfter = after as? UpdateState.Available
         Log.info(
             TAG,
-            "Update check resolved: version=${(status as? UpdateStatus.Available)?.version ?: "none"}, " +
-                "asset=${(status as? UpdateStatus.Available)?.asset?.name ?: "none"}, " +
-                "plan=${(after as? UpdateState.Available)?.update?.plan ?: "n/a"}, " +
-                "installable=${(after as? UpdateState.Available)?.update?.installable ?: false}",
+            "Update check resolved: version=${availableStatus?.version ?: "none"}, " +
+                "asset=${availableStatus?.asset?.name ?: "none"}, " +
+                "plan=${availableAfter?.update?.plan ?: "n/a"}, " +
+                "installable=${availableAfter?.update?.installable ?: false}",
         )
 
         val outcome = mutex.withLock {
