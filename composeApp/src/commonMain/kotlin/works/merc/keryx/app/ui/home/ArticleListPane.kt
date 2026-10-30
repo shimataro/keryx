@@ -50,7 +50,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
@@ -66,7 +65,6 @@ import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
-import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.NativeCheckMenuItem
 import works.merc.keryx.app.platform.NativeMenuAnchor
 import works.merc.keryx.app.platform.NativeMenuEntry
@@ -476,29 +474,6 @@ private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
             }
         }
     }
-}
-
-/**
- * Remembers a plain "copy URL to clipboard" action with no feedback of its own, used by
- * [FeedListPane]'s feed rows and by [rememberPlainArticleUrlCopy].
- */
-@Composable
-internal fun rememberCopyUrlAction(): (String) -> Unit {
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-    return remember(clipboard, scope) {
-        { url: String -> scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(url)) } }
-    }
-}
-
-/**
- * The default for [ArticleListPane]'s and [ArticleListPaneContent]'s `onCopyArticleUrl`: copies the
- * row's URL without the reader's copied feedback. `HomeScreen` passes its own handler instead.
- */
-@Composable
-internal fun rememberPlainArticleUrlCopy(): (ArticleListRow) -> Unit {
-    val copyUrl = rememberCopyUrlAction()
-    return remember(copyUrl) { { row: ArticleListRow -> copyUrl(row.url) } }
 }
 
 /**
