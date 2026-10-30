@@ -81,6 +81,14 @@ fun NewArticleTracking.withList(ids: Set<String>, inserted: Set<String>): NewArt
     val known = knownIds
     if (known.isNullOrEmpty()) return copy(knownIds = ids)
     val candidates = ids - known
+    if (candidates.isEmpty()) {
+        // The common re-emission (a read or star toggle): every id is already known, so known + ids
+        // is known itself and nothing can be newly inserted. Skipping that copy of the ever-growing
+        // knownIds matters on a large list. The unseen ids still have to be narrowed to [ids] — the
+        // list may have shrunk — but only when one of them actually fell out.
+        val nextUnseen = if (ids.containsAll(unseenIds)) unseenIds else unseenIds.intersect(ids)
+        return copy(unseenIds = nextUnseen)
+    }
     val newlyInserted = if (candidates.isEmpty() || inserted.isEmpty()) emptySet() else candidates.intersect(inserted)
     val nextUnseen = (unseenIds + newlyInserted).intersect(ids)
     return copy(knownIds = known + ids, unseenIds = nextUnseen)
