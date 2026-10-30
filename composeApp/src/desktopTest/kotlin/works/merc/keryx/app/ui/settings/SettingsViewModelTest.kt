@@ -17,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
@@ -431,10 +430,12 @@ class SettingsViewModelTest {
     @Test
     fun checkForUpdateIgnoresOverlappingCallsWhileOneIsInFlight() {
         var requestCount = 0
+        // Holds the first check in flight until the overlapping call has been made.
+        val releaseResponse = CompletableDeferred<Unit>()
         val client = HttpClient(
             MockEngine {
                 requestCount++
-                delay(50)
+                releaseResponse.await()
                 respond(
                     """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
                     HttpStatusCode.OK,
@@ -446,6 +447,7 @@ class SettingsViewModelTest {
         vm.checkForUpdate()
         awaitConditionBlocking { vm.updateState.value is UpdateState.Checking }
         vm.checkForUpdate() // ignored: a check is already in flight
+        releaseResponse.complete(Unit)
 
         awaitConditionBlocking { vm.updateState.value is UpdateState.Available }
         assertEquals(1, requestCount)

@@ -392,13 +392,23 @@ internal fun menuSignature(items: List<NativeMenuEntry>): List<MenuEntrySignatur
     }
 
 /**
-     * Creates a signature for a leaf menu entry from its label and checked state.
-     *
-     * @param entry The leaf menu entry to describe.
-     * @return The entry's rendered label and optional checked state.
-     */
-    private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
+ * Creates a signature for a leaf menu entry from its label and checked state.
+ *
+ * @param entry The leaf menu entry to describe.
+ * @return The entry's rendered label and optional checked state.
+ */
+private fun leafSignature(entry: NativeMenuLeaf): LeafSignature =
     LeafSignature(entry.label, (entry as? NativeCheckMenuItem)?.checked, entry.isEnabled)
+
+/** Builds a popup handle from a menu's entries and a supplier of its call site's live ones. */
+internal typealias NativePopupFactory = (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle
+
+/**
+ * The default [NativePopupFactory]. A lambda rather than `::defaultPopupHandle`: that function's
+ * third parameter is defaulted, and spelling the adaptation out keeps the platform constant out of
+ * the factory type.
+ */
+private val DefaultPopupFactory: NativePopupFactory = { entries, current -> defaultPopupHandle(entries, current) }
 
 /**
  * Builds the backend appropriate to the current platform: [AwtPopupHandle] on macOS, where AWT's
@@ -437,10 +447,7 @@ internal fun defaultPopupHandle(
  */
 internal class LazyNativePopup(
     private val window: NativeWindowHandle?,
-    // A lambda rather than `::defaultPopupHandle`: that function's third parameter is defaulted,
-    // and spelling the adaptation out keeps the platform constant out of this type.
-    private val factory: (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle =
-        { entries, current -> defaultPopupHandle(entries, current) },
+    private val factory: NativePopupFactory = DefaultPopupFactory,
 ) {
     private var handle: NativePopupHandle? = null
     private var builtShape: List<String>? = null
@@ -653,8 +660,7 @@ internal class NativeTextSelectionMenuRepresentation(
     window: NativeWindowHandle?,
     private val owner: Component,
     private val entries: () -> List<NativeMenuEntry>,
-    factory: (List<NativeMenuEntry>, () -> List<NativeMenuEntry>) -> NativePopupHandle =
-        { items, current -> defaultPopupHandle(items, current) },
+    factory: NativePopupFactory = DefaultPopupFactory,
 ) : ContextMenuRepresentation {
 
     // Built on the first open and kept for as long as the selection's area is composed, rather than

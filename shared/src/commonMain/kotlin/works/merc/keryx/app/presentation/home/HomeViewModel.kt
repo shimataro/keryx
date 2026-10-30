@@ -726,7 +726,12 @@ class HomeViewModel(
             if (active) results.scope else rows?.scope
         }
 
-    private fun currentScope() = ListScope(_filter.value, narrowingFor(currentMode()))
+    private fun currentScope() =
+        scopeOf(_filter.value, _unreadOnly.value, _unreadOnlyStarred.value, _starredMode.value)
+
+    /** The [ListScope] the given filter and mode inputs select — [currentScope] over explicit values. */
+    private fun scopeOf(filter: ArticleFilter, unread: Boolean, unreadStarred: Boolean, starred: Boolean) =
+        ListScope(filter, narrowingFor(articleListModeFor(filter, unread, unreadStarred, starred)))
 
     /**
      * The article rows the reader's pager pages through, in the order the list itself shows them.
@@ -1207,10 +1212,22 @@ class HomeViewModel(
         // drop the row for that window — the reader's pager then collapses to the selected article and
         // rebuilds every page it holds, so the open article visibly reloads. Same reasoning as setStarred.
         _pinnedReadStates.update { it + (article.id to article.copy(is_read = read.toDbFlag())) }
-        if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_read = read.toDbFlag()) }
+        applyToSelection(article.id, { it.copy(is_read = read.toDbFlag()) }, { it.copy(is_read = read.toDbFlag()) })
+    }
+
+    /**
+     * Applies an optimistic write for article [id] to the selected article and to the pending selected
+     * row, each only if it is that article — the shared tail of [setRead] and [setStarred].
+     */
+    private fun applyToSelection(
+        id: String,
+        onArticle: (Articles) -> Articles,
+        onRow: (ArticleListRow) -> ArticleListRow,
+    ) {
+        if (_selectedArticle.value?.id == id) {
+            _selectedArticle.update { it?.let(onArticle) }
         }
-        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_read = read.toDbFlag()) else it }
+        _pendingSelectedRow.update { if (it?.id == id) onRow(it) else it }
     }
 
     /**
@@ -1282,10 +1299,11 @@ class HomeViewModel(
             pins[article.id]?.let { pins + (article.id to it.copy(is_starred = starred.toDbFlag())) } ?: pins
         }
         starIntents.record(article.id, starred)
-        if (_selectedArticle.value?.id == article.id) {
-            _selectedArticle.update { it?.copy(is_starred = starred.toDbFlag()) }
-        }
-        _pendingSelectedRow.update { if (it?.id == article.id) it.copy(is_starred = starred.toDbFlag()) else it }
+        applyToSelection(
+            article.id,
+            { it.copy(is_starred = starred.toDbFlag()) },
+            { it.copy(is_starred = starred.toDbFlag()) },
+        )
     }
 
     /**
@@ -1322,7 +1340,7 @@ class HomeViewModel(
             combine(
                 displayedScopes, _filter, _unreadOnly, _unreadOnlyStarred, _starredMode,
             ) { shown, filter, unread, unreadStarred, starred ->
-                shown == ListScope(filter, narrowingFor(articleListModeFor(filter, unread, unreadStarred, starred)))
+                shown == scopeOf(filter, unread, unreadStarred, starred)
             }.first { it }
             if (currentScope() == requested) markShownRead()
         }

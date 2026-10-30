@@ -248,9 +248,11 @@ class LinuxUriSchemeRegistrarTest {
     @Test
     fun runProcessWithTimeoutAbortsAHungProcess() {
         val elapsed = measureTimeMillis {
-            assertFailsWith<IOException> { runProcessWithTimeout(listOf("sleep", "5"), timeoutMillis = 200) }
+            assertFailsWith<IOException> { runProcessWithTimeout(listOf("sleep", "60"), timeoutMillis = 200) }
         }
-        assertTrue(elapsed < 4_000, "expected the timeout to abort quickly, took ${elapsed}ms")
+        // Aborted well before the process's own 60s sleep would have finished; the wide margin
+        // keeps a briefly stalled CI machine from failing it.
+        assertTrue(elapsed < 30_000, "expected the timeout to abort quickly, took ${elapsed}ms")
     }
 
     @Test

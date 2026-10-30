@@ -366,7 +366,8 @@ private fun UpdateHeadlineRow(
                 Spacer(Modifier.width(8.dp))
                 FlatTonalButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_retry)) }
             }
-            else -> Unit // unreachable here: Idle/Checking/UpToDate never carry an AvailableUpdate (see UpdateResultSection)
+            // Unreachable here: these never carry an AvailableUpdate (see UpdateResultSection).
+            UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate -> Unit
         }
     }
 }

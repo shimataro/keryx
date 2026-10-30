@@ -2,6 +2,9 @@ package works.merc.keryx.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.ExperimentalResourceApi
@@ -174,3 +177,8 @@ fun rememberDrawableImage(resource: DrawableResource): BufferedImage? = remember
     val bytes = runBlocking { getDrawableResourceBytes(environment, resource) }
     ImageIO.read(ByteArrayInputStream(bytes))
 }
+
+/** Remembers [image] as a [Painter] (rebuilt only when the image itself changes), or `null` without one. */
+@Composable
+fun rememberBitmapPainter(image: BufferedImage?): Painter? =
+    remember(image) { image?.let { BitmapPainter(it.toComposeImageBitmap()) } }

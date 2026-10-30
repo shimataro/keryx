@@ -29,6 +29,8 @@ import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
 import works.merc.keryx.app.core.NotificationText
+import works.merc.keryx.app.core.SETTINGS_TAB_CLOUD_SYNC
+import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
 import works.merc.keryx.app.core.cloudBackupPath
 import works.merc.keryx.app.core.looksLikeSqliteFile
 import works.merc.keryx.app.core.KeryxException
@@ -539,9 +541,8 @@ class SyncRepository(
      */
     private fun nextActionFor(exception: KeryxException): AppNotificationAction = when (exception) {
         is CloudDataIncompatibleException -> AppNotificationAction.ResetCloudData
-        // Tab ids as declared in ui/settings/SettingsDialog.kt.
-        is SchemaVersionException -> AppNotificationAction.ShowSettingsTab("updates")
-        else -> AppNotificationAction.ShowSettingsTab("cloud_sync")
+        is SchemaVersionException -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
+        else -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_CLOUD_SYNC)
     }
 
     /**

@@ -108,7 +108,7 @@ internal enum class UpdateMenuAction {
 /**
  * Maps [state] to what the update menu entry does. Every action other than [UpdateMenuAction.None]
  * also opens the settings dialog on its Updates tab, whose inline results are the entry's only
- * feedback (see `main.kt`'s `onUpdateMenuItemClicked`).
+ * feedback (see `UpdateMenuActions.kt`'s `onUpdateMenuItemClicked`).
  *
  * - `Idle`/`UpToDate`, and a non-installable `Available` (nothing to download here; the tab shows
  *   the release page link and the check refreshes what it says) → [UpdateMenuAction.Check].

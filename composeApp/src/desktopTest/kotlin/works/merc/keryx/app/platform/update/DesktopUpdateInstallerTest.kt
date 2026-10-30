@@ -11,6 +11,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import works.merc.keryx.app.domain.AvailableUpdate
 import works.merc.keryx.app.domain.InstallLaunchResult
@@ -653,5 +654,46 @@ class DesktopUpdateInstallerTest {
         val location = InstallLocation(InstallKind.UNKNOWN, appRoot = null, launcherPath = null, parentWritable = false, translocated = false)
 
         cleanUpStaleSelfReplaceArtifacts(location) // must not throw
+    }
+
+    // --- readPlistStringValue ---------------------------------------------------------------
+
+    private fun plistWith(text: String): String =
+        File(newTempDir("desktop-installer-plist"), "Info.plist").apply { writeText(text) }.path
+
+    @Test
+    fun readPlistStringValueReturnsTheValueAfterTheKey() {
+        val plist = plistWith("<dict><key>Other</key><string>x</string><key>Wanted</key><string>1.2.3</string></dict>")
+
+        assertEquals("1.2.3", readPlistStringValue(plist, "Wanted"))
+    }
+
+    @Test
+    fun readPlistStringValueReturnsNullForAMissingFile() {
+        val missing = File(newTempDir("desktop-installer-plist-missing"), "Info.plist").path
+
+        assertNull(readPlistStringValue(missing, "Wanted"))
+    }
+
+    @Test
+    fun readPlistStringValueReturnsNullForAMissingKey() {
+        assertNull(readPlistStringValue(plistWith("<dict><key>Other</key><string>x</string></dict>"), "Wanted"))
+    }
+
+    @Test
+    fun readPlistStringValueReturnsNullWhenNoStringFollowsTheKey() {
+        assertNull(readPlistStringValue(plistWith("<dict><key>Wanted</key><true/></dict>"), "Wanted"))
+    }
+
+    @Test
+    fun readPlistStringValueReturnsNullForAnUnterminatedString() {
+        assertNull(readPlistStringValue(plistWith("<dict><key>Wanted</key><string>1.2.3"), "Wanted"))
+    }
+
+    @Test
+    fun readPlistStringValueStripsControlCharactersAndCapsTheLength() {
+        val plist = plistWith("<key>Wanted</key><string>1.2\n.3${"x".repeat(MAX_PLIST_VALUE_LENGTH * 2)}</string>")
+
+        assertEquals("1.2.3" + "x".repeat(MAX_PLIST_VALUE_LENGTH - "1.2.3".length), readPlistStringValue(plist, "Wanted"))
     }
 }

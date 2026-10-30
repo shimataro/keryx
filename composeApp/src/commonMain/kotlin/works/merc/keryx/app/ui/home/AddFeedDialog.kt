@@ -219,7 +219,7 @@ internal fun AddFeedDialogContent(
                 onSelectAll = onSelectAll,
                 onClearAll = onClearAll,
             )
-            else -> {}
+            is AddFeedPreview.Failed, null -> {}
         }
 
         errorException?.let {

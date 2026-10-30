@@ -8,6 +8,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
+import works.merc.keryx.app.core.SETTINGS_TAB_CLOUD_SYNC
+import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.ui.common.KeryxDialogTab
 import works.merc.keryx.app.ui.common.KeryxIcons
@@ -52,14 +54,14 @@ internal fun SettingsDialog(
         add(KeryxDialogTab("general", stringResource(Res.string.settings_tab_general), KeryxIcons.Tune))
         add(KeryxDialogTab("notifications", stringResource(Res.string.settings_tab_notifications), KeryxIcons.Notifications))
         if (vm.availableCloudTypes.isNotEmpty()) {
-            add(KeryxDialogTab("cloud_sync", stringResource(Res.string.settings_cloud_sync), KeryxIcons.Cloud))
+            add(KeryxDialogTab(SETTINGS_TAB_CLOUD_SYNC, stringResource(Res.string.settings_cloud_sync), KeryxIcons.Cloud))
         }
         add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
         // Hidden where there's an app-store update mechanism to defer to instead (see
         // selfUpdateCheckSupported's KDoc) — checkForUpdateAndNotify is gated the same way, so this
         // tab would otherwise always show "up to date" without ever being able to find anything.
         if (selfUpdateCheckSupported) {
-            add(KeryxDialogTab("updates", stringResource(Res.string.settings_updates), KeryxIcons.Update))
+            add(KeryxDialogTab(SETTINGS_TAB_UPDATES, stringResource(Res.string.settings_updates), KeryxIcons.Update))
         }
     }
 
@@ -75,9 +77,9 @@ internal fun SettingsDialog(
         when (tabId) {
             "general" -> GeneralTabContent(vm)
             "notifications" -> NotificationsTabContent(vm, permissionPrompt)
-            "cloud_sync" -> CloudSyncTabContent(vm)
+            SETTINGS_TAB_CLOUD_SYNC -> CloudSyncTabContent(vm)
             "data" -> DataTabContent(vm)
-            "updates" -> UpdatesTabContent(vm)
+            SETTINGS_TAB_UPDATES -> UpdatesTabContent(vm)
             else -> Unit
         }
     }

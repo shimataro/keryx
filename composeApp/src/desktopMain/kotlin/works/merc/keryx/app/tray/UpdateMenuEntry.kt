@@ -37,7 +37,7 @@ import works.merc.keryx.app.resources.update_up_to_date
  * showing — see `SettingsOpenRequests`). Every state is then shown disabled, because whatever the
  * entry does it does on the settings dialog's Updates tab; the label still follows [state].
  *
- * See `main.kt`'s `onUpdateMenuItemClicked` for what a click on this entry does in each state.
+ * See `UpdateMenuActions.kt`'s `onUpdateMenuItemClicked` for what a click on this entry does in each state.
  */
 @Composable
 internal fun updateMenuEntry(state: UpdateState, settingsReachable: Boolean): TrayUpdateEntry =

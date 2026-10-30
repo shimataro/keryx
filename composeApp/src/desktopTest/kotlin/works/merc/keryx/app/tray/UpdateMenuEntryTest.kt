@@ -75,7 +75,7 @@ class UpdateMenuEntryTest {
     /**
      * A deb/rpm install (or any form the app can't apply itself) has no in-app download to offer,
      * but the entry stays enabled — clicking it opens the Updates tab, which links the release page
-     * and re-checks (see `main.kt`'s `onUpdateMenuItemClicked`).
+     * and re-checks (see `UpdateMenuActions.kt`'s `onUpdateMenuItemClicked`).
      */
     @Test
     fun aNonInstallableUpdateAnnouncesItselfWithoutPromisingADownload() {

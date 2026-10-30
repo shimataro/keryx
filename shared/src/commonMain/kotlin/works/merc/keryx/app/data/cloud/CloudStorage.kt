@@ -2,6 +2,7 @@ package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -61,14 +62,29 @@ internal fun cloudStorageError(providerName: String, status: Int, body: String):
 }
 
 /**
- * Maps an HTTP response to a successful result, a sync conflict, or a cloud storage error.
+ * Maps a file-write response to the revision it produced, a sync conflict, or a storage error.
  *
+ * Every provider's successful content write answers with the written item's metadata, so the new
+ * revision is read straight from the write itself rather than from a follow-up metadata request,
+ * which could otherwise observe another device's later write.
+ *
+ * @param json The JSON parser used to read the response body.
  * @param providerName The name of the cloud storage provider.
- * @param conflictStatus The HTTP status code representing a sync conflict.
- * @return A successful result for 2xx responses, a sync conflict for the configured status, or a cloud storage error otherwise.
+ * @param revKey The top-level response field holding the written revision.
+ * @param conflictStatus The HTTP status the provider uses to report a lost write guard.
+ * @return The written revision, a conflict, or a mapped storage error.
  */
-internal suspend fun HttpResponse.okOrConflictOr(providerName: String, conflictStatus: Int): Result<Unit> = when {
-    status.value in 200..299 -> Result.Ok(Unit)
+internal suspend fun HttpResponse.writtenMetaOrConflictOr(
+    json: Json,
+    providerName: String,
+    revKey: String,
+    conflictStatus: Int,
+): Result<CloudFileMeta> = when {
+    status.isSuccess() -> {
+        val rev = json.topLevelString(bodyAsText(), revKey)
+            ?: return Result.Err(CloudStorageException("Missing $revKey in upload response"))
+        Result.Ok(CloudFileMeta(rev))
+    }
     status.value == conflictStatus -> Result.Err(SyncConflictException())
     else -> cloudStorageError(providerName, status.value, bodyAsText())
 }
@@ -80,7 +96,7 @@ internal suspend fun HttpResponse.okOrConflictOr(providerName: String, conflictS
  * @param providerName The name of the cloud storage provider.
  */
 internal suspend fun HttpResponse.okOrAbsentOr(providerName: String): Result<Unit> = when {
-    status.value in 200..299 -> Result.Ok(Unit)
+    status.isSuccess() -> Result.Ok(Unit)
     status.value == 404 -> Result.Ok(Unit)
     else -> cloudStorageError(providerName, status.value, bodyAsText())
 }

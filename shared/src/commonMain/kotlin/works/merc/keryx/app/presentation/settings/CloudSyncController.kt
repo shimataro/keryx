@@ -290,13 +290,21 @@ class CloudSyncController(
         viewModelScope.launch {
             try {
                 _runs.tryEmit(ManualSyncEdge.Started)
-                runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
-                    .onFailure { e -> Log.error(TAG, "Manual sync failed", e) }
+                syncLoggingFailure("Manual sync")
             } finally {
                 _manualSyncInFlight.value = false
                 _runs.tryEmit(ManualSyncEdge.Finished)
             }
         }
+    }
+
+    /**
+     * Runs one sync on [dispatcher], logging (rather than propagating) any failure other than
+     * cancellation as "[what] failed".
+     */
+    private suspend fun syncLoggingFailure(what: String) {
+        runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
+            .onFailure { e -> Log.error(TAG, "$what failed", e) }
     }
 
     /**
@@ -326,8 +334,7 @@ class CloudSyncController(
             if (!connected) return@launch
             _initialSyncingType.value = type
             try {
-                runCatchingUnlessCancelled { withContext(dispatcher) { syncRepository.sync() } }
-                    .onFailure { e -> Log.error(TAG, "Initial sync failed", e) }
+                syncLoggingFailure("Initial sync")
             } finally {
                 _initialSyncingType.value = null
             }

@@ -503,7 +503,7 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
   項目にはラベル以外何も出さない）。`Idle`／`UpToDate` とインストール不可の `Available` は確認を実行する
   （`SettingsViewModel.checkForUpdate` 経由。タブのボタンや開いた時の自動確認と同じ、実行中ガード付きの
   呼び出しなので、両者の間で 2 本目の確認が始まることはない）。インストール可能な `Available`、`Failed`
-  （段階ごとの再試行）、`Ready` は `UpdateRepository.performPrimaryAction` を実行する——`main.kt` の
+  （段階ごとの再試行）、`Ready` は `UpdateRepository.performPrimaryAction` を実行する——`UpdateMenuActions.kt` の
   `onUpdateMenuItemClicked` と `tray/TrayActionPolicy.kt` の `updateMenuAction` を参照。ウィンドウが
   隠れている状態からのクリックでは、先にウィンドウを前面に出す。
   Updates タブ自身の見出し行も同じ

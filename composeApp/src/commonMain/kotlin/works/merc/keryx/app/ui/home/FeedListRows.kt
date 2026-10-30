@@ -153,11 +153,7 @@ internal fun FolderGroupHeader(
     val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
     val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
     val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folder.id)
-    val isFeedDragHighlight = when (val boundary = activeBoundaryState.value) {
-        is DropBoundary.BeforeFeed -> boundary.feedId in feedIdsInFolder
-        is DropBoundary.AppendFeeds -> boundary.folderId == folder.id
-        else -> false
-    }
+    val isFeedDragHighlight = activeBoundaryState.value.highlightsFeedGroup(folder.id, feedIdsInFolder)
 
     // Spring-loaded folder: holding a dragged feed over a collapsed header opens it after a short
     // pause, so its feeds become reachable drop targets mid-drag. The expansion runs through the
@@ -225,19 +221,20 @@ internal fun FolderGroupHeader(
             .semantics { if (refreshing) stateDescription = refreshingStateLabel },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CompositionLocalProvider(
-            LocalContentColor provides (
-                dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
-                    ?: LocalContentColor.current
-                ),
-        ) {
+        val filledContentColor = dropTargetContentColorOrNull(
+            isFeedDragHighlight,
+            selected,
+            focused,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            isDragSource,
+        )
+        CompositionLocalProvider(LocalContentColor provides (filledContentColor ?: LocalContentColor.current)) {
             ExpandCollapseChevron(expanded = !collapsed, onToggle = onToggleCollapse)
             Spacer(Modifier.width(CHEVRON_MARKER_GAP))
             Row(
                 Modifier.weight(1f).padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val filledContentColor = dropTargetContentColorOrNull(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.onSecondaryContainer, isDragSource)
                 RefreshingMarkerSlot(refreshing, filledContentColor) {
                     KeryxIcon(
                         KeryxIcons.Folder,
@@ -286,11 +283,7 @@ internal fun NoFolderHeader(
 ) {
     val isEmpty = firstFeedId == null
     val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(null)
-    val isFeedDragHighlight = when (val boundary = activeBoundaryState.value) {
-        is DropBoundary.BeforeFeed -> boundary.feedId in feedIdsInNoFolder
-        is DropBoundary.AppendFeeds -> boundary.folderId == null
-        else -> false
-    }
+    val isFeedDragHighlight = activeBoundaryState.value.highlightsFeedGroup(null, feedIdsInNoFolder)
     Text(
         stringResource(Res.string.home_no_folder),
         style = MaterialTheme.typography.labelMedium,
@@ -493,7 +486,8 @@ internal fun FeedRow(
             .semantics { if (refreshing) stateDescription = refreshingStateLabel },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RefreshingMarkerSlot(refreshing, selectionContentColorOrNull(selectionTone, focused)) {
+        val selectedContentColor = selectionContentColorOrNull(selectionTone, focused)
+        RefreshingMarkerSlot(refreshing, selectedContentColor) {
             FeedAvatar(feed.displayTitle(), feed.favicon_url)
         }
         Spacer(Modifier.width(12.dp))
@@ -513,7 +507,7 @@ internal fun FeedRow(
                 )
             }
         } else {
-            CompositionLocalProvider(LocalContentColor provides (selectionContentColorOrNull(selectionTone, focused) ?: LocalContentColor.current)) {
+            CompositionLocalProvider(LocalContentColor provides (selectedContentColor ?: LocalContentColor.current)) {
                 Text(
                     feed.displayTitle(),
                     Modifier.weight(1f),
@@ -562,4 +556,14 @@ private fun FeedErrorIndicator(gone: Boolean) {
     ) {
         icon()
     }
+}
+
+/**
+ * Whether the drop boundary a drag is hovering lands inside a feed group — the feeds of folder
+ * [folderId] (`null` = the no-folder group), whose ids are [feedIds] — so that group's header lights up.
+ */
+private fun DropBoundary?.highlightsFeedGroup(folderId: String?, feedIds: Set<String>): Boolean = when (this) {
+    is DropBoundary.BeforeFeed -> feedId in feedIds
+    is DropBoundary.AppendFeeds -> this.folderId == folderId
+    is DropBoundary.BeforeFolder, DropBoundary.AppendFolders, null -> false
 }

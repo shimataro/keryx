@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.platform.platformShowsOwnCopyConfirmation
@@ -99,4 +100,27 @@ fun rememberArticleUrlCopier(
             displayedArticleId = { currentDisplayedArticleId() },
         )
     }
+}
+
+/**
+ * Remembers a plain "copy URL to clipboard" action with no feedback of its own, used by
+ * [FeedListPane]'s feed rows and by [rememberPlainArticleUrlCopy].
+ */
+@Composable
+internal fun rememberCopyUrlAction(): (String) -> Unit {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    return remember(clipboard, scope) {
+        { url: String -> scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(url)) } }
+    }
+}
+
+/**
+ * The default for [ArticleListPane]'s and [ArticleListPaneContent]'s `onCopyArticleUrl`: copies the
+ * row's URL without the reader's copied feedback. `HomeScreen` passes its own handler instead.
+ */
+@Composable
+internal fun rememberPlainArticleUrlCopy(): (ArticleListRow) -> Unit {
+    val copyUrl = rememberCopyUrlAction()
+    return remember(copyUrl) { { row: ArticleListRow -> copyUrl(row.url) } }
 }

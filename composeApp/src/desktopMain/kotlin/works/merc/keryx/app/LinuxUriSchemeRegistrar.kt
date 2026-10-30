@@ -100,16 +100,15 @@ internal class LinuxUriSchemeRegistrar(
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, URI_HANDLER_DESKTOP_FILE)
         val entry = desktopEntryContent(launcherPath, CUSTOM_URI_MIME_TYPE, "%u")
-        var changed = false
-
-        if (writeIfChanged(desktopFile, entry)) changed = true
+        val desktopFileChanged = writeIfChanged(desktopFile, entry)
 
         val existingAssociations = readOrNull(mimeAppsList)
         val mergedAssociations =
             mergeMimeAppsList(existingAssociations, URI_HANDLER_DESKTOP_FILE, CUSTOM_URI_MIME_TYPE)
-        if (writeIfChanged(mimeAppsList, mergedAssociations)) changed = true
+        // Both writes always run (separate vals, never a short-circuiting ||).
+        val associationsChanged = writeIfChanged(mimeAppsList, mergedAssociations)
 
-        if (changed) {
+        if (desktopFileChanged || associationsChanged) {
             // Skipped when nothing changed, so startup spawns no process at all.
             refreshDesktopDatabaseBestEffort(refreshDesktopDatabase, applicationsDir, LOG_TAG)
             Log.info(LOG_TAG, "Registered keryx:// URI scheme handler at ${desktopFile.path}")

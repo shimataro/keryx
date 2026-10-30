@@ -104,7 +104,7 @@ class SettingsViewModel(
      *
      * Every user-initiated route goes through here — the tab's "check now" button, the tab's own
      * check on open (`UpdatesTab.kt`'s `shouldAutoCheckOnOpen`), and the tray/Help menu's update
-     * entry (`main.kt`'s `onUpdateMenuItemClicked`). A no-op while one of those is still in flight:
+     * entry (`UpdateMenuActions.kt`'s `onUpdateMenuItemClicked`). A no-op while one of those is still in flight:
      * [checkInFlight] is claimed synchronously, before the launched check has had a chance to move
      * [updateState] to [UpdateState.Checking], so the menu entry's check followed at once by the tab
      * opening (and auto-checking) cannot start a second one. A check already running from the

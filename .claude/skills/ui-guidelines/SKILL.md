@@ -1218,8 +1218,8 @@ Three native-widget exceptions exist on desktop, all outside scrollable containe
 
 - `platform/NativeMenu.kt` — shows a menu on demand rather than embedding a
   persistent Compose-tree node (see above).
-- `ui/common/KeryxDialogs.desktop.kt` — the dialog button row (`JButton`s in a
-  `SwingPanel`), so confirm/cancel get the platform's real buttons.
+- `ui/common/NativeButtonRow.desktop.kt` (used by `KeryxDialogs.desktop.kt`) — the dialog
+  button row (`JButton`s in a `SwingPanel`), so confirm/cancel get the platform's real buttons.
 - `ui/home/ArticleWebView.kt` — the reader `WebView`, a heavyweight AWT
   panel wrapping an OS browser view. This is also *why* every dialog is a
   separate `DialogWindow`: a heavyweight panel always paints over in-window

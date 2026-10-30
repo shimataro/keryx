@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import works.merc.keryx.app.core.ArticleFilter
@@ -537,22 +538,12 @@ internal fun FeedListPane(
                 // pool so a recycled slot is only ever refilled with the same kind of row.
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     stickyHeader(key = "folders-header", contentType = "section-header") {
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                                .padding(start = listRowHorizontalMargin() + FEED_LIST_ROW_START_PADDING, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                stringResource(Res.string.home_folders),
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            val addFolderTooltip = stringResource(Res.string.home_add_folder)
-                            TooltipIconButton(tooltip = addFolderTooltip, onClick = { showAddFolder = true }, size = 32.dp) {
-                                KeryxIcon(KeryxIcons.CreateNewFolder, addFolderTooltip, modifier = Modifier.size(20.dp))
-                            }
-                        }
+                        FeedListSectionHeader(
+                            title = stringResource(Res.string.home_folders),
+                            addTooltip = stringResource(Res.string.home_add_folder),
+                            addIcon = KeryxIcons.CreateNewFolder,
+                            onAdd = { showAddFolder = true },
+                        )
                     }
 
                     /**
@@ -705,22 +696,12 @@ internal fun FeedListPane(
                     }
 
                     stickyHeader(key = "tags-header", contentType = "section-header") {
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                                .padding(start = listRowHorizontalMargin() + FEED_LIST_ROW_START_PADDING, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                stringResource(Res.string.home_tags),
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            val addTagTooltip = stringResource(Res.string.home_add_tag)
-                            TooltipIconButton(tooltip = addTagTooltip, onClick = { showAddTag = true }, size = 32.dp) {
-                                KeryxIcon(KeryxIcons.NewLabel, addTagTooltip, modifier = Modifier.size(20.dp))
-                            }
-                        }
+                        FeedListSectionHeader(
+                            title = stringResource(Res.string.home_tags),
+                            addTooltip = stringResource(Res.string.home_add_tag),
+                            addIcon = KeryxIcons.NewLabel,
+                            onAdd = { showAddTag = true },
+                        )
                     }
                     tags.forEach { tag ->
                         item(key = tagRowKey(tag.id), contentType = "tag") {
@@ -884,3 +865,31 @@ private fun FeedListAutoScrollEffect(
     }
 }
 
+/**
+ * A sticky section header in the feed list ("Folders", "Tags"): the section [title] and its trailing
+ * "add" button. Painted with the pane's own tone so rows scrolling beneath a pinned header never show
+ * through it (see the ui-guidelines skill's "Sticky section headers").
+ */
+@Composable
+private fun FeedListSectionHeader(
+    title: String,
+    addTooltip: String,
+    addIcon: DrawableResource,
+    onAdd: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(start = listRowHorizontalMargin() + FEED_LIST_ROW_START_PADDING, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.weight(1f),
+        )
+        TooltipIconButton(tooltip = addTooltip, onClick = onAdd, size = 32.dp) {
+            KeryxIcon(addIcon, addTooltip, modifier = Modifier.size(20.dp))
+        }
+    }
+}

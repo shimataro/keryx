@@ -5,8 +5,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.Notification
 import androidx.compose.ui.window.Tray
@@ -20,6 +18,7 @@ import works.merc.keryx.app.domain.UpdateState
 import works.merc.keryx.app.drawUnreadDot
 import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.platform.isWindows
+import works.merc.keryx.app.rememberBitmapPainter
 import works.merc.keryx.app.rememberDrawableImage
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.tray_hide
@@ -181,9 +180,7 @@ internal fun ApplicationScope.KeryxTray(
         isTraySupported -> {
             val trayState = rememberTrayState()
             val trayBadgedImage = rememberUnreadDotImage(trayBaseImage, unreadCount)
-            val trayBadgedPainter = remember(trayBadgedImage) {
-                trayBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) }
-            }
+            val trayBadgedPainter = rememberBitmapPainter(trayBadgedImage)
             trayBadgedPainter?.let { painter ->
                 Tray(
                     icon = painter,

@@ -23,9 +23,10 @@ class RealCommandRunnerTest {
     fun runAbortsAndThrowsWhenTheProcessOutlivesTheTimeout() {
         val runner = RealCommandRunner(timeoutMillis = 200)
         val elapsed = measureTimeMillis {
-            assertFailsWith<IOException> { runner.run(listOf("sleep", "5")) }
+            assertFailsWith<IOException> { runner.run(listOf("sleep", "60")) }
         }
-        // Aborted well before the process's own 5s sleep would have finished.
-        assertTrue(elapsed < 4_000, "expected the timeout to abort quickly, took ${elapsed}ms")
+        // Aborted well before the process's own 60s sleep would have finished; the wide margin
+        // keeps a briefly stalled CI machine from failing it.
+        assertTrue(elapsed < 30_000, "expected the timeout to abort quickly, took ${elapsed}ms")
     }
 }
