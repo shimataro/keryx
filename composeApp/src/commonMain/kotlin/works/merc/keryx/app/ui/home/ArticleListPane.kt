@@ -347,7 +347,9 @@ fun ArticleListPane(
             searchListState.scrollToIndexIfNeeded(index)
         }
 
-        articles = results.map { it.article }
+        // Remembered so an unrelated recomposition of this pane (a keystroke, the searching flag)
+        // hands ArticleListPaneContent the same list instance and lets it skip.
+        articles = remember(results) { results.map { it.article } }
         listState = searchListState
         branchOnAddFeedClick = null
         hasNoFeeds = false
