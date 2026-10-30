@@ -78,14 +78,14 @@ private class RecordingInstaller(private val canInstall: Boolean) : UpdateInstal
  * nothing at all. Which action a state maps to is `TrayActionPolicyTest`'s `updateMenuAction`
  * coverage; this suite checks the handler wires that decision to navigation and the action.
  *
- * Two layers. The lambda-based tests inject counting lambdas and pin the handler's own dispatch.
- * The "end to end" tests then click with a real [UpdateRepository] (MockEngine-backed
- * [UpdateChecker]/[UpdateDownloader], a [RecordingInstaller], a temp directory), wired the way
- * `main.kt` wires it — `checkForUpdate` runs the repository's [UpdateRepository.check] (what
- * `SettingsViewModel.checkForUpdate` ultimately calls) and `performPrimaryAction` is
- * `repo::performPrimaryAction` — so they prove the real wiring does the right thing: an installable
- * find downloads, a non-installable one re-checks without downloading, and a ready download is
- * handed to the installer. They use wall-clock polling since the repository runs on its own scope.
+ * Two layers. The lambda-based tests drive [runUpdateMenuAction] with counting lambdas and pin the
+ * handler's own dispatch. The "end to end" tests then click through [onUpdateMenuItemClicked] itself
+ * with a real [UpdateRepository] (MockEngine-backed [UpdateChecker]/[UpdateDownloader], a
+ * [RecordingInstaller], a temp directory) — `checkForUpdate` runs the repository's
+ * [UpdateRepository.check] (what `SettingsViewModel.checkForUpdate` ultimately calls) and the
+ * primary action is the repository's own, exactly as `main.kt` wires it — so they prove the real
+ * wiring does the right thing: an installable find downloads, a non-installable one re-checks
+ * without downloading, and a ready download is handed to the installer. They use wall-clock polling since the repository runs on its own scope.
  */
 class UpdateMenuActionTest {
     private var settingsOpenRequests = SettingsOpenRequests()
@@ -110,7 +110,7 @@ class UpdateMenuActionTest {
     }
 
     private fun click(state: UpdateState) =
-        onUpdateMenuItemClicked(state, settingsOpenRequests, checkForUpdate = { checks++ }, performPrimaryAction = { primaryActions++ })
+        runUpdateMenuAction(state, settingsOpenRequests, checkForUpdate = { checks++ }, performPrimaryAction = { primaryActions++ })
 
     private fun assertOpenedUpdatesTab() {
         assertEquals(SettingsOpenRequest("updates"), settingsOpenRequests.pending.value)
@@ -230,12 +230,7 @@ class UpdateMenuActionTest {
     }
 
     private fun clickWithRealRepository(f: Fixture) =
-        onUpdateMenuItemClicked(
-            f.repo.state.value,
-            settingsOpenRequests,
-            checkForUpdate = { f.scope.launch { f.repo.check() } },
-            performPrimaryAction = f.repo::performPrimaryAction,
-        )
+        onUpdateMenuItemClicked(f.repo, settingsOpenRequests, checkForUpdate = { f.scope.launch { f.repo.check() } })
 
     @Test
     fun endToEndAnInstallableAvailableUpdateStartsItsDownload() {
