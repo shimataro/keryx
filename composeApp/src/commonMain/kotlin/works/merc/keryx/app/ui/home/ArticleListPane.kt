@@ -806,49 +806,7 @@ internal fun ArticleListPaneContent(
                 },
         ) {
             if (articles.isEmpty()) {
-                if (emptyContent != null) {
-                    emptyContent()
-                } else if (loading) {
-                    // Nothing yet — see ArticleListPaneContent's `loading`.
-                } else if (hasNoFeeds) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        // A narrow layout's "+" button lives inside the feed-list drawer (closed by
-                        // default), so this is the one reachable entry point to add a first feed —
-                        // without it a phone-width user with no feeds yet would have no visible way
-                        // forward. See ArticleListPaneContent's own KDoc.
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (onAddFeedClick != null) {
-                                FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
-                            }
-                        }
-                    }
-                } else {
-                    // Scrollable (though it never overflows) only so a pull here still reaches
-                    // pullToRefresh, which listens through nested scroll: an empty unread-only list
-                    // must stay pullable. The min height keeps the message centered in the pane.
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .heightIn(min = maxHeight),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (onShowAllArticles != null) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    Text(stringResource(Res.string.home_no_starred_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    FlatTonalButton(onClick = onShowAllArticles) { Text(stringResource(Res.string.home_show_all_articles)) }
-                                }
-                            } else {
-                                Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
+                ArticleListEmptyState(emptyContent, loading, hasNoFeeds, onAddFeedClick, onShowAllArticles)
             } else {
                 val rowMetrics = rememberArticleRowMetrics()
                 val rowStrings = rememberArticleRowStrings()
@@ -911,6 +869,63 @@ internal fun ArticleListPaneContent(
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                     .padding(8.dp),
             )
+        }
+    }
+}
+
+/**
+ * What the article list shows in place of rows when it has none: the caller's own [emptyContent],
+ * nothing while the first load is still [loading], the "no feeds" prompt, or the "no articles" message.
+ */
+@Composable
+private fun ArticleListEmptyState(
+    emptyContent: (@Composable () -> Unit)?,
+    loading: Boolean,
+    hasNoFeeds: Boolean,
+    onAddFeedClick: (() -> Unit)?,
+    onShowAllArticles: (() -> Unit)?,
+) {
+    if (emptyContent != null) {
+        emptyContent()
+    } else if (loading) {
+        // Nothing yet — see ArticleListPaneContent's `loading`.
+    } else if (hasNoFeeds) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // A narrow layout's "+" button lives inside the feed-list drawer (closed by
+            // default), so this is the one reachable entry point to add a first feed —
+            // without it a phone-width user with no feeds yet would have no visible way
+            // forward. See ArticleListPaneContent's own KDoc.
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (onAddFeedClick != null) {
+                    FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
+                }
+            }
+        }
+    } else {
+        // Scrollable (though it never overflows) only so a pull here still reaches
+        // pullToRefresh, which listens through nested scroll: an empty unread-only list
+        // must stay pullable. The min height keeps the message centered in the pane.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .heightIn(min = maxHeight),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (onShowAllArticles != null) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(stringResource(Res.string.home_no_starred_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        FlatTonalButton(onClick = onShowAllArticles) { Text(stringResource(Res.string.home_show_all_articles)) }
+                    }
+                } else {
+                    Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
