@@ -73,9 +73,7 @@ internal object AwtFilePickerBackend : FilePickerBackend {
             dialog.setFilenameFilter { _, name -> hasAnyExtension(name, request.extensions) }
         }
         dialog.isVisible = true
-        val dir = dialog.directory
-        val file = dialog.file
-        return if (dir != null && file != null) File(dir, file).absolutePath else null
+        return dialog.pickedPath()
     }
 
     /**
@@ -89,9 +87,7 @@ internal object AwtFilePickerBackend : FilePickerBackend {
         val dialog = newFileDialog(owner, request.title, FileDialog.SAVE)
         dialog.file = request.defaultName
         dialog.isVisible = true
-        val dir = dialog.directory
-        val file = dialog.file
-        return if (dir != null && file != null) File(dir, file).absolutePath else null
+        return dialog.pickedPath()
     }
 }
 
@@ -185,25 +181,32 @@ internal object SwingFilePickerBackend : FilePickerBackend {
 }
 
 /**
-     * Determines whether a filename ends with one of the specified extensions.
-     *
-     * @param name The filename to check.
-     * @param extensions The file extensions to match, without leading periods.
-     * @return `true` if the filename matches an extension, `false` otherwise.
-     */
+ * Determines whether a filename ends with one of the specified extensions.
+ *
+ * @param name The filename to check.
+ * @param extensions The file extensions to match, without leading periods.
+ * @return `true` if the filename matches an extension, `false` otherwise.
+ */
 internal fun hasAnyExtension(name: String, extensions: List<String>): Boolean =
     extensions.any { name.endsWith(".$it", ignoreCase = true) }
 
 /**
-     * Resolves a selected save path, requesting confirmation before replacing an existing file.
-     *
-     * @param path The selected save path.
-     * @param exists Determines whether the path already exists.
-     * @param confirmOverwrite Confirms replacement of an existing file.
-     * @return The selected path, or `null` if overwrite is declined.
-     */
+ * Resolves a selected save path, requesting confirmation before replacing an existing file.
+ *
+ * @param path The selected save path.
+ * @param exists Determines whether the path already exists.
+ * @param confirmOverwrite Confirms replacement of an existing file.
+ * @return The selected path, or `null` if overwrite is declined.
+ */
 internal fun resolveSavePath(path: String, exists: (String) -> Boolean, confirmOverwrite: () -> Boolean): String? =
     if (!exists(path) || confirmOverwrite()) path else null
+
+/** The absolute path the user picked in this (already closed) dialog, or `null` if it was cancelled. */
+private fun FileDialog.pickedPath(): String? {
+    val dir = directory
+    val file = file
+    return if (dir != null && file != null) File(dir, file).absolutePath else null
+}
 
 /** Builds the backend appropriate to the current platform. */
 internal fun defaultFilePickerBackend(linux: Boolean = isLinux): FilePickerBackend =

@@ -273,8 +273,10 @@ Project-wide, this is on top of the two Android suites above:
     command line launched for each of macOS/Windows/Linux self-replace and the Windows MSI path via
     a fake `ProcessLauncher` that never actually runs one, a version-mismatched or executable-less
     extracted bundle failing before the launcher is ever called, an `ArchiveExtractor` that rejects
-    the archive failing before it too (with its own reason carried through to the caller), and a
-    stale partial `extracted/` tree being cleared before extraction starts.
+    the archive failing before it too (with its own reason carried through to the caller), a
+    stale partial `extracted/` tree being cleared before extraction starts, and `readPlistStringValue`'s
+    edge cases (a missing file, key, `<string>` or `</string>` yields `null`; the value is stripped of
+    control characters and capped at `MAX_PLIST_VALUE_LENGTH`).
   - `ZipExtractorTest.kt`: zip-slip rejection, the `maxBytes` limit, restoring only the listed
     entries' executable bit, and the same two guards again through `validate`, which must
     additionally not create the destination directory it only resolves against (the entry-count

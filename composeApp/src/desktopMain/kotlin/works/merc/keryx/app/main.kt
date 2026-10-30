@@ -13,8 +13,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.Window
@@ -80,11 +78,9 @@ import works.merc.keryx.app.tray.KeryxTray
 import works.merc.keryx.app.tray.NO_NOTIFICATION_MILLIS
 import works.merc.keryx.app.tray.SniConnection
 import works.merc.keryx.app.tray.TrayWindowAction
-import works.merc.keryx.app.tray.UpdateMenuAction
 import works.merc.keryx.app.tray.trayIconAction
 import works.merc.keryx.app.tray.trayMenuToggleAction
 import works.merc.keryx.app.tray.trayWindowShown
-import works.merc.keryx.app.tray.updateMenuAction
 import works.merc.keryx.app.ui.menu.MenuCommand
 import works.merc.keryx.app.ui.menu.MenuController
 import works.merc.keryx.app.ui.navigation.Screen
@@ -96,12 +92,11 @@ import works.merc.keryx.app.ui.theme.resolveDarkTheme
 import works.merc.keryx.app.ui.theme.updateLookAndFeel
 import java.awt.Desktop
 import java.awt.Dimension
-import java.awt.Frame
-import java.awt.Image
 import java.awt.Taskbar
 import java.awt.desktop.AppReopenedListener
 import java.io.File
 import java.net.URI
+import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
 private const val LOG_TAG = "Main"
@@ -112,30 +107,6 @@ private const val LOG_TAG = "Main"
 // (see kotlinx.coroutines SharedFlow docs), which would leave the window hidden if startMinimized is
 // set. replay = 1 guarantees the first subscriber still receives it regardless of ordering.
 internal val activationRequests = MutableSharedFlow<Unit>(replay = 1)
-
-/**
- * Converts a `file://`-URI launch argument into a plain filesystem path, leaving every other
- * argument (a `keryx://` URI, an already-plain path, an unrelated flag) unchanged. The Linux Snap
- * desktop entry's `Exec=keryx %u` field code covers both the `keryx://` callback and an `.opml`
- * file with a single field code, but some desktop environments hand a local file to `%u` as a
- * `file://` URI rather than a bare path — [classifyLaunchArg] itself stays a pure, JVM-independent
- * string check (it lives in commonMain), so the URI decoding happens here instead. A `null` or
- * `localhost` authority (e.g. `file://localhost/...`, RFC 8089's equivalent of `file:///...`) is
- * normalized to empty before constructing the `File`, since `File(URI)` otherwise rejects any
- * non-empty authority outright.
- */
-internal fun normalizeFileUriArg(arg: String): String {
-    if (!arg.startsWith("file://")) return arg
-    return runCatching {
-        val uri = URI(arg)
-        val localUri = if (uri.authority == null || uri.authority.equals("localhost", ignoreCase = true)) {
-            URI(uri.scheme, null, uri.path, uri.query, uri.fragment)
-        } else {
-            uri
-        }
-        File(localUri).path
-    }.getOrDefault(arg)
-}
 
 /**
  * Starts the Keryx desktop application and coordinates its initialization, single-instance behavior,
@@ -272,7 +243,7 @@ fun main(args: Array<String>) {
     // goes through exitApp/persistWindowStateImmediately — terminates the JVM directly without ever
     // calling back into application code, so the shutdown hook is the only chance to persist a
     // resize/move/maximize that happened just before quitting that way.
-    val latestWindowState = java.util.concurrent.atomic.AtomicReference<ObservedWindowState?>(null)
+    val latestWindowState = AtomicReference<ObservedWindowState?>(null)
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
@@ -374,7 +345,7 @@ fun main(args: Array<String>) {
     // null (every non-KDE environment) leaves the in-window menu bar behaving exactly as before.
     // Independent of the tray (own connection, own lifecycle).
     val appMenuConnection = if (isLinux) AppMenuConnection.tryCreate() else null
-    val resolvedAppMenuXid = java.util.concurrent.atomic.AtomicReference<Long?>(null)
+    val resolvedAppMenuXid = AtomicReference<Long?>(null)
     if (appMenuConnection != null) {
         addShutdownHook { appMenuConnection.close(resolvedAppMenuXid.get()) }
     }
@@ -407,16 +378,18 @@ fun main(args: Array<String>) {
             settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
         }
 
-        val exitApp = {
+        val persistAndFlushSettings = {
             persistWindowStateImmediately()
             runBlocking { settingsRepository.flush() }
+        }
+        val exitApp = {
+            persistAndFlushSettings()
             exitApplication()
         }
         // Closing the window hides it to the tray (the window close button and the menu's Close
         // Window alike), saving its state first as exitApp does.
         val hideToTray = {
-            persistWindowStateImmediately()
-            runBlocking { settingsRepository.flush() }
+            persistAndFlushSettings()
             windowVisible = false
         }
 
@@ -449,10 +422,6 @@ fun main(args: Array<String>) {
         val unreadCountFlow = remember { koin.get<ArticleRepository>().watchUnreadCount() }
         val unreadCount by unreadCountFlow.collectAsState(0L)
 
-        // Deliberately NOT collected here (`.collectAsState()`) — this application {} scope
-        // composes the window, the Dock icon, and single-instance/reopen handling, all of which
-        // would otherwise recompose on every download-progress tick. KeryxTray collects the flow
-        // itself, confining that recomposition to the tray's own composable.
         // Exit only once the OS installer / self-replace script has actually been launched — that
         // process is already waiting for this one to exit (see UpdateInstaller's own KDoc on
         // desktop), and nothing else in this state needs the app still running.
@@ -502,7 +471,7 @@ fun main(args: Array<String>) {
 
         val windowBaseImage = rememberDrawableImage(Res.drawable.tray_icon)
         val windowBadgedImage = remember(windowBaseImage, unreadCount) { windowBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
-        val windowBadgedPainter = remember(windowBadgedImage) { windowBadgedImage?.let { BitmapPainter(it.toComposeImageBitmap()) } }
+        val windowBadgedPainter = rememberBitmapPainter(windowBadgedImage)
 
         // The tray's update entry acts on the settings dialog's Updates tab, so it is disabled while
         // Settings is unreachable (first-run Setup) — the same gate the Help menu's copy follows.
@@ -525,6 +494,10 @@ fun main(args: Array<String>) {
             // every tray offers "Show" for it and showing goes through activationRequests, which
             // un-minimizes, raises and focuses it — the one path every "show" route takes.
             windowShown = trayWindowShown(windowVisible, windowState.isMinimized),
+            // Deliberately NOT collected here (`.collectAsState()`) — this application {} scope
+            // composes the window, the Dock icon, and single-instance/reopen handling, all of which
+            // would otherwise recompose on every download-progress tick. KeryxTray collects the flow
+            // itself, confining that recomposition to the tray's own composable.
             updateStateFlow = updateRepository.state,
             settingsReachable = currentScreen == Screen.Home,
             onToggle = { applyTrayWindowAction(trayMenuToggleAction(windowVisible, windowState.isMinimized)) },
@@ -536,11 +509,7 @@ fun main(args: Array<String>) {
                 )
             },
             onQuit = exitApp,
-            onUpdateAction = {
-                onUpdateMenuItemClicked(
-                    updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
-                )
-            },
+            onUpdateAction = { onUpdateMenuItemClicked(updateRepository, settingsOpenRequests, settingsVm::checkForUpdate) },
             // Reuses the same activation signal as the single-instance/reopen paths below
             // (window.toFront/requestFocus, de-iconify, activateIgnoringOtherApps) - see the
             // LaunchedEffect(Unit) collecting activationRequests further down.
@@ -695,10 +664,10 @@ fun main(args: Array<String>) {
                 if (Taskbar.isTaskbarSupported()) {
                     val taskbar = Taskbar.getTaskbar()
                     SwingUtilities.invokeLater {
-                        when {
-                            taskbar.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW) ->
-                                taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount))
-                            else -> applyBrandedDockIcon(dockBadgedImage)
+                        if (taskbar.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW)) {
+                            taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount))
+                        } else {
+                            applyBrandedDockIcon(dockBadgedImage)
                         }
                     }
                 }
@@ -725,79 +694,3 @@ fun main(args: Array<String>) {
         } // CompositionLocalProvider(LocalWindowExceptionHandlerFactory)
     }
 }
-
-/**
- * Runs whatever the single update menu entry currently stands for — the one shown in the system
- * tray and, identically, in the application menu bar's Help menu (see `tray/UpdateMenuEntry.kt`'s
- * `updateMenuEntry`, which resolves the matching label and enabled flag from the same [state]).
- *
- * Whatever [updateMenuAction] maps [state] to — other than [UpdateMenuAction.None], an action
- * already in flight (the entry is disabled then; a click from a stale menu is a deliberate no-op) —
- * the window is brought to front and the settings dialog opened on its Updates tab through the
- * [SettingsOpenRequests] router every Settings route uses, and then the action runs:
- * [checkForUpdate] (meant to be `SettingsViewModel.checkForUpdate`, the same in-flight-guarded check
- * the tab's own "check now" button and auto-check-on-open use) or [performPrimaryAction]
- * (`UpdateRepository.performPrimaryAction`: download, per-stage retry, or install). The tab's inline
- * status is the entry's only feedback, so an up-to-date, failed or non-installable result reads the
- * same as it does after pressing "check now" there.
- *
- * [state] is passed in rather than read here so each call site can decide how fresh a value it
- * wants; both existing ones read `updateRepository.state.value` at click time.
- */
-internal fun onUpdateMenuItemClicked(
-    state: UpdateState,
-    settingsOpenRequests: SettingsOpenRequests,
-    checkForUpdate: () -> Unit,
-    performPrimaryAction: () -> Unit,
-) {
-    val action = updateMenuAction(state)
-    if (action == UpdateMenuAction.None) return
-    activationRequests.tryEmit(Unit)
-    settingsOpenRequests.request("updates")
-    when (action) {
-        UpdateMenuAction.Check -> checkForUpdate()
-        UpdateMenuAction.Primary -> performPrimaryAction()
-        UpdateMenuAction.None -> Unit
-    }
-}
-
-/**
- * Shows this window, un-minimizes it and brings it to the front with focus. [beforeToFront] runs
- * after it is shown and restored, just before it is fronted.
- */
-private fun Frame.showRestoredAndFocus(beforeToFront: () -> Unit = {}) {
-    isVisible = true
-    extendedState = extendedState and Frame.ICONIFIED.inv()
-    beforeToFront()
-    toFront()
-    requestFocus()
-}
-
-/**
- * Applies the provided image as the taskbar or Dock icon when supported.
- *
- * @param image The icon image to apply, or `null` if no image is available.
- */
-private fun applyBrandedDockIcon(image: Image?) {
-    if (image == null || !Taskbar.isTaskbarSupported()) return
-    val taskbar = Taskbar.getTaskbar()
-    if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
-        taskbar.iconImage = image
-    }
-}
-
-/**
- * Registers a desktop handler when the requested action is supported.
- *
- * @param action The desktop action required for registration.
- * @param label The handler name used in failure logs.
- * @param install Registers the handler on the supported desktop instance.
- */
-private fun installDesktopHandler(action: Desktop.Action, label: String, install: (Desktop) -> Unit) {
-    runCatching {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(action)) {
-            install(Desktop.getDesktop())
-        }
-    }.onFailure { Log.warn(LOG_TAG, "Could not install the $label handler", it) }
-}
-

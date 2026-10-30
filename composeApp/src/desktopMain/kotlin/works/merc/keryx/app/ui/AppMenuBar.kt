@@ -272,11 +272,7 @@ internal fun FrameWindowScope.AppMenuBar(
         // Reads `state.value` fresh rather than closing over the `updateState` snapshot above, so a
         // state change between this composition and the click is honoured — the same wiring
         // `main.kt` gives the tray's own entry.
-        updateAction = {
-            onUpdateMenuItemClicked(
-                updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
-            )
-        },
+        updateAction = { onUpdateMenuItemClicked(updateRepository, settingsOpenRequests, settingsVm::checkForUpdate) },
         about = { menuController.send(MenuCommand.About) },
     )
 

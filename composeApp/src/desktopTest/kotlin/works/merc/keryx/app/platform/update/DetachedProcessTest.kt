@@ -1,5 +1,6 @@
 package works.merc.keryx.app.platform.update
 
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.platform.isWindows
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -61,11 +62,7 @@ class DetachedProcessTest {
         val launched = RealProcessLauncher().launch(listOf("/usr/bin/touch", marker.path))
 
         assertTrue(launched)
-        val deadline = System.currentTimeMillis() + 5_000
-        while (!marker.exists()) {
-            check(System.currentTimeMillis() < deadline) { "Timed out waiting for $marker to appear" }
-            Thread.sleep(20)
-        }
+        awaitConditionBlocking { marker.exists() }
     }
 
     @Test

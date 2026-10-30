@@ -165,7 +165,8 @@ class DesktopUpdateInstaller internal constructor(
                 entryDirName = APP_NAME
                 executableEntries = emptySet()
             }
-            else -> return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
+            UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK ->
+                return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
         }
 
         val zipSize = File(filePath).length()
@@ -248,8 +249,8 @@ class DesktopUpdateInstaller internal constructor(
         // check would then find nothing at the path it expects, and a rollback would restore the
         // wrapper directory rather than the actual app.
         FileSystemExtras.deleteRecursively(oldDir.path)
-        val logFile = File(workDir, "apply.log")
-        val pid = ProcessHandle.current().pid().toString()
+        val logFile = File(workDir, UPDATE_SCRIPT_LOG_NAME)
+        val pid = currentPid()
 
         // MAC_APP_ZIP and LINUX_ZIP differ only in which script text POSIX gets — same interpreter,
         // same argument shape (pid/app/new/old/log), same "mark it executable" requirement. Only
@@ -272,7 +273,7 @@ class DesktopUpdateInstaller internal constructor(
                 )
             }
             UpdateAssetKind.WINDOWS_ZIP -> {
-                val scriptFile = File(workDir, "apply.cmd")
+                val scriptFile = File(workDir, WINDOWS_UPDATE_SCRIPT_NAME)
                 launchScript(
                     scriptFile = scriptFile,
                     scriptText = UpdateScriptWriter.windowsSelfReplace(),
@@ -288,9 +289,9 @@ class DesktopUpdateInstaller internal constructor(
         if (launcherPath == null) return InstallLaunchResult.Failed("Current launcher path is unknown")
         val workDir = File(filePath).parentFile
             ?: return InstallLaunchResult.Failed("Downloaded file has no parent directory")
-        val scriptFile = File(workDir, "apply.cmd")
-        val logFile = File(workDir, "apply.log")
-        val pid = ProcessHandle.current().pid().toString()
+        val scriptFile = File(workDir, WINDOWS_UPDATE_SCRIPT_NAME)
+        val logFile = File(workDir, UPDATE_SCRIPT_LOG_NAME)
+        val pid = currentPid()
         return launchScript(
             scriptFile = scriptFile,
             scriptText = UpdateScriptWriter.windowsMsiInstall(),
@@ -341,7 +342,7 @@ class DesktopUpdateInstaller internal constructor(
                 val exe = File(extractedApp, "$APP_NAME.exe")
                 if (!exe.isFile) "Extracted app is missing $APP_NAME.exe" else null
             }
-            else -> "Unsupported self-replace asset kind: $assetKind"
+            UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK -> "Unsupported self-replace asset kind: $assetKind"
         }
     }
 }
@@ -384,13 +385,13 @@ private fun extractionFailed(extractDir: File, e: Exception): InstallLaunchResul
  * so this costs nothing legitimate — it exists because the value ends up inside an
  * [InstallLaunchResult.Failed] reason, which `UpdateRepository` logs.
  */
-private const val MAX_PLIST_VALUE_LENGTH = 64
+internal const val MAX_PLIST_VALUE_LENGTH = 64
 
 /** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain
  * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
  * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
  * avoids pulling in a plist/XML dependency for a single field. */
-private fun readPlistStringValue(plistPath: String, key: String): String? {
+internal fun readPlistStringValue(plistPath: String, key: String): String? {
     val file = File(plistPath)
     if (!file.isFile) return null
     val text = file.readText()
@@ -403,3 +404,12 @@ private fun readPlistStringValue(plistPath: String, key: String): String? {
     if (valueEnd < 0) return null
     return untrustedText(text.substring(valueStart, valueEnd), MAX_PLIST_VALUE_LENGTH)
 }
+
+/** The hand-off script's own log, written next to the downloaded update. */
+private const val UPDATE_SCRIPT_LOG_NAME = "apply.log"
+
+/** The hand-off script `cmd` runs on Windows (self-replace and MSI install alike). */
+private const val WINDOWS_UPDATE_SCRIPT_NAME = "apply.cmd"
+
+/** This process's id, as the hand-off script's argument it waits on to exit. */
+private fun currentPid(): String = ProcessHandle.current().pid().toString()

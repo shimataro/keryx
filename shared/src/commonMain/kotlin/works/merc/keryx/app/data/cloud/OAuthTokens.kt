@@ -5,6 +5,7 @@ import io.ktor.client.request.forms.submitForm
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Parameters
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -65,7 +66,7 @@ internal suspend fun requestOAuthTokens(
     onFailure: ((status: Int, body: String) -> Unit)? = null,
 ): Result<OAuthTokens> = try {
     val response = client.submitForm(tokenEndpoint, form)
-    if (response.status.value !in 200..299) {
+    if (!response.status.isSuccess()) {
         onFailure?.invoke(response.status.value, response.bodyAsText())
         Result.Err(CloudAuthException("Token request failed (HTTP ${response.status.value})"))
     } else {
@@ -102,7 +103,7 @@ internal suspend fun requestOAuthTokens(
  */
 suspend fun revokeOAuthToken(makeRequest: suspend () -> HttpResponse): Result<Unit> = try {
     val response = makeRequest()
-    if (response.status.value in 200..299) {
+    if (response.status.isSuccess()) {
         Result.Ok(Unit)
     } else {
         Result.Err(CloudAuthException("Revoke failed (HTTP ${response.status.value})"))

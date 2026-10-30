@@ -300,7 +300,9 @@ AGP の `build` ライフサイクルは `androidTest` ソースセットに対�
     実際には何も起動しないフェイクの `ProcessLauncher` 経由で検証すること、バージョン不一致や実行
     権限の無い展開済みバンドルはランチャーが呼ばれる前に失敗すること、書庫を拒否する
     `ArchiveExtractor` も同様にランチャーより手前で失敗し、その理由が呼び出し側まで伝わること、
-    展開開始前に古い `extracted/` ツリーが消されること。
+    展開開始前に古い `extracted/` ツリーが消されること、`readPlistStringValue` の境界（ファイル・key・
+    `<string>`・`</string>` のいずれかが無ければ `null`、値から制御文字が除かれ `MAX_PLIST_VALUE_LENGTH`
+    で切り詰められること）。
   - `ZipExtractorTest.kt`：zip slip の拒否、`maxBytes` の上限、指定したエントリだけ実行ビットが
     復元されること、および同じ2つのガードを `validate` 経由でも検証すること（`validate` はさらに、
     解決先としてしか使わない展開先ディレクトリを作らないこと）（エントリ数上限自体——

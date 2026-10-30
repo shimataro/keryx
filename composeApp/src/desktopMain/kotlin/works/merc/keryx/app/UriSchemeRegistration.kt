@@ -6,6 +6,7 @@ import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
 import works.merc.keryx.app.platform.osName
 import java.io.File
 import java.io.IOException
+import java.net.URI
 
 private const val LOG_TAG = "UriScheme"
 
@@ -203,4 +204,28 @@ private fun runRegistryCommands(commands: List<List<String>>, failureContext: St
             }
             .onFailure { Log.warn(LOG_TAG, "Could not register $failureContext", it) }
     }
+}
+
+/**
+ * Converts a `file://`-URI launch argument into a plain filesystem path, leaving every other
+ * argument (a `keryx://` URI, an already-plain path, an unrelated flag) unchanged. The Linux Snap
+ * desktop entry's `Exec=keryx %u` field code covers both the `keryx://` callback and an `.opml`
+ * file with a single field code, but some desktop environments hand a local file to `%u` as a
+ * `file://` URI rather than a bare path — [classifyLaunchArg] itself stays a pure, JVM-independent
+ * string check (it lives in commonMain), so the URI decoding happens here instead. A `null` or
+ * `localhost` authority (e.g. `file://localhost/...`, RFC 8089's equivalent of `file:///...`) is
+ * normalized to empty before constructing the `File`, since `File(URI)` otherwise rejects any
+ * non-empty authority outright.
+ */
+internal fun normalizeFileUriArg(arg: String): String {
+    if (!arg.startsWith("file://")) return arg
+    return runCatching {
+        val uri = URI(arg)
+        val localUri = if (uri.authority == null || uri.authority.equals("localhost", ignoreCase = true)) {
+            URI(uri.scheme, null, uri.path, uri.query, uri.fragment)
+        } else {
+            uri
+        }
+        File(localUri).path
+    }.getOrDefault(arg)
 }
