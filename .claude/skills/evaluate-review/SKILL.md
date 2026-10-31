@@ -496,9 +496,13 @@ For each comment in `associated_comments`, in order:
    `appleApp/`, `xcodebuild -scheme Keryx -destination 'platform=macOS' test` — the JVM build
    never compiles those. Off a Mac, treat that as unverified: do not commit it. When this
    comment's evidence came from Step 7's temporary instrumentation and the fix's effect is
-   measurable, re-insert that measurement, confirm the effect, and remove it again (per
-   `.claude/etc/temporary-instrumentation.md`).
-   - If verification fails: confirm via `git status`/`git diff` that only this comment's
+   measurable, re-insert that measurement and check the effect, then remove it again per
+   `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** — including
+   when the effect is not confirmed or the run fails — and confirm `git diff` matches the
+   fix-only diff saved under §4 before doing anything else.
+   - If verification fails (including a re-measurement that does not confirm the effect):
+     first make sure no temporary instrumentation remains (the marker check from §3 prints
+     nothing), then confirm via `git status`/`git diff` that only this comment's
      intended changes are present before reverting, so a revert cannot destroy pre-existing
      work in the same file; then do not commit. Note the failure (with the reason) for the
      closing summary, and move on to the next comment.
