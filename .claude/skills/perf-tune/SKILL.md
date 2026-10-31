@@ -390,7 +390,11 @@ run `/feature-branch perf` to create and switch to a feature branch first
 For each approved item:
 
 1. Make one cohesive change.
-2. Re-measure with that axis's method and confirm the improvement is real.
+2. Re-measure with that axis's method and check whether the improvement is real,
+   then remove the measurement code again per
+   `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** —
+   including when the improvement is not confirmed or the run fails — and confirm
+   `git diff` matches the change-only diff saved under §4 before doing anything else.
 3. Re-run the tests:
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
@@ -398,7 +402,9 @@ For each approved item:
    The full suite must be green **and the Step 1 baseline set must survive in
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.
-4. If the improvement cannot be measured, or the suite goes red, **revert that
+4. If the improvement cannot be measured, or the suite goes red, first make sure
+   no measurement code remains (the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 prints nothing), then **revert that
    one item**, make **no commit** for it, and move on — record the reason for
    the "How to report" closing summary.
 5. If this item changed something a doc *names* (per Step 7's criteria below),
