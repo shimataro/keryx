@@ -726,6 +726,15 @@ class HomeViewModel(
         searchResultsSnapshot.map { it.rows },
     )
 
+    /**
+     * The article rows of [searchResults], from the same snapshot — exposed so the article list
+     * does not map the results a second time.
+     */
+    val searchArticleRows: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
+        { searchResultsSnapshot.value.articleRows },
+        searchResultsSnapshot.map { it.articleRows },
+    )
+
     /** The scope of the rows on screen — see [ListScope]; null before the article list first loads. */
     private fun displayedScope(): ListScope? =
         if (searchActive.value) searchResultsSnapshot.value.scope else articlesSnapshot.value?.scope

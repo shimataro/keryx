@@ -6131,6 +6131,7 @@ class HomeViewModelTest {
         assertTrue(vm.searchActive.value)
         assertEquals(vm.searchResults.value.map { it.article.id }, vm.pagerArticles.value.map { it.id })
         assertEquals(listOf("a2"), vm.pagerArticles.value.map { it.id })
+        assertEquals(vm.searchResults.value.map { it.article }, vm.searchArticleRows.value)
     }
 
     /**

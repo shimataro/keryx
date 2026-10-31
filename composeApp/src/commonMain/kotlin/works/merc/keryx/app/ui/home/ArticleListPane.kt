@@ -330,6 +330,7 @@ fun ArticleListPane(
         }
     } else {
         val results by vm.searchResults.collectAsState()
+        val resultRows by vm.searchArticleRows.collectAsState()
         val searching by vm.searching.collectAsState()
         // A query has usable terms once at least one word is 2+ characters (searched via the
         // trigram index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character
@@ -347,9 +348,10 @@ fun ArticleListPane(
             searchListState.scrollToIndexIfNeeded(index)
         }
 
-        // Remembered so an unrelated recomposition of this pane (a keystroke, the searching flag)
-        // hands ArticleListPaneContent the same list instance and lets it skip.
-        articles = remember(results) { results.map { it.article } }
+        // Mapped once per snapshot by the ViewModel, so an unrelated recomposition of this pane
+        // (a keystroke, the searching flag) hands ArticleListPaneContent the same list instance
+        // and lets it skip.
+        articles = resultRows
         listState = searchListState
         branchOnAddFeedClick = null
         hasNoFeeds = false
