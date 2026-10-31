@@ -45,6 +45,7 @@ keeps it, it is temporary code under §3.
   ```bash
   git grep -n --untracked TEMP-INSTRUMENTATION -- ':!.claude'
   ```
+
 - Never log article bodies, tokens, or URLs carrying credentials, and never add an external profiler
   or telemetry service — `docs/external-spec.md` §10 promises no data leaves the device.
 
