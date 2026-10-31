@@ -88,6 +88,25 @@ private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarro
 /** Rows tagged with the [ListScope] that produced them. */
 private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
 
+/**
+ * What the article list shows for a search — its rows and their title highlights — built from one
+ * snapshot so the two never disagree. Compared by identity: a new instance is a new snapshot.
+ */
+class SearchListDisplay internal constructor(results: List<ArticleSearchResult>) {
+    val rows: List<ArticleListRow> = results.map { it.article }
+    val titleMarkedById: Map<String, String> = results.associate { it.article.id to it.titleMarked }
+}
+
+/**
+ * Search results tagged with the [ListScope] that produced them, plus what the article list shows
+ * for them. The [display] is built once here, when the snapshot is produced, rather than on every
+ * read of the list on screen — the reader's swipe asks for its rows on every drag event. [display]
+ * is a body property, so it stays out of [equals]: it is derived from [rows] alone.
+ */
+private data class ScopedSearchResults(val rows: List<ArticleSearchResult>, val scope: ListScope) {
+    val display: SearchListDisplay = SearchListDisplay(rows)
+}
+
 private fun narrowingFor(mode: ArticleListMode) =
     ListNarrowing(unreadOnly = mode == ArticleListMode.Unread, starredOnly = mode == ArticleListMode.Starred)
 
@@ -696,7 +715,7 @@ class HomeViewModel(
     // Unlike `articles`, this also never merges pinned-but-absent-from-raw articles back in —
     // a changed query text means a new search, so leaving a pinned article from the previous
     // query stuck in results that no longer match would be surprising.
-    private val searchResultsSnapshot: StateFlow<ScopedRows<ArticleSearchResult>> =
+    private val searchResultsSnapshot: StateFlow<ScopedSearchResults> =
         combine(
             _rawSearchResults, narrowing, _pinnedReadStates, _pinnedUnstarredArticles,
         ) { snapshot, narrow, pinnedReadStates, pinnedUnstarred ->
@@ -704,16 +723,26 @@ class HomeViewModel(
                 snapshot.results, narrow.unreadOnly, pinnedReadStates, pinnedUnstarred,
                 starredOnly = narrow.starredOnly,
             )
-            ScopedRows(results, ListScope(snapshot.filter, narrow))
+            ScopedSearchResults(results, ListScope(snapshot.filter, narrow))
         }.flowOn(dispatcher).stateIn(
             viewModelScope,
             started,
-            ScopedRows(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
+            ScopedSearchResults(emptyList(), ListScope(_rawSearchResults.value.filter, narrowing.value)),
         )
 
     val searchResults: StateFlow<List<ArticleSearchResult>> = DerivedStateFlow(
         { searchResultsSnapshot.value.rows },
         searchResultsSnapshot.map { it.rows },
+    )
+
+    /**
+     * The article rows of [searchResults] and their title highlights, from the same snapshot — one
+     * flow, so the article list can never render rows from one search update with highlights from
+     * another, and does not map the results a second time.
+     */
+    val searchListDisplay: StateFlow<SearchListDisplay> = DerivedStateFlow(
+        { searchResultsSnapshot.value.display },
+        searchResultsSnapshot.map { it.display },
     )
 
     /** The scope of the rows on screen — see [ListScope]; null before the article list first loads. */
@@ -742,7 +771,7 @@ class HomeViewModel(
      * steps from where the user actually is, not from whatever a Flow last emitted).
      */
     val pagerArticles: StateFlow<List<ArticleListRow>> =
-        combine(searchActive, articles, searchResults) { active, rows, results ->
+        combine(searchActive, articles, searchResultsSnapshot) { active, rows, results ->
             displayedRows(active, rows, results)
         }
             .flowOn(dispatcher)
@@ -761,7 +790,7 @@ class HomeViewModel(
      * whether that re-trim currently has anything left to do.
      */
     val canHideRead: StateFlow<Boolean> =
-        combine(unreadOnly, searchActive, articles, searchResults, _selectionCursor) { unread, active, rows, results, selectedId ->
+        combine(unreadOnly, searchActive, articles, searchResultsSnapshot, _selectionCursor) { unread, active, rows, results, selectedId ->
             unread && hasHideableRead(displayedRows(active, rows, results), selectedId)
         }.stateIn(viewModelScope, started, false)
 
@@ -1139,7 +1168,7 @@ class HomeViewModel(
      * @return Search-result rows while [searchActive], or the filtered article rows otherwise.
      */
     fun currentArticles(): List<ArticleListRow> =
-        displayedRows(searchActive.value, articles.value, searchResults.value)
+        displayedRows(searchActive.value, articles.value, searchResultsSnapshot.value)
 
     /**
      * The rows the article list shows: the search results' articles while [searchActive], the
@@ -1149,8 +1178,8 @@ class HomeViewModel(
     private fun displayedRows(
         searchActive: Boolean,
         rows: List<ArticleListRow>,
-        results: List<ArticleSearchResult>,
-    ): List<ArticleListRow> = if (searchActive) results.map { it.article } else rows
+        results: ScopedSearchResults,
+    ): List<ArticleListRow> = if (searchActive) results.display.rows else rows
 
     /**
      * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end
@@ -1655,11 +1684,12 @@ class HomeViewModel(
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
+        val folderId = folderIdForNewFeed()
         val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
-            folderIdForNewFeed(),
+            folderId,
             afterFeedIdForNewFeed(),
-            beforeFeedIdForNewFeed(),
+            beforeFeedIdForNewFeed(folderId),
             tagIdForNewFeed(),
         )
         // Subscribing is the user's own action, and whatever it fetched is right there in front of
@@ -1700,14 +1730,15 @@ class HomeViewModel(
 
     /**
      * The feed a newly subscribed feed should be inserted directly before: the current first feed
-     * in the target group (the selected folder, the selected feed's folder, or the "no folder" group
-     * when no folder/feed context is selected), or `null` if that group is empty. Only consulted when
+     * in the target group [folderId] (the selected folder, the selected feed's folder, or the
+     * "no folder" group when no folder/feed context is selected — see [folderIdForNewFeed]), or
+     * `null` if that group is empty. Only consulted when
      * [afterFeedIdForNewFeed] is null or its target isn't in the group (see
      * [FeedRepository.insertionSortOrderForNewFeed]), so this doesn't affect the "insert directly
      * after the selected feed" behavior.
      */
-    private fun beforeFeedIdForNewFeed(): String? =
-        feeds.value.filter { it.folder_id == folderIdForNewFeed() }.minByOrNull { it.sort_order }?.id
+    private fun beforeFeedIdForNewFeed(folderId: String?): String? =
+        feeds.value.filter { it.folder_id == folderId }.minByOrNull { it.sort_order }?.id
 
     /**
      * The tag a newly subscribed feed should be tagged with: the currently selected tag, whether

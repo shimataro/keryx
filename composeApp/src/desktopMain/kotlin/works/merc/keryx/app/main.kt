@@ -438,8 +438,22 @@ fun main(args: Array<String>) {
         // small transparent tray glyph windowBaseImage uses for the window's own
         // title-bar/taskbar icon. Declared here (before the Dock activation-policy effect)
         // so that effect can re-apply the icon after a visibility toggle.
+        val badgeRoute = remember {
+            val taskbarSupported = Taskbar.isTaskbarSupported()
+            val taskbar = if (taskbarSupported) Taskbar.getTaskbar() else null
+            unreadBadgeRoute(
+                taskbarSupported = taskbarSupported,
+                windowBadgeSupported = taskbar?.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW) == true,
+                iconImageSupported = taskbar?.isSupported(Taskbar.Feature.ICON_IMAGE) == true,
+            )
+        }
+        // Decoded on every platform: besides the badged icon below, it is the Linux notification
+        // icon (KeryxTray's notificationIcon). Only the per-unread-count redraw is skipped where
+        // the badged icon is never applied.
         val dockBaseImage = rememberDrawableImage(Res.drawable.app_icon)
-        val dockBadgedImage = remember(dockBaseImage, unreadCount) { dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } }
+        val dockBadgedImage = remember(dockBaseImage, unreadCount) {
+            if (badgeRoute == UnreadBadgeRoute.AppIcon) dockBaseImage?.let { drawUnreadBadge(it, unreadCount) } else null
+        }
 
         // Hiding the window to the tray (close button, the menu bar's Close, or the tray's Hide —
         // every route ends in windowVisible = false) is when deferred reading-state changes should
@@ -661,15 +675,13 @@ fun main(args: Array<String>) {
             // - so macOS uses the same full-icon-composite fallback as other
             // platforms below instead.
             LaunchedEffect(unreadCount, dockBadgedImage) {
-                if (Taskbar.isTaskbarSupported()) {
-                    val taskbar = Taskbar.getTaskbar()
-                    SwingUtilities.invokeLater {
-                        if (taskbar.isSupported(Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW)) {
-                            taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount))
-                        } else {
-                            applyBrandedDockIcon(dockBadgedImage)
-                        }
+                when (badgeRoute) {
+                    UnreadBadgeRoute.WindowBadge -> {
+                        val taskbar = Taskbar.getTaskbar()
+                        SwingUtilities.invokeLater { taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount)) }
                     }
+                    UnreadBadgeRoute.AppIcon -> SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
+                    UnreadBadgeRoute.None -> Unit
                 }
             }
 

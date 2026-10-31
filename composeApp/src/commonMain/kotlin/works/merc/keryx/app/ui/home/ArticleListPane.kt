@@ -329,7 +329,8 @@ fun ArticleListPane(
             null
         }
     } else {
-        val results by vm.searchResults.collectAsState()
+        // Rows and their highlights come as one value, so they are always from the same search.
+        val display by vm.searchListDisplay.collectAsState()
         val searching by vm.searching.collectAsState()
         // A query has usable terms once at least one word is 2+ characters (searched via the
         // trigram index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character
@@ -340,20 +341,23 @@ fun ArticleListPane(
         // own effect for the base list: when the user selects (revealRequest) and when results first
         // arrive, never because their contents changed. A background write re-running the search,
         // or a selection handed back after a tombstone, must not pull the list to the selection.
-        // `results` is read through its State delegate, so the effect sees the latest list.
-        LaunchedEffect(revealRequest, results.isNotEmpty()) {
-            val index = results.indexOfFirst { it.article.id == selectedId }
-            if (index !in results.indices) return@LaunchedEffect
+        // `display` is read through its State delegate, so the effect sees the latest list.
+        LaunchedEffect(revealRequest, display.rows.isNotEmpty()) {
+            val index = display.rows.indexOfFirst { it.id == selectedId }
+            if (index !in display.rows.indices) return@LaunchedEffect
             searchListState.scrollToIndexIfNeeded(index)
         }
 
-        articles = results.map { it.article }
+        // Mapped once per snapshot by the ViewModel, so an unrelated recomposition of this pane
+        // (a keystroke, the searching flag) hands ArticleListPaneContent the same list instance
+        // and lets it skip.
+        articles = display.rows
         listState = searchListState
         branchOnAddFeedClick = null
         hasNoFeeds = false
         loading = false
         sortEnabled = false
-        titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } }
+        titleMarkedById = display.titleMarkedById
         onShowAllArticles = null
         emptyContent = when {
             !hasValidTerms -> {
@@ -363,10 +367,10 @@ fun ArticleListPane(
             // flight, instead of flashing "no results" between keystrokes (or right after switching
             // filters) before the real results land. Any previous non-empty results keep showing
             // (the `else` branch below) until the new ones land.
-            results.isEmpty() && searching -> {
+            display.rows.isEmpty() && searching -> {
                 {}
             }
-            results.isEmpty() -> {
+            display.rows.isEmpty() -> {
                 { NoSearchResultsHint(scopedBelowAllFeeds = filter != ArticleFilter.All) }
             }
             else -> null
