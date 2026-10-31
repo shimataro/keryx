@@ -90,6 +90,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
@@ -6131,6 +6132,38 @@ class HomeViewModelTest {
         assertTrue(vm.searchActive.value)
         assertEquals(vm.searchResults.value.map { it.article.id }, vm.pagerArticles.value.map { it.id })
         assertEquals(listOf("a2"), vm.pagerArticles.value.map { it.id })
+        val display = vm.searchListDisplay.value
+        assertEquals(vm.searchResults.value.map { it.article }, display.rows)
+        assertEquals(vm.searchResults.value.associate { it.article.id to it.titleMarked }, display.titleMarkedById)
+        assertSame(display, vm.searchListDisplay.value)
+    }
+
+    /**
+     * While a search runs, [HomeViewModel.currentArticles] — what keyboard and swipe navigation step
+     * through — is the search results' own articles, in their order, and follows a read toggle the
+     * results pin (the rows are derived after pin resolution, not from the raw search).
+     */
+    @Test
+    fun currentArticlesFollowsSearchResultsIncludingTheirPinnedReadState() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a2", "f1", title = "Kotlin Two", content = "kotlin content", isRead = 0L)
+        db.insertArticle("a3", "f1", title = "Swift Three", content = "swift content", isRead = 0L)
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertTrue(vm.searchActive.value)
+        assertEquals(setOf("a1", "a2"), vm.searchResults.value.map { it.article.id }.toSet())
+        assertEquals(vm.searchResults.value.map { it.article }, vm.currentArticles())
+
+        vm.selectArticle(vm.currentArticles().first())
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(vm.searchResults.value.map { it.article }, vm.currentArticles())
+        assertEquals(1L, vm.currentArticles().first().is_read)
     }
 
     /**

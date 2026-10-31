@@ -93,6 +93,42 @@ private fun paintBadge(graphics: Graphics2D, anchorRightX: Float, anchorTopY: Fl
     graphics.drawString(label, textX, textY)
 }
 
+/** How the unread count reaches the OS on this platform — see [unreadBadgeRoute]. */
+enum class UnreadBadgeRoute {
+    /** A badge-only image set on the window (`Taskbar.setWindowIconBadge`, which Windows uses). */
+    WindowBadge,
+
+    /** The full-size branded icon with the badge drawn on it, set as the app icon (macOS Dock). */
+    AppIcon,
+
+    /** No way to show it (no taskbar, or it takes neither image). */
+    None,
+}
+
+/**
+ * Chooses how the unread count is shown, from what the taskbar supports. `main.kt` uses the result
+ * both to decide whether to draw the full-size badged icon (`drawUnreadBadge` over the branded icon)
+ * and to decide which call applies it, so a platform that never shows that image does not redraw it
+ * on every unread-count change. (The base icon itself is still decoded everywhere — it is also the
+ * Linux notification icon.)
+ *
+ * @param taskbarSupported `Taskbar.isTaskbarSupported()`. The two feature flags only mean anything
+ *   when this is true; when it is false they are ignored.
+ * @param windowBadgeSupported Whether the taskbar supports `Taskbar.Feature.ICON_BADGE_IMAGE_WINDOW`.
+ * @param iconImageSupported Whether the taskbar supports `Taskbar.Feature.ICON_IMAGE`.
+ * @return The route, preferring the window badge over the app icon.
+ */
+fun unreadBadgeRoute(
+    taskbarSupported: Boolean,
+    windowBadgeSupported: Boolean,
+    iconImageSupported: Boolean,
+): UnreadBadgeRoute = when {
+    !taskbarSupported -> UnreadBadgeRoute.None
+    windowBadgeSupported -> UnreadBadgeRoute.WindowBadge
+    iconImageSupported -> UnreadBadgeRoute.AppIcon
+    else -> UnreadBadgeRoute.None
+}
+
 /**
  * Draws an unread-count badge at the top-right corner of a copy of [base].
  *
