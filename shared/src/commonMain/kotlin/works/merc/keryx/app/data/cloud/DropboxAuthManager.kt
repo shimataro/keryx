@@ -1,7 +1,7 @@
 package works.merc.keryx.app.data.cloud
 
 import io.ktor.client.HttpClient
-import io.ktor.client.request.header
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.post
 import io.ktor.http.Parameters
 import io.ktor.http.URLBuilder
@@ -83,7 +83,7 @@ class DropboxAuthManager(
      */
     override suspend fun revoke(accessToken: String): Result<Unit> = revokeOAuthToken {
         client.post(DROPBOX_REVOKE_ENDPOINT) {
-            header("Authorization", "Bearer $accessToken")
+            bearerAuth(accessToken)
         }
     }
 

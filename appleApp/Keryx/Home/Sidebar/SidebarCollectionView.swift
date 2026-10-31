@@ -77,6 +77,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private var unreadCounts: SidebarUnreadCounts
     /// The counts the on-screen cells were last brought in line with — see `refreshUnreadCounts()`.
     private var renderedUnreadCounts: SidebarUnreadCounts
+    /// The latest refreshing rows, observed alongside the unread counts and reconfigured the same way.
+    private var refreshing: SidebarRefreshing
+    private var renderedRefreshing: SidebarRefreshing
 
     private(set) var collectionView: UICollectionView!
     private(set) var dataSource: UICollectionViewDiffableDataSource<SidebarSection, SidebarItemID>!
@@ -98,6 +101,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         let counts = Self.unreadCounts(of: home)
         unreadCounts = counts
         renderedUnreadCounts = counts
+        let refreshing = Self.refreshing(of: home)
+        self.refreshing = refreshing
+        renderedRefreshing = refreshing
         super.init(nibName: nil, bundle: nil)
         observeUnreadCounts()
     }
@@ -208,6 +214,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private func updateRow(_ cell: UICollectionViewListCell, _ item: SidebarItemID, _ cellState: UICellConfigurationState) {
         guard let content = state?.contents[item] else { return }
         let unreadCount = unreadCounts.count(for: item)
+        let isRefreshing = refreshing.isRefreshing(item)
         let dropTarget = Self.isDropTarget(cellState)
         let filled = dropTarget || cellState.isSelected
         var background = cell.defaultBackgroundConfiguration().updated(for: cellState)
@@ -246,6 +253,8 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         cell.contentConfiguration = UIHostingConfiguration {
             SidebarCellContent(
                 content: content,
+                isRefreshing: isRefreshing,
+                isFilled: filled,
                 color: Color(uiColor: textColor),
                 onMove: { [weak self] in self?.actions.moveRow(item, $0) }
             )
@@ -336,6 +345,7 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     private func observeUnreadCounts() {
         withObservationTracking {
             _ = Self.unreadCounts(of: home)
+            _ = Self.refreshing(of: home)
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.unreadCountsDidChange() }
         }
@@ -345,7 +355,12 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
         // Re-registering and reading in the same turn, so no change published after it is missed.
         observeUnreadCounts()
         unreadCounts = Self.unreadCounts(of: home)
+        refreshing = Self.refreshing(of: home)
         refreshUnreadCounts()
+    }
+
+    private static func refreshing(of home: HomeObservable) -> SidebarRefreshing {
+        SidebarRefreshing(feeds: home.refreshingFeedIds, folders: home.refreshingFolderIds)
     }
 
     /// Reconfigures the cells whose count differs from what they were last brought in line with.
@@ -353,10 +368,11 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
     /// already paints the latest count, and the rest catch up from `apply(_:force:)` when it ends.
     private func refreshUnreadCounts() {
         guard !dragInProgress, isViewLoaded else { return }
-        let changed = SidebarUnreadCounts.changedItems(
-            dataSource.snapshot().itemIdentifiers, from: renderedUnreadCounts, to: unreadCounts
-        )
+        let items = dataSource.snapshot().itemIdentifiers
+        let changed = SidebarUnreadCounts.changedItems(items, from: renderedUnreadCounts, to: unreadCounts)
+            + SidebarRefreshing.changedItems(items, from: renderedRefreshing, to: refreshing)
         renderedUnreadCounts = unreadCounts
+        renderedRefreshing = refreshing
         reconfigure(Set(changed))
     }
 
@@ -546,6 +562,9 @@ final class SidebarCollectionViewController: UIViewController, UICollectionViewD
 /// A row's hosted content — the shared `SidebarRowLabel` in the colors of the cell's current state.
 private struct SidebarCellContent: View {
     let content: SidebarRowContent
+    let isRefreshing: Bool
+    /// Whether the cell paints the teal fill (selected or a drop target).
+    let isFilled: Bool
     let color: Color
     let onMove: (SidebarMoveDirection) -> Void
 
@@ -555,9 +574,12 @@ private struct SidebarCellContent: View {
             icon: content.icon ?? .symbol("circle"),
             isErroring: content.isErroring,
             isGone: content.isGone,
+            isRefreshing: isRefreshing,
             symbolTint: color
         )
         .foregroundStyle(color)
+        // What a `List` row sets for its selection, so the label's spinner reads on the fill.
+        .environment(\.backgroundProminence, isFilled ? .increased : .standard)
         .frame(maxWidth: .infinity, alignment: .leading)
         // One element per row for VoiceOver, with the reorder a drag would do offered as actions (a
         // screen reader cannot drag): each only where the row can move that way.

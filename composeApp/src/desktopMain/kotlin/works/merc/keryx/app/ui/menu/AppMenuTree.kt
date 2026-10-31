@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.tray.TrayUpdateEntry
 import works.merc.keryx.app.ui.home.renameKey
@@ -58,7 +59,9 @@ internal enum class AppMenuShortcut(
     Search(Key.F, "F"),
     ImportOpml(Key.I, "I"),
     ExportOpml(Key.E, "E"),
-    UnreadOnly(Key.U, "U"),
+    ListModeAll(Key.One, "1"),
+    ListModeUnread(Key.Two, "2"),
+    ListModeStarred(Key.Three, "3"),
     ToggleRead(Key.U, "U", shift = true),
     ToggleStar(Key.S, "S", shift = true),
     OpenInBrowser(Key.O, "O", shift = true),
@@ -113,7 +116,10 @@ internal data class AppMenuLabels(
     val quit: String,
     val viewMenu: String,
     val search: String,
+    val allArticles: String,
     val unreadOnly: String,
+    val starredOnly: String,
+    val hideRead: String,
     val toggleSort: String,
     val markAllRead: String,
     val showMenuBar: String,
@@ -156,7 +162,8 @@ internal data class AppMenuActions(
     val openSettings: () -> Unit,
     val quit: () -> Unit,
     val focusSearch: () -> Unit,
-    val setUnreadOnly: (Boolean) -> Unit,
+    val setListMode: (ArticleListMode) -> Unit,
+    val hideRead: () -> Unit,
     val toggleSort: () -> Unit,
     val markAllRead: () -> Unit,
     val toggleRead: () -> Unit,
@@ -247,15 +254,30 @@ internal fun buildAppMenuTree(
 
     val viewItems = buildList {
         add(AppMenuNode.Item(labels.search, ui.searchEnabled, AppMenuShortcut.Search, actions.focusSearch))
-        add(
-            AppMenuNode.CheckboxItem(
-                labels.unreadOnly,
-                ui.unreadOnlyEnabled,
-                ui.unreadOnlyChecked,
-                AppMenuShortcut.UnreadOnly,
-                onCheckedChange = actions.setUnreadOnly,
-            ),
-        )
+        add(AppMenuNode.Separator)
+        // The article list's mode, as three check items with the current one checked, plus Starred
+        // while the Starred filter fixes it on (starredModeChecked; the toolbar's mode chip offers
+        // the same three, with the same Ctrl/⌘+1–3). Re-choosing the
+        // checked one changes nothing. Separators on both sides set them apart as one choice.
+        listOf(
+            Triple(labels.allArticles, ArticleListMode.All, AppMenuShortcut.ListModeAll),
+            Triple(labels.unreadOnly, ArticleListMode.Unread, AppMenuShortcut.ListModeUnread),
+            Triple(labels.starredOnly, ArticleListMode.Starred, AppMenuShortcut.ListModeStarred),
+        ).forEach { (label, mode, shortcut) ->
+            add(
+                AppMenuNode.CheckboxItem(
+                    label,
+                    if (mode == ArticleListMode.Starred) ui.starredModeEnabled else ui.listModeEnabled,
+                    if (mode == ArticleListMode.Starred) ui.starredModeChecked else ui.listMode == mode,
+                    shortcut,
+                    onCheckedChange = { if (it) actions.setListMode(mode) },
+                ),
+            )
+        }
+        add(AppMenuNode.Separator)
+        // Unread-only keeps rows read since it was chosen on screen; this pulls the list back to
+        // strictly unread on demand, as a manual refresh or sync also does.
+        add(AppMenuNode.Item(labels.hideRead, ui.hideReadEnabled, onClick = actions.hideRead))
         add(AppMenuNode.Item(labels.toggleSort, ui.toggleSortEnabled, onClick = actions.toggleSort))
         add(AppMenuNode.Separator)
         add(AppMenuNode.Item(labels.markAllRead, ui.markAllReadEnabled, onClick = actions.markAllRead))
@@ -287,7 +309,7 @@ internal fun buildAppMenuTree(
         AppMenuNode.Separator,
         AppMenuNode.Item(labels.feedRefresh, ui.feedActionsEnabled, AppMenuShortcut.FeedRefresh, actions.refreshSelectedFeed),
         // Both submenus end with a "New …" item, like the feed row's context menu
-        // (FeedListDragAndDrop.kt), so Tags always has at least that one entry.
+        // (FeedListRows.kt), so Tags always has at least that one entry.
         AppMenuNode.Menu(
             label = labels.feedAssignTags,
             enabled = ui.feedActionsEnabled,

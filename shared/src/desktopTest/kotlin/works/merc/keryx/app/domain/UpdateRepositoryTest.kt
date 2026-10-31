@@ -9,6 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -25,6 +26,7 @@ import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
+import works.merc.keryx.app.testThreadDispatcher
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
@@ -91,16 +93,22 @@ private fun <T> assertSubsequenceOf(expected: List<T>, actual: List<T>, label: S
 class UpdateRepositoryTest {
     private val tempDirs = mutableListOf<File>()
     private val scopes = mutableListOf<CoroutineScope>()
+    private val dispatchers = mutableListOf<ExecutorCoroutineDispatcher>()
 
     @AfterTest
     fun tearDown() {
         scopes.forEach { it.cancel() }
+        dispatchers.forEach { it.close() }
         tempDirs.forEach { it.deleteRecursively() }
     }
 
     private fun newTempDir(): String = createTempDirectory("update-repository-test").toFile().also { tempDirs.add(it) }.path
 
-    private fun trackedScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes.add(it) }
+    /** A scope on a thread of its own ([testThreadDispatcher]), torn down after each test. */
+    private fun trackedScope(): CoroutineScope {
+        val dispatcher = testThreadDispatcher("update-repository-test").also { dispatchers.add(it) }
+        return CoroutineScope(SupervisorJob() + dispatcher).also { scopes.add(it) }
+    }
 
     /** Polls [condition] on the real wall clock until it holds, failing with [describe]'s message on
      * timeout — see this class's own KDoc for why these tests poll rather than use `runTest`. */
@@ -584,7 +592,7 @@ class UpdateRepositoryTest {
      * Deliberately does **not** assert the two recorded sequences are identical. A `StateFlow` is
      * conflating: it only guarantees the latest value arrives, and intermediate values are dropped
      * per collector, *independently*. `Available -> Downloading -> Verifying -> Ready` are all
-     * written back-to-back by `UpdateRepository.runDownload` on [Dispatchers.Default], so on a
+     * written back-to-back by `UpdateRepository.runDownload` on the repository's own thread, so on a
      * slow/low-core machine (observed: the 2-core `windows-latest` CI runner) one collector can
      * conflate a value the other keeps — an `assertEquals` of the two lists was flaky for exactly
      * that reason, not because anything was wrong with the state machine.
@@ -608,7 +616,7 @@ class UpdateRepositoryTest {
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
-        // Appended from the collectors' own Dispatchers.Default threads and read from this one, with
+        // Appended from the collectors' own thread and read from this one, with
         // no happens-before edge between them — a plain ArrayList here would make even the observed
         // contents undefined, quite apart from the conflation this test's KDoc describes.
         val seenByFirst = CopyOnWriteArrayList<UpdateState>()

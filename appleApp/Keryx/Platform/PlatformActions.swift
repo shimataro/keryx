@@ -35,6 +35,8 @@ func openInBrowser(_ urlString: String?) {
     #if os(macOS)
     NSWorkspace.shared.open(url)
     #else
-    UIApplication.shared.open(url)
+    // Through the shared opener, which marks the launch so the foreground exit it causes does not
+    // flush deferred syncs (`ExternalAppLaunch`).
+    BrowserOpener.shared.open(url: url.absoluteString)
     #endif
 }

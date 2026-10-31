@@ -1,3 +1,4 @@
+import co.touchlab.skie.configuration.SuppressSkieWarning
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
@@ -264,6 +265,8 @@ kotlin {
         target.binaries.framework {
             baseName = "KeryxShared"
             isStatic = true
+            // Explicit, so Kotlin/Native doesn't warn and fall back to the bundle name.
+            binaryOption("bundleId", "works.merc.keryx.shared")
             xcframework.add(this)
         }
     }
@@ -407,5 +410,19 @@ sqldelight {
             // step is wired in.
             verifyMigrations.set(false)
         }
+    }
+}
+
+// SKIE renames these `description` properties to `description_`, since they collide with
+// NSObject's `description`. Swift never reads them, so the rename is accepted and its warning
+// muted. Feeds is SQLDelight-generated and HttpStatusCode is Ktor's, so neither can take
+// @ObjCName; FetchedFeed could, but would only trade one unused name for another.
+skie {
+    features {
+        listOf(
+            "works.merc.keryx.app.data.local.db.Feeds.description",
+            "works.merc.keryx.app.data.remote.FetchedFeed.description",
+            "io.ktor.http.HttpStatusCode.description",
+        ).forEach { group(it) { SuppressSkieWarning.NameCollision(true) } }
     }
 }

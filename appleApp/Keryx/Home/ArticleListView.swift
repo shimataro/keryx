@@ -1,7 +1,7 @@
 import KeryxShared
 import SwiftUI
 
-/// The center pane: toolbar (unread-only, hide-read, sort, mark-all-read, the notification bell),
+/// The center pane: toolbar (list mode, sort, mark-all-read, the notification bell),
 /// the article rows themselves (search-highlighted when a query is active), the "new articles"
 /// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
 /// research notes.
@@ -111,10 +111,12 @@ struct ArticleListView: View {
                     .onChange(of: filterKey, initial: false) { _, _ in
                         if let first = displayedRows.first?.id { proxy.scrollTo(first) }
                     }
-                    // Only when the selection actually moved off-screen (keyboard navigation, a
-                    // restored selection) — a row already visible (e.g. just clicked) never jumps.
-                    .onChange(of: home.selectedArticleId) { _, id in
-                        guard let id, !visibleRows.appearedIds.contains(id) else { return }
+                    // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
+                    // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
+                    // Not on `selectedArticleId` itself: it also moves back without the user acting
+                    // (a selection found tombstoned), which must not scroll the list.
+                    .onChange(of: home.selectionRevealRequests) { _, _ in
+                        guard let id = home.selectedArticleId, !visibleRows.appearedIds.contains(id) else { return }
                         proxy.scrollTo(id)
                     }
                     .onChange(of: displayedRows.isEmpty) { _, isEmpty in
@@ -255,59 +257,121 @@ struct ArticleListView: View {
         // The title feeds the next column's back button and its long-press menu; the heading is
         // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
         ToolbarItem(placement: .principal) { Color.clear }
+        // The same status as the sidebar's, for the column an iPhone mostly shows.
+        RefreshStatusToolbarItem(home: home)
         #endif
-        // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
-        // the overflow menu it collapses into at a narrow width takes each row's title from it.
-        // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
-        ToolbarItemGroup(placement: .navigation) {
-            Toggle(isOn: Binding(
-                get: { home.unreadOnly },
-                set: { home.viewModel.setUnreadOnly(value: $0) }
-            )) {
-                Label(
-                    L("home_unread_only"),
-                    systemImage: home.unreadOnly
-                        ? "line.3.horizontal.decrease.circle.fill"
-                        : "line.3.horizontal.decrease.circle"
-                )
-            }
-            .toggleStyle(.button)
-            .help(L("home_unread_only"))
+        #if os(iOS) && compiler(>=6.4)
+        // `#available` is a runtime check, so `visibilityPriority` also needs the iOS 27 SDK at
+        // compile time; Swift 6.4 ships with it (Xcode 27), while an older Xcode keeps the groups.
+        if #available(iOS 27.0, *) {
+            // A vertical bar (iPhone Duo's outer display, and landscape on its inner one) overflows
+            // from the bottom up, which hid Mark All as Read first and squeezed the search button
+            // out of shape. The HIG asks to keep frequent actions and badged items visible longest,
+            // so the bell and Mark All as Read outrank the rest. A horizontal bar ignores these.
+            ToolbarItem(placement: .navigation) { listModeMenu }
+                .visibilityPriority(.low)
 
-            Button {
-                home.viewModel.hideRead()
-            } label: {
-                Label(L("home_hide_read"), systemImage: "eye.slash")
-            }
-            .disabled(!home.canHideRead)
-            .help(L("home_hide_read"))
+            FlexibleToolbarSpacer()
+
+            // Separate items, since a priority applies to a whole item or group.
+            ToolbarItem(placement: .primaryAction) { notificationBellButton }
+                .visibilityPriority(.high)
+            ToolbarItem(placement: .primaryAction) { sortButton }
+                .visibilityPriority(.low)
+            ToolbarItem(placement: .primaryAction) { markAllReadButton }
+                .visibilityPriority(.high)
+        } else {
+            groupedToolbarItems
         }
+        #else
+        groupedToolbarItems
+        #endif
+    }
+
+    /// The toolbar's items in their two groups — what every platform shows where per-item
+    /// visibility priorities are unavailable.
+    @ToolbarContentBuilder
+    private var groupedToolbarItems: some ToolbarContent {
+        // Every item's label is a `Label`, not a bare icon (except the mode menu's on iOS — see
+        // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
+        // into at a narrow width takes each row's title from it.
+        // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
+        ToolbarItem(placement: .navigation) { listModeMenu }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
         // pushes the trailing cluster to the column's right edge.
         FlexibleToolbarSpacer()
 
         ToolbarItemGroup(placement: .primaryAction) {
-            NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
-
-            Button {
-                home.viewModel.toggleSort()
-            } label: {
-                Label(
-                    L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
-                    systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
-                )
-            }
-            .disabled(home.searchActive)
-            .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
-
-            Button {
-                home.viewModel.markAllRead()
-            } label: {
-                Label(L("home_mark_all_read"), systemImage: "checkmark.circle")
-            }
-            .help(L("home_mark_all_read"))
+            notificationBellButton
+            sortButton
+            markAllReadButton
         }
+    }
+
+    private var listModeMenu: some View {
+        // A pop-up button (HIG): the current mode names the button, the menu offers all three.
+        // Each mode has its own icon (`listModeSymbol`), filled whenever it narrows the list, on the
+        // button and beside each item. Toggles rather than an inline Picker:
+        // a Picker option's own `.disabled` is not honored inside a menu, so Starred stayed
+        // choosable under the Starred filter. Same items as the View menu (`HomeCommands`).
+        Menu {
+            ForEach(Self.listModes, id: \.self) { mode in
+                Toggle(L(Self.listModeLabelKey(mode)), systemImage: Self.listModeSymbol(mode), isOn: Binding(
+                    get: { ArticleListModeKt.listModeChecked(item: mode, mode: home.listMode, starredModeAvailable: home.starredModeEnabled) },
+                    set: { if $0 { home.viewModel.setMode(target: mode) } }
+                ))
+                .disabled(mode == .starred && !home.starredModeEnabled)
+            }
+        } label: {
+            #if os(iOS)
+            // iOS draws a toolbar menu as a bare icon and ignores `menuIndicator`, so the label carries
+            // the pop-up button's own chevrons: a tap opens a choice rather than acting at once
+            // (macOS's toolbar adds an indicator by itself). Not a `Label`: the toolbar keeps only the
+            // first image of a `Label`'s icon, dropping the chevrons.
+            HStack(spacing: 1) {
+                Image(systemName: Self.listModeSymbol(home.listMode))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            #else
+            Label(
+                L(Self.listModeLabelKey(home.listMode)),
+                systemImage: Self.listModeSymbol(home.listMode)
+            )
+            .labelStyle(.titleAndIcon)
+            #endif
+        }
+        .help(L("home_list_mode"))
+        .accessibilityLabel(L("home_list_mode"))
+        .accessibilityValue(L(Self.listModeLabelKey(home.listMode)))
+    }
+
+    private var notificationBellButton: some View {
+        NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
+    }
+
+    private var sortButton: some View {
+        Button {
+            home.viewModel.toggleSort()
+        } label: {
+            Label(
+                L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
+                systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
+            )
+        }
+        .disabled(home.searchActive)
+        .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
+    }
+
+    private var markAllReadButton: some View {
+        Button {
+            home.viewModel.markAllRead()
+        } label: {
+            Label(L("home_mark_all_read"), systemImage: "checkmark.circle")
+        }
+        .help(L("home_mark_all_read"))
     }
 
     // MARK: - Content / empty states
@@ -339,7 +403,11 @@ struct ArticleListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !home.hasFeeds {
+        // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
+        // before the first emission (`ArticleListBody.pending`).
+        if home.listBody == .pending {
+            headed(Color.clear)
+        } else if home.listBody == .noFeeds {
             headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
@@ -348,10 +416,40 @@ struct ArticleListView: View {
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
-            noArticlesView
+            // Nothing while the rows are still on their way: being built, or held by the view model
+            // but not yet received here (`articleListCatchingUp`; `listHasRows` is observed, so the
+            // view is woken whichever way it settles).
+            if home.articleRowsBuilding
+                || ArticleListModelKt.articleListCatchingUp(
+                    displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
+                ) {
+                headed(Color.clear)
+            } else {
+                noArticlesView
+            }
         } else {
             articleList
                 .modifier(PullToRefreshModifier(home: home))
+        }
+    }
+
+    private static let listModes: [ArticleListMode] = [.all, .unread, .starred]
+
+    /// The label naming `mode` on the toolbar's mode menu (Compose: `listModeLabel`).
+    private static func listModeLabelKey(_ mode: ArticleListMode) -> String {
+        switch mode {
+        case .all: "home_list_mode_all"
+        case .unread: "home_list_mode_unread"
+        case .starred: "home_list_mode_starred"
+        }
+    }
+
+    /// The icon for `mode`: the app's unread dot and star, in the same circle as All's filter icon.
+    private static func listModeSymbol(_ mode: ArticleListMode) -> String {
+        switch mode {
+        case .all: "line.3.horizontal.decrease.circle"
+        case .unread: "circle.inset.filled"
+        case .starred: "star.circle.fill"
         }
     }
 
@@ -359,7 +457,14 @@ struct ArticleListView: View {
     /// "The gesture works on an empty list too", e.g. unread-only with nothing unread).
     @ViewBuilder
     private var noArticlesView: some View {
-        let emptyState = ContentUnavailableView(L("home_no_articles"), systemImage: "doc.text")
+        // Starred mode can narrow a list to nothing; say so and offer the way out (as Compose does).
+        let emptyState = home.listMode == .starred
+            ? AnyView(ContentUnavailableView {
+                Label(L("home_no_starred_articles"), systemImage: "star")
+            } actions: {
+                Button(L("home_show_all_articles")) { home.viewModel.setMode(target: .all) }
+            })
+            : AnyView(ContentUnavailableView(L("home_no_articles"), systemImage: "doc.text"))
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
@@ -447,6 +552,7 @@ struct ArticleListView: View {
         return ArticleTableView(
             rows: displayed,
             selectedId: selectedId,
+            revealRequest: home.selectionRevealRequests,
             resetGeneration: tableResetGeneration,
             scrollRequest: tableScrollRequest,
             contextMenuSelectionTracker: contextMenuSelectionTracker,

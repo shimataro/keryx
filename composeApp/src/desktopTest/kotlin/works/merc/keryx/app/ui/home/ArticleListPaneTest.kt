@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -17,6 +18,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -33,6 +36,9 @@ import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.Articles
+import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuShortcut
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.ui.common.KeryxIcons
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -42,12 +48,14 @@ import kotlinx.coroutines.launch
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.ActivityCenter
 import works.merc.keryx.app.domain.ArticleListRow
+import works.merc.keryx.app.HoldingDispatcher
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -68,8 +76,8 @@ class ArticleListPaneTest {
             articles = items,
             feedTitles = emptyMap(),
             selectedId = null,
-            unreadOnly = false,
-            onToggleUnreadOnly = {},
+            listMode = ArticleListMode.All,
+            onSelectListMode = {},
             onToggleSort = {},
             onMarkAllRead = {},
             onSelectArticle = {},
@@ -127,8 +135,8 @@ class ArticleListPaneTest {
             articles = articles(5),
             feedTitles = emptyMap(),
             selectedId = null,
-            unreadOnly = false,
-            onToggleUnreadOnly = {},
+            listMode = ArticleListMode.All,
+            onSelectListMode = {},
             onToggleSort = {},
             onMarkAllRead = {},
             onSelectArticle = {},
@@ -264,6 +272,7 @@ class ArticleListPaneTest {
         val items = articles(30)
         lateinit var state: LazyListState
         var selected by mutableStateOf<ArticleListRow?>(null)
+        var revealRequest by mutableStateOf(0)
 
         setContent {
             state = rememberLazyListState()
@@ -271,8 +280,9 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                revealRequest = revealRequest,
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -283,12 +293,54 @@ class ArticleListPaneTest {
         waitForIdle()
 
         selected = items[25]
+        revealRequest++
         waitForIdle()
 
         onNodeWithTag("article-a25").assertIsDisplayed()
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == 25 }
         assertTrue(info.offset >= state.layoutInfo.viewportStartOffset)
         assertTrue(info.offset + info.size <= state.layoutInfo.viewportEndOffset)
+    }
+
+    /**
+     * The selection's id also changes without the user acting — a selection found tombstoned hands
+     * the cursor back to the article before it — and the list must stay where it is then: only a
+     * user's selection (a new `revealRequest`) scrolls.
+     */
+    @Test
+    fun doesNotScrollWhenTheSelectedIdChangesWithoutARevealRequest() = runDesktopComposeUiTest {
+        val items = articles(30)
+        lateinit var state: LazyListState
+        var selectedId by mutableStateOf<String?>(items[25].id)
+        var revealRequest by mutableStateOf(1)
+
+        setContent {
+            state = rememberLazyListState()
+            ArticleListPaneContent(
+                articles = items,
+                feedTitles = emptyMap(),
+                selectedId = selectedId,
+                revealRequest = revealRequest,
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                listState = state,
+            )
+        }
+        waitForIdle()
+        // The user selected a25, far down: it was scrolled into view.
+        onNodeWithTag("article-a25").assertIsDisplayed()
+        val before = state.firstVisibleItemIndex
+
+        // The cursor goes back to a0 (off screen) on its own.
+        selectedId = items[0].id
+        waitForIdle()
+
+        assertEquals(before, state.firstVisibleItemIndex)
+        onNodeWithTag("article-a25").assertIsDisplayed()
     }
 
     /**
@@ -310,8 +362,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = items[22].id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -338,8 +390,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -375,8 +427,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -395,6 +447,7 @@ class ArticleListPaneTest {
         val items = articles(30)
         lateinit var state: LazyListState
         var selected by mutableStateOf<ArticleListRow?>(null)
+        var revealRequest by mutableStateOf(0)
         // First frame: tall enough that a single row is never clipped, so we can measure it.
         var containerHeight by mutableStateOf(2000.dp)
 
@@ -404,8 +457,9 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = selected?.id,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                revealRequest = revealRequest,
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -433,6 +487,7 @@ class ArticleListPaneTest {
 
         val indexBefore = state.firstVisibleItemIndex
         selected = items[targetIndex]
+        revealRequest++
         waitForIdle()
 
         val info = state.layoutInfo.visibleItemsInfo.first { it.index == targetIndex }
@@ -451,8 +506,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
@@ -478,8 +533,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -505,8 +560,8 @@ class ArticleListPaneTest {
                 articles = emptyList(),
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = {},
@@ -522,6 +577,31 @@ class ArticleListPaneTest {
     }
 
     @Test
+    fun emptyStateShowsNeitherMessageWhileTheListsAreStillLoading() = runDesktopComposeUiTest {
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                modifier = Modifier.size(360.dp, 400.dp),
+                hasNoFeeds = false,
+                loading = true,
+                onAddFeedClick = {},
+            )
+        }
+        waitForIdle()
+
+        onNodeWithText("記事がありません").assertDoesNotExist()
+        onNodeWithText("フィードが登録されていません").assertDoesNotExist()
+        onNodeWithText("フィードを追加").assertDoesNotExist()
+    }
+
+    @Test
     fun rightClickOnArticleRowSelectsWithoutActivatingPaneFocus() = runDesktopComposeUiTest {
         val items = articles(3)
         var activateCount = 0
@@ -532,8 +612,8 @@ class ArticleListPaneTest {
                 articles = items,
                 feedTitles = emptyMap(),
                 selectedId = null,
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 onToggleSort = {},
                 onMarkAllRead = {},
                 onSelectArticle = { selectCount++ },
@@ -550,14 +630,44 @@ class ArticleListPaneTest {
         assertEquals(0, activateCount)
     }
 
+    /**
+     * The highlight follows the click itself rather than the reader's body lookup, which can wait out
+     * a write lock (a sync merge, an FTS rebuild) for seconds.
+     */
+    @Test
+    fun theHighlightMovesBeforeTheSelectionsBodyHasLoaded() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        db.insertFeed("f1")
+        db.insertArticleRow("a1", "f1", createdAt = 2L)
+        db.insertArticleRow("a2", "f1", createdAt = 1L)
+        val holding = HoldingDispatcher()
+        useHomeViewModel(driver, db, dispatcher = holding) { fixture ->
+            val vm = fixture.vm
+            setContent { ArticleListPane(vm = vm, focused = true, onActivated = {}) }
+            waitForIdle()
+
+            holding.hold()
+            try {
+                onNodeWithText("Title a2").performClick()
+                waitForIdle()
+
+                assertNull(vm.loadedArticleId(), "the body lookup is still held")
+                onNodeWithText("Title a2").assertIsSelected()
+                onNodeWithText("Title a1").assertIsNotSelected()
+            } finally {
+                holding.release()
+            }
+        }
+    }
+
     @Test
     fun articleListTopBarSortButtonDisabledInSearchModeDoesNotInvokeCallback() = runDesktopComposeUiTest {
         var toggleSortCount = 0
 
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = { toggleSortCount++ },
                 onMarkAllRead = {},
@@ -580,8 +690,8 @@ class ArticleListPaneTest {
 
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = { toggleSortCount++ },
                 onMarkAllRead = {},
@@ -599,51 +709,20 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarHideReadButtonDisabledByDefaultDoesNotInvokeCallback() = runDesktopComposeUiTest {
-        var hideReadCount = 0
-
+    fun articleListTopBarHasNoHideReadButton() = runDesktopComposeUiTest {
+        // Hide read is a View-menu command (AppMenuTree), not a toolbar button.
         setContent {
             ArticleListTopBar(
-                unreadOnly = true,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.Unread,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
-                onHideRead = { hideReadCount++ },
             )
         }
         waitForIdle()
 
-        // canHideRead defaults to false, so the button is present but disabled.
-        onNodeWithContentDescription("既読記事を非表示").assertIsNotEnabled()
-        onNodeWithContentDescription("既読記事を非表示").performClick()
-        waitForIdle()
-
-        assertEquals(0, hideReadCount)
-    }
-
-    @Test
-    fun articleListTopBarHideReadButtonEnabledInvokesCallback() = runDesktopComposeUiTest {
-        var hideReadCount = 0
-
-        setContent {
-            ArticleListTopBar(
-                unreadOnly = true,
-                onToggleUnreadOnly = {},
-                newestFirst = true,
-                onToggleSort = {},
-                onMarkAllRead = {},
-                canHideRead = true,
-                onHideRead = { hideReadCount++ },
-            )
-        }
-        waitForIdle()
-
-        onNodeWithContentDescription("既読記事を非表示").assertIsEnabled()
-        onNodeWithContentDescription("既読記事を非表示").performClick()
-        waitForIdle()
-
-        assertEquals(1, hideReadCount)
+        onNodeWithContentDescription("既読記事を非表示").assertDoesNotExist()
     }
 
     @Test
@@ -665,13 +744,12 @@ class ArticleListPaneTest {
     }
 
     @Test
-    fun articleListTopBarUnreadOnlyEnabledInvokesCallback() = runDesktopComposeUiTest {
-        var toggleUnreadCount = 0
-
+    fun articleListTopBarModeChipNamesTheCurrentMode() = runDesktopComposeUiTest {
+        var mode by mutableStateOf(ArticleListMode.Unread)
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = { toggleUnreadCount++ },
+                listMode = mode,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -679,11 +757,58 @@ class ArticleListPaneTest {
         }
         waitForIdle()
 
-        onNodeWithText("未読のみ").assertIsEnabled()
-        onNodeWithText("未読のみ").performClick()
+        onNodeWithContentDescription("表示する記事").assertIsEnabled()
+        onNodeWithText("未読").assertIsDisplayed()
+
+        mode = ArticleListMode.Starred
+        waitForIdle()
+        onNodeWithText("スター付き").assertIsDisplayed()
+    }
+
+    @Test
+    fun listModeMenuEntriesCheckTheCurrentModeAndGreyOutStarredWhenUnavailable() {
+        val labels = ArticleListMode.entries.associateWith { it.name }
+        val chosen = mutableListOf<ArticleListMode>()
+
+        val entries = listModeMenuEntries(ArticleListMode.Unread, starredModeEnabled = false, labels) { chosen += it }
+            .map { it as NativeCheckMenuItem }
+
+        assertEquals(listOf("All", "Unread", "Starred"), entries.map { it.label })
+        // Starred stays checked (greyed out) while it cannot be chosen.
+        assertEquals(listOf(false, true, true), entries.map { it.checked })
+        assertEquals(listOf(true, true, false), entries.map { it.enabled })
+        assertEquals(
+            listOf(Key.One, Key.Two, Key.Three).map { NativeMenuShortcut(it, ctrl = true) },
+            entries.map { it.shortcut },
+        )
+        entries[0].onClick()
+        entries[2].onClick()
+        assertEquals(listOf(ArticleListMode.All, ArticleListMode.Starred), chosen)
+        assertTrue(listModeMenuEntries(ArticleListMode.All, starredModeEnabled = true, labels) {}.all { (it as NativeCheckMenuItem).enabled })
+    }
+
+    @Test
+    fun anEmptyStarredModeListOffersToShowAllArticles() = runDesktopComposeUiTest {
+        var showAllCount = 0
+        setContent {
+            ArticleListPaneContent(
+                articles = emptyList(),
+                feedTitles = emptyMap(),
+                selectedId = null,
+                listMode = ArticleListMode.Starred,
+                onSelectListMode = {},
+                onToggleSort = {},
+                onMarkAllRead = {},
+                onSelectArticle = {},
+                onShowAllArticles = { showAllCount++ },
+            )
+        }
         waitForIdle()
 
-        assertEquals(1, toggleUnreadCount)
+        onNodeWithText("ここにはスター付きの記事がありません").assertIsDisplayed()
+        onNodeWithText("すべての記事を表示").performClick()
+        waitForIdle()
+        assertEquals(1, showAllCount)
     }
 
     /**
@@ -696,8 +821,8 @@ class ArticleListPaneTest {
     fun articleListTopBarOmitsTheNavigationRowWhenNoDrawerCallbackIsGivenAtAll() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -706,11 +831,11 @@ class ArticleListPaneTest {
         waitForIdle()
 
         onNodeWithContentDescription("フィード一覧を開く").assertDoesNotExist()
-        onNodeWithText("未読のみ").assertIsDisplayed()
+        onNodeWithContentDescription("表示する記事").assertIsDisplayed()
     }
 
     @Test
-    fun articleListPaneUnreadOnlyEnabledForStarredFilter() = runDesktopComposeUiTest {
+    fun articleListPaneModeChipStaysEnabledForStarredFilter() = runDesktopComposeUiTest {
         val (driver, db) = inMemoryDb()
         useHomeViewModel(driver, db) { fixture ->
             val vm = fixture.vm
@@ -721,11 +846,11 @@ class ArticleListPaneTest {
 
             vm.selectFilter(ArticleFilter.Starred)
             waitForIdle()
-            onNodeWithText("未読のみ").assertIsEnabled()
+            onNodeWithContentDescription("表示する記事").assertIsEnabled()
 
             vm.selectFilter(ArticleFilter.All)
             waitForIdle()
-            onNodeWithText("未読のみ").assertIsEnabled()
+            onNodeWithContentDescription("表示する記事").assertIsEnabled()
         }
     }
 
@@ -810,8 +935,8 @@ class ArticleListPaneTest {
         var clicked = false
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -830,8 +955,8 @@ class ArticleListPaneTest {
     fun articleListTopBarOmitsTheSearchIconWhenNotProvidedEvenWithTheDrawerRowPresent() = runDesktopComposeUiTest {
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -849,8 +974,8 @@ class ArticleListPaneTest {
         // icon has nowhere to sit even if onSearchClick were supplied alongside it.
         setContent {
             ArticleListTopBar(
-                unreadOnly = false,
-                onToggleUnreadOnly = {},
+                listMode = ArticleListMode.All,
+                onSelectListMode = {},
                 newestFirst = true,
                 onToggleSort = {},
                 onMarkAllRead = {},
@@ -970,14 +1095,14 @@ class ArticleListPaneTest {
 
             vm.setSearchBarVisible(true)
             waitForIdle()
-            val boundsWhenEmpty = onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot
+            val boundsWhenEmpty = onNodeWithContentDescription("表示する記事").fetchSemanticsNode().boundsInRoot
 
             vm.setSearchQuery("kotlin")
             waitForIdle()
 
             assertEquals(
                 boundsWhenEmpty,
-                onNodeWithText("未読のみ").fetchSemanticsNode().boundsInRoot,
+                onNodeWithContentDescription("表示する記事").fetchSemanticsNode().boundsInRoot,
                 "the controls row must not move when the search field's clear button appears",
             )
         }

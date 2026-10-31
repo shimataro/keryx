@@ -12,6 +12,8 @@ import works.merc.keryx.app.resources.feed_gone_message
 import works.merc.keryx.app.resources.feed_url_changed
 import works.merc.keryx.app.resources.notification_app_translocated
 import works.merc.keryx.app.resources.notification_app_translocated_detail
+import works.merc.keryx.app.resources.notification_refresh_failed
+import works.merc.keryx.app.resources.notification_refresh_failed_detail
 import works.merc.keryx.app.resources.notification_token_storage_fallback
 import works.merc.keryx.app.resources.notification_token_storage_fallback_detail
 import works.merc.keryx.app.resources.notification_token_storage_not_persisted
@@ -43,12 +45,20 @@ suspend fun resolveNotificationText(text: NotificationText): String {
 /** The explanatory dialog body [detail] names, localized. */
 @Composable
 fun infoDialogText(detail: InfoDialogText): String = stringResource(
-    when (detail) {
-        InfoDialogText.TOKEN_STORAGE_FALLBACK -> Res.string.notification_token_storage_fallback_detail
-        InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED -> Res.string.notification_token_storage_not_persisted_detail
-        InfoDialogText.APP_TRANSLOCATED -> Res.string.notification_app_translocated_detail
-    },
+    infoDialogTextResource(detail),
 )
+
+/** [detail] as a localized string, for use outside composition. */
+suspend fun resolveInfoDialogText(detail: InfoDialogText): String = getString(
+    infoDialogTextResource(detail),
+)
+
+private fun infoDialogTextResource(detail: InfoDialogText): StringResource = when (detail) {
+    InfoDialogText.TOKEN_STORAGE_FALLBACK -> Res.string.notification_token_storage_fallback_detail
+    InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED -> Res.string.notification_token_storage_not_persisted_detail
+    InfoDialogText.APP_TRANSLOCATED -> Res.string.notification_app_translocated_detail
+    InfoDialogText.REFRESH_FAILED -> Res.string.notification_refresh_failed_detail
+}
 
 /**
  * The "N imported" text, with a " / N failed" suffix appended when [failed] is non-zero — the
@@ -73,4 +83,5 @@ private fun stringResourceOf(text: NotificationText): Pair<StringResource, Array
     NotificationText.TokenStorageFallback -> Res.string.notification_token_storage_fallback to emptyArray()
     NotificationText.TokenStorageNotPersisted -> Res.string.notification_token_storage_not_persisted to emptyArray()
     NotificationText.AppTranslocated -> Res.string.notification_app_translocated to emptyArray()
+    NotificationText.RefreshFailed -> Res.string.notification_refresh_failed to emptyArray()
 }

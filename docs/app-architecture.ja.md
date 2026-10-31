@@ -19,7 +19,7 @@
 
 | モジュール | 内容 |
 | --- | --- |
-| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
+| `:shared` | UI フレームワークに依存しないものすべて：`core/`・`data/`・`domain/`・`presentation/`（すべての UI が共有する画面の state holder。例：`HomeViewModel`）・`LaunchArg.kt`、SQLDelight スキーマ（`commonMain/sqldelight/`）、`di/SharedModule.kt`（`sharedModule`、任意の `updateModule`、および `presentationModule`——共有の画面 state holder。`:composeApp` の `appModule` と Apple アプリの `KeryxSdk` の両方が組み込む）と `di/HttpClientFactory.kt`、Compose に依存しない `platform/` の expect（AppDirs, BrowserOpener, ContentDigest, DatabaseFile, DatabaseMerger, DatabaseSnapshot, FileSystemExtras, Gzip, InstallLocation, NetworkConditionMonitor, PlatformOs, SecureRandom, SelfUpdateCheck, Sha1, Sha256, ZipExtractor）とその desktop/Android/Apple の actual、および `FileIO`（kotlinx-io 実装。expect なし）、`jvmCommonMain` のすべて、生成される `BuildConfig`/`DesktopBuildConfig`。Compose・Compose Resources・AWT/Swing・Android の UI API を参照してはならない——ネイティブ Apple アプリもこれを利用する（「Apple ネイティブアプリ（SwiftUI）」参照）。 |
 | `:composeApp` | desktop と Android 向けの Compose UI：`ui/`、`App.kt`、`di/AppModule.kt`（`:shared` のモジュールを取り込む `appModule` と `expect val platformModule`）、Compose の型を使う `platform/` の expect、`composeResources/`、desktop アプリの外殻（`main.kt`、トレイ、アプリメニュー、トークンストレージ、アプリ内アップデートのインストーラ、Linux D-Bus）。`:shared` に `api` で依存する。 |
 | `:androidApp` | Android アプリケーション（マニフェスト、`MainActivity`、`KeryxApplication`）——下記参照。 |
 | `:androidGms` | Google Play 開発者サービスに依存するものすべて —— Android の Google Drive（`PlayServicesGoogleDriveAuth.kt`、`PlayServicesGoogleDriveBackend`）。`fdroid` flavor がこれを外せるよう独立したモジュールにしてある。依存するのは `:androidApp` の `github` と `play` flavor だけ —— 下記参照。 |
@@ -38,14 +38,15 @@
     data/cloud/   CloudStorage, CloudAuthManager, DropboxStorage, DropboxAuthManager, GoogleDriveStorage, GoogleDriveAuthManager, OneDriveStorage, OneDriveAuthManager, Pkce, TokenStorage, OAuthTokens,
                   CloudFileTransfer, SecretStoreTokenStorage
     data/opml/    OpmlCodec
-    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
+    domain/       Feed/Article/Tag/Settings/SyncRepository, OpmlImporter, CloudSession, NotificationCenter, MergeSql, MergeFailureClassifier, MergeSchema, IdGenerator, CloudConnectFlow, OAuthConnectFlow, OAuthRedirectTransport（interface + CustomUri）, AuthorizationLauncher（interface + schemeOf。`OAuthConnectFlow` が認可 URL をどう開くか——デスクトップ/Android は既定でシステムのブラウザ、Apple アプリは Swift に委ねる。下記「KeryxSdk」参照）, OAuthCallbackParams, OAuthUriParser（parseOAuthUri。すべての `keryx://`・ループバックのリダイレクト処理が共有）, StartupMaintenanceTasks（runStartupMaintenance/checkForUpdateAndNotify/maybeRebuildFtsIndex）, BackgroundRefreshLoop（backgroundUpdateLoop——デスクトップ版自身のポーリングループ。Apple 版の `KeryxSdk.startMaintenance()` も使う。Android は `WorkManager` でスケジュールするため、これに相当するものはない）, RefreshCycleRunner（すべての更新経路が共有する 更新 → 通知 → 同期 のサイクル）, NetworkUsagePolicy（現在の回線でどの自動通信を許可するか——sync-architecture.ja.md の「ネットワークゲート」参照）, UpdateChecker/UpdateRepository/UpdateAsset/UpdateInstallPolicy/UpdateInstaller（expect 相当の interface）/AvailableUpdate/UpdateState（アプリ内アップデート——下記「アプリ内アップデート」参照）
     di/           SharedModule（sharedModule + updateModule + presentationModule）と HttpClientFactory［:shared］、AppModule（+ expect platformModule）と ImageLoaderSetup［:composeApp］
     presentation/ ［:shared］すべての UI が共有する、UI フレームワーク非依存の画面状態：home/（HomeViewModel——ホーム画面の
                   フィルタ・選択・記事リスト・検索・未読のみ・新着の状態と操作。ArticleContentCache、HomeRefreshController、
                   NewArticleTracking。FeedListExpansion——フォルダ・タグの開閉状態（端末ローカルに永続化）。
                   SelectionReadIntents——選択した記事の本文の読み込み中に行った、既読・未読の明示的な操作の記録（その選択の
                   暗黙の既読より優先させるため）。FeedListModel——FeedListRowSelection とフィードリストの並び・グループ化の規則。
-                  ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。AddFeedController——購読追加ダイアログの
+                  ArticleListModel。ReaderPaging——リーダーのページャのページ／選択の規則。ReaderContent——単一（非ページャ）のリーダーが表示するもの
+                  （none / header-first / full）と、選択ごとの操作がすべて対象にする選択行。両 UI が同じ判断を使う。AddFeedController——購読追加ダイアログの
                   ステートマシン。HomeShortcuts——論理キーに対するキーボードショートカットの対応表。NotificationAlerts——キューを持たない一時的な
                   サーフェス（Android のフォアグラウンド Snackbar など）に、まだ知らせていない警告・エラーが
                   あるかどうか。NameValidation——フォルダ・タグの新規作成/リネームダイアログが共有する
@@ -53,7 +54,8 @@
                   resolveFeedListDropAction/resolveFeedListDropHighlight。フィードリストのドラッグ＆
                   ドロップにおけるドロップ先の判定で、Compose と Apple アプリが共有する。TagColors——
                   TAG_COLOR_PALETTE。タグの色選択が共有する 8 色のパレット）、article/（ArticleWebViewHtml——
-                  リーダーの HTML 文書・CSP・テーマ CSS）、setup/（SetupController——ローカルのみかクラウド
+                  リーダーの HTML 文書・CSP・テーマ CSS。ReaderScrollRestoration——文書を読み込み直した後に
+                  リーダーがどこまでスクロールして戻すか。Compose と SwiftUI の両リーダーが従う唯一の規則）、setup/（SetupController——ローカルのみかクラウド
                   プロバイダーかを選び、接続フローから初回同期までを走らせる）、settings/（CloudSyncController——
                   接続・切断・切り替え・再接続・リセット・今すぐ同期と `canSyncNow`。接続中のプロバイダは
                   `cloudStorageType` が変わるたびに読み直すので、セットアップでの接続も反映される。これは
@@ -76,13 +78,14 @@
                   リーダーが共有）、RelativeTime（relativeTimeOf——タイムスタンプの経過時間を
                   now/minutes/hours/days/absolute に振り分ける。両アプリの通知センターの行が共有）、
                   ManualSync（Home と設定の両方が依存する「今すぐ同期」の契約。実装は
-                  `settings/CloudSyncController`）。
+                  `settings/CloudSyncController`）、DerivedStateFlow（読むたびに他の StateFlow から計算する読み取り専用の
+                  StateFlow。入力とずれた値が観測されることがない。HomeViewModel・CloudSyncController・OpmlTransferController が使う）。
                   ペイン構成・フォーカス・幅は UI ごと
                   （`ui/home/HomeLayoutViewModel`）
     platform/     AppDirs, FileIO（kotlinx-io 実装。expect なし）, BrowserOpener, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, InstallLocation, FileSystemExtras, ZipExtractor,
                   BackHandler, ClipboardEntries, ContentDigest, CursorIcons, FileSelector, Gzip, NativeMenu, NativeWebViewAccessibility,
-                  NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NotificationPermission, PlatformOs, PlatformScrollbar,
-                  SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
+                  NativeWebViewScroll, NativeWebViewScrollbar, NativeWebViewSupport, NativeWebViewVisibility, NetworkConditionMonitor, NotificationPermission, PlatformOs, PlatformScrollbar,
+                  ReaderWebViewFactory, SelfUpdateCheck, Sha1, WindowChrome, WindowDragArea（大半が expect 宣言。InstallLocation.kt は既に唯一の `expect fun` をプレーンなデータ型と同居させている——下記「Android」の `ScrollIndicatorOverlay.kt`／`ScrollIndicatorGeometry.kt` も参照。こちらは同じディレクトリに置かれているだけの、自身の expect を持たないプラットフォーム非依存の共有 Compose コード）
     ui/           theme/, navigation/（Navigator、SettingsOpenRequests——設定を開くすべての経路が通る唯一の
                   窓口。Setup 中の要求は Home が表示されるまで保留する）, setup/, home/（アダプティブな1/2/3ペインレイアウト + 検索 +
                   通知センター）, article/, settings/, i18n/, common/（KeryxTextField/KeryxDialogs/
@@ -105,7 +108,7 @@
     ZipExtractor（アプリ内アップデート——下記「アプリ内アップデート」参照）,
     di/CloudPlatformModule.kt（両プラットフォームの platformModule が呼ぶ共有クラウドプロバイダー DI 配線
     ——cloudSessionSingles, dropboxProvider, oneDriveProvider）
-  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする4本 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence
+  desktopMain/kotlin/…/  main.kt + StartupTasks.kt（runStartupTasks/handleOpenedOpmlFile というデスクトップ固有のオーケストレーションのみ。実際のメンテナンス処理と定期ループはどちらも commonMain の StartupMaintenanceTasks/BackgroundRefreshLoop にある）+ jvmCommonMain がカバーしない `platform/` expect の actual（例: AppDirs, FilePicker, DatabaseMerger, DatabaseSnapshot, DatabaseFile, PlatformModule, InstallLocation, PlatformScrollbar, BackHandler, ClipboardEntries, CursorIcons, NotificationPermission, NativeMenu, SelfUpdateCheck, WindowChrome、および WebView をホストする一群 NativeWebViewSupport/NativeWebViewScrollbar/NativeWebViewAccessibility/NativeWebViewVisibility/NativeWebViewScroll/ReaderWebViewFactory。最後の 2 つはデスクトップでは何もしない／ライブラリ既定の factory を使う。下記「Article Reader」を参照）+ LoopbackRedirectTransport, SingleInstanceCoordinator, UriSchemeRegistration + LinuxUriSchemeRegistrar + LinuxOpmlAssociationRegistrar, TokenStorage 実装（KeyringTokenStorage/SecurityCliTokenStorage/LibSecretTokenStorage——1番目と3番目は commonMain の SecretStoreTokenStorage から outcome 合成ロジックを継承するが、SecurityCliTokenStorage は同じロジックを自前で実装している）, DesktopOs（isMacOs/isWindows/isLinux/isSnap/isTouchPrimary=false/hasNativeAppMenu=true/hasSystemTray=true）, DesktopLookAndFeel（Swing L&F: Linux は FlatLaf。テキストアンチエイリアスヒントの正規化も担う——hint が存在しない場合、DEFAULT、OFF のいずれでもグレースケールアンチエイリアスに解決され、Swing 面のテキストが Compose 描画部と並んだ際にジャギーにならない）。さらに、`expect` を持たないパッケージルート直下のデスクトップ専用クラスとして: IconBadge（Dock/タスクバー/ウインドウアイコンの未読件数バッジ——external-spec.ja.md §7 参照）、MacActivationPolicy（生の `objc_msgSend` 呼び出し——known-issues.md の「macOS: clicking a notification banner does not restore a tray-hidden window」内「What a real fix would need」参照）、WindowStatePersistence、UpdateMenuActions（onUpdateMenuItemClicked——トレイとメニューバーの更新項目に共通のクリックハンドラ）、DesktopShell（main.kt が使うウインドウの前面化・フォーカス、Dock アイコン、`java.awt.Desktop` ハンドラの補助関数）
     tray/      KeryxTray（プラットフォーム分岐）, MacTray, LinuxTray, WindowsTray +
                StatusNotifierItem/dbusmenu の D-Bus オブジェクト、TrayActionPolicy（トレイのアイコン/
                メニューのクリックと更新項目が何をするかの純粋な判定）、TrayMenuModel（トレイメニューの
@@ -134,6 +137,9 @@
     スティッキーヘッダー／フォルダーヘッダー／区切り線／フィード行の混在）ではスクロールに伴って
     どの行が画面に入るかでつまみの長さがわずかに揺れる——Android 自身の一覧が使うのと同じ推定であり、
     理由も同じ: これは非操作のインジケーターであって正確な位置指示ではないため受け入れる）,
+    NativeWebViewScroll（リーダーのスクロール位置とユーザー自身の入力を `android.webkit.WebView` 自身の
+    リスナーで受け取り、TalkBack のタッチ探索が有効かどうかも返す）, ReaderWebViewFactory（レンダラー
+    プロセスが落ちても生き残る `WebView` のサブクラス。どちらも下記「Article Reader」を参照）,
     AppDirs/BrowserOpener/ClipboardEntries（AndroidAppContext 経由 — KeryxApplication.onCreate
     で一度だけ設定される静的 Context ホルダ。再開中の Activity も弱参照で追跡しており、BrowserOpener は
     http(s) リンクの Custom Tab（androidx.browser）を application context ではなくその Activity から
@@ -169,7 +175,7 @@
     選択色は `rowSelectionColors()` の
     `secondaryContainer`/`onSecondaryContainer` で、どのペインがキーボードフォーカスを持つかに
     関わらず同じ値を使う（ペインフォーカスは代わりに `RowSelectionColors.paneFocus` の
-    `PaneFocusIndication.Ring` による `secondary` の輪郭線で表し、`HomeCommon.kt` の
+    `PaneFocusIndication.Ring` による `secondary` の輪郭線で表し、`ListRowSelection.kt` の
     `listRowOutline` が描く — 詳細は同ファイル自身の KDoc）、TooltipIconButton/ToolbarIconGroup/FlatTooltipContent
     （それぞれ、独自のネイティブな長押しトリガーを持つ `TooltipBox` の中に置いた M3 自身の
     アイコンボタン群 — どれを使うかは `IconButtonKind` が決める: `IconButton`（`Standard`）、
@@ -359,6 +365,31 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
 FTS5 の `highlight()` ではなく Kotlin 側（`markTerms`）で生成し、`LIKE` で拾った短い語も FTS 一致と
 同じ見え方でマークされる。正確な文字数の閾値は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節を参照。
 
+### NetworkConditionMonitor（expect / actual）
+
+`platform/NetworkConditionMonitor.kt` はインターフェイス — `condition: Flow<NetworkCondition>`
+（`core/NetworkCondition(metered, dataSaver)`。最初に現在値、以後は変化のたびに流す）と
+`supported: Boolean` — と、`sharedModule` がシングルトンとして登録する
+`expect fun platformNetworkConditionMonitor()` を宣言する。`expect class` ではなくインターフェイスにして
+いるのは、テストで `:testing` の `FakeNetworkConditionMonitor` に差し替えられるようにするため。actual:
+
+- **Android**（`androidMain`）: `AndroidAppContext` 経由の `ConnectivityManager`。初期値は `activeNetwork`
+  の capabilities から同期的に読むので、`WorkManager` で起こされた直後でも仮の値で判断しない。以後の変化は
+  `registerDefaultNetworkCallback` と、実行時に登録する `ACTION_RESTRICT_BACKGROUND_CHANGED` レシーバーで
+  追う。`ACCESS_NETWORK_STATE` が必要。
+- **iOS**（`iosMain`）: `nw_path_monitor`（`isExpensive` / `isConstrained`）。最初のパス通知までは何も流さない。
+- **デスクトップ / macOS**（`desktopMain`、`macosMain`）: `UnrestrictedNetworkConditionMonitor` — 常に
+  制限なしで、`supported = false`。
+
+利用者は `domain/NetworkUsagePolicy` で、`SharedModule` で `SyncRepository` と `RefreshCycleRunner` に
+配線される（`CloudSyncController.meteredSettingSupported` は `supported` を読む）。
+[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照。
+
+Android と iOS では、設定画面のクラウド同期タブの「モバイルデータ通信でも自動で同期する」は、プロバイダに
+接続している間だけ表示する。`SyncRepository.syncDeferredForNetwork` が立っている間は、接続中プロバイダーの行に、
+データ通信量を抑えるため同期を保留中で、制限のない回線に接続すると同期する旨を表示する。どの制限によるものかは
+区別しない（従量制ネットワークの場合も、オプトインでは解除されないデータセーバー / 低データモードの場合もある）。
+
 ### DatabaseMerger（expect / actual）— 同期マージの要
 
 ATTACH DATABASE マージは**専用の JDBC コネクション 1 本**で行う。SQLDelight の JVM ドライバは
@@ -467,7 +498,7 @@ ViewModel はアプリスコープの `single` として登録し、`koinInject(
 
 ### 記事リーダー（ネイティブ WebView）
 
-`ui/home/ArticleDetailPane.kt` のリーダーは記事 HTML をネイティブ WebView
+`ui/home/ArticleDetailPane.kt` のリーダーは記事 HTML をネイティブ WebView（`ui/home/ArticleWebView.kt`）
 （`io.github.kdroidfilter.webview`。ヘビーウェイトな AWT `SwingPanel` が実 OS のブラウザビュー
 — Windows は Edge WebView2、macOS は WebKit、Linux は WebKitGTK — をラップしたもの）で描画して
 おり、Compose が描画するテクスチャではない。ペインの生存期間中は `if` の下に置かず常時
@@ -523,6 +554,15 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 テーマを切り替えても塗り直される。デスクトップ側の `actual` は no-op——WebView2/WebKit/WebKitGTK
 は既に `color-scheme` から自身のスクロールバーを描いているため、他に何もする必要がない。
 
+**iOS でも `color-scheme` だけでは足りない。** iOS のリーダーの `WKWebView` は透明
+（`isOpaque = false`。最初のドキュメントが描画されるまでリーダー自身の背景を見せるため）で、
+その場合 WebKit はスクロールインジケータのスタイルをページから決めなくなり、ダークのリーダー上に
+暗いインジケータが残る。そのため `ArticleWebView.updateUIView` は更新のたびにアプリ内テーマから
+`scrollView.indicatorStyle` を設定する（どちらにするかは `ReaderScrollIndicator` が決め、ダークテーマには
+明るいインジケータ、ライトテーマには暗いインジケータを使う）。これにより、記事を開いたままのテーマ切替や、
+スワイプのページャが到達するページにも反映される。macOS は何もしなくてよい——その `WKWebView` は
+ウィンドウの appearance と `color-scheme` からスクローラを描くため。
+
 **フィード本文はサードパーティのコンテンツであり、文書はそれに耐えるよう組み立てている。** 本文は
 リッチマークアップを活かすため無加工で埋め込まれ、その上に記事自身のオリジンを指す `<base href>` が
 付く。このため本文は配信元サイトのスタイルシートにも到達できてしまう — 本文が持つ
@@ -553,13 +593,45 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
 原因でもあった）。
 
+**Android がバックグラウンドでプロセスを終了させても、読んでいた位置は残る。** `ArticleWebView` は
+ネイティブビューの縦スクロール位置をスクロール可能な高さに対する割合として記録し
+（`platform/NativeWebViewScroll.kt` の `observeNativeWebViewScroll`。`android.webkit.WebView` 自身のスクロール・
+タッチ・マウスホイール・キーのリスナーを使う）、それが属する文書をキーにして `rememberSaveable` で保存する
+（キーは HTML のハッシュ。読み込みガードが記事 id ではなく文書で比較するのと同じ理由）。プロセスが復元されると、
+その位置はその文書が最初に読み込まれたときに提示される — 先に別の文書（本文の読み込み中に表示する
+プレースホルダー）が読み込まれても提示は残る — そして `loadingState` が `Finished` になった時点で適用し、
+内容が伸びる間（画像の到着など）`READER_SCROLL_SETTLE_WINDOW_MS` まで適用し直す。ユーザーがタッチ・スクロール・
+キー入力をした時点ですぐにやめる。この規則は `:shared` の `presentation/article/ReaderScrollRestoration.kt` にあり、
+SwiftUI のリーダーも同じものに従う。`ui/home/ReaderScrollRestoration.kt` にはその `Saver` だけを置き、これは
+別の形の保存値（古いビルドのもの）を位置なしとして復元する。TalkBack のタッチ探索が有効な間
+（`isNativeWebViewScreenReaderActive`）は、読み込み完了時に 1 回だけ位置を適用し、適用し直さない: TalkBack 自身による
+ページ内のスクロールはビューのどのリスナーにも届かないのでリーダー自身のスクロールと区別できず、適用し直すと
+そこから引き戻してしまうため。動作中のアプリでは何も変わらず、同じビューで別の文書を表示すれば先頭から始まる。デスクトップの `actual` は
+何もしない — `WryWebViewPanel` はスクロール位置を公開しておらず、そもそもウィンドウが開いたままプロセスが
+終了させられることがない。
+
+**Android のレンダラーが落ちても、アプリごと落ちずにリーダーを作り直す。** Android の WebView のレンダラーは
+別プロセスで、OS が（メモリ不足で）終了させたりクラッシュしたりすることがある。それをホストしていたすべての
+WebView で `WebViewClient.onRenderProcessGone` が true を返さないと、Android はアプリのプロセスも一緒に終了させる。
+WebView ライブラリ自身のクライアント（`gradle/libs.versions.toml` の `composewebview` のバージョン）はこのコールバックを
+実装していないため、`ArticleWebView` は
+ライブラリに `factory`（`platform/ReaderWebViewFactory.kt` の `readerWebViewFactory`）を渡す。その Android の
+`actual` は `WebView` のサブクラスを作り、ライブラリが設定するクライアントを、ライブラリの 5 つのコールバックを
+委譲しつつ `onRenderProcessGone` を加えたクライアントで包む。これはレンダラーの終了を通知して true を返す。
+レンダラーが落ちた WebView は再利用できないので、`ArticleWebView` は新しい `key` でそれを作り直す — HTML を
+読み込み直し、上記と同じ `ReaderScrollRestoration` で読んでいた位置に戻す。レンダラーはリーダーのすべての
+WebView で共有されるので、カルーセルの各スロットがそれぞれ自分の WebView を作り直す。このサブクラスは、
+ライブラリ自身がこのコールバックを扱うようになれば不要になる。デスクトップの `actual` は null を返し、
+ライブラリ既定の factory を使う。
+
 **狭いレイアウトではリーダーは `HorizontalPager` になる**（`ui/home/ArticleDetailPane.kt`。
 commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の記事へ移動し、画面に出ているページの
 両隣は実際にマウントされた `WebView` であり、それはページャ自身の item content ではなく
 `ArticleWebViewCarousel` 経由で描画される（理由は下記）。`PaneLayout.Triple`（デスクトップの全ウインドウと、
 横持ちの大型タブレット）は上で述べた単一の無条件コンポーズのリーダーのままで、2 つの形態の分岐は
-`readerPaging != null && article != null && isTouchPrimary` の 3 つすべてを見る——`readerPaging`
-単独ではない。`article != null` があるのは、paging データはあるがまだ何も選択されていない
+`readerPaging != null && selectedRow != null && isTouchPrimary` の 3 つすべてを見る——`readerPaging`
+単独ではない。`selectedRow`（`HomeViewModel.selectedArticleRow`。選択した瞬間に最新になる）が null でないことを
+見るのは、paging データはあるがまだ何も選択されていない
 `PaneLayout.Dual` のリーダーを、ページャがたまたま最後に表示していた記事のままにせず、
 プレースホルダの HTML に留めるため。`isTouchPrimary` をここでもう一度見ているのは、
 `ArticleDetailPane`（ViewModel 側のラッパー）がタッチ主体のプラットフォームでしか
@@ -571,7 +643,7 @@ commonMain 共有のコンポーザブル） — 水平ドラッグで次/前の
 `ArticleSwipeNavigation` と `ArticleReaderPaging` は同じ「null = `PaneLayout.Triple`」のシグナル
 だが、前者が意図的に安定した `remember` 済みのコールバック束であるのに対し後者は記事のロードに
 応じて変化するデータを運ぶため、別パラメータに分けてある——`ArticleDetailPane` は自身の組み立てを
-`remember(pages, contents, article)` で包み、記事の書き込みのたびにリーダー全体を再コンポーズ
+`remember(pages, contents, selectedRow, loaded)` で包み、記事の書き込みのたびにリーダー全体を再コンポーズ
 しないようにしている。シグナルが `onNavigateUp` ではなく `swipeNavigation` なのは、
 `PaneLayout.Dual` ではリーダーに戻るボタンが無い（`onNavigateUp` が `null`）がスワイプは有効で
 なければならないため（下記「Home's adaptive pane layout」参照）。
@@ -956,6 +1028,40 @@ JVM ドライバがステートメントごとに開く接続で読むため、�
 トグルも同じ値に結び付いている。`toggleReadSelected` はカーソルの記事を対象に、ボタンの表示と逆の状態へ
 設定するので、この間のタップが前の記事に当たることはなく、2 回目のタップは 1 回目を取り消す。
 
+選択に関するそれ以外のものもカーソルに従う。`HomeViewModel` はカーソルから 2 つの値を導出する（どちらも
+`DerivedStateFlow` なので、カーソルとずれた値が読まれることはない）。`selectedArticleId`（カーソルそのもの。
+記事一覧のハイライトとスクロール、狭いレイアウトの pager の追従、URL コピーの ✓ の照合に使う）と、
+`selectedArticleRow`（カーソルの記事が読み込み済みならその記事、そうでなければ選択時の一覧の行に、その間の
+楽観的な既読/スター操作を反映したもの。リーダーツールバーのスター・ブラウザーで開く・コピー・共有、
+メニューバー、キーボードショートカット、ツールバーのフィード名はこれを対象にする）である。
+
+一覧が選択を見える位置までスクロールするのは、`selectedArticleId` ではなく `selectionRevealRequests` の変化で行う。
+これはユーザーが別の記事へ動かした選択（どの経路でも、そのような `selectArticle` 1 回につき 1。すでに選択
+している記事をもう一度選んでも数えない）を数える。カーソルは、ユーザーが操作して
+いなくても動く（同期マージで墓石化された行を選ぶと、直前の記事へカーソルが戻る）ので、そのたびに一覧が勝手に
+その記事へスクロールし戻ってはならない。フィルタ切り替えによる選択の解除や、復元された選択は要求に含めない
+（復元された選択は、最初の composition が自分で見える位置に出す）。検索結果リストも同じ規則に従う。
+要求があったときと、結果が最初に届いたときにだけ選択へスクロールし、結果の中身が変わっただけではスクロールしない——
+背景の書き込みで検索が再実行されたり、墓石化された選択が差し戻されたりしても、選択した行まで一覧を引き戻してはならない。クエリを変えるのは、ユーザーが別の一覧を求める操作なので、フィルタを
+変えたときと同じく、結果は先頭に戻る（ペインを再マウントしたときは位置を保つ）。
+`toggleStarSelected` も `toggleReadSelected` と同じくカーソルの記事を対象にする。本文の読み込み中に切り替えた
+スターは記録され（2 つ目の `SelectionReadIntents`）、読み込んだ行に重ねられる。この読み込みは
+`dbWriteDispatcher` の FIFO の外で行われるため、書き込み前の行を読むことがあるからである。既読/未読ボタンだけは
+引き続き `selectedArticleShownUnread` を唯一の情報源にする。
+
+単体の（pager でない）リーダーは `readerContent`（`None` / `Header(row)` / `Full(article)`）で動く。
+通常は前の記事から新しい記事の `Full` へ直接切り替わり、文書の読み込みは 1 回で済む。画面に残しておく読み込み済みの記事がないとき（起動後や
+フィルタ切り替え後の最初の選択）は、待たずにすぐ `Header` を出す——ツールバーと一覧のハイライトはすでに新しい
+選択を指しているので、「記事が選択されていません」のプレースホルダーを出すと食い違うためである。本文の読み込みが
+`READER_HEADER_FIRST_GRACE_MS`（50 ms）以内に戻らなかったとき——同期のマージや FTS の再構築の書き込みロックを
+待っているとき——だけ、`hydrateSelection` が起動する猶予タイマーが `Header` を出す。新しい記事の一覧の行から
+タイトル・日付・リンクを空の本文の上に表示するもので、pager が本文未読み込みのページに描く文書と同じである。
+タイマーは読み込みのどの終わり方でも必ず cancel され、発火時には自分の選択が最新で、カーソルが指していて、
+まだ読み込まれていないことを確かめる。ヘッダーは本文が届いたとき、`selectFilter`、tombstone の検出で
+消える。ヘッダー表示中に新しい選択が行われると、リーダーを前に読み込んだ記事へ戻して猶予期間を待つのではなく、
+そのままヘッダーを新しい記事のものに切り替える。Compose の単体リーダーと macOS の SwiftUI リーダーがこれを
+描画する。iOS の pager は描画しない（本文がまだないページは従来どおりリーダーの背景だけを表示する）。
+
 ## ナビゲーション
 
 `ui/navigation/Navigator.kt` は現在の `Screen`（`Setup` または `Home` の一値——スタックではなく、
@@ -1178,6 +1284,13 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 スクロール位置も破棄されない——検索を経て戻ってきたときにフィルタ自身の一覧が元の位置のままである
 ために、スナップショット・復元の手順は一切不要である。
 
+**記事からスワイプで離れてすぐ戻ると、先頭ではなく読んでいた位置に戻る**——リーダーは両隣の記事を
+そのまま保持しているので、離れた記事はそのままの状態で残っている。この記憶は前後 1 記事ずつが対象で、
+リーダーが画面に出ている間だけ保たれる: 2 記事以上離れてから戻った場合、記事一覧に戻った場合、
+スマホ幅とタブレット幅の間で画面を回転させた場合は、いずれもまた先頭から始まる（後で開き直した場合も
+同様）。一覧の先頭/末尾を越えてさらにスワイプした場合も本文はわずかに動いてから跳ね返るため、
+境界に達したことをジェスチャーが何もしないのではなく体感として伝える。
+
 #### iOS
 
 `external-spec.md` は iOS/iPadOS をまず Compose、のちにネイティブ SwiftUI と計画している。
@@ -1278,18 +1391,119 @@ reconcile は、スナップショット後に追加・差し替えられたピ�
 表示の一覧からその行が消えてしまう。選択中の記事のピンは 1 回の `update` の中で、更新対象の map に
 対して決めるので、再トリムは並行する reconcile と合成される。その間に reconcile が外したピンは
 外れたままにし、既存のピンはそのまま残す。reconcile はピンの後で選択記事を更新するため、既存の
-ピンを選択記事から作り直すことはしない。
+ピンを選択記事から作り直すことはしない。選択中の記事がまだ存在するか（同期マージで tombstone に
+なっていないか）は、その後で、呼び出し元の（main）スレッドではなく `dbWriteDispatcher` 上の読み取りで
+確認する。そのため、マージが書き込みロックを持っていても UI が止まらない。tombstone になっていた
+場合は、そのピンが再トリムで残したピンそのものである場合に限って外す。
 
 これを呼び出す箇所はどれも、既読状態ピンに削るだけの価値がある
 エントリが溜まっていることが見込まれる瞬間である——「未読のみ」を ON にした瞬間（`setUnreadOnly`）、
 リフレッシュの前後（`HomeRefreshController`）と手動同期の前後（`ManualSync.runs` の各イベント。設定画面から
-始めた同期も含む）、そして記事一覧ツールバーの
-明示的な「既読記事を非表示」操作（`HomeViewModel.hideRead`）——最後の 1 つだけがユーザーが直接引き金を引く
+始めた同期も含む）、そして表示メニューの
+明示的な「既読記事を非表示」コマンド（`HomeViewModel.hideRead`）——最後の 1 つだけがユーザーが直接引き金を引く
 呼び出し箇所で、「未読のみ」自体からは抜けずに、厳密な未読のみからずれてしまった一覧をその状態へ
 引き戻すためのものである。`hideRead` は `canHideRead`（`unreadOnly`・現在画面に出ている一覧——検索中
 なら検索結果、そうでなければそのフィルタ自身の一覧で、`pagerArticles` と同じ解決方法——・選択状態を
 組み合わせた `StateFlow`）でゲートされているため、選択中の記事以外に既読の行が画面に残っていない状態では
 この操作は何もしない。
+
+**記事一覧のモード。** `HomeViewModel.mode` は `ArticleListMode`（`All` / `Unread` / `Starred`、
+`presentation/home/ArticleListMode.kt`）で、2 つの独立したトグルではなく 3 つから 1 つを選ぶ形である——理由は
+`external-spec.md` §7 を参照。これは 3 つの状態から導かれる：保存される `_unreadOnly`（`lastUnreadOnly`）と
+`_unreadOnlyStarred`（`lastUnreadOnlyStarred`、Starred フィルタの下でだけ読む）、そしてセッション中のみで
+保存されない `_starredMode`。`selectFilter` は、`ArticleFilter.Starred` を含むすべてのフィルタの切り替えで
+`_starredMode` を維持する。Starred フィルタの間は `starredModeEnabled` が false で `articleListModeFor` が
+それを無視し、`setMode(All/Unread)` もそれを変えないので、そのフィルタを出ると入ったときのモードに戻る。スター付きモードも未読のみと同じく、フィルタの生クエリ結果（と検索結果）をメモリ上で
+絞り込む——`articles` の combine が `is_starred` で絞り込み、未読のみが既読ピンで行を残すのと同じように、
+スターを外したピンで行を残す——ので、モードを変えても一覧のクエリは再実行されない。`setStarred` は Starred
+フィルタかスター付きモードが適用されているときにスターを外した記事をピン留めし、`setMode(Starred)` はそれ以前の
+ピンを捨て、スター付きモードと Starred フィルタでの `markAllRead` は、検索と同じ ID リストの経路で表示中の行だけを既読にする
+（Starred フィルタには、スターを外した直後の記事がまだ表示されていることがあり、そのフィルタ自身のクエリでは
+届かないため）。リストはフィルタやモードの切り替えに非同期で追いつくので、`markAllRead` は表示中の行が現在の
+フィルタとモードのもの（`ListScope`）になってから処理し、それまでに選択がさらに変わった場合は何もしない。
+両 UI のツールバーのモードメニュー、表示メニュー（`computeMenuUiState` の `listMode` / `starredModeEnabled`）の
+どの経路も、その ⌘/Ctrl+1〜3 のショートカットも含めて `setMode` を呼ぶ。これらのメニューでどの項目にチェックを
+付けるかも、1 つの共通ルール `listModeChecked` で決める：現在のモードと、Starred フィルタの下での Starred
+（そこではチェック付きで無効——後述）。メニューバーは `MenuUiState.starredModeChecked`
+としてこれを読み、両 UI のツールバーのメニューは直接呼ぶ。
+
+`external-spec.md` §7 の要約以外に、ユーザーから見えるモードの挙動:
+
+- 現在のモードをもう一度選んでも何も変わらない。ポップアップボタンは、一覧を絞り込んでいるモードのときは
+  塗りつぶす。Windows・Linux と Compose 版の macOS ビルドでは、ポップアップボタンのメニューにも同じ
+  ⌘/Ctrl+1〜3 のキーを表示する。iOS / iPadOS ではツールバーにモード名を出す余地がないため、ボタンはモードの
+  アイコンにポップアップボタンの上下シェブロンを添える。押すとすぐ何かが起きるボタンと区別するためである。
+- 購読一覧の「スター付き」項目を選んでいる間はスター付きモードを選べない。その項目はもともとスター付き記事
+  だけを表示し、購読を解除したフィードのスター付き記事が残る唯一の場所だからである。その項目を選んでも
+  スター付きモードは解除されず、フィード・フォルダー・タグ・すべてのフィードに戻ると、スター付きのまま
+  表示される。この間「スター付き」は **チェックを付けたまま無効** で表示し、スター付き記事の中での切り替えと
+  して選べる「すべて」/「未読」のチェックと並ぶ。ツールバーのボタンには、その「すべて」/「未読」を表示する。
+  3 つのうち 2 つに同時にチェックが付くのはここだけで、排他であることへの意図的な例外である。スター付き記事
+  だけを表示している場所で、そのメニューの「スター付き」にチェックがないと、スター付きが効いていないように
+  読めてしまうため。
+- スター付きモード中（または「スター付き」項目の中）でスターを外した記事は、選択かモードが変わるまで一覧に
+  残り、「すべて既読にする」は表示中の記事だけを既読にする。
+- スター付きモードで一覧が空のときはその旨を表示し、すべての記事を表示し直すボタンを置く。
+
+### 更新の表示と引っ張って更新
+
+要約は `external-spec.md` §9 にあり、更新の種類ごとにどのフィードバックを出すかは同節の「更新のフィードバック」で
+決めている。
+
+**引っ張って更新** は、Android では**すべての**幅（大型タブレットが到達する 3 ペインレイアウトも含む）で、
+また iOS / iPadOS ネイティブアプリでも有効で、各プラットフォーム自身のインジケーターを使う（Android は
+Material 3 の Pull to refresh、iOS はシステム標準の更新コントロール）。デスクトップには引っ張る操作がない。
+「すべて更新」と違い、引っ張って更新する場合は、いま画面に出ている一覧の元になっているフィードだけを更新する:
+
+| フィード一覧で選択中の項目 | 引っ張って更新する対象 |
+| --- | --- |
+| すべてのフィード / スター付き | 全フィード（スター付きの記事はどのフィードにも属しうるため） |
+| フィード | そのフィードだけ |
+| フォルダー | そのフォルダーに入っているフィード |
+| タグ | そのタグが付いているフィード |
+
+- 選択中の項目が購読中のフィードを一つも含まない場合（中身のないフォルダーやタグ）は、取得も同期もせずに
+  すぐ終わる。一覧が空でも引っ張れるが、検索結果の表示中——検索結果の一覧を引っ張るのは、その裏にある
+  フィードの更新を求める操作ではない——と、フィードが一件もないときは無効になる。
+- 「すべて更新」と同じく、クラウドに接続していれば更新のあとに同期が続き、インジケーターはその同期が終わる
+  まで表示される。iOS では、引っ張りがしきい値を超えた瞬間にシステムが更新を始めるため、インジケーターを
+  最低約 1 秒は表示する。
+- 更新や同期がすでに動いている間に引っ張った場合は新たには何も始めず、動いている処理が終わるまで
+  インジケーターを表示し続ける。動いているのが自動更新なら、引っ張る操作はその更新に相乗りするので、iOS では
+  後述のステータスにその結果が表示される。インジケーターの表示中にフィード一覧で別の項目を選ぶと、新たに
+  選んだ一覧にはインジケーターを表示しない（更新そのものは続く）。
+- Android では、同じ更新を一覧の TalkBack カスタムアクション（「この一覧を更新」）と、記事一覧が画面に
+  出ているときの物理キーボードの Ctrl+Shift+R からも実行できる（スマートフォン幅でリーダーだけを表示して
+  いるときや、フィード一覧のドロワーが一覧を覆っているときは効かない）。デスクトップでは同じキーはフィード ▸
+  更新で、選択中のフィードだけを更新する。これはプラットフォームごとに別の操作であり、1 つの操作への 2 つの
+  経路ではない。iOS ネイティブアプリには、この範囲を絞った更新へのジェスチャー以外の経路はなく、iPad の物理
+  キーボードでは代わりに「フィード」メニューの「すべて更新」（⌘R）と「更新」（⌘⇧R、選択中のフィードだけ）を
+  使える——これらも別の操作である。
+- iOS ではサイドバーも引き下げられ、この操作は「すべて更新」になる: 何を選択していても全フィードを更新し、
+  クラウドに接続していれば同期が続き、インジケーターはその両方が終わるまで表示される。フィードが一件もない
+  ときは無効。iOS のナビゲーションバーの「すべて更新」ボタンの代わりで、Mail のメールボックス一覧と同じ
+  更新のしかたである。Android のフィード一覧ドロワー（記事一覧に重なるモーダルな面で、ヘッダーに更新ボタンを
+  持つ）と macOS のサイドバー（ツールバーのボタンを使う）には引っ張る操作がない。
+
+**iOS の更新状況表示。** iOS では、ユーザーが始めた更新をツールバーのステータス領域（下部バーの中央。Mail が
+「メールを確認中…」と表示する場所）に、サイドバーと記事一覧の両方で表示する:
+
+- 実行中に別の更新を始めた場合（引っ張る操作の最中のフィードごとの更新など）は 1 回の確認として扱い、最後の
+  更新が終わるまでスピナーを出し続け、結果の件数はすべてを合算する。自動更新の実行中に引っ張るか「すべて更新」を
+  実行した場合はその更新に相乗りし、自分が始めた場合と同じようにその結果を出す。同期だけが動いている間や、
+  ユーザー自身が始めた更新がすでに動いている間に実行した場合は、それ自体の結果は追加しない。
+- 件数は今回取得したフィードの分で、同期で他の端末から入ってきた記事は数えない。
+- 同期だけの処理（同期ボタンや、記事を読んだあとの自動同期）はここに出さない: 同期ボタンのアイコンが回る
+  ことで示す。待機中は何も表示せず（最終更新時刻も出さない）、バーの分の領域を一覧に回す。
+- アプリ自身が引っ張りインジケーターを出して表示することはない（一覧が勝手に引き下がるため）。表示が変わって
+  も VoiceOver に読み上げさせることはしない。
+
+**フィードごとの更新スピナー。** 更新の対象になった各フィードは、更新が始まった時点（取得の順番待ちの間も
+含む）から、そのフィードの新着記事が反映されるまでスピナーを表示する。スピナーは終わったフィードから順に消え、
+消えると同時に未読数が更新される（`FeedRepository.refreshingFeedIds`。[background-update.ja.md](background-update.ja.md)
+参照）。スピナーはアイコン自身の枠の中に収まり、未読数とエラー表示もそのまま残る。折りたたまれたフォルダは、
+配下のフィードが更新中の間スピナーを表示する。展開中のフォルダ・タグ・すべてのフィード・スターには表示しない
+（更新全体はツールバーの更新スピナーが示す）。
 
 ## Apple ネイティブアプリ（SwiftUI）
 
@@ -1363,7 +1577,17 @@ SwiftUI アプリは、共有 Kotlin コードを Kotlin/Native の framework �
 - **UI ごとに持つもの**：ペイン構成とフォーカス（`HomePane`、フォーカス中のペイン、ペイン幅）、キーボードイベントの処理（各 UI は
   自分のキーイベントを共有のショートカット対応表 `presentation/home/HomeShortcuts.kt` に対応付ける）、ウィンドウの復元、すべての描画。
   検索バーの表示状態は、UI が共有状態に設定する入力（クエリの結果を表示するかどうかを決める）であり、UI が所有する状態ではない。SwiftUI では `NavigationSplitView`・`@FocusState`・`@SceneStorage`・標準のウィンドウ復元が
-  これらを担い、Compose アプリは独自の実装を持ち続ける。ペイン幅は各プラットフォームの入力方法に合わせる。macOS アプリは、デスクトップと同じく、
+  これらを担い、Compose アプリは独自の実装を持ち続ける。iPhone では、1 列に畳まれたスタックで表示中の列（サイドバー・記事リスト・
+  リーダー）を `@SceneStorage` に保持するので、iOS がバックグラウンドでアプリを終了させた後の再起動では最初のフレームから
+  その列で開く。リーダーは `HomeViewModel` が選択として復元した記事があるときだけ復元し、なければ記事リストで開く
+  （`Home/CompactColumnRestoration.swift`）。`HomeObservable` は復元されたその選択を自身の init で反映するので、
+  この確認が行われる最初のフレームの時点で選択はそろっている。復元した状態をいつ使い、いつ取り消すかは
+  `Home/HomeRestoration.swift` が決める。App スイッチャーから終了するとシーンの保存内容は破棄されるので、その起動は
+  サイドバーから始まる。選択中の記事のリーダーのスクロール位置も同じ方法で保持し（記事 id とスクロール可能な高さに対する割合、
+  `Home/ReaderScrollPosition.swift`）、その記事の文書の読み込みが終わった時点で、WebContent からの復旧と同じ復元処理で適用する
+  （下記「SwiftUI のリーダーは WebKit のコンテンツプロセスが落ちたら文書を読み込み直す」を参照）。適用するのは選択中の記事自身の
+  ページだけで、スワイプ用に準備しておく前後のページには適用せず、ユーザーが別の記事を選ぶかスタックを移動するまでに限る
+  （復元された選択が届くことはこの変化に当たらない）。`local_settings` のキーは使わない。ペイン幅は各プラットフォームの入力方法に合わせる。macOS アプリは、デスクトップと同じく、
   境界をドラッグした幅を保存して次回に復元する。iPad アプリは、Android のタッチ向けレイアウトと同じく、毎回既定の幅を求めて何も保存せず、
   各列の最小幅を下回らないように画面へ収めるのは `NavigationSplitView` に任せる。
 - Swift 側は、共有 state holder の `StateFlow` を薄い `@Observable` アダプタ経由で購読する。
@@ -1466,13 +1690,28 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
 - **SwiftUI のリーダーは WebKit のコンテンツプロセスが落ちたら文書を読み込み直す。** iOS はアプリが
   バックグラウンドにある間（リンクから開いた外部ブラウザが前面にある間など）に `WKWebView` の WebContent
   プロセスを終了させることがあり、そのままではリーダーが白紙になる。`ArticleWebView` の
-  `webViewWebContentProcessDidTerminate` が保持している HTML を読み込み直す（スクロール位置はプロセスとともに
-  失われるため先頭から）。`Home/ReaderProcessRecovery.swift` はこの再読み込みを文書1つにつき1度だけ許す：
+  `webViewWebContentProcessDidTerminate` が保持している HTML を読み込み直し、ユーザーがいた位置までスクロールして
+  戻す。ページはスクロール位置をスクロール可能な高さに対する割合として、上記の合成クリック用スクリプトと同じコンテンツワールドに
+  登録したメッセージハンドラへ送る（ページ自身のスクリプトからは送れない）。読み込み直した文書の読み込みが終わると、
+  リーダーは最後の割合までスクロールし、内容が伸びる間（画像の到着など）数秒間それを適用し直す。ユーザーがスクロール・
+  タップ・キー入力をした時点ですぐにやめる（`:shared` の `presentation/article/ReaderScrollRestoration.kt`。
+  Compose のリーダーと同じ規則で、iOS と macOS で共通）。VoiceOver の動作中は、ページ内での VoiceOver 自身の
+  スクロールをリーダーのものと区別できないので、位置は 1 回だけ適用し、内容が伸びても適用し直さない。
+  `Home/ReaderProcessRecovery.swift` はこの再読み込みを文書1つにつき1度だけ許す：
   再びプロセスが落ちたら（読み込み直した文書の commit の前でも後でも。WebContent を落とすページでもループしない）、
   リーダーはそこで諦めて白紙のままにする。新しい再読み込みの機会が得られるのは、別の文書に替わったときと、
   アプリが再びアクティブになったときで、諦めた文書はそのアクティブ化の時点でもう一度読み込まれる：よくある
   終了はバックグラウンドで起き、1度きりの再読み込みもそこで一緒に落ちることがあるので、ユーザーが戻ってきた
-  ときにリーダーが白紙のままであってはならないため。
+  ときにリーダーが白紙のままであってはならないため。この読み込みでも最後の位置に戻る。
+- **iOS のリーダーのスワイプページャーは page スタイルの `TabView` ではなく `UIPageViewController` である。**
+  `Home/ReaderPageController.swift` がこれを包み、スワイプのたびに表示中のページの前後の記事を id で引く
+  （`ReaderPagerPages.id(before:)` / `id(after:)`）。保持するのは表示中のページとその両隣だけ
+  （`retainedIds(around:)`。1 つ隣へ行って戻ってもスクロール位置が残るのはこのため）。リーダーの表示中も
+  ページ集合は絶えず変わる——`pagerArticles` の最初の発行で 1 ページのフォールバックが一覧全体に置き換わるときや、
+  開いている間に反映される更新・同期のたびに——が、page スタイルの `TabView` は項目数と現在のページの対応を
+  ゆるくしか保たない：v0.26.0 では、記事一覧へ戻るインタラクティブな pop の間に強制されたレイアウトで、
+  コレクションビューが項目の末尾より先のページへスクロールしようとして `NSInternalInconsistencyException` で
+  落ちた。前後を id で引けば、ずれる件数そのものがない。
 - **`KeryxTests` は単体で完結する（アプリに寄生しない）Swift Testing バンドル**——`dependencies:
   [{target: Keryx}]`/`TEST_HOST` を宣言していない。`supportedDestinations: [macOS, iOS]` のターゲットに
   寄生するテストバンドルには、実在する XcodeGen/Xcode のバグがある：アクティブな destination が macOS
@@ -1672,6 +1911,31 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 では `#00796B` にしている。ダークの `AccentColor`（`#4DB6AC`）の上では白文字が読めない（2.4:1）ため、それより
 暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
 同じくタッチ主体の Android も薄くしない（`external-spec.md` §9）。
+
+### iPhone Duo（iOS）
+
+iPhone Duo の外側ディスプレイと、横向きの内側ディスプレイでは、ナビゲーションバー・ツールバー・タブバーが
+末尾側の端に 1 本の縦のバーとしてまとめて表示される。`NavigationSplitView` に `.toolbar` で付けたツールバーなら
+システムが自動でこう配置する。このアプリはその方法だけを使っているので、Duo 専用のレイアウトコードはない。
+iOS 27.1 シミュレーターで計測した結果と、そこから決めたことは次のとおり。
+
+- **ツールバーの優先度。** 縦のバーは、項目が入りきらないと下から順に「…」に入れる。外側ディスプレイの横向き
+  では、全既読が真っ先に「…」に入り、検索ボタンは押しつぶされて空の円になっていた。iOS 27 以降、記事一覧の
+  項目には `visibilityPriority` を付けている。通知ベル（バッジ付きの項目）と全既読（よく使う操作）は `.high`、
+  並び替えボタンと一覧モードのメニューは `.low` で、HIG が求める順序に従っている。横のバーはこの
+  優先度を無視する（横向きの内側ディスプレイで幅 360pt の記事一覧の列では、並び替えと全既読が変わらず「…」に
+  入る）ので、効くのは縦のバーだけである。iOS 26 以前では、項目は従来どおり 2 つのグループのまま。
+  `visibilityPriority` は iOS 27 SDK にしかないため、この分岐は `#if compiler(>=6.4)`（Xcode 27）でだけ
+  コンパイルされる。Xcode 26.6 に固定したリリースのビルドでは、iOS 27 上でも 2 つのグループのままになる。
+- **外側ディスプレイの一覧の上にある空白の帯**（82pt。ナビゲーションタイトルを持たない記事詳細の上は 24pt）は、
+  ナビゲーションタイトル用の領域そのものである。記事一覧の空の `.principal` 項目を外すと、そこにインラインの
+  タイトルが表示される。システムの設定アプリも、一覧の上に同じ帯を空けたまま残している。そのままにする。
+- **縦向きの内側ディスプレイ**（669pt、regular 幅）では、記事詳細だけを表示し、記事一覧は必要なときにその上に
+  重ねて出す。これは分割ビュー自身の判断である。`.balanced` に `.doubleColumn` の表示を組み合わせても、一覧の
+  理想幅を 300pt にしても、2 つの列は並ばなかった。HIG は独自のコンテナよりシステムのコンテナを使うよう
+  求めている。半分折った姿勢でも何もしなくてよい。分割ビューが自分で列を折り目に揃える。
+- **未計測：** 内側ディスプレイで 2 つのアプリを並べたときの最小の幅。シミュレーターのリサイズモードは外側
+  ディスプレイでしか使えない（そこでは 466pt がすでに最小である）。
 
 ### `KeryxSdk`：Swift からの入口
 

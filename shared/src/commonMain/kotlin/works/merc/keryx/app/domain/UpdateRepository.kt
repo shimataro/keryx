@@ -29,6 +29,7 @@ import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
 import works.merc.keryx.app.core.SystemClock
 import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_INTERVAL_MS
 import works.merc.keryx.app.core.UPDATE_RELEASE_WATCH_MAX_ATTEMPTS
@@ -256,9 +257,10 @@ class UpdateRepository(
                         UpdateState.Idle, UpdateState.UpToDate,
                         is UpdateState.Available, is UpdateState.Failed,
                         -> UpdateState.Checking
-                        // Downloading/Verifying/Ready/Installing/Checking: a check must never
-                        // visibly interrupt these, even momentarily.
-                        else -> current
+                        // A check must never visibly interrupt these, even momentarily.
+                        UpdateState.Checking, is UpdateState.Downloading, is UpdateState.Verifying,
+                        is UpdateState.Ready, is UpdateState.Installing,
+                        -> current
                     }
                 }
             }
@@ -302,19 +304,21 @@ class UpdateRepository(
             // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
             // one live query, one fact, shared with whatever the Updates tab/tray display for it.
             val action = if (after.update.installable) {
-                AppNotificationAction.ShowSettingsTab("updates")
+                AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
             } else {
                 AppNotificationAction.OpenUrl(status.url)
             }
             postNotification(text, action)
         }
 
+        val availableStatus = status as? UpdateStatus.Available
+        val availableAfter = after as? UpdateState.Available
         Log.info(
             TAG,
-            "Update check resolved: version=${(status as? UpdateStatus.Available)?.version ?: "none"}, " +
-                "asset=${(status as? UpdateStatus.Available)?.asset?.name ?: "none"}, " +
-                "plan=${(after as? UpdateState.Available)?.update?.plan ?: "n/a"}, " +
-                "installable=${(after as? UpdateState.Available)?.update?.installable ?: false}",
+            "Update check resolved: version=${availableStatus?.version ?: "none"}, " +
+                "asset=${availableStatus?.asset?.name ?: "none"}, " +
+                "plan=${availableAfter?.update?.plan ?: "n/a"}, " +
+                "installable=${availableAfter?.update?.installable ?: false}",
         )
 
         val outcome = mutex.withLock {
@@ -405,7 +409,9 @@ class UpdateRepository(
             when (val current = _state.value) {
                 is UpdateState.Failed -> retryFailed(current)
                 is UpdateState.Available -> startDownloadOf(current.update)
-                else -> Unit
+                UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate, is UpdateState.Downloading,
+                is UpdateState.Verifying, is UpdateState.Ready, is UpdateState.Installing,
+                -> Unit
             }
         }
     }
@@ -507,7 +513,7 @@ class UpdateRepository(
                     // "ready" row next to an Available state.
                     postNotification(
                         NotificationText.UpdateReadyToInstall(update.version),
-                        AppNotificationAction.ShowSettingsTab("updates"),
+                        AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES),
                     )
                     _state.value = UpdateState.Ready(update, destPath)
                 }

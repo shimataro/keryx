@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -420,12 +418,12 @@ internal fun ArticleRow(
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 error = painterResource(KeryxIcons.PublicFilled),
-                modifier = Modifier.padding(start = 6.dp).size(faviconSize).clip(RoundedCornerShape(4.dp))
+                modifier = Modifier.padding(start = 6.dp).size(faviconSize).clip(FaviconShape)
                     .background(MaterialTheme.colorScheme.primaryContainer),
             )
         } else {
             Spacer(
-                Modifier.padding(start = 6.dp).size(faviconSize).clip(RoundedCornerShape(4.dp))
+                Modifier.padding(start = 6.dp).size(faviconSize).clip(FaviconShape)
                     .background(MaterialTheme.colorScheme.primaryContainer),
             )
         }

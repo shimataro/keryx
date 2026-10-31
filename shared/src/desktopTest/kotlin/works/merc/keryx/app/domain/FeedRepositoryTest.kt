@@ -9,7 +9,10 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import app.cash.sqldelight.db.QueryResult
@@ -17,6 +20,7 @@ import app.cash.sqldelight.db.SqlDriver
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
@@ -123,6 +127,61 @@ private class GatedSortOrderDriver(private val delegate: SqlDriver) : SqlDriver 
     override fun close() = delegate.close()
 }
 
+/**
+ * Fails the first `UPDATE feeds SET favicon_url` it is asked to run — the write a refresh makes
+ * once its favicon lookup succeeds — and passes everything else through.
+ */
+private class FailFirstFaviconWriteDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    var failed = false
+        private set
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (!failed && sql.startsWith("UPDATE feeds SET favicon_url")) {
+            failed = true
+            error("simulated favicon write failure")
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
+}
+
+/**
+ * Fails chosen statements while armed: the [failingInsert]th `INSERT INTO articles` (counted from
+ * arming), and/or every `INSERT INTO articles_fts` (the search-index catch-up). Everything else
+ * passes through, so a refresh can be made to fail part-way and the aftermath inspected.
+ */
+private class FaultInjectingDriver(private val delegate: app.cash.sqldelight.db.SqlDriver) :
+    app.cash.sqldelight.db.SqlDriver by delegate {
+    @Volatile var failingInsert: Int? = null
+    @Volatile var failIndexing = false
+    private var inserts = 0
+
+    /** How many search-index catch-ups (`INSERT INTO articles_fts`) have been run, whether or not they failed. */
+    @Volatile var ftsInserts = 0
+        private set
+
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<Long> {
+        if (sql.startsWith("INSERT INTO articles (") && failingInsert != null && ++inserts == failingInsert) {
+            error("simulated article write failure")
+        }
+        if (sql.contains("INSERT INTO articles_fts")) {
+            ftsInserts++
+            if (failIndexing) error("simulated index failure")
+        }
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
+}
+
 class FeedRepositoryTest {
 
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
@@ -160,6 +219,7 @@ class FeedRepositoryTest {
         return FeedRepository(
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
             notificationCenter, clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
     }
 
@@ -635,6 +695,47 @@ class FeedRepositoryTest {
         }
     }
 
+    /**
+     * A multi-feed refresh only ever runs inside a RefreshCycleRunner cycle, which syncs once right
+     * after it — so the refresh itself must not arm the debounce (once per feed), which could fire a
+     * second whole-DB upload mid-refresh.
+     */
+    @Test
+    fun refreshFeedsSchedulesNoSync(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            repeat(3) { f ->
+                newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed("https://ex.com/$f/feed")
+            }
+            var syncCount = 0
+            val fresh = RSS.replace("<guid>g1</guid>", "<guid>g-fresh</guid>")
+            val repo = newRepo(db, driver, fetcherWith { respond(fresh, HttpStatusCode.OK) }, syncScheduler = { syncCount++ })
+
+            repo.refreshAll()
+
+            assertEquals(0, syncCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A single-feed refresh has no surrounding cycle to sync after it, so it schedules exactly one. */
+    @Test
+    fun refreshFeedSchedulesOneSync(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed("https://ex.com/feed")
+            var syncCount = 0
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }, syncScheduler = { syncCount++ })
+
+            repo.refreshFeed(db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne())
+
+            assertEquals(1, syncCount)
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun refreshFeedMakesNewArticleImmediatelySearchableWithoutManualRebuild(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
@@ -676,7 +777,7 @@ class FeedRepositoryTest {
             val searchRepo = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
             assertEquals(listOf(article.id), searchRepo.search("Kotlin", ArticleFilter.All).map { it.article.id }, "sanity check before the no-op refresh")
 
-            // A 304-style response: no articles at all, so refreshFeedArticles.hadArticles is false
+            // A 304-style response: no articles at all, so the refresh has nothing new to index
             // and the (already up-to-date) FTS index should not need — and must not be broken by —
             // the no-op refresh.
             val noChangeFetcher = fetcherWith { respond("", HttpStatusCode.NotModified) }
@@ -718,6 +819,76 @@ class FeedRepositoryTest {
             // ...so last_error carries the Gone marker instead — the only thing that lets the feed
             // list keep flagging the feed after the notification is dismissed.
             assertEquals(FEED_ERROR_REASON_GONE, after.last_error)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aFeedThatStaysGoneKeepsASingleNotification(): Unit = runBlocking {
+        // A gone feed is still refreshed every cycle; the bell must not gain a copy per cycle.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val notificationCenter = NotificationCenter()
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, notificationCenter = notificationCenter)
+            repeat(3) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+
+            val notifications = notificationCenter.items.value
+            assertEquals(1, notifications.size)
+            assertIs<NotificationText.FeedGone>(notifications.single().text)
+            assertEquals(AppNotificationAction.ShowFeedDetail(feed.id), notifications.single().action)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun renamingAGoneFeedStartsASecondNotification(): Unit = runBlocking {
+        // The coalescing key includes the title (see error-design.md), so a rename between cycles
+        // adds an entry under the new name rather than rewriting the old one.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            val notificationCenter = NotificationCenter()
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, notificationCenter = notificationCenter)
+            goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+            goneRepo.renameFeed(feed.id, "Renamed")
+            repeat(2) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+
+            val titles = notificationCenter.items.value.map { assertIs<NotificationText.FeedGone>(it.text).feedTitle }
+            assertEquals(2, titles.size)
+            assertTrue("Renamed" in titles)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aFeedThatStaysGoneIsNotRewrittenEachRefresh(): Unit = runBlocking {
+        // Any feeds write re-runs the article-list query, so only the transition to gone writes.
+        val (driver, db) = inMemoryDb()
+        try {
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            repo.subscribeFeed("https://ex.com/feed")
+            val feed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+
+            var now = 2000L
+            val goneRepo = newRepo(db, driver, fetcherWith { respond("", HttpStatusCode.Gone) }, clock = Clock { now++ })
+            goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne())
+            val afterFirst = db.feedsQueries.getById(feed.id).executeAsOne()
+            repeat(2) { goneRepo.refreshFeed(db.feedsQueries.getById(feed.id).executeAsOne()) }
+            val afterThird = db.feedsQueries.getById(feed.id).executeAsOne()
+
+            assertEquals(FEED_ERROR_REASON_GONE, afterFirst.last_error)
+            assertEquals(afterFirst.last_error, afterThird.last_error)
+            assertEquals(afterFirst.updated_at, afterThird.updated_at)
         } finally {
             driver.close()
         }
@@ -1001,6 +1172,401 @@ class FeedRepositoryTest {
             // Every feed's serially-applied write landed: each feed now holds its 2nd article (g2) too,
             // so nothing was lost when the concurrent fetches funneled into the sequential write phase.
             assertEquals(2 * n, db.articlesQueries.watchAll().executeAsList().size)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshAllAppliesFeedsThatHaveFetchedWhileASlowerFeedIsStillFetching(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            setupRepo.subscribeFeed("https://ex.com/slow")
+            setupRepo.subscribeFeed("https://ex.com/fast")
+            val slowFeedId = db.feedsQueries.getByUrl("https://ex.com/slow").executeAsOne().id
+            val fastFeedId = db.feedsQueries.getByUrl("https://ex.com/fast").executeAsOne().id
+            val releaseSlow = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                if (request.url.encodedPath == "/slow") releaseSlow.await()
+                respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+            })
+            fun articleCount(feedId: String) = db.articlesQueries.watchByFeed(feedId).executeAsList().size
+
+            val refresh = async(Dispatchers.Default) { repo.refreshAll() }
+            // The fast feed's new article lands while the slow feed's fetch is still held open —
+            // the refresh does not wait for every fetch before writing anything.
+            withTimeout(5_000) { while (articleCount(fastFeedId) < 2) delay(10) }
+            assertEquals(1, articleCount(slowFeedId))
+            assertFalse(refresh.isCompleted)
+
+            releaseSlow.complete(Unit)
+            val results = withTimeout(5_000) { refresh.await() }
+
+            assertEquals(2, articleCount(slowFeedId))
+            assertTrue(results.values.all { it is Result.Ok }, "both feeds should refresh Ok: $results")
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshAllResultKeepsTheFeedListOrderWhateverOrderTheFetchesFinishIn(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val setupRepo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            for (i in 1..4) setupRepo.subscribeFeed("https://ex.com/feed$i")
+            val feedList = setupRepo.feedsCoveredBy(ArticleFilter.All)
+            // Earlier feeds in the list finish later, so completion order is the reverse of it.
+            val repo = newRepo(db, driver, fetcherWith { request ->
+                val index = request.url.encodedPath.removePrefix("/feed").toInt()
+                delay((5 - index) * 40L)
+                respond(RSS, HttpStatusCode.OK)
+            })
+
+            val results = withTimeout(10_000) { repo.refreshFeeds(feedList) }
+
+            assertEquals(feedList.map { it.id }, results.keys.toList())
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A [FaviconResolver] answering every request through [handler] (production client config). */
+    private fun faviconResolverWith(handler: MockRequestHandler): FaviconResolver =
+        FaviconResolver(
+            HttpClient(MockEngine(handler)) {
+                followRedirects = false
+                expectSuccess = false
+                install(HttpTimeout)
+            },
+        )
+
+    /** Subscribes one feed with no favicon (the subscribe-time lookup finds none) and returns its id. */
+    private suspend fun subscribeWithoutFavicon(
+        db: works.merc.keryx.app.data.local.db.KeryxDatabase,
+        driver: app.cash.sqldelight.db.SqlDriver,
+        url: String = "https://ex.com/feed",
+    ): String {
+        newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) }).subscribeFeed(url)
+        val feed = db.feedsQueries.getByUrl(url).executeAsOne()
+        assertEquals(null, feed.favicon_url)
+        return feed.id
+    }
+
+    @Test
+    fun refreshAppliesTheFeedsArticlesBeforeItsFaviconLookupFinishesThenStoresTheFavicon(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val releaseFavicon = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val synced = java.util.concurrent.atomic.AtomicInteger(0)
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith { request ->
+                    releaseFavicon.await()
+                    if (request.url.encodedPath == "/favicon.ico") respond("", HttpStatusCode.OK) else respond("", HttpStatusCode.NotFound)
+                },
+                syncScheduler = SyncScheduler { synced.incrementAndGet() },
+            )
+
+            val refresh = async(Dispatchers.Default) { repo.refreshAll() }
+            withTimeout(5_000) { while (db.articlesQueries.watchByFeed(feedId).executeAsList().size < 2) delay(10) }
+            assertEquals(null, db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+            val syncsBeforeFavicon = synced.get()
+
+            releaseFavicon.complete(Unit)
+            withTimeout(5_000) { refresh.await() }
+
+            assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+            // A favicon is a synced column, so storing it asks for a sync of its own.
+            assertTrue(synced.get() > syncsBeforeFavicon)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun refreshDoesNotLookAMissingFaviconUpAgainWithinTheRetryInterval(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            subscribeWithoutFavicon(db, driver)
+            val faviconRequests = java.util.concurrent.atomic.AtomicInteger(0)
+            val now = java.util.concurrent.atomic.AtomicLong(1_000L)
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith {
+                    faviconRequests.incrementAndGet()
+                    respond("", HttpStatusCode.NotFound)
+                },
+                clock = Clock { now.get() },
+            )
+
+            repo.refreshAll()
+            val afterFirst = faviconRequests.get()
+            assertTrue(afterFirst > 0, "the first refresh must look the favicon up")
+
+            now.addAndGet(works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS - 1)
+            repo.refreshAll()
+            assertEquals(afterFirst, faviconRequests.get(), "no new lookup within the retry interval")
+
+            now.addAndGet(1)
+            repo.refreshAll()
+            assertTrue(faviconRequests.get() > afterFirst, "looked up again once the interval has passed")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * The favicon write is best-effort — a failure is logged and the refresh carries on — but it
+     * does not give up on the favicon: nothing records a miss for a lookup that found one, so the
+     * next refresh looks it up and stores it.
+     */
+    @Test
+    fun aFaviconWriteThatFailsIsRetriedOnTheNextRefresh(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FailFirstFaviconWriteDriver(rawDriver)
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith { request ->
+                    if (request.url.encodedPath == "/favicon.ico") respond("", HttpStatusCode.OK) else respond("", HttpStatusCode.NotFound)
+                },
+            )
+
+            val first = repo.refreshAll()
+
+            assertTrue(driver.failed, "the first favicon write must have been attempted and failed")
+            assertTrue(first.values.all { it is Result.Ok }, "a failed favicon write must not fail the refresh: $first")
+            assertEquals(null, db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+
+            repo.refreshAll()
+
+            assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Android starts a new process for most background refreshes, so a miss held only by the
+     * repository instance would not stop the next one probing the site again: the record is the
+     * store's, and a repository built over the same store (a new process reads the same settings)
+     * leaves the feed alone.
+     */
+    @Test
+    fun aMissIsHonouredByARepositoryBuiltOverTheSameStore(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            subscribeWithoutFavicon(db, driver)
+            val store = InMemoryFaviconMissStore()
+            val faviconRequests = java.util.concurrent.atomic.AtomicInteger(0)
+            fun repo() = FeedRepository(
+                db, fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolverWith { faviconRequests.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined),
+                ftsManagerIndexed(driver), SyncScheduler {}, NotificationCenter(), Clock { 1000L }, Dispatchers.Unconfined,
+                faviconMisses = store,
+            )
+
+            repo().refreshAll()
+            val afterFirstProcess = faviconRequests.get()
+            assertTrue(afterFirstProcess > 0, "the first refresh must look the favicon up")
+
+            repo().refreshAll()
+
+            assertEquals(afterFirstProcess, faviconRequests.get(), "the second repository must not probe the site again")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** The guard `refreshFeed(feedId)` relies on: no fetch for a feed that is gone or was never there. */
+    @Test
+    fun refreshFeedByIdOfAnUnsubscribedOrUnknownFeedReturnsNullWithoutFetching(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("gone", deletedAt = 5L)
+            val fetches = java.util.concurrent.atomic.AtomicInteger(0)
+            val repo = newRepo(db, driver, fetcherWith { fetches.incrementAndGet(); respond(RSS, HttpStatusCode.OK) })
+
+            assertNull(repo.refreshFeedById("gone"))
+            assertNull(repo.refreshFeedById("missing"))
+
+            assertEquals(0, fetches.get())
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aFaviconResolvedAfterTheFeedWasUnsubscribedIsNotWritten(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val lookupStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val releaseFavicon = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val repo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith {
+                    lookupStarted.complete(Unit)
+                    releaseFavicon.await()
+                    respond("", HttpStatusCode.OK)
+                },
+            )
+
+            val refresh = async(Dispatchers.Default) { repo.refreshAll() }
+            withTimeout(5_000) { lookupStarted.await() }
+            repo.unsubscribeFeed(feedId)
+            val updatedAtAfterUnsubscribe = db.feedsQueries.getById(feedId).executeAsOne().updated_at
+            releaseFavicon.complete(Unit)
+            withTimeout(5_000) { refresh.await() }
+
+            val feed = db.feedsQueries.getById(feedId).executeAsOne()
+            assertEquals(null, feed.favicon_url)
+            assertEquals(updatedAtAfterUnsubscribe, feed.updated_at)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun aCancelledFaviconLookupIsNotRememberedAsMissing(): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        try {
+            val feedId = subscribeWithoutFavicon(db, driver)
+            val lookupStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val hang = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val cancelledRepo = newRepo(
+                db, driver,
+                fetcherWith { respond(RSS, HttpStatusCode.OK) },
+                faviconResolver = faviconResolverWith {
+                    lookupStarted.complete(Unit)
+                    hang.await()
+                    respond("", HttpStatusCode.OK)
+                },
+            )
+            val refresh = launch(Dispatchers.Default) { cancelledRepo.refreshAll() }
+            withTimeout(5_000) { lookupStarted.await() }
+            refresh.cancelAndJoin()
+
+            // The same repository (same in-memory miss record) looks the favicon up on the next
+            // refresh, because the abandoned lookup never concluded that there was none.
+            hang.complete(Unit)
+            cancelledRepo.refreshAll()
+
+            assertEquals("https://ex.com/favicon.ico", db.feedsQueries.getById(feedId).executeAsOne().favicon_url)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * Two subscribed feeds: one answering at once and one that waits for [slowGate], so the first is
+     * always applied first and the test decides when — or whether — the second arrives.
+     */
+    private suspend fun twoFeedsOneSlow(
+        driver: FaultInjectingDriver,
+        slowGate: kotlinx.coroutines.CompletableDeferred<Unit>,
+    ): Triple<works.merc.keryx.app.data.local.db.KeryxDatabase, FeedRepository, List<Feeds>> {
+        val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+        val setup = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        setup.subscribeFeed("https://ex.com/ok")
+        setup.subscribeFeed("https://ex.com/slow")
+        val repo = newRepo(db, driver, fetcherWith { request ->
+            if (request.url.encodedPath == "/slow") slowGate.await()
+            respond(RSS_WITH_NEW_SEARCHABLE_ARTICLE, HttpStatusCode.OK)
+        })
+        return Triple(db, repo, repo.feedsCoveredBy(ArticleFilter.All).sortedBy { it.url })
+    }
+
+    /** Waits until the feed's refreshed articles (the two the refresh feed carries) are in the DB. */
+    private suspend fun awaitApplied(db: works.merc.keryx.app.data.local.db.KeryxDatabase, feedId: String) {
+        withTimeout(5_000) {
+            while (db.articlesQueries.watchByFeed(feedId).executeAsList().size < 2) delay(5)
+        }
+    }
+
+    private fun searchHits(db: works.merc.keryx.app.data.local.db.KeryxDatabase, driver: app.cash.sqldelight.db.SqlDriver) =
+        runBlocking {
+            ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, Clock { 1000L }, Dispatchers.Unconfined)
+                .search("Serialization", ArticleFilter.All).map { it.article.feed_id }
+        }
+
+    /**
+     * An apply that fails part-way leaves the feeds applied before it committed and propagates the
+     * failure — but those feeds' new articles are indexed first, rather than staying out of search
+     * until some later refresh.
+     */
+    @Test
+    fun refreshFeedsIndexesTheFeedsAppliedBeforeAnApplyFailureThenRethrows(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            val slowGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val (db, repo, feedList) = twoFeedsOneSlow(driver, slowGate)
+            val okFeed = feedList.single { it.url.endsWith("/ok") }
+            // The ok feed's apply writes two articles (g1, g2); the third insert is the slow feed's.
+            driver.failingInsert = 3
+
+            val refresh = async(Dispatchers.Default) { runCatching { repo.refreshFeeds(feedList) }.exceptionOrNull() }
+            awaitApplied(db, okFeed.id)
+            slowGate.complete(Unit)
+            val failure = withTimeout(5_000) { refresh.await() }
+
+            assertEquals("simulated article write failure", failure?.message)
+            assertEquals(listOf(okFeed.id), searchHits(db, driver), "the feed applied before the failure is searchable")
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** The index catch-up failing as well must not hide the failure that started it. */
+    @Test
+    fun refreshFeedsKeepsTheApplyFailureAndAttachesAnIndexFailureToIt(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            val slowGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val (db, repo, feedList) = twoFeedsOneSlow(driver, slowGate)
+            driver.failingInsert = 3
+            driver.failIndexing = true
+
+            val refresh = async(Dispatchers.Default) { runCatching { repo.refreshFeeds(feedList) }.exceptionOrNull() }
+            awaitApplied(db, feedList.single { it.url.endsWith("/ok") }.id)
+            slowGate.complete(Unit)
+            val failure = withTimeout(5_000) { refresh.await() }
+
+            assertEquals("simulated article write failure", failure?.message)
+            assertEquals(listOf("simulated index failure"), failure?.suppressed?.map { it.message })
+        } finally {
+            driver.close()
+        }
+    }
+
+    /** A refresh that is abandoned is not worth an O(articles) index scan on the way out. */
+    @Test
+    fun aCancelledRefreshFeedsDoesNotIndexOnTheWayOut(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            // The slow feed's gate is never opened: it is still fetching when the refresh is cancelled.
+            val (db, repo, feedList) = twoFeedsOneSlow(driver, kotlinx.coroutines.CompletableDeferred())
+            val indexRunsBefore = driver.ftsInserts
+
+            val refresh = launch(Dispatchers.Default) { repo.refreshFeeds(feedList) }
+            awaitApplied(db, feedList.single { it.url.endsWith("/ok") }.id)
+            refresh.cancelAndJoin()
+
+            assertTrue(refresh.isCancelled)
+            assertEquals(indexRunsBefore, driver.ftsInserts, "an abandoned refresh must not run the index scan")
         } finally {
             driver.close()
         }

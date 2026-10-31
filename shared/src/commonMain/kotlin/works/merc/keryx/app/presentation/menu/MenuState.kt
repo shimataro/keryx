@@ -1,6 +1,8 @@
 package works.merc.keryx.app.presentation.menu
 
 import works.merc.keryx.app.domain.ActivitySnapshot
+import works.merc.keryx.app.presentation.home.ArticleListMode
+import works.merc.keryx.app.presentation.home.listModeChecked
 
 /**
  * Enabled/checked state for every dynamic item in the desktop application menu bar (and, for the
@@ -18,9 +20,19 @@ data class MenuUiState(
      * is already running (whichever route started it — see `OpmlTransferController.busy`). */
     val opmlEnabled: Boolean,
     val searchEnabled: Boolean,
-    val unreadOnlyEnabled: Boolean,
-    val unreadOnlyChecked: Boolean,
+    /** The View menu's article-list mode items (All / Unread only / Starred only). */
+    val listModeEnabled: Boolean,
+    /** Which of those items is checked — `HomeViewModel.mode`. */
+    val listMode: ArticleListMode,
+    /** The "Starred only" item — additionally off under the Starred filter (`HomeViewModel.starredModeEnabled`). */
+    val starredModeEnabled: Boolean,
+    /** Whether the "Starred only" item is checked — also under the Starred filter, where it is fixed
+     * on ([listModeChecked]). */
+    val starredModeChecked: Boolean,
     val toggleSortEnabled: Boolean,
+    /** Hide read articles — the same rule as the action itself (`HomeViewModel.canHideRead`):
+     * unread-only, with a read row other than the selected one on screen. */
+    val hideReadEnabled: Boolean,
     val markAllReadEnabled: Boolean,
     /** Toggle read / star — require a selected article. Not gated on pane focus: the real
      * article-detail toolbar stays clickable for the selected article regardless of which pane
@@ -99,7 +111,9 @@ fun computeMenuUiState(
     activity: ActivitySnapshot,
     canSyncNow: Boolean,
     searchActive: Boolean,
-    unreadOnly: Boolean,
+    canHideRead: Boolean,
+    listMode: ArticleListMode,
+    starredModeAvailable: Boolean,
     opmlBusy: Boolean,
     hasSelectedFeed: Boolean,
     feedListKeysActive: Boolean,
@@ -110,9 +124,12 @@ fun computeMenuUiState(
     addItemsEnabled = onHome,
     opmlEnabled = onHome && !opmlBusy,
     searchEnabled = onHome,
-    unreadOnlyEnabled = onHome,
-    unreadOnlyChecked = unreadOnly,
+    listModeEnabled = onHome,
+    listMode = listMode,
+    starredModeEnabled = onHome && starredModeAvailable,
+    starredModeChecked = listModeChecked(ArticleListMode.Starred, listMode, starredModeAvailable),
     toggleSortEnabled = onHome && !searchActive,
+    hideReadEnabled = onHome && canHideRead,
     markAllReadEnabled = onHome,
     articleActionsEnabled = onHome && hasSelectedArticle,
     copyUrlEnabled = onHome && hasSelectedArticle && selectedArticleHasUrl,

@@ -48,6 +48,25 @@ internal fun runProcessWithTimeout(command: List<String>, timeoutMillis: Long): 
     return proc.exitValue()
 }
 
+/** The user's own `applications` directory (`$XDG_DATA_HOME/applications`), where both registrars write their `.desktop` entry. */
+internal fun defaultApplicationsDir(): File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications")
+
+/** The user's own `mimeapps.list` (`$XDG_CONFIG_HOME/mimeapps.list`), where both registrars record their association. */
+internal fun defaultMimeAppsList(): File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list")
+
+/**
+ * Runs [refreshDesktopDatabase] on [applicationsDir], logging under [logTag] rather than failing.
+ *
+ * Best-effort only. The `[Default Applications]` entry is what GIO, KDE and xdg-open's generic path
+ * all consult first; refreshing mimeinfo.cache merely keeps the "which apps can open this" list
+ * accurate, so a missing desktop-file-utils is not a failure.
+ */
+internal fun refreshDesktopDatabaseBestEffort(refreshDesktopDatabase: (File) -> Unit, applicationsDir: File, logTag: String) {
+    runCatching { refreshDesktopDatabase(applicationsDir) }.onFailure {
+        Log.info(logTag, "Could not refresh the desktop database; the association itself is still in place")
+    }
+}
+
 /** Default `update-desktop-database` refresh, shared by [LinuxUriSchemeRegistrar] and [LinuxOpmlAssociationRegistrar]. */
 internal fun defaultRefreshDesktopDatabase(): (File) -> Unit = { dir ->
     runProcessWithTimeout(listOf("update-desktop-database", dir.path), UPDATE_DESKTOP_DATABASE_TIMEOUT_MS)
@@ -69,8 +88,8 @@ internal fun defaultRefreshDesktopDatabase(): (File) -> Unit = { dir ->
  */
 internal class LinuxUriSchemeRegistrar(
     private val launcherPath: String,
-    private val applicationsDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications"),
-    private val mimeAppsList: File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list"),
+    private val applicationsDir: File = defaultApplicationsDir(),
+    private val mimeAppsList: File = defaultMimeAppsList(),
     private val refreshDesktopDatabase: (File) -> Unit = defaultRefreshDesktopDatabase(),
 ) {
     /**
@@ -81,23 +100,17 @@ internal class LinuxUriSchemeRegistrar(
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, URI_HANDLER_DESKTOP_FILE)
         val entry = desktopEntryContent(launcherPath, CUSTOM_URI_MIME_TYPE, "%u")
-        var changed = false
-
-        if (writeIfChanged(desktopFile, entry)) changed = true
+        val desktopFileChanged = writeIfChanged(desktopFile, entry)
 
         val existingAssociations = readOrNull(mimeAppsList)
         val mergedAssociations =
             mergeMimeAppsList(existingAssociations, URI_HANDLER_DESKTOP_FILE, CUSTOM_URI_MIME_TYPE)
-        if (writeIfChanged(mimeAppsList, mergedAssociations)) changed = true
+        // Both writes always run (separate vals, never a short-circuiting ||).
+        val associationsChanged = writeIfChanged(mimeAppsList, mergedAssociations)
 
-        if (changed) {
-            // Best-effort only. The `[Default Applications]` entry above is what GIO, KDE and
-            // xdg-open's generic path all consult first; refreshing mimeinfo.cache merely keeps
-            // the "which apps can open this" list accurate, so a missing desktop-file-utils is
-            // not a failure. Skipped when nothing changed, so startup spawns no process at all.
-            runCatching { refreshDesktopDatabase(applicationsDir) }.onFailure {
-                Log.info(LOG_TAG, "Could not refresh the desktop database; the association itself is still in place")
-            }
+        if (desktopFileChanged || associationsChanged) {
+            // Skipped when nothing changed, so startup spawns no process at all.
+            refreshDesktopDatabaseBestEffort(refreshDesktopDatabase, applicationsDir, LOG_TAG)
             Log.info(LOG_TAG, "Registered keryx:// URI scheme handler at ${desktopFile.path}")
         }
         true

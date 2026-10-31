@@ -4,6 +4,7 @@ import java.awt.Color
 import java.awt.image.BufferedImage
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class IconBadgeTest {
@@ -123,5 +124,28 @@ class IconBadgeTest {
             (0 until size).any { y -> (image.getRGB(x, y) ushr 24) != 0 }
         }
         assertTrue(hasOpaquePixel, "expected at least one non-transparent pixel")
+    }
+
+    @Test
+    fun `no taskbar means no badge route whatever the feature flags say`() {
+        assertEquals(UnreadBadgeRoute.None, unreadBadgeRoute(false, windowBadgeSupported = true, iconImageSupported = true))
+        assertEquals(UnreadBadgeRoute.None, unreadBadgeRoute(false, windowBadgeSupported = false, iconImageSupported = false))
+    }
+
+    @Test
+    fun `a taskbar with per-window badge images uses the window badge`() {
+        assertEquals(UnreadBadgeRoute.WindowBadge, unreadBadgeRoute(true, windowBadgeSupported = true, iconImageSupported = true))
+        assertEquals(UnreadBadgeRoute.WindowBadge, unreadBadgeRoute(true, windowBadgeSupported = true, iconImageSupported = false))
+    }
+
+    @Test
+    fun `a taskbar that only takes an icon image uses the badged app icon`() {
+        assertEquals(UnreadBadgeRoute.AppIcon, unreadBadgeRoute(true, windowBadgeSupported = false, iconImageSupported = true))
+    }
+
+    @Test
+    fun `a taskbar that takes neither image has no badge route`() {
+        // E.g. the Unity taskbar, which supports only a numeric badge, menu, progress and attention.
+        assertEquals(UnreadBadgeRoute.None, unreadBadgeRoute(true, windowBadgeSupported = false, iconImageSupported = false))
     }
 }

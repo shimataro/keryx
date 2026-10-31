@@ -10,7 +10,6 @@ extension CloudStorageType {
         case .dropbox: return "Dropbox"
         case .googleDrive: return "Google Drive"
         case .onedrive: return "OneDrive"
-        default: return ""
         }
     }
 }

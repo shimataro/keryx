@@ -34,11 +34,13 @@ import works.merc.keryx.app.core.CloudStorageType
 import works.merc.keryx.app.domain.SyncPhase
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.ui.common.FlatButton
+import works.merc.keryx.app.ui.common.FlatSwitch
 import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.IconButtonKind
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.ui.common.KeryxSettingRow
 import works.merc.keryx.app.ui.common.SmallSpinner
 import works.merc.keryx.app.ui.common.TooltipIconButton
 import works.merc.keryx.app.resources.Res
@@ -66,7 +68,10 @@ import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_action
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_body
 import works.merc.keryx.app.resources.settings_cloud_switch_confirm_title
+import works.merc.keryx.app.resources.settings_cloud_sync_deferred_network
 import works.merc.keryx.app.resources.settings_cloud_sync_hint
+import works.merc.keryx.app.resources.settings_cloud_sync_on_metered
+import works.merc.keryx.app.resources.settings_cloud_sync_on_metered_hint
 import works.merc.keryx.app.resources.settings_dropbox_connect
 import works.merc.keryx.app.resources.settings_dropbox_disconnect
 import works.merc.keryx.app.resources.settings_google_drive_connect
@@ -97,6 +102,8 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
     val syncPhase by vm.syncPhase.collectAsState()
     val disconnecting by vm.disconnecting.collectAsState()
     val canSyncNow by vm.canSyncNow.collectAsState()
+    val syncOnMeteredNetwork by vm.syncOnMeteredNetwork.collectAsState()
+    val syncDeferredForNetwork by vm.syncDeferredForNetwork.collectAsState()
     // Confirmation-dialog triggers for the two disruptive cloud-storage actions (disconnect an
     // established connection, or abort an in-flight OAuth wait). Starting a fresh connect stays
     // immediate — it's low-risk (just opens a browser).
@@ -144,6 +151,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     // Swaps this row's recovery action from "reset sync data" to "reconnect" — see
                     // CloudProviderRow's own comment for why the two are mutually exclusive.
                     authFailed = connected == type && lastSyncAuthFailed,
+                    // An automatic sync is waiting for a network that allows it (see
+                    // SyncRepository.syncDeferredForNetwork); "Sync now" below still runs at once.
+                    deferredForNetwork = connected == type && syncDeferredForNetwork,
                     resetting = resetting,
                     // Live progress for the connected row, in priority order: an in-flight
                     // disconnect (waiting out a sync it must let finish first — see
@@ -169,16 +179,35 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                 )
             }
         }
+        // Only where the platform reports metered networks (Android, iOS), and only once a provider
+        // is connected — without one there is no automatic sync for it to govern.
+        if (vm.meteredSettingSupported && connected != null) {
+            Spacer(Modifier.height(8.dp))
+            SettingsCard(settingRowsOnly = true) {
+                KeryxSettingRow(
+                    label = stringResource(Res.string.settings_cloud_sync_on_metered),
+                    supporting = stringResource(Res.string.settings_cloud_sync_on_metered_hint),
+                    onClick = { vm.setSyncOnMeteredNetwork(!syncOnMeteredNetwork) },
+                    trailing = { FlatSwitch(checked = syncOnMeteredNetwork, onCheckedChange = vm::setSyncOnMeteredNetwork) },
+                    toggled = syncOnMeteredNetwork,
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
         // The same manual sync as Home's cloud button, placed where a sync failure is reported
         // (a sync-error notification opens this tab), so retrying needs no trip back to Home.
         // Always present and only disabled when unavailable (no provider, something else running,
         // an auth failure the row's own "reconnect" must fix first), per the layout-stability rule.
         // Kept out of CloudProviderRow: a third labelled action would overrun that row's width.
-        SyncNowButton(
+        // Labelled on every platform (unlike the row's own actions): it stands alone on its line.
+        ProviderActionButton(
+            label = stringResource(Res.string.menu_feed_sync_now),
+            icon = KeryxIcons.Cloud,
+            onClick = { vm.syncNow() },
+            kind = IconButtonKind.Standard,
             enabled = canSyncNow,
             busy = syncing && connected != null,
-            onClick = { vm.syncNow() },
+            iconOnly = false,
         )
     }
 
@@ -203,14 +232,9 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
         )
     }
     if (confirmingResetCloudData) {
-        KeryxAlertDialog(
-            onDismissRequest = { confirmingResetCloudData = false },
-            title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-            text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
-            confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+        ResetCloudDataConfirmDialog(
             onConfirm = { vm.resetCloudData(); confirmingResetCloudData = false },
-            dismissText = stringResource(Res.string.common_cancel),
-            destructive = true,
+            onDismiss = { confirmingResetCloudData = false },
         )
     }
     confirmingSwitchTo?.let { type ->
@@ -234,23 +258,20 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
 }
 
 /**
- * The tab's "sync now" button: a labelled tonal button whose glyph swaps for a spinner in the same
- * fixed slot while a sync is running, so the swap can't reflow the label.
+ * The destructive "reset cloud sync data" confirmation, shared by this tab's own reset button and
+ * the notification center's `ResetCloudData` action so both routes ask the same question.
  */
 @Composable
-private fun SyncNowButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
-    FlatTonalButton(onClick = onClick, enabled = enabled) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (busy) {
-                SmallSpinner(size = 18.dp, color = LocalContentColor.current)
-            } else {
-                // Decorative: the Text beside it announces the action.
-                KeryxIcon(KeryxIcons.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.menu_feed_sync_now))
-        }
-    }
+internal fun ResetCloudDataConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    KeryxAlertDialog(
+        onDismissRequest = onDismiss,
+        title = stringResource(Res.string.settings_cloud_reset_confirm_title),
+        text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
+        confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+        onConfirm = onConfirm,
+        dismissText = stringResource(Res.string.common_cancel),
+        destructive = true,
+    )
 }
 
 /**
@@ -396,6 +417,8 @@ internal fun cloudProviderRowStatusText(
  * @param statusText Live progress text (a sync phase, or "disconnecting…") shown in the same slot
  *   [lastSyncedAtText] otherwise occupies, taking priority over it — see the status slot below.
  *   Only ever non-null for the connected row.
+ * @param deferredForNetwork An automatic sync is waiting for a network that allows it; a wrapping
+ *   notice below the status slot says so, whatever the slot itself shows.
  * @param iconOnly Whether the trailing actions drop their labels — see [ProviderActionButton]. Only
  *   overridden by tests; production always takes the platform's own answer.
  * @param onSelect Invoked to select or connect the provider.
@@ -417,6 +440,7 @@ internal fun CloudProviderRow(
     statusText: String? = null,
     authFailed: Boolean = false,
     resetting: Boolean = false,
+    deferredForNetwork: Boolean = false,
     iconOnly: Boolean = isTouchPrimary,
     onSelect: () -> Unit,
     onCancel: () -> Unit,
@@ -577,6 +601,17 @@ internal fun CloudProviderRow(
                     modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
                 )
             }
+        }
+        // A sync waiting for a network that allows it. Outside the fixed-height slot above because
+        // the message is a full sentence that must wrap at phone width, and it stays up while a
+        // manual sync's progress shows, so it appears and disappears only with the deferral itself.
+        if (deferredForNetwork) {
+            Text(
+                stringResource(Res.string.settings_cloud_sync_deferred_network),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.8f),
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
         }
         // An in-progress sync failure (localized per ErrorKind by the caller) takes precedence: it
         // describes the live state of a working connection, whereas `failed` only reports that the

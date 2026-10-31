@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.core.Log
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Handler
 import java.util.logging.Level
 import java.util.logging.LogRecord
@@ -49,11 +50,7 @@ class SingleInstanceCoordinatorTest {
 
         assertTrue(second.signalRunningInstance())
 
-        val deadline = System.currentTimeMillis() + 5_000
-        while (!activated.get() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20)
-        }
-        assertTrue(activated.get())
+        awaitCondition { activated.get() }
     }
 
     @Test
@@ -107,16 +104,14 @@ class SingleInstanceCoordinatorTest {
     fun signalRunningInstanceForwardsUriString() = runBlocking {
         assertTrue(first.tryAcquireLock())
 
-        var receivedUri: String? = "placeholder"
-        first.startActivationListener { uri -> receivedUri = uri }
+        // Written on the listener's thread, read here.
+        val receivedUri = AtomicReference<String?>("placeholder")
+        first.startActivationListener { uri -> receivedUri.set(uri) }
 
         val testUri = "keryx://oauth2/callback?code=abc&state=xyz"
         assertTrue(second.signalRunningInstance(testUri))
 
-        val deadline = System.currentTimeMillis() + 5_000
-        while (receivedUri == "placeholder" && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20)
-        }
-        assertEquals(testUri, receivedUri)
+        awaitCondition { receivedUri.get() != "placeholder" }
+        assertEquals(testUri, receivedUri.get())
     }
 }

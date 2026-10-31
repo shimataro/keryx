@@ -6,6 +6,7 @@ import works.merc.keryx.app.core.REG_EXE_TIMEOUT_MS
 import works.merc.keryx.app.platform.osName
 import java.io.File
 import java.io.IOException
+import java.net.URI
 
 private const val LOG_TAG = "UriScheme"
 
@@ -90,26 +91,17 @@ internal fun registerWindowsUriScheme(
     launcherPath: String,
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
-    val reg = "reg.exe"
-    val (importCommand, regFile) = try {
-        buildShellOpenCommandImport(
-            "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
-            launcherPath,
-        )
-    } catch (e: IOException) {
-        Log.warn(LOG_TAG, "Could not prepare the Windows URI scheme registry file", e)
-        return
-    }
-    val commands = listOf(
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
-        importCommand,
+    registerWindowsShellOpen(
+        commandKey = "HKEY_CURRENT_USER\\Software\\Classes\\keryx\\shell\\open\\command",
+        addCommands = listOf(
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/ve", "/d", "URL:keryx Protocol", "/f"),
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\keryx", "/v", "URL Protocol", "/d", "", "/f"),
+        ),
+        context = "Windows URI scheme",
+        prepareFailure = "Could not prepare the Windows URI scheme registry file",
+        launcherPath = launcherPath,
+        runCommand = runCommand,
     )
-    try {
-        runRegistryCommands(commands, "Windows URI scheme", runCommand)
-    } finally {
-        regFile.delete()
-    }
 }
 
 /**
@@ -123,24 +115,43 @@ internal fun registerWindowsOpmlAssociation(
     launcherPath: String,
     runCommand: (List<String>) -> Int = { args -> runProcessWithTimeout(args, REG_EXE_TIMEOUT_MS) },
 ) {
-    val reg = "reg.exe"
     val progId = "$APP_NAME.opml"
+    registerWindowsShellOpen(
+        commandKey = "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
+        addCommands = listOf(
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
+            listOf(REG_EXE, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
+        ),
+        context = "Windows .opml association",
+        prepareFailure = "Could not prepare the Windows .opml association registry file",
+        launcherPath = launcherPath,
+        runCommand = runCommand,
+    )
+}
+
+private const val REG_EXE = "reg.exe"
+
+/**
+ * Runs [addCommands] and then the `reg.exe import` that writes [launcherPath] under [commandKey]
+ * (see [buildShellOpenCommandImport]), deleting the temporary `.reg` file afterwards. Logs
+ * [prepareFailure] and registers nothing when that file cannot be written.
+ */
+private fun registerWindowsShellOpen(
+    commandKey: String,
+    addCommands: List<List<String>>,
+    context: String,
+    prepareFailure: String,
+    launcherPath: String,
+    runCommand: (List<String>) -> Int,
+) {
     val (importCommand, regFile) = try {
-        buildShellOpenCommandImport(
-            "HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command",
-            launcherPath,
-        )
+        buildShellOpenCommandImport(commandKey, launcherPath)
     } catch (e: IOException) {
-        Log.warn(LOG_TAG, "Could not prepare the Windows .opml association registry file", e)
+        Log.warn(LOG_TAG, prepareFailure, e)
         return
     }
-    val commands = listOf(
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\.opml", "/ve", "/d", progId, "/f"),
-        listOf(reg, "add", "HKEY_CURRENT_USER\\Software\\Classes\\$progId", "/ve", "/d", "OPML Document", "/f"),
-        importCommand,
-    )
     try {
-        runRegistryCommands(commands, "Windows .opml association", runCommand)
+        runRegistryCommands(addCommands + listOf(importCommand), context, runCommand)
     } finally {
         regFile.delete()
     }
@@ -173,7 +184,7 @@ private fun buildShellOpenCommandImport(commandKey: String, launcherPath: String
     // install path can contain non-ASCII characters, since packageMsi's dirChooser lets the user
     // pick any install directory.
     tempFile.writeBytes(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + regFileText.toByteArray(Charsets.UTF_16LE))
-    return listOf("reg.exe", "import", tempFile.path) to tempFile
+    return listOf(REG_EXE, "import", tempFile.path) to tempFile
 }
 
 /**
@@ -193,4 +204,28 @@ private fun runRegistryCommands(commands: List<List<String>>, failureContext: St
             }
             .onFailure { Log.warn(LOG_TAG, "Could not register $failureContext", it) }
     }
+}
+
+/**
+ * Converts a `file://`-URI launch argument into a plain filesystem path, leaving every other
+ * argument (a `keryx://` URI, an already-plain path, an unrelated flag) unchanged. The Linux Snap
+ * desktop entry's `Exec=keryx %u` field code covers both the `keryx://` callback and an `.opml`
+ * file with a single field code, but some desktop environments hand a local file to `%u` as a
+ * `file://` URI rather than a bare path — [classifyLaunchArg] itself stays a pure, JVM-independent
+ * string check (it lives in commonMain), so the URI decoding happens here instead. A `null` or
+ * `localhost` authority (e.g. `file://localhost/...`, RFC 8089's equivalent of `file:///...`) is
+ * normalized to empty before constructing the `File`, since `File(URI)` otherwise rejects any
+ * non-empty authority outright.
+ */
+internal fun normalizeFileUriArg(arg: String): String {
+    if (!arg.startsWith("file://")) return arg
+    return runCatching {
+        val uri = URI(arg)
+        val localUri = if (uri.authority == null || uri.authority.equals("localhost", ignoreCase = true)) {
+            URI(uri.scheme, null, uri.path, uri.query, uri.fragment)
+        } else {
+            uri
+        }
+        File(localUri).path
+    }.getOrDefault(arg)
 }

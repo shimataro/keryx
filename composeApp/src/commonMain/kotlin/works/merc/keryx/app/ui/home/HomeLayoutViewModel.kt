@@ -17,6 +17,12 @@ import works.merc.keryx.app.core.FEED_LIST_PANE_MIN_WIDTH
 import works.merc.keryx.app.core.PANE_WIDTH_PERSIST_DEBOUNCE_MS
 import works.merc.keryx.app.domain.SettingsRepository
 
+private fun clampFeedListPaneWidth(width: Double): Double =
+    width.coerceIn(FEED_LIST_PANE_MIN_WIDTH.toDouble(), FEED_LIST_PANE_MAX_WIDTH.toDouble())
+
+private fun clampArticleListPaneWidth(width: Double): Double =
+    width.coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble())
+
 /**
  * The Compose home screen's own layout state — the resizable pane widths and which pane had focus —
  * persisted in `local_settings.json`. Split out of the shared
@@ -30,14 +36,12 @@ class HomeLayoutViewModel(
 ) : ViewModel() {
 
     private val _feedListPaneWidth = MutableStateFlow(
-        settingsRepository.getLocalSettings().feedListPaneWidth
-            .coerceIn(FEED_LIST_PANE_MIN_WIDTH.toDouble(), FEED_LIST_PANE_MAX_WIDTH.toDouble()),
+        clampFeedListPaneWidth(settingsRepository.getLocalSettings().feedListPaneWidth),
     )
     val feedListPaneWidth: StateFlow<Double> = _feedListPaneWidth.asStateFlow()
 
     private val _articleListPaneWidth = MutableStateFlow(
-        settingsRepository.getLocalSettings().articleListPaneWidth
-            .coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble()),
+        clampArticleListPaneWidth(settingsRepository.getLocalSettings().articleListPaneWidth),
     )
     val articleListPaneWidth: StateFlow<Double> = _articleListPaneWidth.asStateFlow()
 
@@ -50,11 +54,11 @@ class HomeLayoutViewModel(
     }
 
     fun setFeedListPaneWidth(width: Double) {
-        _feedListPaneWidth.value = width.coerceIn(FEED_LIST_PANE_MIN_WIDTH.toDouble(), FEED_LIST_PANE_MAX_WIDTH.toDouble())
+        _feedListPaneWidth.value = clampFeedListPaneWidth(width)
     }
 
     fun setArticleListPaneWidth(width: Double) {
-        _articleListPaneWidth.value = width.coerceIn(ARTICLE_LIST_PANE_MIN_WIDTH.toDouble(), ARTICLE_LIST_PANE_MAX_WIDTH.toDouble())
+        _articleListPaneWidth.value = clampArticleListPaneWidth(width)
     }
 
     /**

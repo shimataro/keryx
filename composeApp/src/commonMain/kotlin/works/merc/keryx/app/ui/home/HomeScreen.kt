@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -42,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
@@ -53,35 +51,28 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
-import works.merc.keryx.app.core.ARTICLE_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.DETAIL_PANE_MIN_WIDTH
-import works.merc.keryx.app.core.FEED_LIST_PANE_WIDTH_DEFAULT
 import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
-import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.platform.BackHandler
 import works.merc.keryx.app.platform.PredictiveBackHandler
-import works.merc.keryx.app.platform.ClipboardEntries
 import works.merc.keryx.app.platform.isTouchPrimary
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.buildOrderedFeedListRows
 import works.merc.keryx.app.presentation.home.hasUsableUrl
 import works.merc.keryx.app.presentation.home.nextFeedListRow
 import works.merc.keryx.app.resources.Res
-import works.merc.keryx.app.resources.common_cancel
 import works.merc.keryx.app.resources.common_ok
 import works.merc.keryx.app.resources.notification_detail_title
 import works.merc.keryx.app.resources.notification_snackbar_action
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_action
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_body
-import works.merc.keryx.app.resources.settings_cloud_reset_confirm_title
 import works.merc.keryx.app.ui.article.ArticleScrollUnit
 import works.merc.keryx.app.ui.article.FallbackReaderScrollHost
 import works.merc.keryx.app.ui.article.LocalFallbackReaderScrollHost
 import works.merc.keryx.app.ui.common.KeryxAlertDialog
+import works.merc.keryx.app.ui.settings.ResetCloudDataConfirmDialog
 import works.merc.keryx.app.ui.i18n.infoDialogText
 import works.merc.keryx.app.ui.i18n.resolveNotificationText
 import works.merc.keryx.app.ui.menu.MenuCommand
@@ -100,10 +91,10 @@ fun HomeScreen() {
     val menuController = koinInject<MenuController>()
 
     // Note: the selected article is deliberately NOT collected at this scope. It's only needed
-    // inside the keyboard-shortcut callbacks below, which read vm.selectedArticle.value live at
+    // inside the keyboard-shortcut callbacks below, which read vm.selectedArticleRow.value live at
     // invocation (same pattern as openSelectedInBrowser/copySelectedUrl) — collecting it here would
     // recompose the whole HomeScreen on every arrow-key selection change for no rendering benefit.
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val searchActive by vm.searchActive.collectAsState()
     // Whether the expanded search bar is open — see homeBackAction's own KDoc.
     val searchBarVisible by vm.searchBarVisible.collectAsState()
@@ -155,15 +146,15 @@ fun HomeScreen() {
     // ArticleDetailPane watches to flash its copy button's inline ✓ (only for the article it shows:
     // an Android long-press menu doesn't select its row first, so it can copy a different one), and
     // Android's "URL copied" snackbar, which therefore appears even when the reader isn't on screen.
-    val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticle.value?.id }
+    val urlCopier = rememberArticleUrlCopier(snackbarHostState) { vm.selectedArticleId.value }
+    // The one handler every article-row route (toolbar, context menu, shortcut, menu bar) copies through.
+    val copyArticleRowUrl = remember(urlCopier) { { row: ArticleListRow -> urlCopier.copy(row.url, row.id) } }
+    val copyUrl = rememberCopyUrlAction()
     // The one handler behind every "Share" route — the reader's button and the article-row context
     // menu. Null where the platform has no share sheet (desktop), which keeps both routes off screen.
     val articleSharer = rememberArticleSharer()
     val shareArticleRow: ((ArticleListRow) -> Unit)? = remember(articleSharer) {
         articleSharer?.let { sharer -> { row: ArticleListRow -> sharer.share(row.url, row.title) } }
-    }
-    val shareArticle: ((Articles) -> Unit)? = remember(articleSharer) {
-        articleSharer?.let { sharer -> { article: Articles -> sharer.share(article.url, article.title) } }
     }
     val articleSwipeNavigation = rememberArticleSwipeNavigation(vm)
     // Bumped by goBack() whenever shouldFlashReturnedArticle says so; ArticleListPane threads it
@@ -251,7 +242,6 @@ fun HomeScreen() {
     // HomePaneLayout.kt's feedListItemKeysActive).
     val feedListKeysActive = feedListItemKeysActive(keyboardPane, textInputFocused)
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboard.current
     val density = LocalDensity.current
 
     fun setFocusedPane(pane: HomePane) {
@@ -332,12 +322,13 @@ fun HomeScreen() {
     }
 
     // Shared by the keyboard shortcuts and the menu bar (via MenuController). Read the current
-    // selection at call time (vm.selectedArticle.value) so a command collected once stays correct.
+    // selection at call time (vm.selectedArticleRow.value) so a command collected once stays correct
+    // — and acts on the article just selected even while its body is still loading.
     fun openSelectedInBrowser() {
-        openInBrowserIfAllowed(vm.selectedArticle.value?.url)
+        openInBrowserIfAllowed(vm.selectedArticleRow.value?.url)
     }
     fun copySelectedUrl() {
-        vm.selectedArticle.value?.let { urlCopier.copy(it.url, it.id) }
+        vm.selectedArticleRow.value?.let(copyArticleRowUrl)
     }
     fun focusSearch() {
         // Opens the bar at a narrow layout (a no-op at Triple, where HomeScreen's own
@@ -354,14 +345,34 @@ fun HomeScreen() {
     // selected feed the same way AppMenuBar does (filter.value against the already-collected feeds).
     fun selectedFeedForMenu(): Feeds? =
         (vm.filter.value as? ArticleFilter.Feed)?.let { f -> feeds.find { it.id == f.feedId } }
-    fun copySelectedFeedUrl() {
-        selectedFeedForMenu()?.url?.takeIf { hasUsableUrl(it) }?.let {
-            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
-        }
+    fun copySelectedFeedLink(link: (Feeds) -> String?) {
+        selectedFeedForMenu()?.let(link)?.takeIf { hasUsableUrl(it) }?.let(copyUrl)
     }
-    fun copySelectedFeedSiteUrl() {
-        selectedFeedForMenu()?.site_url?.takeIf { hasUsableUrl(it) }?.let {
-            scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(it)) }
+
+    // Keyboard scrolling of the Compose-drawn fallback reader — see KeyboardNav.kt's own KDoc and
+    // FallbackReaderScrollHost's.
+    fun scrollFallbackReader(direction: Int, unit: ArticleScrollUnit) {
+        scope.launch { fallbackReaderScrollHost.scroll(direction, unit) }
+    }
+    fun scrollFallbackReaderIfFocused(direction: Int, unit: ArticleScrollUnit) {
+        if (keyboardPane == HomePane.ArticleDetail) scrollFallbackReader(direction, unit)
+    }
+
+    // Up (-1) / Down (+1). Branches on focusedTextInput first — see KeyboardNav.kt's own KDoc for
+    // why these alone still reach the key handler while a text field holds focus.
+    fun onVerticalKey(delta: Int) {
+        when (focusedTextInput) {
+            HomeTextInput.SearchField -> moveArticleSelectionFromSearchField(delta)
+            HomeTextInput.RowNameEditor -> {}
+            null -> when (keyboardPane) {
+                HomePane.FeedList -> moveFeedSelection(delta)
+                HomePane.ArticleList -> if (delta < 0) vm.selectPrevious() else vm.selectNext()
+                // The native WebView reader handles its own scrolling once it holds real focus (see
+                // "Article Reader (native WebView)" in app-architecture.md); this only reaches the
+                // Compose-drawn fallback reader, via fallbackReaderScrollHost — see KeyboardNav.kt's
+                // own KDoc and FallbackReaderScrollHost's.
+                HomePane.ArticleDetail -> scrollFallbackReader(delta, ArticleScrollUnit.Line)
+            }
         }
     }
 
@@ -373,8 +384,8 @@ fun HomeScreen() {
                 MenuCommand.FocusSearch -> focusSearch()
                 MenuCommand.OpenInBrowser -> openSelectedInBrowser()
                 MenuCommand.CopyUrl -> copySelectedUrl()
-                MenuCommand.CopyFeedUrl -> copySelectedFeedUrl()
-                MenuCommand.CopySiteUrl -> copySelectedFeedSiteUrl()
+                MenuCommand.CopyFeedUrl -> copySelectedFeedLink { it.url }
+                MenuCommand.CopySiteUrl -> copySelectedFeedLink { it.site_url }
                 else -> {}
             }
         }
@@ -401,57 +412,13 @@ fun HomeScreen() {
                     // folds in the drawer-open precedence (see HomePaneLayout.kt's keyboardPaneFor),
                     // so there is exactly one branch to write per handler instead of a
                     // feedDrawerOpen-guarded when(focusedPane) at each one. onUp/onDown additionally
-                    // branch on focusedTextInput first — see KeyboardNav.kt's own KDoc for why they
-                    // alone still reach here while a text field holds focus.
-                    onUp = {
-                        when (focusedTextInput) {
-                            HomeTextInput.SearchField -> moveArticleSelectionFromSearchField(-1)
-                            HomeTextInput.RowNameEditor -> {}
-                            null -> when (keyboardPane) {
-                                HomePane.FeedList -> moveFeedSelection(-1)
-                                HomePane.ArticleList -> vm.selectPrevious()
-                                // The native WebView reader handles its own scrolling once it holds
-                                // real focus (see "Article Reader (native WebView)" in
-                                // app-architecture.md); this only reaches the Compose-drawn fallback
-                                // reader, via fallbackReaderScrollHost — see KeyboardNav.kt's own
-                                // KDoc and FallbackReaderScrollHost's.
-                                HomePane.ArticleDetail ->
-                                    scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Line) }
-                            }
-                        }
-                    },
-                    onDown = {
-                        when (focusedTextInput) {
-                            HomeTextInput.SearchField -> moveArticleSelectionFromSearchField(1)
-                            HomeTextInput.RowNameEditor -> {}
-                            null -> when (keyboardPane) {
-                                HomePane.FeedList -> moveFeedSelection(1)
-                                HomePane.ArticleList -> vm.selectNext()
-                                HomePane.ArticleDetail ->
-                                    scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Line) }
-                            }
-                        }
-                    },
-                    onPageUp = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Page) }
-                        }
-                    },
-                    onPageDown = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Page) }
-                        }
-                    },
-                    onHome = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(-1, ArticleScrollUnit.Edge) }
-                        }
-                    },
-                    onEnd = {
-                        if (keyboardPane == HomePane.ArticleDetail) {
-                            scope.launch { fallbackReaderScrollHost.scroll(1, ArticleScrollUnit.Edge) }
-                        }
-                    },
+                    // branch on focusedTextInput first (see onVerticalKey).
+                    onUp = { onVerticalKey(-1) },
+                    onDown = { onVerticalKey(1) },
+                    onPageUp = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Page) },
+                    onPageDown = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Page) },
+                    onHome = { scrollFallbackReaderIfFocused(-1, ArticleScrollUnit.Edge) },
+                    onEnd = { scrollFallbackReaderIfFocused(1, ArticleScrollUnit.Edge) },
                     onLeft = {
                         // FeedList -> {} covers the drawer-open case too (keyboardPane resolves to
                         // FeedList whenever the drawer is open) — there is nothing further left to
@@ -477,7 +444,7 @@ fun HomeScreen() {
                         } else {
                             when (focusedPane) {
                                 HomePane.FeedList -> {
-                                    if (vm.selectedArticle.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
+                                    if (vm.selectedArticleId.value == null) vm.currentArticles().firstOrNull()?.let { vm.selectArticle(it) }
                                     setFocusedPane(HomePane.ArticleList)
                                 }
                                 HomePane.ArticleList -> setFocusedPane(HomePane.ArticleDetail)
@@ -604,7 +571,7 @@ fun HomeScreen() {
                             modifier = Modifier.width(displayedArticleWidth),
                             notifVm = notifVm,
                             onAddFeedClick = { openAddFeed() },
-                            onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
+                            onCopyArticleUrl = copyArticleRowUrl,
                             onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
                             onShareArticle = shareArticleRow,
                         )
@@ -616,9 +583,9 @@ fun HomeScreen() {
                             modifier = Modifier.weight(1f),
                             onActivated = { activatePane(HomePane.ArticleDetail) },
                             copyPulse = urlCopier.pulse,
-                            onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                            onCopyUrl = copyArticleRowUrl,
                             onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
-                            onShare = shareArticle,
+                            onShare = shareArticleRow,
                         )
                     }
                     }
@@ -736,7 +703,7 @@ fun HomeScreen() {
                                     },
                                     returnRipplePulse = readerBackListPulse(articleReturnRipplePulse, readerBackListBehind),
                                     onAddFeedClick = { openAddFeed() },
-                                    onCopyArticleUrl = { urlCopier.copy(it.url, it.id) },
+                                    onCopyArticleUrl = copyArticleRowUrl,
                                     onOpenArticleInBrowser = { openInBrowserIfAllowed(it.url) },
                                     onShareArticle = shareArticleRow,
                                 )
@@ -745,9 +712,9 @@ fun HomeScreen() {
                                     modifier = paneModifier,
                                     onActivated = { activatePane(HomePane.ArticleDetail) },
                                     copyPulse = urlCopier.pulse,
-                                    onCopyUrl = { urlCopier.copy(it.url, it.id) },
+                                    onCopyUrl = copyArticleRowUrl,
                                     onOpenInBrowser = { openInBrowserIfAllowed(it.url) },
-                                    onShare = shareArticle,
+                                    onShare = shareArticleRow,
                                     // Only where the article list isn't on screen beside this one
                                     // to return to — PaneLayout.Single's article-detail depth. At
                                     // Dual the reader is a permanent neighbor of the article list,
@@ -824,18 +791,13 @@ internal fun PendingNotificationActionHost(
         AppNotificationAction.ResetCloudData ->
             // Corrupt/incompatible cloud DB: confirm the destructive reset, then clear the
             // now-stale error notification.
-            KeryxAlertDialog(
-                onDismissRequest = { notifVm.clearPendingAction() },
-                title = stringResource(Res.string.settings_cloud_reset_confirm_title),
-                text = { Text(stringResource(Res.string.settings_cloud_reset_confirm_body)) },
-                confirmText = stringResource(Res.string.settings_cloud_reset_confirm_action),
+            ResetCloudDataConfirmDialog(
                 onConfirm = {
                     vm.resetCloudData()
                     pending.notificationId?.let(notifVm::dismiss)
                     notifVm.clearPendingAction()
                 },
-                dismissText = stringResource(Res.string.common_cancel),
-                destructive = true,
+                onDismiss = { notifVm.clearPendingAction() },
             )
         // Same effect as clicking that feed in the feed list — except at PaneLayout.Single,
         // where that list is a screen of its own and focusing it would navigate backwards; see
@@ -854,7 +816,7 @@ internal fun PendingNotificationActionHost(
                 confirmText = stringResource(Res.string.common_ok),
                 onConfirm = { notifVm.clearPendingAction() },
             )
-        else -> Unit
+        is AppNotificationAction.OpenUrl, is AppNotificationAction.ShowSettingsTab -> Unit
     }
 }
 

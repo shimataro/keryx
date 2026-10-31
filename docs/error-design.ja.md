@@ -17,6 +17,21 @@
 | フィード URL が無効 | Result 型 |
 | DB アクセス失敗・プログラムのバグ | 例外 |
 
+**最後の行の文書化された例外: best-effort の書き込み・読み取り。** 見た目だけのもの、または派生的なものに
+しか使われず、次の通常の実行で再試行される DB アクセスは、例外を投げず、ログ（`Log.warn`）に残して処理を
+続ける。投げると周囲の処理までキャンセルされ、そのアクセス自体の価値より多くを失うためである。現在
+該当するのは次のとおり。
+
+- フィード更新の最後に行う favicon の書き込み（`FeedRepository.applyFavicon`）。失敗すると、そのフィードは
+  favicon がないままで、「favicon が見つからなかった」という記録も付かない。次の更新でもう一度探して
+  保存する。例外を伝播させると、取得済みでまだ反映していないフィードを含めて、更新全体がキャンセルされる。
+- FTS の検索クエリ（`ArticleRepository.search`）。インデックスが失敗したときは、エラーではなく検索結果なしを返す。
+- クラウド同期設定タブの「最終同期時刻」の読み取り（`CloudSyncController`）。UI の状態にしか使わない。
+
+これ以外の DB アクセスは従来どおり例外を伝播させる。新しい best-effort のアクセスは、理由とともにこの一覧に追加する。
+（ユーザーが始めた操作——OPML の import や export——が失敗した場合は、この例外に当たらない。握りつぶさず、その操作の
+失敗としてユーザーに知らせる。）
+
 ## エラー型（`core/KeryxException.kt`, `core/Result.kt`）
 
 ```kotlin
@@ -125,9 +140,13 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 - 履歴はセッション中のみ保持（DB 保存なし）。記録するのは「後から見返す価値がある内容」に限る:
   エラー・警告に加え、`INFO` は新バージョンの通知のみ。**新着記事は通知センターには記録しない**
   （`NewArticleNotifier` は OS 通知（トレイ）にのみ流す）——記事一覧と未読バッジという永続的な手段で
-  既に把握できるため。この OS 通知は、バックグラウンド/起動時の更新と手動の「すべて更新」の
-  **両方**で発火する。共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ
-  `notificationEnabled` 設定）を経由する。
+  既に把握できるため。この OS 通知は、手動の更新（「すべて更新」、引っ張って更新）では常に発火し（すでに走っていた自動の更新に相乗りした場合も、
+  `RefreshCycleRunner.joinAutomaticCycle` によりその更新の通知、または抑止していた通知を出す）、
+  自動の更新（起動時、定期ループ、Android の `FeedRefreshWorker`、iOS のバックグラウンド更新）では
+  アプリが前面にない間だけ発火する（`domain/AppForeground` を `RefreshCycleRunner` が確認する）——
+  アプリを見ているユーザーには新着が届く様子が既に見えており、頼んでいない更新のために割り込む価値は
+  ないため（[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照）。いずれの場合も
+  共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ `notificationEnabled` 設定）を経由する。
 - ベルアイコンにバッジ（件数）。ベルは幅を問わず（デスクトップの3ペイン定常状態を含む）
   `ArticleListPane` のヘッダ行にある（正確な規則は `ui-guidelines` スキルを参照）。`ArticleDetailPane` には意図的に置かない。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、
@@ -155,9 +174,10 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
 | ネクストアクション | 発生源 | 挙動 |
 | --- | --- | --- |
 | `OpenUrl(url)` | 新バージョン通知（アプリ内アップデート経路が無い場合——`UpdatePlan.OpenReleasePage`/`NotOffered`。[background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照） | リリースページを外部ブラウザで開く |
-| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308) | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
+| `ShowFeedDetail(feedId)` | フィード消失(410) / URL 変更(301/308)。消えたフィードも毎回更新されるため、410 の通知はまとめて 1 フィード 1 件のままにする（タイトルで判定するので、名前を変えると別の 1 件になる）。URL 変更は発生時に 1 回だけ通知する | フィード一覧で該当フィードを選択（一覧をクリックしたときと同じ）。狭い幅ではフィード一覧はペインではなくモーダルナビゲーションドロワーであり、バックグラウンドの通知でこれを不意に開くのは驚きの副作用になってしまうため、ドロワーには触れずそのフィードの記事一覧まで進む — `ui/home/HomePaneLayout.kt` の `paneForFeedDetail` を参照 |
 | `ShowSettingsTab(tabId)` | 同期エラー（`SchemaVersionException` は `updates`、その他は `cloud_sync`）；アプリ内アップデート経路がある場合の新バージョン通知（`updates`） | 設定ダイアログを該当タブで開く（Android ではカテゴリ一覧ではなく、該当カテゴリの画面を直接開く）。`cloud_sync` タブは `SyncRepository.lastSyncError` を失敗理由として表示し、その理由が認証失敗のとき（`SyncRepository.lastSyncAuthFailed`）は接続済みプロバイダの「同期データをリセット」に代えて**連携し直す**アクションを提示する。`updates` タブは開いた時点で自動的に更新確認を行う |
 | `ShowInfoDialog(detail)` | macOS の translocated 警告 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
+| `ShowInfoDialog(detail)` | フィード更新で、対象のどのフィードにも接続できなかったとき——すべてがタイムアウトしたか、応答をまったく得られなかった（`RefreshCycleRunner` から `reportRefreshOutcome` の `isUnreachable` 経由）——多くはオフライン。エラーで応答したフィード（HTTP ステータス、404/410、読めない内容）は数えない: 接続を確認しても解決せず、フィード一覧がすでに印を付けているため。同じ内容はまとめるので、失敗が続いても 1 件のまま | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンが平文ファイルに残ったとき（`CloudSession`）——`TokenStorage.save()` が `TokenSaveOutcome.PLAINTEXT_FILE` を返した場合。OS のセキュアな認証情報ストアに到達できなかったか、（Android で）セキュアな書き込みは成功したが古い平文のコピーを削除できなかった場合 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ShowInfoDialog(detail)` | トークンをどこにも保存できなかったとき（`CloudSession`）——セキュアストアにも平文フォールバックファイルにも書き込めず `TokenSaveOutcome.NOT_PERSISTED` が返った場合。再起動後に再接続が必要 | 原因と対処法の説明ダイアログを表示（画面遷移しない） |
 | `ResetCloudData` | `CloudDataIncompatibleException` | 専用のインラインボタン → 確認ダイアログ → クラウドDBをタイムスタンプ付き名前で退避してから作り直す（[sync-architecture.ja.md](sync-architecture.ja.md)「クラウドデータのリセット（退避）」参照） |
@@ -171,8 +191,8 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 
 | エラー | 自動リトライ | 通知センター |
 | --- | --- | --- |
-| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅ |
-| `FeedParseException` | ❌ | ✅ |
+| `FeedTimeoutException` / `FeedFetchException` | ✅\* | ✅\*\*\* |
+| `FeedParseException` | ❌ | ✅\*\*\* |
 | `CloudStorageException` | ✅\*\* | ✅ |
 | `SyncConflictException` | ✅（内部） | ❌ |
 | `CloudAuthException` / `SchemaVersionException` | ❌ | ✅ |
@@ -186,6 +206,11 @@ Repository は通知の `text` をデータ（`NotificationText.FeedGone(title)`
 \*\* `sync()` 1回の中で `repeat(SYNC_MAX_RETRY)` が再ループするのは `SyncConflictException` のみで、それ以外の
 エラー（`CloudStorageException` を含む）は即座に return する。ここでの「自動リトライ」はループ内の再試行では
 なく、次回のスケジュール済み同期試行を指す。
+
+\*\*\* 失敗したフィードごとに 1 件ずつ入るわけではない（失敗中のフィードはフィード一覧で示す）。ベルに入るのは、
+1 回の更新で対象のどのフィードにも接続できなかったときの `NotificationText.RefreshFailed` の警告 1 件だけで（上記の
+「次のアクション」の表を参照）、同じ内容はまとめられる。いずれかのフィードが応答した更新（成功でもエラーでも）では
+何も追加しない。
 
 ## 定数（`core/Constants.kt`、抜粋）
 

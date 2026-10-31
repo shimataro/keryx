@@ -20,7 +20,36 @@ private fun rows(vararg ids: String): List<ArticleListRow> = ids.map { id ->
     )
 }
 
+/** Every subset of [universe] — small enough here to enumerate exhaustively. */
+private fun subsetsOf(universe: List<String>): List<Set<String>> =
+    (0 until (1 shl universe.size)).map { mask -> universe.filterIndexed { i, _ -> mask and (1 shl i) != 0 }.toSet() }
+
+/** [withList] as it stood before its no-candidate shortcut, kept to check the shortcut changes no result. */
+private fun NewArticleTracking.withListReference(ids: Set<String>, inserted: Set<String>): NewArticleTracking {
+    val known = knownIds
+    if (known.isNullOrEmpty()) return copy(knownIds = ids)
+    val candidates = ids - known
+    val newlyInserted = if (candidates.isEmpty() || inserted.isEmpty()) emptySet() else candidates.intersect(inserted)
+    val nextUnseen = (unseenIds + newlyInserted).intersect(ids)
+    return copy(knownIds = known + ids, unseenIds = nextUnseen)
+}
+
 class NewArticleTrackingTest {
+
+    @Test
+    fun withListGivesTheSameResultAsBeforeItsNoCandidateShortcutForEveryInput() {
+        val subsets = subsetsOf(listOf("a", "b", "c", "d"))
+        for (known in subsets) for (unseen in subsets.filter { known.containsAll(it) }) {
+            val tracking = NewArticleTracking(knownIds = known, unseenIds = unseen, insertedAfterRowId = 7)
+            for (ids in subsets) for (inserted in subsets) {
+                assertEquals(
+                    tracking.withListReference(ids, inserted),
+                    tracking.withList(ids, inserted),
+                    "known=$known unseen=$unseen ids=$ids inserted=$inserted",
+                )
+            }
+        }
+    }
 
     // --- withList: seeding ---
 

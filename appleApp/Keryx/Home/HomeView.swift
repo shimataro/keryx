@@ -23,7 +23,23 @@ struct HomeView: View {
     /// width). Driven explicitly rather than left to the sidebar `List`'s own selection: an article
     /// row is a plain button, which never navigates by itself, and re-tapping the current sidebar row
     /// is no selection change at all. The system writes it back on a back button / edge swipe.
+    #if os(iOS)
+    /// Kept in scene storage, so a relaunch after iOS terminated the app in the background comes back
+    /// on the same column from the first frame (see `CompactColumnRestoration`).
+    private var compactColumn: NavigationSplitViewColumn {
+        get { HomeView.splitViewColumn(CompactColumnRestoration.column(storageValue: storedCompactColumn)) }
+        nonmutating set { storedCompactColumn = HomeView.compactSearchColumn(newValue).rawValue }
+    }
+    @SceneStorage(HomeRestoration.compactColumnKey) private var storedCompactColumn = CompactSearchNavigation.Column.sidebar.rawValue
+    private var compactColumnBinding: Binding<NavigationSplitViewColumn> {
+        Binding(get: { compactColumn }, set: { compactColumn = $0 })
+    }
+    /// When the restored column and reader position are checked and withdrawn.
+    @State private var restoration = HomeRestoration()
+    #else
     @State private var compactColumn: NavigationSplitViewColumn = .sidebar
+    private var compactColumnBinding: Binding<NavigationSplitViewColumn> { $compactColumn }
+    #endif
     /// Bumped each time a phone-width split view brings the article list forward from the sidebar —
     /// see `ArticleListView.remountGeneration`.
     @State private var articleListRemountGeneration = 0
@@ -81,7 +97,7 @@ struct HomeView: View {
     }
 
     var body: some View {
-        NavigationSplitView(preferredCompactColumn: $compactColumn) {
+        NavigationSplitView(preferredCompactColumn: compactColumnBinding) {
             FeedListView(
                 home: home,
                 dialogs: sidebarDialogs,
@@ -127,11 +143,22 @@ struct HomeView: View {
                 }
                 #endif
         } detail: {
+            #if os(iOS)
+            RestoringArticleDetailView(
+                home: home,
+                preferences: preferences,
+                focusedPane: $focusedPane,
+                isOnScreen: !(sidebarIsTopmost || articleListIsTopmost),
+                restoration: restoration
+            )
+            #else
             ArticleDetailView(home: home, preferences: preferences, focusedPane: $focusedPane, isOnScreen: !(sidebarIsTopmost || articleListIsTopmost))
+            #endif
         }
         .onKeyPress { press in handleKeyPress(press) }
         .onChange(of: compactColumn) { old, new in
             #if os(iOS)
+            guard restoration.columnChanged() else { return }
             if ArticleListRemount.isNeeded(
                 isCompact: horizontalSizeClass == .compact,
                 from: HomeView.compactSearchColumn(old),
@@ -171,6 +198,8 @@ struct HomeView: View {
         // Mounted on every layout (the detail column is not, at a compact width until an article is
         // opened), so WebKit can start while the app is idle rather than on the first article.
         .task { await ReaderWebViewWarmUp.scheduleOnce() }
+        .onAppear { restoreCompactColumn() }
+        .onChange(of: home.selectedArticleId) { old, new in restoration.selectionChanged(from: old, to: new) }
         #endif
         .focusedSceneValue(\.homeFocusedPane, focusedPane)
         #if os(macOS)
@@ -196,6 +225,18 @@ struct HomeView: View {
             }
         }
     }
+
+    #if os(iOS)
+    /// Checks the column scene storage restored against the selection `HomeViewModel` restored, once:
+    /// a reader restored without its article shows the article list instead.
+    private func restoreCompactColumn() {
+        guard let restored = restoration.appeared(
+            storedColumn: HomeView.compactSearchColumn(compactColumn),
+            hasSelectedArticle: home.selectedArticleId != nil
+        ) else { return }
+        compactColumn = HomeView.splitViewColumn(restored)
+    }
+    #endif
 
     /// Shows `id`'s row in the gray highlight at once, then fades it out.
     private func flashReturnedRow(_ id: String) {
@@ -466,6 +507,40 @@ struct HomeView: View {
         }
     }
 }
+
+#if os(iOS)
+/// The reader column, together with the scene storage its scroll position is kept in. Held here rather
+/// than in `HomeView`, since the reader writes the position several times a second while it scrolls:
+/// each write re-renders only this view, not the whole split view around it.
+private struct RestoringArticleDetailView: View {
+    let home: HomeObservable
+    let preferences: PreferencesObservable
+    var focusedPane: FocusState<HomeFocusedPane?>.Binding
+    let isOnScreen: Bool
+    let restoration: HomeRestoration
+
+    /// The selected article's reader scroll position, kept in scene storage like the column so the
+    /// relaunch reopens the reader where the user left it (see `ReaderScrollPosition`).
+    @SceneStorage(HomeRestoration.readerScrollArticleIdKey) private var readerScrollArticleId = ""
+    @SceneStorage(HomeRestoration.readerScrollFractionKey) private var readerScrollFraction = 0.0
+
+    var body: some View {
+        ArticleDetailView(
+            home: home,
+            preferences: preferences,
+            focusedPane: focusedPane,
+            isOnScreen: isOnScreen,
+            restoredScroll: restoration.readerScroll(articleId: readerScrollArticleId, fraction: readerScrollFraction),
+            onScroll: { id, fraction in
+                // Only the article on screen; a neighbour kept ready for a swipe is not the one to restore.
+                guard id == home.selectedArticleId else { return }
+                readerScrollArticleId = id
+                readerScrollFraction = fraction
+            }
+        )
+    }
+}
+#endif
 
 /// Compose's window shows no title over the panes; `NavigationSplitView` draws the window's name as
 /// a toolbar item of its own, which `NSWindow.titleVisibility` does not reach. The window itself

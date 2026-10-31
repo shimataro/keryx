@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -47,14 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -62,26 +58,38 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.encode
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
-import works.merc.keryx.app.platform.ClipboardEntries
+import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuAnchor
+import works.merc.keryx.app.platform.NativeMenuEntry
+import works.merc.keryx.app.platform.NativeMenuShortcut
 import works.merc.keryx.app.platform.VerticalScrollbarIfNeeded
 import works.merc.keryx.app.platform.WindowDragArea
 import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.ArticleListBody
+import works.merc.keryx.app.presentation.home.ArticleListMode
+import works.merc.keryx.app.presentation.home.listModeChecked
 import works.merc.keryx.app.presentation.home.HomeViewModel
+import works.merc.keryx.app.presentation.home.articleListCatchingUp
 import works.merc.keryx.app.presentation.home.articleListTitle
 import works.merc.keryx.app.resources.Res
 import works.merc.keryx.app.resources.common_back
 import works.merc.keryx.app.resources.home_all_feeds
-import works.merc.keryx.app.resources.home_hide_read
+import works.merc.keryx.app.resources.home_list_mode
+import works.merc.keryx.app.resources.home_list_mode_all
+import works.merc.keryx.app.resources.home_list_mode_starred
+import works.merc.keryx.app.resources.home_list_mode_unread
 import works.merc.keryx.app.resources.home_mark_all_read
 import works.merc.keryx.app.resources.home_add_feed
 import works.merc.keryx.app.resources.home_no_articles
 import works.merc.keryx.app.resources.home_no_feeds
+import works.merc.keryx.app.resources.home_no_starred_articles
 import works.merc.keryx.app.resources.home_open_feed_list
 import works.merc.keryx.app.resources.home_refresh_this_list
 import works.merc.keryx.app.resources.home_search_clear
@@ -89,18 +97,19 @@ import works.merc.keryx.app.resources.home_search_no_results
 import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_search_too_short
 import works.merc.keryx.app.resources.home_search_try_all_feeds
+import works.merc.keryx.app.resources.home_show_all_articles
 import works.merc.keryx.app.resources.home_sort_disabled_search
 import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
 import works.merc.keryx.app.resources.home_starred
-import works.merc.keryx.app.resources.home_unread_only
 import works.merc.keryx.app.ui.common.FlatButton
+import works.merc.keryx.app.ui.common.FlatTonalButton
 import works.merc.keryx.app.ui.common.KeryxExpandedSearchBar
 import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 import works.merc.keryx.app.ui.common.KeryxPaneTopBar
-import works.merc.keryx.app.ui.common.ToggleChip
+import works.merc.keryx.app.ui.common.MenuChip
 import works.merc.keryx.app.ui.common.ToolbarIconGroup
 import works.merc.keryx.app.ui.common.TooltipIconButton
 
@@ -181,7 +190,7 @@ fun ArticleListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val filter by vm.filter.collectAsState()
-    val feeds by vm.feeds.collectAsState()
+    val feeds by vm.structuralFeeds.collectAsState()
     val folders by vm.folders.collectAsState()
     val tags by vm.tags.collectAsState()
     val title = onOpenDrawer?.let {
@@ -194,15 +203,20 @@ fun ArticleListPane(
             starredLabel = stringResource(Res.string.home_starred),
         )
     }
-    val feedTitles = feeds.associate { it.id to it.displayTitle() }
-    val feedFavicons = feeds.associate { it.id to it.favicon_url }
+    val feedTitles = remember(feeds) { feeds.associate { it.id to it.displayTitle() } }
+    val feedFavicons = remember(feeds) { feeds.associate { it.id to it.favicon_url } }
 
     val query by vm.searchQuery.collectAsState()
     val searchBarVisible by vm.searchBarVisible.collectAsState()
     val searchActive by vm.searchActive.collectAsState()
-    val selected by vm.selectedArticle.collectAsState()
-    val unreadOnly by vm.unreadOnly.collectAsState()
-    val canHideRead by vm.canHideRead.collectAsState()
+    // The selection itself, not the hydrated article: the highlight and scroll-into-view follow the
+    // click at once rather than once the reader's body lookup returns (it can wait out a write lock).
+    val selectedId by vm.selectedArticleId.collectAsState()
+    // What scrolls the selection into view — not selectedId itself, which also moves back without
+    // the user acting (a selection found tombstoned) and must not move the list.
+    val revealRequest by vm.selectionRevealRequests.collectAsState()
+    val listMode by vm.mode.collectAsState()
+    val starredModeEnabled by vm.starredModeEnabled.collectAsState()
     val newestFirst by vm.newestFirst.collectAsState()
 
     // Two independent LazyListStates, one per mode, both declared unconditionally so switching
@@ -220,6 +234,17 @@ fun ArticleListPane(
             baseListState.scrollToItem(0)
             searchListState.scrollToItem(0)
             lastFilter = encoded
+        }
+    }
+    // The search results list goes back to the top when the user changes the query, as it does for a
+    // filter: the new results are a different list, and the position in the previous one (a long way
+    // down, say) means nothing in it. The first composition and a pane remount keep the position —
+    // `lastQuery` is saved, so coming back from an article leaves the results where they were.
+    var lastQuery by rememberSaveable { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (query != lastQuery) {
+            searchListState.scrollToItem(0)
+            lastQuery = query
         }
     }
 
@@ -277,46 +302,63 @@ fun ArticleListPane(
     // debounce state while search isn't even active, and vice versa.
     val articles: List<ArticleListRow>
     val listState: LazyListState
-    val branchReturnRipplePulse: Int
     val branchOnAddFeedClick: (() -> Unit)?
     val hasNoFeeds: Boolean
+    val loading: Boolean
     val sortEnabled: Boolean
     val titleMarkedById: Map<String, String>?
     val emptyContent: (@Composable () -> Unit)?
+    val onShowAllArticles: (() -> Unit)?
 
     if (!searchActive) {
         val baseArticles by vm.articles.collectAsState()
+        val body by vm.articleListBody.collectAsState()
+        val viewModelHasRows by vm.articleListHasRows.collectAsState()
         articles = baseArticles
         listState = baseListState
-        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = onAddFeedClick
-        hasNoFeeds = feeds.isEmpty()
+        hasNoFeeds = body == ArticleListBody.NoFeeds
+        loading = body == ArticleListBody.Pending || articleListCatchingUp(baseArticles.size, viewModelHasRows)
         sortEnabled = true
         titleMarkedById = null
         emptyContent = null
+        // Starred mode can narrow a list to nothing; its empty state says so and offers the way out.
+        onShowAllArticles = if (listMode == ArticleListMode.Starred) {
+            { vm.setMode(ArticleListMode.All) }
+        } else {
+            null
+        }
     } else {
-        val results by vm.searchResults.collectAsState()
+        // Rows and their highlights come as one value, so they are always from the same search.
+        val display by vm.searchListDisplay.collectAsState()
         val searching by vm.searching.collectAsState()
         // A query has usable terms once at least one word is 2+ characters (searched via the
         // trigram index at 3+, or a LIKE fallback at exactly 2 — see FtsSearch). A lone 1-character
         // word, or "a b" where every word is too short, count as no terms.
         val hasValidTerms = searchTerms(query).isNotEmpty()
 
-        // Keep the keyboard-selected result in view (mirrors ArticleListPaneContent's own
-        // scroll-to-selection effect for the base list).
-        LaunchedEffect(selected?.id, results) {
-            val index = results.indexOfFirst { it.article.id == selected?.id }
-            if (index !in results.indices) return@LaunchedEffect
+        // Keep the keyboard-selected result in view — on the same rule as ArticleListPaneContent's
+        // own effect for the base list: when the user selects (revealRequest) and when results first
+        // arrive, never because their contents changed. A background write re-running the search,
+        // or a selection handed back after a tombstone, must not pull the list to the selection.
+        // `display` is read through its State delegate, so the effect sees the latest list.
+        LaunchedEffect(revealRequest, display.rows.isNotEmpty()) {
+            val index = display.rows.indexOfFirst { it.id == selectedId }
+            if (index !in display.rows.indices) return@LaunchedEffect
             searchListState.scrollToIndexIfNeeded(index)
         }
 
-        articles = results.map { it.article }
+        // Mapped once per snapshot by the ViewModel, so an unrelated recomposition of this pane
+        // (a keystroke, the searching flag) hands ArticleListPaneContent the same list instance
+        // and lets it skip.
+        articles = display.rows
         listState = searchListState
-        branchReturnRipplePulse = returnRipplePulse
         branchOnAddFeedClick = null
         hasNoFeeds = false
+        loading = false
         sortEnabled = false
-        titleMarkedById = remember(results) { results.associate { it.article.id to it.titleMarked } }
+        titleMarkedById = display.titleMarkedById
+        onShowAllArticles = null
         emptyContent = when {
             !hasValidTerms -> {
                 { CenteredHint(stringResource(Res.string.home_search_too_short)) }
@@ -325,10 +367,10 @@ fun ArticleListPane(
             // flight, instead of flashing "no results" between keystrokes (or right after switching
             // filters) before the real results land. Any previous non-empty results keep showing
             // (the `else` branch below) until the new ones land.
-            results.isEmpty() && searching -> {
+            display.rows.isEmpty() && searching -> {
                 {}
             }
-            results.isEmpty() -> {
+            display.rows.isEmpty() -> {
                 { NoSearchResultsHint(scopedBelowAllFeeds = filter != ArticleFilter.All) }
             }
             else -> null
@@ -367,16 +409,16 @@ fun ArticleListPane(
         articles = articles,
         feedTitles = feedTitles,
         feedFavicons = feedFavicons,
-        selectedId = selected?.id,
-        unreadOnly = unreadOnly,
-        canHideRead = canHideRead,
+        selectedId = selectedId,
+        revealRequest = revealRequest,
+        listMode = listMode,
+        starredModeEnabled = starredModeEnabled,
         // Deliberately the real sort direction even while search disables the button — search
         // order is always FTS5 relevance rank, but sortDirectionIcon's own KDoc says the button
         // still reflects the current direction while disabled, it just can't be toggled.
         newestFirst = newestFirst,
         focused = focused,
-        onToggleUnreadOnly = { vm.setUnreadOnly(!unreadOnly) },
-        onHideRead = { vm.hideRead() },
+        onSelectListMode = vm::setMode,
         onToggleSort = { vm.toggleSort() },
         onMarkAllRead = { vm.markAllRead() },
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
@@ -387,17 +429,19 @@ fun ArticleListPane(
         onShareArticle = onShareArticle,
         modifier = modifier,
         listState = listState,
-        returnRipplePulse = branchReturnRipplePulse,
+        returnRipplePulse = returnRipplePulse,
         onActivated = onActivated,
         notifVm = notifVm,
         onOpenDrawer = if (barShown) null else onOpenDrawer,
         title = if (barShown) null else title,
         onSearchClick = if (barShown) null else onSearchClick,
         hasNoFeeds = hasNoFeeds,
+        loading = loading,
         onAddFeedClick = branchOnAddFeedClick,
         sortEnabled = sortEnabled,
         titleMarkedById = titleMarkedById,
         emptyContent = emptyContent,
+        onShowAllArticles = onShowAllArticles,
         header = header,
         // Gated by pullRefreshAvailable (touch-primary only, never over search results or with no
         // feeds). The scope is the current selection's own feeds; see HomeRefreshController.pullToRefresh.
@@ -437,29 +481,6 @@ private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
 }
 
 /**
- * Remembers a plain "copy URL to clipboard" action with no feedback of its own, used by
- * [FeedListPane]'s feed rows and by [rememberPlainArticleUrlCopy].
- */
-@Composable
-internal fun rememberCopyUrlAction(): (String) -> Unit {
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-    return remember(clipboard, scope) {
-        { url: String -> scope.launch { clipboard.setClipEntry(ClipboardEntries.ofText(url)) } }
-    }
-}
-
-/**
- * The default for [ArticleListPane]'s and [ArticleListPaneContent]'s `onCopyArticleUrl`: copies the
- * row's URL without the reader's copied feedback. `HomeScreen` passes its own handler instead.
- */
-@Composable
-internal fun rememberPlainArticleUrlCopy(): (ArticleListRow) -> Unit {
-    val copyUrl = rememberCopyUrlAction()
-    return remember(copyUrl) { { row: ArticleListRow -> copyUrl(row.url) } }
-}
-
-/**
  * Picks the sort button's icon for the current direction. Each direction gets its own asset rather
  * than one asset transformed at the call site: this button used to flip a single glyph vertically,
  * which reads as a direction only on an icon set whose sort glyph carries an arrow — Material
@@ -474,27 +495,23 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
 
 /**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): unread-only toggle, hide-read, notifications bell, sort, mark-all-read.
+ * or its search results): list-mode chip, notifications bell, sort, mark-all-read. Hide read is a
+ * View-menu command rather than a toolbar button: it is rarely needed, since a manual refresh or
+ * sync, a filter switch and choosing Unread all clear the read rows the same way.
  * When [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance
  * rank, or recency when every term is too short to be ranked, see FtsSearch), the sort button is
  * disabled and its tooltip explains why instead of showing the usual "sort by ...".
  *
- * The hide-read action ([onHideRead]) is always present, enabled only while [canHideRead] — per
- * "Layout stability under state changes" in the `ui-guidelines` skill, a control whose availability
- * depends on state is shown disabled rather than hidden, so it never shifts its neighbors. Unlike
- * [unreadOnly] (a toggle: pressing it again reverses it), this is a one-shot action — see
- * `HomeViewModel.canHideRead`'s own KDoc for what it does and why it's separate from the
- * unread-only toggle itself. It sits directly beside the unread-only chip rather than in the
- * trailing [ToolbarIconGroup]: its enabled state depends on that chip alone, so adjacency makes
- * the dependency visible, and it keeps this view-only action away from the bulk-mutating
- * mark-all-read it would otherwise be easy to mistake it for. As a lone icon it stays bare (no
- * capsule), per the `ui-guidelines` skill's `ToolbarIconGroup` rule.
+ * The list mode ([listMode]) is a pop-up button — a [MenuChip] naming the current mode, opening a
+ * native menu of all three ([listModeMenuEntries]) — rather than a segmented control: three labelled
+ * segments do not fit the pane's 240dp minimum width beside the other controls. The chip is filled
+ * whenever the mode narrows the list, so a narrowed list never looks like the whole filter.
  *
  * When [onOpenDrawer] is non-null (this pane is shown at a narrow [PaneLayout], where the feed
  * list is a modal navigation drawer rather than an on-screen pane — see `ArticleListPane`'s KDoc),
  * a leading hamburger-button-and-[title] row is added above the controls row rather than folded
  * into it: the controls row is unchanged from [PaneLayout.Triple]/[PaneLayout.Dual] so the
- * unread-only toggle stays reachable at every width instead of being dropped for space. That row
+ * mode chip stays reachable at every width instead of being dropped for space. That row
  * is laid out for the whole time the pane stays at a narrow layout — unlike a "back" button,
  * opening the drawer is never contextually unavailable, so there is no enabled/disabled state to
  * track and the row's presence depends only on [onOpenDrawer]'s own nullness.
@@ -510,13 +527,12 @@ internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
  */
 @Composable
 internal fun ArticleListTopBar(
-    unreadOnly: Boolean,
-    onToggleUnreadOnly: () -> Unit,
+    listMode: ArticleListMode,
+    onSelectListMode: (ArticleListMode) -> Unit,
     newestFirst: Boolean,
     onToggleSort: () -> Unit,
     onMarkAllRead: () -> Unit,
-    canHideRead: Boolean = false,
-    onHideRead: () -> Unit = {},
+    starredModeEnabled: Boolean = true,
     sortEnabled: Boolean = true,
     notifVm: NotificationCenterViewModel? = null,
     onOpenDrawer: (() -> Unit)? = null,
@@ -548,15 +564,16 @@ internal fun ArticleListTopBar(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToggleChip(
-                label = stringResource(Res.string.home_unread_only),
-                checked = unreadOnly,
-                onCheckedChange = { onToggleUnreadOnly() },
-            )
-            Spacer(Modifier.width(4.dp))
-            val hideReadTooltip = stringResource(Res.string.home_hide_read)
-            TooltipIconButton(tooltip = hideReadTooltip, onClick = onHideRead, enabled = canHideRead) {
-                KeryxIcon(KeryxIcons.VisibilityOff, contentDescription = hideReadTooltip)
+            val modeLabels = ArticleListMode.entries.associateWith { stringResource(listModeLabel(it)) }
+            NativeMenuAnchor(
+                items = { listModeMenuEntries(listMode, starredModeEnabled, modeLabels, onSelectListMode) },
+            ) { open ->
+                MenuChip(
+                    label = modeLabels.getValue(listMode),
+                    accessibilityLabel = stringResource(Res.string.home_list_mode),
+                    highlighted = listMode != ArticleListMode.All,
+                    onClick = open,
+                )
             }
             Spacer(Modifier.weight(1f))
             ToolbarIconGroup {
@@ -579,6 +596,39 @@ internal fun ArticleListTopBar(
         }
     }
     }
+}
+
+/** The label naming [mode] on the article list's mode chip and in its menu. */
+internal fun listModeLabel(mode: ArticleListMode): StringResource = when (mode) {
+    ArticleListMode.All -> Res.string.home_list_mode_all
+    ArticleListMode.Unread -> Res.string.home_list_mode_unread
+    ArticleListMode.Starred -> Res.string.home_list_mode_starred
+}
+
+/**
+ * The mode chip's menu: one check item per [ArticleListMode], checked by [listModeChecked]
+ * ([ArticleListMode.Starred] stays checked, greyed out, while [starredModeEnabled] is false).
+ * Choosing the current mode again is a no-op (`HomeViewModel.setMode`).
+ */
+internal fun listModeMenuEntries(
+    mode: ArticleListMode,
+    starredModeEnabled: Boolean,
+    labels: Map<ArticleListMode, String>,
+    onSelect: (ArticleListMode) -> Unit,
+): List<NativeMenuEntry> = ArticleListMode.entries.map { entry ->
+    NativeCheckMenuItem(
+        labels.getValue(entry),
+        checked = listModeChecked(entry, mode, starredModeEnabled),
+        shortcut = NativeMenuShortcut(listModeShortcutKey(entry), ctrl = true),
+        enabled = entry != ArticleListMode.Starred || starredModeEnabled,
+    ) { onSelect(entry) }
+}
+
+/** The key of the View menu's Ctrl/⌘ accelerator for [mode] (`AppMenuShortcut.ListMode*`). */
+private fun listModeShortcutKey(mode: ArticleListMode): Key = when (mode) {
+    ArticleListMode.All -> Key.One
+    ArticleListMode.Unread -> Key.Two
+    ArticleListMode.Starred -> Key.Three
 }
 
 /**
@@ -608,7 +658,11 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param feedTitles Display titles keyed by feed identifier.
  * @param feedFavicons Favicon URLs keyed by feed identifier.
  * @param selectedId The identifier of the selected article, if any.
- * @param unreadOnly Whether to show only unread articles.
+ * @param revealRequest Bumped by each selection the user makes (`HomeViewModel.selectionRevealRequests`);
+ *   a change scrolls [selectedId]'s row into view. [selectedId] changing on its own does not.
+ * @param listMode Which of the filter's articles the list shows — see [ArticleListMode].
+ * @param onSelectListMode Chooses another mode from [ArticleListTopBar]'s mode menu.
+ * @param starredModeEnabled Whether [ArticleListMode.Starred] can be chosen (not under the Starred filter).
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
  * @param sortEnabled Whether the sort button in [ArticleListTopBar] can be toggled — `false` while
@@ -625,12 +679,18 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  *   when there are no feeds at all — otherwise a narrow layout, where the "+" button lives inside
  *   the feed-list drawer, would leave a phone-width user with no visible way to add their first
  *   feed. Only consulted when [emptyContent] is `null`; a non-empty [articles] always wins over both.
+ * @param loading Whether the feed list or the article list has yet to load at launch
+ *   ([ArticleListBody.Pending]): an empty [articles] then shows no message at all, rather than
+ *   flashing "no feeds" / "no articles" before the first DB emission. Only consulted when
+ *   [emptyContent] is `null`.
  * @param onAddFeedClick Invoked from the "Add feed" button shown when [hasNoFeeds]. `null` (the
  *   default) omits the button, leaving just the message.
  * @param emptyContent Overrides the ordinary [hasNoFeeds]/`home_no_articles` empty-state message
  *   when [articles] is empty — search's own "too short a query"/"no matching articles" hints, which
  *   have nothing to do with whether the user has any feeds at all. `null` (the default) falls back
  *   to that ordinary message.
+ * @param onShowAllArticles When non-null (starred mode), the ordinary empty state is replaced by
+ *   "no starred articles here" and a button invoking this to show every article again.
  * @param onPullRefresh Invoked when the list (or its "no articles" empty state) is pulled down past
  *   the refresh threshold. `null` (the default) disables the gesture entirely — desktop, search
  *   results, and a user with no feeds all pass `null`.
@@ -647,10 +707,10 @@ internal fun ArticleListPaneContent(
     feedTitles: Map<String, String>,
     feedFavicons: Map<String, String?> = emptyMap(),
     selectedId: String?,
-    unreadOnly: Boolean,
-    onToggleUnreadOnly: () -> Unit,
-    canHideRead: Boolean = false,
-    onHideRead: () -> Unit = {},
+    revealRequest: Int = 0,
+    listMode: ArticleListMode,
+    onSelectListMode: (ArticleListMode) -> Unit,
+    starredModeEnabled: Boolean = true,
     onToggleSort: () -> Unit,
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
@@ -670,17 +730,19 @@ internal fun ArticleListPaneContent(
     onSearchClick: (() -> Unit)? = null,
     returnRipplePulse: Int = 0,
     hasNoFeeds: Boolean = false,
+    loading: Boolean = false,
     onAddFeedClick: (() -> Unit)? = null,
     sortEnabled: Boolean = true,
     titleMarkedById: Map<String, String>? = null,
     header: (@Composable () -> Unit)? = null,
     emptyContent: (@Composable () -> Unit)? = null,
+    onShowAllArticles: (() -> Unit)? = null,
     onPullRefresh: (() -> Unit)? = null,
     pullRefreshing: Boolean = false,
     newArticleCount: Int = 0,
     onNewArticlesClick: () -> Unit = {},
 ) {
-    LaunchedEffect(listState, selectedId, articles.isNotEmpty()) {
+    LaunchedEffect(listState, revealRequest, articles.isNotEmpty()) {
         val index = articles.indexOfFirst { it.id == selectedId }
         if (index !in articles.indices) return@LaunchedEffect
         // Before the list's first measure pass layoutInfo is still empty, which
@@ -708,10 +770,9 @@ internal fun ArticleListPaneContent(
     ) {
         header?.invoke()
         ArticleListTopBar(
-            unreadOnly = unreadOnly,
-            onToggleUnreadOnly = onToggleUnreadOnly,
-            canHideRead = canHideRead,
-            onHideRead = onHideRead,
+            listMode = listMode,
+            onSelectListMode = onSelectListMode,
+            starredModeEnabled = starredModeEnabled,
             newestFirst = newestFirst,
             onToggleSort = onToggleSort,
             onMarkAllRead = onMarkAllRead,
@@ -749,37 +810,7 @@ internal fun ArticleListPaneContent(
                 },
         ) {
             if (articles.isEmpty()) {
-                if (emptyContent != null) {
-                    emptyContent()
-                } else if (hasNoFeeds) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        // A narrow layout's "+" button lives inside the feed-list drawer (closed by
-                        // default), so this is the one reachable entry point to add a first feed —
-                        // without it a phone-width user with no feeds yet would have no visible way
-                        // forward. See ArticleListPaneContent's own KDoc.
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (onAddFeedClick != null) {
-                                FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
-                            }
-                        }
-                    }
-                } else {
-                    // Scrollable (though it never overflows) only so a pull here still reaches
-                    // pullToRefresh, which listens through nested scroll: an empty unread-only list
-                    // must stay pullable. The min height keeps the message centered in the pane.
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .heightIn(min = maxHeight),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
+                ArticleListEmptyState(emptyContent, loading, hasNoFeeds, onAddFeedClick, onShowAllArticles)
             } else {
                 val rowMetrics = rememberArticleRowMetrics()
                 val rowStrings = rememberArticleRowStrings()
@@ -791,6 +822,12 @@ internal fun ArticleListPaneContent(
                     contentPadding = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues(),
                 ) {
                     items(articles, key = { it.id }) { article ->
+                        // Kept across the row's recompositions (a selection change re-runs every
+                        // visible row) so the highlight isn't rebuilt character by character each time.
+                        val marked = titleMarkedById?.get(article.id)
+                        val titleOverride = remember(marked, article.title, searchHighlight) {
+                            marked?.let { markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight) }
+                        }
                         ArticleRow(
                             article = article,
                             feedTitle = feedTitles[article.feed_id].orEmpty(),
@@ -806,9 +843,7 @@ internal fun ArticleListPaneContent(
                             onOpenInBrowser = { onOpenArticleInBrowser(article) },
                             onShare = onShareArticle?.let { share -> { share(article) } },
                             onActivate = onActivated,
-                            titleOverride = titleMarkedById?.get(article.id)?.let {
-                                markedToAnnotatedString(it.ifBlank { article.title }, searchHighlight)
-                            },
+                            titleOverride = titleOverride,
                             strings = rowStrings,
                             ripplePulse = ripplePulseFor(article.id, selectedId, returnRipplePulse),
                         )
@@ -838,6 +873,63 @@ internal fun ArticleListPaneContent(
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                     .padding(8.dp),
             )
+        }
+    }
+}
+
+/**
+ * What the article list shows in place of rows when it has none: the caller's own [emptyContent],
+ * nothing while the first load is still [loading], the "no feeds" prompt, or the "no articles" message.
+ */
+@Composable
+private fun ArticleListEmptyState(
+    emptyContent: (@Composable () -> Unit)?,
+    loading: Boolean,
+    hasNoFeeds: Boolean,
+    onAddFeedClick: (() -> Unit)?,
+    onShowAllArticles: (() -> Unit)?,
+) {
+    if (emptyContent != null) {
+        emptyContent()
+    } else if (loading) {
+        // Nothing yet — see ArticleListPaneContent's `loading`.
+    } else if (hasNoFeeds) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // A narrow layout's "+" button lives inside the feed-list drawer (closed by
+            // default), so this is the one reachable entry point to add a first feed —
+            // without it a phone-width user with no feeds yet would have no visible way
+            // forward. See ArticleListPaneContent's own KDoc.
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(Res.string.home_no_feeds), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (onAddFeedClick != null) {
+                    FlatButton(onClick = onAddFeedClick) { Text(stringResource(Res.string.home_add_feed)) }
+                }
+            }
+        }
+    } else {
+        // Scrollable (though it never overflows) only so a pull here still reaches
+        // pullToRefresh, which listens through nested scroll: an empty unread-only list
+        // must stay pullable. The min height keeps the message centered in the pane.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .heightIn(min = maxHeight),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (onShowAllArticles != null) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(stringResource(Res.string.home_no_starred_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        FlatTonalButton(onClick = onShowAllArticles) { Text(stringResource(Res.string.home_show_all_articles)) }
+                    }
+                } else {
+                    Text(stringResource(Res.string.home_no_articles), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }

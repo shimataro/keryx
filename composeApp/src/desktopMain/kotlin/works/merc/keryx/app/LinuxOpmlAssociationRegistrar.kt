@@ -54,8 +54,8 @@ internal const val OPML_MIME_PACKAGE_FILE = "keryx-opml.xml"
  */
 internal class LinuxOpmlAssociationRegistrar(
     private val launcherPath: String,
-    private val applicationsDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("applications"),
-    private val mimeAppsList: File = xdgDir("XDG_CONFIG_HOME", ".config").resolve("mimeapps.list"),
+    private val applicationsDir: File = defaultApplicationsDir(),
+    private val mimeAppsList: File = defaultMimeAppsList(),
     private val mimePackagesDir: File = xdgDir("XDG_DATA_HOME", ".local/share").resolve("mime/packages"),
     private val refreshDesktopDatabase: (File) -> Unit = defaultRefreshDesktopDatabase(),
     private val refreshMimeDatabase: (File) -> Unit = { mimeDir ->
@@ -70,24 +70,19 @@ internal class LinuxOpmlAssociationRegistrar(
     fun register(): Boolean = runCatching {
         val desktopFile = File(applicationsDir, OPML_HANDLER_DESKTOP_FILE)
         val entry = desktopEntryContent(launcherPath, OPML_DESKTOP_MIME_TYPES.joinToString(";"), "%f")
-        var changed = false
-
-        if (writeIfChanged(desktopFile, entry)) changed = true
+        val desktopFileChanged = writeIfChanged(desktopFile, entry)
 
         val mimePackageFile = File(mimePackagesDir, OPML_MIME_PACKAGE_FILE)
         val mimePackage = opmlMimePackageContent()
-        var mimeDatabaseChanged = false
-        if (writeIfChanged(mimePackageFile, mimePackage)) {
-            changed = true
-            mimeDatabaseChanged = true
-        }
+        val mimeDatabaseChanged = writeIfChanged(mimePackageFile, mimePackage)
 
         val existingAssociations = readOrNull(mimeAppsList)
         var mergedAssociations = existingAssociations.orEmpty()
         for (mimeType in OPML_DESKTOP_MIME_TYPES) {
             mergedAssociations = mergeMimeAppsList(mergedAssociations, OPML_HANDLER_DESKTOP_FILE, mimeType)
         }
-        if (writeIfChanged(mimeAppsList, mergedAssociations)) changed = true
+        // Every write always runs (separate vals, never a short-circuiting ||).
+        val associationsChanged = writeIfChanged(mimeAppsList, mergedAssociations)
 
         if (mimeDatabaseChanged) {
             // Not best-effort, unlike the desktop-database refresh below: application/x-opml+xml is a
@@ -103,11 +98,8 @@ internal class LinuxOpmlAssociationRegistrar(
                 .onFailure { mimePackageFile.delete() }
                 .getOrThrow()
         }
-        if (changed) {
-            // Best-effort only — see the equivalent comment in LinuxUriSchemeRegistrar.register().
-            runCatching { refreshDesktopDatabase(applicationsDir) }.onFailure {
-                Log.info(LOG_TAG, "Could not refresh the desktop database; the association itself is still in place")
-            }
+        if (desktopFileChanged || mimeDatabaseChanged || associationsChanged) {
+            refreshDesktopDatabaseBestEffort(refreshDesktopDatabase, applicationsDir, LOG_TAG)
             Log.info(LOG_TAG, "Registered .opml file association at ${desktopFile.path}")
         }
         true

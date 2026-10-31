@@ -61,11 +61,14 @@ import works.merc.keryx.app.resources.menu_help_project_page
 import works.merc.keryx.app.resources.menu_help_website
 import works.merc.keryx.app.resources.menu_settings
 import works.merc.keryx.app.resources.menu_view
+import works.merc.keryx.app.resources.menu_view_hide_read
 import works.merc.keryx.app.resources.menu_view_mark_all_read
 import works.merc.keryx.app.resources.menu_view_search
 import works.merc.keryx.app.resources.menu_view_show_menu_bar
 import works.merc.keryx.app.resources.menu_view_toggle_sort
-import works.merc.keryx.app.resources.menu_view_unread_only
+import works.merc.keryx.app.resources.menu_view_list_mode_all
+import works.merc.keryx.app.resources.menu_view_list_mode_starred
+import works.merc.keryx.app.resources.menu_view_list_mode_unread
 import works.merc.keryx.app.resources.website_url
 import works.merc.keryx.app.tray.updateMenuEntry
 import works.merc.keryx.app.ui.home.openInBrowserIfAllowed
@@ -126,14 +129,17 @@ internal fun FrameWindowScope.AppMenuBar(
 
     val screen by menuController.currentScreen.collectAsState()
     val feedListKeysActive by menuController.feedListKeysActive.collectAsState()
-    val selected by homeVm.selectedArticle.collectAsState()
+    // The selection's row, so the Article menu enables for an article whose body is still loading.
+    val selected by homeVm.selectedArticleRow.collectAsState()
     val activity by homeVm.activity.collectAsState()
     val filter by homeVm.filter.collectAsState()
     val searchActive by homeVm.searchActive.collectAsState()
-    val unreadOnly by homeVm.unreadOnly.collectAsState()
+    val canHideRead by homeVm.canHideRead.collectAsState()
+    val listMode by homeVm.mode.collectAsState()
+    val starredModeEnabled by homeVm.starredModeEnabled.collectAsState()
     val canSyncNow by homeVm.canSyncNow.collectAsState()
     val opmlBusy by opmlController.busy.collectAsState()
-    val feeds by homeVm.feeds.collectAsState()
+    val feeds by homeVm.structuralFeeds.collectAsState()
     val tags by homeVm.tags.collectAsState()
     val folders by homeVm.folders.collectAsState()
     val feedTagMap by homeVm.feedTagMap.collectAsState()
@@ -156,7 +162,9 @@ internal fun FrameWindowScope.AppMenuBar(
         activity = activity,
         canSyncNow = canSyncNow,
         searchActive = searchActive,
-        unreadOnly = unreadOnly,
+        canHideRead = canHideRead,
+        listMode = listMode,
+        starredModeAvailable = starredModeEnabled,
         opmlBusy = opmlBusy,
         hasSelectedFeed = selectedFeed != null,
         feedListKeysActive = feedListKeysActive,
@@ -195,7 +203,10 @@ internal fun FrameWindowScope.AppMenuBar(
         quit = stringResource(Res.string.menu_file_quit),
         viewMenu = stringResource(Res.string.menu_view),
         search = stringResource(Res.string.menu_view_search),
-        unreadOnly = stringResource(Res.string.menu_view_unread_only),
+        allArticles = stringResource(Res.string.menu_view_list_mode_all),
+        unreadOnly = stringResource(Res.string.menu_view_list_mode_unread),
+        starredOnly = stringResource(Res.string.menu_view_list_mode_starred),
+        hideRead = stringResource(Res.string.menu_view_hide_read),
         toggleSort = stringResource(Res.string.menu_view_toggle_sort),
         markAllRead = stringResource(Res.string.menu_view_mark_all_read),
         showMenuBar = stringResource(Res.string.menu_view_show_menu_bar),
@@ -236,7 +247,8 @@ internal fun FrameWindowScope.AppMenuBar(
         openSettings = { menuController.send(MenuCommand.OpenSettings) },
         quit = onQuit,
         focusSearch = { menuController.send(MenuCommand.FocusSearch) },
-        setUnreadOnly = { homeVm.setUnreadOnly(it) },
+        setListMode = { homeVm.setMode(it) },
+        hideRead = { homeVm.hideRead() },
         toggleSort = { homeVm.toggleSort() },
         markAllRead = { homeVm.markAllRead() },
         toggleRead = { homeVm.toggleReadSelected() },
@@ -245,7 +257,7 @@ internal fun FrameWindowScope.AppMenuBar(
         copyUrl = { menuController.send(MenuCommand.CopyUrl) },
         refreshAll = { homeVm.refreshAll() },
         sync = { homeVm.sync() },
-        refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it) } },
+        refreshSelectedFeed = { selectedFeed?.let { homeVm.refreshFeed(it.id) } },
         toggleFeedTag = { tagId, attached -> selectedFeed?.let { homeVm.setFeedTag(it.id, tagId, attached) } },
         moveFeedToFolder = { folderId -> selectedFeed?.let { homeVm.moveFeed(it.id, folderId) } },
         newFolderForSelectedFeed = { menuController.send(MenuCommand.NewFolderForSelectedFeed) },
@@ -260,11 +272,7 @@ internal fun FrameWindowScope.AppMenuBar(
         // Reads `state.value` fresh rather than closing over the `updateState` snapshot above, so a
         // state change between this composition and the click is honoured — the same wiring
         // `main.kt` gives the tray's own entry.
-        updateAction = {
-            onUpdateMenuItemClicked(
-                updateRepository.state.value, settingsOpenRequests, settingsVm::checkForUpdate, updateRepository::performPrimaryAction,
-            )
-        },
+        updateAction = { onUpdateMenuItemClicked(updateRepository, settingsOpenRequests, settingsVm::checkForUpdate) },
         about = { menuController.send(MenuCommand.About) },
     )
 

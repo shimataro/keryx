@@ -46,7 +46,6 @@ import works.merc.keryx.app.resources.ic_star_material
 import works.merc.keryx.app.resources.ic_storage_material
 import works.merc.keryx.app.resources.ic_tune_material
 import works.merc.keryx.app.resources.ic_update_material
-import works.merc.keryx.app.resources.ic_visibility_off_material
 import works.merc.keryx.app.resources.ic_warning_material
 
 /**
@@ -97,7 +96,6 @@ actual object KeryxIcons {
     actual val ThisDevice: DrawableResource = Res.drawable.ic_smartphone_material
     actual val Tune: DrawableResource = Res.drawable.ic_tune_material
     actual val Update: DrawableResource = Res.drawable.ic_update_material
-    actual val VisibilityOff: DrawableResource = Res.drawable.ic_visibility_off_material
     actual val Warning: DrawableResource = Res.drawable.ic_warning_material
 
     // Semantic state (Filled)

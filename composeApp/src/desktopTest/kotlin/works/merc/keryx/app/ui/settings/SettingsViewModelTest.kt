@@ -17,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
@@ -29,6 +28,7 @@ import org.jetbrains.compose.resources.getString
 import works.merc.keryx.app.FakeCloudConnectFlow
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.HoldingDispatcher
+import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.CloudStorageType
@@ -332,6 +332,7 @@ class SettingsViewModelTest {
         val feedRepository = FeedRepository(
             db, feedFetcher, missingFaviconResolver(), articleRepository, ftsManager, syncScheduler,
             NotificationCenter(), clock, Dispatchers.Unconfined,
+            faviconMisses = InMemoryFaviconMissStore(),
         )
         val folderRepository = FolderRepository(db, feedRepository, syncScheduler, clock, Dispatchers.Unconfined)
         val tagRepository = TagRepository(db, syncScheduler, clock, Dispatchers.Unconfined)
@@ -429,10 +430,12 @@ class SettingsViewModelTest {
     @Test
     fun checkForUpdateIgnoresOverlappingCallsWhileOneIsInFlight() {
         var requestCount = 0
+        // Holds the first check in flight until the overlapping call has been made.
+        val releaseResponse = CompletableDeferred<Unit>()
         val client = HttpClient(
             MockEngine {
                 requestCount++
-                delay(50)
+                releaseResponse.await()
                 respond(
                     """{"tag_name":"2.0.0","html_url":"https://ex.com/releases/2.0.0","prerelease":false,"draft":false}""",
                     HttpStatusCode.OK,
@@ -444,6 +447,7 @@ class SettingsViewModelTest {
         vm.checkForUpdate()
         awaitConditionBlocking { vm.updateState.value is UpdateState.Checking }
         vm.checkForUpdate() // ignored: a check is already in flight
+        releaseResponse.complete(Unit)
 
         awaitConditionBlocking { vm.updateState.value is UpdateState.Available }
         assertEquals(1, requestCount)

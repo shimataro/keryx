@@ -44,7 +44,7 @@ fun addFeedCanSubscribe(preview: AddFeedPreview?, selectedCandidates: Set<String
     when (preview) {
         is AddFeedPreview.Single -> true
         is AddFeedPreview.Multiple -> selectedCandidates.isNotEmpty()
-        else -> false
+        is AddFeedPreview.Failed, null -> false
     }
 
 /**

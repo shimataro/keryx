@@ -4,6 +4,7 @@ import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.platform.isMacOs
+import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
 import works.merc.keryx.app.tray.TrayUpdateEntry
@@ -32,7 +33,7 @@ class AppMenuTreeTest {
     private fun labels() = AppMenuLabels(
         fileMenu = "File", addFeed = "AddFeed", addFolder = "AddFolder", addTag = "AddTag",
         importOpml = "Import", exportOpml = "Export", closeWindow = "Close", settings = "Settings", quit = "Quit",
-        viewMenu = "View", search = "Search", unreadOnly = "UnreadOnly", toggleSort = "ToggleSort",
+        viewMenu = "View", search = "Search", allArticles = "AllArticles", unreadOnly = "UnreadOnly", starredOnly = "StarredOnly", hideRead = "HideRead", toggleSort = "ToggleSort",
         markAllRead = "MarkAllRead", showMenuBar = "ShowMenuBar",
         articleMenu = "Article", toggleRead = "ToggleRead", toggleStar = "ToggleStar",
         openInBrowser = "OpenInBrowser", copyUrl = "CopyUrl",
@@ -50,11 +51,12 @@ class AppMenuTreeTest {
     private var newFolderInvoked = false
     private var newTagInvoked = false
     private var updateActionInvoked = false
+    private val listModesSet = mutableListOf<ArticleListMode>()
 
     private fun actions() = AppMenuActions(
         addFeed = {}, addFolder = {}, addTag = {}, importOpml = {}, exportOpml = {},
-        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setUnreadOnly = {},
-        toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
+        closeWindow = {}, openSettings = {}, quit = {}, focusSearch = {}, setListMode = { listModesSet += it },
+        hideRead = {}, toggleSort = {}, markAllRead = {}, toggleRead = {}, toggleStar = {}, openInBrowser = {},
         copyUrl = {}, refreshAll = {}, sync = {},
         refreshSelectedFeed = {},
         toggleFeedTag = { tagId, attached -> toggledTagId = tagId; toggledTagAttached = attached },
@@ -68,7 +70,7 @@ class AppMenuTreeTest {
     private fun enabledUi(feedListKeysActive: Boolean = true) = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = true, opmlBusy = false,
+        searchActive = false, canHideRead = true, listMode = ArticleListMode.Unread, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = true, feedListKeysActive = feedListKeysActive, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = true, selectedFeedSiteCanOpenInBrowser = true,
     )
@@ -76,7 +78,7 @@ class AppMenuTreeTest {
     private fun disabledUi() = computeMenuUiState(
         onHome = false, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(feedRefreshCount = 1, syncCount = 1, refreshCycleCount = 1), canSyncNow = false,
-        searchActive = true, unreadOnly = false, opmlBusy = false,
+        searchActive = true, canHideRead = false, listMode = ArticleListMode.All, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = false,
         selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
@@ -85,7 +87,7 @@ class AppMenuTreeTest {
     private fun folderSelectedUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = false, opmlBusy = false,
+        searchActive = false, canHideRead = false, listMode = ArticleListMode.All, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
@@ -93,7 +95,7 @@ class AppMenuTreeTest {
     private fun starredFilterUi() = computeMenuUiState(
         onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = true,
         activity = ActivitySnapshot(), canSyncNow = true,
-        searchActive = false, unreadOnly = true, opmlBusy = false,
+        searchActive = false, canHideRead = false, listMode = ArticleListMode.Unread, starredModeAvailable = true, opmlBusy = false,
         hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true,
         selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
     )
@@ -152,7 +154,8 @@ class AppMenuTreeTest {
         assertEquals(ui.addItemsEnabled, root.menu("File").item("AddFeed").enabled)
         assertEquals(ui.opmlEnabled, root.menu("File").item("Import").enabled)
         assertEquals(ui.searchEnabled, root.menu("View").item("Search").enabled)
-        assertEquals(ui.unreadOnlyEnabled, root.menu("View").checkbox("UnreadOnly")!!.enabled)
+        assertEquals(ui.listModeEnabled, root.menu("View").checkbox("UnreadOnly")!!.enabled)
+        assertEquals(ui.hideReadEnabled, root.menu("View").item("HideRead").enabled)
         assertEquals(ui.toggleSortEnabled, root.menu("View").item("ToggleSort").enabled)
         assertEquals(ui.markAllReadEnabled, root.menu("View").item("MarkAllRead").enabled)
         assertEquals(ui.articleActionsEnabled, root.menu("Article").item("ToggleRead").enabled)
@@ -177,7 +180,7 @@ class AppMenuTreeTest {
         val ui = computeMenuUiState(
             onHome = true, hasSelectedArticle = true, selectedArticleHasUrl = true, selectedArticleCanOpenInBrowser = false,
             activity = ActivitySnapshot(), canSyncNow = true,
-            searchActive = false, unreadOnly = false, opmlBusy = false,
+            searchActive = false, canHideRead = false, listMode = ArticleListMode.All, starredModeAvailable = true, opmlBusy = false,
             hasSelectedFeed = true, feedListKeysActive = false, hasRenamableSelection = true, selectedFeedHasSiteUrl = true,
             selectedFeedSiteCanOpenInBrowser = false,
         )
@@ -426,7 +429,7 @@ class AppMenuTreeTest {
         assertEquals(AppMenuShortcut.Search, root.menu("View").item("Search").shortcut)
         assertEquals(AppMenuShortcut.ImportOpml, root.menu("File").item("Import").shortcut)
         assertEquals(AppMenuShortcut.ExportOpml, root.menu("File").item("Export").shortcut)
-        assertEquals(AppMenuShortcut.UnreadOnly, root.menu("View").checkbox("UnreadOnly")!!.shortcut)
+        assertEquals(AppMenuShortcut.ListModeUnread, root.menu("View").checkbox("UnreadOnly")!!.shortcut)
     }
 
     @Test
@@ -455,4 +458,74 @@ class AppMenuTreeTest {
         // Modified (Ctrl/⌘+Shift) selected-item accelerators are unaffected.
         assertEquals(AppMenuShortcut.FeedRefresh, feed.item("FeedRefresh").shortcut)
     }
+
+    @Test
+    fun viewMenuListsTheThreeListModesWithOnlyTheCurrentOneChecked() {
+        val view = tree(enabledUi()).menu("View")
+        val modes = listOf("AllArticles", "UnreadOnly", "StarredOnly").map { view.checkbox(it)!! }
+
+        assertEquals(listOf(false, true, false), modes.map { it.checked })
+        assertEquals(
+            listOf(AppMenuShortcut.ListModeAll, AppMenuShortcut.ListModeUnread, AppMenuShortcut.ListModeStarred),
+            modes.map { it.shortcut },
+        )
+    }
+
+    @Test
+    fun `the View menu sets the list modes apart with separators`() {
+        val view = tree(enabledUi(), toggle = null).menu("View")
+
+        val actual = view.items.map { node ->
+            when (node) {
+                is AppMenuNode.Item -> node.label
+                is AppMenuNode.CheckboxItem -> node.label
+                AppMenuNode.Separator -> "<separator>"
+                else -> "<other>"
+            }
+        }
+        assertEquals(
+            listOf(
+                "Search", "<separator>", "AllArticles", "UnreadOnly", "StarredOnly", "<separator>",
+                "HideRead", "ToggleSort", "<separator>", "MarkAllRead",
+            ),
+            actual,
+        )
+    }
+
+    @Test
+    fun viewMenuListModeItemsRouteToTheSharedHandlers() {
+        val view = tree(enabledUi()).menu("View")
+
+        view.checkbox("AllArticles")!!.onCheckedChange(true)
+        view.checkbox("UnreadOnly")!!.onCheckedChange(true)
+        view.checkbox("StarredOnly")!!.onCheckedChange(true)
+        // Re-choosing the checked item (the toolkit reports it as an uncheck) changes nothing.
+        view.checkbox("AllArticles")!!.onCheckedChange(false)
+        view.checkbox("UnreadOnly")!!.onCheckedChange(false)
+        view.checkbox("StarredOnly")!!.onCheckedChange(false)
+
+        assertEquals(listOf(ArticleListMode.All, ArticleListMode.Unread, ArticleListMode.Starred), listModesSet)
+    }
+
+    @Test
+    fun viewMenuStarredOnlyIsCheckedAndDisabledUnderTheStarredFilter() {
+        val ui = computeMenuUiState(
+            onHome = true, hasSelectedArticle = false, selectedArticleHasUrl = false, selectedArticleCanOpenInBrowser = false,
+            activity = ActivitySnapshot(), canSyncNow = true,
+            searchActive = false, canHideRead = false, listMode = ArticleListMode.All, starredModeAvailable = false, opmlBusy = false,
+            hasSelectedFeed = false, feedListKeysActive = false, hasRenamableSelection = false,
+            selectedFeedHasSiteUrl = false, selectedFeedSiteCanOpenInBrowser = false,
+        )
+        val view = tree(ui).menu("View")
+
+        assertFalse(view.checkbox("StarredOnly")!!.enabled)
+        assertTrue(view.checkbox("AllArticles")!!.enabled)
+        assertTrue(view.checkbox("UnreadOnly")!!.enabled)
+        // Starred stays checked beside the All/Unread choice made within it.
+        assertEquals(
+            listOf(true, false, true),
+            listOf("AllArticles", "UnreadOnly", "StarredOnly").map { view.checkbox(it)!!.checked },
+        )
+    }
+
 }

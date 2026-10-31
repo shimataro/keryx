@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.presentation.settings.OpmlOperation
@@ -133,37 +134,21 @@ internal fun DataTabContent(vm: SettingsViewModel) {
             val importingOpml = opmlRunning == OpmlOperation.Importing
             val exportingOpml = opmlRunning == OpmlOperation.Exporting
             Row {
-                FlatTonalButton(onClick = { vm.importOpml() }, enabled = !opmlBusy) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (importingOpml) {
-                            SmallSpinner(size = 18.dp)
-                        } else {
-                            KeryxIcon(
-                                KeryxIcons.FileDownload,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(Res.string.settings_import_opml))
-                    }
-                }
+                OpmlActionButton(
+                    icon = KeryxIcons.FileDownload,
+                    label = stringResource(Res.string.settings_import_opml),
+                    running = importingOpml,
+                    enabled = !opmlBusy,
+                    onClick = { vm.importOpml() },
+                )
                 Spacer(Modifier.width(8.dp))
-                FlatTonalButton(onClick = { vm.exportOpml() }, enabled = !opmlBusy) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (exportingOpml) {
-                            SmallSpinner(size = 18.dp)
-                        } else {
-                            KeryxIcon(
-                                KeryxIcons.FileUpload,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(Res.string.settings_export_opml))
-                    }
-                }
+                OpmlActionButton(
+                    icon = KeryxIcons.FileUpload,
+                    label = stringResource(Res.string.settings_export_opml),
+                    running = exportingOpml,
+                    enabled = !opmlBusy,
+                    onClick = { vm.exportOpml() },
+                )
             }
             opmlStatus?.let {
                 Spacer(Modifier.height(8.dp))
@@ -173,6 +158,28 @@ internal fun DataTabContent(vm: SettingsViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/** An OPML import/export button: its [icon], replaced by a spinner while this operation is [running]. */
+@Composable
+private fun OpmlActionButton(
+    icon: DrawableResource,
+    label: String,
+    running: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    FlatTonalButton(onClick = onClick, enabled = enabled) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (running) {
+                SmallSpinner(size = 18.dp)
+            } else {
+                KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(label)
         }
     }
 }

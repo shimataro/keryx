@@ -58,6 +58,7 @@ import works.merc.keryx.app.resources.settings_update_open_release_page
 import works.merc.keryx.app.resources.settings_update_ready
 import works.merc.keryx.app.resources.settings_update_retry
 import works.merc.keryx.app.resources.settings_update_verifying
+import works.merc.keryx.app.ui.theme.subtleDivider
 
 /**
  * Whether opening the Updates tab should itself trigger a check — equivalent to one press of
@@ -107,7 +108,7 @@ internal fun UpdatesTabContent(vm: SettingsViewModel) {
         UpdateStatusAndAction(vm)
 
         Spacer(Modifier.height(16.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.subtleDivider)
         Spacer(Modifier.height(16.dp))
 
         Text(
@@ -365,7 +366,8 @@ private fun UpdateHeadlineRow(
                 Spacer(Modifier.width(8.dp))
                 FlatTonalButton(onClick = onStartDownload) { Text(stringResource(Res.string.settings_update_retry)) }
             }
-            else -> Unit // unreachable here: Idle/Checking/UpToDate never carry an AvailableUpdate (see UpdateResultSection)
+            // Unreachable here: these never carry an AvailableUpdate (see UpdateResultSection).
+            UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate -> Unit
         }
     }
 }

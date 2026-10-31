@@ -2,12 +2,22 @@ package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -17,12 +27,15 @@ import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.FAVICON_RETRY_INTERVAL_MS
 import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
 import works.merc.keryx.app.core.FeedNotFoundException
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.data.local.db.FeedsQueries
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
@@ -34,6 +47,17 @@ import works.merc.keryx.app.data.remote.FetchedFeed
  * at once; DB writes stay serial.
  */
 private const val REFRESH_FETCH_CONCURRENCY = 6
+
+/**
+ * Max feeds a refresh holds between starting their fetch and the writer committing them — the
+ * fetched results queued for the single writer included. Every queued result keeps its feed's parsed
+ * articles resident, so without this a writer held back (a sync merge's write lock) would let a large
+ * subscription list fetch its whole contents into memory at once. Twice the fetch concurrency, so a
+ * writer that keeps up never stalls a fetch slot.
+ */
+internal const val REFRESH_PENDING_APPLY_LIMIT = 2 * REFRESH_FETCH_CONCURRENCY
+
+private const val TAG = "FeedRepository"
 
 /**
  * Feed subscription lifecycle and refresh. Orchestrates [FeedFetcher] +
@@ -50,6 +74,7 @@ class FeedRepository(
     private val notificationCenter: NotificationCenter,
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val faviconMisses: FaviconMissStore,
 ) {
     private val feeds get() = db.feedsQueries
 
@@ -62,6 +87,18 @@ class FeedRepository(
     // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
     // two need their own shared guard here where they converge.
     private val subscribePlacementMutex = Mutex()
+
+    // Per-feed reference count of in-flight refreshes. A count rather than a set membership because a
+    // single-feed refresh can overlap a refresh of every feed, and the feed must stay marked until both end.
+    private val _refreshingFeedCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    /**
+     * Ids of the feeds currently being refreshed — from the moment a feed's refresh is requested
+     * (including while it is queued for a fetch slot) until its articles are committed — by any route
+     * ([refreshFeed], [refreshFeeds]: manual, pull-to-refresh, background, startup). Session-only,
+     * never persisted.
+     */
+    val refreshingFeedIds: Flow<Set<String>> = _refreshingFeedCounts.map { it.keys }.distinctUntilChanged()
 
     fun watchAllFeeds(): Flow<List<Feeds>> = feeds.watchAll().asFlow().mapToList(dispatcher)
 
@@ -184,7 +221,7 @@ class FeedRepository(
         // old relative position may no longer be meaningful after other feeds in that group moved
         // around while it was unsubscribed).
         val wasNewlyCreated = subscribePlacementMutex.withLock {
-            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched, existing)
+            doSubscribeFeedWrite(effectiveUrl, feedId, folderId, afterFeedId, beforeFeedId, now, favicon, fetched)
         }
         articleRepository.upsertParsed(feedId, fetched.articles)
         syncScheduler.scheduleSync()
@@ -299,7 +336,6 @@ class FeedRepository(
         now: Long,
         favicon: String?,
         fetched: FetchedFeed,
-        existing: Feeds?,
     ): Boolean {
         return db.transactionWithResult {
             // Re-read under the lock: the snapshot taken before the fetch/favicon calls can be
@@ -347,44 +383,94 @@ class FeedRepository(
      * @return The number of new articles, or the refresh error.
      */
     suspend fun refreshFeed(feed: Feeds): Result<Int> {
-        val outcome = refreshFeedArticles(feed)
-        if (outcome.hadArticles) ftsManager.indexMissing()
-        return outcome.result
+        val result = refreshFeeds(listOf(feed)).getValue(feed.id)
+        // Unlike refreshFeeds (only ever run inside a RefreshCycleRunner cycle, which syncs after it),
+        // a single-feed refresh has no sync of its own to ride on.
+        syncScheduler.scheduleSync()
+        return result
+    }
+
+    /**
+     * Refreshes the feed [id] names, re-reading its row first so the conditional request carries
+     * the feed's current `etag` / `last_modified` rather than whatever a caller's (possibly stale)
+     * copy of the row holds.
+     *
+     * @return The refresh result, or `null` when no subscribed feed has that id (it was
+     *   unsubscribed in the meantime), in which case nothing is fetched.
+     */
+    suspend fun refreshFeedById(id: String): Result<Int>? {
+        val feed = getFeedById(id)?.takeIf { it.deleted_at == null } ?: return null
+        return refreshFeed(feed)
     }
 
     /** Outcome of [applyFetch]: the article-count result, plus whether any articles were fetched. */
     private data class RefreshOutcome(val result: Result<Int>, val hadArticles: Boolean)
 
-    /**
-     * A feed's network fetch result, gathered off the DB write path so [refreshAll] can fetch many
-     * feeds concurrently before applying their writes serially. [resolvedFavicon] is the favicon URL
-     * resolved during the fetch (only attempted when the feed had none), or null.
-     */
-    private data class FeedFetchPhase(val fetch: Result<FetchedFeed>, val resolvedFavicon: String?)
+    /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
+    private sealed interface RefreshStep {
+        /**
+         * [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. [rows] holds
+         * the fetched articles' rows, already prepared off the writer, exactly when [fetch] is Ok.
+         */
+        class Fetched(
+            val feed: Feeds,
+            val fetch: Result<FetchedFeed>,
+            val rows: List<ArticleRepository.PreparedInsert>?,
+            val committed: CompletableDeferred<Unit>,
+        ) : RefreshStep
+
+        /** A favicon lookup for [feedId] finished; [url] is null when it found none. */
+        class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
+    }
+
+    /** A favicon lookup a fetched feed is due, from [siteUrl] (null when the feed names no site). */
+    private class FaviconLookup(val siteUrl: String?)
 
     /**
-     * Network phase: fetch the feed and, if it has no favicon yet, resolve one. Does NO DB writes,
-     * so it is safe to run for many feeds concurrently.
+     * Whether a refresh that fetched [feed] should look its favicon up: it has none yet, and no
+     * lookup found none within [FAVICON_RETRY_INTERVAL_MS].
      */
-    private suspend fun fetchFeed(feed: Feeds): FeedFetchPhase {
-        val fetch = feedFetcher.fetch(feed.url, feed.etag, feed.last_modified)
-        val favicon = if (fetch is Result.Ok && feed.favicon_url.isNullOrEmpty()) {
-            faviconResolver.resolve(fetch.value.siteUrl ?: feed.site_url, feed.url)
-        } else {
-            null
+    private fun needsFaviconLookup(feed: Feeds): Boolean {
+        if (!feed.favicon_url.isNullOrEmpty()) return false
+        val missedAt = faviconMisses.missedAt(feed.id) ?: return true
+        return clock.nowMillis() - missedAt >= FAVICON_RETRY_INTERVAL_MS
+    }
+
+    /**
+     * Stores a favicon resolved after [feedId]'s own refresh writes, unless the feed has been
+     * unsubscribed or given a favicon meanwhile, or records that none was found. Best effort: a
+     * failed write is logged and left for the next refresh rather than failing this one.
+     */
+    private fun applyFavicon(step: RefreshStep.FaviconResolved) {
+        val url = step.url
+        if (url == null) {
+            faviconMisses.recordMiss(step.feedId, clock.nowMillis())
+            return
         }
-        return FeedFetchPhase(fetch, favicon)
+        faviconMisses.clearMiss(step.feedId)
+        try {
+            val written = feeds.updateFaviconUrlIfMissing(url, clock.nowMillis(), step.feedId).value
+            if (written > 0) syncScheduler.scheduleSync()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.warn(TAG, "Storing a resolved favicon failed", e)
+        }
     }
 
     /**
      * Applies fetched feed data, persists its articles, and emits notifications for permanent removal or URL changes.
      *
      * @param feed The feed being refreshed.
-     * @param phase The fetched feed data and any resolved favicon.
+     * @param fetch The feed's fetch result.
      * @return The article update result and whether the fetch contained articles.
      */
-    private suspend fun applyFetch(feed: Feeds, phase: FeedFetchPhase): RefreshOutcome {
-        val fetched = when (val r = phase.fetch) {
+    private suspend fun applyFetch(
+        feed: Feeds,
+        fetch: Result<FetchedFeed>,
+        rows: List<ArticleRepository.PreparedInsert>?,
+    ): RefreshOutcome {
+        val fetched = when (val r = fetch) {
             is Result.Ok -> r.value
             is Result.Err -> {
                 val ex = r.exception
@@ -395,20 +481,35 @@ class FeedRepository(
                     // error_count stays untouched (410 is permanent, not a retry candidate), so record
                     // the reason in last_error instead — that's what keeps the feed list flagged after
                     // the notification is dismissed. Cleared by resetErrorCount if the feed comes back.
-                    feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    // Written only on the transition: a gone feed is still refreshed every cycle, and
+                    // any feeds write re-runs the article-list query. The check reads the row taken
+                    // before the fetch, so a marker cleared meanwhile (a single-feed Refresh that
+                    // succeeded, or a sync merge) is not rewritten this cycle; the next one rereads the
+                    // row and restores it — the same assumption as the resetErrorCount guard below. Not
+                    // checked in SQL instead: SQLDelight re-runs the queries even when no row changes.
+                    if (feed.last_error != FEED_ERROR_REASON_GONE) {
+                        feeds.markGone(FEED_ERROR_REASON_GONE, clock.nowMillis(), feed.id)
+                    }
+                    // Coalesced: a gone feed is still refreshed every cycle, and each one would otherwise
+                    // add another copy of the same warning for as long as the session runs. The key
+                    // includes the title, so a feed renamed in between gets an entry of its own.
                     notify(
                         NotificationText.FeedGone(feed.displayTitle()),
                         AppNotificationLevel.WARNING,
                         action = AppNotificationAction.ShowFeedDetail(feed.id),
+                        coalesce = true,
                     )
                 }
                 return RefreshOutcome(r, hadArticles = false)
             }
         }
 
-        // CPU-heavy preparation stays outside the transaction below, so it doesn't hold the write
-        // lock (the same reason upsertParsed precomputes before opening its own transaction).
-        val prepared = articleRepository.prepareParsed(feed.id, fetched.articles)
+        // The CPU-heavy half of the preparation already ran on the fetch's own coroutine (see
+        // launchFetches), so it neither holds the write lock nor queues behind other feeds' writes.
+        // Only the half that reads the DB runs here, outside the transaction below (the same reason
+        // upsertParsed precomputes before opening its own transaction), so the new-article count
+        // compares against what is stored now, not when the fetch finished.
+        val prepared = articleRepository.countPrepared(feed.id, checkNotNull(rows))
         // The target itself rather than a boolean: the write below and the notification after the
         // commit both need the value, and carrying it keeps its non-nullness with it at both sites.
         // Non-null exactly when the fetch reported a permanent redirect somewhere we are not already.
@@ -430,12 +531,6 @@ class FeedRepository(
         val newCount = db.transactionWithResult {
             if (feed.error_count != 0L || feed.last_error != null) {
                 feeds.resetErrorCount(now, feed.id)
-            }
-
-            if (feed.favicon_url.isNullOrEmpty()) {
-                phase.resolvedFavicon?.let {
-                    feeds.updateFaviconUrl(it, now, feed.id)
-                }
             }
 
             // A 304 carries no validators, so writing them back would erase the ones that produced it.
@@ -481,18 +576,18 @@ class FeedRepository(
                 action = AppNotificationAction.ShowFeedDetail(feed.id),
             )
         }
-        syncScheduler.scheduleSync()
+        // No sync is scheduled here: a refresh of many feeds would otherwise arm the debounce once
+        // per feed and could fire a whole-DB upload mid-refresh. RefreshCycleRunner covers the batch
+        // (it syncs right after, or schedules one when the cycle synced first); the single-feed
+        // refreshFeed() schedules its own.
         return RefreshOutcome(Result.Ok(newCount), fetched.articles.isNotEmpty())
     }
-
-    /** Refreshes a single feed: fetch (network) then apply (DB), one after the other. */
-    private suspend fun refreshFeedArticles(feed: Feeds): RefreshOutcome = applyFetch(feed, fetchFeed(feed))
 
     /**
      * Refreshes all feeds and collects the article-count result for each feed.
      *
      * Network fetching is performed concurrently with bounded concurrency, while database updates
-     * are applied in the original feed order.
+     * are applied serially as each feed's fetch completes — see [refreshFeeds].
      *
      * @return A map from feed ID to the result containing the number of newly processed articles.
      */
@@ -515,47 +610,215 @@ class FeedRepository(
      * unsubscribed feed). Ordered like [getAllFeeds].
      */
     fun feedsCoveredBy(filter: ArticleFilter): List<Feeds> = when (filter) {
-        ArticleFilter.All, ArticleFilter.Starred -> feeds.watchAll().executeAsList()
-        is ArticleFilter.Feed -> feeds.watchAll().executeAsList().filter { it.id == filter.feedId }
+        ArticleFilter.All, ArticleFilter.Starred -> getAllFeeds()
+        is ArticleFilter.Feed -> getAllFeeds().filter { it.id == filter.feedId }
         is ArticleFilter.Folder -> feeds.getByFolder(filter.folderId).executeAsList()
         is ArticleFilter.Tag -> {
             val tagged = db.feed_tagsQueries.watchFeedIdsForTag(filter.tagId).executeAsList().toSet()
-            feeds.watchAll().executeAsList().filter { it.id in tagged }
+            getAllFeeds().filter { it.id in tagged }
         }
     }
 
     /**
      * Refreshes [feedList] (e.g. [feedsCoveredBy] the article list's current selection), fetching
-     * concurrently with bounded concurrency, then applying the DB writes serially in list order and
-     * indexing any new articles for search.
+     * concurrently with bounded concurrency while applying each feed's DB writes as soon as its own
+     * fetch completes — serially, from this one coroutine — and finally indexing any new articles
+     * for search.
+     *
+     * Applying in completion order rather than list order keeps one slow feed from holding back
+     * every faster feed's articles (and its [refreshingFeedIds] entry) until the slowest fetch ends.
      *
      * Pass rows freshly read from the DB (as [feedsCoveredBy] returns them) rather than a
      * long-lived UI snapshot, so a stale etag / URL is never used for the fetch.
      *
      * @param feedList The feeds to refresh.
-     * @return A map from feed ID to the result containing the number of newly processed articles.
+     * @return A map from feed ID to the result containing the number of newly processed articles,
+     * in [feedList]'s order.
      */
     suspend fun refreshFeeds(feedList: List<Feeds>): Map<String, Result<Int>> {
-        // Phase 1: fetch every feed's network data concurrently (bounded by a semaphore), with NO
-        // DB writes — this is where the wall-clock win comes from vs. the old sequential loop.
+        val state = RefreshApplyState(total = feedList.size)
+        try {
+            coroutineScope {
+                // Unlimited, and sent to only after the fetch permit is released (see launchFetches):
+                // a fetch that finishes while the writer is busy applying another feed must free its
+                // permit for the next fetch rather than wait for the writer. How many results can
+                // queue here is bounded separately, by REFRESH_PENDING_APPLY_LIMIT.
+                val steps = Channel<RefreshStep>(Channel.UNLIMITED)
+                launchFetches(feedList, steps)
+                applySteps(steps, state)
+            }
+        } catch (e: Exception) {
+            indexAfterFailure(e, state)
+            throw e
+        }
+        indexIfNeeded(state)
+        return state.resultsInOrder(feedList)
+    }
+
+    /**
+     * Network phase of [refreshFeeds]: every feed's fetch runs concurrently (bounded by a
+     * semaphore), with NO DB writes, handing its result to [steps]. A second semaphore bounds how
+     * many feeds sit between starting their fetch and being committed
+     * ([REFRESH_PENDING_APPLY_LIMIT]): a writer that falls that far behind pauses further fetches
+     * rather than letting their parsed articles pile up in memory. Each feed stays in
+     * [refreshingFeedIds] from the start, including while queued for a fetch slot, until the writer
+     * has committed it — so every feed the refresh covers is marked at once and clears as its own
+     * articles land. A favicon lookup
+     * follows that commit under a permit of its own, so it never delays that feed's articles. [steps]
+     * is closed once every fetch has finished.
+     */
+    private fun CoroutineScope.launchFetches(feedList: List<Feeds>, steps: SendChannel<RefreshStep>) {
         val semaphore = Semaphore(REFRESH_FETCH_CONCURRENCY)
-        val phases = coroutineScope {
-            feedList.map { feed ->
-                async(dispatcher) { feed to semaphore.withPermit { fetchFeed(feed) } }
-            }.awaitAll()
+        val pendingApply = Semaphore(REFRESH_PENDING_APPLY_LIMIT)
+        val fetches = feedList.map { feed ->
+            launch(dispatcher) {
+                val faviconLookup = trackRefreshing(feed.id) {
+                    // The pending-apply permit is taken only once this feed's turn for a fetch slot
+                    // comes, and inside trackRefreshing: every feed keeps its place in the fetch queue
+                    // ahead of any favicon lookup (which queues for the same slots), and is marked
+                    // refreshing from the start. A writer more than REFRESH_PENDING_APPLY_LIMIT behind
+                    // holds the fetch slots until it catches up — the point of the bound.
+                    fetchHoldingPendingApply(
+                        semaphore,
+                        pendingApply,
+                        fetch = { feedFetcher.fetch(feed.url, feed.etag, feed.last_modified) },
+                    ) { fetch ->
+                        // Holds no fetch permit while waiting, so a writer within
+                        // REFRESH_PENDING_APPLY_LIMIT of the fetches never caps the fetch concurrency.
+                        // The articles' rows are built here, concurrently across feeds and holding
+                        // no fetch permit, rather than on the single writer, which would otherwise
+                        // parse every feed's article HTML one after another. Only an Ok fetch has
+                        // any; an exception propagates like any other failure of this coroutine.
+                        val rows = (fetch as? Result.Ok)?.let {
+                            articleRepository.prepareRows(feed.id, it.value.articles)
+                        }
+                        val committed = CompletableDeferred<Unit>()
+                        steps.send(RefreshStep.Fetched(feed, fetch, rows, committed))
+                        committed.await()
+                        // Only the site URL outlives the commit: the lookup below can wait on a permit
+                        // and the network for a while, and must not keep every parsed article resident
+                        // meanwhile.
+                        if (fetch is Result.Ok && needsFaviconLookup(feed)) {
+                            FaviconLookup(fetch.value.siteUrl ?: feed.site_url)
+                        } else {
+                            null
+                        }
+                    }
+                }
+                if (faviconLookup != null) {
+                    val url = semaphore.withPermit { faviconResolver.resolve(faviconLookup.siteUrl, feed.url) }
+                    steps.send(RefreshStep.FaviconResolved(feed.id, url))
+                }
+            }
         }
-        // Phase 2: apply DB writes + notifications serially, in the original feed order, so writes
-        // stay single-threaded. Each feed's upsertParsed still notifies watchAll, so articles from
-        // earlier feeds appear incrementally as the loop advances.
-        val result = LinkedHashMap<String, Result<Int>>()
-        var anyHadArticles = false
-        for ((feed, phase) in phases) {
-            val outcome = applyFetch(feed, phase)
-            result[feed.id] = outcome.result
-            if (outcome.hadArticles) anyHadArticles = true
+        launch {
+            fetches.joinAll()
+            steps.close()
         }
-        if (anyHadArticles) ftsManager.indexMissing()
-        return result
+    }
+
+    /**
+     * Runs [fetch] under a [fetchSlots] permit, taking a [pendingApply] permit inside it, then hands
+     * the result to [untilCommitted] with only the pending-apply permit still held. That permit is
+     * acquired and released here alone, on every path — a cancelled fetch and a failed writer too.
+     */
+    private suspend fun <T, R> fetchHoldingPendingApply(
+        fetchSlots: Semaphore,
+        pendingApply: Semaphore,
+        fetch: suspend () -> T,
+        untilCommitted: suspend (T) -> R,
+    ): R {
+        var holdsPendingApply = false
+        try {
+            val fetched = fetchSlots.withPermit {
+                pendingApply.acquire()
+                holdsPendingApply = true
+                fetch()
+            }
+            return untilCommitted(fetched)
+        } finally {
+            if (holdsPendingApply) pendingApply.release()
+        }
+    }
+
+    /**
+     * Apply phase of [refreshFeeds]: this coroutine alone applies every step, in the order they
+     * happen, so writes stay single-threaded while a slow feed no longer holds back every other
+     * feed's articles. Each feed's upsert notifies watchAll, so articles appear as their feed lands;
+     * the search index catches up once every feed has been applied, without waiting for any favicon
+     * lookup still running. Runs on the caller's coroutine, never a child of its own.
+     */
+    private suspend fun applySteps(steps: ReceiveChannel<RefreshStep>, state: RefreshApplyState) {
+        for (step in steps) {
+            when (step) {
+                is RefreshStep.Fetched -> {
+                    val outcome = applyFetch(step.feed, step.fetch, step.rows)
+                    val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
+                    step.committed.complete(Unit)
+                    if (wasLast) indexIfNeeded(state)
+                }
+                is RefreshStep.FaviconResolved -> applyFavicon(step)
+            }
+        }
+    }
+
+    /** Brings the search index up to date once, if any applied feed had articles. */
+    private suspend fun indexIfNeeded(state: RefreshApplyState) {
+        if (state.takeIndexingDue()) ftsManager.indexMissing()
+    }
+
+    /**
+     * Feeds applied before [failure] stay committed; index them so they don't stay out of search
+     * until the next refresh. A cancellation (the whole refresh was abandoned) skips this
+     * O(articles) scan: the next hot-path indexMissing picks the rows up. An index failure is
+     * attached to [failure] rather than replacing it.
+     */
+    private suspend fun indexAfterFailure(failure: Exception, state: RefreshApplyState) {
+        if (failure is CancellationException) return
+        try {
+            indexIfNeeded(state)
+        } catch (indexFailure: Exception) {
+            failure.addSuppressed(indexFailure)
+        }
+    }
+
+    /** What [refreshFeeds]' apply phase has done so far. Touched by the applying coroutine only. */
+    private class RefreshApplyState(private val total: Int) {
+        private val results = HashMap<String, Result<Int>>(total)
+        private var applied = 0
+        private var anyHadArticles = false
+        private var indexed = false
+
+        /** Records a feed's outcome; returns whether it was the last feed to be applied. */
+        fun recordFetched(feedId: String, result: Result<Int>, hadArticles: Boolean): Boolean {
+            results[feedId] = result
+            if (hadArticles) anyHadArticles = true
+            return ++applied == total
+        }
+
+        /** Whether the search index is due — some feed had articles and it hasn't run — claiming it. */
+        fun takeIndexingDue(): Boolean {
+            if (!anyHadArticles || indexed) return false
+            indexed = true
+            return true
+        }
+
+        /** The results keyed in [feedList]'s order, as callers have always received them. */
+        fun resultsInOrder(feedList: List<Feeds>): Map<String, Result<Int>> =
+            feedList.associateTo(LinkedHashMap()) { it.id to results.getValue(it.id) }
+    }
+
+    /** Runs [block] with [feedId] counted in [refreshingFeedIds], releasing it however [block] ends. */
+    private suspend fun <T> trackRefreshing(feedId: String, block: suspend () -> T): T {
+        _refreshingFeedCounts.update { it + (feedId to (it[feedId] ?: 0) + 1) }
+        try {
+            return block()
+        } finally {
+            _refreshingFeedCounts.update {
+                val remaining = (it[feedId] ?: 1) - 1
+                if (remaining > 0) it + (feedId to remaining) else it - feedId
+            }
+        }
     }
 
     /**
@@ -564,17 +827,23 @@ class FeedRepository(
      * @param text What the notification says.
      * @param level The notification severity level.
      * @param action The next action offered when the user acts on the notification.
+     * @param coalesce Whether this replaces an entry already saying the same thing
+     *   ([NotificationCenter.addCoalescing]) rather than adding another.
      */
-    private suspend fun notify(text: NotificationText, level: AppNotificationLevel, action: AppNotificationAction? = null) {
-        notificationCenter.add(
-            AppNotification(
-                id = IdGenerator.newId(),
-                level = level,
-                text = text,
-                timestampMillis = clock.nowMillis(),
-                action = action,
-            ),
+    private suspend fun notify(
+        text: NotificationText,
+        level: AppNotificationLevel,
+        action: AppNotificationAction? = null,
+        coalesce: Boolean = false,
+    ) {
+        val notification = AppNotification(
+            id = IdGenerator.newId(),
+            level = level,
+            text = text,
+            timestampMillis = clock.nowMillis(),
+            action = action,
         )
+        if (coalesce) notificationCenter.addCoalescing(notification) else notificationCenter.add(notification)
     }
 }
 
@@ -590,7 +859,7 @@ private inline fun applyReorderUpdates(
     previousSortOrderOf: Map<String, Long>,
     feedId: String,
     now: Long,
-    feedsQueries: works.merc.keryx.app.data.local.db.FeedsQueries,
+    feedsQueries: FeedsQueries,
     onFeedId: (index: Int) -> Unit = {},
 ): Long {
     var newFeedSortOrder = 0L

@@ -1,0 +1,569 @@
+package works.merc.keryx.app.ui.home
+
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
+import works.merc.keryx.app.core.FEED_ERROR_REASON_GONE
+import works.merc.keryx.app.data.local.db.Feeds
+import works.merc.keryx.app.data.local.db.Folders
+import works.merc.keryx.app.data.local.db.Tags
+import works.merc.keryx.app.domain.displayTitle
+import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
+import works.merc.keryx.app.platform.NativeMenuShortcut
+import works.merc.keryx.app.platform.NativeSubMenu
+import works.merc.keryx.app.platform.nativeContextMenu
+import works.merc.keryx.app.presentation.home.canOpenInBrowser
+import works.merc.keryx.app.presentation.home.hasUsableUrl
+import works.merc.keryx.app.resources.Res
+import works.merc.keryx.app.resources.home_assign_tags
+import works.merc.keryx.app.resources.home_copy_feed_url
+import works.merc.keryx.app.resources.home_copy_site_url
+import works.merc.keryx.app.resources.home_delete_folder_menu
+import works.merc.keryx.app.resources.home_edit_folder_menu
+import works.merc.keryx.app.resources.home_feed_error
+import works.merc.keryx.app.resources.home_feed_gone
+import works.merc.keryx.app.resources.home_move_to_folder
+import works.merc.keryx.app.resources.home_new_folder
+import works.merc.keryx.app.resources.home_new_tag
+import works.merc.keryx.app.resources.home_no_folder
+import works.merc.keryx.app.resources.home_feed_refreshing
+import works.merc.keryx.app.resources.home_open_site
+import works.merc.keryx.app.resources.home_refresh
+import works.merc.keryx.app.resources.home_rename_feed
+import works.merc.keryx.app.resources.home_unsubscribe_menu
+import works.merc.keryx.app.ui.common.FlatTooltipContent
+import works.merc.keryx.app.ui.common.KeryxIcon
+import works.merc.keryx.app.ui.common.KeryxIcons
+import works.merc.keryx.app.presentation.home.DropBoundary
+
+/** How long a dragged feed must be held over a collapsed folder header before the folder opens by
+ * itself, so the feeds inside it become reachable drop targets without letting go of the drag
+ * (the spring-loaded folder of Finder / Explorer). Long enough not to fire while merely passing
+ * over the header on the way somewhere else. */
+private const val FOLDER_AUTO_EXPAND_DELAY_MS = 700L
+
+/** Test tag on a [FeedRow]'s whole clickable band. */
+internal fun feedRowTestTag(feedId: String): String = "feed-row-$feedId"
+
+/** Test tag on a [FolderGroupHeader]'s whole clickable band. */
+internal fun folderRowTestTag(folderId: String): String = "folder-row-$folderId"
+
+/** Test tag on [NoFolderHeader]'s whole band — there is only ever one, unlike
+ * [feedRowTestTag]/[folderRowTestTag]. Needed (unlike a plain `onNodeWithText` lookup on its
+ * label) because that would resolve to the unmerged text node's own intrinsic bounds, not the
+ * full row band `insertionMarkers`/`listRowSurface` measure — the same reason [FeedRow] and
+ * [FolderGroupHeader] carry a tag instead of being located by their own label text. */
+internal const val NO_FOLDER_HEADER_TEST_TAG = "no-folder-row"
+
+/**
+ * Renders a folder header with selection styling, context-menu actions, drag-hover highlighting,
+ * insertion indicators, and automatic expansion while a dragged feed hovers over a collapsed folder.
+ *
+ * @param folder The folder represented by the header.
+ * @param count The number of feeds in the folder.
+ * @param collapsed Whether the folder's feed list is collapsed.
+ * @param selected Whether the folder is selected.
+ * @param focused Whether the folder has focus.
+ * @param firstFeedId The first feed in the folder, or `null` if the folder is empty.
+ * @param nextFolderId The ID of the following folder, or `null` if this is the last folder.
+ * @param feedIdsInFolder The IDs of feeds contained in the folder.
+ * @param precedingFeedZoneBoundary The feed-zone boundary of the immediately preceding folder,
+ *   only when that folder is collapsed or empty (so no feed row of its own exists to paint the
+ *   matching half of its own feed-zone marker) — `null` otherwise. This header then paints that
+ *   half from its own top edge, using its own top margin, so the preceding folder's guide reads
+ *   the same 2dp-thick, 1dp-clearance line whether it is collapsed or expanded.
+ * @param activeBoundaryState The currently highlighted insertion boundary.
+ * @param onToggleCollapse Toggles the folder's collapsed state.
+ * @param onClick Selects the folder.
+ * @param onEdit Starts inline editing of the folder's name.
+ * @param onDelete Deletes the folder.
+ * @param editingName Whether the name is currently open for inline editing (see [InlineRenameField]).
+ * @param onRenameCommit Applies an edited folder name.
+ * @param onRenameCancel Abandons an in-progress name edit.
+ * @param nameError Produces a validation message for an edited name, or `null` when valid.
+ * @param isDragSource Whether the folder contains the feed currently being dragged.
+ * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
+ *   [DragHandle] — which is then also given its assistive-technology counterpart, see
+ *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
+ * @param onMoveUp Moves this folder one position up in the folder order, or `null` when it is
+ *   already the first one (see [reorderTargetWithinScope]).
+ * @param onMoveDown Moves this folder one position down, or `null` when it is already the last one.
+ * @param isBeingDragged Whether this folder is the one being dragged on a touch platform, so it
+ *   dims to a placeholder (see [dragSourcePlaceholder]).
+ */
+@Composable
+internal fun FolderGroupHeader(
+    folder: Folders,
+    count: Long,
+    collapsed: Boolean,
+    selected: Boolean,
+    focused: Boolean,
+    firstFeedId: String?,
+    nextFolderId: String?,
+    feedIdsInFolder: Set<String>,
+    precedingFeedZoneBoundary: DropBoundary? = null,
+    activeBoundaryState: State<DropBoundary?>,
+    onToggleCollapse: () -> Unit,
+    onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    editingName: Boolean = false,
+    onRenameCommit: (String) -> Unit = {},
+    onRenameCancel: () -> Unit = {},
+    nameError: (String) -> String? = { null },
+    isDragSource: Boolean = false,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
+    isBeingDragged: Boolean = false,
+    refreshing: Boolean = false,
+) {
+    val refreshingStateLabel = stringResource(Res.string.home_feed_refreshing)
+    val editFolderLabel = stringResource(Res.string.home_edit_folder_menu)
+    val deleteFolderLabel = stringResource(Res.string.home_delete_folder_menu)
+    val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folder.id)
+    val isFeedDragHighlight = activeBoundaryState.value.highlightsFeedGroup(folder.id, feedIdsInFolder)
+
+    // Spring-loaded folder: holding a dragged feed over a collapsed header opens it after a short
+    // pause, so its feeds become reachable drop targets mid-drag. The expansion runs through the
+    // same persisted toggle as a click, so the folder deliberately stays open afterwards. Driven
+    // purely by activeBoundaryState (fed by the centralized drop target in FeedListPane), so this
+    // needs no drag target of its own.
+    LaunchedEffect(isFeedDragHighlight, collapsed) {
+        if (!isFeedDragHighlight || !collapsed) return@LaunchedEffect
+        delay(FOLDER_AUTO_EXPAND_DELAY_MS)
+        onToggleCollapse()
+    }
+
+    val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
+    val rowInteraction = remember { MutableInteractionSource() }
+    val currentBoundary = activeBoundaryState.value
+    // Always unpaired: no folder ever checks the boundary before the *next* folder from its own
+    // bottom edge, so a folder's own top edge is the only place `BeforeFolder` is ever painted.
+    // The second branch is unrelated to that — see `precedingFeedZoneBoundary`.
+    val topMarker = when {
+        currentBoundary == DropBoundary.BeforeFolder(folder.id) -> InsertionMarker(indented = false, unpaired = true)
+        precedingFeedZoneBoundary != null && currentBoundary == precedingFeedZoneBoundary -> InsertionMarker(indented = true)
+        else -> null
+    }
+    // Always paired (half thickness, with its own LIST_ROW_GUIDE_CLEARANCE), regardless of
+    // collapse state: whether the matching half comes from the actual first feed row (expanded) or
+    // from whatever row follows this one pairing on `precedingFeedZoneBoundary` (collapsed or
+    // empty — see that KDoc), this header's own drawing never changes, so the spring-loaded
+    // auto-expand below never visibly moves the guide. `AppendFolders` stays gated on being the
+    // last folder — that boundary only exists there — and is always unpaired (no row ever checks
+    // for it from the other side). See `insertionMarkers`.
+    val bottomMarker = when {
+        currentBoundary == feedZoneBoundary -> InsertionMarker(indented = true)
+        nextFolderId == null && currentBoundary == DropBoundary.AppendFolders -> InsertionMarker(indented = false, unpaired = true)
+        else -> null
+    }
+    Row(
+        Modifier.fillMaxWidth()
+            .testTag(folderRowTestTag(folder.id))
+            .reorderAccessibilityActions(reorderMoves)
+            .listRowClickable(rowInteraction, selected, onClick)
+            .nativeContextMenu(
+                items = {
+                    listOf(
+                        NativeMenuItem(editFolderLabel, renameNativeShortcut) { onEdit() },
+                        NativeMenuItem(deleteFolderLabel, deleteNativeShortcut) { onDelete() },
+                    ) + if (reorderMoves.isEmpty()) emptyList() else listOf(NativeMenuSeparator) + reorderMenuEntries(reorderMoves)
+                },
+                onOpen = { if (!selected) onClick() },
+            )
+            .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .dragSourcePlaceholder(isBeingDragged)
+            .listRowSurface(
+                dropTargetBackground(isFeedDragHighlight, selected, focused, MaterialTheme.colorScheme.secondaryContainer, isDragSource),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(
+                    ListRowKind.NavItem,
+                    selected,
+                    focused,
+                    dropTargetColor = MaterialTheme.colorScheme.secondary.takeIf { isFeedDragHighlight },
+                ),
+            )
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(start = FEED_LIST_ROW_START_PADDING, end = 8.dp)
+            .semantics { if (refreshing) stateDescription = refreshingStateLabel },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val filledContentColor = dropTargetContentColorOrNull(
+            isFeedDragHighlight,
+            selected,
+            focused,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            isDragSource,
+        )
+        CompositionLocalProvider(LocalContentColor provides (filledContentColor ?: LocalContentColor.current)) {
+            ExpandCollapseChevron(expanded = !collapsed, onToggle = onToggleCollapse)
+            Spacer(Modifier.width(CHEVRON_MARKER_GAP))
+            Row(
+                Modifier.weight(1f).padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RefreshingMarkerSlot(refreshing, filledContentColor) {
+                    KeryxIcon(
+                        KeryxIcons.Folder,
+                        contentDescription = null,
+                        tint = filledContentColor ?: MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(FEED_LIST_MARKER_SLOT),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                // Same weighted slot either way, so the chevron/folder icon on the left and the
+                // count badge on the right never move when editing starts or ends.
+                if (editingName) {
+                    Box(Modifier.weight(1f)) {
+                        InlineRenameField(
+                            value = folder.name,
+                            onCommit = onRenameCommit,
+                            onCancel = onRenameCancel,
+                            blockingError = nameError,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                } else {
+                    Text(folder.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (count > 0) CountBadge(count, selected, focused, isFeedDragHighlight, isDragSource)
+        if (isTouchPrimary) DragHandle()
+    }
+}
+
+/** The "no folder" section label, including the highlight/insertion-line rendering for a drag
+ * hovering it (drop handling is centralized in `FeedListPane`'s outer `Box`).
+ *
+ * @param precedingFeedZoneBoundary The last real folder's own feed-zone boundary, only when that
+ *   folder is collapsed or empty — see `FolderGroupHeader`'s parameter of the same name. This
+ *   section is always the last one rendered, so it is the only possible "next row" for the very
+ *   last folder.
+ */
+@Composable
+internal fun NoFolderHeader(
+    firstFeedId: String?,
+    feedIdsInNoFolder: Set<String>,
+    precedingFeedZoneBoundary: DropBoundary? = null,
+    activeBoundaryState: State<DropBoundary?>,
+) {
+    val isEmpty = firstFeedId == null
+    val feedZoneBoundary = firstFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(null)
+    val isFeedDragHighlight = activeBoundaryState.value.highlightsFeedGroup(null, feedIdsInNoFolder)
+    Text(
+        stringResource(Res.string.home_no_folder),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth()
+            .testTag(NO_FOLDER_HEADER_TEST_TAG)
+            // Paired (half thickness) when the group has feeds: the first one below paints the
+            // matching half from its own top edge (also un-indented, so they line up). Unpaired
+            // (full thickness) when empty — no feed row exists to pair with it, and (being always
+            // the last feed/folder row) none ever will, so `listRowSurface`'s `extraBottomMargin`
+            // reserves the other row's half on this row's own side instead, keeping the guide
+            // 1dp clear of the highlight the same way a paired boundary is. `top` is unrelated: it
+            // pairs with the last folder's own feed-zone marker when that folder is collapsed or
+            // empty — see `precedingFeedZoneBoundary`.
+            .insertionMarkers(
+                top = InsertionMarker(indented = true)
+                    .takeIf { precedingFeedZoneBoundary != null && activeBoundaryState.value == precedingFeedZoneBoundary },
+                bottom = InsertionMarker(indented = false, unpaired = isEmpty).takeIf { activeBoundaryState.value == feedZoneBoundary },
+            )
+            .listRowSurface(
+                dropTargetBackground(
+                    isFeedDragHighlight,
+                    selected = false,
+                    focused = false,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+                kind = ListRowKind.NavItem,
+                decoration = listRowOutline(
+                    ListRowKind.NavItem,
+                    selected = false,
+                    focused = false,
+                    dropTargetColor = MaterialTheme.colorScheme.secondary.takeIf { isFeedDragHighlight },
+                ),
+                extraBottomMargin = (LIST_ROW_GUIDE_THICKNESS / 2f).takeIf { isEmpty } ?: 0.dp,
+            )
+            .padding(start = FEED_LIST_ROW_START_PADDING, top = 4.dp, bottom = 4.dp),
+    )
+}
+
+/**
+ * Displays a feed row with selection styling, unread count, error indicators, context-menu actions,
+ * and insertion markers for drop boundaries.
+ *
+ * @param feed The feed represented by the row.
+ * @param count The number of unread articles.
+ * @param selectionTone How this rendered instance paints its selection — the same feed can render
+ *   again under an expanded tag, and only the instance actually selected paints
+ *   [RowSelectionTone.PRIMARY] (see [FeedListRowSelection]).
+ * @param indented Whether to indent the row within a folder.
+ * @param nextFeedId The ID of the following feed, or `null` when this is the last feed.
+ * @param folderId The containing folder's ID, or `null` for feeds without a folder.
+ * @param isFirstInList Whether this is the very first row of the entire feed list — only possible
+ *   when there are no folders at all (otherwise the first folder's header always precedes every
+ *   feed row). Paints a full-thickness top marker instead of half, since nothing precedes it.
+ * @param activeBoundaryState The currently active insertion boundary.
+ * @param onRename Starts inline editing of the feed's display title.
+ * @param editingName Whether the title is currently open for inline editing (see [InlineRenameField]).
+ * @param onRenameCommit Applies an edited title; a blank value resets it to the feed's own title.
+ * @param onRenameCancel Abandons an in-progress title edit.
+ * @param onCopyFeedUrl Copies the feed's own (RSS/Atom) URL to the clipboard.
+ * @param onCopySiteUrl Copies the feed's website URL to the clipboard.
+ * @param onOpenSite Opens the feed's website in the external browser.
+ * @param isTouchPrimary Whether this platform's reorder gesture starts from the row's own
+ *   [DragHandle] — which is then also given its assistive-technology counterpart, see
+ *   [reorderAccessibilityActions]. Overridable for tests only, like `FeedListPane`'s own parameter.
+ * @param onMoveUp Moves this feed one position up among the feeds of its own group, or `null` when
+ *   it is already the first one there (see [reorderTargetWithinScope]).
+ * @param onMoveDown Moves this feed one position down in the same group, or `null` when it is
+ *   already the last one there.
+ * @param isBeingDragged Whether this feed is the one being dragged on a touch platform, so it
+ *   dims to a placeholder (see [dragSourcePlaceholder]).
+ */
+@Composable
+internal fun FeedRow(
+    feed: Feeds,
+    count: Long,
+    selectionTone: RowSelectionTone,
+    focused: Boolean,
+    indented: Boolean,
+    nextFeedId: String?,
+    folderId: String?,
+    isFirstInList: Boolean = false,
+    activeBoundaryState: State<DropBoundary?>,
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    editingName: Boolean,
+    onRenameCommit: (String) -> Unit,
+    onRenameCancel: () -> Unit,
+    onRefresh: () -> Unit,
+    tags: List<Tags>,
+    attachedTagIds: Set<String>,
+    onToggleFeedTag: (tagId: String, attached: Boolean) -> Unit,
+    folders: List<Folders>,
+    onMoveFeedToFolder: (folderId: String?) -> Unit,
+    onUnsubscribe: () -> Unit,
+    onCopyFeedUrl: () -> Unit,
+    onCopySiteUrl: () -> Unit,
+    onOpenSite: () -> Unit,
+    isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
+    isBeingDragged: Boolean = false,
+    onCreateNewFolderForFeed: () -> Unit = {},
+    onCreateNewTagForFeed: () -> Unit = {},
+    refreshing: Boolean = false,
+) {
+    val refreshLabel = stringResource(Res.string.home_refresh)
+    val refreshingStateLabel = stringResource(Res.string.home_feed_refreshing)
+    val assignTagsLabel = stringResource(Res.string.home_assign_tags)
+    val renameFeedLabel = stringResource(Res.string.home_rename_feed)
+    val moveToFolderLabel = stringResource(Res.string.home_move_to_folder)
+    val newFolderLabel = stringResource(Res.string.home_new_folder)
+    val newTagLabel = stringResource(Res.string.home_new_tag)
+    val noFolderLabel = stringResource(Res.string.home_no_folder)
+    val unsubscribeLabel = stringResource(Res.string.home_unsubscribe_menu)
+    val copyFeedUrlLabel = stringResource(Res.string.home_copy_feed_url)
+    val copySiteUrlLabel = stringResource(Res.string.home_copy_site_url)
+    val openSiteLabel = stringResource(Res.string.home_open_site)
+    // Copy and open have their own rules, shared with every other route (the menu bar's Feed menu):
+    // any non-blank site URL can be copied, but only an http(s) one is opened.
+    val siteUrlCopyable = hasUsableUrl(feed.site_url)
+    val siteUrlOpenable = canOpenInBrowser(feed.site_url)
+    val belowBoundary = nextFeedId?.let(DropBoundary::BeforeFeed) ?: DropBoundary.AppendFeeds(folderId)
+    val reorderMoves = reorderMoves(isTouchPrimary, onMoveUp, onMoveDown)
+    val rowInteraction = remember { MutableInteractionSource() }
+    val currentBoundary = activeBoundaryState.value
+    // Both edges, not just the last row's: for any feed but the last in its group, the row after
+    // this one paints the other half of `belowBoundary` from its own top edge, and the two halves
+    // together make one line centred on the boundary — see `insertionMarkers`. The last feed in a
+    // group is unpaired instead: nothing after it (the next folder's header, or the end of the
+    // list) ever checks for `belowBoundary`, so it paints the full thickness itself.
+    val isLastInList = nextFeedId == null
+    val topMarker = InsertionMarker(indented, unpaired = isFirstInList).takeIf { currentBoundary == DropBoundary.BeforeFeed(feed.id) }
+    val bottomMarker = InsertionMarker(indented, unpaired = isLastInList).takeIf { currentBoundary == belowBoundary }
+
+    Row(
+        Modifier.fillMaxWidth()
+            .testTag(feedRowTestTag(feed.id))
+            .reorderAccessibilityActions(reorderMoves)
+            .listRowClickable(rowInteraction, selectionTone == RowSelectionTone.PRIMARY, onClick)
+            .nativeContextMenu(
+                items = {
+                    listOf(
+                        NativeMenuItem(refreshLabel, NativeMenuShortcut(Key.R, ctrl = true, shift = true)) { onRefresh() },
+                        // Refresh → Tags → Move to folder, matching the menu bar's Feed menu
+                        // (AppMenuTree.kt) and the SwiftUI app's, separators included.
+                        NativeSubMenu(
+                            label = assignTagsLabel,
+                            items = tags.map { tag ->
+                                NativeCheckMenuItem(tag.name, checked = tag.id in attachedTagIds) {
+                                    onToggleFeedTag(tag.id, tag.id !in attachedTagIds)
+                                }
+                            } + listOf(
+                                NativeMenuItem(newTagLabel) { onCreateNewTagForFeed() },
+                            ),
+                        ),
+                        NativeSubMenu(
+                            label = moveToFolderLabel,
+                            items = buildList {
+                                add(
+                                    NativeCheckMenuItem(noFolderLabel, checked = feed.folder_id == null) {
+                                        onMoveFeedToFolder(null)
+                                    },
+                                )
+                                folders.forEach { folder ->
+                                    add(
+                                        NativeCheckMenuItem(folder.name, checked = feed.folder_id == folder.id) {
+                                            onMoveFeedToFolder(folder.id)
+                                        },
+                                    )
+                                }
+                                add(NativeMenuItem(newFolderLabel) { onCreateNewFolderForFeed() })
+                            },
+                        ),
+                        *reorderMenuEntries(reorderMoves).toTypedArray(),
+                        NativeMenuSeparator,
+                        NativeMenuItem(copyFeedUrlLabel) { onCopyFeedUrl() },
+                        NativeMenuItem(copySiteUrlLabel, enabled = siteUrlCopyable) { onCopySiteUrl() },
+                        NativeMenuItem(openSiteLabel, enabled = siteUrlOpenable) { onOpenSite() },
+                        NativeMenuSeparator,
+                        NativeMenuItem(renameFeedLabel, renameNativeShortcut) { onRename() },
+                        NativeMenuSeparator,
+                        NativeMenuItem(unsubscribeLabel, deleteNativeShortcut) { onUnsubscribe() },
+                    )
+                },
+                // A secondary-toned (or unselected) row is not the one currently focused, so a
+                // right-click on it promotes it first.
+                onOpen = { if (selectionTone != RowSelectionTone.PRIMARY) onClick() },
+            )
+            .insertionMarkers(top = topMarker, bottom = bottomMarker)
+            .dragSourcePlaceholder(isBeingDragged)
+            .listRowSurface(
+                selectionBackground(selectionTone, focused),
+                ListRowKind.NavItem,
+                rowInteraction,
+                decoration = listRowOutline(ListRowKind.NavItem, selectionTone, focused),
+            )
+            .heightIn(min = listRowMinHeight(isTouchPrimary))
+            .padding(start = if (indented) feedRowIndent() else FEED_LIST_ROW_START_PADDING, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .semantics { if (refreshing) stateDescription = refreshingStateLabel },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val selectedContentColor = selectionContentColorOrNull(selectionTone, focused)
+        RefreshingMarkerSlot(refreshing, selectedContentColor) {
+            FeedAvatar(feed.displayTitle(), feed.favicon_url)
+        }
+        Spacer(Modifier.width(12.dp))
+        // Same weighted slot either way, so the favicon on the left and the error indicator /
+        // count badge on the right never move when editing starts or ends. A blank value is
+        // meaningful here (it clears `custom_title`), so it commits rather than being rejected,
+        // and the placeholder shows the feed's own title it would fall back to.
+        if (editingName) {
+            Box(Modifier.weight(1f)) {
+                InlineRenameField(
+                    value = feed.custom_title ?: feed.title,
+                    onCommit = onRenameCommit,
+                    onCancel = onRenameCancel,
+                    placeholder = feed.title,
+                    allowBlank = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            CompositionLocalProvider(LocalContentColor provides (selectedContentColor ?: LocalContentColor.current)) {
+                Text(
+                    feed.displayTitle(),
+                    Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // A 410-Gone feed deliberately keeps error_count at 0 (it is permanent, not a retry
+        // candidate), so it is recognized by its last_error marker instead — otherwise a
+        // disappeared feed would look completely normal here once its notification is dismissed.
+        val gone = feed.last_error == FEED_ERROR_REASON_GONE
+        if (feed.error_count > 0 || gone) {
+            FeedErrorIndicator(gone)
+            Spacer(Modifier.width(4.dp))
+        }
+        if (count > 0) CountBadge(count, selectionTone == RowSelectionTone.PRIMARY, focused)
+        if (isTouchPrimary) DragHandle()
+    }
+}
+
+/**
+ * Displays an error indicator for a feed, with an explanatory tooltip when the feed is gone.
+ *
+ * @param gone Whether the feed responded with HTTP 410 Gone.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FeedErrorIndicator(gone: Boolean) {
+    val icon = @Composable {
+        KeryxIcon(
+            KeryxIcons.ErrorFilled,
+            contentDescription = stringResource(if (gone) Res.string.home_feed_gone else Res.string.home_feed_error),
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+    if (!gone) {
+        icon()
+        return
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { FlatTooltipContent(stringResource(Res.string.home_feed_gone)) },
+        state = rememberTooltipState(),
+    ) {
+        icon()
+    }
+}
+
+/**
+ * Whether the drop boundary a drag is hovering lands inside a feed group — the feeds of folder
+ * [folderId] (`null` = the no-folder group), whose ids are [feedIds] — so that group's header lights up.
+ */
+private fun DropBoundary?.highlightsFeedGroup(folderId: String?, feedIds: Set<String>): Boolean = when (this) {
+    is DropBoundary.BeforeFeed -> feedId in feedIds
+    is DropBoundary.AppendFeeds -> this.folderId == folderId
+    is DropBoundary.BeforeFolder, DropBoundary.AppendFolders, null -> false
+}

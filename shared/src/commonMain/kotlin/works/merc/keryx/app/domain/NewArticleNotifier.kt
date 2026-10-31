@@ -3,7 +3,6 @@ package works.merc.keryx.app.domain
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.core.valueOrNull
 
 /**
  * Bridges "new articles fetched" events — from the periodic background loop, the once-per-launch
@@ -51,7 +50,7 @@ class NewArticleNotifier(private val sink: OsNotificationSink = OsNotificationSi
         notificationEnabled: Boolean,
         messages: NotificationMessages,
     ) {
-        val newCount = results.values.sumOf { it.valueOrNull ?: 0 }
+        val newCount = newArticleCount(results)
         if (newCount > 0 && notificationEnabled) {
             notify(messages.newArticles(newCount), newCount)
         }

@@ -115,11 +115,15 @@ not in global chrome:
   "Adaptive pane layout & touch affordances" below).
 - Sort / mark all read — header row of `ArticleListPane`, unchanged at every
   layout.
-- Hide read — the same header row, directly after the "unread only"
-  `ToggleChip` (4dp gap) rather than in the trailing icon cluster: its
-  enabled state depends on that chip alone, and keeping it away from mark all
-  read avoids confusing a view-only action with a bulk mutation. A lone icon,
-  so bare (no `ToolbarIconGroup` capsule).
+- List mode — the same header row, leading: a `MenuChip` naming the current
+  `ArticleListMode` (All / Unread / Starred) inside a `NativeMenuAnchor`, whose
+  native menu offers all three. A pop-up button rather than a
+  `SegmentedControl`, because three labelled segments do not fit the pane's
+  240dp minimum width beside the other controls; the chip is filled whenever
+  the mode narrows the list.
+- Hide read — not in the header row: a View-menu command only (`AppMenuTree`,
+  the SwiftUI `HomeCommands`), since a manual refresh or sync, a filter switch
+  and choosing Unread already clear the kept read rows (`external-spec.md` §7).
 - Notifications (the bell) — `ArticleListPane`'s own header row, at every
   layout and every reachable depth: the article list is visible everywhere
   except `PaneLayout.Single`'s article-detail depth (see `visiblePanes` in
@@ -319,14 +323,16 @@ Two nullable parameters carry the narrow-layout signal, and they are always supp
 (`ui/home/ArticlePagerSync.kt`) for the pages and their bodies. They are separate because the first
 is a deliberately stable `remember`ed bundle whose identity must not churn, while the second changes
 as articles load — folding them together would invalidate the callbacks on every load. The branch
-between the two reader forms checks `readerPaging != null && article != null && isTouchPrimary` —
-all three, not `readerPaging` alone: `article != null` keeps a `PaneLayout.Dual` reader that has
+between the two reader forms checks `readerPaging != null && selectedRow != null && isTouchPrimary` —
+all three, not `readerPaging` alone: `selectedRow != null` (`HomeViewModel.selectedArticleRow` — current the
+moment a selection is made, before its body loads, so the pager mounts with the selection rather than once
+the body has landed) keeps a `PaneLayout.Dual` reader that has
 `readerPaging` but nothing selected yet on its HTML placeholder rather than silently showing
 whatever article the pager last happened to rest on, and `isTouchPrimary` is checked again here
 even though the caller already only builds `readerPaging` on a touch-primary platform — the
 composable that actually decides whether the heavyweight pager mounts is where that invariant has
-to hold, not just the caller above it. The gesture and the accessibility actions stay gated on the
-same three conditions. It is deliberately **not**
+to hold, not just the caller above it. The gesture and the accessibility actions are gated on
+`swipeEnabled` — `isTouchPrimary && swipeNavigation != null && selectedRow != null`. It is deliberately **not**
 gated on `onNavigateUp`, despite that being this file's usual narrow-layout signal: `onNavigateUp`
 is `null` at `PaneLayout.Dual` (the reader is a permanent neighbor of the article list there, with
 no back button of its own, the same as Gmail's own tablet reading pane), but the swipe must still
@@ -712,9 +718,9 @@ change what's showing), or a content item in a list (an article — something yo
 `kind` explicitly; it has no default (see `listRowSurface`'s own KDoc for why — a forgotten `kind`
 should be a compile error, not a silently wrong Android row style).
 
-`selectionBackground`/`selectionContentColorOrNull` (`ui/home/HomeCommon.kt`) resolve their actual
+`selectionBackground`/`selectionContentColorOrNull` (`ui/home/ListRowSelection.kt`) resolve their actual
 colors from `rowSelectionColors()` (`ui/home/ListRowChrome.kt`'s `expect`/`actual`,
-`RowSelectionColors`) — the shared logic in `HomeCommon.kt` only handles the `LocalRowSelectionVisible`
+`RowSelectionColors`) — the shared logic in `ListRowSelection.kt` only handles the `LocalRowSelectionVisible`
 gate, the `RowSelectionTone` fan-out (a feed rendered once under its folder and again under every
 expanded tag; the non-primary instances get a faint tint of `RowSelectionColors.selectedBackground`
 at `SECONDARY_SELECTION_ALPHA`), and deriving a non-focused row's actual color from
@@ -733,7 +739,7 @@ The palette itself is per-platform:
   (`ActiveFocusLabelTextColor` equals `ActiveLabelTextColor`). An Android tablet can have a physical
   keyboard attached, though, so pane focus still exists there and still needs to be shown somewhere:
   it's carried by `paneFocus = PaneFocusIndication.Ring(secondary)` instead — a `secondary` outline
-  drawn by `listRowOutline` (`ui/home/HomeCommon.kt`, shared logic; see below) around the selected
+  drawn by `listRowOutline` (`ui/home/ListRowSelection.kt`, shared logic; see below) around the selected
   row in whichever pane holds keyboard focus, M3's own `FocusIndicatorColor` concept (a token that
   ships with no Compose implementation, so Android's `actual` supplies its own).
 
@@ -741,7 +747,7 @@ The palette itself is per-platform:
 one — which is why it is a sealed type rather than a `RowSelectionColors` carrying both a nullable
 dim alpha and a nullable ring color, each platform leaving the other's field unused.
 
-`listRowOutline` (`ui/home/HomeCommon.kt`, two overloads mirroring `selectionBackground`'s
+`listRowOutline` (`ui/home/ListRowSelection.kt`, two overloads mirroring `selectionBackground`'s
 boolean/`RowSelectionTone` split) draws a row's outline decoration: a drop-target border when the row
 is an active drop target, otherwise — gated on `LocalKeyboardEngaged` (below) — the keyboard-focus
 ring above, for whichever selected row is `focused`. A drop target always wins over the focus ring;
@@ -794,7 +800,7 @@ rather than a plain `item(...)` for any such header, following
   visible — exactly the "fixed row/scroll boundary" case the Divider policy
   says needs none.
 - This does not change how a list's rows are hit-tested for drag-and-drop
-  (`FeedListDragController`/`HomeCommon.resolveHitBand`):
+  (`FeedListDragController`/`FeedListRowKeys.kt`'s `resolveHitBand`):
   `LazyListState.layoutInfo.visibleItemsInfo` keeps every item — sticky or
   not — in ascending index order, so a pinned header's band is always
   resolved before any row hidden behind it, with no extra code needed.
@@ -1212,9 +1218,9 @@ Three native-widget exceptions exist on desktop, all outside scrollable containe
 
 - `platform/NativeMenu.kt` — shows a menu on demand rather than embedding a
   persistent Compose-tree node (see above).
-- `ui/common/KeryxDialogs.desktop.kt` — the dialog button row (`JButton`s in a
-  `SwingPanel`), so confirm/cancel get the platform's real buttons.
-- `ui/home/ArticleDetailPane.kt` — the reader `WebView`, a heavyweight AWT
+- `ui/common/NativeButtonRow.desktop.kt` (used by `KeryxDialogs.desktop.kt`) — the dialog
+  button row (`JButton`s in a `SwingPanel`), so confirm/cancel get the platform's real buttons.
+- `ui/home/ArticleWebView.kt` — the reader `WebView`, a heavyweight AWT
   panel wrapping an OS browser view. This is also *why* every dialog is a
   separate `DialogWindow`: a heavyweight panel always paints over in-window
   Compose `Popup`s.
@@ -1284,7 +1290,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   large/extra-large ones into a capsule (WWDC25 "Build an AppKit app with the new design"), so a
   capsule would drift further from the dialogs' native `JButton` row, not closer. Keep the
   secondary fill neutral too — painting it `primary` would make a button indistinguishable from a
-  selected `SegmentedControl` segment or a checked `ToggleChip`, and erase the primary/secondary
+  selected `SegmentedControl` segment or a highlighted `MenuChip`, and erase the primary/secondary
   distinction.
   **A button whose action destroys data takes `FlatTonalButton(destructive = true)`**
   (`CloudSyncTab`'s "reset sync data", `NotificationCenterSheet`'s
@@ -1311,18 +1317,22 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   the flag, since its confirm button is a native Swing `JButton`. The confirm
   label itself always names the action ("Delete", "Reset"), so color is again
   not the only signal.
-- **`SegmentedControl<T>` / `ToggleChip`**
+- **`SegmentedControl<T>` / `MenuChip`**
   (`ui/common/SegmentedControl.kt`, expect/actual): the replacement for
   Material3's `FilterChip` for both "pick one of N" (`SegmentedControl`, used
   by `SettingsDialog`'s theme/font-size/cache/timeout/refresh-interval rows)
-  and standalone boolean toggles (`ToggleChip`, used by `ArticleListPane`'s
-  "unread only"), **at a `commonMain` call site** — reach for these, not
-  `FilterChip`, there. The desktop `actual`s render as a bordered
+  and a pop-up button naming the current choice of a menu (`MenuChip`, used by
+  `ArticleListPane`'s list mode inside a `NativeMenuAnchor` — a native menu
+  opened by a click rather than a right-click), **at a `commonMain` call site**
+  — reach for these, not `FilterChip`, there. `MenuChip`'s desktop `actual` is
+  the bordered block described below with a trailing chevron, filled when
+  `highlighted`; its Android `actual` is M3's `FilterChip` with a dropdown
+  arrow. The desktop `actual`s render as a bordered
   (`outlineVariant`) block that, when selected/checked, fills solid with
   `primary` and switches its label to `onPrimary`, using
-  `Modifier.selectable`/`Modifier.toggleable` rather than `FilterChip`'s pill
+  `Modifier.selectable`/`Modifier.clickable` rather than `FilterChip`'s pill
   shape. The label is always `FontWeight.Bold` (selected and unselected
-  alike) rather than only bolding on selection — `ToggleChip` sits before a
+  alike) rather than only bolding on selection — `MenuChip` sits before a
   `weight(1f)` `Spacer` in `ArticleListPane`'s header row, so a
   selection-only weight change would shift the icons after it by a few px
   each time it's toggled; keeping the weight constant avoids that jitter, and
@@ -1544,12 +1554,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     `HomeView`'s own `textInputFocused` stays false there and the shortcut/focus-handoff logic
     (`HomeShortcutsKt.homeShortcutFor`'s `textInputFocused`, moving into the results with ↓/↑) does
     not see it.
-  - `selectionBackground()` (`ui/home/HomeCommon.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
+  - `selectionBackground()` (`ui/home/ListRowSelection.kt`) row highlight in `ArticleListPane`/`FeedListPane` —
     hand-computed focused/unfocused-pane dimming → native `List` row selection already dims the same way.
   - `SettingsDialog`'s `SwitchRow` — now uses `FlatSwitch` (`ui/common/FlatToggles.kt`), consistent with
     the app's other flat controls → SwiftUI's native `Toggle` on a future SwiftUI port.
-  - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`,
-    `RowHalf`, `resolveRowHalf`) and the shared `presentation/home/FeedListDrag.kt` (`DropBoundary`,
+  - The drag-and-drop insertion-marker system in `FeedListDragAndDrop.kt` (`insertionMarkers`)
+    and `FeedListRowKeys.kt` (`RowHalf`, `resolveRowHalf`) and the shared `presentation/home/FeedListDrag.kt` (`DropBoundary`,
     `FeedListDropIndex`, `resolveFeedListDropAction`/`resolveFeedListDropHighlight`) — hand-computed
     row-half hit-testing and a manually drawn insertion line (explicitly modeled on macOS Notes'
     reorder UI) → **already ported, deliberately not to `.onMove`/`.onInsert`**: the Apple app
@@ -1688,7 +1698,10 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   revalidate and repaint the *entire window*, not just this pane (see `docs/app-architecture.md`'s
   "Article Reader (native WebView)"). A narrow layout renders a `HorizontalPager` instead, where
   pages legitimately mount and unmount — that is an Android-only path, and Android's `WebView` is
-  an ordinary in-tree view with no such interop cost. Consequently, empty/error states for this pane (no article selected, no content) are
+  an ordinary in-tree view with no such interop cost. The one exception is `ArticleWebView`'s
+  `key(rendererGeneration)`, which rebuilds the reader's WebView when Android's renderer process
+  dies (`platform/ReaderWebViewFactory`). It only ever happens on Android — desktop's
+  `readerWebViewFactory` returns `null`, so the generation never changes there. Consequently, empty/error states for this pane (no article selected, no content) are
   rendered as HTML *inside* the WebView (`presentation/article/ArticleWebViewHtml.kt` (`:shared`)), not as Compose
   `Text`, and the toolbar above it keeps the exact same Compose structure (same buttons, only
   `enabled` toggles) across every state rather than conditionally hiding an action — hiding one

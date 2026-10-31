@@ -7,6 +7,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -15,16 +17,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import works.merc.keryx.app.presentation.home.FAVICON_CORNER_RADIUS_RATIO
 
 /**
  * The horizontal inset a list row's highlight keeps from the pane edge — see [listRowSurface].
@@ -147,6 +152,22 @@ internal val CHEVRON_MARKER_GAP = 4.dp
  * favicon starting at the same horizontal position regardless of which kind of row it is.
  */
 internal val FEED_LIST_MARKER_SLOT = 18.dp
+
+/**
+ * The shape every favicon (feed list, article list, reader header) is clipped to. Its corner is
+ * [FAVICON_CORNER_RADIUS_RATIO] of the clipped size's shorter side, so each favicon has the same
+ * roundness whatever size it is drawn at.
+ */
+internal val FaviconShape = RoundedCornerShape(FaviconCornerSize)
+
+/**
+ * [FAVICON_CORNER_RADIUS_RATIO] of the shape's shorter side. `CornerSize(Float)` would be a fixed
+ * pixel radius, and `CornerSize(percent: Int)` would round 12.5% down to 12%.
+ */
+private object FaviconCornerSize : CornerSize {
+    override fun toPx(shapeSize: Size, density: Density): Float =
+        shapeSize.minDimension * FAVICON_CORNER_RADIUS_RATIO
+}
 
 /**
  * The minimum size a touch-only hit target may grow to without adding any layout footprint of its
@@ -344,7 +365,7 @@ internal fun Modifier.listRowSurface(
 
 /**
  * The shape a list row's selection surface is clipped to (and that a drop-target border /
- * keyboard-focus outline traces via `listRowOutline` in `HomeCommon.kt`). Desktop's `actual`
+ * keyboard-focus outline traces via `listRowOutline` in `ListRowSelection.kt`). Desktop's `actual`
  * ignores [kind] entirely — its one macOS-leaning row style applies to every row. Kept out of
  * [listRowSurface] as a value of its own so a decoration drawn *around* a row traces the very
  * shape the row is clipped to, instead of repeating a shape constant that could drift from it.
@@ -379,7 +400,7 @@ internal expect fun listRowShape(kind: ListRowKind): Shape
 internal val LocalFeedListInDrawer = staticCompositionLocalOf { false }
 
 /** Width of a list row's outline decoration — both the drop-target border and the keyboard-focus
- * ring `listRowOutline` (`HomeCommon.kt`) draws share this one value. */
+ * ring `listRowOutline` (`ListRowSelection.kt`) draws share this one value. */
 internal val ROW_OUTLINE_WIDTH = 2.dp
 
 /**
@@ -402,7 +423,7 @@ internal sealed interface PaneFocusIndication {
      * keeps the same `secondaryContainer`/`onSecondaryContainer` pair whether or not the item holds
      * focus) — a physical keyboard can be attached to an Android tablet, though, so pane focus still
      * needs to be shown somewhere, and here it's a `secondary` outline (`listRowOutline` in
-     * `HomeCommon.kt`) around the selected row in whichever pane holds it — M3's own
+     * `ListRowSelection.kt`) around the selected row in whichever pane holds it — M3's own
      * `FocusIndicatorColor` concept, which ships as a token but has no Compose implementation yet,
      * so this platform's `actual` supplies its own [color].
      */
@@ -412,7 +433,7 @@ internal sealed interface PaneFocusIndication {
 /**
  * The palette a selectable list row paints its selection from — resolved per platform, applied by
  * the shared `selectionBackground` / `selectionContentColorOrNull` / `rowOutlineColorOrNull` logic
- * in `HomeCommon.kt` (which keeps the [LocalRowSelectionVisible] gate, the [RowSelectionTone]
+ * in `ListRowSelection.kt` (which keeps the [LocalRowSelectionVisible] gate, the [RowSelectionTone]
  * fan-out, and the derivation of a non-focused row's/an echo row's actual color from
  * [selectedBackground]/[paneFocus] common to both platforms — see those functions' own KDoc).
  *

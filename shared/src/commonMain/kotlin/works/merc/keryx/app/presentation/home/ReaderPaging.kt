@@ -3,7 +3,6 @@ package works.merc.keryx.app.presentation.home
 import works.merc.keryx.app.data.local.db.Articles
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.ArticleReaderRow
-import works.merc.keryx.app.domain.toListRow
 import works.merc.keryx.app.domain.toReaderRow
 
 /**
@@ -18,11 +17,12 @@ import works.merc.keryx.app.domain.toReaderRow
  * (the article id) keeps that page's WebView alive across the swap.
  *
  * @param pages The list rows to page through.
- * @param selected The currently selected article, or `null` when nothing is selected.
+ * @param selected The selected article's row (`HomeViewModel.selectedArticleRow` — current the
+ *   moment it is selected, before its body has loaded), or `null` when nothing is selected.
  */
-fun readerPages(pages: List<ArticleListRow>, selected: Articles?): List<ArticleListRow> {
+fun readerPages(pages: List<ArticleListRow>, selected: ArticleListRow?): List<ArticleListRow> {
     if (selected == null) return pages
-    return if (pages.any { it.id == selected.id }) pages else listOf(selected.toListRow())
+    return if (pages.any { it.id == selected.id }) pages else listOf(selected)
 }
 
 /**

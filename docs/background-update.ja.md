@@ -18,7 +18,8 @@
 `PeriodicWorkRequest` — 上のプラットフォーム方針の表と後述の「Android 実装」を参照）だが、毎周回
 実行する処理はプラットフォーム非依存の commonMain のコードなので、Android 側の worker は重複実装せず
 同じ実装を呼んでいる: `domain/RefreshCycleRunner.kt` の `RefreshCycleRunner.run`（更新 → 新着記事通知 →
-同期のサイクル。手動更新と引っ張って更新も、その `runIfIdle` 経由で同じものを通る）と、
+同期のサイクル。手動更新と引っ張って更新も、その `runIfIdle` 経由で同じものを通る。手動更新は、自動のサイクルが
+すでに走っていれば何も始めずにそれに相乗りし、そのサイクルの結果（と新着記事通知）を `joinAutomaticCycle` 経由で報告する）と、
 `domain/StartupMaintenanceTasks.kt` の `checkForUpdateAndNotify` / `maybeRebuildFtsIndex` である。
 
 ```kotlin
@@ -43,6 +44,17 @@ while (true) {
   `org.freedesktop.Notifications.Notify` を使う。残る唯一のケース——SNI ホストの無い Linux——だけが
   Compose 自体の `Tray()` コンポーザブルにフォールバックし、その `TrayState.sendNotification` を使う。
   詳細は [app-architecture.ja.md](app-architecture.ja.md) の「デスクトップトレイ」を参照。
+- **自動の更新は、アプリが前面にある間は新着記事の通知を出さない。** 自動のサイクル（起動時の更新、
+  このループ、Android の `FeedRefreshWorker`、iOS のバックグラウンド更新）はすべて、通知の前に
+  `RefreshCycleRunner` で `domain/AppForeground` を確認し、「前面にある」間は通知を出さない——
+  ユーザーは新着が届く様子を既に見ているため。手動の更新（すべて更新、引っ張って更新）は従来どおり
+  通知する。各 UI は状態を報告するだけ: デスクトップはメインウィンドウがフォーカスを持つ間
+  （`main.kt`、`LocalWindowInfo.isWindowFocused` から）、Android は `MainActivity` が resumed の間
+  （`onResume`/`onPause`）、macOS はメインウィンドウがキーウィンドウの間（`AppDelegate`）、iOS は
+  シーンフェーズが `active` の間（`KeryxApp`）。Apple アプリは `KeryxSdk.setAppForeground` を通して報告する。
+  メインウィンドウの前に設定ウィンドウがあると、フォーカス（デスクトップ）やキーの状態（macOS）がそちらへ
+  移るため、前面にないものとして扱う。UI の無いプロセス（`WorkManager` や `BGAppRefreshTask` による起動）は
+  前面にない状態から始まる。[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照。
 
 ## iOS 実装（`KeryxSdk.runBackgroundRefresh` + `appleApp/Keryx/Platform/BackgroundRefresh.swift`）
 
@@ -56,11 +68,14 @@ SwiftUI アプリの `backgroundUpdateLoop` はプロセスが動いている間
 
 SwiftUI の `.backgroundTask(.appRefresh(…))` ハンドラが `AppModel.runBackgroundRefresh` を呼び、それが
 `KeryxSdk.runBackgroundRefresh` を呼ぶ。中身は `RefreshCycleRunner.runIfIdle` の 1 サイクル（更新、
-同じ `OsNotificationPoster` 経由の新着記事 OS 通知、接続中なら同期）。セットアップ完了前は何もしない——
+同じ `OsNotificationPoster` 経由の新着記事 OS 通知、接続中なら同期）。他の自動のサイクルと同じく、
+アプリが前面にある間は通知を出さない。iOS で前面にあるとはシーンフェーズが `active` の間のこと
+（上の `AppForeground` を参照）で、バックグラウンド実行中は決してそうならない。セットアップ完了前は何もしない——
 設定ファイルの存在がセットアップ完了の目印なので、設定の flush もしない。起動時シーケンス、アップデート確認、
 FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 秒）。実行するのは
-`ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もせず、
-枠の終了でタスクがキャンセルされると、共有している処理もキャンセルされる。
+`ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もしない。
+逆に、この自動のサイクルの実行中に引っ張るかすべて更新を実行すると、それに相乗りしてその結果を表示する
+（`joinAutomaticCycle`）。枠の終了でタスクがキャンセルされると、共有している処理もキャンセルされる。
 
 同じ理由で、`AppModel` は `startMaintenance()`（起動時シーケンスと更新ループ）を `init` ではなく
 シーンが最初にアクティブになったときに開始する（`init` はバックグラウンド起動でも実行されるため。
@@ -69,6 +84,12 @@ FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 �
 （`KeryxSdk.stopRefreshLoop`）、次にアクティブになったときに新しい間隔で再開する。OS が停止中の
 プロセスをバックグラウンド更新のために起こしている間にループのタイマーが満了しても、更新チェックや
 FTS の再構築に枠を使わないようにするため。起動時シーケンスもその時点で実行中なら同様に止め、次にアクティブになったときに最初から再実行する。完了済みなら、そのプロセスでは再実行しない。
+
+**従量制回線と低データモード。** バックグラウンド実行も、他の自動サイクルと同じ `RefreshCycleRunner` の
+ゲートを通る（[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照）: モバイル
+回線やテザリングでは、ユーザーがモバイルデータ通信での同期を許可していない限り同期を保留し、低データ
+モードではフィード更新もスキップする。iOS には Android の従量制でない回線を待つジョブに相当するものは
+なく、アプリが中断中に保留された同期は、回線が許す次のバックグラウンド実行か前面での同期で行われる。
 
 **アプリアイコンのバッジ。** アプリアイコンには未読の総数（`setBadgeCount`。macOS の Dock バッジと
 同じ値）を、実行中とバックグラウンド実行のたびに更新して表示する。通知の許可が必要で、アプリは
@@ -107,6 +128,28 @@ Google Drive も持つ（[sync-architecture.ja.md](sync-architecture.ja.md) の
 （`CloudAuthException`/`SchemaVersionException`/`CloudDataIncompatibleException`）は次回の
 定期実行に委ねる。
 
+**従量制回線とデータセーバー。** 周期ジョブの `NetworkType.CONNECTED` 制約は維持する: 従量制回線でも
+フィード更新は実行し、保留されるのは同期ステップだけ（ユーザーがモバイルデータ通信での同期を許可して
+いない場合）。データセーバーがオンのときはサイクルのフィード更新もスキップする —
+[sync-architecture.ja.md](sync-architecture.ja.md) の「ネットワークゲート」参照。OS でアプリにデータ使用を
+無制限に許可した場合はデータセーバーの対象外となり、そのように扱われる。
+
+**保留された同期。** `KeryxApplication.onCreate` は `startDeferredSyncHandoff`
+（`background/DeferredSync.kt`）も呼ぶ。これはプロセスが生きている間ずっと
+`SyncRepository.syncDeferredForNetwork` を監視し、立つたびに `NetworkType.UNMETERED`（ユーザーが従量制回線での同期を許可している場合は
+`NetworkType.CONNECTED`。`NetworkUsagePolicy.deferredSyncNeedsUnmeteredNetwork`）を条件とする一意な
+単発 `DeferredSyncWorker`（`"deferred_sync"`、`ExistingWorkPolicy.KEEP` なので連続して保留されても
+ジョブは 1 つ）を enqueue する。保留中にこの許可設定が変わったときはジョブを置き換える。
+Worker は `SyncRepository.sync(SyncTrigger.AUTOMATIC)` を呼ぶだけで、
+同期が許可される回線ではネットワークゲートを通過し（`autoSyncSuspended` の対象であることは変わらない）、
+`FeedRefreshWorker` と同じく `CloudStorageException` のときにリトライし、同期の後でフラグが再び立っている
+ときもリトライする（ゲート評価前に回線が制限付きに戻って同期が保留された場合で、この一意なジョブだけが
+それを実行できるため。リトライでもジョブのネットワーク制約は維持される）。アプリを閉じた後で端末が
+Wi-Fi につながったときに保留中の変更を同期するのはこのジョブ — `SyncRepository` 自身のプロセス内の待機
+ジョブはプロセスが生きている間しか働かない。このプロセス内でフラグが下りたとき（プロセス内の待機ジョブが引き継いだ、同期が成功した、または
+接続が解除された）はジョブを取り消す。以前のプロセスが残したジョブは、その変更がまだ同期されていない
+ため、起動時に取り消すことはない。
+
 `MainActivity.onCreate` から `runAndroidStartupTasks`（`AndroidStartupTasks.kt`）を呼ぶ —
 デスクトップの `runStartupTasks` に相当するが、macOS 固有の translocation 警告（Android には該当
 概念がない）を除く。5つのステップをそれぞれ独立して実行する（`runMaintenanceStep`）ため、1ステップが
@@ -141,7 +184,9 @@ return した呼び出しは、`FeedRefreshWorker` 自身が実行しない `cle
 別系統になっている（理由はそのクラス自身の KDoc を参照: `WorkManager` に起こされたプロセスでは、
 更新が終わった時点で `trayEvents` の購読者が既に張られている保証が無い — `trayEvents` は replay 0 で、
 購読者がいない間に発行されたものは黙って捨てられるため。デスクトップ自身の束縛は同じ理由で no-op に
-なっている）。`AndroidNotificationSink` は投稿のたびに
+なっている）。自動の更新（起動時または `FeedRefreshWorker`）は、`MainActivity` が resumed の間は何も
+投稿しない（`AppForeground`、上記参照）。Activity の無い、`WorkManager` に起こされたプロセスは前面にない
+ものとして扱う。`AndroidNotificationSink` は投稿のたびに
 `NotificationManagerCompat.areNotificationsEnabled()` でガードしており、これ1回で Android 13+ の
 `POST_NOTIFICATIONS` ランタイム権限とユーザーによるアプリ/チャンネル単位のブロックの両方をカバーする。
 権限自体は `platform/NotificationPermission.kt` の `rememberNotificationPermission`
@@ -458,7 +503,7 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
   項目にはラベル以外何も出さない）。`Idle`／`UpToDate` とインストール不可の `Available` は確認を実行する
   （`SettingsViewModel.checkForUpdate` 経由。タブのボタンや開いた時の自動確認と同じ、実行中ガード付きの
   呼び出しなので、両者の間で 2 本目の確認が始まることはない）。インストール可能な `Available`、`Failed`
-  （段階ごとの再試行）、`Ready` は `UpdateRepository.performPrimaryAction` を実行する——`main.kt` の
+  （段階ごとの再試行）、`Ready` は `UpdateRepository.performPrimaryAction` を実行する——`UpdateMenuActions.kt` の
   `onUpdateMenuItemClicked` と `tray/TrayActionPolicy.kt` の `updateMenuAction` を参照。ウィンドウが
   隠れている状態からのクリックでは、先にウィンドウを前面に出す。
   Updates タブ自身の見出し行も同じ
@@ -513,11 +558,32 @@ Compose 版から SwiftUI アプリへの一度きりの移行（SwiftUI アプ�
 更新では書き込みも再クエリも発生しない。
 
 `FeedRepository.refreshAll` は各フィードのネットワーク取得を**並行**（同時取得数を
-`REFRESH_FETCH_CONCURRENCY` で上限）で行い、その後で各フィードの DB 書き込みをフィード順に
-**直列**で適用する。そのため購読数が多くても、更新にかかる時間は「全取得の合計」ではなく
-「最も遅い取得」程度で済む。DB 書き込みは単一スレッドのまま（JVM の SQLite ドライバは文ごとに
-新しいコネクションを開くため、並行書き込みは競合しうる）で、各フィードの記事は従来どおり
-1 フィードずつコミットされるため、更新の進行に合わせてリストに逐次表示される。
+`REFRESH_FETCH_CONCURRENCY` で上限）で行い、各フィードの DB 書き込みは、そのフィードの取得が
+終わった時点で**直列**に適用する。そのため遅いフィードがあっても、取得済みのフィードの記事が
+待たされることはない。購読数が多くても、更新にかかる時間は「全取得の合計」ではなく
+「最も遅い取得」程度で済む。DB 書き込みは単一スレッドのまま（1 つのコルーチンがすべて適用する。
+JVM の SQLite ドライバは文ごとに新しいコネクションを開くため、並行書き込みは競合しうる）で、
+各フィードの記事は 1 フィードずつコミットされるため、更新の進行に合わせてリストに逐次表示される。
+記事の準備のうち CPU を使う部分（各記事の HTML を検索用テキストに変換する処理）は、そのフィード自身の
+取得コルーチン上で他のフィードと並行して行う。単一の書き込み側は、DB から必要なものを読んで書き込むだけで済む。
+取得を始めてからコミットされるまでの状態にあるフィードは、最大 `REFRESH_PENDING_APPLY_LIMIT`
+（同時取得数の 2 倍）件に制限する。これは `REFRESH_FETCH_CONCURRENCY` とは別の上限である。
+取得したフィードは書き込みがコミットするまで解析済みの記事（と準備済みの検索用テキスト）をメモリに保持するので、書き込みが遅れた場合
+（同期マージの書き込みロック待ちなど）は以降の取得を止めて待ち、購読数が多くても全フィードの内容が一度に
+メモリに載らないようにする。書き込みが追いついている間はこの上限に達しないため、同時取得数は変わらない。
+検索インデックスは、全フィードの適用が終わった後に 1 回だけ更新する。
+まだ favicon のないフィードは、そのフィードの記事を書き込んだ後で favicon を探す（取得枠を別に取るので、
+記事の反映を遅らせない）。見つからなかったフィードは `FAVICON_RETRY_INTERVAL_MS`（24 時間）の間は
+探し直さない（記録は、メモリ上ではなく端末ローカルの設定 `faviconMissedAt` に持つ。Android は
+バックグラウンドの更新の多くで新しいプロセスを起こすので、メモリ上だけの記録では次の更新が同じサイトをまた探してしまう）。見つかった favicon は、そのフィードが購読中で、かつまだ
+favicon を持っていない場合に限って書き込む。
+戻り値のフィードごとの結果はフィード順のまま。
+
+各フィードは、更新が要求された時点（取得枠の順番待ちの間も含む）から記事のコミットまでの間、メモリ上でも追跡される
+（`FeedRepository.refreshingFeedIds`）。更新のきっかけ（手動・引っ張って更新・バックグラウンド・
+起動時）は問わない。フィード一覧はこれを行ごとの更新中インジケーターとして表示する
+（[external-spec.ja.md](external-spec.ja.md) の「幅による適応レイアウトとタッチ入力」を参照）。`feeds` への書き込みは
+記事一覧のクエリを再実行させるため、この状態は DB には書かない。
 
 ## 起動時タスク（`runStartupTasks` / `runAndroidStartupTasks`）
 

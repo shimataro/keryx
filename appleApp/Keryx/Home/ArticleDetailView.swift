@@ -26,22 +26,35 @@ struct ArticleDetailView: View {
     /// previous article's buttons through the whole push and then animate them to the new state. Built
     /// afresh on each push instead, the toolbar starts out in the new article's state.
     var isOnScreen: Bool = true
+    #if os(iOS)
+    /// See `ReaderPageController.restoredScroll`.
+    var restoredScroll: ReaderScrollPosition?
+    /// See `ReaderPageController.onScroll`.
+    var onScroll: (String, Double) -> Void = { _, _ in }
+    #endif
 
     @State private var copyConfirmed = false
 
     var body: some View {
-        let hasArticle = home.selectedArticle != nil
+        #if os(iOS)
+        // The pager follows the selection itself, so it appears with it rather than once its body loads.
+        let hasArticle = home.hasSelectedArticle
+        #else
+        let hasArticle = !(home.readerContent is ReaderContentNone)
+        #endif
         ZStack {
             #if os(iOS)
             // A swipe pager only while there is an article to page from — a pager with nothing
             // selected would still show its first page (see `ArticlePagerView`).
             if hasArticle {
-                ArticlePagerView(home: home, preferences: preferences)
+                ArticlePagerView(home: home, preferences: preferences, restoredScroll: restoredScroll, onScroll: onScroll)
             }
             #else
+            let reader = ReaderPageInputs.resolve(home.readerContent)
             ReaderPageView(
-                row: home.selectedArticle?.toReaderRow(),
-                revision: home.selectedArticle.map(ObjectIdentifier.init),
+                row: reader.row,
+                header: reader.header,
+                revision: reader.revision,
                 preferences: preferences
             )
             .allowsHitTesting(hasArticle)
@@ -89,8 +102,7 @@ struct ArticleDetailView: View {
                     .lineLimit(1)
             } icon: {
                 FaviconView(url: feedFaviconUrl, letter: feedName.first)
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .faviconFrame(18)
             }
             .labelStyle(.titleAndIcon)
         }
@@ -102,7 +114,8 @@ struct ArticleDetailView: View {
     // In the window toolbar (the strip above this column) so each pane gets its own toolbar section.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        let article = home.selectedArticle
+        // The selection itself, current before its body has loaded — never the previous article.
+        let article = home.selectedArticleRow
         // Separate rules, shared with every other route: any non-blank URL can be copied, but only
         // an http(s) one is opened.
         let copyEnabled = article.map { ArticleListModelKt.hasUsableUrl(url: $0.url) } ?? false

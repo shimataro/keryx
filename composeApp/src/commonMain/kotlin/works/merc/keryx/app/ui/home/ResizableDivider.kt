@@ -18,7 +18,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
+import works.merc.keryx.app.core.PANE_DIVIDER_WIDTH
 import works.merc.keryx.app.platform.CursorIcons
+import works.merc.keryx.app.ui.theme.subtleDivider
 
 /**
  * A vertical divider between two panes with a wider invisible drag hit-target.
@@ -40,8 +42,8 @@ internal fun ResizableDivider(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     if (isTouchPrimary) {
-        Box(modifier = Modifier.fillMaxHeight().width(8.dp), contentAlignment = Alignment.Center) {
-            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        Box(modifier = Modifier.fillMaxHeight().width(PANE_DIVIDER_WIDTH.dp), contentAlignment = Alignment.Center) {
+            VerticalDivider(color = MaterialTheme.colorScheme.subtleDivider)
         }
         return
     }
@@ -52,7 +54,7 @@ internal fun ResizableDivider(
     Box(
         modifier = Modifier
             .fillMaxHeight()
-            .width(8.dp)
+            .width(PANE_DIVIDER_WIDTH.dp)
             .pointerHoverIcon(CursorIcons.horizontalResize)
             .hoverable(interactionSource)
             .draggable(
@@ -64,7 +66,7 @@ internal fun ResizableDivider(
         if (hovered) {
             VerticalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.primary)
         } else {
-            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            VerticalDivider(color = MaterialTheme.colorScheme.subtleDivider)
         }
     }
 }

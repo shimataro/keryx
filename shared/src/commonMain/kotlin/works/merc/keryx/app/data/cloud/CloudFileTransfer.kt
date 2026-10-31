@@ -84,7 +84,3 @@ internal class FileUploadContent(
         if (suffix.isNotEmpty()) channel.writeFully(suffix)
     }
 }
-
-/** Size in bytes of the file at [path], or 0 when it does not exist. */
-internal fun fileSizeOrZero(path: String): Long =
-    SystemFileSystem.metadataOrNull(Path(path))?.size ?: 0L

@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     private weak var mainWindow: NSWindow?
     private var isTerminating = false
     private var unreadCount: Int64 = 0
+    private var keyStateObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.updateActivationPolicySoon()
+            MainActor.assumeIsolated { self?.updateActivationPolicySoon() }
         }
     }
 
@@ -58,10 +59,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
     /// prevent that. Registered by reference rather than inferred from key-window changes, so a
     /// window hidden before it ever became key ("start minimized") is still the one the tray and
     /// Dock reveal, instead of `showMainWindow` opening a second one.
+    ///
+    /// Also follows the main window's key state, reported as the app's "in front" state
+    /// (`KeryxSdk.setAppForeground`): while the main window is key, an automatic refresh posts no
+    /// new-article notification. Settings or About in front takes the key status, so it counts as
+    /// not in front.
     func registerMainWindow(_ window: NSWindow) {
         guard window !== mainWindow else { return }
         mainWindow = window
         window.delegate = self
+        observeKeyState(of: window)
+    }
+
+    private func observeKeyState(of window: NSWindow) {
+        for observer in keyStateObservers { NotificationCenter.default.removeObserver(observer) }
+        keyStateObservers = [
+            (NSWindow.didBecomeKeyNotification, true),
+            (NSWindow.didResignKeyNotification, false),
+        ].map { name, isKey in
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.model?.sdk?.setAppForeground(inForeground: isKey) }
+            }
+        }
+        model?.sdk?.setAppForeground(inForeground: window.isKeyWindow)
     }
 
     /// Turning "close" into "hide" for the main window only — About/Settings should still close for
@@ -70,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
         guard sender === mainWindow else { return true }
         sender.orderOut(nil)
         updateActivationPolicySoon()
+        model?.flushPendingSync()
         return false
     }
 
@@ -184,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @pre
                 window.orderOut(nil)
             }
             setDockIconVisible(false)
+            model?.flushPendingSync()
         } else {
             revealMainWindow()
         }

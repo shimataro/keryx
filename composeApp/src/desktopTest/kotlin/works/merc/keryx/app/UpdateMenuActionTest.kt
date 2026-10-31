@@ -5,7 +5,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -71,21 +71,21 @@ private class RecordingInstaller(private val canInstall: Boolean) : UpdateInstal
 }
 
 /**
- * Covers `main.kt`'s [onUpdateMenuItemClicked] — the one click handler behind both the system
+ * Covers `UpdateMenuActions.kt`'s [onUpdateMenuItemClicked] — the one click handler behind both the system
  * tray's and the Help menu's single update entry. Every state with something to do must land on
  * the Updates tab (via the [SettingsOpenRequests] router, raising the window through
  * [activationRequests]) and run exactly one of the two actions; the in-flight states must do
  * nothing at all. Which action a state maps to is `TrayActionPolicyTest`'s `updateMenuAction`
  * coverage; this suite checks the handler wires that decision to navigation and the action.
  *
- * Two layers. The lambda-based tests inject counting lambdas and pin the handler's own dispatch.
- * The "end to end" tests then click with a real [UpdateRepository] (MockEngine-backed
- * [UpdateChecker]/[UpdateDownloader], a [RecordingInstaller], a temp directory), wired the way
- * `main.kt` wires it — `checkForUpdate` runs the repository's [UpdateRepository.check] (what
- * `SettingsViewModel.checkForUpdate` ultimately calls) and `performPrimaryAction` is
- * `repo::performPrimaryAction` — so they prove the real wiring does the right thing: an installable
- * find downloads, a non-installable one re-checks without downloading, and a ready download is
- * handed to the installer. They use wall-clock polling since the repository runs on its own scope.
+ * Two layers. The lambda-based tests drive [runUpdateMenuAction] with counting lambdas and pin the
+ * handler's own dispatch. The "end to end" tests then click through [onUpdateMenuItemClicked] itself
+ * with a real [UpdateRepository] (MockEngine-backed [UpdateChecker]/[UpdateDownloader], a
+ * [RecordingInstaller], a temp directory) — `checkForUpdate` runs the repository's
+ * [UpdateRepository.check] (what `SettingsViewModel.checkForUpdate` ultimately calls) and the
+ * primary action is the repository's own, exactly as `main.kt` wires it — so they prove the real
+ * wiring does the right thing: an installable find downloads, a non-installable one re-checks
+ * without downloading, and a ready download is handed to the installer. They use wall-clock polling since the repository runs on its own scope.
  */
 class UpdateMenuActionTest {
     private var settingsOpenRequests = SettingsOpenRequests()
@@ -94,10 +94,12 @@ class UpdateMenuActionTest {
 
     private val tempDirs = mutableListOf<File>()
     private val scopes = mutableListOf<CoroutineScope>()
+    private val dispatchers = mutableListOf<ExecutorCoroutineDispatcher>()
 
     @AfterTest
     fun tearDown() {
         scopes.forEach { it.cancel() }
+        dispatchers.forEach { it.close() }
         tempDirs.forEach { it.deleteRecursively() }
     }
 
@@ -108,7 +110,7 @@ class UpdateMenuActionTest {
     }
 
     private fun click(state: UpdateState) =
-        onUpdateMenuItemClicked(state, settingsOpenRequests, checkForUpdate = { checks++ }, performPrimaryAction = { primaryActions++ })
+        runUpdateMenuAction(state, settingsOpenRequests, checkForUpdate = { checks++ }, performPrimaryAction = { primaryActions++ })
 
     private fun assertOpenedUpdatesTab() {
         assertEquals(SettingsOpenRequest("updates"), settingsOpenRequests.pending.value)
@@ -210,7 +212,8 @@ class UpdateMenuActionTest {
                 respond(payload, HttpStatusCode.OK)
             },
         ) { expectSuccess = false }
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scopes.add(it) }
+        val dispatcher = testThreadDispatcher("update-menu-action-test").also { dispatchers.add(it) }
+        val scope = CoroutineScope(SupervisorJob() + dispatcher).also { scopes.add(it) }
         val installer = RecordingInstaller(canInstall)
         val location = if (canInstall) WRITABLE_MAC_LOCATION else READ_ONLY_MAC_LOCATION
         val dir = createTempDirectory("update-menu-action-test").toFile().also { tempDirs.add(it) }
@@ -227,12 +230,7 @@ class UpdateMenuActionTest {
     }
 
     private fun clickWithRealRepository(f: Fixture) =
-        onUpdateMenuItemClicked(
-            f.repo.state.value,
-            settingsOpenRequests,
-            checkForUpdate = { f.scope.launch { f.repo.check() } },
-            performPrimaryAction = f.repo::performPrimaryAction,
-        )
+        onUpdateMenuItemClicked(f.repo, settingsOpenRequests, checkForUpdate = { f.scope.launch { f.repo.check() } })
 
     @Test
     fun endToEndAnInstallableAvailableUpdateStartsItsDownload() {

@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import org.koin.core.module.Module
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -21,23 +23,28 @@ import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.AppForeground
 import works.merc.keryx.app.domain.ArticleRepository
 import works.merc.keryx.app.domain.CloudConnectionService
 import works.merc.keryx.app.domain.CloudSession
 import works.merc.keryx.app.domain.FeedRepository
 import works.merc.keryx.app.domain.FolderRepository
+import works.merc.keryx.app.domain.NetworkUsagePolicy
 import works.merc.keryx.app.domain.NewArticleNotifier
 import works.merc.keryx.app.domain.NotificationCenter
 import works.merc.keryx.app.domain.OpmlImporter
 import works.merc.keryx.app.domain.RefreshCycleRunner
+import works.merc.keryx.app.domain.SettingsFaviconMissStore
 import works.merc.keryx.app.domain.SettingsRepository
 import works.merc.keryx.app.domain.SyncRepository
 import works.merc.keryx.app.domain.SyncScheduler
 import works.merc.keryx.app.domain.TagRepository
 import works.merc.keryx.app.domain.UpdateChecker
 import works.merc.keryx.app.domain.UpdateRepository
+import works.merc.keryx.app.platform.NetworkConditionMonitor
 import works.merc.keryx.app.platform.SelfUpdateCheckSupport
 import works.merc.keryx.app.platform.detectInstallLocation
+import works.merc.keryx.app.platform.platformNetworkConditionMonitor
 import works.merc.keryx.app.platform.selfUpdateCheckSupported
 import works.merc.keryx.app.presentation.home.HomeViewModel
 import works.merc.keryx.app.presentation.home.NotificationAlerts
@@ -69,7 +76,9 @@ fun sharedModule(): Module = module {
     single<Clock> { SystemClock }
     single { NotificationCenter() }
     single { ActivityCenter() }
+    single { AppForeground() }
     single { NewArticleNotifier(get()) }
+    single<NetworkConditionMonitor> { platformNetworkConditionMonitor() }
     // The gate on whether [updateModule] may be used at all (checkForUpdateAndNotify reads it
     // before touching the updater), so it lives here rather than in that optional module: a build
     // without the updater — the Apple app — must still be able to ask, and be told no.
@@ -99,6 +108,14 @@ fun sharedModule(): Module = module {
             // localDbPath left at its constructor default (platform/DatabaseFile.kt's
             // databaseFilePath(), already the platform-correct real DB path on both desktop and
             // Android) rather than passed here — see that function's own KDoc for why it exists.
+            // Lazy for the same reason as cloudProvider: SettingsRepository depends on this class
+            // (as its SyncScheduler), so resolving it eagerly here would be a cycle.
+            automaticSyncAllowedFlow = {
+                NetworkUsagePolicy.automaticSyncAllowedFlow(
+                    condition = get<NetworkConditionMonitor>().condition,
+                    syncOnMetered = get<SettingsRepository>().localSettings.map { it.syncOnMeteredNetwork },
+                )
+            },
         )
     }
     single<SyncScheduler> { get<SyncRepository>() }
@@ -110,10 +127,20 @@ fun sharedModule(): Module = module {
     single { SettingsRepository(get(), get(), get(), get()) }
     single { ArticleRepository(get(), get(), get(), get()) }
     single { TagRepository(get(), get(), get()) }
-    single { FeedRepository(get(), get(), get(), get(), get(), get(), get(), get()) }
+    single {
+        FeedRepository(
+            get(), get(), get(), get(), get(), get(), get(), get(),
+            faviconMisses = SettingsFaviconMissStore(get()),
+        )
+    }
     single { FolderRepository(get(), get(), get(), get()) }
     single { OpmlImporter(get(), get(), get()) }
-    single { RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get()) }
+    single {
+        val monitor = get<NetworkConditionMonitor>()
+        RefreshCycleRunner(get(), get(), get(), get(), get(), get(), get(), get(), get(), appForeground = get()) {
+            NetworkUsagePolicy.automaticRefreshAllowed(monitor.condition.first())
+        }
+    }
 }
 
 /**
@@ -143,7 +170,7 @@ fun presentationModule(): Module = module {
     single { SetupController(get(), get(), get(), get()) }
     single { NotificationAlerts(get()) }
     // Also Home's "Sync now" (HomeViewModel takes it as ManualSync), so every route shares one sync.
-    single { CloudSyncController(get(), get(), get(), get(), get()) } bind ManualSync::class
+    single { CloudSyncController(get(), get(), get(), get(), get(), networkConditionMonitor = get()) } bind ManualSync::class
     single { PreferencesController(get()) }
     single { OpmlTransfer(get(), get(), get(), get()) }
     // Every OPML route (Data tab, File menu, opened .opml file) shares this one busy/result state.

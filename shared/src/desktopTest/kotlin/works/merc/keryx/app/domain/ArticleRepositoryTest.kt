@@ -20,12 +20,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** A [SyncScheduler] fake that counts invocations. */
+/**
+ * A [SyncScheduler] fake that counts deferred-sync requests. Every sync [ArticleRepository]
+ * schedules is a reading-state change, which must use the long deferred window (each sync uploads
+ * the whole database), so the short-window [scheduleSync] fails the test outright.
+ */
 private class CountingSyncScheduler : SyncScheduler {
     var callCount = 0
         private set
 
     override fun scheduleSync() {
+        error("reading-state changes must call scheduleDeferredSync, not scheduleSync")
+    }
+
+    override fun scheduleDeferredSync() {
         callCount++
     }
 }
@@ -487,6 +495,84 @@ class ArticleRepositoryTest {
     }
 
     @Test
+    fun markAsReadOnAnAlreadyReadArticleChangesNothingAndSchedulesNoSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", isRead = 1L)
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markAsRead("a1")
+
+            val row = db.articlesQueries.getById("a1").executeAsOne()
+            assertNull(row.read_at)
+            assertEquals(0L, row.updated_at)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun markAsReadStampsAnUnreadArticleOnce() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markAsRead("a1")
+            repo.markAsRead("a1")
+
+            assertTrue(db.articlesQueries.getById("a1").executeAsOne().read_at != null)
+            assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun markAsUnreadOnAnUnreadArticleChangesNothingAndSchedulesNoSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.markAsUnread("a1")
+
+            assertNull(db.articlesQueries.getById("a1").executeAsOne().read_at)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun setStarredToTheCurrentStateChangesNothingAndSchedulesNoSync() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", isStarred = 1L)
+            db.insertArticle("a2", "f1")
+            val scheduler = CountingSyncScheduler()
+            val repo = newRepo(db, driver, syncScheduler = scheduler)
+
+            repo.setStarred("a1", true)
+            repo.setStarred("a2", false)
+
+            assertNull(db.articlesQueries.getById("a1").executeAsOne().starred_at)
+            assertNull(db.articlesQueries.getById("a2").executeAsOne().starred_at)
+            assertEquals(0, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
     fun markAllAsReadAllMarksEveryUnreadArticle() {
         val (driver, db) = inMemoryDb()
         try {
@@ -710,6 +796,26 @@ class ArticleRepositoryTest {
             assertEquals(0L, db.articlesQueries.getById("keepUnread").executeAsOne().is_read)
             assertEquals(1L, db.articlesQueries.watchUnreadCount().executeAsOne())
             assertEquals(1, scheduler.callCount)
+        } finally {
+            driver.close()
+        }
+    }
+
+    /**
+     * `articles_fts` is raw SQL outside the schema and can be absent (before the first startup
+     * catch-up has created it): searching then returns no hits, rather than throwing out of the repository.
+     */
+    @Test
+    fun searchReturnsNoHitsInsteadOfThrowingWhenTheIndexIsUnavailable() {
+        val (driver, db) = inMemoryDb()
+        try {
+            db.insertFeed("f1")
+            db.insertArticle("a1", "f1", title = "Kotlin Multiplatform", content = "cross platform apps")
+            // No ftsManagerIndexed(driver): the articles_fts table does not exist.
+
+            val results = newRepo(db, driver).search("Kotlin", ArticleFilter.All)
+
+            assertEquals(emptyList(), results)
         } finally {
             driver.close()
         }

@@ -165,7 +165,8 @@ class DesktopUpdateInstaller internal constructor(
                 entryDirName = APP_NAME
                 executableEntries = emptySet()
             }
-            else -> return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
+            UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK ->
+                return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
         }
 
         val zipSize = File(filePath).length()
@@ -200,16 +201,14 @@ class DesktopUpdateInstaller internal constructor(
             // leave up to zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE sitting under <cacheDir>, which
             // nothing reclaims until the next check()'s sweep — up to updateCheckIntervalHours
             // away, and never if the app is closed first.
-            FileSystemExtras.deleteRecursively(extractDir.path)
-            return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
+            return extractionFailed(extractDir, e)
         } catch (e: IOException) {
             // Kotlin has no multi-catch, so this is a second clause rather than widening the one
             // above to Exception (which would also swallow CancellationException on this suspend
             // path). Covers a full disk (ENOSPC), a corrupt archive (ZipException), or an extractor
             // process that could not be started at all — anything the extractor's own
             // java.util.zip/java.io/ProcessBuilder calls can throw beyond its check()s.
-            FileSystemExtras.deleteRecursively(extractDir.path)
-            return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
+            return extractionFailed(extractDir, e)
         }
 
         val extractedApp = File(extractDir, entryDirName)
@@ -228,7 +227,7 @@ class DesktopUpdateInstaller internal constructor(
             return InstallLaunchResult.Failed("Not enough free disk space on the install volume to stage the update")
         }
 
-        val newDir = File(parent, ".${appRootFile.name}.new")
+        val newDir = selfReplaceSibling(parent, appRootFile, "new")
         FileSystemExtras.deleteRecursively(newDir.path) // clear any leftover from a previously failed attempt
         if (!FileSystemExtras.move(extractedApp.path, newDir.path)) {
             FileSystemExtras.deleteRecursively(extractDir.path)
@@ -242,7 +241,7 @@ class DesktopUpdateInstaller internal constructor(
         FileSystemExtras.deleteRecursively(extractDir.path)
         File(filePath).delete()
 
-        val oldDir = File(parent, ".${appRootFile.name}.old")
+        val oldDir = selfReplaceSibling(parent, appRootFile, "old")
         // Cleared for the same reason newDir was above: every script's own retreat step is a plain
         // `mv "$APP" "$OLD"` (never delete-then-move, by design — see UpdateScriptWriter's own
         // KDoc), so if a stale .old is still sitting here from a previous attempt that never got
@@ -250,8 +249,8 @@ class DesktopUpdateInstaller internal constructor(
         // check would then find nothing at the path it expects, and a rollback would restore the
         // wrapper directory rather than the actual app.
         FileSystemExtras.deleteRecursively(oldDir.path)
-        val logFile = File(workDir, "apply.log")
-        val pid = ProcessHandle.current().pid().toString()
+        val logFile = File(workDir, UPDATE_SCRIPT_LOG_NAME)
+        val pid = currentPid()
 
         // MAC_APP_ZIP and LINUX_ZIP differ only in which script text POSIX gets — same interpreter,
         // same argument shape (pid/app/new/old/log), same "mark it executable" requirement. Only
@@ -274,7 +273,7 @@ class DesktopUpdateInstaller internal constructor(
                 )
             }
             UpdateAssetKind.WINDOWS_ZIP -> {
-                val scriptFile = File(workDir, "apply.cmd")
+                val scriptFile = File(workDir, WINDOWS_UPDATE_SCRIPT_NAME)
                 launchScript(
                     scriptFile = scriptFile,
                     scriptText = UpdateScriptWriter.windowsSelfReplace(),
@@ -290,9 +289,9 @@ class DesktopUpdateInstaller internal constructor(
         if (launcherPath == null) return InstallLaunchResult.Failed("Current launcher path is unknown")
         val workDir = File(filePath).parentFile
             ?: return InstallLaunchResult.Failed("Downloaded file has no parent directory")
-        val scriptFile = File(workDir, "apply.cmd")
-        val logFile = File(workDir, "apply.log")
-        val pid = ProcessHandle.current().pid().toString()
+        val scriptFile = File(workDir, WINDOWS_UPDATE_SCRIPT_NAME)
+        val logFile = File(workDir, UPDATE_SCRIPT_LOG_NAME)
+        val pid = currentPid()
         return launchScript(
             scriptFile = scriptFile,
             scriptText = UpdateScriptWriter.windowsMsiInstall(),
@@ -343,7 +342,7 @@ class DesktopUpdateInstaller internal constructor(
                 val exe = File(extractedApp, "$APP_NAME.exe")
                 if (!exe.isFile) "Extracted app is missing $APP_NAME.exe" else null
             }
-            else -> "Unsupported self-replace asset kind: $assetKind"
+            UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK -> "Unsupported self-replace asset kind: $assetKind"
         }
     }
 }
@@ -365,22 +364,34 @@ internal fun cleanUpStaleSelfReplaceArtifacts(location: InstallLocation) {
     if (location.kind !in SELF_REPLACE_INSTALL_KINDS) return
     val appRootFile = File(location.appRoot ?: return)
     val parent = appRootFile.parentFile ?: return
-    FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.new").path)
-    FileSystemExtras.deleteRecursively(File(parent, ".${appRootFile.name}.old").path)
+    FileSystemExtras.deleteRecursively(selfReplaceSibling(parent, appRootFile, "new").path)
+    FileSystemExtras.deleteRecursively(selfReplaceSibling(parent, appRootFile, "old").path)
 }
 
-/** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain
- * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
- * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
- * avoids pulling in a plist/XML dependency for a single field. */
+/**
+ * The hidden `.<app>.new` / `.<app>.old` sibling of [appRoot] in [parent] that a self-replace
+ * stages the new build into and retreats the current one to.
+ */
+private fun selfReplaceSibling(parent: File, appRoot: File, suffix: String): File = File(parent, ".${appRoot.name}.$suffix")
+
+/** Clears the partially extracted [extractDir] and reports the extraction failure [e]. */
+private fun extractionFailed(extractDir: File, e: Exception): InstallLaunchResult.Failed {
+    FileSystemExtras.deleteRecursively(extractDir.path)
+    return InstallLaunchResult.Failed("Failed to extract the downloaded update: ${e.message}")
+}
+
 /**
  * Longest value [readPlistStringValue] will hand back. A version string is a handful of characters,
  * so this costs nothing legitimate — it exists because the value ends up inside an
  * [InstallLaunchResult.Failed] reason, which `UpdateRepository` logs.
  */
-private const val MAX_PLIST_VALUE_LENGTH = 64
+internal const val MAX_PLIST_VALUE_LENGTH = 64
 
-private fun readPlistStringValue(plistPath: String, key: String): String? {
+/** Reads a top-level `<key>[key]</key><string>...</string>` value out of a plist file by plain
+ * text search rather than a full XML parse — jpackage's generated Info.plist is a small, fixed,
+ * non-attacker-controlled file (it comes from inside an already digest-verified ZIP), so this
+ * avoids pulling in a plist/XML dependency for a single field. */
+internal fun readPlistStringValue(plistPath: String, key: String): String? {
     val file = File(plistPath)
     if (!file.isFile) return null
     val text = file.readText()
@@ -393,3 +404,12 @@ private fun readPlistStringValue(plistPath: String, key: String): String? {
     if (valueEnd < 0) return null
     return untrustedText(text.substring(valueStart, valueEnd), MAX_PLIST_VALUE_LENGTH)
 }
+
+/** The hand-off script's own log, written next to the downloaded update. */
+private const val UPDATE_SCRIPT_LOG_NAME = "apply.log"
+
+/** The hand-off script `cmd` runs on Windows (self-replace and MSI install alike). */
+private const val WINDOWS_UPDATE_SCRIPT_NAME = "apply.cmd"
+
+/** This process's id, as the hand-off script's argument it waits on to exit. */
+private fun currentPid(): String = ProcessHandle.current().pid().toString()

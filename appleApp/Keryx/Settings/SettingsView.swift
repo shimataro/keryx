@@ -70,7 +70,7 @@ struct SettingsView: View {
             NotificationsSettingsTab(preferences: preferences)
                 .navigationTitle(L("settings_tab_notifications"))
         case SettingsNavigation.Tab.cloudSync:
-            CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync)
+            CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync, preferences: preferences)
                 .navigationTitle(L("settings_cloud_sync"))
         case SettingsNavigation.Tab.data:
             DataSettingsTab(preferences: preferences, opmlTransfer: opmlTransfer)
@@ -105,7 +105,7 @@ struct SettingsView: View {
             // Only shown when at least one cloud provider is actually configured in this build —
             // matches Compose's own `SettingsDialog.kt`, which never adds this tab otherwise.
             if !cloudSync.availableCloudTypes.isEmpty {
-                CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync)
+                CloudSyncSettingsTab(oauthCoordinator: oauthCoordinator, cloudSync: cloudSync, preferences: preferences)
                     .tabItem { Label(L("settings_cloud_sync"), systemImage: "cloud") }
                     .tag(SettingsNavigation.Tab.cloudSync)
             }
