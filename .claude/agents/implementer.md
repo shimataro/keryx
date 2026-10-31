@@ -72,4 +72,5 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
    code that also compiles for Kotlin/Native, or `appleApp/`: `./gradlew :shared:macosArm64Test`
    passes, and for `appleApp/` also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`
    (run `cd appleApp && xcodegen generate` first if `project.yml` changed).
-6. `grep -rn TEMP-INSTRUMENTATION` finds nothing — no temporary instrumentation remains.
+6. The marker check in `.claude/etc/temporary-instrumentation.md` §3 prints nothing — no
+   temporary instrumentation remains.

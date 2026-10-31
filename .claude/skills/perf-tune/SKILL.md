@@ -408,8 +408,8 @@ For each approved item:
    the files, and only the hunks, belonging to this item** (including any doc
    fix from step 5) — verify the staged diff contains nothing beyond this item
    before committing, so an unrelated pre-existing edit or residue from an
-   earlier item's revert never rides along; also `grep` for
-   `TEMP-INSTRUMENTATION` and confirm no measurement code remains. Create **exactly one commit** with
+   earlier item's revert never rides along; also run the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 and confirm no measurement code remains. Create **exactly one commit** with
    a **single-line** commit message only (no body, no trailer), in the repo's
    Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
    lookups`. Never batch multiple items into one commit, and never amend a

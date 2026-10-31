@@ -39,7 +39,12 @@ keeps it, it is temporary code under §3.
   `git diff` that the tree is back to its pre-insertion state before moving on — this keeps any
   clean-tree baseline the caller relies on intact.
 - Never commit it, and never carry it into a plan as permanent code. Before staging or committing,
-  `grep` for `TEMP-INSTRUMENTATION` and confirm nothing remains.
+  run the marker check below and confirm it prints nothing. It covers untracked files (a temporary
+  test) and excludes `.claude/`, whose policy files contain the marker literally:
+
+  ```bash
+  git grep -n --untracked TEMP-INSTRUMENTATION -- ':!.claude'
+  ```
 - Never log article bodies, tokens, or URLs carrying credentials, and never add an external profiler
   or telemetry service — `docs/external-spec.md` §10 promises no data leaves the device.
 

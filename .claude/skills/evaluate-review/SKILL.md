@@ -408,8 +408,8 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
    - **Changes** — concrete, line-level actions
    - **Verification** — how to test (unit tests, manual checks, build). For an item whose
      evidence came from Step 7's temporary instrumentation, include the post-fix
-     re-measurement (when the effect is measurable) and a check that no
-     `TEMP-INSTRUMENTATION` code remains.
+     re-measurement (when the effect is measurable) and the marker check from
+     `.claude/etc/temporary-instrumentation.md` §3 (no temporary instrumentation remains).
    - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
 4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
    (`~/.claude/plans/evaluate-review-{id}.md`) as its argument so it targets exactly the
@@ -505,8 +505,8 @@ For each comment in `associated_comments`, in order:
 4. On success, review `git status --porcelain` / `git diff` and stage **only the files, and
    only the hunks, touched by this fix** — verify the staged diff contains nothing beyond this
    comment's change before committing, so unrelated pre-existing edits or residue from a prior
-   comment's failed attempt never ride along. Also `grep` for `TEMP-INSTRUMENTATION` and confirm
-   no temporary instrumentation remains. Create **exactly one commit** with a
+   comment's failed attempt never ride along. Also run the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 and confirm no temporary instrumentation remains. Create **exactly one commit** with a
    **single-line** commit message only (no body, no trailer), in the repo's Conventional
    Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`. Never batch
    multiple comments into one commit, and never amend a commit made earlier in this same run.
