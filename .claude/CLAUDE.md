@@ -141,7 +141,7 @@ explicit request, or in bulk) — confirm it per `.claude/etc/temporary-instrume
 delegating it, tell `implementer` it is unconfirmed.
 Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
 number / finding / outcome (fixed, or not addressed with the reason — a finding the evidence
-disproved is "not addressed: disproved by measurement", with what was observed), and if a fix could
+disproved is "not addressed: disproved by evidence", with what was observed or checked), and if a fix could
 affect another perspective, offer to re-run just that one.
 
 **Exception — direct dispatch.** The `refactor` and `perf-tune` skills call specific `review-*`
