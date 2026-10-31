@@ -127,23 +127,25 @@ class IconBadgeTest {
     }
 
     @Test
-    fun `macOS always needs the badged dock icon`() {
-        assertTrue(needsDockBadgedImage(isMacOs = true, taskbarSupported = true, windowBadgeSupported = false))
-        assertTrue(needsDockBadgedImage(isMacOs = true, taskbarSupported = false, windowBadgeSupported = false))
+    fun `no taskbar means no badge route whatever the feature flags say`() {
+        assertEquals(UnreadBadgeRoute.None, unreadBadgeRoute(false, windowBadgeSupported = true, iconImageSupported = true))
+        assertEquals(UnreadBadgeRoute.None, unreadBadgeRoute(false, windowBadgeSupported = false, iconImageSupported = false))
     }
 
     @Test
-    fun `a taskbar with per-window badge images does not need the badged icon`() {
-        assertFalse(needsDockBadgedImage(isMacOs = false, taskbarSupported = true, windowBadgeSupported = true))
+    fun `a taskbar with per-window badge images uses the window badge`() {
+        assertEquals(UnreadBadgeRoute.WindowBadge, unreadBadgeRoute(true, windowBadgeSupported = true, iconImageSupported = true))
+        assertEquals(UnreadBadgeRoute.WindowBadge, unreadBadgeRoute(true, windowBadgeSupported = true, iconImageSupported = false))
     }
 
     @Test
-    fun `no taskbar does not need the badged icon`() {
-        assertFalse(needsDockBadgedImage(isMacOs = false, taskbarSupported = false, windowBadgeSupported = false))
+    fun `a taskbar that only takes an icon image uses the badged app icon`() {
+        assertEquals(UnreadBadgeRoute.AppIcon, unreadBadgeRoute(true, windowBadgeSupported = false, iconImageSupported = true))
     }
 
     @Test
-    fun `a taskbar without per-window badge images needs the badged icon`() {
-        assertTrue(needsDockBadgedImage(isMacOs = false, taskbarSupported = true, windowBadgeSupported = false))
+    fun `a taskbar that takes neither image has no badge route`() {
+        // E.g. the Unity taskbar, which supports only a numeric badge, menu, progress and attention.
+        assertEquals(UnreadBadgeRoute.None, unreadBadgeRoute(true, windowBadgeSupported = false, iconImageSupported = false))
     }
 }
