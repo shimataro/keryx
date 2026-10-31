@@ -76,6 +76,10 @@ check every path. `Low` — it looks wrong but you could not confirm it.
 The orchestrator moves every `Low`-confidence finding into a separate **Needs confirmation** section,
 so do not inflate confidence to get attention, and never file a guess at `High`.
 
+For a `Medium` or `Low` finding, say in its **Suggestion** what observation would confirm or refute
+it — a reproducing test, where to log, what to measure — so whoever fixes it can settle it first per
+`.claude/etc/temporary-instrumentation.md`. You are read-only (§1): name the observation, never run it.
+
 ## 7. Language
 
 Everything under `.claude/` — this file, the agent definitions, and the report templates — is written

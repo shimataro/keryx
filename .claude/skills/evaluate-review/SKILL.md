@@ -319,42 +319,16 @@ in this exact format:
 
 Any item whose Confidence is **Medium** or **Low** — whatever its Validity, so an Invalid
 verdict is not dismissed on a guess either — must be backed by evidence that directly
-observes the claim before its verdict is final. Gather it in this order of preference:
+observes the claim before its verdict is final. Gather it, and handle any temporary code,
+per `.claude/etc/temporary-instrumentation.md` (read it before inserting anything); it keeps
+Case B's clean-tree baseline intact by requiring every probe to be removed first.
 
-1. **A test that reproduces the claim** (it fails if the comment is right). At this stage it
-   is temporary like any other probe and is removed below; if it would serve as the fix's
-   test, include it in the Case A plan, or add it again during Case B step 3.
-2. **Temporary logging or assertions** — log through the existing `core/Log` — observed by
-   running the relevant `./gradlew` test target.
-3. **A manual run** — give the user the steps and ask for the result.
-
-Measure automatically rather than manually wherever possible: options 1 and 2 come first,
-and a manual run is the last resort when neither can observe the claim. To automate, mocks
-and fakes (Ktor `MockEngine`, the fakes under `testing/`, an in-memory DB) are fine as long
-as they do not affect what the evidence proves — never mock the part the comment is actually
-about (e.g. the real driver's behavior, real concurrent execution); observe that part for
-real. When a mock is used, state in the Reasoning what it replaced and why that does not
-affect the conclusion.
-
-Once the evidence is in, update the item's Validity / Confidence and record in its Reasoning
-what was inserted and what was observed. A comment that cannot be observed at runtime (doc
-conformance, naming, conventions) needs no measurement; say so in the Reasoning instead.
-
-Rules for the temporary code:
-
-- Insert it only into files with no uncommitted changes, so removing it can never take
-  pre-existing work with it.
-- Tag every inserted line or block with the marker comment `TEMP-EVALUATE-REVIEW`, so a
-  leftover from an interrupted run can be found with `grep` and removed.
-- **Always remove it** once the evidence is in, and confirm with `git status --porcelain` /
-  `git diff` that the tree is back to its pre-insertion state before moving on — this keeps
-  Case B's clean-tree baseline intact.
-- Never commit it, and never carry it into a plan as permanent code.
-- Never log article bodies, tokens, or URLs carrying credentials.
-
-When the fix's effect is itself measurable (performance, call counts, timing), re-insert the
-same measurement after implementing the fix, compare before/after, and remove it again once
-confirmed.
+- **Where the outcome goes**: update the item's Validity / Confidence and record the evidence
+  (what was inserted, what was observed, any mock and why it does not affect the conclusion —
+  or why the comment cannot be observed at runtime) in its Reasoning.
+- **A reproducing test** is temporary at this stage and is removed with the other probes; if
+  it would serve as the fix's test, include it in the Case A plan, or add it again during
+  Case B step 3.
 
 ### Step 8 — Take action
 
@@ -435,7 +409,7 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
    - **Verification** — how to test (unit tests, manual checks, build). For an item whose
      evidence came from Step 7's temporary instrumentation, include the post-fix
      re-measurement (when the effect is measurable) and a check that no
-     `TEMP-EVALUATE-REVIEW` code remains.
+     `TEMP-INSTRUMENTATION` code remains.
    - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
 4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
    (`~/.claude/plans/evaluate-review-{id}.md`) as its argument so it targets exactly the
@@ -523,7 +497,7 @@ For each comment in `associated_comments`, in order:
    never compiles those. Off a Mac, treat that as unverified: do not commit it. When this
    comment's evidence came from Step 7's temporary instrumentation and the fix's effect is
    measurable, re-insert that measurement, confirm the effect, and remove it again (per
-   Step 7's temporary-code rules).
+   `.claude/etc/temporary-instrumentation.md`).
    - If verification fails: confirm via `git status`/`git diff` that only this comment's
      intended changes are present before reverting, so a revert cannot destroy pre-existing
      work in the same file; then do not commit. Note the failure (with the reason) for the
@@ -531,7 +505,7 @@ For each comment in `associated_comments`, in order:
 4. On success, review `git status --porcelain` / `git diff` and stage **only the files, and
    only the hunks, touched by this fix** — verify the staged diff contains nothing beyond this
    comment's change before committing, so unrelated pre-existing edits or residue from a prior
-   comment's failed attempt never ride along. Also `grep` for `TEMP-EVALUATE-REVIEW` and confirm
+   comment's failed attempt never ride along. Also `grep` for `TEMP-INSTRUMENTATION` and confirm
    no temporary instrumentation remains. Create **exactly one commit** with a
    **single-line** commit message only (no body, no trailer), in the repo's Conventional
    Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`. Never batch

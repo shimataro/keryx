@@ -339,7 +339,8 @@ Each axis has its own method.
   approval.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
-hooks in production code. Every candidate must carry axis-appropriate before/after
+hooks in production code. Inserting, tagging, removing, and checking for leftover
+measurement code follows `.claude/etc/temporary-instrumentation.md` §3. Every candidate must carry axis-appropriate before/after
 evidence — a timed before/after, milestone timestamps, or (for a #16 concurrency
 hazard, where there is nothing to time) a deterministic controlled-interleaving
 regression test that fails before the fix and passes after; an `EXPLAIN` diff may
@@ -407,7 +408,8 @@ For each approved item:
    the files, and only the hunks, belonging to this item** (including any doc
    fix from step 5) — verify the staged diff contains nothing beyond this item
    before committing, so an unrelated pre-existing edit or residue from an
-   earlier item's revert never rides along. Create **exactly one commit** with
+   earlier item's revert never rides along; also `grep` for
+   `TEMP-INSTRUMENTATION` and confirm no measurement code remains. Create **exactly one commit** with
    a **single-line** commit message only (no body, no trailer), in the repo's
    Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
    lookups`. Never batch multiple items into one commit, and never amend a
