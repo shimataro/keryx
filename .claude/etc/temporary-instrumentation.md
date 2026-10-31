@@ -52,8 +52,8 @@ keeps it, it is temporary code under §3.
 ## 4. Re-measuring after the fix
 
 When the fix's effect is itself measurable (performance, call counts, timing), re-insert the same
-measurement after implementing the fix, compare before/after, and remove it again under §3 once
-confirmed.
+measurement after implementing the fix, compare before/after, and remove it again under §3
+whatever the outcome — including a failed run or an effect the re-measurement does not confirm.
 
 The fix is usually still uncommitted at this point, so the re-measurement may go into a file whose
 only uncommitted changes are the fix under test (and nothing else). Before inserting, take a
