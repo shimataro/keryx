@@ -408,8 +408,10 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
    - **Changes** — concrete, line-level actions
    - **Verification** — how to test (unit tests, manual checks, build). For an item whose
      evidence came from Step 7's temporary instrumentation, include the post-fix
-     re-measurement (when the effect is measurable) and the marker check from
-     `.claude/etc/temporary-instrumentation.md` §3 (no temporary instrumentation remains).
+     re-measurement when the effect is measurable — saving the fix-only `git diff` before
+     re-inserting the measurement and confirming after its removal that `git diff` matches
+     that saved copy exactly (`.claude/etc/temporary-instrumentation.md` §4) — and the
+     marker check from §3 (no temporary instrumentation remains).
    - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
 4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
    (`~/.claude/plans/evaluate-review-{id}.md`) as its argument so it targets exactly the
