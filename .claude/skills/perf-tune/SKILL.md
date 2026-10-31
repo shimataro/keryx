@@ -402,8 +402,8 @@ For each approved item:
    The full suite must be green **and the Step 1 baseline set must survive in
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.
-4. If the improvement cannot be measured, or the suite goes red, first make sure
-   no measurement code remains (the marker check from
+4. If the improvement cannot be measured, the improvement is not confirmed, or
+   the suite goes red, first make sure no measurement code remains (the marker check from
    `.claude/etc/temporary-instrumentation.md` §3 prints nothing), then **revert that
    one item**, make **no commit** for it, and move on — record the reason for
    the "How to report" closing summary.
