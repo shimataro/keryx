@@ -339,7 +339,8 @@ Each axis has its own method.
   approval.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
-hooks in production code. Every candidate must carry axis-appropriate before/after
+hooks in production code. Inserting, tagging, removing, and checking for leftover
+measurement code follows `.claude/etc/temporary-instrumentation.md` §3. Every candidate must carry axis-appropriate before/after
 evidence — a timed before/after, milestone timestamps, or (for a #16 concurrency
 hazard, where there is nothing to time) a deterministic controlled-interleaving
 regression test that fails before the fix and passes after; an `EXPLAIN` diff may
@@ -389,7 +390,12 @@ run `/feature-branch perf` to create and switch to a feature branch first
 For each approved item:
 
 1. Make one cohesive change.
-2. Re-measure with that axis's method and confirm the improvement is real.
+2. Re-measure with that axis's method and check whether the improvement is real,
+   then remove the measurement code again per
+   `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** —
+   including when the improvement is not confirmed or the run fails — and confirm
+   a fresh §4 snapshot matches the change-only one taken before re-inserting it,
+   before doing anything else.
 3. Re-run the tests:
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
@@ -397,7 +403,9 @@ For each approved item:
    The full suite must be green **and the Step 1 baseline set must survive in
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.
-4. If the improvement cannot be measured, or the suite goes red, **revert that
+4. If the improvement cannot be measured, the improvement is not confirmed, or
+   the suite goes red, first make sure no measurement code remains (the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 prints nothing), then **revert that
    one item**, make **no commit** for it, and move on — record the reason for
    the "How to report" closing summary.
 5. If this item changed something a doc *names* (per Step 7's criteria below),
@@ -407,7 +415,8 @@ For each approved item:
    the files, and only the hunks, belonging to this item** (including any doc
    fix from step 5) — verify the staged diff contains nothing beyond this item
    before committing, so an unrelated pre-existing edit or residue from an
-   earlier item's revert never rides along. Create **exactly one commit** with
+   earlier item's revert never rides along; also run the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 and confirm no measurement code remains. Create **exactly one commit** with
    a **single-line** commit message only (no body, no trailer), in the repo's
    Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
    lookups`. Never batch multiple items into one commit, and never amend a

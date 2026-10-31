@@ -44,6 +44,10 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
   `.claude/skills/ui-guidelines/SKILL.md` first and follow its conventions
   (pane tones, divider policy, layout stability, flat native-feel components,
   dialog/popup rules).
+- When the caller tells you the fix's premise is unconfirmed (e.g. a Medium/Low-confidence
+  review finding), confirm it before implementing, per
+  `.claude/etc/temporary-instrumentation.md`. If the evidence disproves it, implement
+  nothing and report what was observed.
 
 ## Error handling (`docs/error-design.md`, already in your context)
 
@@ -68,3 +72,5 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
    code that also compiles for Kotlin/Native, or `appleApp/`: `./gradlew :shared:macosArm64Test`
    passes, and for `appleApp/` also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`
    (run `cd appleApp && xcodegen generate` first if `project.yml` changed).
+6. The marker check in `.claude/etc/temporary-instrumentation.md` §3 prints nothing — no
+   temporary instrumentation remains.

@@ -315,6 +315,21 @@ in this exact format:
 [Your analysis. Cite specific lines or docs where applicable.]
 ```
 
+#### Confirming Medium / Low confidence with temporary instrumentation
+
+Any item whose Confidence is **Medium** or **Low** — whatever its Validity, so an Invalid
+verdict is not dismissed on a guess either — must be backed by evidence that directly
+observes the claim before its verdict is final. Gather it, and handle any temporary code,
+per `.claude/etc/temporary-instrumentation.md` (read it before inserting anything); it keeps
+Case B's clean-tree baseline intact by requiring every probe to be removed first.
+
+- **Where the outcome goes**: update the item's Validity / Confidence and record the evidence
+  (what was inserted, what was observed, any mock and why it does not affect the conclusion —
+  or why the comment cannot be observed at runtime) in its Reasoning.
+- **A reproducing test** is temporary at this stage and is removed with the other probes; if
+  it would serve as the fix's test, include it in the Case A plan, or add it again during
+  Case B step 3.
+
 ### Step 8 — Take action
 
 Branch on `comment_type` and, for `pr_review`, on whether `associated_comments` (gathered in
@@ -391,7 +406,13 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
    - **Context** — what the review pointed out and why it matters
    - **Files to modify** — exact file paths
    - **Changes** — concrete, line-level actions
-   - **Verification** — how to test (unit tests, manual checks, build)
+   - **Verification** — how to test (unit tests, manual checks, build). For an item whose
+     evidence came from Step 7's temporary instrumentation, include the post-fix
+     re-measurement when the effect is measurable — taking the §4 snapshot of the fix
+     (tracked changes and untracked files) before re-inserting the measurement and confirming
+     after its removal that a fresh snapshot matches it exactly
+     (`.claude/etc/temporary-instrumentation.md` §4) — and the
+     marker check from §3 (no temporary instrumentation remains).
    - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
 4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
    (`~/.claude/plans/evaluate-review-{id}.md`) as its argument so it targets exactly the
@@ -476,15 +497,23 @@ For each comment in `associated_comments`, in order:
    clearly sufficient to cover the change) to verify before committing. When the fix touches
    `shared/src/apple*` or `appleApp/`, also run `./gradlew :shared:macosArm64Test` and, for
    `appleApp/`, `xcodebuild -scheme Keryx -destination 'platform=macOS' test` — the JVM build
-   never compiles those. Off a Mac, treat that as unverified: do not commit it.
-   - If verification fails: confirm via `git status`/`git diff` that only this comment's
+   never compiles those. Off a Mac, treat that as unverified: do not commit it. When this
+   comment's evidence came from Step 7's temporary instrumentation and the fix's effect is
+   measurable, re-insert that measurement and check the effect, then remove it again per
+   `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** — including
+   when the effect is not confirmed or the run fails — and confirm a fresh §4 snapshot
+   matches the fix-only one taken before re-inserting it, before doing anything else.
+   - If verification fails (including a re-measurement that does not confirm the effect):
+     first make sure no temporary instrumentation remains (the marker check from §3 prints
+     nothing), then confirm via `git status`/`git diff` that only this comment's
      intended changes are present before reverting, so a revert cannot destroy pre-existing
      work in the same file; then do not commit. Note the failure (with the reason) for the
      closing summary, and move on to the next comment.
 4. On success, review `git status --porcelain` / `git diff` and stage **only the files, and
    only the hunks, touched by this fix** — verify the staged diff contains nothing beyond this
    comment's change before committing, so unrelated pre-existing edits or residue from a prior
-   comment's failed attempt never ride along. Create **exactly one commit** with a
+   comment's failed attempt never ride along. Also run the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 and confirm no temporary instrumentation remains. Create **exactly one commit** with a
    **single-line** commit message only (no body, no trailer), in the repo's Conventional
    Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`. Never batch
    multiple comments into one commit, and never amend a commit made earlier in this same run.
