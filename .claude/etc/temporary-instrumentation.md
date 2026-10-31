@@ -32,7 +32,7 @@ keeps it, it is temporary code under §3.
 ## 3. Rules for the temporary code
 
 - Insert it only into files with no uncommitted changes, so removing it can never take pre-existing
-  work with it.
+  work with it. The one exception is §4's post-fix re-measurement.
 - Tag every inserted line or block with the marker comment `TEMP-INSTRUMENTATION`, so a leftover
   from an interrupted run can be found with `grep` and removed.
 - **Always remove it** once the evidence is in, and confirm with `git status --porcelain` /
@@ -53,3 +53,8 @@ keeps it, it is temporary code under §3.
 When the fix's effect is itself measurable (performance, call counts, timing), re-insert the same
 measurement after implementing the fix, compare before/after, and remove it again under §3 once
 confirmed.
+
+The fix is usually still uncommitted at this point, so the re-measurement may go into a file whose
+only uncommitted changes are the fix under test (and nothing else). Save its `git diff` to the
+scratchpad before inserting; after removing the measurement, `git diff` must match that saved copy
+exactly — the fix intact, only the measurement gone. Everything else in §3 still applies.
