@@ -90,6 +90,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
@@ -6131,7 +6132,10 @@ class HomeViewModelTest {
         assertTrue(vm.searchActive.value)
         assertEquals(vm.searchResults.value.map { it.article.id }, vm.pagerArticles.value.map { it.id })
         assertEquals(listOf("a2"), vm.pagerArticles.value.map { it.id })
-        assertEquals(vm.searchResults.value.map { it.article }, vm.searchArticleRows.value)
+        val display = vm.searchListDisplay.value
+        assertEquals(vm.searchResults.value.map { it.article }, display.rows)
+        assertEquals(vm.searchResults.value.associate { it.article.id to it.titleMarked }, display.titleMarkedById)
+        assertSame(display, vm.searchListDisplay.value)
     }
 
     /**

@@ -89,13 +89,22 @@ private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarro
 private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
 
 /**
- * Search results tagged with the [ListScope] that produced them, plus their article rows. The rows
- * are mapped once here, when the snapshot is produced, rather than on every read of the list on
- * screen — the reader's swipe asks for it on every drag event. [articleRows] is a body property, so
- * it stays out of [equals]: it is derived from [rows] alone.
+ * What the article list shows for a search — its rows and their title highlights — built from one
+ * snapshot so the two never disagree. Compared by identity: a new instance is a new snapshot.
+ */
+class SearchListDisplay internal constructor(results: List<ArticleSearchResult>) {
+    val rows: List<ArticleListRow> = results.map { it.article }
+    val titleMarkedById: Map<String, String> = results.associate { it.article.id to it.titleMarked }
+}
+
+/**
+ * Search results tagged with the [ListScope] that produced them, plus what the article list shows
+ * for them. The [display] is built once here, when the snapshot is produced, rather than on every
+ * read of the list on screen — the reader's swipe asks for its rows on every drag event. [display]
+ * is a body property, so it stays out of [equals]: it is derived from [rows] alone.
  */
 private data class ScopedSearchResults(val rows: List<ArticleSearchResult>, val scope: ListScope) {
-    val articleRows: List<ArticleListRow> = rows.map { it.article }
+    val display: SearchListDisplay = SearchListDisplay(rows)
 }
 
 private fun narrowingFor(mode: ArticleListMode) =
@@ -727,12 +736,13 @@ class HomeViewModel(
     )
 
     /**
-     * The article rows of [searchResults], from the same snapshot — exposed so the article list
-     * does not map the results a second time.
+     * The article rows of [searchResults] and their title highlights, from the same snapshot — one
+     * flow, so the article list can never render rows from one search update with highlights from
+     * another, and does not map the results a second time.
      */
-    val searchArticleRows: StateFlow<List<ArticleListRow>> = DerivedStateFlow(
-        { searchResultsSnapshot.value.articleRows },
-        searchResultsSnapshot.map { it.articleRows },
+    val searchListDisplay: StateFlow<SearchListDisplay> = DerivedStateFlow(
+        { searchResultsSnapshot.value.display },
+        searchResultsSnapshot.map { it.display },
     )
 
     /** The scope of the rows on screen — see [ListScope]; null before the article list first loads. */
@@ -1169,7 +1179,7 @@ class HomeViewModel(
         searchActive: Boolean,
         rows: List<ArticleListRow>,
         results: ScopedSearchResults,
-    ): List<ArticleListRow> = if (searchActive) results.articleRows else rows
+    ): List<ArticleListRow> = if (searchActive) results.display.rows else rows
 
     /**
      * Moves the selection [delta] rows. With nothing selected it opens the first row; at either end
