@@ -136,8 +136,9 @@ language it arrives in — severity（重要度 / 重大度）, High（高）, #
 | The report has left the context | Do not guess a number — say so and offer to re-run the review |
 | Nothing matches the instruction | Say so rather than picking the nearest finding |
 
-Before fixing a `Medium`-confidence finding, or a `Low` one pulled in by number, confirm it per
-`.claude/etc/temporary-instrumentation.md`; when delegating it, tell `implementer` it is unconfirmed.
+Before fixing a `Medium`- or `Low`-confidence finding — however it was selected (by number, by an
+explicit request, or in bulk) — confirm it per `.claude/etc/temporary-instrumentation.md`; when
+delegating it, tell `implementer` it is unconfirmed.
 Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
 number / finding / outcome (fixed, or not addressed with the reason — a finding the evidence
 disproved is "not addressed: disproved by measurement", with what was observed), and if a fix could
