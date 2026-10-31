@@ -56,6 +56,20 @@ measurement after implementing the fix, compare before/after, and remove it agai
 confirmed.
 
 The fix is usually still uncommitted at this point, so the re-measurement may go into a file whose
-only uncommitted changes are the fix under test (and nothing else). Save its `git diff` to the
-scratchpad before inserting; after removing the measurement, `git diff` must match that saved copy
-exactly — the fix intact, only the measurement gone. Everything else in §3 still applies.
+only uncommitted changes are the fix under test (and nothing else). Before inserting, take a
+snapshot of the fix with the block below, `SNAPSHOT` pointing at `before.snapshot` in the
+scratchpad. It covers the tracked changes (`git diff`) and the full content of every untracked file
+(a new test, which `git diff` alone omits), so a measurement removed from either kind of file is
+checked the same way:
+
+```bash
+{ git diff
+  git ls-files -z --others --exclude-standard | while IFS= read -r -d '' f; do
+    git diff --no-index -- /dev/null "$f"
+  done; } > "$SNAPSHOT"
+```
+
+After removing the measurement, run it again with `SNAPSHOT` pointing at `after.snapshot` and
+confirm `diff before.snapshot after.snapshot` prints nothing — the fix intact, only the measurement
+gone. Compare the output, not the exit status: `git diff --no-index` exits 1 whenever a file
+differs from `/dev/null`. Everything else in §3 still applies.

@@ -394,7 +394,8 @@ For each approved item:
    then remove the measurement code again per
    `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** —
    including when the improvement is not confirmed or the run fails — and confirm
-   `git diff` matches the change-only diff saved under §4 before doing anything else.
+   a fresh §4 snapshot matches the change-only one taken before re-inserting it,
+   before doing anything else.
 3. Re-run the tests:
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest

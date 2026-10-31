@@ -408,9 +408,10 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
    - **Changes** — concrete, line-level actions
    - **Verification** — how to test (unit tests, manual checks, build). For an item whose
      evidence came from Step 7's temporary instrumentation, include the post-fix
-     re-measurement when the effect is measurable — saving the fix-only `git diff` before
-     re-inserting the measurement and confirming after its removal that `git diff` matches
-     that saved copy exactly (`.claude/etc/temporary-instrumentation.md` §4) — and the
+     re-measurement when the effect is measurable — taking the §4 snapshot of the fix
+     (tracked changes and untracked files) before re-inserting the measurement and confirming
+     after its removal that a fresh snapshot matches it exactly
+     (`.claude/etc/temporary-instrumentation.md` §4) — and the
      marker check from §3 (no temporary instrumentation remains).
    - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
 4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
@@ -500,8 +501,8 @@ For each comment in `associated_comments`, in order:
    comment's evidence came from Step 7's temporary instrumentation and the fix's effect is
    measurable, re-insert that measurement and check the effect, then remove it again per
    `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** — including
-   when the effect is not confirmed or the run fails — and confirm `git diff` matches the
-   fix-only diff saved under §4 before doing anything else.
+   when the effect is not confirmed or the run fails — and confirm a fresh §4 snapshot
+   matches the fix-only one taken before re-inserting it, before doing anything else.
    - If verification fails (including a re-measurement that does not confirm the effect):
      first make sure no temporary instrumentation remains (the marker check from §3 prints
      nothing), then confirm via `git status`/`git diff` that only this comment's
