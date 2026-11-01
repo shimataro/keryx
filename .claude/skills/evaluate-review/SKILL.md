@@ -1,6 +1,6 @@
 ---
 name: evaluate-review
-description: Evaluate a GitHub PR review comment or review summary for technical validity. For a discussion (line) comment or a PR review with no associated comments, create an implementation plan for user approval; for a PR review with associated discussion comments, automatically fix and commit each one independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
+description: Evaluate a GitHub PR review comment or review summary for technical validity. For a discussion (line) comment or a PR review with no associated comments, create an implementation plan for user approval, then fix and commit it once approved; for a PR review with associated discussion comments, automatically fix and commit each one independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
 ---
 
 # Evaluate Review
@@ -12,9 +12,10 @@ description: Evaluate a GitHub PR review comment or review summary for technical
 
 Evaluate a GitHub pull-request review comment or review summary for technical validity, then act
 on it. A `discussion_r` comment, or a `pullrequestreview` with no associated line comments,
-produces an implementation plan for the user to approve and commit themselves. A
-`pullrequestreview` that has associated discussion comments is instead fixed and committed
-automatically, one commit per comment — see Step 8. When multiple URLs are given, each one runs
+produces an implementation plan for the user to approve; once approved, the fix is
+implemented, verified, and committed as one commit. A `pullrequestreview` that has associated
+discussion comments is instead fixed and committed automatically after a one-time run
+confirmation, one commit per comment — see Step 8. Either way, every fix ends in a commit. When multiple URLs are given, each one runs
 through this whole flow independently, strictly in the order the URLs were given — see Step 1.
 
 ## Usage
@@ -50,7 +51,7 @@ Check whether one or more URL arguments (space-separated) were passed to the ski
   waiting out `EnterPlanMode`/`ExitPlanMode` approval where Case A applies). Process the items
   **one at a time, strictly in the order the URLs were given** — never reorder, batch, or run
   two items concurrently. Fully finish one URL's Step 8 action before starting the next URL at
-  Step 2. If **only one** URL was given, proceed exactly as before (no cross-URL summary at the
+  Step 2 (for Case A, that includes the post-approval fix and commit). If **only one** URL was given, proceed exactly as before (no cross-URL summary at the
   end of Step 8).
 
 ### Step 2 — Validate URL format
@@ -348,7 +349,7 @@ table summarizing every item this run is evaluating:
 - **Finding summary** — a concise one-line paraphrase (not a verbatim quote) of what the
   comment/review points out.
 - **Validity** / **Confidence** — that item's Step 7 Validity / Confidence.
-- **Next action** — the planned outcome: **Implementation plan** (Case A, Valid/Partially
+- **Next action** — the planned outcome: **Plan → fix & commit** (Case A, Valid/Partially
   Valid + code change needed), **Fix & commit** (Case B, Valid/Partially Valid + code
   change needed), or **No action needed** (Invalid, or valid but no code change required).
 - **Case A**: exactly one row, from the Step 7 evaluation already performed for this
@@ -391,14 +392,20 @@ or in Japanese:
 
 #### Case A — `review_comment`, or `pr_review` with no `associated_comments`
 
-This case is unchanged from before: it always ends in a plan awaiting user approval, and
-the user authors/performs the eventual commit themselves (per the repo's normal "don't commit
-unless asked" rule).
+This case goes through a plan awaiting user approval, and then fixes and commits it. The
+user's approval of the plan (`ExitPlanMode`) is the approval to commit this item's fix — it
+satisfies the repo's "don't commit unless asked" convention, so no further confirmation is
+asked before the commit.
 
 This case always begins by printing the one-row summary table and this item's Step 7
 detail block, per the "Common rule — summary table" above.
 
-If the evaluation is **Valid** or **Partially Valid** **and** the comment/review calls for code changes, proceed:
+If the evaluation is **Valid** or **Partially Valid** **and** the comment/review calls for code
+changes, first apply the same guards as Case B before planning anything: if the current branch
+is a version branch (`v*`), run `/feature-branch fix`; then check `git status --porcelain`, and
+if the working tree is dirty with changes unrelated to this run, warn and skip this URL entirely
+(plan nothing, commit nothing, note "Working tree not clean"; in a multi-URL run, continue to the
+next URL at Step 2). Otherwise proceed:
 
 1. Call `EnterPlanMode`.
 2. Explore the codebase to understand the surrounding architecture.
@@ -413,6 +420,9 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
      after its removal that a fresh snapshot matches it exactly
      (`.claude/etc/temporary-instrumentation.md` §4) — and the
      marker check from §3 (no temporary instrumentation remains).
+   - **Commit Strategy** — exactly one commit for this item, with a **single-line**
+     Conventional Commits message (no body, no trailer), made after verification passes;
+     never pushed.
    - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
 4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
    (`~/.claude/plans/evaluate-review-{id}.md`) as its argument so it targets exactly the
@@ -422,7 +432,18 @@ If the evaluation is **Valid** or **Partially Valid** **and** the comment/review
    verification, sequencing), auto-fixes what it can, and trims the plan to final agreed content.
    If `refine-plan` surfaces a genuine decision it asks the user via `AskUserQuestion`; resolve
    those before proceeding.
-5. Call `ExitPlanMode` to submit the refined plan for user approval.
+5. Call `ExitPlanMode` to submit the refined plan for user approval. If the user rejects it,
+   implement nothing and commit nothing (outcome: `Plan rejected`); revise the plan instead
+   if the user asks for changes.
+6. **Once approved, fix and commit.** Approval can take an unbounded time, so first re-run
+   `git status --porcelain` and confirm it is still clean; if not, treat it like the dirty-tree
+   guard above (skip, note "Working tree not clean"). Then implement the approved plan and
+   verify and commit it exactly as Case B's steps 3–4 below describe — the same verification
+   (including the Apple-target tests and the off-a-Mac "unverified, do not commit" rule), the
+   same temporary-instrumentation re-measurement, removal and §4 snapshot check, the same
+   failure handling (no commit, report the reason), and the same staging discipline ending in
+   **exactly one** single-line commit, never amending an earlier one. Finally output
+   `Committed <sha>` or `Verification failed: <reason>`.
 
 If the review is **Invalid** or no code change is required, state clearly:
 
@@ -434,9 +455,9 @@ Then output the reviewer-facing reply per the Common rule above.
 
 #### Case B — `pr_review` with one or more `associated_comments` (automatic fix & commit)
 
-**Auto-commit only ever happens in this case.** `review_comment` URLs never reach it, and
-always follow Case A instead — the user still approves a plan and performs the commit
-themselves there.
+Unlike Case A, there is no plan to approve: a one-time run confirmation (below) authorizes the
+whole run, after which each comment is fixed and committed on its own. `review_comment` URLs
+never reach this case; they always follow Case A.
 
 Before starting, if the current branch is a version branch (`v*`), run
 `/feature-branch fix` to create and switch to a feature branch before
@@ -522,7 +543,7 @@ For each comment in `associated_comments`, in order:
 
 After every associated comment has been processed, if the review's own `body` text raises
 something not already covered by any associated comment, evaluate and handle that leftover
-portion via Case A instead (Plan Mode — not auto-committed).
+portion via Case A instead (Plan Mode — committed once its plan is approved).
 
 Finally, output a short summary listing, for each associated comment (file:line or comment
 URL), its verdict and outcome: `Committed <sha>` / `Skipped: <reason>` / `Verification
@@ -532,6 +553,6 @@ failed: <reason>`.
 
 If Step 1 received more than one URL, after the **last** one finishes its Step 8 action (Case A
 or Case B, whichever applied to it), output one final cross-URL summary — in the same order the
-URLs were given — listing each URL and its overall outcome (e.g. `Plan submitted for approval`,
-`Committed <sha>` / `N commits`, `No implementation plan needed`, `Invalid`). This is in addition
+URLs were given — listing each URL and its overall outcome (e.g. `Committed <sha>` /
+`N commits`, `Plan rejected`, `Verification failed`, `No implementation plan needed`, `Invalid`). This is in addition
 to, not a replacement for, each URL's own Step 7 evaluation and Step 8 output.
