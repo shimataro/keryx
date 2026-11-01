@@ -89,7 +89,8 @@ Parse the URL. It must match one of the following patterns:
   still goes through a variable (Steps 3 and 6). Shell variables do not survive from one Bash
   call to the next, so run the lines that bind such a variable (`pr_*`, `review_path`) in the
   same call as every command that uses it; a later call repeats the binding lines to re-bind it
-  from the API, never retyping the value.
+  from the API, never retyping the value. The one exception is the PR head SHA 8.6 compares
+  against, which is the value Step 3.1 printed (hex, so written in directly).
 - Determine `comment_type`: `review_comment` for `#discussion_r`, `pr_review` for `#pullrequestreview`.
 - If the URL does **not** match either pattern, output exactly the line below, then end this URL
   (`Invalid URL`):
@@ -110,7 +111,10 @@ into a shell variable and only ever use the variable, never the retyped name.
    pr_branch="$(jq -r '.head.ref' <<<"$pr_json")"
    pr_head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
    pr_head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+   printf 'PR head: %s\n' "$pr_head_sha"
    ```
+
+   The printed `PR head` SHA is the one 8.6 compares against, so it stays in the transcript.
 
    If this fails (e.g. network error, bad credentials), output a warning and proceed to Step 4.
 2. Get the current local branch with `git branch --show-current`. If the directory is not a git
@@ -457,10 +461,11 @@ does, commit nothing and end this URL (`Working tree not clean`).
 
 The PR can also gain commits during that wait. Re-fetch its head with
 `gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'` and compare it with the
-`$pr_head_sha` Step 3 recorded (a hex SHA, so it may be written into the command directly):
+`PR head` SHA Step 3.1 printed (a hex SHA, so it is written into the command directly). Never
+re-bind it from the API here: that returns the new head, and the comparison would always pass.
 
 - **Same SHA**, or the fetched SHA is already in HEAD (`git merge-base --is-ancestor <sha> HEAD`,
-  e.g. it was pushed from this checkout) → continue. If Step 3 recorded no head SHA, only the
+  e.g. it was pushed from this checkout) → continue. If Step 3.1 printed no head SHA, only the
   ancestor check applies.
 - **Otherwise** → commit nothing and end this URL (`PR head moved`): the new commits may already
   change what was evaluated and planned, so tell the user to bring the checkout up to the PR head
