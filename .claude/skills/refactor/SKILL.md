@@ -16,7 +16,7 @@ first step to the last. Work in small, reviewable, independently-revertible
 batches (Survey → confirm → batches). After the one-time scope confirmation
 (Step 3), each approved batch is applied, verified, and **committed
 independently — one commit per batch** — with no further per-batch approval,
-mirroring the `evaluate-review` skill's Case B auto-commit flow, rather than
+mirroring the `evaluate-review` skill's per-item fix & commit flow (Step 8), rather than
 left for the user to commit. This is *refactoring*, not redesign and
 not optimization — if a change alters what the program does, it does not belong
 here.
@@ -218,7 +218,7 @@ confirm or narrow what to apply (e.g. all of it, only `domain/`, or exclude
 This approval is also the **one-time run confirmation**: once given, every
 approved batch below proceeds straight through apply → verify → commit (Step 4)
 with no further per-batch approval gate — the same shape as `evaluate-review`'s
-Case B. Before Step 4 makes its first commit: if the current branch is a
+per-item fix & commit flow (Step 8). Before Step 4 makes its first commit: if the current branch is a
 version branch (`v*`), run `/feature-branch refactor` to create and switch
 to a feature branch first — Step 1's worktree check already ruled out unrelated
 dirty changes.

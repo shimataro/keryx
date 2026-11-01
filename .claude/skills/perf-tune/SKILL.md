@@ -22,7 +22,7 @@ gate → apply one at a time → re-measure. The existing test suite is the orac
 for behavior and must stay green throughout. After the Step 4 gate approval,
 each approved item is applied, re-measured, verified, and **committed
 independently — one commit per item** — with no further per-item approval,
-mirroring the `evaluate-review` skill's Case B auto-commit flow, rather than
+mirroring the `evaluate-review` skill's per-item fix & commit flow (Step 8), rather than
 left for the user to commit.
 
 > Judging whether an optimization crosses a durability, sync-merge, or FTS
@@ -380,7 +380,7 @@ Each of these approvals is also its item's **one-time run confirmation**: the
 bulk Green/Yellow approval covers every item in that batch, and each
 individual Red approval covers that one item — once given, the item proceeds
 straight through apply → re-measure → verify → commit (Step 5) with no further
-approval gate, the same shape as `evaluate-review`'s Case B. Before Step 5
+approval gate, the same shape as `evaluate-review`'s per-item fix & commit flow (Step 8). Before Step 5
 makes its first commit: if the current branch is a version branch (`v*`),
 run `/feature-branch perf` to create and switch to a feature branch first
 — Step 1's worktree check already ruled out unrelated dirty changes.
