@@ -138,7 +138,8 @@ language it arrives in — severity（重要度 / 重大度）, High（高）, #
 
 Before fixing a `Medium`- or `Low`-confidence finding — however it was selected (by number, by an
 explicit request, or in bulk) — confirm it per `.claude/etc/temporary-instrumentation.md`; when
-delegating it, tell `implementer` it is unconfirmed.
+delegating it, tell `implementer` it is unconfirmed. When several findings are selected, confirm
+every Medium/Low one before starting any fix, so no probe has to go into a file a fix already changed.
 Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
 number / finding / outcome (fixed, or not addressed with the reason — a finding the evidence
 disproved is "not addressed: disproved by evidence", with what was observed or checked), and if a fix could

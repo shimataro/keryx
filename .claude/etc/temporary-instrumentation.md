@@ -37,7 +37,9 @@ keeps it, it is temporary code under §3.
 ## 3. Rules for the temporary code
 
 - Insert it only into files with no uncommitted changes, so removing it can never take pre-existing
-  work with it. The one exception is §4's post-fix re-measurement.
+  work with it. The one exception is §4's post-fix re-measurement. When the claim is about a file
+  that already has uncommitted changes, observe it from a new file instead (a reproducing test,
+  §1 option 1), or ask the user.
 - Tag every inserted line or block with the marker comment `TEMP-INSTRUMENTATION`, so a leftover
   from an interrupted run can be found with `grep` and removed.
 - **Always remove it** once the evidence is in, and confirm with `git status --porcelain` /
