@@ -41,7 +41,7 @@ Every place that reports a result uses only these labels.
 | Item | `Verification failed: <reason>` | Fix reverted after verification failed (8.6) |
 | Item / URL | `Plan rejected` | The user rejected the plan (8.5) |
 | Item / URL | `Working tree not clean` | Unrelated uncommitted changes at 8.4 or 8.6 |
-| URL | `PR head moved` | The PR head is not contained in HEAD at 8.6 (e.g. it advanced during plan approval) |
+| URL | `PR head moved` | At 8.6 the PR head differs from the one Step 3 recorded and is not contained in HEAD (e.g. it advanced during plan approval) |
 | URL | `Invalid URL` | Step 2 |
 | URL | `Fetch failed: <reason>` | A Step 4 request failed |
 | URL | `Not in this PR` | The fetched comment/review belongs to another PR (Step 4) |
