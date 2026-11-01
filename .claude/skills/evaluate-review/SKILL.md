@@ -481,9 +481,11 @@ Then, for each **Fix & commit** item, in item order:
    - If verification fails (including a re-measurement that does not confirm the effect):
      first make sure no temporary instrumentation remains (the marker check from §3 prints
      nothing), then confirm via `git status`/`git diff` that only this item's intended changes
-     are present before reverting, so a revert cannot destroy pre-existing work in the same
-     file; then do not commit. Note the failure (with the reason) for the closing summary, and
-     move on to the next item.
+     are present, so the revert cannot destroy pre-existing work in the same file. Then
+     **revert that one item** — `git restore -- <files>` for the tracked files it changed, and
+     delete any untracked file it created — and confirm `git status --porcelain` is back to the
+     clean baseline, so nothing of it reaches the next item. Do not commit. Note the failure
+     (with the reason) for the closing summary, and move on to the next item.
 3. Commit: review `git status --porcelain` / `git diff`, then run the marker check from
    `.claude/etc/temporary-instrumentation.md` §3 and confirm it prints nothing **before staging
    anything**. Then stage **only the files, and only the hunks, touched by this item's fix** —
