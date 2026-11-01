@@ -21,9 +21,10 @@ Run the caller's tests for the item. In addition, the JVM build never compiles t
 when an item touches:
 
 - `shared/src/commonMain` (including `sqldelight/`), `shared/src/commonTest`, `shared/src/apple*`,
-  `shared/src/macos*` or `shared/src/ios*`, also run `./gradlew :shared:macosArm64Test` — these
-  source sets also compile for Kotlin/Native, and `commonTest` runs natively too. When it touches
-  `shared/src/ios*`, run `:shared:iosSimulatorArm64Test` as well;
+  `shared/src/macos*` or `shared/src/ios*`, also run
+  `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` — these source sets compile for
+  both Kotlin/Native targets and `commonTest` runs natively on both, while `macosMain` and
+  `iosMain` hold separate actuals, so a change can break one target while the other still passes;
 - `appleApp/`, also run `xcodebuild -scheme Keryx -destination 'platform=macOS' test`.
 
 Off a Mac, an item touching an Apple-only source set (`apple*`, `macos*`, `ios*`) or `appleApp/`
