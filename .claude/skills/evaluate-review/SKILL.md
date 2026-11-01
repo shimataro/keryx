@@ -1,21 +1,20 @@
 ---
 name: evaluate-review
-description: Evaluate a GitHub PR review comment or review summary for technical validity. For a discussion (line) comment or a PR review with no associated comments, create an implementation plan for user approval; for a PR review with associated discussion comments, automatically fix and commit each one independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
+description: Evaluate a GitHub PR review comment or review summary for technical validity. Each finding (a discussion comment, or a review's line comments and body) is evaluated on its own; the ones needing a change go into one implementation plan for user approval, and once approved each is fixed, verified and committed independently. Accepts multiple URLs, processed one at a time in the order given. Invoke with /evaluate-review <url> [<url> ...].
 ---
 
 # Evaluate Review
 
 > This skill involves **high-accuracy judgments** — deciding whether a reviewer's claim is
-> actually correct against this codebase, and auto-committing fixes for the ones that are.
+> actually correct against this codebase, and committing fixes for the ones that are.
 > **Run it in an opus session.** Skills inherit the caller session's model and cannot pin
-> one in frontmatter, so verify the session model is opus before executing.
+> one in frontmatter, so verify the session model is opus before executing;
+> if it is not, tell the user and ask whether to continue.
 
 Evaluate a GitHub pull-request review comment or review summary for technical validity, then act
-on it. A `discussion_r` comment, or a `pullrequestreview` with no associated line comments,
-produces an implementation plan for the user to approve and commit themselves. A
-`pullrequestreview` that has associated discussion comments is instead fixed and committed
-automatically, one commit per comment — see Step 8. When multiple URLs are given, each one runs
-through this whole flow independently, strictly in the order the URLs were given — see Step 1.
+on it: each URL is broken into **items** (Step 4), every item is evaluated on its own, and the
+ones needing a change are planned, approved once, then fixed, verified and committed one commit
+per item (Step 8).
 
 ## Usage
 
@@ -31,27 +30,49 @@ Examples:
 /evaluate-review https://github.com/shimataro/keryx/pull/3#discussion_r3618156689 https://github.com/shimataro/keryx/pull/3#pullrequestreview-2183723456
 ```
 
+## Outcomes
+
+Every place that reports a result uses only these labels — plus the suffix
+` (Apple targets not verified locally)` on `Committed <sha>` when `.claude/etc/per-item-commit.md`
+§2 calls for it.
+
+| Scope | Label | When |
+| --- | --- | --- |
+| Item | `Committed <sha>` | Fixed, verified and committed (8.6) |
+| Item | `No action needed` | Invalid, valid but needing no code change, unconfirmed (Step 7), or a review body covered by the line comments (Step 7) |
+| Item | `Verification failed: <reason>` | Fix reverted after verification failed (8.6) |
+| Item / URL | `Plan rejected` | The user rejected the plan (8.5) |
+| Item / URL | `Working tree not clean` | Uncommitted changes at 8.4 or 8.6 |
+| URL | `PR head moved` | At 8.6 the PR head differs from the one Step 3 recorded and is not contained in HEAD (e.g. it advanced during plan approval) |
+| URL | `Invalid URL` | Step 2 |
+| URL | `Fetch failed: <reason>` | A Step 4 request failed |
+| URL | `Not in this PR` | The fetched comment/review belongs to another PR (Step 4) |
+| URL | `No actionable feedback` | A review with no body and no line comments (Step 4) |
+| URL | `No implementation plan needed` | No item needs a fix (8.3) |
+| URL | `N committed, M failed` | Summary of a URL whose plan ran (8.6) |
+| Run | `Cancelled` | The user cancelled at Step 3 |
+
+**End this URL** (used throughout): print the reason, record the URL's outcome from the table,
+and continue with the next URL at Step 2. After the last URL, print the cross-URL summary (see
+the end of Step 8) if more than one URL was given.
+
 ## Steps
 
 ### Step 1 — Validate presence of argument(s)
 
 Check whether one or more URL arguments (space-separated) were passed to the skill.
 
-- **If none**: prompt the user to provide a GitHub PR review URL. Ask:
+- **If none**: ask the user for one, then proceed to Step 2 with it:
 
   ```text
   Please provide a GitHub PR review URL.
   Usage: /evaluate-review <github-pr-review-url>
   ```
 
-  Wait for the user to respond with a URL, then use that URL and proceed to Step 2.
-- **If one or more**: treat each URL as a separate item and run it through Steps 2–8 as its own
-  independent pass — its own branch check, fetch, evaluation, and Step 8 action (including
-  waiting out `EnterPlanMode`/`ExitPlanMode` approval where Case A applies). Process the items
-  **one at a time, strictly in the order the URLs were given** — never reorder, batch, or run
-  two items concurrently. Fully finish one URL's Step 8 action before starting the next URL at
-  Step 2. If **only one** URL was given, proceed exactly as before (no cross-URL summary at the
-  end of Step 8).
+- **If one or more**: run each URL through Steps 2–8 as its own independent pass — its own
+  branch check, fetch, evaluation, plan approval, fixes and commits. Process them **one at a
+  time, strictly in the order given** — never reorder, batch, or run two URLs concurrently —
+  and fully finish one URL's Step 8 before starting the next at Step 2.
 
 ### Step 2 — Validate URL format
 
@@ -62,140 +83,166 @@ Parse the URL. It must match one of the following patterns:
 2. **PR review** (overall summary):
    `https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<review_id>`
 
-- Extract `owner`, `repo`, `pull_number`, and the trailing numeric ID.
+- Extract `owner`, `repo`, `pull_number`, and the trailing numeric ID. Each must match its
+  character set in full — `owner` `[A-Za-z0-9-]+`, `repo` `[A-Za-z0-9._-]+`, `pull_number` and
+  the ID `[0-9]+` — or the URL does not match. Only these validated values and GitHub-generated
+  IDs and SHAs from the API (digits / hex only, e.g. `{comment_id}`, `{commit_id}`) are written
+  straight into commands: those character sets hold no shell syntax. Anything PR-controlled
+  still goes through a variable (Steps 3 and 6). Shell variables do not survive from one Bash
+  call to the next, so run the lines that bind such a variable (`pr_*`, `review_path`) in the
+  same call as every command that uses it; a later call repeats the binding lines to re-bind it
+  from the API, never retyping the value. The one exception is the PR head SHA 8.6 compares
+  against, which is the value Step 3.1 printed (hex, so written in directly).
 - Determine `comment_type`: `review_comment` for `#discussion_r`, `pr_review` for `#pullrequestreview`.
-- If the URL does **not** match either pattern, output exactly:
+- If the URL does **not** match either pattern, output exactly the line below, then end this URL
+  (`Invalid URL`):
 
   ```text
   The provided URL does not appear to be a GitHub PR review comment or review link.
   ```
 
-  Mark this URL as `Invalid` for the closing summary and stop only *this* URL's processing. If
-  more URLs remain (Step 1), continue to the next one at Step 2; only halt the whole run if this
-  was the sole/last URL.
-
 ### Step 3 — Verify branch alignment
 
-1. Fetch the PR's head branch name via GitHub API:
+The PR's head branch name is PR-controlled, like a review `path` (Step 6): bind it from the API
+into a shell variable and only ever use the variable, never the retyped name.
+
+1. Fetch the PR's head branch, repository and commit:
 
    ```bash
-   gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.ref'
+   pr_json="$(gh api repos/{owner}/{repo}/pulls/{pull_number})"
+   pr_branch="$(jq -r '.head.ref' <<<"$pr_json")"
+   pr_head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+   pr_head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+   printf 'PR head: %s\n' "$pr_head_sha"
    ```
 
-   - If this command fails (e.g., network error, bad credentials), output a warning and proceed to Step 4.
-2. Get the current local branch:
+   The printed `PR head` SHA is the one 8.6 compares against, so it stays in the transcript.
 
-   ```bash
-   git branch --show-current
-   ```
-
-   - If the current directory is not a git repository, output a warning and proceed to Step 4.
-3. Compare the two branch names.
-   - **If they match**, proceed to Step 4.
-   - **If they differ**:
-     1. Output a warning message indicating the mismatch (e.g., `PR branch: feat/foo, Current branch: feat/bar`).
-     2. Check for uncommitted changes (`git status --porcelain`). If dirty, note that changes will be stashed before switching and restored afterward.
-     3. Prompt the user via `AskUserQuestion` with options:
-        - **Switch to PR branch** (Recommended)
-        - **Stay on current branch**
-        - **Cancel evaluation**
-     4. If the user chooses **Switch**:
-        - If the branch does not exist locally, run `git fetch origin <pr_branch>` followed by `git switch <pr_branch>`.
-        - If the working tree is dirty, run `git stash push -m "evaluate-review auto-stash"`, then `git switch <pr_branch>`, then `git stash pop`.
-        - After switching, proceed to Step 4.
-     5. If the user chooses **Stay**, proceed to Step 4 with the warning still displayed.
-     6. If the user chooses **Cancel**, stop immediately.
+   If this fails (e.g. network error, bad credentials), output a warning and proceed to Step 4.
+2. Get the current local branch with `git branch --show-current`. If the directory is not a git
+   repository, output a warning and proceed to Step 4.
+3. If the branches match, go to 4. Otherwise output the mismatch
+   (`PR branch: <pr_branch>, Current branch: <current>`), then:
+   - **Fork PR** (`$pr_head_repo` is not `{owner}/{repo}`): `origin` does not carry that branch,
+     so do not offer to switch; warn that the evaluation runs against the current branch and
+     go to 4.
+   - **Otherwise** ask via `AskUserQuestion`. If `git status --porcelain` is not empty, say in the
+     question that those uncommitted changes travel with a switch and will make 8.4 skip this URL.
+     Options:
+     - **Switch to PR branch** (Recommended) — `git fetch origin "$pr_branch"`, then
+       `git switch "$pr_branch"`, then go to 4. `git switch` carries uncommitted changes along
+       (no stash); if it refuses because of a conflict, report that and go to 4 on the
+       current branch.
+     - **Stay on current branch** — go to 4 with the warning still displayed.
+     - **Cancel evaluation** — stop the whole run (`Cancelled`); remaining URLs are not processed.
+4. **Head check** — the branch name alone does not prove the checkout carries the PR's code, and
+   a stale one would receive Step 8's fixes against the wrong revision. If `$pr_head_sha` is not
+   present locally (`git cat-file -e "$pr_head_sha^{commit}"` fails) and this is not a fork PR,
+   run `git fetch origin "$pr_branch"` first. Then:
+   - `git merge-base --is-ancestor "$pr_head_sha" HEAD` succeeds (HEAD is the PR head or ahead
+     of it) → proceed to Step 4.
+   - Otherwise (behind, diverged, or the commit is not available) output the state and ask via
+     `AskUserQuestion`:
+     - **Fast-forward to the PR head** (Recommended) — offered only when the current branch is
+       `$pr_branch` (the names matched, or the switch succeeded) and HEAD is an ancestor of
+       `$pr_head_sha` (simply behind): `git merge --ff-only "$pr_head_sha"`, then proceed to
+       Step 4. If git refuses (e.g. uncommitted changes in the way), report that and ask again
+       without this option. Never offer it after **Stay**, on a fork PR or after a failed
+       switch: the checkout is then a branch the user chose to keep, and must not be moved.
+     - **Continue on the current HEAD** — proceed to Step 4 with a warning that fixes will be
+       made against older code and may conflict with the PR head when pushed.
+     - **Cancel evaluation** — stop the whole run (`Cancelled`).
 
 ### Step 4 — Fetch the comment or review
 
-Branch the next steps based on `comment_type`.
+Any failed request below: output the error and end this URL (`Fetch failed: <reason>`).
 
-#### If `review_comment` (line-level comment)
+**Line-comment fields** — kept for every line comment fetched here: `id`, `html_url`, `body`,
+`path`, `line` / `original_line` (ending line), `start_line` / `original_start_line` (starting
+line of a multi-line comment), `side` / `start_side` (`LEFT` or `RIGHT`), `diff_hunk`,
+`original_commit_id` and `commit_id`. The reviewed revision is `original_commit_id` (the commit
+the comment was left on), with `original_line` / `original_start_line` its position there — on
+the `RIGHT` side only: a `LEFT` line is a deleted line, which exists only on the diff's base side;
+GitHub moves `commit_id` and `line` / `start_line` along as the PR advances, so they give the
+comment's current position, not what the reviewer saw.
 
-Use the GitHub CLI to retrieve the comment:
+**PR membership check** — right after fetching the comment or review, and before anything else,
+confirm its `pull_request_url` equals
+`https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`. If not, output the block below
+(`<kind>` is `comment` or `review`) and end this URL (`Not in this PR`):
+
+```text
+The fetched <kind> does not belong to the requested PR.
+Expected: <expected_url>
+Got:      <pull_request_url>
+```
+
+#### If `review_comment`
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/comments/{comment_id}
 ```
 
-- If the request fails (e.g., 404), output the error message and stop.
-- From the JSON response, extract:
-  - `body` — the review text
-  - `path` — file under review
-  - `line` / `original_line` — ending line of the comment
-  - `start_line` / `original_start_line` — starting line of the comment (for multi-line comments)
-  - `side` / `start_side` — side of the diff (`LEFT` or `RIGHT`)
-  - `diff_hunk` — diff context provided by GitHub
-  - `commit_id` — commit SHA at which the comment was left
-- **Verify the comment belongs to the requested PR.** Extract `pull_request_url` from the JSON response and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}` (using the values parsed in Step 2).
-  If it does **not** match, output:
+Run the PR membership check, then keep the line-comment fields.
 
-  ```text
-  The fetched comment does not belong to the requested PR.
-  Expected: <expected_url>
-  Got:      <pull_request_url>
-  ```
-
-  and stop immediately.
-
-#### If `pr_review` (overall review summary)
-
-Use the GitHub CLI to retrieve the review:
+#### If `pr_review`
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}
 ```
 
-- If the request fails (e.g., 404), output the error message and stop.
-- From the JSON response, extract:
-  - `body` — the review text
-  - `state` — `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, etc.
-  - `commit_id` — commit SHA at which the review was submitted
-  - `user` — reviewer login
-  - `submitted_at` — ISO-8601 timestamp
-
-1. Fetch the review's associated line comments:
+1. Run the PR membership check, then keep `body`, `state`, `commit_id`, `user` and `submitted_at`.
+2. List the review's line comments:
 
    ```bash
    gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments
    ```
 
-2. If the response is not empty, retain them as `associated_comments`. Preserve each comment's `id`, `body`, `path`, `line`/`original_line`, `start_line`/`original_start_line`, `side`/`start_side`, `diff_hunk`, and `commit_id`.
-3. If `body` is null or empty AND there are no associated comments, output that the review has no actionable feedback and stop.
+   This endpoint omits `line` / `original_line`, `start_line` / `original_start_line` and
+   `side` / `start_side`, so fetch each listed comment again by its `id` (digits, written
+   directly) and keep the line-comment fields from that response as `associated_comments`:
 
-- **Verify the review belongs to the requested PR.** Extract `pull_request_url` and confirm it matches `https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}`.
-  If it does **not** match, output:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/comments/{id}
+   ```
 
-  ```text
-  The fetched review does not belong to the requested PR.
-  Expected: <expected_url>
-  Got:      <pull_request_url>
-  ```
+3. If `body` is empty and there are no associated comments, end this URL
+   (`No actionable feedback`).
 
-  and stop immediately.
+#### Normalize into items
+
+Everything after this step works on a list of **items**, so a single comment and a review with
+many comments run through the same flow — they differ only in how many items there are.
+
+- `review_comment` → one **line-comment item** (the fetched comment).
+- `pr_review` → one **line-comment item** per entry in `associated_comments`, in API order, then
+  one **review-body item** at the end if the review's `body` is not empty.
+
+Steps 5–7 branch on the item's kind (line comment / review body), never on `comment_type`.
 
 ### Step 5 — Gather thread context
 
-A review comment or review is often part of a longer conversation. Reconstruct the surrounding discussion so the evaluation accounts for prior clarification or rebuttal.
+A review comment or review is often part of a longer conversation. Reconstruct it so the
+evaluation accounts for prior clarification or rebuttal — in particular whether earlier rounds
+already accepted, rejected or refined the point, whether the item is a follow-up that narrows or
+shifts the request, and any author push-back or reviewer concession.
 
-#### If `review_comment`
+#### Line-comment items
 
-1. Fetch **all** review comments on the PR:
+1. Fetch **all** review comments on the PR — once per URL, shared by every line-comment item:
 
    ```bash
    gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/comments
    ```
 
-2. Build the reply graph using the `in_reply_to_id` field. Each comment either starts a thread (`in_reply_to_id` is absent) or replies to another.
-3. Identify which thread contains the target `comment_id`. Using the reply graph from step 2, follow the `in_reply_to_id` chain backward from the target comment to locate the root of the thread. Then collect **all** comments in that thread—both ancestors and descendants—and present the complete conversation in chronological order.
-4. Include this conversation history in your analysis. Pay attention to:
-   - Whether earlier rounds already accepted, rejected, or refined the point.
-   - Whether the target comment is a follow-up that narrows or shifts the request.
-   - Any author push-back or reviewer concession that changes the expected outcome.
+2. Build the reply graph from `in_reply_to_id` (absent on a thread's first comment).
+3. For each item, follow the chain back to the thread's root, collect **all** comments in that
+   thread (ancestors and descendants), and include them in chronological order in the item's
+   analysis.
 
-#### If `pr_review`
+#### Review-body item
 
-PR review summaries do not use `in_reply_to_id`, so build context from chronology instead:
+Review summaries have no `in_reply_to_id`, so build context from chronology instead:
 
 1. Fetch **all** reviews on the PR:
 
@@ -203,111 +250,124 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
    gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews
    ```
 
-2. Sort by `submitted_at` to locate chronologically adjacent reviews from the same reviewer (or from any reviewer) that provide context.
-3. Include these adjacent reviews in your analysis. Note especially:
-   - Whether a previous review already covered the same points.
-   - Whether the author has already responded or pushed back.
-   - Whether the target review is a follow-up that narrows or shifts earlier requests.
-
-- **If this review has `associated_comments` from Step 4**:
-  1. Fetch **all** review comments on the PR once and build the reply graph using the `in_reply_to_id` field.
-  2. For each associated comment, resolve its thread against the pre-built graph: locate the thread containing the comment's `id`, then collect the full thread (ancestors and descendants) in chronological order.
-  3. Include all gathered thread conversations in the evaluation context. The evaluation must consider the specific bodies, file paths, and line ranges of the associated comments, not only the overall review chronology.
+2. Sort by `submitted_at` and include the chronologically adjacent reviews (from the same reviewer
+   or any other) in the item's analysis.
 
 ### Step 6 — Gather code context
 
-#### If `review_comment`
+**Never write a review-provided path into a command** — not as a bare token, not inside quotes,
+not in a jq filter. A path is PR-controlled and can contain `'`, `$(`, a backtick or `;`, which
+would end a quoted string or the jq expression and run as shell syntax. Bind it from the API
+response into the shell variable `review_path` and use only that variable afterwards. (Not
+`path` — in zsh, `path` is tied to `$PATH`, so assigning it breaks every later command.)
 
-1. Use the `commit_id` extracted in Step 4 to load the code exactly as it existed when the comment was left.
-2. If the reviewed file exists in the local working tree **and matches `commit_id`**, read it for full context.
-3. Otherwise, fetch the file content at `commit_id`:
+**Reading a file at a commit** — given `$review_path` and a `commit_id`:
 
-   ```bash
-   gh api repos/{owner}/{repo}/contents/{path}?ref={commit_id}
-   ```
+```bash
+if git cat-file -e "{commit_id}^{commit}" 2>/dev/null; then
+  git show "{commit_id}:$review_path"
+else
+  enc="$(jq -rn --arg p "$review_path" '$p | split("/") | map(@uri) | join("/")')"
+  gh api "repos/{owner}/{repo}/contents/$enc?ref={commit_id}" --jq '.content' | base64 --decode
+fi
+```
 
-   **URL-encode the `{path}` segment** before interpolation (e.g. space → `%20`, `#` → `%23`, `?` → `%3F`) while preserving `/` between directory components. Decode the `content` field from base64 if necessary.
-4. Fetch the diff for that commit to understand the change being reviewed. **Never interpolate
-   the review-provided `{path}` into a jq filter string or an unquoted shell token** — a path
-   containing a quote or backtick could otherwise break the jq expression or the constructed
-   shell command. Bind it through a quoted shell variable and jq's `--arg` instead:
+#### Line-comment items
 
-   ```bash
-   path='{path}'
-   gh api repos/{owner}/{repo}/commits/{commit_id} | jq --arg path "$path" '.files[] | select(.filename == $path) | .patch'
-   ```
+For each item, using **that item's own** `original_commit_id`, path and `original_*` line range
+(items on the same file but different commits are handled separately):
 
-   (The `diff_hunk` from Step 4 already provides the immediate surrounding context.)
-5. **Separately**, fetch the current PR head SHA and compare it to `commit_id`:
-
-   ```bash
-   gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
-   ```
-
-   If the head has advanced, briefly check whether the issue noted in the review comment has already been fixed in a later commit. If so, note this in the evaluation reasoning.
-
-#### If `pr_review`
-
-There is no single `path` or `line`. Gather broader context from the PR:
-
-1. Fetch all files changed in the PR:
+1. Bind its path — `{comment_id}` is the item's own `id`:
 
    ```bash
-   gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files --jq '.[] | {filename, status, patch}'
+   review_path="$(gh api repos/{owner}/{repo}/pulls/comments/{comment_id} --jq '.path')"
    ```
 
-2. If the review body explicitly names specific files or functions, also fetch the content of those files at `commit_id`:
+2. Read the file at the item's `original_commit_id` (block above, with it as `{commit_id}`). If
+   `side` (or, for a multi-line comment, `start_side`) is `LEFT`, the commented lines are deleted
+   ones that this file no longer contains: do not look them up by number here — find them in
+   `diff_hunk`, and use this file only for the surrounding code.
+3. Fetch that commit's diff for the file (the item's `diff_hunk` already gives the immediate
+   context; an empty result means that commit did not touch the file, so rely on `diff_hunk`):
 
    ```bash
-   gh api repos/{owner}/{repo}/contents/{path}?ref={commit_id}
+   gh api repos/{owner}/{repo}/commits/{original_commit_id} | jq --arg path "$review_path" '.files[] | select(.filename == $path) | .patch'
    ```
 
-   (URL-encode `{path}` as above.)
-3. Fetch the current PR head SHA and compare it to `commit_id`:
+#### Review-body item
+
+There is no single path or line, so gather broader context:
+
+1. Fetch all files changed in the PR, numbered from 0 (`--paginate --jq` would filter each page
+   on its own, so the pages are joined with `jq -s add` first):
 
    ```bash
-   gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
+   gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files | jq -s 'add | to_entries[] | {index: .key, filename: .value.filename, status: .value.status, patch: .value.patch}'
    ```
 
-   If the head has advanced, briefly check whether the issues noted in the review have already been addressed in a later commit. If so, note this in the evaluation reasoning.
+2. If the body names specific files or functions, read each of those files at the review's
+   `commit_id` (block above), binding `review_path` by its step 1 `index` (digits, so written
+   directly as `{index}`) in the same Bash call — never retyping the filename from the review
+   body or from step 1's output:
 
-- **If this review has `associated_comments` from Step 4**:
-  1. For each associated comment, apply the `review_comment` code-context gathering (as described in the `review_comment` section above): load the file at **that comment's own `commit_id`**, fetch the commit diff for that file at that same SHA, and check whether the current PR head has already fixed the issue noted in that comment. If multiple associated comments reference the same file path but different commits, process each comment separately.
-  2. The evaluation must specifically assess the code at the line ranges indicated by the associated comments, using the same accuracy, relevance, and constructiveness criteria applied to direct `review_comment` evaluations.
+   ```bash
+   review_path="$(gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files | jq -rs --argjson i {index} 'add | .[$i].filename')"
+   printf 'review_path: %s\n' "$review_path"
+   ```
+
+   The list is fetched again here, so confirm the printed `review_path` is the `filename` step 1
+   showed for that index; if not, the PR changed in between — start this item's step 1 again.
+
+#### Every item
+
+Fetch the current PR head SHA once per URL:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
+```
+
+If the head has advanced past the revision an item was raised on — a line comment's
+`original_commit_id`, a review body's `commit_id` (a review's own `commit_id` stays at the
+reviewed commit) — briefly check whether the issue that item raises has already been fixed in a
+later commit. If so, note this in its evaluation reasoning.
 
 ### Step 7 — Evaluate validity
 
-Analyze the review comment or review summary against the code and project conventions. Consider:
+Evaluate **every item independently** against the code and project conventions, producing a
+separate verdict per item. Consider:
 
 1. **Accuracy** — Is the factual claim correct? (e.g., a reported bug must actually exist)
-2. **Relevance** — Does the comment apply to the code at the stated location?
-   - For `review_comment`: the specific line(s).
-   - For `pr_review`: the overall PR diff (or the specific files/areas explicitly named in the review body).
+2. **Relevance** — Does the item apply to the code at the stated location?
+   - Line-comment item: the specific line(s).
+   - Review-body item: the overall PR diff (or the specific files/areas explicitly named in the body).
 3. **Constructiveness** — Does it clearly identify a problem or suggest a valid improvement?
-   - For `pr_review`: if the body is vague or only asks questions without requesting changes, the evaluation may conclude that no code change is required.
+   - Review-body item: if the body is vague or only asks questions without requesting changes, the evaluation may conclude that no code change is required.
 4. **Project conventions** — Does it align with the project's documented rules (check `.claude/CLAUDE.md` and `docs/*.md`)?
-5. **Language / library / framework / external-service correctness** — When the comment concerns usage of a language runtime, library, framework, or external service (e.g., REST API, cloud SDK), verify the claim against the **official documentation of the exact version the project uses**. Prefer official docs (API reference, language spec, release notes, vendor API docs) over blog posts or Stack Overflow. If the docs do not cover the point, inspect the source code or make a controlled test request directly. Do not rely on memory or general assumptions.
-6. **Regression / security / data-integrity risk** — If the review proposes or implies a code change, consider whether adopting it could break existing behavior (regression), weaken security boundaries, or corrupt data. Focus especially on:
+5. **Language / library / framework / external-service correctness** — When the item concerns usage
+   of a language runtime, library, framework, or external service (e.g., REST API, cloud SDK),
+   verify the claim against the **official documentation of the exact version the project uses**.
+   Prefer official docs (API reference, language spec, release notes, vendor API docs) over blog
+   posts or Stack Overflow. If the docs do not cover the point, inspect the source code or make a
+   controlled test request directly. Do not rely on memory or general assumptions.
+6. **Regression / security / data-integrity risk** — If the item proposes or implies a code change, consider whether adopting it could break existing behavior (regression), weaken security boundaries, or corrupt data. Focus especially on:
    - **Security**: authorization checks, input validation, secrets handling, injection vectors, and race conditions (e.g., TOCTOU).
    - **Data integrity**: transaction boundaries, unique / foreign-key constraints, merge semantics (`DatabaseMerger`, `MergeSql`, `SyncRepository`), FTS index consistency (`articles_fts` lifetime rules), and logical-deletion timestamps.
    - Verify the proposal does not violate documented critical constraints (e.g., `.claude/CLAUDE.md` "Critical constraints", `docs/sync-architecture.md`).
 
-For `pr_review` with `associated_comments`, apply these same criteria **independently to
-each associated comment**, producing a separate verdict per comment — not only a single
-verdict for the review as a whole. See Step 8 for how these per-comment verdicts are used.
+A review-body item is evaluated only for what it raises **beyond** the review's line-comment
+items. If everything it says is already covered by them, its verdict is **No action needed —
+covered by the line comments**, and it gets no reviewer-facing reply of its own (Step 8).
 
-For every item evaluated — the single comment/review for Case A, or each associated
-comment independently for Case B — record its **Validity** ([Valid / Invalid / Partially
-Valid]), **Confidence** ([High / Medium / Low]), and **Reasoning**. Do not print this
-immediately: Step 8 defines exactly when and how it is surfaced — first as a row in the
-run's summary table ("Common rule — summary table"), then as this per-item detail block,
-in this exact format:
+For every item, record its **Validity** (Valid / Invalid / Partially Valid), **Confidence**
+(High / Medium / Low, as defined in `.claude/etc/review/common.md` §6), and **Reasoning**. Do not
+print this immediately: Step 8 surfaces it, first as a row in the summary table, then as this
+per-item detail block:
 
 ```markdown
 ## Evaluation
 
-**URL**: <the comment/review URL being evaluated>
-**Finding summary**: <one-line paraphrase of the comment/review's point, not a verbatim quote>
+**URL**: <the item's Comment URL — see 8.1>
+**Finding summary**: <one-line paraphrase of the item's point, not a verbatim quote>
 **Validity**: [Valid / Invalid / Partially Valid]
 **Confidence**: [High / Medium / Low]
 
@@ -315,193 +375,153 @@ in this exact format:
 [Your analysis. Cite specific lines or docs where applicable.]
 ```
 
+#### Confirming Medium / Low confidence with temporary instrumentation
+
+Any item whose Confidence is **Medium** or **Low** — whatever its Validity, so an Invalid
+verdict is not dismissed on a guess either — must be backed by evidence that directly
+observes the claim before its verdict is final. Gather it, and handle any temporary code,
+per `.claude/etc/temporary-instrumentation.md` (read it before inserting anything); it keeps
+Step 8's clean-tree guard intact by requiring every probe to be removed first.
+
+- **Where the outcome goes**: update the item's Validity / Confidence and record the evidence
+  (what was inserted, what was observed, any mock and why it does not affect the conclusion —
+  or why the comment cannot be observed at runtime) in its Reasoning.
+- **A reproducing test** is temporary at this stage and is removed with the other probes; if
+  it would serve as the fix's test, include it in that item's section of the Step 8 plan.
+- **Unconfirmed** (`.claude/etc/temporary-instrumentation.md` §2): the item's Next action is
+  **No action needed**, its Reasoning records what was tried, and its reviewer reply (8.2) says
+  the point could not be confirmed and what evidence would settle it.
+
 ### Step 8 — Take action
 
-Branch on `comment_type` and, for `pr_review`, on whether `associated_comments` (gathered in
-Step 4) is non-empty, into one of two cases below (Case A / Case B).
+Every URL goes through the same steps below, whether it has one item or many.
 
-**Common rule — summary table (always, printed before any per-item detail)**: Before
-printing any item's Step 7 detail block or taking any action on it, print one Markdown
-table summarizing every item this run is evaluating:
+#### 8.1 — Summary table
+
+Before printing any item's detail block or taking any action, print one Markdown table with a
+row per item, in item order:
 
 | Comment URL | Finding summary | Validity | Confidence | Next action |
 | --- | --- | --- | --- | --- |
 
-- **Comment URL** — the target URL for Case A (the `discussion_r...`/`pullrequestreview-...`
-  URL given to the skill); for Case B, each associated comment's own `html_url` (fall back
-  to its `path`:`line`/`original_line` if no URL is available).
-- **Finding summary** — a concise one-line paraphrase (not a verbatim quote) of what the
-  comment/review points out.
+- **Comment URL** — for a line-comment item, its `html_url` (fall back to `path`:`line` /
+  `original_line` if missing); for a review-body item, the `pullrequestreview-...` URL.
+- **Finding summary** — a concise one-line paraphrase (not a verbatim quote) of the item's point.
 - **Validity** / **Confidence** — that item's Step 7 Validity / Confidence.
-- **Next action** — the planned outcome: **Implementation plan** (Case A, Valid/Partially
-  Valid + code change needed), **Fix & commit** (Case B, Valid/Partially Valid + code
-  change needed), or **No action needed** (Invalid, or valid but no code change required).
-- **Case A**: exactly one row, from the Step 7 evaluation already performed for this
-  comment/review.
-- **Case B**: one row per entry in `associated_comments`, in that order, from the verdicts
-  Step 7 already produced for every associated comment (Step 7 evaluates all of them before
-  Step 8 begins — see its "apply independently to each associated comment" rule). No
-  comment is acted on until every row is printed.
+- **Next action** — **Fix & commit** (Valid/Partially Valid + code change needed) or
+  **No action needed**.
 
-This table is a preview of the plan, not the final outcome — Case B's closing summary
-still reports what actually happened to each comment (`Committed <sha>` / `Skipped` /
-`Verification failed`), which can differ from Next action if a fix later fails verification.
+This table is a preview; 8.7 reports what actually happened to each item.
 
-**Common rule — reviewer-facing reply for "no change needed" outcomes**: whenever a comment or
-review (or, in Case B, an individual associated comment) is judged **Invalid**, or **Valid**/
-**Partially Valid** but requiring no code change, in addition to whatever else this step
-specifies, output a suggested reply comment for the reviewer as a fenced ```markdown``` code
-block so the user can copy it directly into GitHub — this skill never posts it automatically.
-Compose it from the Step 7 **Reasoning**, rewritten as plain, polite prose suitable for a public
-PR reply (do not surface internal labels like "Confidence: Low" verbatim). Cover: (1) a brief
-nod to what the comment/review pointed out, (2) why no change is being made, and (3) — when the
-verdict is **Partially Valid** — which part is being left as-is versus already covered elsewhere.
-Match the language of the reviewer's own text: identify the natural language the original `body`
-is written in, and write the reply in that same language — this is not limited to specific languages; a comment in English, Japanese, French, or any other language gets a reply in that language.
-English and Japanese are simply the two most common cases in this repo (examples of each below).
-If the body mixes languages or its language cannot be confidently identified (e.g. it's too short
-or is mostly code with little natural-language text), fall back to English.
+#### 8.2 — Detail blocks and reviewer replies
 
-For example, in English:
+Right after the table, print every item's Step 7 detail block in item order, so the reasoning
+is visible before the plan is approved; they are not printed again during execution.
+
+Directly after the detail block, output a suggested reply for the reviewer as a fenced
+```markdown``` code block the user can copy into GitHub — this skill never posts it — for:
+
+- every **No action needed** item, except a review body covered by the line comments: why no
+  change is being made;
+- every **Partially Valid** item marked **Fix & commit**: which part is being fixed and why the
+  rest is left as-is.
+
+Compose it from the Step 7 Reasoning as plain, polite prose for a public PR reply (no internal
+labels like "Confidence: Low"), opening with a brief nod to what the item pointed out. Write it
+in the language of the reviewer's own `body`; if that cannot be confidently identified, use
+English. For example:
 
 ```markdown
 Thanks for the review. After checking, I've concluded no change is needed here because 〈reason〉.
 ```
 
-or in Japanese:
-
 ```markdown
 ご指摘ありがとうございます。確認した結果、〈理由〉のため、現状のコードに変更は不要と判断しました。
 ```
 
-#### Case A — `review_comment`, or `pr_review` with no `associated_comments`
+#### 8.3 — Nothing to fix
 
-This case is unchanged from before: it always ends in a plan awaiting user approval, and
-the user authors/performs the eventual commit themselves (per the repo's normal "don't commit
-unless asked" rule).
-
-This case always begins by printing the one-row summary table and this item's Step 7
-detail block, per the "Common rule — summary table" above.
-
-If the evaluation is **Valid** or **Partially Valid** **and** the comment/review calls for code changes, proceed:
-
-1. Call `EnterPlanMode`.
-2. Explore the codebase to understand the surrounding architecture.
-3. Write the plan to `~/.claude/plans/evaluate-review-{id}.md` with:
-   - **Context** — what the review pointed out and why it matters
-   - **Files to modify** — exact file paths
-   - **Changes** — concrete, line-level actions
-   - **Verification** — how to test (unit tests, manual checks, build)
-   - Note: for `pr_review`, the plan may span multiple files because the feedback is not tied to a single line.
-4. **Refine the plan**: invoke the `refine-plan` skill, passing the plan file path
-   (`~/.claude/plans/evaluate-review-{id}.md`) as its argument so it targets exactly the
-   file just written (`refine-plan` resolves `$ARGUMENTS` as a file path before falling back to
-   the active Plan Mode file, removing any ambiguity about which document is refined). It runs its
-   fixed checklist (open questions, data integrity, UI/UX, simplicity, codebase match, scope, risk,
-   verification, sequencing), auto-fixes what it can, and trims the plan to final agreed content.
-   If `refine-plan` surfaces a genuine decision it asks the user via `AskUserQuestion`; resolve
-   those before proceeding.
-5. Call `ExitPlanMode` to submit the refined plan for user approval.
-
-If the review is **Invalid** or no code change is required, state clearly:
+If no item is **Fix & commit**, output the line below and end this URL
+(`No implementation plan needed`):
 
 ```text
 No implementation plan is needed.
 ```
 
-Then output the reviewer-facing reply per the Common rule above.
+#### 8.4 — Guards
 
-#### Case B — `pr_review` with one or more `associated_comments` (automatic fix & commit)
+Before planning anything:
 
-**Auto-commit only ever happens in this case.** `review_comment` URLs never reach it, and
-always follow Case A instead — the user still approves a plan and performs the commit
-themselves there.
+1. Branch per `.claude/etc/per-item-commit.md` §1 with type `fix` (Step 3 makes a `v*` branch
+   unlikely here, but guard for it anyway).
+2. Check `git status --porcelain`. If it prints anything, warn and end this URL
+   (`Working tree not clean`) — a failed-verification revert (8.6)
+   must never be able to destroy pre-existing uncommitted work in the same file. A clean result
+   here is the baseline for 8.6's re-check.
 
-Before starting, if the current branch is a version branch (`v*`), run
-`/feature-branch fix` to create and switch to a feature branch before
-making any commits. Step 3's branch-alignment check already makes this
-unlikely in practice (the PR's head branch is normally already a feature branch),
-but guard for it anyway.
+#### 8.5 — Plan, refine, approve
 
-Check `git status --porcelain`. If the working tree is dirty with changes unrelated to this
-run, warn and skip this URL entirely (commit nothing, note "Working tree not clean" in the
-closing summary) rather than making any Case B edits — a failed-verification revert (step 3
-below) must never be able to destroy pre-existing uncommitted work in the same file. For a
-multi-URL run this only skips the current URL; continue to the next one at Step 2. A clean
-result here becomes this run's baseline for the re-check below.
+1. Call `EnterPlanMode`.
+2. Explore the codebase to understand the surrounding architecture of every **Fix & commit** item.
+3. Write the plan to `~/.claude/plans/evaluate-review-{id}.md` (`{id}` = the URL's trailing
+   numeric ID) with:
+   - **Context** — what the review pointed out and why it matters.
+   - **One section per Fix & commit item**, in item order, each with:
+     - **Files to modify** — exact file paths (a review-body item may span several files)
+     - **Changes** — concrete, line-level actions
+     - **Verification** — the tests, build targets and manual checks that confirm this item.
+       For an item whose evidence came from Step 7's temporary instrumentation and whose effect
+       is measurable, add "re-measure per 8.6".
+   - **Commit Strategy** — one commit per item, in item order, per
+     `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
+4. Invoke the `refine-plan` skill with the plan file path as its argument, and resolve any
+   question it asks before proceeding.
+5. Call `ExitPlanMode` to submit the refined plan for user approval. This approval is the
+   whole URL's one-time run confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement nothing, commit nothing, and end this URL
+   (`Plan rejected`); revise the plan instead if the user asks for changes.
 
-Print the summary table (per the "Common rule — summary table" above) covering every
-comment in `associated_comments`.
+#### 8.6 — Fix, verify, commit each item
 
-**One-time run confirmation**: ask the user via `AskUserQuestion` to confirm the whole
-Case B run once, referencing the table just printed — e.g. "Found N comment(s): X
-Valid/Partially Valid (will fix & commit), Y Invalid or no change needed (skipped) —
-proceed with the plan above?" (Proceed / Cancel this URL). This satisfies the repo's
-"don't commit unless asked" convention while preserving Case B's per-comment efficiency:
-once confirmed, every comment below still proceeds straight to fix → verify → commit with
-no further per-comment approval. If the user cancels, skip this URL entirely (commit
-nothing, note "Cancelled by user" in the closing summary) and, for a multi-URL run,
-continue to the next URL at Step 2. This one-time confirmation authorizes the whole run,
-but does not itself substitute for reviewing individual comments — each comment's own
-detail block is still surfaced as it is reached (see step 1 below), just without a further
-approval gate.
+Approval can take an unbounded time, so right before the first edit re-run
+`git status --porcelain` and confirm it still matches 8.4's clean baseline. If it no longer
+does, commit nothing and end this URL (`Working tree not clean`).
 
-**Re-check immediately before the first edit**: because the one-time run confirmation above
-blocks on the user for an unbounded time, re-run `git status --porcelain` right before the
-first edit (i.e., right before step 3 fires for the first Valid/Partially Valid comment
-below) and confirm it still matches the baseline (still clean). If it no longer does, treat
-it exactly like the initial dirty-tree case: skip this URL entirely (commit nothing, note
-"Working tree not clean" in the closing summary) rather than starting any Case B edits, and
-continue to the next URL in a multi-URL run.
+The PR can also gain commits during that wait. Re-fetch its head with
+`gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'` and compare it with the
+`PR head` SHA Step 3.1 printed (a hex SHA, so it is written into the command directly). Never
+re-bind it from the API here: that returns the new head, and the comparison would always pass.
 
-For each comment in `associated_comments`, in order:
+- **Same SHA**, or the fetched SHA is already in HEAD (`git merge-base --is-ancestor <sha> HEAD`,
+  e.g. it was pushed from this checkout) → continue. If Step 3.1 printed no head SHA, only the
+  ancestor check applies.
+- **Otherwise** → commit nothing and end this URL (`PR head moved`): the new commits may already
+  change what was evaluated and planned, so tell the user to bring the checkout up to the PR head
+  and re-run.
+- **The request fails** → warn, as Step 3.1 does, and continue.
 
-1. This comment's Step 7 evaluation was already produced while Step 7 evaluated every
-   associated comment (that already fed one row of the summary table printed above) — do
-   not re-run it. Output its detail block now — this comment's file:line or comment URL,
-   followed by the Step 7 **Validity** / **Confidence** / **Reasoning** — to the user,
-   **before** taking any action on it. This is informational only, not a per-comment
-   approval gate: the one-time run confirmation above already authorizes proceeding, so
-   continue immediately to step 2 or 3 below without waiting for a reply.
-2. If **Invalid**, or valid but no code change is required: skip this comment — implement
-   nothing, commit nothing. Output the reviewer-facing reply for this comment per the Common
-   rule above. Note it (with the reason) for the closing summary.
-3. If **Valid** or **Partially Valid**: explore the codebase as needed to understand the
-   surrounding architecture (no `EnterPlanMode`/`ExitPlanMode`, and no further interactive
-   approval per comment — the one-time run confirmation above already covers the whole run),
-   then implement the fix for this comment only, following the
-   repo's standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including
-   adding/updating tests where constraint #7 applies). Then run `./gradlew build` (or the
-   narrowest relevant test target, e.g. `:shared:desktopTest --tests "..."` / `:composeApp:desktopTest --tests "..."`, when that is
-   clearly sufficient to cover the change) to verify before committing. When the fix touches
-   `shared/src/apple*` or `appleApp/`, also run `./gradlew :shared:macosArm64Test` and, for
-   `appleApp/`, `xcodebuild -scheme Keryx -destination 'platform=macOS' test` — the JVM build
-   never compiles those. Off a Mac, treat that as unverified: do not commit it.
-   - If verification fails: confirm via `git status`/`git diff` that only this comment's
-     intended changes are present before reverting, so a revert cannot destroy pre-existing
-     work in the same file; then do not commit. Note the failure (with the reason) for the
-     closing summary, and move on to the next comment.
-4. On success, review `git status --porcelain` / `git diff` and stage **only the files, and
-   only the hunks, touched by this fix** — verify the staged diff contains nothing beyond this
-   comment's change before committing, so unrelated pre-existing edits or residue from a prior
-   comment's failed attempt never ride along. Create **exactly one commit** with a
-   **single-line** commit message only (no body, no trailer), in the repo's Conventional
-   Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`. Never batch
-   multiple comments into one commit, and never amend a commit made earlier in this same run.
-5. Continue to the next comment regardless of the previous comment's outcome.
+Then, for each **Fix & commit** item, in item order (one item's failure never stops the rest):
 
-After every associated comment has been processed, if the review's own `body` text raises
-something not already covered by any associated comment, evaluate and handle that leftover
-portion via Case A instead (Plan Mode — not auto-committed).
+1. Implement that item's section of the approved plan — that item only — following the repo's
+   standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including adding/updating
+   tests where constraint #7 applies).
+2. Verify per `.claude/etc/per-item-commit.md` §2. When the plan says to re-measure, do that
+   first: re-insert Step 7's measurement and check the effect, then remove it and confirm a fresh
+   `.claude/etc/temporary-instrumentation.md` §4 snapshot matches the fix-only one taken before
+   re-inserting it. Then run the item's planned Verification — at minimum `./gradlew build` (or
+   the narrowest relevant test target, e.g. `:shared:desktopTest --tests "..."` /
+   `:composeApp:desktopTest --tests "..."`, when that clearly covers the change).
+3. On failure (including a re-measurement that does not confirm the effect), revert the item per
+   `.claude/etc/per-item-commit.md` §3 and record `Verification failed: <reason>`.
+4. On success, commit per `.claude/etc/per-item-commit.md` §4, e.g.
+   `fix(sync): correct rev comparison for Google Drive`.
 
-Finally, output a short summary listing, for each associated comment (file:line or comment
-URL), its verdict and outcome: `Committed <sha>` / `Skipped: <reason>` / `Verification
-failed: <reason>`.
+#### 8.7 — Closing summary
+
+Output a short summary listing, for each item (its Comment URL), its verdict and its item
+outcome from the Outcomes table.
 
 #### Multiple top-level URLs
 
-If Step 1 received more than one URL, after the **last** one finishes its Step 8 action (Case A
-or Case B, whichever applied to it), output one final cross-URL summary — in the same order the
-URLs were given — listing each URL and its overall outcome (e.g. `Plan submitted for approval`,
-`Committed <sha>` / `N commits`, `No implementation plan needed`, `Invalid`). This is in addition
-to, not a replacement for, each URL's own Step 7 evaluation and Step 8 output.
+If more than one URL was given, after the last one finishes, output one final cross-URL summary
+— in the order the URLs were given — listing each URL and its URL outcome from the Outcomes
+table. This is in addition to each URL's own Step 8 output.

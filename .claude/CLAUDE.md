@@ -136,9 +136,16 @@ language it arrives in — severity（重要度 / 重大度）, High（高）, #
 | The report has left the context | Do not guess a number — say so and offer to re-run the review |
 | Nothing matches the instruction | Say so rather than picking the nearest finding |
 
+Before fixing a `Medium`- or `Low`-confidence finding — however it was selected (by number, by an
+explicit request, or in bulk) — confirm it yourself per `.claude/etc/temporary-instrumentation.md`.
+Confirm every selected Medium/Low finding before starting any fix or delegation, so no probe has to
+go into a file a fix already changed; then hand `implementer` the recorded evidence, and delegate
+nothing for a finding the evidence disproved.
 Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
-number / finding / outcome (fixed, or not addressed with the reason), and if a fix could affect
-another perspective, offer to re-run just that one.
+number / finding / outcome (fixed, or not addressed with the reason — a finding the evidence
+disproved is "not addressed: disproved by evidence", and one it could neither confirm nor refute is
+"not addressed: could not be confirmed", each with what was observed or checked), and if a fix could
+affect another perspective, offer to re-run just that one.
 
 **Exception — direct dispatch.** The `refactor` and `perf-tune` skills call specific `review-*`
 specialists directly instead of going through `reviewer`: each already knows exactly which
