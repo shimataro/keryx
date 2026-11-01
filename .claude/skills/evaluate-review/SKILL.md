@@ -276,15 +276,21 @@ but different commits are handled separately):
 
 There is no single path or line, so gather broader context:
 
-1. Fetch all files changed in the PR:
+1. Fetch all files changed in the PR, numbered from 0 (`--paginate --jq` would filter each page
+   on its own, so the pages are joined with `jq -s add` first):
 
    ```bash
-   gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files --jq '.[] | {filename, status, patch}'
+   gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files | jq -s 'add | to_entries[] | {index: .key, filename: .value.filename, status: .value.status, patch: .value.patch}'
    ```
 
-2. If the body names specific files or functions, read those files at the review's `commit_id`
-   (block above), binding each `review_path` from a `filename` that step 1 returned — never
-   retyped from the review body.
+2. If the body names specific files or functions, read each of those files at the review's
+   `commit_id` (block above), binding `review_path` by its step 1 `index` (digits, so written
+   directly as `{index}`) in the same Bash call — never retyping the filename from the review
+   body or from step 1's output:
+
+   ```bash
+   review_path="$(gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files | jq -rs --argjson i {index} 'add | .[$i].filename')"
+   ```
 
 #### Every item
 
