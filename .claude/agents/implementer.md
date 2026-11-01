@@ -44,12 +44,6 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
   `.claude/skills/ui-guidelines/SKILL.md` first and follow its conventions
   (pane tones, divider policy, layout stability, flat native-feel components,
   dialog/popup rules).
-- When the caller tells you the fix's premise is unconfirmed (e.g. a Medium/Low-confidence
-  review finding), confirm it before implementing, per
-  `.claude/etc/temporary-instrumentation.md`. If the evidence disproves it, implement
-  nothing and report what was observed. You cannot ask the user mid-run, so if a probe would
-  have to go into a file that already has uncommitted changes and a reproducing test in a new
-  file cannot observe the claim, implement nothing and report that it could not be confirmed.
 
 ## Error handling (`docs/error-design.md`, already in your context)
 
