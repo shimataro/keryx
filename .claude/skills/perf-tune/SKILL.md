@@ -8,7 +8,8 @@ description: Measurement-driven performance work on the Keryx source — reduce 
 > This skill involves **high-accuracy judgments** — interpreting measurements, and
 > deciding whether a change trades away durability, security, or observable behavior.
 > **Run it in an opus session.** Skills inherit the caller session's model and cannot
-> pin one in frontmatter, so verify the session model is opus before executing.
+> pin one in frontmatter, so verify the session model is opus before executing;
+> if it is not, tell the user and ask whether to continue.
 
 Make Keryx faster **without ever trading away durability, security, or observable
 behavior**. Every change must be justified by a measurement taken before it, and
@@ -22,13 +23,8 @@ gate → apply one at a time → re-measure. The existing test suite is the orac
 for behavior and must stay green throughout. After the Step 4 gate approval,
 each approved item is applied, re-measured, verified, and **committed
 independently — one commit per item** — with no further per-item approval,
-mirroring the `evaluate-review` skill's per-item fix & commit flow (Step 8), rather than
+per `.claude/etc/per-item-commit.md`, rather than
 left for the user to commit.
-
-> Judging whether an optimization crosses a durability, sync-merge, or FTS
-> invariant is a **high-accuracy judgment**. **Run this in an opus session.**
-> Skills inherit the caller session's model and cannot pin one in frontmatter,
-> so verify the session model before executing.
 
 ## Scope
 
@@ -376,14 +372,10 @@ impact stated. Proceed with only what was approved. If the list contains any
 Yellow/Red item, Step 3's mandatory review must have completed first — this gate
 is downstream of that one, not a substitute for it.
 
-Each of these approvals is also its item's **one-time run confirmation**: the
-bulk Green/Yellow approval covers every item in that batch, and each
-individual Red approval covers that one item — once given, the item proceeds
-straight through apply → re-measure → verify → commit (Step 5) with no further
-approval gate, the same shape as `evaluate-review`'s per-item fix & commit flow (Step 8). Before Step 5
-makes its first commit: if the current branch is a version branch (`v*`),
-run `/feature-branch perf` to create and switch to a feature branch first
-— Step 1's worktree check already ruled out unrelated dirty changes.
+Each of these approvals is also its item's **one-time run confirmation**
+(`.claude/etc/per-item-commit.md` §1): the bulk Green/Yellow approval covers
+every item in that batch, and each individual Red approval covers that one
+item. Branch type is `perf`; Step 1's worktree check is the clean baseline.
 
 ### Step 5 — Apply one at a time, verified
 
@@ -396,7 +388,7 @@ For each approved item:
    including when the improvement is not confirmed or the run fails — and confirm
    a fresh §4 snapshot matches the change-only one taken before re-inserting it,
    before doing anything else.
-3. Re-run the tests:
+3. Re-run the tests, plus the Apple targets per `.claude/etc/per-item-commit.md` §2:
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
@@ -404,24 +396,14 @@ For each approved item:
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.
 4. If the improvement cannot be measured, the improvement is not confirmed, or
-   the suite goes red, first make sure no measurement code remains (the marker check from
-   `.claude/etc/temporary-instrumentation.md` §3 prints nothing), then **revert that
-   one item**, make **no commit** for it, and move on — record the reason for
-   the "How to report" closing summary.
+   the suite goes red, revert the item per `.claude/etc/per-item-commit.md` §3
+   and record the reason for the "How to report" closing summary.
 5. If this item changed something a doc *names* (per Step 7's criteria below),
    fix the stale doc reference now, **inside this same change**, so it rides
    along in this item's commit rather than a separate later one.
-6. On success, review `git status --porcelain` / `git diff`, then run the
-   marker check from `.claude/etc/temporary-instrumentation.md` §3 and confirm
-   it prints nothing **before staging anything**. Then stage **only the files,
-   and only the hunks, belonging to this item** (including any doc fix from
-   step 5) — verify the staged diff contains nothing beyond this item before
-   committing, so an unrelated pre-existing edit or residue from an earlier
-   item's revert never rides along. Create **exactly one commit** with
-   a **single-line** commit message only (no body, no trailer), in the repo's
-   Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
-   lookups`. Never batch multiple items into one commit, and never amend a
-   commit made earlier in this same run.
+6. On success, commit per `.claude/etc/per-item-commit.md` §4, with any doc
+   fix from step 5 riding along, e.g. `perf(data): batch getByFeedAndGuid
+   lookups`.
 
 Watch `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` especially — a
 failure there means a DB/merge/sync regression slipped in.

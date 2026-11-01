@@ -12,7 +12,8 @@ cross-checking against the current source code**, then output recommended fixes 
 
 > This skill involves **high-accuracy judgments**. **Run it in an opus session.**
 > Skills inherit the caller session's model and cannot fix a model in frontmatter,
-> so verify the session model is opus before executing.
+> so verify the session model is opus before executing;
+> if it is not, tell the user and ask whether to continue.
 
 ## Process
 

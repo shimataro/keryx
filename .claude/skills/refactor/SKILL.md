@@ -8,7 +8,8 @@ description: Refactor the Keryx source code for internal quality — reduce dupl
 > This skill involves **high-accuracy judgments** — proving a change is genuinely
 > behavior-preserving, and not silently altering the sync / merge / FTS / error-taxonomy
 > invariants. **Run it in an opus session.** Skills inherit the caller session's model and
-> cannot pin one in frontmatter, so verify the session model is opus before executing.
+> cannot pin one in frontmatter, so verify the session model is opus before executing;
+> if it is not, tell the user and ask whether to continue.
 
 Improve the internal quality of Keryx's source **without changing observable
 behavior**. The existing test suite is the oracle: it must stay green from the
@@ -16,7 +17,7 @@ first step to the last. Work in small, reviewable, independently-revertible
 batches (Survey → confirm → batches). After the one-time scope confirmation
 (Step 3), each approved batch is applied, verified, and **committed
 independently — one commit per batch** — with no further per-batch approval,
-mirroring the `evaluate-review` skill's per-item fix & commit flow (Step 8), rather than
+per `.claude/etc/per-item-commit.md`, rather than
 left for the user to commit. This is *refactoring*, not redesign and
 not optimization — if a change alters what the program does, it does not belong
 here.
@@ -215,20 +216,17 @@ Present the prioritized batch list and use **`AskUserQuestion`** once to
 confirm or narrow what to apply (e.g. all of it, only `domain/`, or exclude
 `ui/`). Proceed with only the approved batches.
 
-This approval is also the **one-time run confirmation**: once given, every
-approved batch below proceeds straight through apply → verify → commit (Step 4)
-with no further per-batch approval gate — the same shape as `evaluate-review`'s
-per-item fix & commit flow (Step 8). Before Step 4 makes its first commit: if the current branch is a
-version branch (`v*`), run `/feature-branch refactor` to create and switch
-to a feature branch first — Step 1's worktree check already ruled out unrelated
-dirty changes.
+This approval is also the **one-time run confirmation**
+(`.claude/etc/per-item-commit.md` §1, where each batch is an item). Branch
+type is `refactor`; Step 1's worktree check is the clean baseline.
 
 ### Step 4 — Apply batches (behavior-preserving, verified)
 
 For each approved batch:
 
 1. Make one cohesive change set — small enough to review and revert on its own.
-2. Recompile and re-run tests:
+2. Recompile and re-run tests, plus the Apple targets per
+   `.claude/etc/per-item-commit.md` §2:
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
@@ -238,24 +236,17 @@ For each approved batch:
    new one leaves the count unchanged. Only a **net addition** of tests is
    allowed, unless an approved **test-only batch (Step 5)** deliberately changed
    the set. On red **or a missing baseline test**, fix *that batch* (feedback
-   loop: change → test → fix → repeat); if it cannot be made green, **revert it
-   entirely** and make **no commit** for it — record the reason for the "How to
-   report" closing summary, then move on to the next batch.
+   loop: change → test → fix → repeat); if it cannot be made green, revert it per
+   `.claude/etc/per-item-commit.md` §3 and record the reason for the "How to
+   report" closing summary.
 4. Never cross an invariant from `## Do NOT touch`.
 5. If this batch changed something a doc *names* (per Step 6's criteria below),
    fix the stale doc reference now, **inside this same change set** — Step 6 is
    applied inline here, immediately before this batch's commit, not as a
    separate later pass.
-6. On success, review `git status --porcelain` / `git diff` and stage **only
-   the files, and only the hunks, belonging to this batch** (including any
-   doc fix from step 5) — verify the staged diff contains nothing beyond this
-   batch before committing, so an unrelated pre-existing edit or residue from
-   an earlier batch's revert never rides along. Create **exactly one commit**
-   with a **single-line** commit message only (no body, no trailer), in the
-   repo's Conventional Commits style, e.g.
-   `refactor(domain): extract shared merge-guard helper`. Never batch multiple
-   candidates into one commit, and never amend a commit made earlier in this
-   same run.
+6. On success, commit per `.claude/etc/per-item-commit.md` §4, with any doc
+   fix from step 5 riding along, e.g.
+   `refactor(domain): extract shared merge-guard helper`.
 
 Watch `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` especially — a
 failure there means a DB/merge/sync regression slipped in.

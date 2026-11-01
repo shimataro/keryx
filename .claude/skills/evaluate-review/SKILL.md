@@ -8,7 +8,8 @@ description: Evaluate a GitHub PR review comment or review summary for technical
 > This skill involves **high-accuracy judgments** — deciding whether a reviewer's claim is
 > actually correct against this codebase, and committing fixes for the ones that are.
 > **Run it in an opus session.** Skills inherit the caller session's model and cannot pin
-> one in frontmatter, so verify the session model is opus before executing.
+> one in frontmatter, so verify the session model is opus before executing;
+> if it is not, tell the user and ask whether to continue.
 
 Evaluate a GitHub pull-request review comment or review summary for technical validity, then act
 on it: each URL is broken into **items** (Step 4), every item is evaluated on its own, and the
@@ -384,9 +385,8 @@ No implementation plan is needed.
 
 Before planning anything:
 
-1. If the current branch is a version branch (`v*`), run `/feature-branch fix` to create and
-   switch to a feature branch. Step 3's branch-alignment check makes this unlikely in practice
-   (the PR's head branch is normally already a feature branch), but guard for it anyway.
+1. Branch per `.claude/etc/per-item-commit.md` §1 with type `fix` (Step 3 makes a `v*` branch
+   unlikely here, but guard for it anyway).
 2. Check `git status --porcelain`. If the working tree is dirty with changes unrelated to this
    run, warn and end this URL (`Working tree not clean`) — a failed-verification revert (8.6)
    must never be able to destroy pre-existing uncommitted work in the same file. A clean result
@@ -405,15 +405,12 @@ Before planning anything:
      - **Verification** — the tests, build targets and manual checks that confirm this item.
        For an item whose evidence came from Step 7's temporary instrumentation and whose effect
        is measurable, add "re-measure per 8.6".
-   - **Commit Strategy** — exactly one commit per item, in item order, each with a
-     **single-line** Conventional Commits message (no body, no trailer), made after that
-     item's verification passes; never pushed.
+   - **Commit Strategy** — one commit per item, in item order, per
+     `.claude/etc/per-item-commit.md` §4, made after that item's verification passes.
 4. Invoke the `refine-plan` skill with the plan file path as its argument, and resolve any
    question it asks before proceeding.
-5. Call `ExitPlanMode` to submit the refined plan for user approval. **This approval authorizes
-   the whole URL** — every item in the plan proceeds through fix → verify → commit with no
-   further per-item approval, which satisfies the repo's "don't commit unless asked"
-   convention. If the user rejects it, implement nothing, commit nothing, and end this URL
+5. Call `ExitPlanMode` to submit the refined plan for user approval. This approval is the
+   whole URL's one-time run confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement nothing, commit nothing, and end this URL
    (`Plan rejected`); revise the plan instead if the user asks for changes.
 
 #### 8.6 — Fix, verify, commit each item
@@ -422,39 +419,22 @@ Approval can take an unbounded time, so right before the first edit re-run
 `git status --porcelain` and confirm it still matches 8.4's clean baseline. If it no longer
 does, commit nothing and end this URL (`Working tree not clean`).
 
-Then, for each **Fix & commit** item, in item order:
+Then, for each **Fix & commit** item, in item order (one item's failure never stops the rest):
 
 1. Implement that item's section of the approved plan — that item only — following the repo's
    standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including adding/updating
    tests where constraint #7 applies).
-2. Verify: run the item's planned Verification. At minimum run `./gradlew build` (or the
-   narrowest relevant test target, e.g. `:shared:desktopTest --tests "..."` /
-   `:composeApp:desktopTest --tests "..."`, when that clearly covers the change). When the fix
-   touches `shared/src/apple*` or `appleApp/`, also run `./gradlew :shared:macosArm64Test` and,
-   for `appleApp/`, `xcodebuild -scheme Keryx -destination 'platform=macOS' test` — the JVM build
-   never compiles those. Off a Mac, treat that as unverified: do not commit it. When the plan says
-   to re-measure, re-insert Step 7's measurement and check the effect, then remove it again per
-   `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** — including when
-   the effect is not confirmed or the run fails — and confirm a fresh §4 snapshot matches the
-   fix-only one taken before re-inserting it, before doing anything else.
-   - If verification fails (including a re-measurement that does not confirm the effect):
-     first make sure no temporary instrumentation remains (the marker check from §3 prints
-     nothing), then confirm via `git status`/`git diff` that only this item's intended changes
-     are present, so the revert cannot destroy pre-existing work in the same file. Then
-     **revert that one item** — `git restore -- <files>` for the tracked files it changed, and
-     delete any untracked file it created — and confirm `git status --porcelain` is back to the
-     clean baseline, so nothing of it reaches the next item. Do not commit. Record
-     `Verification failed: <reason>` and move on to the next item.
-3. Commit: review `git status --porcelain` / `git diff`, then run the marker check from
-   `.claude/etc/temporary-instrumentation.md` §3 and confirm it prints nothing **before staging
-   anything**. Then stage **only the files, and only the hunks, touched by this item's fix** —
-   verify the staged diff contains nothing beyond this item's change before committing, so
-   unrelated pre-existing edits or residue from a prior item's failed attempt never ride along.
-   Create **exactly one commit** with a **single-line** commit message only (no body, no
-   trailer), in the repo's Conventional Commits style, e.g.
-   `fix(sync): correct rev comparison for Google Drive`. Never batch multiple items into one
-   commit, and never amend a commit made earlier in this same run.
-4. Continue to the next item regardless of the previous item's outcome.
+2. Verify per `.claude/etc/per-item-commit.md` §2, running the item's planned Verification —
+   at minimum `./gradlew build` (or the narrowest relevant test target, e.g.
+   `:shared:desktopTest --tests "..."` / `:composeApp:desktopTest --tests "..."`, when that
+   clearly covers the change). When the plan says to re-measure, re-insert Step 7's measurement
+   and check the effect, then remove it and confirm a fresh
+   `.claude/etc/temporary-instrumentation.md` §4 snapshot matches the fix-only one taken before
+   re-inserting it.
+3. On failure (including a re-measurement that does not confirm the effect), revert the item per
+   `.claude/etc/per-item-commit.md` §3 and record `Verification failed: <reason>`.
+4. On success, commit per `.claude/etc/per-item-commit.md` §4, e.g.
+   `fix(sync): correct rev comparison for Google Drive`.
 
 #### 8.7 — Closing summary
 
