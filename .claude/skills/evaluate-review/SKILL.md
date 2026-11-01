@@ -39,7 +39,7 @@ Every place that reports a result uses only these labels — plus the suffix
 | Scope | Label | When |
 | --- | --- | --- |
 | Item | `Committed <sha>` | Fixed, verified and committed (8.6) |
-| Item | `No action needed` | Invalid, valid but needing no code change, or a review body covered by the line comments (Step 7) |
+| Item | `No action needed` | Invalid, valid but needing no code change, unconfirmed (Step 7), or a review body covered by the line comments (Step 7) |
 | Item | `Verification failed: <reason>` | Fix reverted after verification failed (8.6) |
 | Item / URL | `Plan rejected` | The user rejected the plan (8.5) |
 | Item / URL | `Working tree not clean` | Unrelated uncommitted changes at 8.4 or 8.6 |
@@ -373,6 +373,9 @@ Step 8's clean-tree guard intact by requiring every probe to be removed first.
   or why the comment cannot be observed at runtime) in its Reasoning.
 - **A reproducing test** is temporary at this stage and is removed with the other probes; if
   it would serve as the fix's test, include it in that item's section of the Step 8 plan.
+- **Unconfirmed** (`.claude/etc/temporary-instrumentation.md` §2): the item's Next action is
+  **No action needed**, its Reasoning records what was tried, and its reviewer reply (8.2) says
+  the point could not be confirmed and what evidence would settle it.
 
 ### Step 8 — Take action
 

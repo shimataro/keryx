@@ -143,7 +143,8 @@ go into a file a fix already changed; then hand `implementer` the recorded evide
 nothing for a finding the evidence disproved.
 Delegate heavy implementation to `implementer` and tests to `test-writer`. Finish with a table of
 number / finding / outcome (fixed, or not addressed with the reason — a finding the evidence
-disproved is "not addressed: disproved by evidence", with what was observed or checked), and if a fix could
+disproved is "not addressed: disproved by evidence", and one it could neither confirm nor refute is
+"not addressed: could not be confirmed", each with what was observed or checked), and if a fix could
 affect another perspective, offer to re-run just that one.
 
 **Exception — direct dispatch.** The `refactor` and `perf-tune` skills call specific `review-*`

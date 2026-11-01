@@ -31,6 +31,11 @@ Record what was inserted and what was observed, wherever the caller says. A clai
 observed at runtime (doc conformance, naming, conventions) needs no measurement; record that
 instead.
 
+A runtime claim the evidence can neither confirm nor refute — no test or logging can observe it,
+and a manual run is impossible, declined or inconclusive — is **unconfirmed**: record what was
+tried, make no fix that rests on it, and report it as unconfirmed wherever the caller reports
+outcomes.
+
 Whether a reproducing test may stay as a permanent test is the caller's decision; unless the caller
 keeps it, it is temporary code under §3.
 
