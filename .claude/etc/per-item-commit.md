@@ -25,7 +25,11 @@ when an item touches:
   `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` — these source sets compile for
   both Kotlin/Native targets and `commonTest` runs natively on both, while `macosMain` and
   `iosMain` hold separate actuals, so a change can break one target while the other still passes;
-- `appleApp/`, also run `xcodebuild -scheme Keryx -destination 'platform=macOS' test`.
+- `appleApp/`, also run `cd appleApp && xcodegen generate` and then
+  `xcodebuild -scheme Keryx -destination 'platform=macOS' test` there — the `.xcodeproj` is a
+  gitignored artifact that XcodeGen writes with every source file listed, so one left over from an
+  earlier generate can miss a `project.yml` change or an added, removed or renamed file and still
+  pass.
 
 Off a Mac, an item touching an Apple-only source set (`apple*`, `macos*`, `ios*`) or `appleApp/`
 cannot be verified: treat it as failed (§3), not as passed. An item touching only `commonMain` /
