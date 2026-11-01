@@ -64,7 +64,16 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
 4. `./gradlew :shared:desktopTest :composeApp:desktopTest` passes; existing tests under
    `commonTest/` and `desktopTest/` are not broken. Watch `SyncMergerTest` and
    `SchemaTest` especially when touching the DB or merge SQL.
-5. On a Mac, when the change touches `shared/src/apple*`, `:shared` `commonMain`/`commonTest`
-   code that also compiles for Kotlin/Native, or `appleApp/`: `./gradlew :shared:macosArm64Test`
-   passes, and for `appleApp/` also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`
-   (run `cd appleApp && xcodegen generate` first if `project.yml` changed).
+5. On a Mac, when the change touches `shared/src/apple*` / `macos*` / `ios*`, `:shared`
+   `commonMain`/`commonTest` code that also compiles for Kotlin/Native, `testing/src/commonMain`
+   (fakes `:shared`'s `commonTest` uses on the Apple targets), the build scripts configuring them
+   (`shared/build.gradle.kts`, `testing/build.gradle.kts`, `gradle/libs.versions.toml`), or
+   `appleApp/`:
+   `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` passes, and for `appleApp/`
+   also `(./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog && cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)`
+   — always regenerating first, since the gitignored `.xcodeproj` lists every source file and a
+   stale one misses an added, removed or renamed file and can still pass; the subshell keeps later
+   commands at the repo root, and the Gradle step creates the XCFramework and String Catalog
+   that a fresh checkout lacks (`docs/build.md`).
+6. The marker check in `.claude/etc/temporary-instrumentation.md` §3 prints nothing — no
+   temporary instrumentation remains.

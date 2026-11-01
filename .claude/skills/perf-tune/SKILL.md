@@ -8,7 +8,8 @@ description: Measurement-driven performance work on the Keryx source — reduce 
 > This skill involves **high-accuracy judgments** — interpreting measurements, and
 > deciding whether a change trades away durability, security, or observable behavior.
 > **Run it in an opus session.** Skills inherit the caller session's model and cannot
-> pin one in frontmatter, so verify the session model is opus before executing.
+> pin one in frontmatter, so verify the session model is opus before executing;
+> if it is not, tell the user and ask whether to continue.
 
 Make Keryx faster **without ever trading away durability, security, or observable
 behavior**. Every change must be justified by a measurement taken before it, and
@@ -22,13 +23,8 @@ gate → apply one at a time → re-measure. The existing test suite is the orac
 for behavior and must stay green throughout. After the Step 4 gate approval,
 each approved item is applied, re-measured, verified, and **committed
 independently — one commit per item** — with no further per-item approval,
-mirroring the `evaluate-review` skill's Case B auto-commit flow, rather than
+per `.claude/etc/per-item-commit.md`, rather than
 left for the user to commit.
-
-> Judging whether an optimization crosses a durability, sync-merge, or FTS
-> invariant is a **high-accuracy judgment**. **Run this in an opus session.**
-> Skills inherit the caller session's model and cannot pin one in frontmatter,
-> so verify the session model before executing.
 
 ## Scope
 
@@ -260,8 +256,8 @@ headroom:
 
 ### Step 1 — Establish a green baseline
 
-Check `git status --porcelain` before anything else: if the working tree is
-dirty with changes unrelated to this run, warn and stop — proceeding would
+Check `git status --porcelain` before anything else: if it prints anything,
+warn and stop — proceeding would
 contaminate the baseline below and risk an unrelated file getting swept into
 (or clobbered by a revert during) a later item's commit. Then run the tests —
 or invoke the **`build` skill**:
@@ -339,12 +335,21 @@ Each axis has its own method.
   approval.
 
 **Measurement code is never committed** — do not grow permanent instrumentation
-hooks in production code. Every candidate must carry axis-appropriate before/after
+hooks in production code. Inserting, tagging, removing, and checking for leftover
+measurement code follows `.claude/etc/temporary-instrumentation.md` §3. Every candidate must carry axis-appropriate before/after
 evidence — a timed before/after, milestone timestamps, or (for a #16 concurrency
 hazard, where there is nothing to time) a deterministic controlled-interleaving
 regression test that fails before the fix and passes after; an `EXPLAIN` diff may
 support an SQL candidate but must be paired with a repeatable query-execution
 measurement. A candidate without one is not proposed.
+
+**Tests the item keeps are not measurement code.** A #16 reproducing regression
+test, and an axis-3 test confirming DB writes stay serialized, are the item's
+permanent tests (CLAUDE.md constraint #7) — the keep decision
+`.claude/etc/temporary-instrumentation.md` §2 leaves to the caller. The copy run
+here in Step 2 is removed like any other probe; Step 5 adds the test back as part
+of the change, without the `TEMP-INSTRUMENTATION` marker, keeps it through Step
+5's measurement cleanup, and commits it with the item.
 
 ### Step 3 — Inventory, tier, and gate the candidates
 
@@ -375,43 +380,41 @@ impact stated. Proceed with only what was approved. If the list contains any
 Yellow/Red item, Step 3's mandatory review must have completed first — this gate
 is downstream of that one, not a substitute for it.
 
-Each of these approvals is also its item's **one-time run confirmation**: the
-bulk Green/Yellow approval covers every item in that batch, and each
-individual Red approval covers that one item — once given, the item proceeds
-straight through apply → re-measure → verify → commit (Step 5) with no further
-approval gate, the same shape as `evaluate-review`'s Case B. Before Step 5
-makes its first commit: if the current branch is a version branch (`v*`),
-run `/feature-branch perf` to create and switch to a feature branch first
-— Step 1's worktree check already ruled out unrelated dirty changes.
+Each of these approvals is also its item's **one-time run confirmation**
+(`.claude/etc/per-item-commit.md` §1): the bulk Green/Yellow approval covers
+every item in that batch, and each individual Red approval covers that one
+item. Branch type is `perf`; Step 1's worktree check is the clean baseline.
 
 ### Step 5 — Apply one at a time, verified
 
 For each approved item:
 
 1. Make one cohesive change.
-2. Re-measure with that axis's method and confirm the improvement is real.
-3. Re-run the tests:
+2. Re-measure with that axis's method and check whether the improvement is real,
+   then remove the measurement code again (never a test the item keeps — see
+   Step 2) per
+   `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** —
+   including when the improvement is not confirmed or the run fails — and confirm
+   a fresh §4 snapshot matches the change-only one taken before re-inserting it,
+   before doing anything else.
+3. Re-run the tests, plus the Apple targets per `.claude/etc/per-item-commit.md` §2:
+
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
+
    The full suite must be green **and the Step 1 baseline set must survive in
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.
-4. If the improvement cannot be measured, or the suite goes red, **revert that
-   one item**, make **no commit** for it, and move on — record the reason for
-   the "How to report" closing summary.
+4. If the improvement cannot be measured, the improvement is not confirmed, or
+   the suite goes red, revert the item per `.claude/etc/per-item-commit.md` §3
+   and record the reason for the "How to report" closing summary.
 5. If this item changed something a doc *names* (per Step 7's criteria below),
    fix the stale doc reference now, **inside this same change**, so it rides
    along in this item's commit rather than a separate later one.
-6. On success, review `git status --porcelain` / `git diff` and stage **only
-   the files, and only the hunks, belonging to this item** (including any doc
-   fix from step 5) — verify the staged diff contains nothing beyond this item
-   before committing, so an unrelated pre-existing edit or residue from an
-   earlier item's revert never rides along. Create **exactly one commit** with
-   a **single-line** commit message only (no body, no trailer), in the repo's
-   Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
-   lookups`. Never batch multiple items into one commit, and never amend a
-   commit made earlier in this same run.
+6. On success, commit per `.claude/etc/per-item-commit.md` §4, with any doc
+   fix from step 5 riding along, e.g. `perf(data): batch getByFeedAndGuid
+   lookups`.
 
 Watch `SchemaTest` / `SyncMergerTest` / `SyncRepositoryTest` especially — a
 failure there means a DB/merge/sync regression slipped in.
@@ -483,8 +486,9 @@ produce here — finish by outputting the closing summary (see `## How to report
 - One entry per applied change: **axis** → location → **before/after measurement
   or milestone timestamps** (an SQL entry gives the execution measurement *and* its
   `EXPLAIN` diff, not the plan diff alone) → why the semantics are identical →
-  tier → `Committed <sha>` with its one-line message, or `Reverted: <reason>`
-  if it could not be confirmed.
+  tier → `Committed <sha>` with its one-line message (noting
+  "Apple targets not verified locally" when `.claude/etc/per-item-commit.md` §2
+  calls for it), or `Reverted: <reason>` if it could not be confirmed.
 - For axis-2 changes, state explicitly that **total time is unchanged** — never
   let a perceived-speed improvement read as a speed-up.
 - The final test result, confirming the Step 1 baseline test set is intact
