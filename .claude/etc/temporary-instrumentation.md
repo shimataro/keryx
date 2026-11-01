@@ -4,6 +4,10 @@ Read by any skill or agent that must back a claim with evidence before acting on
 unconfirmed review finding, a performance hypothesis. The caller decides **when** this applies and
 **where** the outcome is recorded; this file defines **how**.
 
+The marker check in §3 and the snapshot command in §4 are exercised by
+`.claude/etc/tests/test_temporary_instrumentation.py`, which reads them from this file; after
+changing either, run `python3 -m unittest discover -s .claude/etc/tests`.
+
 ## 1. Gathering evidence
 
 Observe the claim directly, in this order of preference:
