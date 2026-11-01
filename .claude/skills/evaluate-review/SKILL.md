@@ -161,7 +161,8 @@ Any failed request below: output the error and end this URL (`Fetch failed: <rea
 `path`, `line` / `original_line` (ending line), `start_line` / `original_start_line` (starting
 line of a multi-line comment), `side` / `start_side` (`LEFT` or `RIGHT`), `diff_hunk`,
 `original_commit_id` and `commit_id`. The reviewed revision is `original_commit_id` (the commit
-the comment was left on), with `original_line` / `original_start_line` its position there;
+the comment was left on), with `original_line` / `original_start_line` its position there — on
+the `RIGHT` side only: a `LEFT` line is a deleted line, which exists only on the diff's base side;
 GitHub moves `commit_id` and `line` / `start_line` along as the PR advances, so they give the
 comment's current position, not what the reviewer saw.
 
@@ -282,7 +283,10 @@ For each item, using **that item's own** `original_commit_id`, path and `origina
    review_path="$(gh api repos/{owner}/{repo}/pulls/comments/{comment_id} --jq '.path')"
    ```
 
-2. Read the file at the item's `original_commit_id` (block above, with it as `{commit_id}`).
+2. Read the file at the item's `original_commit_id` (block above, with it as `{commit_id}`). If
+   `side` (or, for a multi-line comment, `start_side`) is `LEFT`, the commented lines are deleted
+   ones that this file no longer contains: do not look them up by number here — find them in
+   `diff_hunk`, and use this file only for the surrounding code.
 3. Fetch that commit's diff for the file (the item's `diff_hunk` already gives the immediate
    context; an empty result means that commit did not touch the file, so rely on `diff_hunk`):
 
