@@ -33,8 +33,10 @@ when an item touches:
   depends on), while `macosMain` and `iosMain` hold separate actuals, so a change can break one
   target while the other still passes;
 - `appleApp/`, also run
-  `(cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)`
-  — in a subshell, so later commands still run from the repo root. The `.xcodeproj` is a
+  `(./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog && cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)`
+  — in a subshell, so later commands still run from the repo root. The Gradle step comes first
+  because `xcodegen generate` and Xcode's build planning both need its outputs, which a fresh
+  checkout lacks (`docs/build.md`). The `.xcodeproj` is a
   gitignored artifact that XcodeGen writes with every source file listed, so one left over from an
   earlier generate can miss a `project.yml` change or an added, removed or renamed file and still
   pass.

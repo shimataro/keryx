@@ -45,10 +45,12 @@ Run Keryx KMP's standard build flow in sequence.
    file and can still pass:
 
    ```bash
-   (cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)
+   (./gradlew :shared:assembleKeryxSharedReleaseXCFramework :composeApp:generateStringCatalog && cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)
    ```
 
-   (A subshell, so later commands still run from the repo root.)
+   (A subshell, so later commands still run from the repo root. The Gradle step comes first
+   because `xcodegen generate` and Xcode's build planning both need its outputs, which a fresh
+   checkout lacks — `docs/build.md`.)
 
    Off a Mac, skip this step and say so in the report rather than reporting it as passed.
 
