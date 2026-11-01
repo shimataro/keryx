@@ -312,7 +312,11 @@ There is no single path or line, so gather broader context:
 
    ```bash
    review_path="$(gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files | jq -rs --argjson i {index} 'add | .[$i].filename')"
+   printf 'review_path: %s\n' "$review_path"
    ```
+
+   The list is fetched again here, so confirm the printed `review_path` is the `filename` step 1
+   showed for that index; if not, the PR changed in between — start this item's step 1 again.
 
 #### Every item
 
