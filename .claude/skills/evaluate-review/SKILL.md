@@ -472,13 +472,12 @@ Then, for each **Fix & commit** item, in item order (one item's failure never st
 1. Implement that item's section of the approved plan — that item only — following the repo's
    standing constraints (`.claude/CLAUDE.md`, `docs/testing.md` — including adding/updating
    tests where constraint #7 applies).
-2. Verify per `.claude/etc/per-item-commit.md` §2, running the item's planned Verification —
-   at minimum `./gradlew build` (or the narrowest relevant test target, e.g.
-   `:shared:desktopTest --tests "..."` / `:composeApp:desktopTest --tests "..."`, when that
-   clearly covers the change). When the plan says to re-measure, re-insert Step 7's measurement
-   and check the effect, then remove it and confirm a fresh
+2. Verify per `.claude/etc/per-item-commit.md` §2. When the plan says to re-measure, do that
+   first: re-insert Step 7's measurement and check the effect, then remove it and confirm a fresh
    `.claude/etc/temporary-instrumentation.md` §4 snapshot matches the fix-only one taken before
-   re-inserting it.
+   re-inserting it. Then run the item's planned Verification — at minimum `./gradlew build` (or
+   the narrowest relevant test target, e.g. `:shared:desktopTest --tests "..."` /
+   `:composeApp:desktopTest --tests "..."`, when that clearly covers the change).
 3. On failure (including a re-measurement that does not confirm the effect), revert the item per
    `.claude/etc/per-item-commit.md` §3 and record `Verification failed: <reason>`.
 4. On success, commit per `.claude/etc/per-item-commit.md` §4, e.g.

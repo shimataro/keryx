@@ -17,6 +17,10 @@ verified, reverted and committed.
 
 ## 2. Verify
 
+If the caller re-measures this item with temporary instrumentation, do that first, then remove it
+per `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome**, before running the
+tests below — they must run on the item's change alone.
+
 Run the caller's tests for the item. In addition, the JVM build never compiles the Apple code, so
 when an item touches:
 
@@ -39,9 +43,6 @@ Off a Mac, an item touching an Apple-only source set (`apple*`, `macos*`, `ios*`
 cannot be verified: treat it as failed (§3), not as passed. An item touching only `commonMain` /
 `commonTest`, `testing/src/commonMain` or those build scripts is judged on the caller's tests there, and the caller's closing summary records
 "Apple targets not verified locally" for it (CI runs the Apple tests on every push).
-
-If the caller used temporary instrumentation for this item, remove it per
-`.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome**, before anything else.
 
 ## 3. Revert on failure
 
