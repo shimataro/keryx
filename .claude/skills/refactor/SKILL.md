@@ -168,8 +168,8 @@ divider policy, article card style, flat native-feel components, dialog rules).
 
 ### Step 1 — Establish a green baseline
 
-Check `git status --porcelain` before anything else: if the working tree is
-dirty with changes unrelated to this run, warn and stop — proceeding would
+Check `git status --porcelain` before anything else: if it prints anything,
+warn and stop — proceeding would
 contaminate the baseline below and risk an unrelated file getting swept into
 (or clobbered by a revert during) a later batch's commit. Then run the tests —
 or invoke the **`build` skill**:

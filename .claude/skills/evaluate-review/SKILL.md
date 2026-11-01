@@ -42,7 +42,7 @@ Every place that reports a result uses only these labels — plus the suffix
 | Item | `No action needed` | Invalid, valid but needing no code change, unconfirmed (Step 7), or a review body covered by the line comments (Step 7) |
 | Item | `Verification failed: <reason>` | Fix reverted after verification failed (8.6) |
 | Item / URL | `Plan rejected` | The user rejected the plan (8.5) |
-| Item / URL | `Working tree not clean` | Unrelated uncommitted changes at 8.4 or 8.6 |
+| Item / URL | `Working tree not clean` | Uncommitted changes at 8.4 or 8.6 |
 | URL | `PR head moved` | At 8.6 the PR head differs from the one Step 3 recorded and is not contained in HEAD (e.g. it advanced during plan approval) |
 | URL | `Invalid URL` | Step 2 |
 | URL | `Fetch failed: <reason>` | A Step 4 request failed |
@@ -127,8 +127,8 @@ into a shell variable and only ever use the variable, never the retyped name.
      so do not offer to switch; warn that the evaluation runs against the current branch and
      go to 4.
    - **Otherwise** ask via `AskUserQuestion`. If `git status --porcelain` is not empty, say in the
-     question that those uncommitted changes travel with a switch and will make 8.4 skip this URL
-     unless they are this run's own. Options:
+     question that those uncommitted changes travel with a switch and will make 8.4 skip this URL.
+     Options:
      - **Switch to PR branch** (Recommended) — `git fetch origin "$pr_branch"`, then
        `git switch "$pr_branch"`, then go to 4. `git switch` carries uncommitted changes along
        (no stash); if it refuses because of a conflict, report that and go to 4 on the
@@ -454,8 +454,8 @@ Before planning anything:
 
 1. Branch per `.claude/etc/per-item-commit.md` §1 with type `fix` (Step 3 makes a `v*` branch
    unlikely here, but guard for it anyway).
-2. Check `git status --porcelain`. If the working tree is dirty with changes unrelated to this
-   run, warn and end this URL (`Working tree not clean`) — a failed-verification revert (8.6)
+2. Check `git status --porcelain`. If it prints anything, warn and end this URL
+   (`Working tree not clean`) — a failed-verification revert (8.6)
    must never be able to destroy pre-existing uncommitted work in the same file. A clean result
    here is the baseline for 8.6's re-check.
 

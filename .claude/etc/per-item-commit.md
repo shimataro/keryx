@@ -12,8 +12,9 @@ verified, reverted and committed.
   repo's "don't commit unless asked" convention.
 - Before the first commit, if the current branch is a version branch (`v*`), run
   `/feature-branch <type>` (the caller names `<type>`) to create and switch to a feature branch.
-- The tree must have no unrelated uncommitted changes when the first item starts; that clean
-  state is the **baseline** §3 returns to. The caller says where it checked.
+- The tree must have no uncommitted changes when the first item starts — `git status --porcelain`
+  prints nothing, untracked files included; that clean state is the **baseline** §3 returns to.
+  The caller says where it checked.
 
 ## 2. Verify
 
