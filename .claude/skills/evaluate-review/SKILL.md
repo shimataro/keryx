@@ -86,7 +86,10 @@ Parse the URL. It must match one of the following patterns:
   the ID `[0-9]+` — or the URL does not match. Only these validated values and GitHub-generated
   IDs and SHAs from the API (digits / hex only, e.g. `{comment_id}`, `{commit_id}`) are written
   straight into commands: those character sets hold no shell syntax. Anything PR-controlled
-  still goes through a variable (Steps 3 and 6).
+  still goes through a variable (Steps 3 and 6). Shell variables do not survive from one Bash
+  call to the next, so run the lines that bind such a variable (`pr_*`, `review_path`) in the
+  same call as every command that uses it; a later call repeats the binding lines to re-bind it
+  from the API, never retyping the value.
 - Determine `comment_type`: `review_comment` for `#discussion_r`, `pr_review` for `#pullrequestreview`.
 - If the URL does **not** match either pattern, output exactly the line below, then end this URL
   (`Invalid URL`):
