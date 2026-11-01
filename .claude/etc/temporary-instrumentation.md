@@ -62,8 +62,9 @@ whatever the outcome — including a failed run or an effect the re-measurement 
 
 The fix is usually still uncommitted at this point, so the re-measurement may go into a file whose
 only uncommitted changes are the fix under test (and nothing else). Before inserting, take a
-snapshot of the fix with the block below, `SNAPSHOT` pointing at `before.snapshot` in the
-scratchpad — a directory **outside the worktree**. Inside it, an unignored snapshot file would be
+snapshot of the fix with the block below, `SNAPSHOT` set to the absolute path of
+`before.snapshot` in the scratchpad — a directory **outside the worktree** — in the same Bash call
+(shell variables do not survive between calls). Inside the worktree, an unignored snapshot file would be
 listed as an untracked file and captured into the snapshot itself, so the two would never match
 even after a correct cleanup. It covers the tracked changes (`git diff`) and the full content of every untracked file
 (a new test, which `git diff` alone omits), so a measurement removed from either kind of file is
@@ -76,8 +77,8 @@ checked the same way:
   done; } > "$SNAPSHOT"
 ```
 
-After removing the measurement, run it again with `SNAPSHOT` pointing at `after.snapshot` in the same
-directory and
-confirm `diff before.snapshot after.snapshot` prints nothing — the fix intact, only the measurement
+After removing the measurement, run it again with `SNAPSHOT` set to the absolute path of
+`after.snapshot` in the same directory, and confirm that `diff` of the two files, both given by
+absolute path (the worktree is the working directory, so bare names would not resolve), prints nothing — the fix intact, only the measurement
 gone. Compare the output, not the exit status: `git diff --no-index` exits 1 whenever a file
 differs from `/dev/null`. Everything else in §3 still applies.
