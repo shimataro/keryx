@@ -411,12 +411,13 @@ For each approved item:
 5. If this item changed something a doc *names* (per Step 7's criteria below),
    fix the stale doc reference now, **inside this same change**, so it rides
    along in this item's commit rather than a separate later one.
-6. On success, review `git status --porcelain` / `git diff` and stage **only
-   the files, and only the hunks, belonging to this item** (including any doc
-   fix from step 5) — verify the staged diff contains nothing beyond this item
-   before committing, so an unrelated pre-existing edit or residue from an
-   earlier item's revert never rides along; also run the marker check from
-   `.claude/etc/temporary-instrumentation.md` §3 and confirm no measurement code remains. Create **exactly one commit** with
+6. On success, review `git status --porcelain` / `git diff`, then run the
+   marker check from `.claude/etc/temporary-instrumentation.md` §3 and confirm
+   it prints nothing **before staging anything**. Then stage **only the files,
+   and only the hunks, belonging to this item** (including any doc fix from
+   step 5) — verify the staged diff contains nothing beyond this item before
+   committing, so an unrelated pre-existing edit or residue from an earlier
+   item's revert never rides along. Create **exactly one commit** with
    a **single-line** commit message only (no body, no trailer), in the repo's
    Conventional Commits style, e.g. `perf(data): batch getByFeedAndGuid
    lookups`. Never batch multiple items into one commit, and never amend a

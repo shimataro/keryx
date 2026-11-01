@@ -509,11 +509,12 @@ For each comment in `associated_comments`, in order:
      intended changes are present before reverting, so a revert cannot destroy pre-existing
      work in the same file; then do not commit. Note the failure (with the reason) for the
      closing summary, and move on to the next comment.
-4. On success, review `git status --porcelain` / `git diff` and stage **only the files, and
-   only the hunks, touched by this fix** — verify the staged diff contains nothing beyond this
-   comment's change before committing, so unrelated pre-existing edits or residue from a prior
-   comment's failed attempt never ride along. Also run the marker check from
-   `.claude/etc/temporary-instrumentation.md` §3 and confirm no temporary instrumentation remains. Create **exactly one commit** with a
+4. On success, review `git status --porcelain` / `git diff`, then run the marker check from
+   `.claude/etc/temporary-instrumentation.md` §3 and confirm it prints nothing **before
+   staging anything**. Then stage **only the files, and only the hunks, touched by this fix** —
+   verify the staged diff contains nothing beyond this comment's change before committing, so
+   unrelated pre-existing edits or residue from a prior comment's failed attempt never ride
+   along. Create **exactly one commit** with a
    **single-line** commit message only (no body, no trailer), in the repo's Conventional
    Commits style, e.g. `fix(sync): correct rev comparison for Google Drive`. Never batch
    multiple comments into one commit, and never amend a commit made earlier in this same run.
