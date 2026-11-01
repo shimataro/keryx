@@ -143,10 +143,12 @@ into a shell variable and only ever use the variable, never the retyped name.
      of it) → proceed to Step 4.
    - Otherwise (behind, diverged, or the commit is not available) output the state and ask via
      `AskUserQuestion`:
-     - **Fast-forward to the PR head** (Recommended) — offered only when HEAD is an ancestor of
+     - **Fast-forward to the PR head** (Recommended) — offered only when the current branch is
+       `$pr_branch` (the names matched, or the switch succeeded) and HEAD is an ancestor of
        `$pr_head_sha` (simply behind): `git merge --ff-only "$pr_head_sha"`, then proceed to
        Step 4. If git refuses (e.g. uncommitted changes in the way), report that and ask again
-       without this option.
+       without this option. Never offer it after **Stay**, on a fork PR or after a failed
+       switch: the checkout is then a branch the user chose to keep, and must not be moved.
      - **Continue on the current HEAD** — proceed to Step 4 with a warning that fixes will be
        made against older code and may conflict with the PR head when pushed.
      - **Cancel evaluation** — stop the whole run (`Cancelled`).
