@@ -68,9 +68,11 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
 4. `./gradlew :shared:desktopTest :composeApp:desktopTest` passes; existing tests under
    `commonTest/` and `desktopTest/` are not broken. Watch `SyncMergerTest` and
    `SchemaTest` especially when touching the DB or merge SQL.
-5. On a Mac, when the change touches `shared/src/apple*`, `:shared` `commonMain`/`commonTest`
-   code that also compiles for Kotlin/Native, or `appleApp/`: `./gradlew :shared:macosArm64Test`
-   passes, and for `appleApp/` also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`
-   (run `cd appleApp && xcodegen generate` first if `project.yml` changed).
+5. On a Mac, when the change touches `shared/src/apple*` / `macos*` / `ios*`, `:shared`
+   `commonMain`/`commonTest` code that also compiles for Kotlin/Native, or `appleApp/`:
+   `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` passes, and for `appleApp/`
+   also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`, always after
+   `cd appleApp && xcodegen generate` — the gitignored `.xcodeproj` lists every source file, so a
+   stale one misses an added, removed or renamed file and can still pass.
 6. The marker check in `.claude/etc/temporary-instrumentation.md` §3 prints nothing — no
    temporary instrumentation remains.

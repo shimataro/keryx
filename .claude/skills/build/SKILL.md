@@ -29,17 +29,24 @@ Run Keryx KMP's standard build flow in sequence.
    ./gradlew :composeApp:run
    ```
    (Blocks until the window closes — only run when asked to verify UI manually.)
-5. **Apple targets — on a Mac only, when the change touches `shared/src/apple*`,
-   `:shared` `commonMain`/`commonTest` code (which also compiles for Kotlin/Native), or
-   `appleApp/`.** Steps 2–3 run on the JVM and never compile the Apple targets:
+5. **Apple targets — on a Mac only, when the change touches `shared/src/apple*` /
+   `macos*` / `ios*`, `:shared` `commonMain`/`commonTest` code (which also compiles for
+   Kotlin/Native), or `appleApp/`.** Steps 2–3 run on the JVM and never compile the Apple
+   targets:
+
    ```bash
    ./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test
    ```
-   and, when `appleApp/` changed (run `cd appleApp && xcodegen generate` first if
-   `project.yml` changed):
+
+   and, when `appleApp/` changed — always regenerating first, since the gitignored
+   `.xcodeproj` lists every source file and a stale one misses an added, removed or renamed
+   file and can still pass:
+
    ```bash
+   cd appleApp && xcodegen generate
    xcodebuild -scheme Keryx -destination 'platform=macOS' test
    ```
+
    Off a Mac, skip this step and say so in the report rather than reporting it as passed.
 
 ## Notes
