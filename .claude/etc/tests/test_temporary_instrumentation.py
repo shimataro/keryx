@@ -21,13 +21,13 @@ def documented_marker_check():
     return match.group(1).strip()
 
 
-
 def documented_snapshot_command():
     section = POLICY.read_text(encoding="utf-8").split("## 4. Re-measuring after the fix", 1)[1]
     match = re.search(r"```bash\s*\n(.*?)\n\s*```", section, re.DOTALL)
     if match is None:
         raise AssertionError("The snapshot command's bash block is missing from section 4")
     return match.group(1)
+
 
 class MarkerCheckTest(unittest.TestCase):
     def setUp(self):
@@ -117,7 +117,6 @@ class MarkerCheckTest(unittest.TestCase):
         self.assertEqual(self.git("status", "--porcelain").stdout, "A  tracked.kt\n")
 
 
-
 class SnapshotTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -188,6 +187,7 @@ class SnapshotTest(unittest.TestCase):
         self.write("tracked.kt", "original\nfix\n")
 
         self.assertEqual(self.snapshot(), self.git("diff").stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
