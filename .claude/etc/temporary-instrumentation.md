@@ -6,7 +6,8 @@ unconfirmed review finding, a performance hypothesis. The caller decides **when*
 
 The marker check in §3 and the snapshot command in §4 are exercised by
 `.claude/etc/tests/test_temporary_instrumentation.py`, which reads them from this file; after
-changing either, run `python3 -m unittest discover -s .claude/etc/tests`.
+changing either, run `python3 -B -m unittest discover -s .claude/etc/tests` (`-B` leaves no
+`__pycache__` behind to dirty the tree).
 
 ## 1. Gathering evidence
 
