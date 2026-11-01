@@ -119,15 +119,15 @@ into a shell variable and only ever use the variable, never the retyped name.
    (`PR branch: <pr_branch>, Current branch: <current>`), then:
    - **Fork PR** (`$pr_head_repo` is not `{owner}/{repo}`): `origin` does not carry that branch,
      so do not offer to switch; warn that the evaluation runs against the current branch and
-     proceed to Step 4.
+     go to 4.
    - **Otherwise** ask via `AskUserQuestion`. If `git status --porcelain` is not empty, say in the
      question that those uncommitted changes travel with a switch and will make 8.4 skip this URL
      unless they are this run's own. Options:
      - **Switch to PR branch** (Recommended) — `git fetch origin "$pr_branch"`, then
        `git switch "$pr_branch"`, then go to 4. `git switch` carries uncommitted changes along
-       (no stash); if it refuses because of a conflict, report that and proceed to Step 4 on
-       the current branch.
-     - **Stay on current branch** — proceed to Step 4 with the warning still displayed.
+       (no stash); if it refuses because of a conflict, report that and go to 4 on the
+       current branch.
+     - **Stay on current branch** — go to 4 with the warning still displayed.
      - **Cancel evaluation** — stop the whole run (`Cancelled`); remaining URLs are not processed.
 4. **Head check** — the branch name alone does not prove the checkout carries the PR's code, and
    a stale one would receive Step 8's fixes against the wrong revision. If `$pr_head_sha` is not
