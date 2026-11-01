@@ -186,11 +186,18 @@ gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}
 ```
 
 1. Run the PR membership check, then keep `body`, `state`, `commit_id`, `user` and `submitted_at`.
-2. Fetch the review's line comments and keep each one's line-comment fields as
-   `associated_comments`:
+2. List the review's line comments:
 
    ```bash
    gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments
+   ```
+
+   This endpoint omits `line` / `original_line`, `start_line` / `original_start_line` and
+   `side` / `start_side`, so fetch each listed comment again by its `id` (digits, written
+   directly) and keep the line-comment fields from that response as `associated_comments`:
+
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/comments/{id}
    ```
 
 3. If `body` is empty and there are no associated comments, end this URL
