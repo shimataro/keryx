@@ -343,6 +343,14 @@ regression test that fails before the fix and passes after; an `EXPLAIN` diff ma
 support an SQL candidate but must be paired with a repeatable query-execution
 measurement. A candidate without one is not proposed.
 
+**Tests the item keeps are not measurement code.** A #16 reproducing regression
+test, and an axis-3 test confirming DB writes stay serialized, are the item's
+permanent tests (CLAUDE.md constraint #7) — the keep decision
+`.claude/etc/temporary-instrumentation.md` §2 leaves to the caller. The copy run
+here in Step 2 is removed like any other probe; Step 5 adds the test back as part
+of the change, without the `TEMP-INSTRUMENTATION` marker, keeps it through Step
+5's measurement cleanup, and commits it with the item.
+
 ### Step 3 — Inventory, tier, and gate the candidates
 
 Label each candidate with its axis and its Green/Yellow/Red tier, then prioritize
@@ -383,7 +391,8 @@ For each approved item:
 
 1. Make one cohesive change.
 2. Re-measure with that axis's method and check whether the improvement is real,
-   then remove the measurement code again per
+   then remove the measurement code again (never a test the item keeps — see
+   Step 2) per
    `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome** —
    including when the improvement is not confirmed or the run fails — and confirm
    a fresh §4 snapshot matches the change-only one taken before re-inserting it,
