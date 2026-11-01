@@ -28,8 +28,9 @@ when an item touches:
   both Kotlin/Native targets and `commonTest` runs natively on both (with the `testing/` fakes it
   depends on), while `macosMain` and `iosMain` hold separate actuals, so a change can break one
   target while the other still passes;
-- `appleApp/`, also run `cd appleApp && xcodegen generate` and then
-  `xcodebuild -scheme Keryx -destination 'platform=macOS' test` there — the `.xcodeproj` is a
+- `appleApp/`, also run
+  `(cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)`
+  — in a subshell, so later commands still run from the repo root. The `.xcodeproj` is a
   gitignored artifact that XcodeGen writes with every source file listed, so one left over from an
   earlier generate can miss a `project.yml` change or an added, removed or renamed file and still
   pass.

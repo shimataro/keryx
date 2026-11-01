@@ -45,9 +45,10 @@ Run Keryx KMP's standard build flow in sequence.
    file and can still pass:
 
    ```bash
-   cd appleApp && xcodegen generate
-   xcodebuild -scheme Keryx -destination 'platform=macOS' test
+   (cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)
    ```
+
+   (A subshell, so later commands still run from the repo root.)
 
    Off a Mac, skip this step and say so in the report rather than reporting it as passed.
 

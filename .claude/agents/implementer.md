@@ -74,8 +74,9 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
    (`shared/build.gradle.kts`, `testing/build.gradle.kts`, `gradle/libs.versions.toml`), or
    `appleApp/`:
    `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` passes, and for `appleApp/`
-   also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`, always after
-   `cd appleApp && xcodegen generate` — the gitignored `.xcodeproj` lists every source file, so a
-   stale one misses an added, removed or renamed file and can still pass.
+   also `(cd appleApp && xcodegen generate && xcodebuild -scheme Keryx -destination 'platform=macOS' test)`
+   — always regenerating first, since the gitignored `.xcodeproj` lists every source file and a
+   stale one misses an added, removed or renamed file and can still pass; the subshell keeps later
+   commands at the repo root.
 6. The marker check in `.claude/etc/temporary-instrumentation.md` §3 prints nothing — no
    temporary instrumentation remains.
