@@ -326,8 +326,9 @@ message to produce here — finish by outputting the closing summary (see
 ## How to report
 
 - One line per applied batch: category → files → why behavior is preserved →
-  `Committed <sha>` with its one-line message, or `Reverted: <reason>` if it
-  could not be made green.
+  `Committed <sha>` with its one-line message (noting
+  "Apple targets not verified locally" when `.claude/etc/per-item-commit.md` §2
+  calls for it), or `Reverted: <reason>` if it could not be made green.
 - The final test result — passing count plus confirmation the Step 1 baseline
   test set is intact (e.g. "all baseline tests pass, 0 failures, N added").
 - Any doc files updated for consistency (Step 6) — which file and what drifted.

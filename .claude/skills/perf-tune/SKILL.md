@@ -486,8 +486,9 @@ produce here — finish by outputting the closing summary (see `## How to report
 - One entry per applied change: **axis** → location → **before/after measurement
   or milestone timestamps** (an SQL entry gives the execution measurement *and* its
   `EXPLAIN` diff, not the plan diff alone) → why the semantics are identical →
-  tier → `Committed <sha>` with its one-line message, or `Reverted: <reason>`
-  if it could not be confirmed.
+  tier → `Committed <sha>` with its one-line message (noting
+  "Apple targets not verified locally" when `.claude/etc/per-item-commit.md` §2
+  calls for it), or `Reverted: <reason>` if it could not be confirmed.
 - For axis-2 changes, state explicitly that **total time is unchanged** — never
   let a perceived-speed improvement read as a speed-up.
 - The final test result, confirming the Step 1 baseline test set is intact

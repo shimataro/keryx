@@ -32,7 +32,9 @@ Examples:
 
 ## Outcomes
 
-Every place that reports a result uses only these labels.
+Every place that reports a result uses only these labels — plus the suffix
+` (Apple targets not verified locally)` on `Committed <sha>` when `.claude/etc/per-item-commit.md`
+§2 calls for it.
 
 | Scope | Label | When |
 | --- | --- | --- |
