@@ -41,7 +41,7 @@ Every place that reports a result uses only these labels.
 | Item | `Verification failed: <reason>` | Fix reverted after verification failed (8.6) |
 | Item / URL | `Plan rejected` | The user rejected the plan (8.5) |
 | Item / URL | `Working tree not clean` | Unrelated uncommitted changes at 8.4 or 8.6 |
-| URL | `PR head moved` | The PR head advanced during plan approval (8.6) |
+| URL | `PR head moved` | The PR head is not contained in HEAD at 8.6 (e.g. it advanced during plan approval) |
 | URL | `Invalid URL` | Step 2 |
 | URL | `Fetch failed: <reason>` | A Step 4 request failed |
 | URL | `Not in this PR` | The fetched comment/review belongs to another PR (Step 4) |
@@ -446,11 +446,12 @@ The PR can also gain commits during that wait. Re-fetch its head with
 `$pr_head_sha` Step 3 recorded (a hex SHA, so it may be written into the command directly):
 
 - **Same SHA**, or the fetched SHA is already in HEAD (`git merge-base --is-ancestor <sha> HEAD`,
-  e.g. it was pushed from this checkout) → continue.
+  e.g. it was pushed from this checkout) → continue. If Step 3 recorded no head SHA, only the
+  ancestor check applies.
 - **Otherwise** → commit nothing and end this URL (`PR head moved`): the new commits may already
   change what was evaluated and planned, so tell the user to bring the checkout up to the PR head
   and re-run.
-- **The request fails, or Step 3 recorded no head SHA** → warn, as Step 3.1 does, and continue.
+- **The request fails** → warn, as Step 3.1 does, and continue.
 
 Then, for each **Fix & commit** item, in item order (one item's failure never stops the rest):
 
