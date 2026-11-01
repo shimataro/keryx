@@ -99,18 +99,19 @@ Parse the URL. It must match one of the following patterns:
 The PR's head branch name is PR-controlled, like a review `path` (Step 6): bind it from the API
 into a shell variable and only ever use the variable, never the retyped name.
 
-1. Fetch the PR's head branch and repository:
+1. Fetch the PR's head branch, repository and commit:
 
    ```bash
    pr_json="$(gh api repos/{owner}/{repo}/pulls/{pull_number})"
    pr_branch="$(jq -r '.head.ref' <<<"$pr_json")"
    pr_head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+   pr_head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
    ```
 
    If this fails (e.g. network error, bad credentials), output a warning and proceed to Step 4.
 2. Get the current local branch with `git branch --show-current`. If the directory is not a git
    repository, output a warning and proceed to Step 4.
-3. If the branches match, proceed to Step 4. Otherwise output the mismatch
+3. If the branches match, go to 4. Otherwise output the mismatch
    (`PR branch: <pr_branch>, Current branch: <current>`), then:
    - **Fork PR** (`$pr_head_repo` is not `{owner}/{repo}`): `origin` does not carry that branch,
      so do not offer to switch; warn that the evaluation runs against the current branch and
@@ -118,12 +119,27 @@ into a shell variable and only ever use the variable, never the retyped name.
    - **Otherwise** ask via `AskUserQuestion`. If `git status --porcelain` is not empty, say in the
      question that those uncommitted changes travel with a switch and will make 8.4 skip this URL
      unless they are this run's own. Options:
-     - **Switch to PR branch** (Recommended) — `git switch "$pr_branch"`, after
-       `git fetch origin "$pr_branch"` if it does not exist locally. `git switch` carries
-       uncommitted changes along (no stash); if it refuses because of a conflict, report that
-       and proceed on the current branch.
+     - **Switch to PR branch** (Recommended) — `git fetch origin "$pr_branch"`, then
+       `git switch "$pr_branch"`, then go to 4. `git switch` carries uncommitted changes along
+       (no stash); if it refuses because of a conflict, report that and proceed to Step 4 on
+       the current branch.
      - **Stay on current branch** — proceed to Step 4 with the warning still displayed.
      - **Cancel evaluation** — stop the whole run (`Cancelled`); remaining URLs are not processed.
+4. **Head check** — the branch name alone does not prove the checkout carries the PR's code, and
+   a stale one would receive Step 8's fixes against the wrong revision. If `$pr_head_sha` is not
+   present locally (`git cat-file -e "$pr_head_sha^{commit}"` fails) and this is not a fork PR,
+   run `git fetch origin "$pr_branch"` first. Then:
+   - `git merge-base --is-ancestor "$pr_head_sha" HEAD` succeeds (HEAD is the PR head or ahead
+     of it) → proceed to Step 4.
+   - Otherwise (behind, diverged, or the commit is not available) output the state and ask via
+     `AskUserQuestion`:
+     - **Fast-forward to the PR head** (Recommended) — offered only when HEAD is an ancestor of
+       `$pr_head_sha` (simply behind): `git merge --ff-only "$pr_head_sha"`, then proceed to
+       Step 4. If git refuses (e.g. uncommitted changes in the way), report that and ask again
+       without this option.
+     - **Continue on the current HEAD** — proceed to Step 4 with a warning that fixes will be
+       made against older code and may conflict with the PR head when pushed.
+     - **Cancel evaluation** — stop the whole run (`Cancelled`).
 
 ### Step 4 — Fetch the comment or review
 
