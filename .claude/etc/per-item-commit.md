@@ -20,11 +20,16 @@ verified, reverted and committed.
 Run the caller's tests for the item. In addition, the JVM build never compiles the Apple code, so
 when an item touches:
 
-- `shared/src/apple*`, also run
-  `./gradlew :shared:macosArm64Test`;
+- `shared/src/commonMain` (including `sqldelight/`), `shared/src/commonTest`, `shared/src/apple*`,
+  `shared/src/macos*` or `shared/src/ios*`, also run `./gradlew :shared:macosArm64Test` — these
+  source sets also compile for Kotlin/Native, and `commonTest` runs natively too. When it touches
+  `shared/src/ios*`, run `:shared:iosSimulatorArm64Test` as well;
 - `appleApp/`, also run `xcodebuild -scheme Keryx -destination 'platform=macOS' test`.
 
-Off a Mac, such an item cannot be verified: treat it as failed (§3), not as passed.
+Off a Mac, an item touching an Apple-only source set (`apple*`, `macos*`, `ios*`) or `appleApp/`
+cannot be verified: treat it as failed (§3), not as passed. An item touching only `commonMain` /
+`commonTest` is judged on the caller's tests there, and the caller's closing summary records
+"Apple targets not verified locally" for it (CI runs the Apple tests on every push).
 
 If the caller used temporary instrumentation for this item, remove it per
 `.claude/etc/temporary-instrumentation.md` §3–§4 **whatever the outcome**, before anything else.
