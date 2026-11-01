@@ -389,9 +389,11 @@ For each approved item:
    a fresh §4 snapshot matches the change-only one taken before re-inserting it,
    before doing anything else.
 3. Re-run the tests, plus the Apple targets per `.claude/etc/per-item-commit.md` §2:
+
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
+
    The full suite must be green **and the Step 1 baseline set must survive in
    full** — a matching count is not sufficient, since a deleted test can hide
    behind a new one.

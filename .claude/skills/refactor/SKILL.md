@@ -227,9 +227,11 @@ For each approved batch:
 1. Make one cohesive change set — small enough to review and revert on its own.
 2. Recompile and re-run tests, plus the Apple targets per
    `.claude/etc/per-item-commit.md` §2:
+
    ```bash
    ./gradlew :shared:desktopTest :composeApp:desktopTest
    ```
+
 3. The **full suite must stay green** and the **Step 1 baseline set must survive
    in full** — every recorded baseline test still runs and passes. A
    matching-or-higher count is *not* sufficient: a deleted test hidden behind a
