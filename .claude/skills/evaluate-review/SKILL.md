@@ -157,8 +157,11 @@ Any failed request below: output the error and end this URL (`Fetch failed: <rea
 
 **Line-comment fields** — kept for every line comment fetched here: `id`, `html_url`, `body`,
 `path`, `line` / `original_line` (ending line), `start_line` / `original_start_line` (starting
-line of a multi-line comment), `side` / `start_side` (`LEFT` or `RIGHT`), `diff_hunk`, and
-`commit_id` (the commit the comment was left on).
+line of a multi-line comment), `side` / `start_side` (`LEFT` or `RIGHT`), `diff_hunk`,
+`original_commit_id` and `commit_id`. The reviewed revision is `original_commit_id` (the commit
+the comment was left on), with `original_line` / `original_start_line` its position there;
+GitHub moves `commit_id` and `line` / `start_line` along as the PR advances, so they give the
+comment's current position, not what the reviewer saw.
 
 **PR membership check** — right after fetching the comment or review, and before anything else,
 confirm its `pull_request_url` equals
@@ -268,8 +271,8 @@ fi
 
 #### Line-comment items
 
-For each item, using **that item's own** `commit_id`, path and line range (items on the same file
-but different commits are handled separately):
+For each item, using **that item's own** `original_commit_id`, path and `original_*` line range
+(items on the same file but different commits are handled separately):
 
 1. Bind its path — `{comment_id}` is the item's own `id`:
 
@@ -277,12 +280,12 @@ but different commits are handled separately):
    review_path="$(gh api repos/{owner}/{repo}/pulls/comments/{comment_id} --jq '.path')"
    ```
 
-2. Read the file at the item's `commit_id` (block above).
+2. Read the file at the item's `original_commit_id` (block above, with it as `{commit_id}`).
 3. Fetch that commit's diff for the file (the item's `diff_hunk` already gives the immediate
-   context):
+   context; an empty result means that commit did not touch the file, so rely on `diff_hunk`):
 
    ```bash
-   gh api repos/{owner}/{repo}/commits/{commit_id} | jq --arg path "$review_path" '.files[] | select(.filename == $path) | .patch'
+   gh api repos/{owner}/{repo}/commits/{original_commit_id} | jq --arg path "$review_path" '.files[] | select(.filename == $path) | .patch'
    ```
 
 #### Review-body item
@@ -313,8 +316,10 @@ Fetch the current PR head SHA once per URL:
 gh api repos/{owner}/{repo}/pulls/{pull_number} --jq '.head.sha'
 ```
 
-If the head has advanced past an item's `commit_id`, briefly check whether the issue that item
-raises has already been fixed in a later commit. If so, note this in its evaluation reasoning.
+If the head has advanced past the revision an item was raised on — a line comment's
+`original_commit_id`, a review body's `commit_id` (a review's own `commit_id` stays at the
+reviewed commit) — briefly check whether the issue that item raises has already been fixed in a
+later commit. If so, note this in its evaluation reasoning.
 
 ### Step 7 — Evaluate validity
 
