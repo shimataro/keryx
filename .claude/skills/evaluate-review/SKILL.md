@@ -228,22 +228,32 @@ PR review summaries do not use `in_reply_to_id`, so build context from chronolog
 For each line-comment item, using **that item's own** `commit_id`, `path` and line range (items
 on the same file but different commits are handled separately):
 
+**Never write the review-provided `path` into a command** — not as a bare token, not inside
+quotes, not in a jq filter. A path is PR-controlled and can contain `'`, `$(`, a backtick or
+`;`, which would end a quoted string or the jq expression and run as shell syntax. Instead,
+bind it from the API response into a shell variable and use only that variable afterwards.
+Name it `review_path`, not `path` — in zsh, `path` is tied to `$PATH`, so assigning it breaks
+every later command (`{owner}`, `{repo}` and `{comment_id}` are the values validated in Step 2 or numeric API IDs):
+
+```bash
+review_path="$(gh api repos/{owner}/{repo}/pulls/comments/{comment_id} --jq '.path')"
+```
+
 1. Load the code exactly as it existed when the comment was left. If the reviewed file exists in the local working tree **and matches `commit_id`**, read it for full context.
-2. Otherwise, fetch the file content at `commit_id`:
+2. Otherwise, fetch the file content at `commit_id`, percent-encoding each directory component
+   of `$review_path` with jq (keeping the `/` between them) and quoting the whole URL:
 
    ```bash
-   gh api repos/{owner}/{repo}/contents/{path}?ref={commit_id}
+   enc="$(jq -rn --arg p "$review_path" '$p | split("/") | map(@uri) | join("/")')"
+   gh api "repos/{owner}/{repo}/contents/$enc?ref={commit_id}"
    ```
 
-   **URL-encode the `{path}` segment** before interpolation (e.g. space → `%20`, `#` → `%23`, `?` → `%3F`) while preserving `/` between directory components. Decode the `content` field from base64 if necessary.
-3. Fetch the diff for that commit to understand the change being reviewed. **Never interpolate
-   the review-provided `{path}` into a jq filter string or an unquoted shell token** — a path
-   containing a quote or backtick could otherwise break the jq expression or the constructed
-   shell command. Bind it through a quoted shell variable and jq's `--arg` instead:
+   Decode the `content` field from base64 if necessary.
+3. Fetch the diff for that commit to understand the change being reviewed, passing
+   `$review_path` to jq through `--arg`:
 
    ```bash
-   path='{path}'
-   gh api repos/{owner}/{repo}/commits/{commit_id} | jq --arg path "$path" '.files[] | select(.filename == $path) | .patch'
+   gh api repos/{owner}/{repo}/commits/{commit_id} | jq --arg path "$review_path" '.files[] | select(.filename == $path) | .patch'
    ```
 
    (The item's `diff_hunk` already provides the immediate surrounding context.)
@@ -258,10 +268,13 @@ There is no single `path` or `line`. Gather broader context from the PR:
    gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/files --jq '.[] | {filename, status, patch}'
    ```
 
-2. If the review body explicitly names specific files or functions, also fetch the content of those files at the review's `commit_id` (URL-encode `{path}` as above):
+2. If the review body explicitly names specific files or functions, also fetch the content of
+   those files at the review's `commit_id`. Bind each `review_path` from the `filename` that step
+   1's output returned — never retyped from the review body — and encode it as above:
 
    ```bash
-   gh api repos/{owner}/{repo}/contents/{path}?ref={commit_id}
+   enc="$(jq -rn --arg p "$review_path" '$p | split("/") | map(@uri) | join("/")')"
+   gh api "repos/{owner}/{repo}/contents/$enc?ref={commit_id}"
    ```
 
 #### Every item
