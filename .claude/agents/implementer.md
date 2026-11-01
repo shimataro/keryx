@@ -69,7 +69,10 @@ AppKit/UIKit differences) — CLAUDE.md constraint #4.
    `commonTest/` and `desktopTest/` are not broken. Watch `SyncMergerTest` and
    `SchemaTest` especially when touching the DB or merge SQL.
 5. On a Mac, when the change touches `shared/src/apple*` / `macos*` / `ios*`, `:shared`
-   `commonMain`/`commonTest` code that also compiles for Kotlin/Native, or `appleApp/`:
+   `commonMain`/`commonTest` code that also compiles for Kotlin/Native, `testing/src/commonMain`
+   (fakes `:shared`'s `commonTest` uses on the Apple targets), the build scripts configuring them
+   (`shared/build.gradle.kts`, `testing/build.gradle.kts`, `gradle/libs.versions.toml`), or
+   `appleApp/`:
    `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` passes, and for `appleApp/`
    also `xcodebuild -scheme Keryx -destination 'platform=macOS' test`, always after
    `cd appleApp && xcodegen generate` — the gitignored `.xcodeproj` lists every source file, so a

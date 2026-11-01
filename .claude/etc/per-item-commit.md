@@ -21,10 +21,13 @@ Run the caller's tests for the item. In addition, the JVM build never compiles t
 when an item touches:
 
 - `shared/src/commonMain` (including `sqldelight/`), `shared/src/commonTest`, `shared/src/apple*`,
-  `shared/src/macos*` or `shared/src/ios*`, also run
+  `shared/src/macos*`, `shared/src/ios*`, `testing/src/commonMain`, or the build scripts that
+  configure those compilations (`shared/build.gradle.kts`, `testing/build.gradle.kts`,
+  `gradle/libs.versions.toml`), also run
   `./gradlew :shared:macosArm64Test :shared:iosSimulatorArm64Test` — these source sets compile for
-  both Kotlin/Native targets and `commonTest` runs natively on both, while `macosMain` and
-  `iosMain` hold separate actuals, so a change can break one target while the other still passes;
+  both Kotlin/Native targets and `commonTest` runs natively on both (with the `testing/` fakes it
+  depends on), while `macosMain` and `iosMain` hold separate actuals, so a change can break one
+  target while the other still passes;
 - `appleApp/`, also run `cd appleApp && xcodegen generate` and then
   `xcodebuild -scheme Keryx -destination 'platform=macOS' test` there — the `.xcodeproj` is a
   gitignored artifact that XcodeGen writes with every source file listed, so one left over from an
@@ -33,7 +36,7 @@ when an item touches:
 
 Off a Mac, an item touching an Apple-only source set (`apple*`, `macos*`, `ios*`) or `appleApp/`
 cannot be verified: treat it as failed (§3), not as passed. An item touching only `commonMain` /
-`commonTest` is judged on the caller's tests there, and the caller's closing summary records
+`commonTest`, `testing/src/commonMain` or those build scripts is judged on the caller's tests there, and the caller's closing summary records
 "Apple targets not verified locally" for it (CI runs the Apple tests on every push).
 
 If the caller used temporary instrumentation for this item, remove it per

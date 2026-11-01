@@ -31,7 +31,9 @@ Run Keryx KMP's standard build flow in sequence.
    (Blocks until the window closes — only run when asked to verify UI manually.)
 5. **Apple targets — on a Mac only, when the change touches `shared/src/apple*` /
    `macos*` / `ios*`, `:shared` `commonMain`/`commonTest` code (which also compiles for
-   Kotlin/Native), or `appleApp/`.** Steps 2–3 run on the JVM and never compile the Apple
+   Kotlin/Native), `testing/src/commonMain` (fakes `:shared`'s `commonTest` uses on the Apple
+   targets), the build scripts configuring them (`shared/build.gradle.kts`,
+   `testing/build.gradle.kts`, `gradle/libs.versions.toml`), or `appleApp/`.** Steps 2–3 run on the JVM and never compile the Apple
    targets:
 
    ```bash
