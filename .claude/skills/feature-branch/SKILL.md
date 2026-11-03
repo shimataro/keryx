@@ -15,8 +15,7 @@ git branch --show-current
 - **Empty output** → detached `HEAD`. Treat like a version branch for creation (Step 5/6), but like
   a non-version branch when resolving the base branch in Step 2.
 - A name matching `v*` (e.g. `v0`, `v1`) → a version branch. Proceed to Step 2.
-- Anything else → a feature branch. Proceed to Step 2; the action will be **rename** unless the
-  user explicitly asked to create a new branch.
+- Anything else → a feature branch. Proceed to Step 2; the action will be **rename**.
 
 ## Step 2 — Resolve the base branch
 
