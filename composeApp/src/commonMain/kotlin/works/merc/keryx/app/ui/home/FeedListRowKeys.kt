@@ -1,6 +1,5 @@
 package works.merc.keryx.app.ui.home
 
-import androidx.compose.foundation.layout.size
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags

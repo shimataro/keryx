@@ -193,15 +193,6 @@ internal class FeedListDragController(
         overlay.onCancel = ::cancel
     }
 
-    /** The item currently being dragged, or `null` when no drag is in progress. */
-    val dragged: DraggedItem? get() = overlay.item
-
-    /** Top-left of the drag ghost, in root coordinates. */
-    val ghostPositionInRoot: Offset get() = overlay.positionInRoot
-
-    /** Size of the drag ghost. */
-    val ghostSize: IntSize get() = overlay.size
-
     /** Where inside the dragged row the pointer grabbed it, local to the drag host. */
     private var grabOffset: Offset = Offset.Zero
 

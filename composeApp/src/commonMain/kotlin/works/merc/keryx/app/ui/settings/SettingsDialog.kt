@@ -23,6 +23,15 @@ import works.merc.keryx.app.resources.settings_title
 import works.merc.keryx.app.resources.settings_updates
 
 /**
+ * Ids of the settings tabs only the Compose UI addresses. The tabs `:shared` also opens are
+ * `SETTINGS_TAB_CLOUD_SYNC` / `SETTINGS_TAB_UPDATES` in `core/Constants.kt`; all five match the
+ * SwiftUI app's `SettingsNavigation.swift`.
+ */
+internal const val SETTINGS_TAB_GENERAL = "general"
+internal const val SETTINGS_TAB_NOTIFICATIONS = "notifications"
+internal const val SETTINGS_TAB_DATA = "data"
+
+/**
  * The settings screen (see [KeryxTabDialog]): a modeless, macOS-System-Settings-style tabbed
  * dialog window on desktop; on Android, a near-fullscreen, modal `Dialog` that lists the categories
  * and opens one as a detail screen, each with its own back arrow, since a near-fullscreen surface
@@ -51,12 +60,12 @@ internal fun SettingsDialog(
     // The cloud-sync tab exists only when at least one cloud provider was configured at build time.
     // availableCloudTypes is stable across the dialog's life.
     val tabs = buildList {
-        add(KeryxDialogTab("general", stringResource(Res.string.settings_tab_general), KeryxIcons.Tune))
-        add(KeryxDialogTab("notifications", stringResource(Res.string.settings_tab_notifications), KeryxIcons.Notifications))
+        add(KeryxDialogTab(SETTINGS_TAB_GENERAL, stringResource(Res.string.settings_tab_general), KeryxIcons.Tune))
+        add(KeryxDialogTab(SETTINGS_TAB_NOTIFICATIONS, stringResource(Res.string.settings_tab_notifications), KeryxIcons.Notifications))
         if (vm.availableCloudTypes.isNotEmpty()) {
             add(KeryxDialogTab(SETTINGS_TAB_CLOUD_SYNC, stringResource(Res.string.settings_cloud_sync), KeryxIcons.Cloud))
         }
-        add(KeryxDialogTab("data", stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
+        add(KeryxDialogTab(SETTINGS_TAB_DATA, stringResource(Res.string.settings_tab_data), KeryxIcons.Storage))
         // Hidden where there's an app-store update mechanism to defer to instead (see
         // selfUpdateCheckSupported's KDoc) — checkForUpdateAndNotify is gated the same way, so this
         // tab would otherwise always show "up to date" without ever being able to find anything.
@@ -75,10 +84,10 @@ internal fun SettingsDialog(
         title = stringResource(Res.string.settings_title),
     ) { tabId ->
         when (tabId) {
-            "general" -> GeneralTabContent(vm)
-            "notifications" -> NotificationsTabContent(vm, permissionPrompt)
+            SETTINGS_TAB_GENERAL -> GeneralTabContent(vm)
+            SETTINGS_TAB_NOTIFICATIONS -> NotificationsTabContent(vm, permissionPrompt)
             SETTINGS_TAB_CLOUD_SYNC -> CloudSyncTabContent(vm)
-            "data" -> DataTabContent(vm)
+            SETTINGS_TAB_DATA -> DataTabContent(vm)
             SETTINGS_TAB_UPDATES -> UpdatesTabContent(vm)
             else -> Unit
         }
