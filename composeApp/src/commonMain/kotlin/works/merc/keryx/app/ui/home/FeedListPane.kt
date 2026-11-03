@@ -547,6 +547,63 @@ internal fun FeedListPane(
                     }
 
                     /**
+                     * One feed row, with everything both its places in the list (its folder group and
+                     * an expanded tag's sub-list) wire up alike. The caller passes only what differs
+                     * between them.
+                     *
+                     * @param instance Which occurrence of the feed this row is (its selection identity).
+                     * @param editTarget The inline-rename target this row edits.
+                     */
+                    @Composable
+                    fun FeedRowItem(
+                        feed: Feeds,
+                        instance: FeedListRowSelection,
+                        editTarget: InlineEditTarget,
+                        indented: Boolean,
+                        nextFeedId: String?,
+                        folderId: String?,
+                        isFirstInList: Boolean,
+                        activeBoundaryState: State<DropBoundary?>,
+                        isBeingDragged: Boolean,
+                        onMoveUp: (() -> Unit)?,
+                        onMoveDown: (() -> Unit)?,
+                    ) {
+                        FeedRow(
+                            feed = feed,
+                            count = unreadByFeed[feed.id] ?: 0L,
+                            refreshing = feed.id in refreshingFeedIds,
+                            selectionTone = toneFor(instance),
+                            focused = focused,
+                            indented = indented,
+                            nextFeedId = nextFeedId,
+                            folderId = folderId,
+                            isFirstInList = isFirstInList,
+                            activeBoundaryState = activeBoundaryState,
+                            onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
+                            onRename = { inlineEdit = editTarget },
+                            editingName = inlineEdit == editTarget,
+                            onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
+                            onRenameCancel = { inlineEdit = null },
+                            onRefresh = { vm.refreshFeed(feed.id) },
+                            tags = tags,
+                            attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
+                            onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
+                            folders = folders,
+                            onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
+                            onUnsubscribe = { confirmingUnsubscribeFeed = feed },
+                            onCopyFeedUrl = { copyUrl(feed.url) },
+                            onCopySiteUrl = { feed.site_url?.let(copyUrl) },
+                            onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
+                            isTouchPrimary = isTouchPrimary,
+                            isBeingDragged = isBeingDragged,
+                            onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
+                            onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
+                            onMoveUp = onMoveUp,
+                            onMoveDown = onMoveDown,
+                        )
+                    }
+
+                    /**
                      * Adds feed rows for a folder or uncategorized feed group.
                      *
                      * @param feedsInFolder The feeds to display.
@@ -570,37 +627,16 @@ internal fun FeedListPane(
                             key = { _, feed -> feedRowKey(feed.id) },
                             contentType = { _, _ -> "feed" },
                         ) { index, feed ->
-                            val instance = FeedListRowSelection.FeedInFolderGroup(feed.id)
-                            FeedRow(
+                            FeedRowItem(
                                 feed = feed,
-                                count = unreadByFeed[feed.id] ?: 0L,
-                                refreshing = feed.id in refreshingFeedIds,
-                                selectionTone = toneFor(instance),
-                                focused = focused,
+                                instance = FeedListRowSelection.FeedInFolderGroup(feed.id),
+                                editTarget = InlineEditTarget.Feed(feed.id),
                                 indented = indented,
                                 nextFeedId = feedsInFolder.getOrNull(index + 1)?.id,
                                 folderId = folderId,
                                 isFirstInList = isFirstInList && index == 0,
                                 activeBoundaryState = activeBoundaryState,
-                                onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
-                                onRename = { inlineEdit = InlineEditTarget.Feed(feed.id) },
-                                editingName = inlineEdit == InlineEditTarget.Feed(feed.id),
-                                onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
-                                onRenameCancel = { inlineEdit = null },
-                                onRefresh = { vm.refreshFeed(feed.id) },
-                                tags = tags,
-                                attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
-                                onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
-                                folders = folders,
-                                onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
-                                onUnsubscribe = { confirmingUnsubscribeFeed = feed },
-                                onCopyFeedUrl = { copyUrl(feed.url) },
-                                onCopySiteUrl = { feed.site_url?.let(copyUrl) },
-                                onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
-                                isTouchPrimary = isTouchPrimary,
                                 isBeingDragged = isTouchPrimary && draggedFeedId == feed.id,
-                                onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
-                                onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 // Same mutation the drop of a real drag applies (see
                                 // FeedListDragController.end), just with the landing position
                                 // resolved from the group's own order instead of a pointer.
@@ -734,38 +770,18 @@ internal fun FeedListPane(
                                 key = { tagFeedRowKey(tag.id, it.id) },
                                 contentType = { "tag-feed" },
                             ) { feed ->
-                                val instance = FeedListRowSelection.FeedInTag(feed.id, tag.id)
-                                FeedRow(
+                                FeedRowItem(
                                     feed = feed,
-                                    count = unreadByFeed[feed.id] ?: 0L,
-                                    refreshing = feed.id in refreshingFeedIds,
-                                    selectionTone = toneFor(instance),
-                                    focused = focused,
+                                    instance = FeedListRowSelection.FeedInTag(feed.id, tag.id),
+                                    editTarget = InlineEditTarget.Feed(feed.id, tag.id),
                                     indented = true,
                                     nextFeedId = null,
                                     folderId = null,
                                     isFirstInList = false,
                                     activeBoundaryState = remember { mutableStateOf<DropBoundary?>(null) },
-                                    onClick = { selectFilterFromRow(ArticleFilter.Feed(feed.id), instance) },
-                                    onRename = { inlineEdit = InlineEditTarget.Feed(feed.id, tag.id) },
-                                    editingName = inlineEdit == InlineEditTarget.Feed(feed.id, tag.id),
-                                    onRenameCommit = { vm.renameFeed(feed.id, it); inlineEdit = null },
-                                    onRenameCancel = { inlineEdit = null },
-                                    onRefresh = { vm.refreshFeed(feed.id) },
-                                    tags = tags,
-                                    attachedTagIds = feedTagMap[feed.id] ?: emptySet(),
-                                    onToggleFeedTag = { tagId, attached -> vm.setFeedTag(feed.id, tagId, attached) },
-                                    folders = folders,
-                                    onMoveFeedToFolder = { moveFolderId -> vm.moveFeed(feed.id, moveFolderId) },
-                                    onUnsubscribe = { confirmingUnsubscribeFeed = feed },
-                                    onCopyFeedUrl = { copyUrl(feed.url) },
-                                    onCopySiteUrl = { feed.site_url?.let(copyUrl) },
-                                    onOpenSite = { openInBrowserIfAllowed(feed.site_url) },
-                                    isTouchPrimary = isTouchPrimary,
+                                    isBeingDragged = false,
                                     onMoveUp = null,
                                     onMoveDown = null,
-                                    onCreateNewFolderForFeed = { creatingFolderForFeedId = feed.id },
-                                    onCreateNewTagForFeed = { creatingTagForFeedId = feed.id },
                                 )
                             }
                         }
