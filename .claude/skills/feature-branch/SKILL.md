@@ -200,18 +200,22 @@ same name with `HEAD`:
 git for-each-ref --format='%(refname)' "refs/remotes/*/<current branch>"
 mb=$(git merge-base "<ref>" HEAD)            # for each ref listed above
 git merge-base --is-ancestor "$mb" "<default>" # only when $mb is not empty
+git merge-base --is-ancestor "$mb" "<base>"    # only when $mb is not in <default> and <base> is not <default>
 ```
 
 `<default>` is the default branch, resolved as in Step 2 "Without an argument" step 1 (reuse it if
-Step 2 already resolved it). Classify each ref:
+Step 2 already resolved it). `<base>` is the base Step 2 resolved. Classify each ref:
 
 - `$mb` is empty (unrelated history, e.g. a same-named branch on another remote) → ignore the ref.
-- `$mb` is **not** in the default branch (`--is-ancestor` fails) → the ref shares a commit of this
-  branch's own → **pushed**. This still holds after an amend or rebase that kept any earlier commit,
-  which is why the ref is not required to be an ancestor of `HEAD` (`--merged=HEAD`).
+- `$mb` is in **neither** the default branch nor the base (both `--is-ancestor` checks fail) → the
+  ref shares a commit of this branch's own → **pushed**. This still holds after an amend or rebase
+  that kept any earlier commit, which is why the ref is not required to be an ancestor of `HEAD`
+  (`--merged=HEAD`).
+- `$mb` is not in the default branch but **is** in the base (the only shared history is the parent
+  branch's, e.g. a stacked branch) → **ambiguous**, for the same reason as the next case.
 - `$mb` **is** in the default branch (the only shared history is the default branch's) →
-  **ambiguous**. Any two branches cut from the default branch share that history, so this is what
-  both of these look like, and local history cannot tell them apart:
+  **ambiguous**. Any two branches cut from the same base share that history, so this — like the
+  previous case — is what both of these look like, and local history cannot tell them apart:
   - this branch was pushed and then every commit was rewritten (an amended single-commit branch, a
     rebase);
   - the ref is unrelated — a stale remote-tracking ref of a merged and deleted branch whose name was
