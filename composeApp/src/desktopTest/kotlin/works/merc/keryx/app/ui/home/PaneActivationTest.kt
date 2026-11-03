@@ -106,10 +106,6 @@ class PaneActivationTest {
     }
 }
 
-/** Ctrl+C everywhere except macOS, which copies with Cmd+C instead (`isCopyKeyEvent`). */
-private val copyModifierKey: Key
-    get() = if (System.getProperty("os.name") == "Mac OS X") Key.MetaLeft else Key.CtrlLeft
-
 /** Captures what `SelectionContainer`'s copy handler writes, without touching the real OS clipboard. */
 @OptIn(ExperimentalComposeUiApi::class)
 private class RecordingClipboard : Clipboard {
