@@ -92,6 +92,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.fail
 import kotlin.test.assertTrue
 
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
@@ -145,6 +146,12 @@ private class SearchCountingSqlDriver(private val delegate: SqlDriver) : SqlDriv
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 }
+
+/** How long [HomeViewModelTest.pumpUntil] waits for real-thread work before failing the test. */
+private const val PUMP_UNTIL_TIMEOUT_MS = 5_000L
+
+/** The real-time yield between two drains of the virtual scheduler in `pumpUntil`. */
+private const val PUMP_UNTIL_YIELD_MS = 5L
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -401,16 +408,20 @@ class HomeViewModelTest {
     }
 
     /**
-     * Pumps the virtual scheduler with short real sleeps until [done] holds: feed fetches resume on
-     * Ktor's real MockEngine dispatcher, off the test scheduler (see docs/testing.md), so a single
-     * advanceUntilIdle() can race them.
+     * Drains the virtual scheduler until [done] holds, yielding briefly in real time between drains:
+     * feed fetches on an engine without a test dispatcher resume on Ktor's real MockEngine dispatcher,
+     * off the test scheduler (see docs/testing.md), so a single advanceUntilIdle() can race them.
+     * Fails (rather than silently carrying on) if [done] has not held after [PUMP_UNTIL_TIMEOUT_MS].
      */
     private fun TestScope.pumpUntil(done: () -> Boolean) {
-        var waited = 0
-        while (!done() && waited < 5_000) {
+        val deadline = System.nanoTime() + PUMP_UNTIL_TIMEOUT_MS * 1_000_000
+        testScheduler.advanceUntilIdle()
+        while (!done()) {
+            if (System.nanoTime() >= deadline) {
+                fail("pumpUntil: condition not met within $PUMP_UNTIL_TIMEOUT_MS ms")
+            }
+            Thread.sleep(PUMP_UNTIL_YIELD_MS)
             testScheduler.advanceUntilIdle()
-            Thread.sleep(50)
-            waited += 50
         }
         testScheduler.advanceUntilIdle()
     }
@@ -501,7 +512,7 @@ class HomeViewModelTest {
     @Test
     fun aFeedsOwnRefreshReportsItsOutcome() = runTest {
         db.insertFeed("f1")
-        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        val vm = newViewModel(feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { respond(RSS, HttpStatusCode.OK) })
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
@@ -517,7 +528,7 @@ class HomeViewModelTest {
     @Test
     fun twoFeedRefreshesWithTheSameOutcomeFinishUnequal() = runTest {
         db.insertFeed("f1")
-        val vm = newViewModel(feedFetcher = fetcherWith { throw IOException("unreachable") })
+        val vm = newViewModel(feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { throw IOException("unreachable") })
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
@@ -769,7 +780,7 @@ class HomeViewModelTest {
         val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
         val activityCenter = ActivityCenter()
         val vm = newViewModel(
-            feedFetcher = fetcherWith { request ->
+            feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { request ->
                 requested += request.url.toString()
                 respond("", HttpStatusCode.NotFound)
             },
@@ -1019,8 +1030,9 @@ class HomeViewModelTest {
     /**
      * Regression: [HomeViewModel.refreshAll]'s double-start guard used to read ActivityCenter's
      * per-flag `stateIn` copies, which only catch up once their sharing coroutine is dispatched
-     * (on `Dispatchers.Default` for the default [ActivityCenter]), so a second call right after the
-     * first could still see "not refreshing" and start a second refresh.
+     * (on a dispatcher, so a second call right after the first could still see "not refreshing"
+     * and start a second refresh). [ActivityCenter] now exposes its backing `MutableStateFlow`
+     * directly, so this test pins that the guard never lags again.
      *
      * Main is unconfined here, like production's `Main.immediate` on the UI thread: each
      * `viewModelScope.launch` runs inline up to its first suspension, so the first call's refresh
@@ -5061,7 +5073,7 @@ class HomeViewModelTest {
         val trayJob = launch { notifier.trayEvents.collect { tray.add(it) } }
         val activityCenter = ActivityCenter()
         val vm = newViewModel(
-            feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+            feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { respond(RSS, HttpStatusCode.OK) },
             newArticleNotifier = notifier,
             activityCenter = activityCenter,
         )
@@ -5069,15 +5081,10 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         vm.refreshAll()
-        // The feed fetch/parse work hops onto Ktor's real MockEngine dispatcher (not the virtual
-        // test scheduler), so a single advanceUntilIdle() can race it (see docs/testing.md on
-        // mixing runTest with Ktor MockEngine). Poll with short real sleeps until it lands.
-        var waited = 0
-        while (tray.isEmpty() && waited < 5_000) {
-            testScheduler.advanceUntilIdle()
-            Thread.sleep(50)
-            waited += 50
-        }
+        // The fetch runs on an engine with no test dispatcher (it hops onto Ktor's real MockEngine
+        // dispatcher, off the virtual scheduler), so pumpUntil alternates drains with short real yields
+        // and fails if the tray event never lands.
+        pumpUntil { tray.isNotEmpty() }
 
         // The single fetched article (guid g1) is reported via the fake NotificationMessages
         // as "new:1"; this proves manual refresh now reaches the tray, not just the background loop.
