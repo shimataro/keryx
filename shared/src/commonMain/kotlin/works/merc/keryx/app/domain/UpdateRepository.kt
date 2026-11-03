@@ -297,28 +297,8 @@ class UpdateRepository(
             withContext(dispatcher) { FileSystemExtras.deleteRecursively(updateDownloadDir(before.update.version)) }
         }
 
-        if (status is UpdateStatus.Available && after is UpdateState.Available) {
-            val text = NotificationText.UpdateAvailable(status.version)
-            // Reuses after.update.installable (resolved moments ago by nextStateAfterCheck via the
-            // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
-            // one live query, one fact, shared with whatever the Updates tab/tray display for it.
-            val action = if (after.update.installable) {
-                AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
-            } else {
-                AppNotificationAction.OpenUrl(status.url)
-            }
-            postNotification(text, action)
-        }
-
-        val availableStatus = status as? UpdateStatus.Available
-        val availableAfter = after as? UpdateState.Available
-        Log.info(
-            TAG,
-            "Update check resolved: version=${availableStatus?.version ?: "none"}, " +
-                "asset=${availableStatus?.asset?.name ?: "none"}, " +
-                "plan=${availableAfter?.update?.plan ?: "n/a"}, " +
-                "installable=${availableAfter?.update?.installable ?: false}",
-        )
+        notifyIfAvailable(status, after)
+        logCheckResolved(status, after)
 
         val outcome = mutex.withLock {
             // Available-with-no-asset-here is what starts/continues a watch; Available-with-asset
@@ -331,6 +311,45 @@ class UpdateRepository(
         }
         if (outcome == UpdateCheckOutcome.AWAITING_RELEASE) startReleaseWatch()
         return outcome
+    }
+
+    /**
+     * Posts the "update available" notification when [status] found a version and the check left the
+     * state at [UpdateState.Available] for it.
+     *
+     * @param status What the check found.
+     * @param after The state the check resolved to.
+     */
+    private suspend fun notifyIfAvailable(status: UpdateStatus, after: UpdateState) {
+        if (status !is UpdateStatus.Available || after !is UpdateState.Available) return
+        val text = NotificationText.UpdateAvailable(status.version)
+        // Reuses after.update.installable (resolved moments ago by nextStateAfterCheck via the
+        // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
+        // one live query, one fact, shared with whatever the Updates tab/tray display for it.
+        val action = if (after.update.installable) {
+            AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
+        } else {
+            AppNotificationAction.OpenUrl(status.url)
+        }
+        postNotification(text, action)
+    }
+
+    /**
+     * Logs what a check resolved to: the version and asset found, and the resulting install plan.
+     *
+     * @param status What the check found.
+     * @param after The state the check resolved to.
+     */
+    private fun logCheckResolved(status: UpdateStatus, after: UpdateState) {
+        val availableStatus = status as? UpdateStatus.Available
+        val availableAfter = after as? UpdateState.Available
+        Log.info(
+            TAG,
+            "Update check resolved: version=${availableStatus?.version ?: "none"}, " +
+                "asset=${availableStatus?.asset?.name ?: "none"}, " +
+                "plan=${availableAfter?.update?.plan ?: "n/a"}, " +
+                "installable=${availableAfter?.update?.installable ?: false}",
+        )
     }
 
     /**
