@@ -19,8 +19,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -28,6 +29,7 @@ import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.ARTICLE_CONTENT_CACHE_LIMIT
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS
+import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedNotFoundException
@@ -169,9 +171,13 @@ class HomeViewModelTest {
     /** The runner the most recent [newViewModel] built, so a test can run an automatic cycle on it. */
     private var lastRunner: RefreshCycleRunner? = null
 
+    /** The scheduler Main (and so every `runTest`'s TestScope) shares; lets newViewModel build a test dispatcher on it. */
+    private lateinit var mainScheduler: TestCoroutineScheduler
+
     @BeforeTest
     fun setUp() {
-        Dispatchers.setMain(StandardTestDispatcher())
+        mainScheduler = TestCoroutineScheduler()
+        Dispatchers.setMain(StandardTestDispatcher(mainScheduler))
         val (d, _) = inMemoryDb()
         // Wrapped so a test can assert which actions re-execute the article-list query.
         driver = CountingSqlDriver(d)
@@ -240,7 +246,7 @@ class HomeViewModelTest {
         dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         // The ViewModel's background dispatcher (flows, selectArticle's body lookup) — overridable
         // so a test can hold a hydration mid-flight (e.g. with a HoldingDispatcher).
-        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        dispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(mainScheduler),
         // Consulted once per sync() — a test can count invocations to tell whether a sync ran.
         // Passing one also connects the CloudSession (a client ID plus stored tokens), since a
         // refresh-then-sync cycle only syncs while a provider is connected.
@@ -4665,29 +4671,24 @@ class HomeViewModelTest {
     }
 
     /**
-     * [HomeViewModel.setSearchQuery]'s 250ms debounce runs under the search flow's
-     * `flowOn(dispatcher)` (`Dispatchers.Unconfined` in these tests), which drops the shared
-     * virtual test scheduler for that segment of the pipeline — `delay()` there falls back to a
-     * real-time wait instead of being advanced by [kotlinx.coroutines.test.TestScope.testScheduler].
-     * A short real sleep lets that debounce actually elapse; the surrounding `advanceUntilIdle()`
-     * calls then pump everything else (the FTS query + StateFlow update) on the shared scheduler.
-     * Sleeps well past the 250ms debounce window (rather than just past it) so this doesn't flake
-     * on a loaded CI machine.
+     * Lets [HomeViewModel.setSearchQuery]'s [SEARCH_DEBOUNCE_MS] debounce elapse in virtual time.
+     * The view model's background dispatcher is an `UnconfinedTestDispatcher` on the shared test
+     * scheduler (see [newViewModel]), so the debounce's `delay()` is a [Delay] the scheduler
+     * controls; advancing past it and draining runs the FTS query + StateFlow update too.
      */
     private fun TestScope.advanceForSearchDebounce() {
         testScheduler.advanceUntilIdle()
-        Thread.sleep(500)
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS + 1)
         testScheduler.advanceUntilIdle()
     }
 
     /**
      * Lets an active search re-run after an article write: the change signal is debounced by
-     * [SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS] on the real clock (`dispatcher` is Unconfined), like the
-     * query debounce above.
+     * [SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS], elapsed here in virtual time like the query debounce above.
      */
     private fun TestScope.advanceForArticleChangeDebounce() {
         testScheduler.advanceUntilIdle()
-        Thread.sleep(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS * 3)
+        testScheduler.advanceTimeBy(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS + 1)
         testScheduler.advanceUntilIdle()
     }
 
@@ -4702,7 +4703,8 @@ class HomeViewModelTest {
 
         // A valid query is typed but the debounced FTS results haven't arrived yet.
         vm.setSearchQuery("Kotlin")
-        testScheduler.advanceUntilIdle()
+        // runCurrent, not advanceUntilIdle: the latter would also elapse the debounce.
+        testScheduler.runCurrent()
         assertTrue(vm.searching.value)
 
         // Once the debounce elapses and the search runs, searching clears and results appear.
@@ -5040,11 +5042,39 @@ class HomeViewModelTest {
 
         // Several commits in quick succession, as a refresh lands one per fetched feed.
         repeat(5) { i -> db.insertArticle("b$i", "f1", title = "Other $i") }
-        testScheduler.advanceUntilIdle()
+        // runCurrent, not advanceUntilIdle: the latter would also elapse the debounce.
+        testScheduler.runCurrent()
         assertEquals(0, counting.matchQueries)
 
         advanceForArticleChangeDebounce()
         assertEquals(1, counting.matchQueries)
+    }
+
+    @Test
+    fun aBurstOfKeystrokesRunsTheSearchOnceAfterTheQueryDebounce() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
+        ftsManagerIndexed(driver)
+        val counting = SearchCountingSqlDriver(driver)
+        val vm = newViewModel(ftsDriver = counting)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        counting.matchQueries = 0
+
+        vm.setSearchQuery("Kot")
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS - 50)
+        vm.setSearchQuery("Kotl")
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS - 50)
+        vm.setSearchQuery("Kotlin")
+        // Each keystroke restarted the window, so nothing has run yet.
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS - 1)
+        assertEquals(0, counting.matchQueries)
+        assertTrue(vm.searchResults.value.isEmpty())
+
+        testScheduler.advanceTimeBy(2)
+        testScheduler.runCurrent()
+        assertEquals(1, counting.matchQueries)
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
     }
 
     @Test
@@ -6698,7 +6728,7 @@ class HomeViewModelTest {
     // --- ArticleListMode.Starred ---
 
     /** Feed f1 in folder d1 and tag t1: s1 starred+read, s2 starred+unread, u1 unstarred+unread, newest first. */
-    private fun TestScope.starredModeViewModel(dispatcher: CoroutineDispatcher = Dispatchers.Unconfined): HomeViewModel {
+    private fun TestScope.starredModeViewModel(dispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(testScheduler)): HomeViewModel {
         db.insertFolder("d1", "Folder")
         db.insertFeed("f1", folderId = "d1")
         db.insertTag("t1", "Tag")
