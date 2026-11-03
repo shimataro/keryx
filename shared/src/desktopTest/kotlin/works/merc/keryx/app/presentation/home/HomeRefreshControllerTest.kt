@@ -1,0 +1,238 @@
+package works.merc.keryx.app.presentation.home
+
+import app.cash.sqldelight.db.SqlDriver
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import works.merc.keryx.app.core.ArticleFilter
+import works.merc.keryx.app.data.local.db.KeryxDatabase
+import works.merc.keryx.app.domain.RefreshCycleRunnerFixture
+import works.merc.keryx.app.domain.RefreshCycleRunnerFixtures
+import works.merc.keryx.app.domain.RefreshOutcome
+import works.merc.keryx.app.domain.SyncTrigger
+import works.merc.keryx.app.inMemoryDb
+import works.merc.keryx.app.insertFeed
+import works.merc.keryx.app.platform.AppDirs
+import works.merc.keryx.app.platform.FileIO
+import kotlin.random.Random
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
+
+/**
+ * [HomeRefreshController] over a real [works.merc.keryx.app.domain.RefreshCycleRunner] (the shared
+ * [RefreshCycleRunnerFixtures] wiring: real DB, MockEngine fetcher, recording sync). `runBlocking`
+ * rather than `runTest`: MockEngine plus `HttpTimeout` under virtual time can misfire (see testing.md).
+ */
+class HomeRefreshControllerTest {
+    private val dir = FileIO.join(AppDirs.tempDir(), "home-refresh-controller-test-${Random.nextInt()}")
+    private val fixtures = RefreshCycleRunnerFixtures(dir)
+
+    @AfterTest
+    fun tearDown() {
+        fixtures.close()
+        FileIO.delete(FileIO.join(dir, "local_settings.json"))
+    }
+
+    private class Harness(
+        val controller: HomeRefreshController,
+        val fixture: RefreshCycleRunnerFixture,
+        val job: Job,
+        val uncaught: MutableList<Throwable>,
+        private val retrims: () -> Int,
+    ) {
+        val retrimCount: Int get() = retrims()
+
+        /** Waits for every coroutine the controller launched to finish. */
+        suspend fun settle() = job.children.toList().forEach { it.join() }
+    }
+
+    private fun withController(
+        currentFilter: () -> ArticleFilter = { ArticleFilter.All },
+        fetchGate: CompletableDeferred<Unit>? = null,
+        block: suspend CoroutineScope.(Harness, SqlDriver, KeryxDatabase) -> Unit,
+    ): Unit = runBlocking {
+        val (driver, db) = inMemoryDb()
+        val job = SupervisorJob(coroutineContext[Job])
+        try {
+            val uncaught = mutableListOf<Throwable>()
+            val scope = CoroutineScope(coroutineContext + job + CoroutineExceptionHandler { _, e -> uncaught += e })
+            db.insertFeed("f1", url = "https://ex.com/f1")
+            db.insertFeed("f2", url = "https://ex.com/f2")
+            val fixture = fixtures.create(driver, db, fetchGate = fetchGate)
+            var retrims = 0
+            val controller = HomeRefreshController(
+                scope = scope,
+                dispatcher = Dispatchers.Unconfined,
+                runner = fixture.runner,
+                activityCenter = fixture.activityCenter,
+                currentFilter = currentFilter,
+                retrimPins = { retrims++; fixture.log += "retrim" },
+            )
+            block(Harness(controller, fixture, job, uncaught) { retrims }, driver, db)
+        } finally {
+            job.cancelAndJoin()
+            driver.close()
+        }
+    }
+
+    private suspend fun RefreshCycleRunnerFixture.awaitFeedRefreshing() {
+        withTimeout(5_000) { activityCenter.activity.first { it.feedRefreshing } }
+    }
+
+    @Test
+    fun refreshFeedWhenTheRunnerThrowsStillEndsTheStatusWithAFreshGeneration() = withController { h, driver, _ ->
+        // Make the runner's feed lookup throw, then restore the column so the next refresh works.
+        driver.execute(null, "ALTER TABLE feeds RENAME COLUMN description TO description_x", 0)
+        h.controller.refreshFeed("f1")
+        h.settle()
+
+        assertEquals(1, h.uncaught.size, "the runner's failure propagates out of the launched coroutine")
+        assertEquals(ManualRefreshStatus.Idle, h.controller.manualRefreshStatus.value, "the throw ended the status with a null outcome")
+        assertTrue(h.fixture.activityCenter.activity.value.idle)
+
+        driver.execute(null, "ALTER TABLE feeds RENAME COLUMN description_x TO description", 0)
+        h.controller.refreshFeed("f1")
+        h.settle()
+
+        val finished = assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value)
+        assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), finished.outcome)
+        assertEquals(2L, finished.generation, "the failed refresh's end consumed generation 1")
+        assertEquals(0, h.retrimCount, "a single feed's refresh is not a cycle and re-trims nothing")
+    }
+
+    @Test
+    fun aCycleThatRanRetrimsBeforeAndAfter() = withController { h, _, _ ->
+        h.controller.refreshAll()
+        h.settle()
+
+        assertEquals("retrim", h.fixture.log.first(), "the first re-trim precedes the fetches")
+        assertEquals("retrim", h.fixture.log.last(), "the second re-trim follows the notify and the sync")
+        assertTrue(h.fixture.log.indexOf("sync") < h.fixture.log.lastIndexOf("retrim"))
+        assertEquals(2, h.retrimCount)
+        val finished = assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value)
+        assertEquals(1L, finished.generation)
+    }
+
+    @Test
+    fun aSelectionCoveringNoFeedRetrimsOnlyBefore() = withController { h, _, _ ->
+        h.controller.pullToRefresh(ArticleFilter.Folder("empty"))
+        h.settle()
+
+        assertEquals(1, h.retrimCount)
+        assertEquals(emptyList(), h.fixture.log.filter { it.startsWith("fetch:") })
+        assertEquals(ManualRefreshStatus.Idle, h.controller.manualRefreshStatus.value)
+        assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
+    }
+
+    @Test
+    fun aBusyCycleRetrimsOnlyBeforeAndLeavesTheStatusAlone() = withController { h, _, _ ->
+        // A sync alone in flight is neither idle nor an automatic cycle to join, so the call is Busy.
+        val syncGate = CompletableDeferred<Unit>()
+        val sync = launch { h.fixture.activityCenter.trackSync { syncGate.await() } }
+        withTimeout(5_000) { h.fixture.activityCenter.activity.first { !it.idle } }
+
+        h.controller.refreshAll()
+        h.settle()
+
+        assertEquals(1, h.retrimCount)
+        assertEquals(ManualRefreshStatus.Idle, h.controller.manualRefreshStatus.value)
+        assertEquals(emptyList(), h.fixture.log.filter { it.startsWith("fetch:") })
+        syncGate.complete(Unit)
+        sync.join()
+    }
+
+    @Test
+    fun aPullOnABusyCycleWaitsForIdleAndRetrimsOnlyBefore() = withController { h, _, _ ->
+        val syncGate = CompletableDeferred<Unit>()
+        val sync = launch { h.fixture.activityCenter.trackSync { syncGate.await() } }
+        withTimeout(5_000) { h.fixture.activityCenter.activity.first { !it.idle } }
+
+        h.controller.pullToRefresh()
+        assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
+
+        syncGate.complete(Unit)
+        sync.join()
+        h.settle()
+
+        assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
+        assertEquals(1, h.retrimCount)
+    }
+
+    @Test
+    fun joiningAnAutomaticCycleRetrimsOnlyBeforeThenReportsItsOutcome() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, _ ->
+            val automatic = launch { h.fixture.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            h.fixture.awaitFeedRefreshing()
+
+            h.controller.refreshAll()
+            withTimeout(5_000) { h.controller.manualRefreshStatus.first { it is ManualRefreshStatus.Checking } }
+            assertEquals(1, h.retrimCount)
+
+            gate.complete(Unit)
+            automatic.join()
+            h.settle()
+
+            val finished = assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value)
+            assertEquals(RefreshOutcome(newArticleCount = 2, unreachable = false), finished.outcome)
+            assertEquals(1, h.retrimCount, "a joined cycle is not a Ran one, so there is no second re-trim")
+        }
+    }
+
+    @Test
+    fun aPullOnAFilterThatIsAlreadyPendingIsANoOp() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, _ ->
+            h.controller.pullToRefresh(ArticleFilter.All)
+            h.fixture.awaitFeedRefreshing()
+            assertEquals(1, h.retrimCount)
+
+            h.controller.pullToRefresh(ArticleFilter.All)
+            h.job.children.count().let { assertEquals(1, it, "the repeated pull launched nothing") }
+            assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
+
+            gate.complete(Unit)
+            h.settle()
+
+            assertEquals(2, h.retrimCount, "one cycle: a re-trim before and after")
+            assertEquals(2, h.fixture.log.count { it.startsWith("fetch:") }, "each of the two feeds fetched once")
+            assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
+        }
+    }
+
+    @Test
+    fun pullsOnDifferentFiltersAreTrackedSeparately() {
+        val gate = CompletableDeferred<Unit>()
+        withController(currentFilter = { ArticleFilter.Feed("f2") }, fetchGate = gate) { h, _, _ ->
+            h.controller.pullToRefresh(ArticleFilter.Feed("f1"))
+            h.fixture.awaitFeedRefreshing()
+            // The current-selection overload tracks under the filter showing when it started.
+            h.controller.pullToRefresh()
+
+            assertEquals(
+                setOf<ArticleFilter>(ArticleFilter.Feed("f1"), ArticleFilter.Feed("f2")),
+                h.controller.pullRefreshingFilters.value,
+            )
+
+            gate.complete(Unit)
+            h.settle()
+
+            assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
+            // f1's pull ran the cycle (before + after); f2's found it busy (before only).
+            assertEquals(3, h.retrimCount)
+            assertEquals(1, h.fixture.log.count { it == "fetch:https://ex.com/f1" })
+            assertEquals(0, h.fixture.log.count { it == "fetch:https://ex.com/f2" })
+        }
+    }
+}
