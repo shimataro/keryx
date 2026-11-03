@@ -144,6 +144,7 @@ class LoopbackRedirectTransportTest {
 
         assertTrue(finished, "the child JVM did not finish in time")
         assertEquals(0, child.exitValue(), output)
+        assertTrue(output.contains("redirect=http://127.0.0.1:"), output)
         assertTrue(output.contains("code=${LoopbackChildJvm.CODE}"), output)
     }
 }

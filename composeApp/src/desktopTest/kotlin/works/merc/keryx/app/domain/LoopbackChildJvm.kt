@@ -23,6 +23,7 @@ internal object LoopbackChildJvm {
         val exitCode = try {
             val params = runBlocking {
                 LoopbackRedirectTransport { "Done" }.capture(STATE, timeoutMillis = 10_000) { redirectUri ->
+                    println("redirect=$redirectUri")
                     val connection = URI("$redirectUri/?state=$STATE&code=$CODE").toURL().openConnection() as HttpURLConnection
                     connection.connectTimeout = 5_000
                     try {
