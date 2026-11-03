@@ -5,14 +5,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import works.merc.keryx.app.core.Log
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.logging.Handler
-import java.util.logging.Level
-import java.util.logging.LogRecord
-import java.util.logging.Logger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -53,6 +48,9 @@ class LoopbackRedirectTransportTest {
         val result = async(Dispatchers.IO) {
             transport.capture(state, timeoutMillis) { uri.complete(it) }
         }
+        // If capture fails before it launches the browser (a bind failure, say), the redirect URI is never
+        // produced; fail the wait with that error instead of hanging the whole test run on it.
+        result.invokeOnCompletion { cause -> if (cause != null) uri.completeExceptionally(cause) }
         interact(uri.await())
         result.await()
     }
@@ -112,50 +110,17 @@ class LoopbackRedirectTransportTest {
     }
 
     @Test
-    fun `a malformed escape is rejected without completing and never logs the secret`() {
+    fun `a malformed escape is rejected without completing the wait`() {
         var code = 0
-        val records = withCapturedLogRecords {
-            val params = runCapture(timeoutMillis = 1_000) { uri ->
-                code = get("$uri/?state=s&code=SECRET%zz").code
-            }
-            assertNull(params, "a malformed callback never completes the wait")
+        val params = runCapture(timeoutMillis = 1_000) { uri ->
+            code = get("$uri/?state=s&code=SECRET%zz").code
         }
 
-        // The JDK HttpServer itself rejects an unparseable request URI with 400 before the handler's own
-        // catch (which answers 500 after logging a warning) can run; either way the callback is rejected.
+        // The JDK HttpServer itself rejects an unparseable request URI with 400 before the handler runs
+        // (so the handler's own catch, which would answer 500, is out of reach from here). Either way the
+        // callback is rejected and never completes the wait. That the parser's error never quotes a value
+        // is pinned where it can actually be reached: OAuthUriParserTest.
         assertTrue(code == 400 || code == 500, "rejected, was $code")
-        records.forEach { record ->
-            assertFalse(record.message.orEmpty().contains("SECRET"), record.message)
-            generateSequence(record.thrown) { it.cause }.forEach {
-                assertFalse(it.message.orEmpty().contains("SECRET"), it.message)
-                assertFalse(it.toString().contains("SECRET"), it.toString())
-            }
-        }
-    }
-
-    /** Same white-box capture pattern as `SingleInstanceCoordinatorTest`: attach a handler to the JUL logger [Log] writes to. */
-    private fun withCapturedLogRecords(block: () -> Unit): List<LogRecord> {
-        val previousLogDir = System.getProperty("keryx.log.dir")
-        System.setProperty("keryx.log.dir", System.getProperty("java.io.tmpdir"))
-        val logger = Logger.getLogger(Log.LOGGER_NAME)
-        val captured = java.util.concurrent.CopyOnWriteArrayList<LogRecord>()
-        val handler = object : Handler() {
-            override fun publish(record: LogRecord) { captured.add(record) }
-            override fun flush() {}
-            override fun close() {}
-        }
-        handler.level = Level.ALL
-        logger.addHandler(handler)
-        try {
-            block()
-        } finally {
-            logger.removeHandler(handler)
-            if (previousLogDir == null) {
-                System.clearProperty("keryx.log.dir")
-            } else {
-                System.setProperty("keryx.log.dir", previousLogDir)
-            }
-        }
-        return captured.toList()
+        assertNull(params, "a malformed callback never completes the wait")
     }
 }
