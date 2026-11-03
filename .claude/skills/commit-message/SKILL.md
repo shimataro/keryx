@@ -53,8 +53,8 @@ convention (see `.claude/CLAUDE.md` → "Commit messages"):
 
 ## Step 5 — Branching
 
-If the current branch is a version branch (`v*`), run `/feature-branch <type>`
-(using the Conventional Commits type from Step 4) to create and switch to a feature
+If the current branch is a version branch (`v*`), run `/feature-branch`
+(it infers the name from the staged changes) to create and switch to a feature
 branch before this message is used to commit.
 
 ## Step 6 — Output
