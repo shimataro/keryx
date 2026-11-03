@@ -226,6 +226,8 @@ internal data class SelectedFeedMenuData(
  *   [menuBarToggle] and [selectedFeedMenu] before it): those are `commonMain` types, and
  *   `UpdateState`'s desktop-only tray mapping has no business in them. Its item is always present,
  *   disabled in the states with nothing to act on.
+ * @param isMacOs whether Settings/Quit and About live in the macOS app menu instead (and so are
+ *   omitted here). Defaults to the running platform; a parameter so one test run covers both.
  */
 internal fun buildAppMenuTree(
     ui: MenuUiState,
@@ -234,6 +236,7 @@ internal fun buildAppMenuTree(
     menuBarToggle: MenuBarToggle?,
     selectedFeedMenu: SelectedFeedMenuData,
     updateEntry: TrayUpdateEntry,
+    isMacOs: Boolean = works.merc.keryx.app.platform.isMacOs,
 ): AppMenuRoot {
     val fileItems = buildList {
         add(AppMenuNode.Item(labels.addFeed, ui.addItemsEnabled, AppMenuShortcut.AddFeed, actions.addFeed))
