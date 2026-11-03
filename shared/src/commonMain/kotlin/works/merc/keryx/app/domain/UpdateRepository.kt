@@ -132,6 +132,9 @@ class UpdateRepository(
     // UpdateRepositoryTest can hold it and observe a waiter, to cover a cancellation landing at
     // postNotification()'s only suspension point.
     private val notificationMutex: Mutex = Mutex(),
+    // Serializes whole checks — see the "[checkMutex] serializes" comment below. A constructor
+    // parameter only so UpdateRepositoryTest can wrap it and observe a second check waiting on it.
+    private val checkMutex: Mutex = Mutex(),
 ) {
     private val cacheDir: String get() = cacheDirOverride ?: AppDirs.cacheDir()
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -158,7 +161,7 @@ class UpdateRepository(
     // inspect/replace downloadJob while a check() is mid-flight. See this class's own methods below.
     private val mutex = Mutex()
 
-    // Serializes one whole runCheck transaction — the "start" snapshot, checker.check() itself, and
+    // [checkMutex] serializes one whole runCheck transaction — the "start" snapshot, checker.check() itself, and
     // the "apply"/"watch bookkeeping" steps after it — against every other runCheck. [mutex] cannot
     // do this: it is deliberately released across checker.check(), so two checks could fetch
     // concurrently and the one that started *first* could apply *last*, overwriting a freshly found
@@ -169,8 +172,8 @@ class UpdateRepository(
     // is done, so a later start always sees later data. It equally serializes two *public* checks,
     // whose overlap would otherwise hand the second one a `before` of UpdateState.Checking, which
     // updateVersionInUse() reports as "no version in use" — letting sweepStaleUpdateDownloads delete
-    // the very directory the first check's Ready state is still pointing at.
-    private val checkMutex = Mutex()
+    // the very directory the first check's Ready state is still pointing at. (Injected — see the
+    // constructor's checkMutex parameter.)
 
     // Written only under mutex (startDownloadOf), but read from cancelDownload() — a plain,
     // non-suspend call from a UI click handler that cannot take a suspend lock — without it. @Volatile
