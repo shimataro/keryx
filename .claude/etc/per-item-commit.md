@@ -69,6 +69,9 @@ When the item fails verification and the caller's own retry (if any) cannot fix 
 2. Stage **only the files, and only the hunks, belonging to this item** (including anything the
    caller says rides along, such as a doc fix). Verify the staged diff contains nothing beyond
    this item, so an unrelated edit or residue from an earlier item's revert never rides along.
-3. Create **exactly one commit** with a **single-line** message only (no body, no trailer), in
-   the repo's Conventional Commits style. Never batch several items into one commit, never amend
-   a commit made earlier in the same run, and never push.
+3. Create **exactly one commit** in the repo's Conventional Commits style. The
+   message must be a single-line subject (`<type>(<scope>): <subject>`) unless a
+   body is genuinely needed, and it must always end with the attribution trailer
+   `Co-Authored-By: Claude Code <noreply@anthropic.com>` on its own line after a
+   blank line. Never batch several items into one commit, never amend a commit
+   made earlier in the same run, and never push.
