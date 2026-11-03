@@ -182,6 +182,23 @@ class KeryxSdkTest {
     }
 
     @Test
+    fun aMalformedOAuthRedirectIsReportedUndeliveredInsteadOfThrowing() = runTest {
+        val sdk = start()
+        try {
+            val received = mutableListOf<OAuthCallbackParams>()
+            val collector = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                sdk.oauthCallbacks.collect { received += it }
+            }
+
+            assertFalse(sdk.handleOAuthRedirect("keryx://oauth2/callback?code=abc%zz&state=xyz"))
+            assertTrue(received.isEmpty())
+            collector.cancel()
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
     fun anOAuthRedirectReachesAWaitingConnectFlow() = runTest {
         val sdk = start()
         try {

@@ -1,10 +1,15 @@
 package works.merc.keryx.app.domain
 
+import io.ktor.http.URLDecodeException
 import io.ktor.http.decodeURLQueryComponent
 
 /**
  * Parses a custom-scheme redirect URI into structured OAuth callback parameters.
  * Extracts the query string from the URI and decodes key/value pairs.
+ *
+ * @throws IllegalArgumentException when a value has a malformed percent-escape. The message names
+ *   only the parameter: Ktor's own [URLDecodeException] quotes the whole value (e.g. an
+ *   authorization code), which a caller logging the exception would otherwise write to the log.
  */
 fun parseOAuthUri(uriString: String): OAuthCallbackParams {
     val queryMap = parseQuery(rawQuery(uriString))
@@ -31,7 +36,11 @@ private fun parseQuery(query: String?): Map<String, String> {
         if (idx < 0) return@mapNotNull null
         val key = pair.substring(0, idx)
         // application/x-www-form-urlencoded: `+` is a space, `%2B` a literal plus.
-        val value = pair.substring(idx + 1).decodeURLQueryComponent(plusIsSpace = true)
+        val value = try {
+            pair.substring(idx + 1).decodeURLQueryComponent(plusIsSpace = true)
+        } catch (_: URLDecodeException) {
+            throw IllegalArgumentException("Malformed percent-escape in OAuth callback parameter '$key'")
+        }
         key to value
     }.toMap()
 }
