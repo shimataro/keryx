@@ -105,4 +105,18 @@ class OAuthUriParserTest {
         assertFalse(secret in e.message.orEmpty(), "the value (an authorization code) must not be quoted")
         assertEquals(true, e.message?.contains("'code'"), "the message names the offending parameter")
     }
+
+    @Test
+    fun malformedEscapesInOtherParametersDoNotExposeTheirValuesOrDecoderException() {
+        for (key in listOf("state", "error", "error_description")) {
+            val secret = "sensitive-value"
+            val e = assertFailsWith<IllegalArgumentException> {
+                parseOAuthUri("keryx://oauth2/callback?code=valid&$key=$secret%zz")
+            }
+
+            assertEquals("Malformed percent-escape in OAuth callback parameter '$key'", e.message)
+            assertFalse(secret in e.toString())
+            assertNull(e.cause)
+        }
+    }
 }

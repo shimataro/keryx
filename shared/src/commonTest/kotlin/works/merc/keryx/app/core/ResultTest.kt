@@ -52,6 +52,20 @@ class ResultTest {
     }
 
     @Test
+    fun valueOrElsePreservesANullSuccessWithoutInvokingTheErrorHandler() {
+        val result: Result<String?> = Result.Ok(null)
+        var called = false
+
+        val value = result.valueOrElse {
+            called = true
+            error("unexpected error")
+        }
+
+        assertNull(value)
+        assertTrue(!called)
+    }
+
+    @Test
     fun valueOrElseInvokesLambdaWithSameErrAndTakesEarlyReturn() {
         val err = Result.Err(FeedParseException("boom"))
         var received: Result.Err? = null
