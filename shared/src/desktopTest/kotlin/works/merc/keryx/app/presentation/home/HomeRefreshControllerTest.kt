@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.RefreshCycleRunnerFixture
@@ -219,6 +220,12 @@ class HomeRefreshControllerTest {
             h.fixture.awaitFeedRefreshing()
             // The current-selection overload tracks under the filter showing when it started.
             h.controller.pullToRefresh()
+            // That pull is only queued on this event loop. Let it reach the runner and find f1's cycle
+            // busy before the gate opens: otherwise f1's cycle, resumed on the fetch thread, can end
+            // first and the second pull runs a cycle of its own. Its first re-trim is followed by a
+            // Busy check that never suspends (Unconfined dispatcher, no suspension on the busy path),
+            // so once the count reaches 2 the check has happened.
+            withTimeout(5_000) { while (h.retrimCount < 2) yield() }
 
             assertEquals(
                 setOf<ArticleFilter>(ArticleFilter.Feed("f1"), ArticleFilter.Feed("f2")),
