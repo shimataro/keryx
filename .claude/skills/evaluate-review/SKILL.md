@@ -452,9 +452,7 @@ No implementation plan is needed.
 
 Before planning anything:
 
-1. Branch per `.claude/etc/per-item-commit.md` §1 with type `fix` (Step 3 makes a `v*` branch
-   unlikely here, but guard for it anyway).
-2. Check `git status --porcelain`. If it prints anything, warn and end this URL
+1. Check `git status --porcelain`. If it prints anything, warn and end this URL
    (`Working tree not clean`) — a failed-verification revert (8.6)
    must never be able to destroy pre-existing uncommitted work in the same file. A clean result
    here is the baseline for 8.6's re-check.

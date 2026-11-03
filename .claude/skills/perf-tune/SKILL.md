@@ -383,7 +383,7 @@ is downstream of that one, not a substitute for it.
 Each of these approvals is also its item's **one-time run confirmation**
 (`.claude/etc/per-item-commit.md` §1): the bulk Green/Yellow approval covers
 every item in that batch, and each individual Red approval covers that one
-item. Branch type is `perf`; Step 1's worktree check is the clean baseline.
+item. Step 1's worktree check is the clean baseline.
 
 ### Step 5 — Apply one at a time, verified
 
