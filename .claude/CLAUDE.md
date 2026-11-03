@@ -94,18 +94,6 @@ message in English for the resulting diff (`git diff`). Do not commit unless
 asked, except when the user has explicitly approved auto-commit. Follow the
 repo's Conventional Commits style (`fix(scope): ...`, `docs(scope): ...`, etc.).
 
-End every commit message with the attribution trailer:
-
-```text
-Co-Authored-By: Claude Code <noreply@anthropic.com>
-```
-
-When creating or updating a pull request, end its description with:
-
-```text
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-```
-
 When changes are not committed, generate a commit comment from the diff and
 present it to the user so they can review or use it manually.
 

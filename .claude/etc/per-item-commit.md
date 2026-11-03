@@ -71,7 +71,5 @@ When the item fails verification and the caller's own retry (if any) cannot fix 
    this item, so an unrelated edit or residue from an earlier item's revert never rides along.
 3. Create **exactly one commit** in the repo's Conventional Commits style. The
    message must be a single-line subject (`<type>(<scope>): <subject>`) unless a
-   body is genuinely needed, and it must always end with the attribution trailer
-   `Co-Authored-By: Claude Code <noreply@anthropic.com>` on its own line after a
-   blank line. Never batch several items into one commit, never amend a commit
-   made earlier in the same run, and never push.
+   body is genuinely needed. Never batch several items into one commit, never
+   amend a commit made earlier in the same run, and never push.
