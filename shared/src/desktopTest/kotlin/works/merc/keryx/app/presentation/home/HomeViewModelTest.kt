@@ -5790,6 +5790,28 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun subscribeFeedsBeforeTheFirstFeedEmissionStillFilesIntoTheSelectedFeedsFolder() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
+        // A StandardTestDispatcher holds the feed list's collector back until the scheduler runs,
+        // so feeds.value is still the pre-load empty list when subscribeFeeds is called.
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        assertTrue(vm.feeds.value.isEmpty())
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        assertEquals("d1", newFeed.folder_id)
+        assertEquals(listOf("f1", newFeed.id, "f2"), db.feedsQueries.getByFolder("d1").executeAsList().map { it.id })
+    }
+
+    @Test
     fun subscribeFeedsLeavesNewFeedUnfiledWhenAnUnfiledFeedIsSelected() = runTest {
         // f1 has no folder (folderId omitted), so the new feed must also land unfiled instead of
         // inheriting some stale/unrelated folder id.

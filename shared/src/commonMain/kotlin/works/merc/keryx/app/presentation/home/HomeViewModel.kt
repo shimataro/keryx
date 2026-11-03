@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
@@ -1684,7 +1685,10 @@ class HomeViewModel(
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
-        val placement = newFeedPlacement(_filter.value, _selectedRowInstance.value, feeds.value)
+        // The loaded feed list, not feeds.value: before the first DB emission that reads as empty,
+        // which would file a feed subscribed under a selected feed into the unfiled group.
+        val loadedFeeds = feedsSnapshot.filterNotNull().first()
+        val placement = newFeedPlacement(_filter.value, _selectedRowInstance.value, loadedFeeds)
         val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
             placement.folderId,
