@@ -136,6 +136,7 @@ Compare from the merge base, covering commits **and** uncommitted work:
 
 ```bash
 base=$(git merge-base "<base>" HEAD)
+```
 
 If `$base` is empty (the base shares no history with `HEAD`), output the following and stop:
 
@@ -143,6 +144,7 @@ If `$base` is empty (the base shares no history with `HEAD`), output the followi
 '<base>' shares no history with HEAD.
 ```
 
+```bash
 git log --oneline "$base"..HEAD                 # commit subjects are naming hints
 git diff --stat "$base"                         # working tree vs merge base: staged + unstaged too
 git diff "$base"
