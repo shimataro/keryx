@@ -12,7 +12,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
@@ -26,12 +28,14 @@ import works.merc.keryx.app.core.UpdateStage
 import works.merc.keryx.app.data.remote.UpdateDownloader
 import works.merc.keryx.app.platform.InstallKind
 import works.merc.keryx.app.platform.InstallLocation
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.testThreadDispatcher
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.ContinuationInterceptor
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -90,6 +94,21 @@ private fun <T> assertSubsequenceOf(expected: List<T>, actual: List<T>, label: S
  * scheduler: [UpdateRepository]'s own [CoroutineScope] runs on a real dispatcher, the same reason
  * `SettingsViewModelTest`'s update-check tests do the same (see that file's own comment).
  */
+/** A [Mutex] that counts how many times it was asked for, so a test can see a waiter has queued. */
+private class LockCountingMutex(private val inner: Mutex = Mutex()) : Mutex by inner {
+    val attempts = AtomicInteger()
+
+    override suspend fun lock(owner: Any?) {
+        attempts.incrementAndGet()
+        inner.lock(owner)
+    }
+
+    override fun tryLock(owner: Any?): Boolean {
+        attempts.incrementAndGet()
+        return inner.tryLock(owner)
+    }
+}
+
 class UpdateRepositoryTest {
     private val tempDirs = mutableListOf<File>()
     private val scopes = mutableListOf<CoroutineScope>()
@@ -112,12 +131,29 @@ class UpdateRepositoryTest {
 
     /** Polls [condition] on the real wall clock until it holds, failing with [describe]'s message on
      * timeout — see this class's own KDoc for why these tests poll rather than use `runTest`. */
-    private fun await(timeoutMs: Long = 5_000, describe: () -> String, condition: () -> Boolean) = runBlocking {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!condition()) {
-            check(System.currentTimeMillis() < deadline, describe)
-            delay(5)
+    private fun await(timeoutMs: Long = 5_000, describe: () -> String, condition: () -> Boolean) {
+        try {
+            awaitConditionBlocking(timeoutMs, condition)
+        } catch (e: TimeoutCancellationException) {
+            throw IllegalStateException(describe(), e)
         }
+    }
+
+    /**
+     * Waits until everything already queued on [scope]'s single-thread dispatcher — and anything
+     * that work queued in turn, one hop deep — has run. The dispatcher is FIFO, so a no-op task
+     * submitted after the code under test is guaranteed to run after it; submitting two covers a
+     * coroutine that the first one launched. This is the deterministic stand-in for "give wrongly
+     * launched work every chance to have run" before a negative assertion.
+     */
+    private fun drainScope(scope: CoroutineScope) = runBlocking {
+        val dispatcher = scope.coroutineContext[ContinuationInterceptor]!!
+        repeat(2) { withTimeout(5_000) { withContext(dispatcher) {} } }
+    }
+
+    /** Waits for every coroutine [scope] still has running (the release-watch loop here) to finish. */
+    private fun awaitScopeChildrenFinished(scope: CoroutineScope) = runBlocking {
+        withTimeout(5_000) { scope.coroutineContext[Job]!!.children.toList().forEach { it.join() } }
     }
 
     private fun awaitState(repo: UpdateRepository, timeoutMs: Long = 5_000, predicate: (UpdateState) -> Boolean) =
@@ -401,7 +437,7 @@ class UpdateRepositoryTest {
         awaitState(repo) { it is UpdateState.Ready }
         val filePath = (repo.state.value as UpdateState.Ready).filePath
 
-        trackedScope().launch { repo.check() } // snapshots `before = Ready`, then parks
+        val parkedCheck = trackedScope().launch { repo.check() } // snapshots `before = Ready`, then parks
         await(describe = { "the second check never reached the network" }) { checkCount >= 2 }
         repo.install()
         runBlocking { withTimeout(5_000) { installer.started.await() } }
@@ -410,8 +446,9 @@ class UpdateRepositoryTest {
         // nextStateAfterCheck passes Installing straight through, so `after` is not Ready — which a
         // `after !is Ready` supersede-check would read as "this version was replaced" and delete out
         // from under the running extraction.
-        await(describe = { "the check never finished" }) { checkCount >= 2 && repo.state.value is UpdateState.Installing }
-        Thread.sleep(200)
+        // Join the check itself: the supersede-check (and any deletion it would do) runs inside it.
+        runBlocking { withTimeout(5_000) { parkedCheck.join() } }
+        assertIs<UpdateState.Installing>(repo.state.value)
         assertTrue(File(filePath).exists(), "a check must not delete the download the running install is reading")
         installGate.complete(Unit)
     }
@@ -436,6 +473,7 @@ class UpdateRepositoryTest {
                 }
             }
         }
+        val scope = trackedScope()
         val repo = UpdateRepository(
             checker = checkerFor {
                 releaseJson(
@@ -446,7 +484,7 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(downloaderClient),
             installer = installer,
             notificationCenter = NotificationCenter(),
-            scope = trackedScope(),
+            scope = scope,
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
@@ -460,7 +498,9 @@ class UpdateRepositoryTest {
         awaitState(repo) { it is UpdateState.Installing }
         repo.startDownload() // second retry — must find Installing, not Failed, and do nothing
 
-        Thread.sleep(200) // give a leaked third install every chance to appear
+        // startDownload() launches on the scope's single-thread dispatcher: once that queue has
+        // drained, a wrongly started third install would already have run (and counted itself).
+        drainScope(scope)
         assertEquals(2, installCount, "a retry must never start a second install over one already running")
         assertTrue(!secondInstallEntered.isCompleted)
         gate.complete(Unit)
@@ -775,12 +815,13 @@ class UpdateRepositoryTest {
         val sha256 = sha256Hex(payload)
         var downloadRequestCount = 0
         val downloaderClient = HttpClient(MockEngine { downloadRequestCount++; respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }
+        val scope = trackedScope()
         val repo = UpdateRepository(
             checker = checkerFor { releaseJson("2.0.0", "Keryx-2.0.0-macos-arm64.zip", "https://release-assets.githubusercontent.com/x.zip", payload.size, sha256) },
             downloader = UpdateDownloader(downloaderClient),
             installer = noOpInstaller(canInstall = false),
             notificationCenter = NotificationCenter(),
-            scope = trackedScope(),
+            scope = scope,
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
         )
@@ -789,9 +830,10 @@ class UpdateRepositoryTest {
 
         repo.startDownload()
 
-        // No completion signal to await (nothing should ever start), so give any wrongly-launched
-        // download a real chance to have issued its request before asserting it didn't.
-        runBlocking { delay(200) }
+        // Nothing should ever start, so there is no completion signal. Instead drain the scope's
+        // single-thread dispatcher: a wrongly launched download would have set Downloading (its very
+        // first step, on that thread) by the time the queue has drained.
+        drainScope(scope)
         assertEquals(0, downloadRequestCount)
         assertIs<UpdateState.Available>(repo.state.value)
     }
@@ -1306,10 +1348,11 @@ class UpdateRepositoryTest {
         // runCheck's own KDoc) nor end the watch — both would be visible regressions a user could
         // stumble on. Wait for at least one such failing poll to have actually happened before
         // asserting on its (lack of) effect.
-        await(describe = { "watch never re-polled after the endpoint started failing" }) {
-            phase1RequestCount.get() > 0
+        // The watch loop is sequential (under checkMutex), so poll N+1's request proves poll N,
+        // including its own state-handling, has finished.
+        await(describe = { "watch never re-polled twice after the endpoint started failing" }) {
+            phase1RequestCount.get() >= 2
         }
-        Thread.sleep(100) // let that poll's own state-handling (a no-op) finish settling
 
         assertEquals(UpdateState.UpToDate, repo.state.value, "a quiet poll's own failure must not surface as Failed")
         assertTrue(notificationCenter.items.value.isEmpty())
@@ -1319,12 +1362,13 @@ class UpdateRepositoryTest {
     fun watchGivesUpAfterItsAttemptBudgetWithoutEverNotifying() {
         val requestCount = AtomicInteger(0)
         val notificationCenter = NotificationCenter()
+        val scope = trackedScope()
         val repo = UpdateRepository(
             checker = checkerFor { requestCount.incrementAndGet(); releaseJsonNoAssets("2.0.0") },
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            scope = trackedScope(),
+            scope = scope,
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
             releaseWatchIntervalMs = 0L,
@@ -1339,9 +1383,8 @@ class UpdateRepositoryTest {
         await(timeoutMs = 30_000, describe = { "release watch never gave up; requestCount=$requestCount" }) {
             requestCount.get() >= expectedTotal
         }
-        // Let the request that pushed the budget over finish its own bookkeeping and the watch
-        // loop actually exit, then confirm no further request follows.
-        Thread.sleep(200)
+        // Wait for the watch loop to actually exit, then confirm no further request followed.
+        awaitScopeChildrenFinished(scope)
         val countAfterSettling = requestCount.get()
         assertEquals(expectedTotal, countAfterSettling, "the watch kept polling past its own budget")
         assertTrue(notificationCenter.items.value.isEmpty())
@@ -1360,6 +1403,7 @@ class UpdateRepositoryTest {
     fun afterTheWatchBudgetIsExhaustedAPlainUpToDateCheckIsNotMistakenForStillWatching() {
         val phase = AtomicInteger(0) // 0 = no asset (drives the watch to exhaustion); 1 = plain up to date
         val requestCount = AtomicInteger(0)
+        val scope = trackedScope()
         val repo = UpdateRepository(
             checker = checkerFor {
                 requestCount.incrementAndGet()
@@ -1368,7 +1412,7 @@ class UpdateRepositoryTest {
             downloader = UpdateDownloader(HttpClient(MockEngine { respond("", HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = NotificationCenter(),
-            scope = trackedScope(),
+            scope = scope,
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
             releaseWatchIntervalMs = 0L,
@@ -1383,7 +1427,7 @@ class UpdateRepositoryTest {
         await(timeoutMs = 30_000, describe = { "release watch never gave up; requestCount=$requestCount" }) {
             requestCount.get() >= expectedTotal
         }
-        Thread.sleep(200) // let the watch loop's own last iteration finish and truly exit
+        awaitScopeChildrenFinished(scope) // the watch loop's last iteration has finished and it exited
 
         phase.set(1)
         val laterOutcome = runBlocking { repo.check() }
@@ -1432,6 +1476,7 @@ class UpdateRepositoryTest {
                 respond(body, HttpStatusCode.OK)
             },
         ) { expectSuccess = false }
+        val checkMutex = LockCountingMutex()
         val repo = UpdateRepository(
             checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
             downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
@@ -1441,6 +1486,7 @@ class UpdateRepositoryTest {
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
             releaseWatchIntervalMs = 1_500L,
+            checkMutex = checkMutex,
         )
 
         // Starts the release watch: request #1 (the public check itself) finds no asset yet.
@@ -1457,7 +1503,12 @@ class UpdateRepositoryTest {
         // waits for the poll to fully finish (including its own "apply" step) before even issuing
         // its own request.
         val secondCheck = trackedScope().launch { repo.check() }
-        runBlocking { delay(200) } // give a wrongly-concurrent request every chance to have fired
+        // Lock requests so far: the public check, the parked poll, and now this second check. It
+        // blocks on the lock before issuing any request, so none beyond the poll's own can exist.
+        await(describe = { "the second check never asked for checkMutex; attempts=${checkMutex.attempts}" }) {
+            checkMutex.attempts.get() >= 3
+        }
+        assertEquals(2, requestCount.get(), "a check must not issue its request while another holds checkMutex")
 
         quietGate.complete(Unit)
         runBlocking { withTimeout(5_000) { secondCheck.join() } }
@@ -1495,12 +1546,13 @@ class UpdateRepositoryTest {
                 }
             },
         ) { expectSuccess = false }
+        val scope = trackedScope()
         val repo = UpdateRepository(
             checker = UpdateChecker(checkerClient, currentVersion = "1.0.0", repoSlug = "owner/repo", location = WRITABLE_MAC_LOCATION),
             downloader = UpdateDownloader(HttpClient(MockEngine { respond(payload, HttpStatusCode.OK) }) { expectSuccess = false }),
             installer = noOpInstaller(),
             notificationCenter = notificationCenter,
-            scope = trackedScope(),
+            scope = scope,
             location = WRITABLE_MAC_LOCATION,
             cacheDirOverride = newTempDir(),
             releaseWatchIntervalMs = 1_000L,
@@ -1530,7 +1582,7 @@ class UpdateRepositoryTest {
         // single already-in-flight poll finds `releaseWatchAttempts == 0` (the public check reset
         // it) and stops the loop instead of continuing it — so waiting several more intervals must
         // show no further growth.
-        Thread.sleep(2_500)
+        awaitScopeChildrenFinished(scope) // a resurrected watch would never finish
         assertEquals(
             requestsBeforeFailure + 1,
             requestCount.get(),
