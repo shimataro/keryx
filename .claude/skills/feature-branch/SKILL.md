@@ -208,7 +208,8 @@ Step 2 already resolved it). `<base>` is the base Step 2 resolved. Classify each
 
 - `$mb` is empty (unrelated history, e.g. a same-named branch on another remote) → ignore the ref.
 - `$mb` is in **neither** the default branch nor the base (both `--is-ancestor` checks fail) → the
-  ref shares a commit of this branch's own → **pushed**. This still holds after an amend or rebase
+  ref shares a commit beyond the base — normally one of this branch's own (see the note below) →
+  **pushed**. This still holds after an amend or rebase
   that kept any earlier commit, which is why the ref is not required to be an ancestor of `HEAD`
   (`--merged=HEAD`).
 - `$mb` is not in the default branch but **is** in the base (the only shared history is the parent
@@ -223,8 +224,13 @@ Step 2 already resolved it). `<base>` is the base Step 2 resolved. Classify each
 - The default branch cannot be resolved → any ref with a non-empty `$mb` is **ambiguous**.
 
 The branch is pushed if any ref is pushed; otherwise ambiguous if any ref is ambiguous; otherwise
-not pushed. (A stale `origin/<default>` that was never fetched can make a ref look pushed; that errs
-on the side of not renaming, so it is accepted.)
+not pushed. (Two cases can make a ref look pushed when it is not; both err on the side of not
+renaming, so they are accepted. One is a stale `origin/<default>` that was never fetched. The other
+is a base that does not contain the parent branch's commits — the default branch passed or picked
+instead of a stacked branch's parent, or a parent Step 2 cannot detect because it was rebased or its
+ref was deleted after a squash merge: a same-named ref cut from the parent then shares a parent commit
+outside both. Telling that apart would need the parent itself, which this skill only knows as the
+base.)
 
 (Do not use `@{u}`: a branch created from `origin/v0` tracks it, which says nothing about whether
 this branch was pushed.)
