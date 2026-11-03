@@ -5051,6 +5051,12 @@ class HomeViewModelTest {
         testScheduler.advanceTimeBy(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS - 1)
         assertEquals(0, counting.matchQueries)
 
+        // Exactly at the window's end the rerun is due; runCurrent runs what advanceTimeBy leaves at the target time.
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+        assertEquals(1, counting.matchQueries)
+
+        // Draining everything still leaves exactly one rerun for the whole burst.
         advanceForArticleChangeDebounce()
         assertEquals(1, counting.matchQueries)
     }
