@@ -266,6 +266,11 @@ fun HomeScreen() {
         setFocusedPane(pane)
     }
 
+    // Moves the article selection one step: back for a negative delta, forward otherwise.
+    fun stepArticle(delta: Int) {
+        if (delta < 0) vm.selectPrevious() else vm.selectNext()
+    }
+
     // ↓/↑ reach here even while a text field holds focus (KeyboardNav.kt's own guard lets them
     // through — see its KDoc) — used by onUp/onDown below only when focusedTextInput is
     // HomeTextInput.SearchField. Descends into the results list rather than moving whatever
@@ -276,7 +281,7 @@ fun HomeScreen() {
     fun moveArticleSelectionFromSearchField(delta: Int) {
         returnKeyboardFocusToRoot()
         setFocusedPane(HomePane.ArticleList)
-        if (delta < 0) vm.selectPrevious() else vm.selectNext()
+        stepArticle(delta)
     }
 
     // At a narrow PaneLayout, focusedPane doubles as the navigation stack's depth cursor (see
@@ -366,7 +371,7 @@ fun HomeScreen() {
             HomeTextInput.RowNameEditor -> {}
             null -> when (keyboardPane) {
                 HomePane.FeedList -> moveFeedSelection(delta)
-                HomePane.ArticleList -> if (delta < 0) vm.selectPrevious() else vm.selectNext()
+                HomePane.ArticleList -> stepArticle(delta)
                 // The native WebView reader handles its own scrolling once it holds real focus (see
                 // "Article Reader (native WebView)" in app-architecture.md); this only reaches the
                 // Compose-drawn fallback reader, via fallbackReaderScrollHost — see KeyboardNav.kt's
