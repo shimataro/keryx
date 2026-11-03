@@ -28,6 +28,11 @@ import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.FeedDiscoveryException
+import works.merc.keryx.app.core.FeedFetchException
+import works.merc.keryx.app.core.FeedNotFoundException
+import works.merc.keryx.app.core.FeedParseException
+import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SETTINGS_TAB_CLOUD_SYNC
 import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
@@ -45,6 +50,7 @@ import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SYNC_STATE_LAST_UPLOADED_DIGEST
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.syncErrorKind
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
@@ -542,7 +548,10 @@ class SyncRepository(
     private fun nextActionFor(exception: KeryxException): AppNotificationAction = when (exception) {
         is CloudDataIncompatibleException -> AppNotificationAction.ResetCloudData
         is SchemaVersionException -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
-        else -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_CLOUD_SYNC)
+        is FeedFetchException, is FeedParseException, is FeedDiscoveryException, is FeedTimeoutException,
+        is FeedNotFoundException, is CloudAuthException, is CloudStorageException, is SyncConflictException,
+        is UpdateException,
+        -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_CLOUD_SYNC)
     }
 
     /**

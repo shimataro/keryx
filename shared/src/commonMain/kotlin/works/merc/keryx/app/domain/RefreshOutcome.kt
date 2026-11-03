@@ -4,11 +4,20 @@ import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.CloudDataIncompatibleException
+import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.FeedFetchException
+import works.merc.keryx.app.core.FeedNotFoundException
+import works.merc.keryx.app.core.FeedParseException
 import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.SchemaVersionException
+import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.errorOrNull
 import works.merc.keryx.app.core.valueOrNull
 
@@ -39,7 +48,10 @@ fun isUnreachable(results: Map<String, Result<Int>>): Boolean =
         when (val e = result.errorOrNull) {
             is FeedTimeoutException -> true
             is FeedFetchException -> e.noResponse
-            else -> false
+            null, is FeedParseException, is FeedDiscoveryException, is FeedNotFoundException,
+            is CloudAuthException, is CloudStorageException, is SyncConflictException,
+            is SchemaVersionException, is CloudDataIncompatibleException, is UpdateException,
+            -> false
         }
     }
 

@@ -436,10 +436,14 @@ class UpdateRepository(
      */
     private suspend fun retryFailed(failed: UpdateState.Failed) {
         val update = failed.update
-        when {
-            update == null || failed.exception.stage == UpdateStage.CHECK -> check()
-            failed.exception.stage == UpdateStage.INSTALL -> retryInstall(update)
-            else -> startDownloadOf(update) // DOWNLOAD or VERIFY
+        if (update == null) {
+            check()
+            return
+        }
+        when (failed.exception.stage) {
+            UpdateStage.CHECK -> check()
+            UpdateStage.INSTALL -> retryInstall(update)
+            UpdateStage.DOWNLOAD, UpdateStage.VERIFY -> startDownloadOf(update)
         }
     }
 
