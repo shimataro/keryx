@@ -88,7 +88,7 @@ base. If nothing is reasonably close, go to **Asking for the base** below.
      branch>` — basing on it would cover only what has not been pushed yet), and `*/HEAD`. Do not
      exclude `@{u}`: a stacked branch created with `--track` has its parent as its upstream.
 
-  3. Measure each candidate's distance and pick the nearest as the base:
+  3. Measure each candidate's distance (how many commits `HEAD` is ahead of it):
 
      ```bash
      git rev-list --count "<candidate>"..HEAD
@@ -97,9 +97,15 @@ base. If nothing is reasonably close, go to **Asking for the base** below.
      Treat a local and a remote branch at the same commit (e.g. `releases/v0.27.0` and
      `origin/releases/v0.27.0`) as one candidate, shown by its local name.
 
-     - If several candidates at different commits share the smallest distance, present them and
-       the default branch via `AskUserQuestion` and use the one picked.
-     - If there are no candidates, use the default branch.
+     - If there are no candidates, use the default branch (no question).
+     - Otherwise the nearest candidate is only a proposal: a branch whose tip lies among this
+       branch's own commits (a backup branch, a sub-branch merged back in, an `origin/<old name>`
+       left from before a local rename) is nearer than the real parent, and basing on it would leave
+       the earlier commits out of the name. Confirm via `AskUserQuestion` before Step 3: up to 3
+       candidates, nearest first, plus the default branch, each `description` saying what it is and
+       `HEAD is N commits ahead`. Mark the nearest as Recommended — unless several candidates at
+       different commits share the smallest distance, in which case mark none. "Other" takes a
+       branch, tag or commit hash, run through "With an argument" above. Use the one picked.
 
   When a parent branch is used, say so in the base line, naming the default branch and how to
   override it (a stale `origin/<default>` that was never fetched can make an already-merged branch
