@@ -812,8 +812,8 @@ Keychain のアカウント名とフォールバックファイル名は `CloudS
     以前の劣化した保存で残った古いフォールバックファイルを削除し、セキュアストレージが再び使える
     ようになった後も平文コピーがディスクに残り続けないようにする — Android の `KeystoreTokenStorage`
     （後述）と同じ clear-on-success の挙動である。`KeyringTokenStorage`/`LibSecretTokenStorage` は
-    この合成ロジックを共通の `SecretStoreTokenStorage` から継承するが、`SecurityCliTokenStorage` は
-    継承せず同じ合成ロジックを自前で実装している。削除の確認が取れなかったフォールバッククリアは、
+    この合成ロジックを共通の `SecretStoreTokenStorage` から継承し、`SecurityCliTokenStorage` も
+    そのバックエンド `SecurityKeychainStore` が継承したうえで、メモリ内キャッシュを重ねるだけである。削除の確認が取れなかったフォールバッククリアは、
     `SECURE` と偽って報告するのではなく `PLAINTEXT_FILE` へと結果を降格する。
 - macOS は書き込み後に **read-back 検証**（login keychain を明示指定して読み戻し）を行い、永続化を確認できない
   場合は file フォールバックへ回す。**書き込みの永続性は起動セッション依存**: パッケージ版（GUI ログイン

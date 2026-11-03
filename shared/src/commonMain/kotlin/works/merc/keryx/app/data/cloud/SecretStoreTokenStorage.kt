@@ -6,7 +6,8 @@ import works.merc.keryx.app.core.Log
 /**
  * Shared save/load/clear contract for the secure-store backends that keep one secret per account
  * and degrade to [fallback] on any failure — currently desktop's `KeyringTokenStorage`
- * (java-keyring) and `LibSecretTokenStorage` (libsecret), and Android's `KeystoreTokenStorage`
+ * (java-keyring), `LibSecretTokenStorage` (libsecret) and `SecurityKeychainStore` (macOS's
+ * `security` CLI, wrapped in `SecurityCliTokenStorage`'s cache), and Android's `KeystoreTokenStorage`
  * (Android Keystore). A concrete subclass supplies only the three backend primitives
  * ([storeSecret]/[loadSecret]/[clearSecret]); the outcome composition itself — when a backend
  * write earns [TokenSaveOutcome.SECURE], when a stale fallback copy must be cleared and what a

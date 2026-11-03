@@ -65,13 +65,22 @@ internal class RealCommandRunner(
  * Results are cached in memory: [CloudSession] calls [load] on every access-token
  * fetch, and this is a single-instance desktop app with one writer, so caching
  * avoids spawning `security` (and re-triggering Keychain prompts) repeatedly.
+ *
+ * The outcome composition (when a write earns [TokenSaveOutcome.SECURE], when the stale fallback
+ * copy is cleared, how a failed decode is logged) is [SecretStoreTokenStorage]'s, shared with the
+ * other secure-store backends: [SecurityKeychainStore] supplies only the `security` primitives,
+ * and this class adds the in-memory cache and serialization on top.
  */
-class SecurityCliTokenStorage internal constructor(
-    private val fallback: TokenStorage,
-    private val runner: CommandRunner,
-    private val json: Json,
-    private val account: String = CloudStorageType.DROPBOX.id,
+class SecurityCliTokenStorage private constructor(
+    private val store: SecurityKeychainStore,
 ) : TokenStorage {
+
+    internal constructor(
+        fallback: TokenStorage,
+        runner: CommandRunner,
+        json: Json,
+        account: String = CloudStorageType.DROPBOX.id,
+    ) : this(SecurityKeychainStore(fallback, runner, json, account))
 
     constructor(
         fallback: TokenStorage,
@@ -79,37 +88,14 @@ class SecurityCliTokenStorage internal constructor(
         json: Json = Json { ignoreUnknownKeys = true },
     ) : this(fallback, RealCommandRunner(), json, account)
 
-    private val loginKeychain = System.getProperty("user.home") + "/Library/Keychains/login.keychain-db"
-
     private var cached: OAuthTokens? = null
     private var loaded: Boolean = false
 
     @Synchronized
     override fun save(tokens: OAuthTokens): TokenSaveOutcome {
-        val payload = json.encodeToString(tokens)
-        val storedInKeychain = writeToKeychainVerified(payload)
+        val outcome = store.save(tokens)
         // The cache is updated either way — this session must use the tokens it was just handed
         // even when nothing could be persisted.
-        val outcome = if (!storedInKeychain) {
-            // Report the fallback's own outcome: its write can fail too, and that leaves the
-            // tokens nowhere at all instead of in a plaintext file.
-            fallback.save(tokens)
-        } else {
-            // A previous run may have written the plaintext fallback before the Keychain became
-            // available again (see the class doc's `gradlew run` caveat); clear it so a stale
-            // plaintext copy doesn't linger once a verified Keychain write is working, and report
-            // a copy that survived — it still hands out a readable (stale, but possibly still
-            // valid) refresh token, which is exactly what the caller's plaintext warning exists
-            // for. The check has to be fallback.clear()'s own answer, not a follow-up
-            // fallback.load(): FileTokenStorage.load() reports a file whose JSON no longer decodes
-            // as "nothing stored", so a failed delete of a corrupt-but-readable file would have
-            // looked like a successful cleanup and claimed SECURE with the tokens still on disk.
-            if (fallback.clear() == TokenClearOutcome.CLEARED) {
-                TokenSaveOutcome.SECURE
-            } else {
-                TokenSaveOutcome.PLAINTEXT_FILE
-            }
-        }
         cached = tokens
         loaded = true
         return outcome
@@ -118,21 +104,40 @@ class SecurityCliTokenStorage internal constructor(
     @Synchronized
     override fun load(): OAuthTokens? {
         if (loaded) return cached
-        val raw = readKeychainRaw()
-        val fromKeychain = raw?.let {
-            runCatching { json.decodeFromString<OAuthTokens>(it) }
-                .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Stored token payload could not be decoded", e) }
-                .getOrNull()
-        }
-        cached = fromKeychain ?: fallback.load()
+        cached = store.load()
         loaded = true
         return cached
     }
 
     @Synchronized
     override fun clear(): TokenClearOutcome {
+        val outcome = store.clear()
+        cached = null
+        loaded = true
+        return outcome
+    }
+}
+
+/**
+ * The login Keychain, reached through `/usr/bin/security`, as a [SecretStoreTokenStorage] backend —
+ * see [SecurityCliTokenStorage] for why it goes through the CLI and verifies every write.
+ */
+internal class SecurityKeychainStore(
+    fallback: TokenStorage,
+    private val runner: CommandRunner,
+    json: Json,
+    private val account: String,
+) : SecretStoreTokenStorage(fallback, json) {
+
+    private val loginKeychain = System.getProperty("user.home") + "/Library/Keychains/login.keychain-db"
+
+    override fun storeSecret(payload: String): Boolean = writeToKeychainVerified(payload)
+
+    override fun loadSecret(): String? = readKeychainRaw()
+
+    override fun clearSecret(): Boolean {
         val result = runSecurity("delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, loginKeychain)
-        val keychainCleared = when {
+        return when {
             // A null result means `security` could not run, so the entry's fate is unknown.
             result == null -> {
                 Log.warn(TOKEN_STORAGE_LOG_TAG, "security delete-generic-password could not run")
@@ -145,10 +150,6 @@ class SecurityCliTokenStorage internal constructor(
                 false
             }
         }
-        val fallbackCleared = fallback.clear() == TokenClearOutcome.CLEARED
-        cached = null
-        loaded = true
-        return if (keychainCleared && fallbackCleared) TokenClearOutcome.CLEARED else TokenClearOutcome.DATA_MAY_REMAIN
     }
 
     /**
