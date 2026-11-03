@@ -105,8 +105,9 @@ class LinuxNotifierTest {
         val notifier = LinuxNotifier({ daemon }, null)
         notifier.notify("s", "b")
 
-        assertTrue(daemon.calls.isEmpty())
-        assertFalse(notifier.consumeIfOwn(daemon.nextId))
+        // The fake throws before recording, so the call count alone says little: also check that no
+        // id at all is consumable, not just the one the daemon would have returned.
+        assertFalse(listOf(0, 1, 7, 42).any { notifier.consumeIfOwn(UInt32(it.toLong())) })
     }
 
     @Test
@@ -115,7 +116,7 @@ class LinuxNotifierTest {
 
         notifier.notify("s", "b")
 
-        assertFalse(notifier.consumeIfOwn(UInt32(42)))
+        assertFalse(listOf(0, 1, 7, 42).any { notifier.consumeIfOwn(UInt32(it.toLong())) })
     }
 
     @Test
