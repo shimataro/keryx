@@ -26,14 +26,14 @@ class LoopbackRedirectTransport(
         timeoutMillis: Long,
         launchBrowser: suspend (redirectUri: String) -> Unit,
     ): OAuthCallbackParams? {
-        val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
-        val redirectUri = "http://127.0.0.1:${server.address.port}"
+        val server = HttpServer.create(InetSocketAddress(IPV4_LOOPBACK, 0), 0)
+        val redirectUri = "http://$LOOPBACK_HOST:${server.address.port}"
         val deferred = CompletableDeferred<OAuthCallbackParams>()
         val successPage = successHtml(successMessageProvider())
 
         server.createContext("/") { exchange ->
             try {
-                val params = parseOAuthUri("http://127.0.0.1${exchange.requestURI}")
+                val params = parseOAuthUri("http://$LOOPBACK_HOST${exchange.requestURI}")
                 // Only our real callback (matching state, with a code or an error) completes the wait;
                 // stray requests (e.g. favicon) get a 404 and are ignored.
                 if (params.state == state && (params.code != null || params.error != null)) {
@@ -75,5 +75,13 @@ class LoopbackRedirectTransport(
 
     private companion object {
         const val TAG = "OAuthLoopback"
+
+        /** The host the redirect URI advertises, and so the one the server must listen on. */
+        const val LOOPBACK_HOST = "127.0.0.1"
+
+        // Not InetAddress.getLoopbackAddress(): that returns ::1 under java.net.preferIPv6Addresses,
+        // where the browser's redirect to the advertised 127.0.0.1 would be refused. Built from
+        // bytes so no name lookup is involved.
+        val IPV4_LOOPBACK: InetAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
     }
 }

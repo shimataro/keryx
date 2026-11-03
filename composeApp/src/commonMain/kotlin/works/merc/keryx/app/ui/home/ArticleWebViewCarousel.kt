@@ -71,9 +71,7 @@ internal fun ArticleWebViewCarousel(
     requestContent: (String) -> Unit,
     widthPx: () -> Float,
     theme: ArticleHtmlTheme,
-    noTitleText: String,
-    noContentText: String,
-    openInBrowserTooltip: String,
+    strings: ReaderStrings,
     reader: @Composable (html: String, body: String, articleUrl: String?, active: Boolean) -> Unit,
 ) {
     for (slot in 0 until ARTICLE_READER_SLOT_COUNT) {
@@ -88,9 +86,7 @@ internal fun ArticleWebViewCarousel(
                 requestContent = requestContent,
                 widthPx = widthPx,
                 theme = theme,
-                noTitleText = noTitleText,
-                noContentText = noContentText,
-                openInBrowserTooltip = openInBrowserTooltip,
+                strings = strings,
                 reader = reader,
             )
         }
@@ -140,9 +136,7 @@ internal fun ArticleWebViewSlot(
     requestContent: (String) -> Unit,
     widthPx: () -> Float,
     theme: ArticleHtmlTheme,
-    noTitleText: String,
-    noContentText: String,
-    openInBrowserTooltip: String,
+    strings: ReaderStrings,
     reader: @Composable (html: String, body: String, articleUrl: String?, active: Boolean) -> Unit,
 ) {
     val index = slotIndex(slot, pagerState.currentPage, pages.size) ?: return
@@ -155,8 +149,11 @@ internal fun ArticleWebViewSlot(
     val bylineFeed = bylineFeeds[row.feed_id]
     val bylineFeedName = bylineFeed?.displayTitle()
     val bylineFaviconUrl = bylineFeed?.favicon_url
-    val document = remember(theme, row, full, bylineFeedName, bylineFaviconUrl, noTitleText, noContentText, openInBrowserTooltip) {
-        readerDocument(theme, row, full, bylineFeedName, bylineFaviconUrl, noTitleText, noContentText, openInBrowserTooltip)
+    val document = remember(theme, row, full, bylineFeedName, bylineFaviconUrl, strings) {
+        readerDocument(
+            theme, row, full, bylineFeedName, bylineFaviconUrl,
+            strings.noTitleText, strings.noContentText, strings.openInBrowserTooltip,
+        )
     }
     // A page the user has not swiped to is held ready, not shown. It must not be reachable by a
     // screen reader's linear traversal (its WebView is a real view, clipped rather than

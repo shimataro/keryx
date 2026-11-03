@@ -37,6 +37,15 @@ inline fun <T> Result<T>.onErr(block: (KeryxException) -> Unit): Result<T> {
     return this
 }
 
+/**
+ * Returns the success value, or runs [onErr] with the error — which must leave the enclosing scope
+ * (typically `return it`), so an early-return unwrap reads as one expression.
+ */
+inline fun <T> Result<T>.valueOrElse(onErr: (Result.Err) -> Nothing): T = when (this) {
+    is Result.Ok -> value
+    is Result.Err -> onErr(this)
+}
+
 /** Maps the success value; passes errors through unchanged. */
 inline fun <T, R> Result<T>.map(transform: (T) -> R): Result<R> = when (this) {
     is Result.Ok -> Result.Ok(transform(value))

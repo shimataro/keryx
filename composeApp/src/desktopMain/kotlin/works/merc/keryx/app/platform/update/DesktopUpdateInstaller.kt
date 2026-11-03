@@ -140,34 +140,8 @@ class DesktopUpdateInstaller internal constructor(
         val workDir = File(filePath).parentFile
             ?: return InstallLaunchResult.Failed("Downloaded file has no parent directory")
 
-        // entryDirName and executableEntries are layout facts about assetKind's extracted ZIP —
-        // computed together so there's one place, not two, that has to agree on what each kind's
-        // archive actually looks like inside.
-        val entryDirName: String
-        val executableEntries: Set<String>
-        when (assetKind) {
-            UpdateAssetKind.MAC_APP_ZIP -> {
-                entryDirName = "$APP_NAME.app"
-                // Only reachable by the in-process extractor, which on macOS means tests alone:
-                // production always extracts a bundle with ditto, which restores every mode from
-                // the archive and ignores this set (see ArchiveExtractor's own @param KDoc). A
-                // newly-required executable therefore has to be fixed in packaging, not here.
-                executableEntries = setOf(
-                    "$entryDirName/Contents/MacOS/$APP_NAME",
-                    "$entryDirName/Contents/runtime/Contents/Home/lib/jspawnhelper",
-                )
-            }
-            UpdateAssetKind.LINUX_ZIP -> {
-                entryDirName = APP_NAME
-                executableEntries = setOf("$entryDirName/bin/$APP_NAME")
-            }
-            UpdateAssetKind.WINDOWS_ZIP -> {
-                entryDirName = APP_NAME
-                executableEntries = emptySet()
-            }
-            UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK ->
-                return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
-        }
+        val layout = selfReplaceLayout(assetKind)
+            ?: return InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
 
         val zipSize = File(filePath).length()
         // The 3x check runDownload() already did covers the download itself (the .part file
@@ -179,7 +153,7 @@ class DesktopUpdateInstaller internal constructor(
             return InstallLaunchResult.Failed("Not enough free disk space to extract the downloaded update")
         }
 
-        val extractDir = File(workDir, "extracted")
+        val extractDir = File(workDir, EXTRACT_DIR_NAME)
         // A previous attempt killed mid-extraction leaves a partial tree here, and both extractors
         // merge into an existing destination rather than replacing it — so without this the next
         // attempt blends two versions into one bundle, which on Windows/Linux passes every gate
@@ -194,7 +168,7 @@ class DesktopUpdateInstaller internal constructor(
                 zipPath = filePath,
                 destDir = extractDir.path,
                 maxBytes = zipSize * ZIP_EXTRACT_MAX_BYTES_MULTIPLE,
-                executableEntries = executableEntries,
+                executableEntries = layout.executableEntries,
             )
         } catch (e: IllegalStateException) {
             // Both clauses clear the partial tree themselves: a rejected extraction can otherwise
@@ -211,8 +185,8 @@ class DesktopUpdateInstaller internal constructor(
             return extractionFailed(extractDir, e)
         }
 
-        val extractedApp = File(extractDir, entryDirName)
-        verifyExtractedApp(extractedApp, assetKind, expectedVersion)?.let { reason ->
+        val extractedApp = File(extractDir, layout.entryDirName)
+        verifyExtractedApp(extractedApp, assetKind, layout, expectedVersion)?.let { reason ->
             FileSystemExtras.deleteRecursively(extractDir.path)
             return InstallLaunchResult.Failed(reason)
         }
@@ -260,7 +234,7 @@ class DesktopUpdateInstaller internal constructor(
         // rather than being reconstructed a second time to do the latter.
         return when (assetKind) {
             UpdateAssetKind.MAC_APP_ZIP, UpdateAssetKind.LINUX_ZIP -> {
-                val scriptFile = File(workDir, "apply.sh")
+                val scriptFile = File(workDir, POSIX_UPDATE_SCRIPT_NAME)
                 launchScript(
                     scriptFile = scriptFile,
                     scriptText = if (assetKind == UpdateAssetKind.MAC_APP_ZIP) {
@@ -281,6 +255,9 @@ class DesktopUpdateInstaller internal constructor(
                     executableScript = false,
                 )
             }
+            // Unreachable: selfReplaceLayout already turned these away above.
+            UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK ->
+                InstallLaunchResult.Failed("Unsupported self-replace asset kind: $assetKind")
         }
     }
 
@@ -319,11 +296,16 @@ class DesktopUpdateInstaller internal constructor(
      * means the download or archive was bad in some way [UpdateDownloader]'s digest check didn't
      * catch (e.g. an unexpected internal layout), and must be caught before any file that belongs
      * to the current, working install is touched. */
-    private fun verifyExtractedApp(extractedApp: File, assetKind: UpdateAssetKind, expectedVersion: String): String? {
+    private fun verifyExtractedApp(
+        extractedApp: File,
+        assetKind: UpdateAssetKind,
+        layout: SelfReplaceLayout,
+        expectedVersion: String,
+    ): String? {
         if (!extractedApp.isDirectory) return "Extracted update is missing its app directory"
+        val exe = File(extractedApp, layout.launcherPath)
         return when (assetKind) {
             UpdateAssetKind.MAC_APP_ZIP -> {
-                val exe = File(extractedApp, "Contents/MacOS/$APP_NAME")
                 val plistVersion = readPlistStringValue(File(extractedApp, "Contents/Info.plist").path, "CFBundleShortVersionString")
                 when {
                     !exe.canExecute() -> "Extracted app's launcher isn't executable"
@@ -334,14 +316,8 @@ class DesktopUpdateInstaller internal constructor(
                     else -> codeSigningVerifier.verify(extractedApp.path)
                 }
             }
-            UpdateAssetKind.LINUX_ZIP -> {
-                val exe = File(extractedApp, "bin/$APP_NAME")
-                if (!exe.canExecute()) "Extracted app's launcher isn't executable" else null
-            }
-            UpdateAssetKind.WINDOWS_ZIP -> {
-                val exe = File(extractedApp, "$APP_NAME.exe")
-                if (!exe.isFile) "Extracted app is missing $APP_NAME.exe" else null
-            }
+            UpdateAssetKind.LINUX_ZIP -> if (!exe.canExecute()) "Extracted app's launcher isn't executable" else null
+            UpdateAssetKind.WINDOWS_ZIP -> if (!exe.isFile) "Extracted app is missing $APP_NAME.exe" else null
             UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK -> "Unsupported self-replace asset kind: $assetKind"
         }
     }
@@ -405,11 +381,57 @@ internal fun readPlistStringValue(plistPath: String, key: String): String? {
     return untrustedText(text.substring(valueStart, valueEnd), MAX_PLIST_VALUE_LENGTH)
 }
 
+/**
+ * Layout facts about a self-replace asset's extracted ZIP, kept in one place so the extraction and
+ * the post-extraction health check agree on what each kind's archive looks like inside.
+ *
+ * @property entryDirName The archive's top-level directory: the app bundle or install tree.
+ * @property launcherPath The launcher, relative to [entryDirName].
+ * @property executableEntries Archive entries the in-process extractor must mark executable.
+ */
+private class SelfReplaceLayout(
+    val entryDirName: String,
+    val launcherPath: String,
+    val executableEntries: Set<String>,
+)
+
+/** The [SelfReplaceLayout] of [kind], or `null` for a kind that is never self-replaced. */
+private fun selfReplaceLayout(kind: UpdateAssetKind): SelfReplaceLayout? = when (kind) {
+    UpdateAssetKind.MAC_APP_ZIP -> {
+        val entryDirName = "$APP_NAME.app"
+        val launcherPath = "Contents/MacOS/$APP_NAME"
+        SelfReplaceLayout(
+            entryDirName = entryDirName,
+            launcherPath = launcherPath,
+            // Only reachable by the in-process extractor, which on macOS means tests alone:
+            // production always extracts a bundle with ditto, which restores every mode from
+            // the archive and ignores this set (see ArchiveExtractor's own @param KDoc). A
+            // newly-required executable therefore has to be fixed in packaging, not here.
+            executableEntries = setOf(
+                "$entryDirName/$launcherPath",
+                "$entryDirName/Contents/runtime/Contents/Home/lib/jspawnhelper",
+            ),
+        )
+    }
+    UpdateAssetKind.LINUX_ZIP -> {
+        val launcherPath = "bin/$APP_NAME"
+        SelfReplaceLayout(APP_NAME, launcherPath, executableEntries = setOf("$APP_NAME/$launcherPath"))
+    }
+    UpdateAssetKind.WINDOWS_ZIP -> SelfReplaceLayout(APP_NAME, "$APP_NAME.exe", executableEntries = emptySet())
+    UpdateAssetKind.WINDOWS_MSI, UpdateAssetKind.ANDROID_APK -> null
+}
+
 /** The hand-off script's own log, written next to the downloaded update. */
 private const val UPDATE_SCRIPT_LOG_NAME = "apply.log"
 
 /** The hand-off script `cmd` runs on Windows (self-replace and MSI install alike). */
 private const val WINDOWS_UPDATE_SCRIPT_NAME = "apply.cmd"
+
+/** The hand-off script `sh` runs on macOS and Linux to swap in the extracted app. */
+private const val POSIX_UPDATE_SCRIPT_NAME = "apply.sh"
+
+/** The directory under the work dir the downloaded archive is extracted into. */
+private const val EXTRACT_DIR_NAME = "extracted"
 
 /** This process's id, as the hand-off script's argument it waits on to exit. */
 private fun currentPid(): String = ProcessHandle.current().pid().toString()

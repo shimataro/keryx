@@ -1,48 +1,29 @@
 package works.merc.keryx.app.domain
 
 import app.cash.sqldelight.db.SqlDriver
-import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.MockRequestHandler
-import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import works.merc.keryx.app.FakeTokenStorage
-import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
-import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.NetworkCondition
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
-import works.merc.keryx.app.data.cloud.DropboxAuthManager
-import works.merc.keryx.app.data.cloud.OAuthTokens
-import works.merc.keryx.app.data.local.FtsManager
-import works.merc.keryx.app.data.local.FtsSearch
-import works.merc.keryx.app.data.local.LocalSettingsStore
 import works.merc.keryx.app.data.local.db.KeryxDatabase
-import works.merc.keryx.app.data.remote.FaviconResolver
-import works.merc.keryx.app.data.remote.FeedFetcher
-import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.insertFolder
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
-import works.merc.keryx.app.singleProviderCloudSession
-import java.io.IOException
 import java.util.Collections
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -55,11 +36,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
-<title>Feed</title><link>https://ex.com</link>
-<item><title>Post</title><link>https://ex.com/1</link><guid>g1</guid></item>
-</channel></rss>"""
-
 /**
  * [RefreshCycleRunner] against a real DB, a MockEngine feed fetcher, and a real [SyncRepository]
  * whose `cloudProvider` returns `null` (so a sync is an instant `Ok`) but records each call — the
@@ -68,89 +44,12 @@ private const val RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
  */
 class RefreshCycleRunnerTest {
     private val dir = FileIO.join(AppDirs.tempDir(), "refresh-cycle-runner-test-${Random.nextInt()}")
-    private val cleanups = mutableListOf<() -> Unit>()
+    private val fixtures = RefreshCycleRunnerFixtures(dir)
 
     @AfterTest
     fun tearDown() {
-        cleanups.asReversed().forEach { it() }
+        fixtures.close()
         FileIO.delete(FileIO.join(dir, "local_settings.json"))
-    }
-
-    private class Fixture(
-        val runner: RefreshCycleRunner,
-        val activityCenter: ActivityCenter,
-        val notificationCenter: NotificationCenter,
-        /** "fetch:<url>", "notify:<message>" and "sync" entries, in the order they happened. */
-        val log: MutableList<String>,
-    )
-
-    private fun httpClient(handler: MockRequestHandler) = HttpClient(MockEngine(handler)) {
-        followRedirects = false
-        expectSuccess = false
-        install(HttpTimeout)
-    }.also { client -> cleanups += { client.close() } }
-
-    private fun fixture(
-        driver: SqlDriver,
-        db: KeryxDatabase,
-        connected: Boolean = true,
-        fetchGate: CompletableDeferred<Unit>? = null,
-        /** The status each feed URL answers with, or `null` for a request that gets no response. */
-        fetchStatus: (url: String) -> HttpStatusCode? = { HttpStatusCode.OK },
-        fetchBody: String = RSS,
-        notifySink: OsNotificationSink? = null,
-        network: NetworkCondition = NetworkCondition.UNRESTRICTED,
-        appForeground: AppForeground = AppForeground(),
-    ): Fixture {
-        val clock = Clock { 1000L }
-        val log = Collections.synchronizedList(mutableListOf<String>())
-        val activityCenter = ActivityCenter()
-        val notificationCenter = NotificationCenter()
-        val fetcher = FeedFetcher(
-            httpClient { request ->
-                log += "fetch:${request.url}"
-                fetchGate?.await()
-                val status = fetchStatus(request.url.toString()) ?: throw IOException("unreachable")
-                respond(fetchBody, status)
-            },
-        )
-        val favicons = FaviconResolver(httpClient { respond("", HttpStatusCode.NotFound) })
-        val articleRepository = ArticleRepository(db, FtsSearch(driver), SyncScheduler {}, clock, Dispatchers.Unconfined)
-        val feedRepository = FeedRepository(
-            db, fetcher, favicons, articleRepository, ftsManagerIndexed(driver), SyncScheduler {},
-            notificationCenter, clock, Dispatchers.Unconfined,
-            faviconMisses = InMemoryFaviconMissStore(),
-        )
-        val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined).also { scope -> cleanups += { scope.cancel() } }
-        val syncRepository = SyncRepository(
-            driver = driver,
-            db = db,
-            ftsManager = FtsManager(driver),
-            cloudProvider = { log += "sync"; null },
-            clock = clock,
-            scope = syncScope,
-            activityCenter = activityCenter,
-            notificationCenter = NotificationCenter(),
-            localDbPath = "unused",
-            tempDir = "unused",
-        )
-        val authClient = httpClient { respond("{}", HttpStatusCode.OK) }
-        val cloudSession = singleProviderCloudSession(
-            client = authClient,
-            tokenStorage = FakeTokenStorage(if (connected) OAuthTokens(accessToken = "token") else null),
-            authManager = DropboxAuthManager(authClient, clock = clock),
-            clock = clock,
-        )
-        val settingsRepository = SettingsRepository(
-            db, LocalSettingsStore(dirOverride = dir), SyncScheduler {}, clock, writeDispatcher = Dispatchers.Unconfined,
-        )
-        val runner = RefreshCycleRunner(
-            activityCenter, feedRepository, syncRepository, cloudSession,
-            NewArticleNotifier(notifySink ?: OsNotificationSink { message, _ -> log += "notify:$message" }),
-            settingsRepository, FakeNotificationMessages(), notificationCenter, clock,
-            appForeground = appForeground,
-        ) { NetworkUsagePolicy.automaticRefreshAllowed(network) }
-        return Fixture(runner, activityCenter, notificationCenter, log)
     }
 
     private fun withDb(block: suspend CoroutineScope.(SqlDriver, KeryxDatabase) -> Unit): Unit = runBlocking {
@@ -165,7 +64,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runRefreshesNotifiesThenSyncsByDefault() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val result = f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -177,7 +76,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun automaticRunSkipsTheRefreshWhileTheOsIsSavingDataButStillReachesTheSync() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, network = NetworkCondition(metered = true, dataSaver = true))
+        val f = fixtures.create(driver, db, network = NetworkCondition(metered = true, dataSaver = true))
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -188,7 +87,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun automaticRunRefreshesOnAMeteredNetworkWithoutDataSaver() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, network = NetworkCondition(metered = true, dataSaver = false))
+        val f = fixtures.create(driver, db, network = NetworkCondition(metered = true, dataSaver = false))
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -198,7 +97,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun manualRunRefreshesEvenWhileTheOsIsSavingData() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, network = NetworkCondition(metered = true, dataSaver = true))
+        val f = fixtures.create(driver, db, network = NetworkCondition(metered = true, dataSaver = true))
 
         f.runner.run(trigger = SyncTrigger.MANUAL)
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
@@ -210,7 +109,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runSyncsFirstWithSyncThenRefresh() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         f.runner.run(order = RefreshCycleRunner.CycleOrder.SYNC_THEN_REFRESH, trigger = SyncTrigger.AUTOMATIC)
 
@@ -222,7 +121,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runDoesNotSyncWhenNoProviderIsConnected() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, connected = false)
+        val f = fixtures.create(driver, db, connected = false)
 
         val result = f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -233,7 +132,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runWrapsEachStageInTheStepWrapper() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         val steps = mutableListOf<String>()
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
@@ -248,7 +147,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runKeepsGoingWhenTheStepWrapperSwallowsAFailedStage() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val result = f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
             // Stand-in for runMaintenanceStep: the refresh stage "fails" and is swallowed.
@@ -265,7 +164,7 @@ class RefreshCycleRunnerTest {
     fun runIsNotIdleAnywhereInTheCycle() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
-        val f = fixture(driver, db, fetchGate = gate)
+        val f = fixtures.create(driver, db, fetchGate = gate)
         val snapshots = Collections.synchronizedList(mutableListOf<ActivitySnapshot>())
 
         val cycle = async {
@@ -287,7 +186,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runIfIdleReturnsBusyWithoutStartingWhileAnythingIsInFlight() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         val gate = CompletableDeferred<Unit>()
         val entered = CompletableDeferred<Unit>()
         val busy = launch { f.activityCenter.trackSync { entered.complete(Unit); gate.await() } }
@@ -305,7 +204,7 @@ class RefreshCycleRunnerTest {
     fun runIfIdleRunsTheCycleForTheSelectedFeedOnly() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         db.insertFeed("f2", url = "https://ex.com/f2")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val outcome = f.runner.runIfIdle(ArticleFilter.Feed("f2"), SyncTrigger.MANUAL)
 
@@ -321,7 +220,7 @@ class RefreshCycleRunnerTest {
     fun runIfIdleDoesNothingForASelectionCoveringNoSubscribedFeed() = withDb { driver, db ->
         db.insertFolder("d1", "Empty")
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val outcome = f.runner.runIfIdle(ArticleFilter.Folder("d1"), SyncTrigger.MANUAL)
 
@@ -332,7 +231,7 @@ class RefreshCycleRunnerTest {
 
     @Test
     fun runIfIdleStillSyncsForAllWithNoFeeds() = withDb { driver, db ->
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
 
@@ -343,7 +242,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun runIfIdleReportsANullSyncResultWhenNotConnected() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, connected = false)
+        val f = fixtures.create(driver, db, connected = false)
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
 
@@ -355,7 +254,7 @@ class RefreshCycleRunnerTest {
     fun aManualCycleReturnsHowItsRefreshWent() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         db.insertFeed("f2", url = "https://ex.com/f2")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
 
@@ -370,7 +269,7 @@ class RefreshCycleRunnerTest {
     fun runIfIdleCallsOnStartedOnlyForACycleThatRuns() = withDb { driver, db ->
         db.insertFolder("empty", name = "Empty")
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         var starts = 0
 
         f.runner.runIfIdle(ArticleFilter.Folder("empty"), SyncTrigger.MANUAL) { starts++ }
@@ -387,7 +286,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun anUnreachableRefreshReportsItAndWarnsOnceHoweverOftenItRecurs() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, fetchStatus = { null })
+        val f = fixtures.create(driver, db, fetchStatus = { null })
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
@@ -402,7 +301,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aStageFailingAfterTheRefreshStillReportsIt() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, fetchStatus = { null })
+        val f = fixtures.create(driver, db, fetchStatus = { null })
 
         assertFailsWith<IllegalStateException> {
             f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
@@ -418,7 +317,7 @@ class RefreshCycleRunnerTest {
     fun anAutomaticRunPublishesItsOutcomeUntilTheWholeCycleEnds() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
-        val f = fixture(driver, db, fetchGate = gate)
+        val f = fixtures.create(driver, db, fetchGate = gate)
         assertNull(f.runner.joinableAutomaticCycle())
 
         val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
@@ -438,7 +337,7 @@ class RefreshCycleRunnerTest {
     fun anAutomaticRunIfIdlePublishesItsOutcomeToo() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
-        val f = fixture(driver, db, fetchGate = gate)
+        val f = fixtures.create(driver, db, fetchGate = gate)
 
         val cycle = async { f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC) }
         withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
@@ -455,7 +354,7 @@ class RefreshCycleRunnerTest {
     fun aManualCycleNeverPublishesAJoinableCycle() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
-        val f = fixture(driver, db, fetchGate = gate)
+        val f = fixtures.create(driver, db, fetchGate = gate)
 
         val run = async { f.runner.run(trigger = SyncTrigger.MANUAL) }
         withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
@@ -464,7 +363,7 @@ class RefreshCycleRunnerTest {
         run.await()
 
         val gate2 = CompletableDeferred<Unit>()
-        val f2 = fixture(driver, db, fetchGate = gate2)
+        val f2 = fixtures.create(driver, db, fetchGate = gate2)
         val idle = async { f2.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL) }
         withTimeout(5_000) { f2.activityCenter.activity.first { it.feedRefreshing } }
         assertNull(f2.runner.joinableAutomaticCycle())
@@ -477,7 +376,7 @@ class RefreshCycleRunnerTest {
     fun aManualRunIfIdleDuringAnAutomaticCycleJoinsItWithoutStarting() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
-        val f = fixture(driver, db, fetchGate = gate)
+        val f = fixtures.create(driver, db, fetchGate = gate)
         val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
         withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
         val running = assertNotNull(f.runner.joinableAutomaticCycle())
@@ -496,7 +395,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun anOverlappedAutomaticCycleStaysJoinableAfterALaterOneEnds() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         val atSync = CompletableDeferred<Unit>()
         val gate = CompletableDeferred<Unit>()
         val earlier = async {
@@ -526,7 +425,7 @@ class RefreshCycleRunnerTest {
     fun aBusyAutomaticRunIfIdlePublishesNothingAndKeepsTheRunningCycle()= withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
-        val f = fixture(driver, db, fetchGate = gate)
+        val f = fixtures.create(driver, db, fetchGate = gate)
         val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
         withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
         val running = assertNotNull(f.runner.joinableAutomaticCycle())
@@ -545,7 +444,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aBusyAutomaticRunIfIdleDuringASyncAlonePublishesNothing() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         val gate = CompletableDeferred<Unit>()
         val entered = CompletableDeferred<Unit>()
         val busy = launch { f.activityCenter.trackSync { entered.complete(Unit); gate.await() } }
@@ -561,7 +460,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aStageThrowingStillCompletesAndClearsTheJoinableCycle() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         var joinable: kotlinx.coroutines.Deferred<RefreshOutcome?>? = null
 
         assertFailsWith<IllegalStateException> {
@@ -581,7 +480,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aCycleFailingBeforeAnyRefreshCompletesTheJoinableCycleWithNull() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
         var joinable: kotlinx.coroutines.Deferred<RefreshOutcome?>? = null
 
         assertFailsWith<IllegalStateException> {
@@ -598,7 +497,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aSingleFeedRefreshReturnsItsOutcome() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         val outcome = f.runner.refreshFeed("f1")
 
@@ -616,7 +515,7 @@ class RefreshCycleRunnerTest {
             "https://ex.com/missing" to HttpStatusCode.NotFound,
             "https://ex.com/broken" to HttpStatusCode.ServiceUnavailable,
         )
-        val f = fixture(driver, db, fetchStatus = { statuses.getValue(it) })
+        val f = fixtures.create(driver, db, fetchStatus = { statuses.getValue(it) })
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
 
@@ -630,7 +529,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aSingleGoneFeedOnlyRaisesItsOwnNotification() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, fetchStatus = { HttpStatusCode.Gone })
+        val f = fixtures.create(driver, db, fetchStatus = { HttpStatusCode.Gone })
 
         f.runner.refreshFeed("f1")
 
@@ -640,7 +539,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun anUnparsableFeedIsNotUnreachable() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, fetchBody = "not a feed")
+        val f = fixtures.create(driver, db, fetchBody = "not a feed")
 
         val outcome = f.runner.refreshFeed("f1")
 
@@ -652,7 +551,7 @@ class RefreshCycleRunnerTest {
     fun anUnreachableFeedAlongsideOneThatAnsweredIsNotUnreachable() = withDb { driver, db ->
         db.insertFeed("down", url = "https://ex.com/down")
         db.insertFeed("missing", url = "https://ex.com/missing")
-        val f = fixture(driver, db, fetchStatus = { if (it.endsWith("missing")) HttpStatusCode.NotFound else null })
+        val f = fixtures.create(driver, db, fetchStatus = { if (it.endsWith("missing")) HttpStatusCode.NotFound else null })
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -664,7 +563,7 @@ class RefreshCycleRunnerTest {
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
         val front = AppForeground().also { it.set(true) }
-        val f = fixture(driver, db, fetchGate = gate, appForeground = front)
+        val f = fixtures.create(driver, db, fetchGate = gate, appForeground = front)
 
         val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
         withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
@@ -679,7 +578,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun anAutomaticRunIfIdleInFrontStillReturnsItsRefreshOutcome() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+        val f = fixtures.create(driver, db, appForeground = AppForeground().also { it.set(true) })
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC)
 
@@ -694,7 +593,7 @@ class RefreshCycleRunnerTest {
     fun anAutomaticRunNotInFrontNotifies() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val front = AppForeground().also { it.set(true); it.set(false) }
-        val f = fixture(driver, db, appForeground = front)
+        val f = fixtures.create(driver, db, appForeground = front)
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -704,7 +603,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aManualRunInFrontStillNotifies() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+        val f = fixtures.create(driver, db, appForeground = AppForeground().also { it.set(true) })
 
         val outcome = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
 
@@ -715,7 +614,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun anUnreachableAutomaticRefreshInFrontStillWarnsInTheNotificationCenter() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, fetchStatus = { null }, appForeground = AppForeground().also { it.set(true) })
+        val f = fixtures.create(driver, db, fetchStatus = { null }, appForeground = AppForeground().also { it.set(true) })
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC)
 
@@ -727,7 +626,7 @@ class RefreshCycleRunnerTest {
         db.insertFeed("f1", url = "https://ex.com/f1")
         val gate = CompletableDeferred<Unit>()
         val front = AppForeground()
-        val f = fixture(driver, db, fetchGate = gate, appForeground = front)
+        val f = fixtures.create(driver, db, fetchGate = gate, appForeground = front)
 
         val cycle = async { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
         withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
@@ -741,7 +640,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aUserActionJoiningBeforeTheRefreshFinishesGetsTheNotificationInFront() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+        val f = fixtures.create(driver, db, appForeground = AppForeground().also { it.set(true) })
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
             if (name == "feedRefresh") assertNotNull(f.runner.joinAutomaticCycle())
@@ -754,7 +653,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun aUserActionJoiningAfterTheNotificationWasHeldBackPostsIt() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+        val f = fixtures.create(driver, db, appForeground = AppForeground().also { it.set(true) })
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
             block()
@@ -770,7 +669,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun joiningTheSameCycleTwicePostsTheNotificationOnce() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db, appForeground = AppForeground().also { it.set(true) })
+        val f = fixtures.create(driver, db, appForeground = AppForeground().also { it.set(true) })
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
             if (name == "feedRefresh") assertNotNull(f.runner.joinAutomaticCycle())
@@ -784,7 +683,7 @@ class RefreshCycleRunnerTest {
     @Test
     fun joiningAnAutomaticCycleNotInFrontDoesNotPostASecondNotification() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
-        val f = fixture(driver, db)
+        val f = fixtures.create(driver, db)
 
         f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
             block()

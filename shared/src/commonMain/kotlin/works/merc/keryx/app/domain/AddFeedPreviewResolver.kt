@@ -4,6 +4,16 @@ import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedDiscoveryException
 import works.merc.keryx.app.core.KeryxException
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.CloudAuthException
+import works.merc.keryx.app.core.CloudDataIncompatibleException
+import works.merc.keryx.app.core.CloudStorageException
+import works.merc.keryx.app.core.FeedFetchException
+import works.merc.keryx.app.core.FeedNotFoundException
+import works.merc.keryx.app.core.FeedParseException
+import works.merc.keryx.app.core.FeedTimeoutException
+import works.merc.keryx.app.core.SchemaVersionException
+import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.UpdateException
 import works.merc.keryx.app.core.valueOrNull
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.UrlResolver
@@ -104,7 +114,10 @@ class AddFeedPreviewResolver(
             )
             is Result.Err -> when (val ex = r.exception) {
                 is FeedDiscoveryException -> AddFeedPreview.Multiple(ex.candidates)
-                else -> AddFeedPreview.Failed(ex)
+                is FeedFetchException, is FeedParseException, is FeedTimeoutException, is FeedNotFoundException,
+                is CloudAuthException, is CloudStorageException, is SyncConflictException,
+                is SchemaVersionException, is CloudDataIncompatibleException, is UpdateException,
+                -> AddFeedPreview.Failed(ex)
             }
         }
     }

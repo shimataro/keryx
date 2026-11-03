@@ -50,7 +50,7 @@ internal fun AppMenuShortcut.awtKeyCode(): Int = when (this) {
 internal fun AppMenuNode.isEnabled(): Boolean = when (this) {
     is AppMenuNode.Item -> enabled
     is AppMenuNode.CheckboxItem -> enabled
-    else -> true
+    is AppMenuNode.Menu, AppMenuNode.Separator -> true
 }
 
 /**
@@ -74,7 +74,7 @@ internal fun matchMenuShortcut(
     fun shortcutOf(node: AppMenuNode): AppMenuShortcut? = when (node) {
         is AppMenuNode.Item -> node.shortcut
         is AppMenuNode.CheckboxItem -> node.shortcut
-        else -> null
+        is AppMenuNode.Menu, AppMenuNode.Separator -> null
     }
 
     fun search(nodes: List<AppMenuNode>): AppMenuNode? {
@@ -106,7 +106,7 @@ internal fun AppMenuNode.invokeAction() {
     when (this) {
         is AppMenuNode.Item -> onClick()
         is AppMenuNode.CheckboxItem -> onCheckedChange(!checked)
-        else -> Unit
+        is AppMenuNode.Menu, AppMenuNode.Separator -> Unit
     }
 }
 

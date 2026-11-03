@@ -90,10 +90,8 @@ import works.merc.keryx.app.ui.theme.installLookAndFeel
 import works.merc.keryx.app.ui.theme.keryxSurfaceColor
 import works.merc.keryx.app.ui.theme.resolveDarkTheme
 import works.merc.keryx.app.ui.theme.updateLookAndFeel
-import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Taskbar
-import java.awt.desktop.AppReopenedListener
 import java.io.File
 import java.net.URI
 import java.util.concurrent.atomic.AtomicReference
@@ -244,13 +242,15 @@ fun main(args: Array<String>) {
     // calling back into application code, so the shutdown hook is the only chance to persist a
     // resize/move/maximize that happened just before quitting that way.
     val latestWindowState = AtomicReference<ObservedWindowState?>(null)
+    // Writes an observed window placement into local settings (persisted off-thread, coalesced).
+    fun persistWindowState(observed: ObservedWindowState) {
+        settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
+    }
     // Local settings are persisted off-thread and coalesced (see SettingsRepository), so a change
     // made shortly before quitting may not have hit disk yet. Flush on JVM shutdown so the latest
     // value (theme, pane widths, last-selected article, setup completion, …) is never lost on exit.
     addShutdownHook {
-        latestWindowState.get()?.let { observed ->
-            settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
-        }
+        latestWindowState.get()?.let { observed -> persistWindowState(observed) }
         runBlocking { settingsRepository.flush() }
     }
     val saved = settingsRepository.getLocalSettings()
@@ -283,48 +283,15 @@ fun main(args: Array<String>) {
 
     val menuController = koin.get<MenuController>()
 
-    // Replace the JVM's default "About" panel (which shows "java" + the JVM version) with our
-    // own About dialog, and route the native "Settings…" (⌘,) item to our Settings screen. Both
-    // live in the macOS app (Keryx) menu, so they are omitted from AppMenuBar there. Registered
-    // after the apple.awt.* properties above, since touching Desktop initializes AWT. macOS-only in
-    // practice (APP_ABOUT / APP_PREFERENCES are unsupported elsewhere).
-    installDesktopHandler(Desktop.Action.APP_ABOUT, "About menu") {
-        it.setAboutHandler { menuController.send(MenuCommand.About) }
-    }
-    installDesktopHandler(Desktop.Action.APP_PREFERENCES, "Preferences menu") {
-        it.setPreferencesHandler { menuController.send(MenuCommand.OpenSettings) }
-    }
-
-    // Install the in-process URI handler (macOS). Windows/Linux receive the URI as a
-    // command-line argument instead, forwarded through SingleInstanceCoordinator.
-    installDesktopHandler(Desktop.Action.APP_OPEN_URI, "URI") {
-        it.setOpenURIHandler { event ->
-            val uri = event.uri.toString()
-            if (uri.startsWith("keryx://")) dispatchOAuthCallback(uri)
-        }
-    }
-
-    // Install the in-process file-open handler (macOS). A double-clicked / "Open With"-launched
-    // .opml file arrives here via an Apple Event whether or not Keryx was already running — unlike
-    // Windows/Linux, which only ever deliver it as argv on a genuinely new process (see the
-    // single-instance dispatch above).
-    installDesktopHandler(Desktop.Action.APP_OPEN_FILE, ".opml file-open") { desktop ->
-        desktop.setOpenFileHandler { event ->
-            event.files
-                .filter { it.name.endsWith(".opml", ignoreCase = true) }
-                .forEach { file -> dispatchOpmlFile(file.absolutePath) }
-        }
-    }
-
-    // macOS: a second Finder/Dock double-click while Keryx is already running never spawns a
-    // second process - Launch Services enforces single-instance for a plain .app bundle itself -
-    // it delivers a native "reopen" Apple Event to this process instead. SingleInstanceCoordinator's
-    // file-lock/socket handoff below only ever sees a genuine second process (Windows/Linux), so
-    // without this listener the window-restore + Dock-icon-reapply logic gated on activationRequests
-    // below never runs on macOS, leaving the window hidden and the Dock showing a generic icon.
-    installDesktopHandler(Desktop.Action.APP_EVENT_REOPENED, "reopen") {
-        it.addAppEventListener(AppReopenedListener { activationRequests.tryEmit(Unit) })
-    }
+    // macOS application-level handlers (About, Settings…, keryx:// URIs, opened .opml files,
+    // reopen). Registered after the apple.awt.* properties above, since touching Desktop
+    // initializes AWT.
+    installAppEventHandlers(
+        menuController = menuController,
+        onOAuthCallback = ::dispatchOAuthCallback,
+        onOpmlFile = ::dispatchOpmlFile,
+        onReopen = { activationRequests.tryEmit(Unit) },
+    )
 
     // Tell the OS how to handle keryx:// URIs and .opml files (Windows registry / Linux .desktop +
     // mimeapps.list). macOS declares both in Info.plist at packaging time, so it needs nothing here.
@@ -375,7 +342,7 @@ fun main(args: Array<String>) {
         val persistWindowStateImmediately = {
             val observed = observedWindowState(windowState)
             latestWindowState.set(observed)
-            settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
+            persistWindowState(observed)
         }
 
         val persistAndFlushSettings = {
@@ -402,9 +369,7 @@ fun main(args: Array<String>) {
             snapshotFlow { observedWindowState(windowState) }
                 .onEach { latestWindowState.set(it) }
                 .debounce(WINDOW_STATE_PERSIST_DEBOUNCE_MS)
-                .collect { observed ->
-                    settingsRepository.mutateLocalSettings { persistedWindowState(it, observed) }
-                }
+                .collect { observed -> persistWindowState(observed) }
         }
 
         // Tracks when a new-article notification was last sent, for onTrayAction's recency bias
@@ -548,161 +513,161 @@ fun main(args: Array<String>) {
         // Logs window exceptions before the default handler — see rememberLoggingExceptionHandlerFactory.
         val exceptionHandlerFactory = rememberLoggingExceptionHandlerFactory()
         CompositionLocalProvider(LocalWindowExceptionHandlerFactory provides exceptionHandlerFactory) {
-        Window(
-            onCloseRequest = hideToTray,
-            title = APP_NAME,
-            state = windowState,
-            visible = windowVisible,
-            icon = windowBadgedPainter ?: painterResource(Res.drawable.tray_icon),
-        ) {
-            // The resolved theme's surface color, used just below to pre-fill the native window
-            // background. Resolved from the startup theme snapshot (enough for the launch flash;
-            // runtime theme switches are covered by Compose's own full-window Surface fill).
-            val windowSurface = keryxSurfaceColor(resolveDarkTheme(saved.themeMode, isSystemInDarkTheme()))
+            Window(
+                onCloseRequest = hideToTray,
+                title = APP_NAME,
+                state = windowState,
+                visible = windowVisible,
+                icon = windowBadgedPainter ?: painterResource(Res.drawable.tray_icon),
+            ) {
+                // The resolved theme's surface color, used just below to pre-fill the native window
+                // background. Resolved from the startup theme snapshot (enough for the launch flash;
+                // runtime theme switches are covered by Compose's own full-window Surface fill).
+                val windowSurface = keryxSurfaceColor(resolveDarkTheme(saved.themeMode, isSystemInDarkTheme()))
 
-            // Run synchronously during composition (not via LaunchedEffect, which is
-            // dispatched as a coroutine after composition commits) so the chrome switch
-            // happens as early as possible, minimizing the standard-title-bar flash.
-            remember {
-                window.minimumSize = Dimension(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
-                // Paint the native window/content-pane with the theme surface so a dark-mode
-                // launch doesn't flash the platform-default (light) background in the gap between
-                // the window becoming visible and Compose's first (already-dark) frame. Which of
-                // the two actually fills the visible pixels is platform/timing dependent, so set
-                // both (an opaque dark fill is harmless on either).
-                window.paintNativeSurface(windowSurface)
-                if (isMacOs) {
-                    // Measure the OS's actual title bar height *before* switching to
-                    // the transparent/merged style, since fullWindowContent changes
-                    // how insets are reported afterward. This adapts automatically
-                    // to whatever the current macOS version/system settings use,
-                    // instead of hardcoding a guessed constant.
-                    WindowChrome.titleBarInsetDp = window.insets.top.toFloat()
-                    window.rootPane.applyMacMergedTitleBar()
+                // Run synchronously during composition (not via LaunchedEffect, which is
+                // dispatched as a coroutine after composition commits) so the chrome switch
+                // happens as early as possible, minimizing the standard-title-bar flash.
+                remember {
+                    window.minimumSize = Dimension(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
+                    // Paint the native window/content-pane with the theme surface so a dark-mode
+                    // launch doesn't flash the platform-default (light) background in the gap between
+                    // the window becoming visible and Compose's first (already-dark) frame. Which of
+                    // the two actually fills the visible pixels is platform/timing dependent, so set
+                    // both (an opaque dark fill is harmless on either).
+                    window.paintNativeSurface(windowSurface)
+                    if (isMacOs) {
+                        // Measure the OS's actual title bar height *before* switching to
+                        // the transparent/merged style, since fullWindowContent changes
+                        // how insets are reported afterward. This adapts automatically
+                        // to whatever the current macOS version/system settings use,
+                        // instead of hardcoding a guessed constant.
+                        WindowChrome.titleBarInsetDp = window.insets.top.toFloat()
+                        window.rootPane.applyMacMergedTitleBar()
+                    }
+                    Unit
                 }
-                Unit
-            }
 
-            // Keep the Swing look and feel (menu bar, context menus, dialog buttons) on the same
-            // light/dark side as the Compose UI. Unlike `saved`, this follows the live setting, so
-            // an in-app theme change applies without a restart (Linux only — see
-            // updateLookAndFeel). Collected inside the effect rather than via collectAsState so a
-            // theme-unrelated local-settings write (pane widths change on every drag frame) can't
-            // recompose the window content.
-            val systemDark = isSystemInDarkTheme()
-            LaunchedEffect(systemDark) {
-                settingsRepository.localSettings
-                    .map { resolveDarkTheme(it.themeMode, systemDark) }
-                    .distinctUntilChanged()
-                    .collect { dark -> withContext(Dispatchers.Swing) { updateLookAndFeel(dark) } }
-            }
+                // Keep the Swing look and feel (menu bar, context menus, dialog buttons) on the same
+                // light/dark side as the Compose UI. Unlike `saved`, this follows the live setting, so
+                // an in-app theme change applies without a restart (Linux only — see
+                // updateLookAndFeel). Collected inside the effect rather than via collectAsState so a
+                // theme-unrelated local-settings write (pane widths change on every drag frame) can't
+                // recompose the window content.
+                val systemDark = isSystemInDarkTheme()
+                LaunchedEffect(systemDark) {
+                    settingsRepository.localSettings
+                        .map { resolveDarkTheme(it.themeMode, systemDark) }
+                        .distinctUntilChanged()
+                        .collect { dark -> withContext(Dispatchers.Swing) { updateLookAndFeel(dark) } }
+                }
 
-            // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). On KDE with a
-            // Global Menu registrar, AppMenuBarHost also exports it over D-Bus and hides the in-window
-            // bar once registered. Closing the window hides to the tray, matching onCloseRequest.
-            AppMenuBarHost(
-                appMenuConnection = appMenuConnection,
-                windowVisible = windowVisible,
-                onCloseWindow = hideToTray,
-                onQuit = exitApp,
-                resolvedXid = resolvedAppMenuXid,
-            )
+                // Application menu bar (macOS: system menu bar; Windows/Linux: in-window). On KDE with a
+                // Global Menu registrar, AppMenuBarHost also exports it over D-Bus and hides the in-window
+                // bar once registered. Closing the window hides to the tray, matching onCloseRequest.
+                AppMenuBarHost(
+                    appMenuConnection = appMenuConnection,
+                    windowVisible = windowVisible,
+                    onCloseWindow = hideToTray,
+                    onQuit = exitApp,
+                    resolvedXid = resolvedAppMenuXid,
+                )
 
-            // A second launch signals this instance (via SingleInstanceCoordinator's
-            // loopback socket) instead of opening its own window. Bring this window
-            // to front and restore it from the tray / OS-level minimized state. Also fed
-            // by a Linux SNI notification click (onNotificationClicked below) - macOS has
-            // no equivalent path here; see known-issues.md "macOS: clicking a notification
-            // banner does not restore a tray-hidden window" for why.
-            LaunchedEffect(Unit) {
-                activationRequests.collect {
-                    windowVisible = true
-                    SwingUtilities.invokeLater {
-                        if (isMacOs) {
-                            // Promote to Regular + activate *before* touching the window at all.
-                            // Showing/ordering the window first and only promoting the app
-                            // afterward left the window never actually rendering when starting
-                            // from tray-hidden (Accessory policy) - the window server can drop an
-                            // order-front that lands while the app is still Accessory, in the same
-                            // tick as an immediately-following policy promotion. This didn't
-                            // reproduce when the window was merely backgrounded (Regular the whole
-                            // time already, no transition to race).
-                            // LaunchedEffect(windowVisible) above only re-fires on a value change, so
-                            // it won't call activateIgnoringOtherApps when the window was already
-                            // visible. Call it unconditionally here on every activation signal
-                            // instead - harmless no-op when the Dock policy is already REGULAR.
-                            MacActivationPolicy.setDockIconVisible(true)
-                            // Defer showing/fronting/focusing the window (and the Dock icon
-                            // re-application) to a later EDT turn, giving the Accessory->Regular
-                            // transition - which recreates the Dock tile from scratch - time to
-                            // settle first (guaranteed FIFO, after the tile is recreated).
-                            SwingUtilities.invokeLater {
-                                window.showRestoredAndFocus { applyBrandedDockIcon(dockBadgedImage) }
+                // A second launch signals this instance (via SingleInstanceCoordinator's
+                // loopback socket) instead of opening its own window. Bring this window
+                // to front and restore it from the tray / OS-level minimized state. Also fed
+                // by a Linux SNI notification click (onNotificationClicked below) - macOS has
+                // no equivalent path here; see known-issues.md "macOS: clicking a notification
+                // banner does not restore a tray-hidden window" for why.
+                LaunchedEffect(Unit) {
+                    activationRequests.collect {
+                        windowVisible = true
+                        SwingUtilities.invokeLater {
+                            if (isMacOs) {
+                                // Promote to Regular + activate *before* touching the window at all.
+                                // Showing/ordering the window first and only promoting the app
+                                // afterward left the window never actually rendering when starting
+                                // from tray-hidden (Accessory policy) - the window server can drop an
+                                // order-front that lands while the app is still Accessory, in the same
+                                // tick as an immediately-following policy promotion. This didn't
+                                // reproduce when the window was merely backgrounded (Regular the whole
+                                // time already, no transition to race).
+                                // LaunchedEffect(windowVisible) above only re-fires on a value change, so
+                                // it won't call activateIgnoringOtherApps when the window was already
+                                // visible. Call it unconditionally here on every activation signal
+                                // instead - harmless no-op when the Dock policy is already REGULAR.
+                                MacActivationPolicy.setDockIconVisible(true)
+                                // Defer showing/fronting/focusing the window (and the Dock icon
+                                // re-application) to a later EDT turn, giving the Accessory->Regular
+                                // transition - which recreates the Dock tile from scratch - time to
+                                // settle first (guaranteed FIFO, after the tile is recreated).
+                                SwingUtilities.invokeLater {
+                                    window.showRestoredAndFocus { applyBrandedDockIcon(dockBadgedImage) }
+                                }
+                            } else {
+                                window.showRestoredAndFocus()
                             }
-                        } else {
-                            window.showRestoredAndFocus()
                         }
                     }
                 }
-            }
 
-            // Mirrors the observed focus state into the app-scope windowFocused var declared
-            // above (outside Window{}, where onTrayAction needs to read it) - LocalWindowInfo is
-            // only resolvable inside Window{}'s own content, unlike windowState.size above.
-            val currentWindowFocused = LocalWindowInfo.current.isWindowFocused
-            // Also reported as the app's "in front" state, which holds back an automatic refresh's
-            // new-article notification (AppForeground). A settings window in front takes the focus
-            // and so counts as not in front.
-            LaunchedEffect(currentWindowFocused) {
-                windowFocused = currentWindowFocused
-                appForeground.set(currentWindowFocused)
-            }
+                // Mirrors the observed focus state into the app-scope windowFocused var declared
+                // above (outside Window{}, where onTrayAction needs to read it) - LocalWindowInfo is
+                // only resolvable inside Window{}'s own content, unlike windowState.size above.
+                val currentWindowFocused = LocalWindowInfo.current.isWindowFocused
+                // Also reported as the app's "in front" state, which holds back an automatic refresh's
+                // new-article notification (AppForeground). A settings window in front takes the focus
+                // and so counts as not in front.
+                LaunchedEffect(currentWindowFocused) {
+                    windowFocused = currentWindowFocused
+                    appForeground.set(currentWindowFocused)
+                }
 
-            // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
-            // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()
-            // handles the actual navigation/dialog off the same MenuController.commands flow.
-            LaunchedEffect(Unit) {
-                menuController.commands.collect { command ->
-                    if (command == MenuCommand.About || command == MenuCommand.OpenSettings) {
-                        windowVisible = true
+                // Menu commands that must be visible on screen — "About Keryx" and "Settings…" from the
+                // native macOS app menu — may fire while the window is tray-hidden, so surface it. App()
+                // handles the actual navigation/dialog off the same MenuController.commands flow.
+                LaunchedEffect(Unit) {
+                    menuController.commands.collect { command ->
+                        if (command == MenuCommand.About || command == MenuCommand.OpenSettings) {
+                            windowVisible = true
+                        }
                     }
                 }
-            }
 
-            // Dock/taskbar badge. Native macOS badge API (Taskbar.setIconBadge) was
-            // tried and confirmed to call through without error but never actually
-            // render on this macOS/JDK combination (verified via temporary logging)
-            // - so macOS uses the same full-icon-composite fallback as other
-            // platforms below instead.
-            LaunchedEffect(unreadCount, dockBadgedImage) {
-                when (badgeRoute) {
-                    UnreadBadgeRoute.WindowBadge -> {
-                        val taskbar = Taskbar.getTaskbar()
-                        SwingUtilities.invokeLater { taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount)) }
+                // Dock/taskbar badge. Native macOS badge API (Taskbar.setIconBadge) was
+                // tried and confirmed to call through without error but never actually
+                // render on this macOS/JDK combination (verified via temporary logging)
+                // - so macOS uses the same full-icon-composite fallback as other
+                // platforms below instead.
+                LaunchedEffect(unreadCount, dockBadgedImage) {
+                    when (badgeRoute) {
+                        UnreadBadgeRoute.WindowBadge -> {
+                            val taskbar = Taskbar.getTaskbar()
+                            SwingUtilities.invokeLater { taskbar.setWindowIconBadge(window, drawBadgeOnlyImage(unreadCount)) }
+                        }
+                        UnreadBadgeRoute.AppIcon -> SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
+                        UnreadBadgeRoute.None -> Unit
                     }
-                    UnreadBadgeRoute.AppIcon -> SwingUtilities.invokeLater { applyBrandedDockIcon(dockBadgedImage) }
-                    UnreadBadgeRoute.None -> Unit
                 }
-            }
 
-            // macOS integrates the title bar into the content, losing the OS's drag-to-move, so we wrap
-            // the header strip in WindowDraggableArea to restore it. Windows/Linux keep the OS title bar,
-            // so this stays a pass-through (no-op). WindowDraggableArea can only be called within
-            // FrameWindowScope, so we capture that receiver (this@Window) and close over it in the wrapper.
-            val frameScope = this
-            val dragWrapper: @Composable (Modifier, @Composable () -> Unit) -> Unit =
-                if (isMacOs) {
-                    { mod, dragContent -> with(frameScope) { WindowDraggableArea(mod) { dragContent() } } }
-                } else {
-                    { _, dragContent -> dragContent() }
+                // macOS integrates the title bar into the content, losing the OS's drag-to-move, so we wrap
+                // the header strip in WindowDraggableArea to restore it. Windows/Linux keep the OS title bar,
+                // so this stays a pass-through (no-op). WindowDraggableArea can only be called within
+                // FrameWindowScope, so we capture that receiver (this@Window) and close over it in the wrapper.
+                val frameScope = this
+                val dragWrapper: @Composable (Modifier, @Composable () -> Unit) -> Unit =
+                    if (isMacOs) {
+                        { mod, dragContent -> with(frameScope) { WindowDraggableArea(mod) { dragContent() } } }
+                    } else {
+                        { _, dragContent -> dragContent() }
+                    }
+                CompositionLocalProvider(
+                    LocalNativeWindow provides window,
+                    LocalWindowDragArea provides dragWrapper,
+                ) {
+                    App()
                 }
-            CompositionLocalProvider(
-                LocalNativeWindow provides window,
-                LocalWindowDragArea provides dragWrapper,
-            ) {
-                App()
             }
         }
-        } // CompositionLocalProvider(LocalWindowExceptionHandlerFactory)
     }
 }

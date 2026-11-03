@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
@@ -28,6 +27,11 @@ import works.merc.keryx.app.core.CloudDataIncompatibleException
 import works.merc.keryx.app.core.CloudStorageException
 import works.merc.keryx.app.core.DEFERRED_SYNC_DEBOUNCE_MS
 import works.merc.keryx.app.core.ErrorKind
+import works.merc.keryx.app.core.FeedDiscoveryException
+import works.merc.keryx.app.core.FeedFetchException
+import works.merc.keryx.app.core.FeedNotFoundException
+import works.merc.keryx.app.core.FeedParseException
+import works.merc.keryx.app.core.FeedTimeoutException
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SETTINGS_TAB_CLOUD_SYNC
 import works.merc.keryx.app.core.SETTINGS_TAB_UPDATES
@@ -45,7 +49,10 @@ import works.merc.keryx.app.core.SYNC_STATE_LAST_SYNCED_AT
 import works.merc.keryx.app.core.SYNC_STATE_LAST_UPLOADED_DIGEST
 import works.merc.keryx.app.core.SchemaVersionException
 import works.merc.keryx.app.core.SyncConflictException
+import works.merc.keryx.app.core.UpdateException
+import works.merc.keryx.app.core.onErr
 import works.merc.keryx.app.core.syncErrorKind
+import works.merc.keryx.app.core.valueOrElse
 import works.merc.keryx.app.data.cloud.CloudFileMeta
 import works.merc.keryx.app.data.cloud.CloudStorage
 import works.merc.keryx.app.data.local.FtsManager
@@ -484,19 +491,15 @@ class SyncRepository(
     private suspend fun archiveCloudDb(cloud: CloudStorage): Result<Unit> {
         val backupPath = cloudBackupPath(clock.nowMillis())
         return when (val renamed = cloud.rename(CLOUD_DB_GZ_PATH, backupPath)) {
-            is Result.Ok -> Result.Ok(Unit)
+            is Result.Ok -> renamed
             is Result.Err -> {
                 if (renamed.exception is CloudAuthException) {
                     Log.error(TAG, "Reset: archive failed (not authenticated)")
                     return renamed
                 }
                 Log.warn(TAG, "Reset: archive to $backupPath failed (${renamed.exception.message}); deleting instead")
-                when (val deleted = cloud.delete(CLOUD_DB_GZ_PATH)) {
-                    is Result.Ok -> Result.Ok(Unit)
-                    is Result.Err -> {
-                        Log.error(TAG, "Reset: delete fallback failed: ${deleted.exception.message}")
-                        deleted
-                    }
+                cloud.delete(CLOUD_DB_GZ_PATH).onErr { e ->
+                    Log.error(TAG, "Reset: delete fallback failed: ${e.message}")
                 }
             }
         }
@@ -518,11 +521,10 @@ class SyncRepository(
             _lastSyncError.value = reason
             _lastSyncAuthFailed.value = reason == ErrorKind.CLOUD_AUTH
             notificationCenter.addCoalescing(
-                AppNotification(
-                    id = IdGenerator.newId(),
+                newNotification(
                     level = AppNotificationLevel.ERROR,
                     text = NotificationText.SyncFailed(reason),
-                    timestampMillis = clock.nowMillis(),
+                    nowMillis = clock.nowMillis(),
                     action = nextActionFor(result.exception),
                 ),
             )
@@ -542,7 +544,10 @@ class SyncRepository(
     private fun nextActionFor(exception: KeryxException): AppNotificationAction = when (exception) {
         is CloudDataIncompatibleException -> AppNotificationAction.ResetCloudData
         is SchemaVersionException -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
-        else -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_CLOUD_SYNC)
+        is FeedFetchException, is FeedParseException, is FeedDiscoveryException, is FeedTimeoutException,
+        is FeedNotFoundException, is CloudAuthException, is CloudStorageException, is SyncConflictException,
+        is UpdateException,
+        -> AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_CLOUD_SYNC)
     }
 
     /**
@@ -567,12 +572,9 @@ class SyncRepository(
             // request. The legacy CLOUD_DB_PATH is consulted only when this comes back absent; see
             // "Compressed Upload / Legacy Fallback" in sync-architecture.md.
             _syncPhase.value = SyncPhase.CHECKING
-            val gzMeta = when (val meta = cloud.metadata(CLOUD_DB_GZ_PATH)) {
-                is Result.Err -> {
-                    Log.error(TAG, "Sync: metadata() failed: ${meta.exception.message}")
-                    return meta
-                }
-                is Result.Ok -> meta.value
+            val gzMeta = cloud.metadata(CLOUD_DB_GZ_PATH).valueOrElse {
+                Log.error(TAG, "Sync: metadata() failed: ${it.exception.message}")
+                return it
             }
 
             // `mergedRemote` records whether a download+merge happened this cycle, because a merge
@@ -585,20 +587,15 @@ class SyncRepository(
             if (gzMeta != null) {
                 val changed = gzMeta.rev != getSyncState(SYNC_STATE_CLOUD_FILE_REV)
                 if (changed) {
-                    when (val merged = downloadAndMerge(cloud, CLOUD_DB_GZ_PATH, compressed = true)) {
-                        is Result.Err -> return merged
-                        is Result.Ok -> setSyncState(SYNC_STATE_CLOUD_FILE_REV, merged.value.rev)
-                    }
+                    val merged = downloadAndMerge(cloud, CLOUD_DB_GZ_PATH, compressed = true).valueOrElse { return it }
+                    setSyncState(SYNC_STATE_CLOUD_FILE_REV, merged.rev)
                 }
                 mergedRemote = changed
                 expectedRev = gzMeta.rev
             } else {
-                val legacyMeta = when (val meta = cloud.metadata(CLOUD_DB_PATH)) {
-                    is Result.Err -> {
-                        Log.error(TAG, "Sync: legacy metadata() failed: ${meta.exception.message}")
-                        return meta
-                    }
-                    is Result.Ok -> meta.value
+                val legacyMeta = cloud.metadata(CLOUD_DB_PATH).valueOrElse {
+                    Log.error(TAG, "Sync: legacy metadata() failed: ${it.exception.message}")
+                    return it
                 }
                 if (legacyMeta == null) {
                     // Nothing in the cloud at all: first sync ever. If the file actually already
@@ -620,10 +617,8 @@ class SyncRepository(
                 // yet to compare against, so the upload-skip check below is bypassed by
                 // `mergedRemote = true`, and `expectedRev = null` selects create-only (guarding
                 // against a device racing to migrate at the same time).
-                when (val merged = downloadAndMerge(cloud, CLOUD_DB_PATH, compressed = false)) {
-                    is Result.Err -> return merged
-                    is Result.Ok -> Unit // its revision belongs to the legacy file; nothing to store
-                }
+                // Its revision belongs to the legacy file, so there is nothing to store.
+                downloadAndMerge(cloud, CLOUD_DB_PATH, compressed = false).valueOrElse { return it }
                 mergedRemote = true
                 expectedRev = null
             }
@@ -632,10 +627,7 @@ class SyncRepository(
             // streamed to the cloud from disk, deleted afterwards. The snapshot is the largest
             // thing this app handles, and nothing here needs it as a contiguous array.
             _syncPhase.value = SyncPhase.PREPARING
-            val digest = when (val prepared = prepareCompressedUpload()) {
-                is Result.Err -> return prepared
-                is Result.Ok -> prepared.value
-            }
+            val digest = prepareCompressedUpload().valueOrElse { return it }
             try {
                 // Skip the upload when the snapshot is byte-identical to the one already in the
                 // cloud. The comparison is over the *uncompressed* snapshot's own content
@@ -691,10 +683,7 @@ class SyncRepository(
      */
     private suspend fun createFresh(cloud: CloudStorage): Result<Unit> {
         _syncPhase.value = SyncPhase.PREPARING
-        val digest = when (val prepared = prepareCompressedUpload()) {
-            is Result.Err -> return prepared
-            is Result.Ok -> prepared.value
-        }
+        val digest = prepareCompressedUpload().valueOrElse { return it }
         return try {
             _syncPhase.value = SyncPhase.UPLOADING
             when (val r = cloud.create(CLOUD_DB_GZ_PATH, snapshotGzPath)) {
@@ -726,12 +715,9 @@ class SyncRepository(
         val downloadPath = if (compressed) cloudTempGzPath else cloudTempPath
         try {
             _syncPhase.value = SyncPhase.DOWNLOADING
-            val meta = when (val d = cloud.download(path, downloadPath)) {
-                is Result.Ok -> d.value
-                is Result.Err -> {
-                    Log.error(TAG, "Sync: download failed: ${d.exception.message}")
-                    return d
-                }
+            val meta = cloud.download(path, downloadPath).valueOrElse {
+                Log.error(TAG, "Sync: download failed: ${it.exception.message}")
+                return it
             }
             _syncPhase.value = SyncPhase.MERGING
             val mergeTarget = if (compressed) {
@@ -856,10 +842,7 @@ class SyncRepository(
      * Both are already cleaned up on failure.
      */
     private fun prepareCompressedUpload(): Result<String?> {
-        when (val prepared = prepareSnapshot()) {
-            is Result.Err -> return prepared
-            is Result.Ok -> Unit
-        }
+        prepareSnapshot().valueOrElse { return it }
         return try {
             val digest = ContentDigest.sha256File(snapshotPath)
             Gzip.compressFile(snapshotPath, snapshotGzPath)

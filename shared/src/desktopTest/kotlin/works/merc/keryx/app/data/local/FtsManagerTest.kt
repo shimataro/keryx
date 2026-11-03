@@ -7,6 +7,7 @@ import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.ftsManager
 import works.merc.keryx.app.ftsManagerIndexed
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import kotlin.test.Test
@@ -98,10 +99,15 @@ class FtsManagerTest {
             val indexer = Thread { runBlocking { manager.indexMissing() } }.apply { start() }
             assertTrue(driver.indexMissingEntered.await(5, TimeUnit.SECONDS), "indexMissing never started")
 
-            // Start the rebuild while indexMissing is provably mid-statement, and give it time to
-            // reach the driver if nothing holds it back.
+            // Start the rebuild while indexMissing is provably mid-statement, and wait until it has
+            // either parked on the write mutex (WAITING / TIMED_WAITING, since runBlocking parks with
+            // parkNanos: the lock is doing its job) or run its statement to completion
+            // (TERMINATED: it got past the lock). rebuildIndex takes the mutex with no suspension
+            // before it, so it reaches one of the two without further help.
             val rebuilder = Thread { runBlocking { manager.rebuildIndex() } }.apply { start() }
-            Thread.sleep(300)
+            awaitConditionBlocking {
+                rebuilder.state in setOf(Thread.State.WAITING, Thread.State.TIMED_WAITING, Thread.State.TERMINATED)
+            }
             driver.releaseIndexMissing.countDown()
             indexer.join(5_000)
             rebuilder.join(5_000)

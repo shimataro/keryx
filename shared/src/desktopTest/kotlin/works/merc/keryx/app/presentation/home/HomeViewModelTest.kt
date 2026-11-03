@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
@@ -18,8 +19,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -27,6 +29,7 @@ import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.ARTICLE_CONTENT_CACHE_LIMIT
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS
+import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.Clock
 import works.merc.keryx.app.core.DiscoveredFeedLink
 import works.merc.keryx.app.core.FeedNotFoundException
@@ -91,6 +94,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.fail
 import kotlin.test.assertTrue
 
 /** In-memory [TokenStorage] fake (never actually used since appKey is empty in these tests). */
@@ -145,6 +149,12 @@ private class SearchCountingSqlDriver(private val delegate: SqlDriver) : SqlDriv
     }
 }
 
+/** How long [HomeViewModelTest.pumpUntil] waits for real-thread work before failing the test. */
+private const val PUMP_UNTIL_TIMEOUT_MS = 5_000L
+
+/** The real-time yield between two drains of the virtual scheduler in `pumpUntil`. */
+private const val PUMP_UNTIL_YIELD_MS = 5L
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
 
@@ -161,9 +171,13 @@ class HomeViewModelTest {
     /** The runner the most recent [newViewModel] built, so a test can run an automatic cycle on it. */
     private var lastRunner: RefreshCycleRunner? = null
 
+    /** The scheduler Main (and so every `runTest`'s TestScope) shares; lets newViewModel build a test dispatcher on it. */
+    private lateinit var mainScheduler: TestCoroutineScheduler
+
     @BeforeTest
     fun setUp() {
-        Dispatchers.setMain(StandardTestDispatcher())
+        mainScheduler = TestCoroutineScheduler()
+        Dispatchers.setMain(StandardTestDispatcher(mainScheduler))
         val (d, _) = inMemoryDb()
         // Wrapped so a test can assert which actions re-execute the article-list query.
         driver = CountingSqlDriver(d)
@@ -190,8 +204,19 @@ class HomeViewModelTest {
     }
 
     /** A [FeedFetcher] backed by [handler] (mirrors production DI: followRedirects off, HttpTimeout on). */
-    private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
-        val client = HttpClient(MockEngine(handler)) {
+    private fun fetcherWith(
+        // Optional: run the engine on a test dispatcher so advanceUntilIdle() drains a wrongly started
+        // request deterministically instead of leaving it on MockEngine's real IO dispatcher.
+        engineDispatcher: CoroutineDispatcher? = null,
+        handler: MockRequestHandler,
+    ): FeedFetcher {
+        val engine = MockEngine(
+            MockEngineConfig().apply {
+                engineDispatcher?.let { dispatcher = it }
+                addHandler(handler)
+            },
+        )
+        val client = HttpClient(engine) {
             followRedirects = false
             expectSuccess = false
             install(HttpTimeout)
@@ -221,7 +246,7 @@ class HomeViewModelTest {
         dbWriteDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         // The ViewModel's background dispatcher (flows, selectArticle's body lookup) — overridable
         // so a test can hold a hydration mid-flight (e.g. with a HoldingDispatcher).
-        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        dispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(mainScheduler),
         // Consulted once per sync() — a test can count invocations to tell whether a sync ran.
         // Passing one also connects the CloudSession (a client ID plus stored tokens), since a
         // refresh-then-sync cycle only syncs while a provider is connected.
@@ -389,16 +414,20 @@ class HomeViewModelTest {
     }
 
     /**
-     * Pumps the virtual scheduler with short real sleeps until [done] holds: feed fetches resume on
-     * Ktor's real MockEngine dispatcher, off the test scheduler (see docs/testing.md), so a single
-     * advanceUntilIdle() can race them.
+     * Drains the virtual scheduler until [done] holds, yielding briefly in real time between drains:
+     * feed fetches on an engine without a test dispatcher resume on Ktor's real MockEngine dispatcher,
+     * off the test scheduler (see docs/testing.md), so a single advanceUntilIdle() can race them.
+     * Fails (rather than silently carrying on) if [done] has not held after [PUMP_UNTIL_TIMEOUT_MS].
      */
     private fun TestScope.pumpUntil(done: () -> Boolean) {
-        var waited = 0
-        while (!done() && waited < 5_000) {
+        val deadline = System.nanoTime() + PUMP_UNTIL_TIMEOUT_MS * 1_000_000
+        testScheduler.advanceUntilIdle()
+        while (!done()) {
+            if (System.nanoTime() >= deadline) {
+                fail("pumpUntil: condition not met within $PUMP_UNTIL_TIMEOUT_MS ms")
+            }
+            Thread.sleep(PUMP_UNTIL_YIELD_MS)
             testScheduler.advanceUntilIdle()
-            Thread.sleep(50)
-            waited += 50
         }
         testScheduler.advanceUntilIdle()
     }
@@ -489,7 +518,7 @@ class HomeViewModelTest {
     @Test
     fun aFeedsOwnRefreshReportsItsOutcome() = runTest {
         db.insertFeed("f1")
-        val vm = newViewModel(feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) })
+        val vm = newViewModel(feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { respond(RSS, HttpStatusCode.OK) })
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
@@ -505,7 +534,7 @@ class HomeViewModelTest {
     @Test
     fun twoFeedRefreshesWithTheSameOutcomeFinishUnequal() = runTest {
         db.insertFeed("f1")
-        val vm = newViewModel(feedFetcher = fetcherWith { throw IOException("unreachable") })
+        val vm = newViewModel(feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { throw IOException("unreachable") })
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
@@ -757,7 +786,7 @@ class HomeViewModelTest {
         val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
         val activityCenter = ActivityCenter()
         val vm = newViewModel(
-            feedFetcher = fetcherWith { request ->
+            feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { request ->
                 requested += request.url.toString()
                 respond("", HttpStatusCode.NotFound)
             },
@@ -962,7 +991,10 @@ class HomeViewModelTest {
         try {
             val cloud = CountingNoCloud()
             val vm = newViewModel(
-                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) {
+                    fetches.incrementAndGet()
+                    respond("", HttpStatusCode.NotFound)
+                },
                 activityCenter = activityCenter,
                 cloudProvider = cloud,
             )
@@ -976,11 +1008,8 @@ class HomeViewModelTest {
             assertFalse(vm.activity.value.feedRefreshing)
 
             vm.refreshAll()
-            // Give a wrongly started refresh time to reach the (real-dispatcher) MockEngine.
-            repeat(5) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(50)
-            }
+            // The engine runs on the test scheduler, so one drain runs a wrongly started fetch to completion.
+            testScheduler.advanceUntilIdle()
             assertEquals(0, fetches.get(), "refreshAll must not refresh while a cycle is running")
             assertEquals(0, cloud.syncs.get(), "refreshAll must not sync while a cycle is running")
 
@@ -1007,8 +1036,9 @@ class HomeViewModelTest {
     /**
      * Regression: [HomeViewModel.refreshAll]'s double-start guard used to read ActivityCenter's
      * per-flag `stateIn` copies, which only catch up once their sharing coroutine is dispatched
-     * (on `Dispatchers.Default` for the default [ActivityCenter]), so a second call right after the
-     * first could still see "not refreshing" and start a second refresh.
+     * (on a dispatcher, so a second call right after the first could still see "not refreshing"
+     * and start a second refresh). [ActivityCenter] now exposes its backing `MutableStateFlow`
+     * directly, so this test pins that the guard never lags again.
      *
      * Main is unconfined here, like production's `Main.immediate` on the UI thread: each
      * `viewModelScope.launch` runs inline up to its first suspension, so the first call's refresh
@@ -1226,7 +1256,10 @@ class HomeViewModelTest {
         try {
             val cloud = CountingNoCloud()
             val vm = newViewModel(
-                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) {
+                    fetches.incrementAndGet()
+                    respond("", HttpStatusCode.NotFound)
+                },
                 activityCenter = activityCenter,
                 cloudProvider = cloud,
             )
@@ -1237,10 +1270,8 @@ class HomeViewModelTest {
             val sync = activityScope.launch { activityCenter.trackSync { gate.await() } }
 
             vm.refreshAll()
-            repeat(5) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(50)
-            }
+            // The engine runs on the test scheduler, so one drain runs a wrongly started fetch to completion.
+            testScheduler.advanceUntilIdle()
             gate.complete(Unit)
             sync.join()
             testScheduler.advanceUntilIdle()
@@ -4005,9 +4036,10 @@ class HomeViewModelTest {
         gate.complete(Unit)
 
         // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
-        // so poll until the whole cycle settles — not just its feed-refresh stage, which ends before
-        // the sync stage and the final re-trim on Main.
-        pumpUntil { activityCenter.activity.value.idle }
+        // so poll until the cycle has ended on Main. Not on ActivityCenter going idle: that happens on
+        // the fetch thread, before the final re-trim back on Main has even been queued. The Finished
+        // status is set on Main, and the final re-trim follows it there without suspending.
+        pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Finished }
 
         // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
@@ -4640,29 +4672,24 @@ class HomeViewModelTest {
     }
 
     /**
-     * [HomeViewModel.setSearchQuery]'s 250ms debounce runs under the search flow's
-     * `flowOn(dispatcher)` (`Dispatchers.Unconfined` in these tests), which drops the shared
-     * virtual test scheduler for that segment of the pipeline — `delay()` there falls back to a
-     * real-time wait instead of being advanced by [kotlinx.coroutines.test.TestScope.testScheduler].
-     * A short real sleep lets that debounce actually elapse; the surrounding `advanceUntilIdle()`
-     * calls then pump everything else (the FTS query + StateFlow update) on the shared scheduler.
-     * Sleeps well past the 250ms debounce window (rather than just past it) so this doesn't flake
-     * on a loaded CI machine.
+     * Lets [HomeViewModel.setSearchQuery]'s [SEARCH_DEBOUNCE_MS] debounce elapse in virtual time.
+     * The view model's background dispatcher is an `UnconfinedTestDispatcher` on the shared test
+     * scheduler (see [newViewModel]), so the debounce's `delay()` is a [Delay] the scheduler
+     * controls; advancing past it and draining runs the FTS query + StateFlow update too.
      */
     private fun TestScope.advanceForSearchDebounce() {
         testScheduler.advanceUntilIdle()
-        Thread.sleep(500)
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS + 1)
         testScheduler.advanceUntilIdle()
     }
 
     /**
      * Lets an active search re-run after an article write: the change signal is debounced by
-     * [SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS] on the real clock (`dispatcher` is Unconfined), like the
-     * query debounce above.
+     * [SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS], elapsed here in virtual time like the query debounce above.
      */
     private fun TestScope.advanceForArticleChangeDebounce() {
         testScheduler.advanceUntilIdle()
-        Thread.sleep(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS * 3)
+        testScheduler.advanceTimeBy(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS + 1)
         testScheduler.advanceUntilIdle()
     }
 
@@ -4677,7 +4704,8 @@ class HomeViewModelTest {
 
         // A valid query is typed but the debounced FTS results haven't arrived yet.
         vm.setSearchQuery("Kotlin")
-        testScheduler.advanceUntilIdle()
+        // runCurrent, not advanceUntilIdle: the latter would also elapse the debounce.
+        testScheduler.runCurrent()
         assertTrue(vm.searching.value)
 
         // Once the debounce elapses and the search runs, searching clears and results appear.
@@ -5015,11 +5043,49 @@ class HomeViewModelTest {
 
         // Several commits in quick succession, as a refresh lands one per fetched feed.
         repeat(5) { i -> db.insertArticle("b$i", "f1", title = "Other $i") }
-        testScheduler.advanceUntilIdle()
+        // runCurrent, not advanceUntilIdle: the latter would also elapse the debounce.
+        testScheduler.runCurrent()
         assertEquals(0, counting.matchQueries)
 
+        // One millisecond short of the debounce window, the search still must not have run.
+        testScheduler.advanceTimeBy(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS - 1)
+        assertEquals(0, counting.matchQueries)
+
+        // Exactly at the window's end the rerun is due; runCurrent runs what advanceTimeBy leaves at the target time.
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+        assertEquals(1, counting.matchQueries)
+
+        // Draining everything still leaves exactly one rerun for the whole burst.
         advanceForArticleChangeDebounce()
         assertEquals(1, counting.matchQueries)
+    }
+
+    @Test
+    fun aBurstOfKeystrokesRunsTheSearchOnceAfterTheQueryDebounce() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
+        ftsManagerIndexed(driver)
+        val counting = SearchCountingSqlDriver(driver)
+        val vm = newViewModel(ftsDriver = counting)
+        subscribeAll(vm)
+        testScheduler.advanceUntilIdle()
+        counting.matchQueries = 0
+
+        vm.setSearchQuery("Kot")
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS - 50)
+        vm.setSearchQuery("Kotl")
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS - 50)
+        vm.setSearchQuery("Kotlin")
+        // Each keystroke restarted the window, so nothing has run yet.
+        testScheduler.advanceTimeBy(SEARCH_DEBOUNCE_MS - 1)
+        assertEquals(0, counting.matchQueries)
+        assertTrue(vm.searchResults.value.isEmpty())
+
+        testScheduler.advanceTimeBy(2)
+        testScheduler.runCurrent()
+        assertEquals(1, counting.matchQueries)
+        assertEquals(listOf("a1"), vm.searchResults.value.map { it.article.id })
     }
 
     @Test
@@ -5048,7 +5114,7 @@ class HomeViewModelTest {
         val trayJob = launch { notifier.trayEvents.collect { tray.add(it) } }
         val activityCenter = ActivityCenter()
         val vm = newViewModel(
-            feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+            feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) { respond(RSS, HttpStatusCode.OK) },
             newArticleNotifier = notifier,
             activityCenter = activityCenter,
         )
@@ -5056,15 +5122,10 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
 
         vm.refreshAll()
-        // The feed fetch/parse work hops onto Ktor's real MockEngine dispatcher (not the virtual
-        // test scheduler), so a single advanceUntilIdle() can race it (see docs/testing.md on
-        // mixing runTest with Ktor MockEngine). Poll with short real sleeps until it lands.
-        var waited = 0
-        while (tray.isEmpty() && waited < 5_000) {
-            testScheduler.advanceUntilIdle()
-            Thread.sleep(50)
-            waited += 50
-        }
+        // The fetch runs on an engine with no test dispatcher (it hops onto Ktor's real MockEngine
+        // dispatcher, off the virtual scheduler), so pumpUntil alternates drains with short real yields
+        // and fails if the tray event never lands.
+        pumpUntil { tray.isNotEmpty() }
 
         // The single fetched article (guid g1) is reported via the fake NotificationMessages
         // as "new:1"; this proves manual refresh now reaches the tray, not just the background loop.
@@ -5737,6 +5798,28 @@ class HomeViewModelTest {
 
         assertEquals(1, outcome.successCount)
         assertEquals("d1", db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne().folder_id)
+    }
+
+    @Test
+    fun subscribeFeedsBeforeTheFirstFeedEmissionStillFilesIntoTheSelectedFeedsFolder() = runTest {
+        db.insertFolder("d1", "Kotlin folder")
+        db.insertFeed("f1", folderId = "d1", sortOrder = 0L)
+        db.insertFeed("f2", folderId = "d1", sortOrder = 1L)
+        // A StandardTestDispatcher holds the feed list's collector back until the scheduler runs,
+        // so feeds.value is still the pre-load empty list when subscribeFeeds is called.
+        val vm = newViewModel(
+            feedFetcher = fetcherWith { respond(RSS, HttpStatusCode.OK) },
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.selectFilter(ArticleFilter.Feed("f1"))
+        assertTrue(vm.feeds.value.isEmpty())
+
+        val outcome = vm.subscribeFeeds(listOf("https://ex.com/feed"))
+
+        assertEquals(1, outcome.successCount)
+        val newFeed = db.feedsQueries.getByUrl("https://ex.com/feed").executeAsOne()
+        assertEquals("d1", newFeed.folder_id)
+        assertEquals(listOf("f1", newFeed.id, "f2"), db.feedsQueries.getByFolder("d1").executeAsList().map { it.id })
     }
 
     @Test
@@ -6678,7 +6761,7 @@ class HomeViewModelTest {
     // --- ArticleListMode.Starred ---
 
     /** Feed f1 in folder d1 and tag t1: s1 starred+read, s2 starred+unread, u1 unstarred+unread, newest first. */
-    private fun TestScope.starredModeViewModel(dispatcher: CoroutineDispatcher = Dispatchers.Unconfined): HomeViewModel {
+    private fun TestScope.starredModeViewModel(dispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(testScheduler)): HomeViewModel {
         db.insertFolder("d1", "Folder")
         db.insertFeed("f1", folderId = "d1")
         db.insertTag("t1", "Tag")

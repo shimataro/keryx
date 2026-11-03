@@ -54,7 +54,7 @@ internal class MacTrayMenu(
      * Pushes the current labels onto the already-built widgets.
      *
      * @param toggle The label for the toggle entry — already resolved by the caller from
-     * `windowVisible`/`showLabel`/`hideLabel`, since that resolution is presentation logic tied to
+     * whether the window is shown and the localized show/hide labels, since that resolution is presentation logic tied to
      * Compose state, not something this AWT-facing class needs to know about.
      * @param quit The label for the quit entry.
      */
@@ -97,11 +97,9 @@ internal class MacTrayMenu(
  *
  * @param image The tray icon image; when `null`, no tray UI is displayed.
  * @param tooltip The tray icon tooltip.
- * @param showLabel The menu label used when the window is hidden.
- * @param hideLabel The menu label used when the window is visible.
+ * @param toggleLabel The toggle item's label: Hide while the window is shown (visible and not
+ *   minimized — see [trayWindowShown]), Show otherwise.
  * @param quitLabel The menu label for quitting the application.
- * @param windowShown Whether the application window is currently shown (visible and not
- *   minimized — see [trayWindowShown]); picks the toggle item's label.
  * @param onToggle Called when the toggle menu item is activated.
  * @param onIconClick Called for a left click on the tray icon.
  * @param onQuit Called when the quit menu item is activated.
@@ -111,10 +109,8 @@ internal class MacTrayMenu(
 internal fun MacTray(
     image: Image?,
     tooltip: String,
-    showLabel: String,
-    hideLabel: String,
+    toggleLabel: String,
     quitLabel: String,
-    windowShown: Boolean,
     updateEntry: TrayUpdateEntry,
     onToggle: () -> Unit,
     onIconClick: () -> Unit,
@@ -189,8 +185,8 @@ internal fun MacTray(
     LaunchedEffect(trayIcon, tooltip) {
         trayIcon.toolTip = tooltip
     }
-    LaunchedEffect(menu, windowShown, showLabel, hideLabel, quitLabel) {
-        menu.setLabels(toggle = if (windowShown) hideLabel else showLabel, quit = quitLabel)
+    LaunchedEffect(menu, toggleLabel, quitLabel) {
+        menu.setLabels(toggle = toggleLabel, quit = quitLabel)
     }
     LaunchedEffect(menu, updateEntry) {
         menu.setUpdateEntry(updateEntry)

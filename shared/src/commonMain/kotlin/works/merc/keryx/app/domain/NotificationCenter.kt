@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import works.merc.keryx.app.core.AlertKey
 import works.merc.keryx.app.core.AppNotification
+import works.merc.keryx.app.core.AppNotificationAction
+import works.merc.keryx.app.core.AppNotificationLevel
+import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.alertKey
 
 /**
@@ -48,3 +51,25 @@ class NotificationCenter {
         _items.value = emptyList()
     }
 }
+
+/**
+ * Builds a notification with a freshly minted id, stamped at [nowMillis] — the shape every source
+ * posts to [NotificationCenter]. Whether it is added plainly or coalesced stays the caller's choice.
+ *
+ * @param level The notification severity level.
+ * @param text What the notification says, as data for the UI to localize.
+ * @param nowMillis The timestamp to stamp it with, from the caller's clock.
+ * @param action The next action offered when the user acts on it, or `null` for none.
+ */
+fun newNotification(
+    level: AppNotificationLevel,
+    text: NotificationText,
+    nowMillis: Long,
+    action: AppNotificationAction? = null,
+): AppNotification = AppNotification(
+    id = IdGenerator.newId(),
+    level = level,
+    text = text,
+    timestampMillis = nowMillis,
+    action = action,
+)

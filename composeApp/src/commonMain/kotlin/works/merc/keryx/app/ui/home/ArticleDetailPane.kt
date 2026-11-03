@@ -276,6 +276,9 @@ internal fun ArticleDetailPaneContent(
     }
 
     val openInBrowserTooltip = stringResource(Res.string.article_open_in_browser)
+    val readerStrings = remember(noTitleText, noContentText, openInBrowserTooltip) {
+        ReaderStrings(noTitleText, noContentText, openInBrowserTooltip)
+    }
 
     // Where the feed is named: in the toolbar on desktop, and in each article's own byline on a
     // touch-primary platform (Android), matching the SwiftUI app's macOS/iOS split. A phone-width
@@ -412,9 +415,7 @@ internal fun ArticleDetailPaneContent(
                         requestContent = readerPaging.requestContent,
                         widthPx = { swipeController.widthPx },
                         theme = theme,
-                        noTitleText = noTitleText,
-                        noContentText = noContentText,
-                        openInBrowserTooltip = openInBrowserTooltip,
+                        strings = readerStrings,
                         reader = reader,
                     )
                 } else {
@@ -572,6 +573,16 @@ private fun ArticleDetailToolbar(
 internal data class ReaderDocument(val html: String, val body: String, val articleUrl: String?)
 
 /**
+ * The localized strings every reader document needs, bundled so the pager's slots take one parameter
+ * instead of three. A data class, so as a `remember` key it compares by value like the strings did.
+ */
+internal data class ReaderStrings(
+    val noTitleText: String,
+    val noContentText: String,
+    val openInBrowserTooltip: String,
+)
+
+/**
  * Builds the document for one pager page from whatever is known about that article so far.
  *
  * A page composes as soon as it comes within the pager's reach, which is before its body has been
@@ -601,10 +612,12 @@ internal fun readerDocument(
     val meta = articleMetaText(full?.author, full?.published_at ?: row.published_at, feedName)
     val metaIconUrl = feedFaviconUrl.takeIf { feedName != null }
     val body = full?.readerBody()
-    val html = when {
-        full == null -> wrapArticleHtml(theme, title, meta, body = "", baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
-        body.isNullOrBlank() -> articleNoContentHtml(theme, title, meta, noContentText, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
-        else -> wrapArticleHtml(theme, title, meta, body, baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
+    // A body not loaded yet (full == null, so body is null too) renders as an empty article rather
+    // than the "no content" placeholder, which is only for an article that really has none.
+    val html = if (full != null && body.isNullOrBlank()) {
+        articleNoContentHtml(theme, title, meta, noContentText, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
+    } else {
+        wrapArticleHtml(theme, title, meta, body.orEmpty(), baseUrl = url, titleUrl = url, titleTooltip = openInBrowserTooltip, metaIconUrl = metaIconUrl)
     }
     return ReaderDocument(html, body.orEmpty(), url)
 }

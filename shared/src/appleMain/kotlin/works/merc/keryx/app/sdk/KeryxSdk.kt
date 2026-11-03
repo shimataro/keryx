@@ -280,15 +280,17 @@ class KeryxSdk private constructor(private val koin: Koin) {
      * Routes an OAuth redirect the app received (`keryx://oauth2/callback?…`, e.g. from
      * `onOpenURL` or an `ASWebAuthenticationSession`) back into the waiting connect flow.
      *
-     * @return `false` when no connect flow was waiting for it; the redirect is then dropped, not
-     *   kept for a flow that starts later.
+     * @return `false` when no connect flow was waiting for it, or when the URL could not be parsed
+     *   (a malformed percent-escape); the redirect is then dropped, not kept for a flow that starts
+     *   later. Never throws: an exception escaping here would reach Swift as a crash.
      */
     fun handleOAuthRedirect(url: String): Boolean {
         val callbacks = oauthCallbacks
         // With no subscriber a SharedFlow drops the value yet `tryEmit` still reports `true`, so the
         // subscriber check is what makes the result mean "delivered".
         if (callbacks.subscriptionCount.value == 0) return false
-        return callbacks.tryEmit(parseOAuthUri(url))
+        val params = runCatching { parseOAuthUri(url) }.getOrElse { return false }
+        return callbacks.tryEmit(params)
     }
 
     /** The callback flow a connect flow collects while it waits for its redirect. */

@@ -368,8 +368,12 @@ Chrome も無いため不可）で作り直すか、既存の AVD に実ブラ�
 
 ### `./gradlew :composeApp:run` で Dropbox / OneDrive 連携が完了しない（全デスクトップ OS 共通）
 
-これらのリダイレクト URI はカスタムスキーム `keryx://` で、接続ボタンが disabled のまま
-タイムアウトする。理由は OS ごとに異なる:
+これらのリダイレクト URI はカスタムスキーム `keryx://` で、`gradlew run` のインスタンスには
+届かない。リダイレクトを待っている間、プロバイダー行には「中止」ボタンがスピナー付きで表示される。
+押すと確認ダイアログが出て、確定すると待機を打ち切り、行は「連携する」に戻る。何も押さずにいると
+3 分（`OAUTH_CONNECT_TIMEOUT_MS`）でタイムアウトし、行は「連携する」に戻って「認証に失敗しました」
+と表示され、ログには `OAuth authorization timed out … callback never received` が残る。
+理由は OS ごとに異なる:
 
 - **macOS**: LaunchServices が `keryx://` を**パッケージ版 `Keryx.app`**（Info.plist の
   `CFBundleURLTypes`）にルーティングし、`gradlew run` のインスタンスには届かない。

@@ -36,6 +36,7 @@ import works.merc.keryx.app.presentation.article.ArticleHtmlTheme
 import works.merc.keryx.app.presentation.article.articleNoContentHtml
 import works.merc.keryx.app.presentation.article.articlePlaceholderHtml
 import works.merc.keryx.app.presentation.article.wrapArticleHtml
+import works.merc.keryx.app.ui.home.copyModifierKey
 
 /**
  * Renders the Compose fallback reader, which stands in for the native web view on platforms that
@@ -422,10 +423,6 @@ class ArticleContentViewTest {
 
 /** Enough paragraphs to overflow the test window, so the reader's LazyColumn really can scroll. */
 private const val FILLER_PARAGRAPHS = 100
-
-/** Ctrl+C everywhere except macOS, which copies with Cmd+C instead (`isCopyKeyEvent`). */
-private val copyModifierKey: Key
-    get() = if (System.getProperty("os.name") == "Mac OS X") Key.MetaLeft else Key.CtrlLeft
 
 /** Captures what [SelectionContainer]'s copy handler writes, without touching the real OS clipboard. */
 @OptIn(ExperimentalComposeUiApi::class)

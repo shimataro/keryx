@@ -3,7 +3,6 @@ package works.merc.keryx.app.ui.menu
 import works.merc.keryx.app.data.local.db.Folders
 import works.merc.keryx.app.data.local.db.Tags
 import works.merc.keryx.app.domain.ActivitySnapshot
-import works.merc.keryx.app.platform.isMacOs
 import works.merc.keryx.app.presentation.home.ArticleListMode
 import works.merc.keryx.app.presentation.menu.MenuUiState
 import works.merc.keryx.app.presentation.menu.computeMenuUiState
@@ -19,8 +18,9 @@ import kotlin.test.assertTrue
  * Covers [buildAppMenuTree]: the fixed menu shape, the `isMacOs` omissions, the enabled/checked
  * flags mirroring [MenuUiState] 1:1, and the optional "Show Menu Bar" toggle.
  *
- * `isMacOs` is a process constant, so assertions that depend on it branch on the actual value
- * (this suite runs on macOS locally and Linux in CI).
+ * `isMacOs` is passed to [buildAppMenuTree] explicitly, so the platform-dependent assertions cover
+ * both branches on any host. The one exception is the `FeedRename` accelerator (an enum constant
+ * whose key is fixed per host OS), which cannot be parameterized and is asserted as-is.
  */
 class AppMenuTreeTest {
 
@@ -112,7 +112,8 @@ class AppMenuTreeTest {
         toggle: MenuBarToggle? = null,
         feedMenu: SelectedFeedMenuData = selectedFeedMenu(),
         updateEntry: TrayUpdateEntry = TrayUpdateEntry("CheckForUpdate", enabled = true),
-    ): AppMenuRoot = buildAppMenuTree(ui, labels(), actions(), toggle, feedMenu, updateEntry)
+        isMacOs: Boolean = false,
+    ): AppMenuRoot = buildAppMenuTree(ui, labels(), actions(), toggle, feedMenu, updateEntry, isMacOs)
 
     private fun AppMenuRoot.menu(label: String): AppMenuNode.Menu = menus.first { it.label == label }
 
@@ -349,23 +350,26 @@ class AppMenuTreeTest {
      */
     @Test
     fun `the update entry sits behind a separator after the external links`() {
-        val help = tree(enabledUi(), updateEntry = TrayUpdateEntry("CheckForUpdate", enabled = true)).menu("Help")
+        for (macOs in listOf(true, false)) {
+            val help = tree(enabledUi(), updateEntry = TrayUpdateEntry("CheckForUpdate", enabled = true), isMacOs = macOs)
+                .menu("Help")
 
-        val expected = buildList {
-            add("Website")
-            add("ProjectPage")
-            add("<separator>")
-            add("CheckForUpdate")
-            if (!isMacOs) add("About")
-        }
-        val actual = help.items.map { node ->
-            when (node) {
-                is AppMenuNode.Item -> node.label
-                AppMenuNode.Separator -> "<separator>"
-                else -> "<other>"
+            val expected = buildList {
+                add("Website")
+                add("ProjectPage")
+                add("<separator>")
+                add("CheckForUpdate")
+                if (!macOs) add("About")
             }
+            val actual = help.items.map { node ->
+                when (node) {
+                    is AppMenuNode.Item -> node.label
+                    AppMenuNode.Separator -> "<separator>"
+                    else -> "<other>"
+                }
+            }
+            assertEquals(expected, actual, "isMacOs=$macOs")
         }
-        assertEquals(expected, actual)
     }
 
     @Test
@@ -387,16 +391,18 @@ class AppMenuTreeTest {
 
     @Test
     fun `settings quit and about follow the platform`() {
-        val root = tree(enabledUi())
-        val file = root.menu("File")
-        val help = root.menu("Help")
-        val hasSettings = file.items.filterIsInstance<AppMenuNode.Item>().any { it.label == "Settings" }
-        val hasQuit = file.items.filterIsInstance<AppMenuNode.Item>().any { it.label == "Quit" }
-        val hasAbout = help.items.filterIsInstance<AppMenuNode.Item>().any { it.label == "About" }
-        // On macOS these live in the native app menu and are omitted here; elsewhere they are present.
-        assertEquals(!isMacOs, hasSettings)
-        assertEquals(!isMacOs, hasQuit)
-        assertEquals(!isMacOs, hasAbout)
+        for (macOs in listOf(true, false)) {
+            val root = tree(enabledUi(), isMacOs = macOs)
+            val file = root.menu("File")
+            val help = root.menu("Help")
+            val hasSettings = file.items.filterIsInstance<AppMenuNode.Item>().any { it.label == "Settings" }
+            val hasQuit = file.items.filterIsInstance<AppMenuNode.Item>().any { it.label == "Quit" }
+            val hasAbout = help.items.filterIsInstance<AppMenuNode.Item>().any { it.label == "About" }
+            // On macOS these live in the native app menu and are omitted here; elsewhere they are present.
+            assertEquals(!macOs, hasSettings, "Settings, isMacOs=$macOs")
+            assertEquals(!macOs, hasQuit, "Quit, isMacOs=$macOs")
+            assertEquals(!macOs, hasAbout, "About, isMacOs=$macOs")
+        }
     }
 
     @Test

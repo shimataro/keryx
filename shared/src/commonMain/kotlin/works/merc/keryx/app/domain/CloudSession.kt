@@ -4,7 +4,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
@@ -178,11 +177,10 @@ class CloudSession(
                 NotificationText.TokenStorageNotPersisted to InfoDialogText.TOKEN_STORAGE_NOT_PERSISTED
         }
         notificationCenter.addCoalescing(
-            AppNotification(
-                id = IdGenerator.newId(),
+            newNotification(
                 level = AppNotificationLevel.WARNING,
                 text = text,
-                timestampMillis = clock.nowMillis(),
+                nowMillis = clock.nowMillis(),
                 action = AppNotificationAction.ShowInfoDialog(detail),
             ),
         )

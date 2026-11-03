@@ -89,7 +89,7 @@ fun NewArticleTracking.withList(ids: Set<String>, inserted: Set<String>): NewArt
         val nextUnseen = if (ids.containsAll(unseenIds)) unseenIds else unseenIds.intersect(ids)
         return copy(unseenIds = nextUnseen)
     }
-    val newlyInserted = if (candidates.isEmpty() || inserted.isEmpty()) emptySet() else candidates.intersect(inserted)
+    val newlyInserted = if (inserted.isEmpty()) emptySet() else candidates.intersect(inserted)
     val nextUnseen = (unseenIds + newlyInserted).intersect(ids)
     return copy(knownIds = known + ids, unseenIds = nextUnseen)
 }

@@ -232,7 +232,10 @@ internal fun UpdateResultSection(
                     }
                     // Idle/Checking render nothing here; every other state carries an
                     // AvailableUpdate, so update wouldn't be null in the first place.
-                    else -> Unit
+                    UpdateState.Idle, UpdateState.Checking, is UpdateState.Available,
+                    is UpdateState.Downloading, is UpdateState.Verifying, is UpdateState.Ready,
+                    is UpdateState.Installing,
+                    -> Unit
                 }
             } else {
                 Spacer(Modifier.height(12.dp))
@@ -418,7 +421,10 @@ private fun UpdateProgressSlot(state: UpdateState, onCancelDownload: () -> Unit)
                     )
                 }
             }
-            else -> Unit // reserved but empty — see this function's own KDoc
+            // Reserved but empty — see this function's own KDoc.
+            UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate, is UpdateState.Available,
+            is UpdateState.Ready, is UpdateState.Installing, is UpdateState.Failed,
+            -> Unit
         }
     }
 }

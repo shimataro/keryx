@@ -124,7 +124,11 @@
 - `runTest`（仮想時間）と Ktor `MockEngine` の `HttpTimeout` や実ソケット I/O を組み合わせると、
   タイムアウトが誤検知されて flaky になることがある。該当するテストは `kotlinx.coroutines.runBlocking`
   （または実時間ポーリング）に切り替える（`FeedFetcherTest.kt`, `FeedRepositoryTest.kt`,
-  `OAuthConnectFlowTest.kt` 等の実績あり）。
+  `OAuthConnectFlowTest.kt` 等の実績あり）。唯一の安全な例外は、`MockEngineConfig.dispatcher` にテスト自身の
+  `StandardTestDispatcher(testScheduler)` を渡し、ハンドラが**中断せずに**応答する `MockEngine` である
+  （`HomeViewModelTest` の `fetcherWith(engineDispatcher)`）。この場合フェッチはテストスケジューラ上で再開するので、
+  `advanceUntilIdle()` で決定的に進められる。ゲートで待つハンドラは実 IO ディスパッチャのままにすること——
+  仮想時間では、待っている間にリクエストのタイムアウトが発火してしまう。
 - **同一の `StateFlow` を 2 つのコレクタで観測し、その列が一致することをアサートしてはならない。**
   `StateFlow` は conflating で、「最新値が届くこと」しか保証しない。中間値は**コレクタごとに独立に**
   間引かれる。したがって 2 本の記録列の比較は、「一方だけ間引かれる」ことが起きないほど速いマシンで

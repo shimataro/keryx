@@ -17,11 +17,16 @@ private const val NOTIFICATION_ICON_SIZE = 48
  *
  * When no notification daemon is present this is a no-op: `NewArticleNotifier` has already
  * recorded the same message in the in-app notification centre, so nothing is lost.
+ *
+ * @param notifications Looks up the daemon's proxy on each [notify] (normally
+ *   [SniConnection.notifications]); `null` when no daemon is present.
  */
 internal class LinuxNotifier(
-    private val connection: SniConnection,
+    private val notifications: () -> FreedesktopNotifications?,
     icon: BufferedImage?,
 ) {
+    constructor(connection: SniConnection, icon: BufferedImage?) : this(connection::notifications, icon)
+
     private val imageData = icon?.let { toNotificationImageData(scaleToSquare(it, NOTIFICATION_ICON_SIZE)) }
     private val pendingIds = PendingNotificationIds()
 
@@ -32,12 +37,12 @@ internal class LinuxNotifier(
      * @param body The notification body.
      */
     fun notify(summary: String, body: String) {
-        val notifications = connection.notifications() ?: return
+        val daemon = notifications() ?: return
         val hints: Map<String, Variant<*>> = imageData
             ?.let { mapOf("image-data" to Variant(it, "(iiibiiay)")) }
             ?: emptyMap()
         runCatching {
-            notifications.Notify(
+            daemon.Notify(
                 appName = APP_NAME,
                 // 0 = never replace an earlier notification, so successive "N new articles"
                 // notices stack the way the AWT balloons did.

@@ -2,6 +2,8 @@ package works.merc.keryx.app.domain
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 
 class OAuthUriParserTest {
@@ -92,5 +94,29 @@ class OAuthUriParserTest {
 
         assertEquals("4/0Ab", params.code)
         assertEquals("s1", params.state)
+    }
+
+    @Test
+    fun aMalformedEscapeFailsWithoutQuotingTheValue() {
+        val secret = "SECRETcode"
+        val e = assertFailsWith<IllegalArgumentException> {
+            parseOAuthUri("keryx://oauth2/callback?code=$secret%zz&state=s")
+        }
+        assertFalse(secret in e.message.orEmpty(), "the value (an authorization code) must not be quoted")
+        assertEquals(true, e.message?.contains("'code'"), "the message names the offending parameter")
+    }
+
+    @Test
+    fun malformedEscapesInOtherParametersDoNotExposeTheirValuesOrDecoderException() {
+        for (key in listOf("state", "error", "error_description")) {
+            val secret = "sensitive-value"
+            val e = assertFailsWith<IllegalArgumentException> {
+                parseOAuthUri("keryx://oauth2/callback?code=valid&$key=$secret%zz")
+            }
+
+            assertEquals("Malformed percent-escape in OAuth callback parameter '$key'", e.message)
+            assertFalse(secret in e.toString())
+            assertNull(e.cause)
+        }
     }
 }

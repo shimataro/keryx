@@ -23,7 +23,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
@@ -133,6 +132,9 @@ class UpdateRepository(
     // UpdateRepositoryTest can hold it and observe a waiter, to cover a cancellation landing at
     // postNotification()'s only suspension point.
     private val notificationMutex: Mutex = Mutex(),
+    // Serializes whole checks — see the "[checkMutex] serializes" comment below. A constructor
+    // parameter only so UpdateRepositoryTest can wrap it and observe a second check waiting on it.
+    private val checkMutex: Mutex = Mutex(),
 ) {
     private val cacheDir: String get() = cacheDirOverride ?: AppDirs.cacheDir()
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -159,7 +161,7 @@ class UpdateRepository(
     // inspect/replace downloadJob while a check() is mid-flight. See this class's own methods below.
     private val mutex = Mutex()
 
-    // Serializes one whole runCheck transaction — the "start" snapshot, checker.check() itself, and
+    // [checkMutex] serializes one whole runCheck transaction — the "start" snapshot, checker.check() itself, and
     // the "apply"/"watch bookkeeping" steps after it — against every other runCheck. [mutex] cannot
     // do this: it is deliberately released across checker.check(), so two checks could fetch
     // concurrently and the one that started *first* could apply *last*, overwriting a freshly found
@@ -170,8 +172,8 @@ class UpdateRepository(
     // is done, so a later start always sees later data. It equally serializes two *public* checks,
     // whose overlap would otherwise hand the second one a `before` of UpdateState.Checking, which
     // updateVersionInUse() reports as "no version in use" — letting sweepStaleUpdateDownloads delete
-    // the very directory the first check's Ready state is still pointing at.
-    private val checkMutex = Mutex()
+    // the very directory the first check's Ready state is still pointing at. (Injected — see the
+    // constructor's checkMutex parameter.)
 
     // Written only under mutex (startDownloadOf), but read from cancelDownload() — a plain,
     // non-suspend call from a UI click handler that cannot take a suspend lock — without it. @Volatile
@@ -298,28 +300,8 @@ class UpdateRepository(
             withContext(dispatcher) { FileSystemExtras.deleteRecursively(updateDownloadDir(before.update.version)) }
         }
 
-        if (status is UpdateStatus.Available && after is UpdateState.Available) {
-            val text = NotificationText.UpdateAvailable(status.version)
-            // Reuses after.update.installable (resolved moments ago by nextStateAfterCheck via the
-            // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
-            // one live query, one fact, shared with whatever the Updates tab/tray display for it.
-            val action = if (after.update.installable) {
-                AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
-            } else {
-                AppNotificationAction.OpenUrl(status.url)
-            }
-            postNotification(text, action)
-        }
-
-        val availableStatus = status as? UpdateStatus.Available
-        val availableAfter = after as? UpdateState.Available
-        Log.info(
-            TAG,
-            "Update check resolved: version=${availableStatus?.version ?: "none"}, " +
-                "asset=${availableStatus?.asset?.name ?: "none"}, " +
-                "plan=${availableAfter?.update?.plan ?: "n/a"}, " +
-                "installable=${availableAfter?.update?.installable ?: false}",
-        )
+        notifyIfAvailable(status, after)
+        logCheckResolved(status, after)
 
         val outcome = mutex.withLock {
             // Available-with-no-asset-here is what starts/continues a watch; Available-with-asset
@@ -332,6 +314,45 @@ class UpdateRepository(
         }
         if (outcome == UpdateCheckOutcome.AWAITING_RELEASE) startReleaseWatch()
         return outcome
+    }
+
+    /**
+     * Posts the "update available" notification when [status] found a version and the check left the
+     * state at [UpdateState.Available] for it.
+     *
+     * @param status What the check found.
+     * @param after The state the check resolved to.
+     */
+    private suspend fun notifyIfAvailable(status: UpdateStatus, after: UpdateState) {
+        if (status !is UpdateStatus.Available || after !is UpdateState.Available) return
+        val text = NotificationText.UpdateAvailable(status.version)
+        // Reuses after.update.installable (resolved moments ago by nextStateAfterCheck via the
+        // same canInstall) rather than asking installer.canInstall(after.update.plan) again —
+        // one live query, one fact, shared with whatever the Updates tab/tray display for it.
+        val action = if (after.update.installable) {
+            AppNotificationAction.ShowSettingsTab(SETTINGS_TAB_UPDATES)
+        } else {
+            AppNotificationAction.OpenUrl(status.url)
+        }
+        postNotification(text, action)
+    }
+
+    /**
+     * Logs what a check resolved to: the version and asset found, and the resulting install plan.
+     *
+     * @param status What the check found.
+     * @param after The state the check resolved to.
+     */
+    private fun logCheckResolved(status: UpdateStatus, after: UpdateState) {
+        val availableStatus = status as? UpdateStatus.Available
+        val availableAfter = after as? UpdateState.Available
+        Log.info(
+            TAG,
+            "Update check resolved: version=${availableStatus?.version ?: "none"}, " +
+                "asset=${availableStatus?.asset?.name ?: "none"}, " +
+                "plan=${availableAfter?.update?.plan ?: "n/a"}, " +
+                "installable=${availableAfter?.update?.installable ?: false}",
+        )
     }
 
     /**
@@ -436,10 +457,14 @@ class UpdateRepository(
      */
     private suspend fun retryFailed(failed: UpdateState.Failed) {
         val update = failed.update
-        when {
-            update == null || failed.exception.stage == UpdateStage.CHECK -> check()
-            failed.exception.stage == UpdateStage.INSTALL -> retryInstall(update)
-            else -> startDownloadOf(update) // DOWNLOAD or VERIFY
+        if (update == null) {
+            check()
+            return
+        }
+        when (failed.exception.stage) {
+            UpdateStage.CHECK -> check()
+            UpdateStage.INSTALL -> retryInstall(update)
+            UpdateStage.DOWNLOAD, UpdateStage.VERIFY -> startDownloadOf(update)
         }
     }
 
@@ -617,17 +642,9 @@ class UpdateRepository(
      * both reach this, on different threads, with no other synchronization between them. */
     private suspend fun postNotification(text: NotificationText, action: AppNotificationAction) = notificationMutex.withLock {
         lastNotificationId?.let { notificationCenter.dismiss(it) }
-        val id = IdGenerator.newId()
-        notificationCenter.addCoalescing(
-            AppNotification(
-                id = id,
-                level = AppNotificationLevel.INFO,
-                text = text,
-                timestampMillis = SystemClock.nowMillis(),
-                action = action,
-            ),
-        )
-        lastNotificationId = id
+        val notification = newNotification(AppNotificationLevel.INFO, text, SystemClock.nowMillis(), action)
+        notificationCenter.addCoalescing(notification)
+        lastNotificationId = notification.id
     }
 
     private fun sweepStaleUpdateDownloads(currentBeforeCheck: UpdateState) {

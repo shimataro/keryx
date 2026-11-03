@@ -28,6 +28,7 @@ import works.merc.keryx.app.core.MAX_SYNC_DB_SIZE_BYTES
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.SyncConflictException
 import works.merc.keryx.app.core.map
+import works.merc.keryx.app.core.valueOrElse
 
 /**
  * [CloudStorage] backed by the Google Drive API v3, storing the sync DB in the
@@ -79,10 +80,8 @@ class GoogleDriveStorage(
      * @return The downloaded file's Google Drive revision.
      */
     override suspend fun download(path: String, destPath: String): Result<CloudFileMeta> = withToken { token ->
-        val file = when (val f = findFile(token, fileName(path))) {
-            is Result.Err -> return@withToken f
-            is Result.Ok -> f.value ?: return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
-        }
+        val file = findFile(token, fileName(path)).valueOrElse { return@withToken it }
+            ?: return@withToken Result.Err(CloudStorageException("File not found: ${fileName(path)}"))
         val response = client.get("$apiBase/files/${file.id}") {
             bearerAuth(token)
             url { parameters.append("alt", "media") }
@@ -102,10 +101,7 @@ class GoogleDriveStorage(
         expectedRev: String?,
     ): Result<CloudFileMeta> = withToken { token ->
         val name = fileName(path)
-        val existing = when (val f = findFile(token, name)) {
-            is Result.Err -> return@withToken f
-            is Result.Ok -> f.value
-        }
+        val existing = findFile(token, name).valueOrElse { return@withToken it }
         if (existing == null) {
             createFile(token, name, sourcePath).map { CloudFileMeta(it.version) }
         } else {
@@ -129,10 +125,7 @@ class GoogleDriveStorage(
         // Best-effort create-only: Drive has no atomic create-if-absent, so we check first and
         // fail with a conflict when the file already exists rather than overwriting it. The small
         // check-then-write window is reconciled by the sync retry loop, as with upload().
-        val existing = when (val f = findFile(token, name)) {
-            is Result.Err -> return@withToken f
-            is Result.Ok -> f.value
-        }
+        val existing = findFile(token, name).valueOrElse { return@withToken it }
         if (existing != null) {
             Result.Err(SyncConflictException())
         } else {
@@ -181,10 +174,7 @@ class GoogleDriveStorage(
                 continue
             }
             // We are the winner — safely delete every duplicate.
-            when (val del = deleteAll(token, files, keepId = winner.id)) {
-                is Result.Err -> return del
-                is Result.Ok -> Unit
-            }
+            deleteAll(token, files, keepId = winner.id).valueOrElse { return it }
             // We won, so the retained file is the one we created — report the version its *own*
             // write returned, not the one this listing just read. The listing happens up to
             // RACE_RECHECK_DELAY_MS after that write, and a racing device's upload() landing in
@@ -219,10 +209,7 @@ class GoogleDriveStorage(
     private suspend fun deleteAll(token: String, files: List<DriveFile>, keepId: String? = null): Result<Unit> {
         for (file in files) {
             if (file.id == keepId) continue
-            when (val del = deleteById(token, file.id)) {
-                is Result.Err -> return del
-                is Result.Ok -> Unit
-            }
+            deleteById(token, file.id).valueOrElse { return it }
         }
         return Result.Ok(Unit)
     }
@@ -249,15 +236,9 @@ class GoogleDriveStorage(
      * otherwise, the first lookup, rename, or cleanup error.
      */
     override suspend fun rename(from: String, to: String): Result<Unit> = withToken { token ->
-        val files = when (val list = listFilesByName(token, fileName(from))) {
-            is Result.Err -> return@withToken list
-            is Result.Ok -> list.value
-        }
+        val files = listFilesByName(token, fileName(from)).valueOrElse { return@withToken it }
         val winner = files.minByOrNull { it.id } ?: return@withToken Result.Ok(Unit) // absent = done
-        when (val renamed = renameById(token, winner.id, fileName(to))) {
-            is Result.Err -> return@withToken renamed
-            is Result.Ok -> Unit
-        }
+        renameById(token, winner.id, fileName(to)).valueOrElse { return@withToken it }
         deleteAll(token, files, keepId = winner.id)
     }
 
@@ -299,10 +280,7 @@ class GoogleDriveStorage(
             ?.get("files")?.jsonArray
             ?: return Result.Err(CloudStorageException("Missing files array in response"))
         val result = files.map { fileObj ->
-            when (val file = parseDriveFile(fileObj.jsonObject)) {
-                is Result.Err -> return file
-                is Result.Ok -> file.value
-            }
+            parseDriveFile(fileObj.jsonObject).valueOrElse { return it }
         }
         return Result.Ok(result)
     }
