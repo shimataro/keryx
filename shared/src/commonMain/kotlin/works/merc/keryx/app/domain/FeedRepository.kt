@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.valueOrElse
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.FeedsQueries
@@ -198,9 +199,8 @@ class FeedRepository(
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
     ): FeedWriteOutcome {
-        val fetched = when (val r = feedFetcher.fetch(url)) {
-            is Result.Ok -> r.value
-            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false, wasNewlyCreated = false)
+        val fetched = feedFetcher.fetch(url).valueOrElse {
+            return FeedWriteOutcome(it, hadArticles = false, wasNewlyCreated = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
