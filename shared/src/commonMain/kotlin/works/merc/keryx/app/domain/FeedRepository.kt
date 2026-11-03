@@ -32,6 +32,7 @@ import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.map
 import works.merc.keryx.app.core.valueOrElse
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
@@ -408,19 +409,21 @@ class FeedRepository(
     /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
     private sealed interface RefreshStep {
         /**
-         * [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. [rows] holds
-         * the fetched articles' rows, already prepared off the writer, exactly when [fetch] is Ok.
+         * [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. An Ok [fetch]
+         * carries the fetched articles' rows, already prepared off the writer.
          */
         class Fetched(
             val feed: Feeds,
-            val fetch: Result<FetchedFeed>,
-            val rows: List<ArticleRepository.PreparedInsert>?,
+            val fetch: Result<PreparedFetch>,
             val committed: CompletableDeferred<Unit>,
         ) : RefreshStep
 
         /** A favicon lookup for [feedId] finished; [url] is null when it found none. */
         class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
     }
+
+    /** A successful fetch, together with its articles' [rows] as prepared off the writer. */
+    private class PreparedFetch(val fetched: FetchedFeed, val rows: List<ArticleRepository.PreparedInsert>)
 
     /** A favicon lookup a fetched feed is due, from [siteUrl] (null when the feed names no site). */
     private class FaviconLookup(val siteUrl: String?)
@@ -461,15 +464,14 @@ class FeedRepository(
      * Applies fetched feed data, persists its articles, and emits notifications for permanent removal or URL changes.
      *
      * @param feed The feed being refreshed.
-     * @param fetch The feed's fetch result.
+     * @param fetch The feed's fetch result, with its prepared article rows when Ok.
      * @return The article update result and whether the fetch contained articles.
      */
     private suspend fun applyFetch(
         feed: Feeds,
-        fetch: Result<FetchedFeed>,
-        rows: List<ArticleRepository.PreparedInsert>?,
+        fetch: Result<PreparedFetch>,
     ): RefreshOutcome {
-        val fetched = when (val r = fetch) {
+        val ok = when (val r = fetch) {
             is Result.Ok -> r.value
             is Result.Err -> {
                 val ex = r.exception
@@ -502,13 +504,14 @@ class FeedRepository(
                 return RefreshOutcome(r, hadArticles = false)
             }
         }
+        val fetched = ok.fetched
 
         // The CPU-heavy half of the preparation already ran on the fetch's own coroutine (see
         // launchFetches), so it neither holds the write lock nor queues behind other feeds' writes.
         // Only the half that reads the DB runs here, outside the transaction below (the same reason
         // upsertParsed precomputes before opening its own transaction), so the new-article count
         // compares against what is stored now, not when the fetch finished.
-        val prepared = articleRepository.countPrepared(feed.id, checkNotNull(rows))
+        val prepared = articleRepository.countPrepared(feed.id, ok.rows)
         // The target itself rather than a boolean: the write below and the notification after the
         // commit both need the value, and carrying it keeps its non-nullness with it at both sites.
         // Non-null exactly when the fetch reported a permanent redirect somewhere we are not already.
@@ -689,11 +692,9 @@ class FeedRepository(
                         // no fetch permit, rather than on the single writer, which would otherwise
                         // parse every feed's article HTML one after another. Only an Ok fetch has
                         // any; an exception propagates like any other failure of this coroutine.
-                        val rows = (fetch as? Result.Ok)?.let {
-                            articleRepository.prepareRows(feed.id, it.value.articles)
-                        }
+                        val prepared = fetch.map { PreparedFetch(it, articleRepository.prepareRows(feed.id, it.articles)) }
                         val committed = CompletableDeferred<Unit>()
-                        steps.send(RefreshStep.Fetched(feed, fetch, rows, committed))
+                        steps.send(RefreshStep.Fetched(feed, prepared, committed))
                         committed.await()
                         // Only the site URL outlives the commit: the lookup below can wait on a permit
                         // and the network for a while, and must not keep every parsed article resident
@@ -752,7 +753,7 @@ class FeedRepository(
         for (step in steps) {
             when (step) {
                 is RefreshStep.Fetched -> {
-                    val outcome = applyFetch(step.feed, step.fetch, step.rows)
+                    val outcome = applyFetch(step.feed, step.fetch)
                     val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
                     step.committed.complete(Unit)
                     if (wasLast) indexIfNeeded(state)
