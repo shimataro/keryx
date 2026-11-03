@@ -57,16 +57,14 @@ class KeyringTokenStorage internal constructor(
         json: Json = Json { ignoreUnknownKeys = true },
     ) : this(fallback, account, json, createKeyring())
 
-    private val domain = KEYCHAIN_SERVICE
-
     override fun storeSecret(payload: String): Boolean = keyring?.let {
-        runCatching { it.setPassword(domain, account, payload) }
+        runCatching { it.setPassword(KEYCHAIN_SERVICE, account, payload) }
             .onFailure { e -> Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring save failed; falling back to file storage", e) }
             .isSuccess
     } ?: false
 
     override fun loadSecret(): String? = keyring?.let {
-        runCatching { it.getPassword(domain, account) }
+        runCatching { it.getPassword(KEYCHAIN_SERVICE, account) }
             .onFailure { e ->
                 if (!isExpectedKeyringMissingEntry(e)) {
                     Log.warn(TOKEN_STORAGE_LOG_TAG, "Keyring load failed; falling back to file storage", e)
@@ -87,7 +85,7 @@ class KeyringTokenStorage internal constructor(
     // earlier run's backend may well have succeeded and left a secret sitting in the OS store,
     // which a null keyring can neither confirm nor deny.
     override fun clearSecret(): Boolean = keyring?.let {
-        runCatching { it.deletePassword(domain, account) }.fold(
+        runCatching { it.deletePassword(KEYCHAIN_SERVICE, account) }.fold(
             onSuccess = { true },
             onFailure = { e ->
                 if (!isExpectedKeyringMissingEntry(e)) {

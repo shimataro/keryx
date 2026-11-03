@@ -540,61 +540,61 @@ internal fun ArticleListTopBar(
     onSearchClick: (() -> Unit)? = null,
 ) {
     WindowDragArea(Modifier.fillMaxWidth()) {
-    Column(Modifier.fillMaxWidth()) {
-        if (onOpenDrawer != null) {
-            val openDrawerLabel = stringResource(Res.string.home_open_feed_list)
-            KeryxPaneTopBar(
-                modifier = Modifier.padding(start = 4.dp, end = 8.dp, top = 4.dp),
-                title = title.orEmpty(),
-                navigationIcon = {
-                    TooltipIconButton(tooltip = openDrawerLabel, onClick = onOpenDrawer) {
-                        KeryxIcon(KeryxIcons.Menu, contentDescription = openDrawerLabel)
+        Column(Modifier.fillMaxWidth()) {
+            if (onOpenDrawer != null) {
+                val openDrawerLabel = stringResource(Res.string.home_open_feed_list)
+                KeryxPaneTopBar(
+                    modifier = Modifier.padding(start = 4.dp, end = 8.dp, top = 4.dp),
+                    title = title.orEmpty(),
+                    navigationIcon = {
+                        TooltipIconButton(tooltip = openDrawerLabel, onClick = onOpenDrawer) {
+                            KeryxIcon(KeryxIcons.Menu, contentDescription = openDrawerLabel)
+                        }
+                    },
+                ) {
+                    if (onSearchClick != null) {
+                        val searchLabel = stringResource(Res.string.home_search)
+                        TooltipIconButton(tooltip = searchLabel, onClick = onSearchClick) {
+                            KeryxIcon(KeryxIcons.Search, contentDescription = searchLabel)
+                        }
                     }
-                },
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (onSearchClick != null) {
-                    val searchLabel = stringResource(Res.string.home_search)
-                    TooltipIconButton(tooltip = searchLabel, onClick = onSearchClick) {
-                        KeryxIcon(KeryxIcons.Search, contentDescription = searchLabel)
+                val modeLabels = ArticleListMode.entries.associateWith { stringResource(listModeLabel(it)) }
+                NativeMenuAnchor(
+                    items = { listModeMenuEntries(listMode, starredModeEnabled, modeLabels, onSelectListMode) },
+                ) { open ->
+                    MenuChip(
+                        label = modeLabels.getValue(listMode),
+                        accessibilityLabel = stringResource(Res.string.home_list_mode),
+                        highlighted = listMode != ArticleListMode.All,
+                        onClick = open,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                ToolbarIconGroup {
+                    if (notifVm != null) {
+                        NotificationsBell(notifVm)
+                    }
+                    val sortTooltip = if (sortEnabled) {
+                        stringResource(if (newestFirst) Res.string.home_sort_oldest else Res.string.home_sort_newest)
+                    } else {
+                        stringResource(Res.string.home_sort_disabled_search)
+                    }
+                    TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
+                        KeryxIcon(sortDirectionIcon(newestFirst), contentDescription = sortTooltip)
+                    }
+                    val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
+                    TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
+                        KeryxIcon(KeryxIcons.DoneAll, contentDescription = markAllReadTooltip)
                     }
                 }
             }
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val modeLabels = ArticleListMode.entries.associateWith { stringResource(listModeLabel(it)) }
-            NativeMenuAnchor(
-                items = { listModeMenuEntries(listMode, starredModeEnabled, modeLabels, onSelectListMode) },
-            ) { open ->
-                MenuChip(
-                    label = modeLabels.getValue(listMode),
-                    accessibilityLabel = stringResource(Res.string.home_list_mode),
-                    highlighted = listMode != ArticleListMode.All,
-                    onClick = open,
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            ToolbarIconGroup {
-                if (notifVm != null) {
-                    NotificationsBell(notifVm)
-                }
-                val sortTooltip = if (sortEnabled) {
-                    stringResource(if (newestFirst) Res.string.home_sort_oldest else Res.string.home_sort_newest)
-                } else {
-                    stringResource(Res.string.home_sort_disabled_search)
-                }
-                TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
-                    KeryxIcon(sortDirectionIcon(newestFirst), contentDescription = sortTooltip)
-                }
-                val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
-                TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
-                    KeryxIcon(KeryxIcons.DoneAll, contentDescription = markAllReadTooltip)
-                }
-            }
-        }
-    }
     }
 }
 

@@ -57,7 +57,7 @@ sealed class KeryxException(message: String) : Exception(message) {
 ないため、不正または非対応の URL は他のフェッチエラーと同様、フェッチ自体が失敗した際に
 `FeedFetchException` として表面化する。
 
-補助拡張: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
+補助拡張: `isOk` / `isErr` / `valueOrNull` / `valueOrElse`（早期 return 付きの取り出し）/ `errorOrNull` / `fold` / `onOk` / `onErr` / `map`。
 
 ## 層ごとの処理
 

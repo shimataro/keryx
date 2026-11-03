@@ -58,7 +58,7 @@ There is no dedicated "invalid feed URL" exception — the subscribe path never 
 attempting to fetch it, so a malformed or unsupported URL surfaces as a `FeedFetchException` once the fetch
 itself fails, same as any other fetch error.
 
-Helper extensions: `isOk` / `isErr` / `valueOrNull` / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
+Helper extensions: `isOk` / `isErr` / `valueOrNull` / `valueOrElse` (early-return unwrap) / `errorOrNull` / `fold` / `onOk` / `onErr` / `map`.
 
 ## Layer-by-Layer Handling
 

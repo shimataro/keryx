@@ -14,6 +14,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeout
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
@@ -34,6 +35,7 @@ import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.remote.FaviconResolver
 import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.CountingSqlDriver
+import works.merc.keryx.app.awaitConditionBlocking
 import works.merc.keryx.app.fileDb
 import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
@@ -182,6 +184,25 @@ private class FaultInjectingDriver(private val delegate: app.cash.sqldelight.db.
     }
 }
 
+/**
+ * A [Mutex] that counts how many times a caller asked for it ([lock] or [tryLock]), whether or not
+ * the request had to wait. `withLock` goes through [lock], so [attempts] rises as soon as a caller is
+ * queued behind the current holder — the observable point a test can wait for instead of sleeping.
+ */
+private class CountingMutex(private val inner: Mutex = Mutex()) : Mutex by inner {
+    val attempts = java.util.concurrent.atomic.AtomicInteger()
+
+    override suspend fun lock(owner: Any?) {
+        attempts.incrementAndGet()
+        inner.lock(owner)
+    }
+
+    override fun tryLock(owner: Any?): Boolean {
+        attempts.incrementAndGet()
+        return inner.tryLock(owner)
+    }
+}
+
 class FeedRepositoryTest {
 
     private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
@@ -212,6 +233,7 @@ class FeedRepositoryTest {
         notificationCenter: NotificationCenter = NotificationCenter(),
         messages: NotificationMessages = FakeNotificationMessages(),
         clock: Clock = Clock { 1000L },
+        subscribePlacementMutex: Mutex = Mutex(),
     ): FeedRepository {
         val articleRepository = ArticleRepository(db, FtsSearch(driver), syncScheduler, clock, Dispatchers.Unconfined)
         // Mirror startup: ensureIndexed() creates articles_fts so the refresh path's indexMissing() works.
@@ -220,6 +242,7 @@ class FeedRepositoryTest {
             db, feedFetcher, faviconResolver, articleRepository, ftsManager, syncScheduler,
             notificationCenter, clock, Dispatchers.Unconfined,
             faviconMisses = InMemoryFaviconMissStore(),
+            subscribePlacementMutex = subscribePlacementMutex,
         )
     }
 
@@ -351,7 +374,8 @@ class FeedRepositoryTest {
                 if (request.url.toString().endsWith("/second")) secondFetchStarted.countDown()
                 respond(RSS_NO_ITEMS, HttpStatusCode.OK)
             }
-            val repo = newRepo(db, driver, fetcher)
+            val placementMutex = CountingMutex()
+            val repo = newRepo(db, driver, fetcher, subscribePlacementMutex = placementMutex)
 
             val firstResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
             val secondResult = java.util.concurrent.atomic.AtomicReference<Result<Feeds>>()
@@ -360,13 +384,15 @@ class FeedRepositoryTest {
             }.apply { start() }
             assertTrue(driver.firstReadEntered.await(5, TimeUnit.SECONDS), "first subscribeFeed never started")
 
-            // Start the second call while the first is provably mid-read, and give it time to reach
-            // the driver if the mutex isn't actually blocking it.
+            // Start the second call while the first is provably mid-read, and wait until it has asked
+            // for the placement lock (the first call's own request is attempt 1). It can only be
+            // parked there, since the first still holds the lock; an implementation that bypassed the
+            // lock would never request it a second time, so this wait times out and the test fails.
             val second = Thread {
                 runBlocking { secondResult.set(repo.subscribeFeed("https://ex.com/second", folderId = "folder-1")) }
             }.apply { start() }
             assertTrue(secondFetchStarted.await(5, TimeUnit.SECONDS), "second subscribeFeed never started its fetch")
-            Thread.sleep(300)
+            awaitConditionBlocking { placementMutex.attempts.get() >= 2 }
             driver.releaseFirstRead.countDown()
             first.join(5_000)
             second.join(5_000)

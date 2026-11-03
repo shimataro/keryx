@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
@@ -660,7 +661,7 @@ class HomeViewModel(
 
     /**
      * Identity of the current browsing context, bumped whenever the whole read-state pin set is dropped
-     * for a fresh one ([selectFilter], and a query change in [setSearchQuery]).
+     * for a fresh one ([selectFilter]; a query change in [setSearchQuery] deliberately does not).
      *
      * [selectionCursorId] cannot stand in for this: it carries no scope identity, so a selection
      * made under the new scope puts a non-null id back, and a hydration still in flight from the old
@@ -703,7 +704,7 @@ class HomeViewModel(
             .stateIn(viewModelScope, started, SearchSnapshot("", _filter.value, emptyList()))
 
     // True while the live query has usable terms but its results haven't arrived yet — still
-    // inside the 250ms debounce, the FTS query is running, or the filter it should be scoped to has
+    // inside the SEARCH_DEBOUNCE_MS debounce, the FTS query is running, or the filter it should be scoped to has
     // moved on since the snapshot was taken. Lets the search pane hold instead of flashing "no
     // results" between keystrokes (or right after switching filters) before the real results land.
     val searching: StateFlow<Boolean> =
@@ -1665,10 +1666,10 @@ class HomeViewModel(
      * Deliberately does not touch [_pinnedReadStates] or [browsingEpoch] — unlike a filter
      * switch, a query change doesn't start a fresh browsing context, it narrows the *same* one.
      * `_pinnedReadStates` is shared between the underlying filter's own list and search results
-     * over it (see [searchResults]' own combine), so clearing it here would drop a just-read
+     * over it (see [searchResultsSnapshot]'s own combine), so clearing it here would drop a just-read
      * article from the filter's list the instant the user types a character into an
-     * always-visible field ([PaneLayout.Triple]'s sidebar). [searchResults] never merges a pinned
-     * id back in that the fresh query no longer matches (see its own KDoc), so nothing pinned
+     * always-visible field ([PaneLayout.Triple]'s sidebar). [searchResultsSnapshot] never merges a
+     * pinned id back in that the fresh query no longer matches (see its own comment), so nothing pinned
      * under a previous query can leak into results that don't match it.
      *
      * @param query The new search query.
@@ -1684,13 +1685,16 @@ class HomeViewModel(
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
-        val folderId = folderIdForNewFeed()
+        // The loaded feed list, not feeds.value: before the first DB emission that reads as empty,
+        // which would file a feed subscribed under a selected feed into the unfiled group.
+        val loadedFeeds = feedsSnapshot.filterNotNull().first()
+        val placement = newFeedPlacement(_filter.value, _selectedRowInstance.value, loadedFeeds)
         val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
-            folderId,
-            afterFeedIdForNewFeed(),
-            beforeFeedIdForNewFeed(folderId),
-            tagIdForNewFeed(),
+            placement.folderId,
+            placement.afterFeedId,
+            placement.beforeFeedId,
+            placement.tagId,
         )
         // Subscribing is the user's own action, and whatever it fetched is right there in front of
         // them — it was never "missed". Acknowledge exactly the subscribed feeds' articles instead
@@ -1704,54 +1708,6 @@ class HomeViewModel(
             _newArticleTracking.update { it.withAcknowledged(ids) }
         }
         return outcome
-    }
-
-    /**
-     * The folder a newly subscribed feed should be filed into, derived from the feed list's
-     * current selection: the selected folder itself, or the folder of the selected feed. Any
-     * other selection (all/starred/tag) yields `null` (no folder).
-     */
-    private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
-        is ArticleFilter.Folder -> f.folderId
-        is ArticleFilter.Feed -> feeds.value.firstOrNull { it.id == f.feedId }?.folder_id
-        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Tag -> null
-    }
-
-    /**
-     * The feed a newly subscribed feed should be inserted directly after, derived from the feed
-     * list's current selection: the selected feed itself, whether it's filed in a folder or
-     * unfiled. Any other selection (folder/all/starred/tag) yields `null`, which appends
-     * the new feed to the end of its target group instead (unchanged from before this feature).
-     */
-    private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
-        is ArticleFilter.Feed -> f.feedId
-        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Folder, is ArticleFilter.Tag -> null
-    }
-
-    /**
-     * The feed a newly subscribed feed should be inserted directly before: the current first feed
-     * in the target group [folderId] (the selected folder, the selected feed's folder, or the
-     * "no folder" group when no folder/feed context is selected — see [folderIdForNewFeed]), or
-     * `null` if that group is empty. Only consulted when
-     * [afterFeedIdForNewFeed] is null or its target isn't in the group (see
-     * [FeedRepository.insertionSortOrderForNewFeed]), so this doesn't affect the "insert directly
-     * after the selected feed" behavior.
-     */
-    private fun beforeFeedIdForNewFeed(folderId: String?): String? =
-        feeds.value.filter { it.folder_id == folderId }.minByOrNull { it.sort_order }?.id
-
-    /**
-     * The tag a newly subscribed feed should be tagged with: the currently selected tag, whether
-     * selected directly or via a feed selected within an expanded tag's feed sub-list. `null` for
-     * any other selection (folder, feed outside a tag, starred, or nothing selected) — no tag is
-     * applied.
-     */
-    private fun tagIdForNewFeed(): String? = when (val selection = _selectedRowInstance.value) {
-        is FeedListRowSelection.Tag -> selection.tagId
-        is FeedListRowSelection.FeedInTag -> selection.tagId
-        FeedListRowSelection.All, FeedListRowSelection.Starred,
-        is FeedListRowSelection.FeedInFolderGroup, is FeedListRowSelection.Folder,
-        -> null
     }
 
     /**

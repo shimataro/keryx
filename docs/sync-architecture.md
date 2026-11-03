@@ -603,8 +603,8 @@ opens a browser directly:
     clears a stale fallback file left over from an earlier degraded save, so a plaintext copy
     doesn't keep sitting on disk once secure storage starts working again — the same clear-on-success
     behavior `KeystoreTokenStorage` uses on Android (see below). `KeyringTokenStorage`/`LibSecretTokenStorage`
-    share this composition logic via `SecretStoreTokenStorage`; `SecurityCliTokenStorage`
-    re-implements the same outcome composition inline instead of inheriting it. A fallback clear
+    share this composition logic via `SecretStoreTokenStorage`, and so does `SecurityCliTokenStorage`,
+    whose `SecurityKeychainStore` backend inherits it and which only adds an in-memory cache on top. A fallback clear
     that does not confirm removal downgrades the outcome to `PLAINTEXT_FILE` rather than falsely
     reporting `SECURE`.
 - macOS performs a **read-back verification** after writing (explicitly specifying login keychain), and falls back to file if persistence cannot be confirmed. **Write persistence is session-dependent**: packaged version (GUI login session) persists to login keychain, but `gradlew run` (detached session under Gradle daemon via launchd) may not persist even if `security add` returns success, so file is used. **Read is possible from either session** (once linked via packaged version, `gradlew run` can also reuse the connection).

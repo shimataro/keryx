@@ -131,9 +131,10 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
             // connected one).
             vm.availableCloudTypes.forEachIndexed { index, type ->
                 if (index > 0) Spacer(Modifier.height(4.dp))
+                val isConnected = connected == type
                 CloudProviderRow(
                     type = type,
-                    connected = connected == type,
+                    connected = isConnected,
                     connecting = connectingType == type,
                     canCancel = canCancelConnect,
                     // "Reset"/"switch provider" stay blocked through the OAuth wait, the initial
@@ -144,16 +145,16 @@ internal fun CloudSyncTabContent(vm: SettingsViewModel) {
                     idleEnabled = connectingType == null && initialSyncingType == null && !disconnecting,
                     leaveEnabled = connectingType == null && !disconnecting,
                     failed = connectFailedType == type,
-                    lastSyncedAtText = if (connected == type) lastSyncedAtText else null,
+                    lastSyncedAtText = if (isConnected) lastSyncedAtText else null,
                     // Only meaningful for the connected provider: it's why its background syncs
                     // are currently failing (an expired token, a transient outage, bad cloud data).
-                    lastSyncErrorText = if (connected == type) lastSyncError?.let { errorMessage(it) } else null,
+                    lastSyncErrorText = if (isConnected) lastSyncError?.let { errorMessage(it) } else null,
                     // Swaps this row's recovery action from "reset sync data" to "reconnect" — see
                     // CloudProviderRow's own comment for why the two are mutually exclusive.
-                    authFailed = connected == type && lastSyncAuthFailed,
+                    authFailed = isConnected && lastSyncAuthFailed,
                     // An automatic sync is waiting for a network that allows it (see
                     // SyncRepository.syncDeferredForNetwork); "Sync now" below still runs at once.
-                    deferredForNetwork = connected == type && syncDeferredForNetwork,
+                    deferredForNetwork = isConnected && syncDeferredForNetwork,
                     resetting = resetting,
                     // Live progress for the connected row, in priority order: an in-flight
                     // disconnect (waiting out a sync it must let finish first — see
@@ -372,6 +373,9 @@ private val CLOUD_ROW_ICON_SIZE = 20.dp
  * [CloudProviderRow] so the box is always tall enough for its own content. */
 private val CLOUD_STATUS_SLOT_TOP_PADDING = 2.dp
 
+/** Opacity of the provider row's secondary status text (sync phase, last synced, network deferral). */
+private const val CLOUD_STATUS_TEXT_ALPHA = 0.8f
+
 /** Localized progress text for a running sync's current phase, for the connected row's status slot. */
 @Composable
 private fun SyncPhase.statusText(): String = when (this) {
@@ -589,7 +593,7 @@ internal fun CloudProviderRow(
                     Text(
                         statusText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = contentColor.copy(alpha = 0.8f),
+                        color = contentColor.copy(alpha = CLOUD_STATUS_TEXT_ALPHA),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -597,7 +601,7 @@ internal fun CloudProviderRow(
                 lastSyncedAtText != null -> Text(
                     stringResource(Res.string.settings_last_synced, lastSyncedAtText),
                     style = MaterialTheme.typography.labelSmall,
-                    color = contentColor.copy(alpha = 0.8f),
+                    color = contentColor.copy(alpha = CLOUD_STATUS_TEXT_ALPHA),
                     modifier = Modifier.padding(top = CLOUD_STATUS_SLOT_TOP_PADDING),
                 )
             }
@@ -609,7 +613,7 @@ internal fun CloudProviderRow(
             Text(
                 stringResource(Res.string.settings_cloud_sync_deferred_network),
                 style = MaterialTheme.typography.labelSmall,
-                color = contentColor.copy(alpha = 0.8f),
+                color = contentColor.copy(alpha = CLOUD_STATUS_TEXT_ALPHA),
                 modifier = Modifier.padding(bottom = 4.dp),
             )
         }

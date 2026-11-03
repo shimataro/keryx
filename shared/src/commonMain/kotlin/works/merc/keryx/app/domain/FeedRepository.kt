@@ -22,7 +22,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
@@ -33,6 +32,8 @@ import works.merc.keryx.app.core.FeedNotFoundException
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
+import works.merc.keryx.app.core.map
+import works.merc.keryx.app.core.valueOrElse
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
 import works.merc.keryx.app.data.local.db.FeedsQueries
@@ -75,18 +76,21 @@ class FeedRepository(
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val faviconMisses: FaviconMissStore,
+    // Guards subscribe placement — see the "[subscribePlacementMutex] guards" comment below. A constructor parameter only so
+    // FeedRepositoryTest can wrap it and observe a second subscribe waiting on it.
+    private val subscribePlacementMutex: Mutex = Mutex(),
 ) {
     private val feeds get() = db.feedsQueries
 
-    // Guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
+    // [subscribePlacementMutex] guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
     // db.transaction alone isn't enough: SQLite's deferred BEGIN means the nextSortOrderInGroup
     // SELECT below doesn't take a write lock, so two overlapping transactions could still both
     // read the same stale MAX before either writes. This mutex is the piece that actually
     // serializes that read-then-write, the same way OpmlImporter's own mutex serializes concurrent
     // import() runs against each other — but that lock doesn't cover a concurrent call through
     // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
-    // two need their own shared guard here where they converge.
-    private val subscribePlacementMutex = Mutex()
+    // two need their own shared guard here where they converge. (Injected — see the constructor's
+    // subscribePlacementMutex parameter.)
 
     // Per-feed reference count of in-flight refreshes. A count rather than a set membership because a
     // single-feed refresh can overlap a refresh of every feed, and the feed must stay marked until both end.
@@ -199,9 +203,8 @@ class FeedRepository(
         afterFeedId: String? = null,
         beforeFeedId: String? = null,
     ): FeedWriteOutcome {
-        val fetched = when (val r = feedFetcher.fetch(url)) {
-            is Result.Ok -> r.value
-            is Result.Err -> return FeedWriteOutcome(r, hadArticles = false, wasNewlyCreated = false)
+        val fetched = feedFetcher.fetch(url).valueOrElse {
+            return FeedWriteOutcome(it, hadArticles = false, wasNewlyCreated = false)
         }
         val effectiveUrl = fetched.redirectUrl ?: url
         val existing = feeds.getByUrl(effectiveUrl).executeAsOneOrNull()
@@ -409,19 +412,21 @@ class FeedRepository(
     /** What [refreshFeeds]' fetches hand to its single writer, in the order they happen. */
     private sealed interface RefreshStep {
         /**
-         * [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. [rows] holds
-         * the fetched articles' rows, already prepared off the writer, exactly when [fetch] is Ok.
+         * [feed]'s fetch finished — apply it ([applyFetch]), then complete [committed]. An Ok [fetch]
+         * carries the fetched articles' rows, already prepared off the writer.
          */
         class Fetched(
             val feed: Feeds,
-            val fetch: Result<FetchedFeed>,
-            val rows: List<ArticleRepository.PreparedInsert>?,
+            val fetch: Result<PreparedFetch>,
             val committed: CompletableDeferred<Unit>,
         ) : RefreshStep
 
         /** A favicon lookup for [feedId] finished; [url] is null when it found none. */
         class FaviconResolved(val feedId: String, val url: String?) : RefreshStep
     }
+
+    /** A successful fetch, together with its articles' [rows] as prepared off the writer. */
+    private class PreparedFetch(val fetched: FetchedFeed, val rows: List<ArticleRepository.PreparedInsert>)
 
     /** A favicon lookup a fetched feed is due, from [siteUrl] (null when the feed names no site). */
     private class FaviconLookup(val siteUrl: String?)
@@ -462,15 +467,14 @@ class FeedRepository(
      * Applies fetched feed data, persists its articles, and emits notifications for permanent removal or URL changes.
      *
      * @param feed The feed being refreshed.
-     * @param fetch The feed's fetch result.
+     * @param fetch The feed's fetch result, with its prepared article rows when Ok.
      * @return The article update result and whether the fetch contained articles.
      */
     private suspend fun applyFetch(
         feed: Feeds,
-        fetch: Result<FetchedFeed>,
-        rows: List<ArticleRepository.PreparedInsert>?,
+        fetch: Result<PreparedFetch>,
     ): RefreshOutcome {
-        val fetched = when (val r = fetch) {
+        val ok = when (val r = fetch) {
             is Result.Ok -> r.value
             is Result.Err -> {
                 val ex = r.exception
@@ -503,13 +507,14 @@ class FeedRepository(
                 return RefreshOutcome(r, hadArticles = false)
             }
         }
+        val fetched = ok.fetched
 
         // The CPU-heavy half of the preparation already ran on the fetch's own coroutine (see
         // launchFetches), so it neither holds the write lock nor queues behind other feeds' writes.
         // Only the half that reads the DB runs here, outside the transaction below (the same reason
         // upsertParsed precomputes before opening its own transaction), so the new-article count
         // compares against what is stored now, not when the fetch finished.
-        val prepared = articleRepository.countPrepared(feed.id, checkNotNull(rows))
+        val prepared = articleRepository.countPrepared(feed.id, ok.rows)
         // The target itself rather than a boolean: the write below and the notification after the
         // commit both need the value, and carrying it keeps its non-nullness with it at both sites.
         // Non-null exactly when the fetch reported a permanent redirect somewhere we are not already.
@@ -567,8 +572,9 @@ class FeedRepository(
             articleRepository.insertPrepared(prepared)
         }
 
-        // Notifications are emitted after the commit: `notify` suspends, which a transaction block
-        // cannot host, and a listener must not observe a half-applied feed anyway.
+        // Notifications are emitted after the commit, so a listener never observes a half-applied
+        // feed. `notify` is declared `suspend` so it cannot be called from inside the transaction
+        // block by mistake.
         if (redirectTarget != null) {
             notify(
                 NotificationText.FeedUrlChanged(feed.displayTitle()),
@@ -689,11 +695,9 @@ class FeedRepository(
                         // no fetch permit, rather than on the single writer, which would otherwise
                         // parse every feed's article HTML one after another. Only an Ok fetch has
                         // any; an exception propagates like any other failure of this coroutine.
-                        val rows = (fetch as? Result.Ok)?.let {
-                            articleRepository.prepareRows(feed.id, it.value.articles)
-                        }
+                        val prepared = fetch.map { PreparedFetch(it, articleRepository.prepareRows(feed.id, it.articles)) }
                         val committed = CompletableDeferred<Unit>()
-                        steps.send(RefreshStep.Fetched(feed, fetch, rows, committed))
+                        steps.send(RefreshStep.Fetched(feed, prepared, committed))
                         committed.await()
                         // Only the site URL outlives the commit: the lookup below can wait on a permit
                         // and the network for a while, and must not keep every parsed article resident
@@ -752,7 +756,7 @@ class FeedRepository(
         for (step in steps) {
             when (step) {
                 is RefreshStep.Fetched -> {
-                    val outcome = applyFetch(step.feed, step.fetch, step.rows)
+                    val outcome = applyFetch(step.feed, step.fetch)
                     val wasLast = state.recordFetched(step.feed.id, outcome.result, outcome.hadArticles)
                     step.committed.complete(Unit)
                     if (wasLast) indexIfNeeded(state)
@@ -836,11 +840,10 @@ class FeedRepository(
         action: AppNotificationAction? = null,
         coalesce: Boolean = false,
     ) {
-        val notification = AppNotification(
-            id = IdGenerator.newId(),
+        val notification = newNotification(
             level = level,
             text = text,
-            timestampMillis = clock.nowMillis(),
+            nowMillis = clock.nowMillis(),
             action = action,
         )
         if (coalesce) notificationCenter.addCoalescing(notification) else notificationCenter.add(notification)

@@ -1,15 +1,14 @@
 package works.merc.keryx.app
 
 import org.koin.core.Koin
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.InfoDialogText
 import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.SystemClock
-import works.merc.keryx.app.domain.IdGenerator
 import works.merc.keryx.app.domain.NotificationCenter
+import works.merc.keryx.app.domain.newNotification
 import works.merc.keryx.app.domain.runMaintenanceStep
 import works.merc.keryx.app.domain.runStartupMaintenance
 import works.merc.keryx.app.platform.FileIO
@@ -48,17 +47,17 @@ internal suspend fun handleOpenedOpmlFile(koin: Koin, path: String) {
 /**
  * Warns the user when the application is running from a translocated path that may prevent
  * `keryx://` OAuth callbacks from reaching the application.
+ *
+ * @param exePath The running executable's path; a parameter only so a test can supply one.
  */
-private suspend fun warnIfAppTranslocated(koin: Koin) {
-    val exePath = currentExecutablePath()
+internal suspend fun warnIfAppTranslocated(koin: Koin, exePath: String? = currentExecutablePath()) {
     if (!isTranslocatedPath(exePath)) return
     Log.warn(LOG_TAG, "App is running from a translocated path ($exePath); keryx:// OAuth linking may fail")
     koin.get<NotificationCenter>().add(
-        AppNotification(
-            id = IdGenerator.newId(),
+        newNotification(
             level = AppNotificationLevel.WARNING,
             text = NotificationText.AppTranslocated,
-            timestampMillis = SystemClock.nowMillis(),
+            nowMillis = SystemClock.nowMillis(),
             // Nothing to navigate to — the useful next step is understanding the cause and the fix,
             // so acting on it opens an explanatory dialog in place.
             action = AppNotificationAction.ShowInfoDialog(InfoDialogText.APP_TRANSLOCATED),

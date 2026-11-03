@@ -27,6 +27,7 @@ import works.merc.keryx.app.ui.navigation.SettingsOpenRequests
 import works.merc.keryx.app.ui.navigation.rememberNavigator
 import works.merc.keryx.app.ui.settings.AboutDialog
 import works.merc.keryx.app.ui.settings.NotificationPermissionDialog
+import works.merc.keryx.app.ui.settings.SETTINGS_TAB_DATA
 import works.merc.keryx.app.ui.settings.SettingsDialog
 import works.merc.keryx.app.ui.settings.rememberNotificationPermissionPrompt
 import works.merc.keryx.app.ui.setup.SetupScreen
@@ -115,7 +116,7 @@ fun App() {
         val pendingOpmlRequest by opmlController.pendingRequest.collectAsState()
         val opmlBusy by opmlController.busy.collectAsState()
         LaunchedEffect(pendingOpmlRequest, opmlBusy) {
-            if (shouldPresentOpmlRequest(pendingOpmlRequest, opmlBusy)) settingsOpenRequests.request("data")
+            if (shouldPresentOpmlRequest(pendingOpmlRequest, opmlBusy)) settingsOpenRequests.request(SETTINGS_TAB_DATA)
         }
 
         // A notification's "open this settings tab" action is forwarded to the router (HomeScreen

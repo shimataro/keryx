@@ -3,13 +3,20 @@ package works.merc.keryx.app.data.cloud
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SecurityCliTokenStorageTest {
     private val dir = FileIO.join(AppDirs.tempDir(), "security-token-test-${Random.nextInt()}")
@@ -54,6 +61,49 @@ class SecurityCliTokenStorageTest {
 
         private fun flag(args: List<String>, name: String): String? =
             args.indexOf(name).takeIf { it >= 0 && it + 1 < args.size }?.let { args[it + 1] }
+    }
+
+    /** Same white-box capture pattern as `core.LogTest`: attach a handler to the JUL logger [Log] writes to. */
+    private fun withCapturedLogRecords(block: () -> Unit): List<LogRecord> {
+        val previousLogDir = System.getProperty("keryx.log.dir")
+        System.setProperty("keryx.log.dir", System.getProperty("java.io.tmpdir"))
+        val logger = Logger.getLogger(Log.LOGGER_NAME)
+        val captured = mutableListOf<LogRecord>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) { captured.add(record) }
+            override fun flush() {}
+            override fun close() {}
+        }
+        handler.level = Level.ALL
+        logger.addHandler(handler)
+        try {
+            block()
+        } finally {
+            logger.removeHandler(handler)
+            if (previousLogDir == null) {
+                System.clearProperty("keryx.log.dir")
+            } else {
+                System.setProperty("keryx.log.dir", previousLogDir)
+            }
+        }
+        return captured
+    }
+
+    @Test
+    fun anUndecodablePayloadIsLoggedWithoutItsContent() {
+        // kotlinx.serialization's JsonDecodingException quotes the offending input in its own
+        // message, so logging the exception itself would write this secret into the log file.
+        val secret = "SECRET-refresh-token-value"
+        val fake = FakeSecurity()
+        fake.store[KEYCHAIN_SERVICE to CloudStorageType.DROPBOX.id] = "{\"refresh_token\":\"$secret\""
+        val storage = SecurityCliTokenStorage(file(), fake, json)
+
+        val records = withCapturedLogRecords { assertNull(storage.load()) }
+
+        val decodeWarning = records.single { "Stored token payload could not be decoded" in it.message }
+        assertNull(decodeWarning.thrown, "the decode exception (which embeds the payload) must not be logged")
+        assertTrue(records.none { it.thrown != null }, "no record may carry an exception quoting the payload")
+        assertFalse(records.any { secret in it.message }, "the payload must never reach the log text")
     }
 
     @Test

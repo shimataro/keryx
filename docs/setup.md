@@ -373,8 +373,12 @@ Store and therefore Chrome), or install a real browser APK on the existing AVD.
 
 ### `./gradlew :composeApp:run` does not complete Dropbox / OneDrive linking (all desktop OSes)
 
-Their redirect URI uses the custom scheme `keryx://`, and the connect button remains disabled
-until timeout. The reason differs per OS:
+Their redirect URI uses the custom scheme `keryx://`, which never reaches the `gradlew run`
+instance. While the app waits for the redirect, the provider row shows an **Abort** button with a
+spinner. Pressing it asks for confirmation; confirming ends the wait and returns the row to
+Connect. If nothing is pressed, the wait times out after 3 minutes (`OAUTH_CONNECT_TIMEOUT_MS`):
+the row returns to Connect and shows "Authentication failed", and the log gets `OAuth
+authorization timed out … callback never received`. The reason differs per OS:
 
 - **macOS**: LaunchServices routes `keryx://` to the **packaged `Keryx.app`** (via
   `CFBundleURLTypes` in Info.plist), which the `gradlew run` instance is not.
