@@ -22,7 +22,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.ArticleFilter
@@ -837,11 +836,10 @@ class FeedRepository(
         action: AppNotificationAction? = null,
         coalesce: Boolean = false,
     ) {
-        val notification = AppNotification(
-            id = IdGenerator.newId(),
+        val notification = newNotification(
             level = level,
             text = text,
-            timestampMillis = clock.nowMillis(),
+            nowMillis = clock.nowMillis(),
             action = action,
         )
         if (coalesce) notificationCenter.addCoalescing(notification) else notificationCenter.add(notification)

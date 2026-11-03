@@ -23,7 +23,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Log
@@ -621,17 +620,9 @@ class UpdateRepository(
      * both reach this, on different threads, with no other synchronization between them. */
     private suspend fun postNotification(text: NotificationText, action: AppNotificationAction) = notificationMutex.withLock {
         lastNotificationId?.let { notificationCenter.dismiss(it) }
-        val id = IdGenerator.newId()
-        notificationCenter.addCoalescing(
-            AppNotification(
-                id = id,
-                level = AppNotificationLevel.INFO,
-                text = text,
-                timestampMillis = SystemClock.nowMillis(),
-                action = action,
-            ),
-        )
-        lastNotificationId = id
+        val notification = newNotification(AppNotificationLevel.INFO, text, SystemClock.nowMillis(), action)
+        notificationCenter.addCoalescing(notification)
+        lastNotificationId = notification.id
     }
 
     private fun sweepStaleUpdateDownloads(currentBeforeCheck: UpdateState) {

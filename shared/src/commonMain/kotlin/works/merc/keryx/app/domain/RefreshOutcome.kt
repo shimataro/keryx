@@ -1,6 +1,5 @@
 package works.merc.keryx.app.domain
 
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.Clock
@@ -71,11 +70,10 @@ internal suspend fun reportRefreshOutcome(
     val unreachable = isUnreachable(results)
     if (unreachable) {
         notificationCenter.addCoalescing(
-            AppNotification(
-                id = IdGenerator.newId(),
+            newNotification(
                 level = AppNotificationLevel.WARNING,
                 text = NotificationText.RefreshFailed,
-                timestampMillis = clock.nowMillis(),
+                nowMillis = clock.nowMillis(),
                 action = AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED),
             ),
         )

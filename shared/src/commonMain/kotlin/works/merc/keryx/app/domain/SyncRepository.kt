@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationAction
 import works.merc.keryx.app.core.AppNotificationLevel
 import works.merc.keryx.app.core.CLOUD_DB_GZ_PATH
@@ -524,11 +523,10 @@ class SyncRepository(
             _lastSyncError.value = reason
             _lastSyncAuthFailed.value = reason == ErrorKind.CLOUD_AUTH
             notificationCenter.addCoalescing(
-                AppNotification(
-                    id = IdGenerator.newId(),
+                newNotification(
                     level = AppNotificationLevel.ERROR,
                     text = NotificationText.SyncFailed(reason),
-                    timestampMillis = clock.nowMillis(),
+                    nowMillis = clock.nowMillis(),
                     action = nextActionFor(result.exception),
                 ),
             )
