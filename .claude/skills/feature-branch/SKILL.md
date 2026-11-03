@@ -187,19 +187,34 @@ name, which stays as the proposal "the current name already fits" (picking it do
 
 ## Step 5 — Propose and confirm
 
-On a feature branch, first check whether it has been pushed — a remote branch of the same name
-exists and shares history with `HEAD`:
+On a feature branch, first check whether it has been pushed, by comparing each remote branch of the
+same name with `HEAD`:
 
 ```bash
 git for-each-ref --format='%(refname)' "refs/remotes/*/<current branch>"
-git merge-base "<ref>" HEAD   # for each ref listed above
+mb=$(git merge-base "<ref>" HEAD)            # for each ref listed above
+git merge-base --is-ancestor "$mb" "<default>" # only when $mb is not empty
 ```
 
-The branch counts as pushed when at least one listed ref shares history with `HEAD` (`merge-base`
-prints a commit). Do not require the ref to be an ancestor of `HEAD` (`--merged=HEAD`): after an
-amend or rebase of a pushed branch the remote ref is no longer an ancestor, yet the branch has still
-been pushed. A same-named ref on another remote with unrelated history (`merge-base` prints nothing)
-is ignored.
+`<default>` is the default branch, resolved as in Step 2 "Without an argument" step 1 (reuse it if
+Step 2 already resolved it). Classify each ref:
+
+- `$mb` is empty (unrelated history, e.g. a same-named branch on another remote) → ignore the ref.
+- `$mb` is **not** in the default branch (`--is-ancestor` fails) → the ref shares a commit of this
+  branch's own → **pushed**. This still holds after an amend or rebase that kept any earlier commit,
+  which is why the ref is not required to be an ancestor of `HEAD` (`--merged=HEAD`).
+- `$mb` **is** in the default branch (the only shared history is the default branch's) →
+  **ambiguous**. Any two branches cut from the default branch share that history, so this is what
+  both of these look like, and local history cannot tell them apart:
+  - this branch was pushed and then every commit was rewritten (an amended single-commit branch, a
+    rebase);
+  - the ref is unrelated — a stale remote-tracking ref of a merged and deleted branch whose name was
+    reused (this skill never fetches, so it is never pruned), or someone else's branch.
+- The default branch cannot be resolved → any ref with a non-empty `$mb` is **ambiguous**.
+
+The branch is pushed if any ref is pushed; otherwise ambiguous if any ref is ambiguous; otherwise
+not pushed. (A stale `origin/<default>` that was never fetched can make a ref look pushed; that errs
+on the side of not renaming, so it is accepted.)
 
 (Do not use `@{u}`: a branch created from `origin/v0` tracks it, which says nothing about whether
 this branch was pushed.)
@@ -210,6 +225,7 @@ Then, by situation:
 | --- | --- |
 | On `v*` or detached `HEAD` | `AskUserQuestion`: create a new branch with the chosen name and switch to it? Briefly say why a feature branch is needed (`.claude/CLAUDE.md` → "Branching") |
 | Feature branch, not pushed | `AskUserQuestion`: rename `<current branch>` to the chosen name? |
+| Feature branch, push status ambiguous | `AskUserQuestion`: name the ref(s), say the branch may have been pushed and rewritten or the ref may be unrelated, and that the user can clear a stale ref with `git fetch --prune` and re-run. Options: **Don't rename** (Recommended — then act as for a pushed branch) plus up to 3 candidates to rename to |
 | Feature branch, pushed | List the candidates (name + meaning) best first, say the branch is not renamed because it has already been pushed, and stop |
 
 In `AskUserQuestion`, each option's `label` is the branch name and its `description` the meaning.
@@ -259,5 +275,6 @@ Always keep "Other" so the user can type any name of their own.
 
 - Never create or rename a branch without the user's selection or a name they provided.
 - Never rename a `v*` branch — always create a new one.
-- Never rename a feature branch that has already been pushed to the remote.
+- Never rename a feature branch that has already been pushed to the remote, nor one whose push
+  status is ambiguous unless the user picks a new name in Step 5.
 - Never touch the remote: no push, no remote branch deletion, no fetch.
