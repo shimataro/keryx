@@ -189,11 +189,11 @@ First, determine the situation:
 To detect whether the current feature branch has been pushed:
 
 ```bash
-git for-each-ref --format='%(refname)' "refs/remotes/*/<current branch>"
+git for-each-ref --merged=HEAD --format='%(refname:short)' "refs/remotes/*/<current branch>"
 ```
 
 (Do not use `@{u}`: a branch created from `origin/v0` tracks it, which says nothing about whether
-this branch was pushed.)
+this branch was pushed. A matching ref on another remote with unrelated history is ignored.)
 
 Present the candidates via `AskUserQuestion` with an additional **"Other"** option so the user can
 type their own. For creation on `v*`, include a brief explanation of why a feature branch is needed
