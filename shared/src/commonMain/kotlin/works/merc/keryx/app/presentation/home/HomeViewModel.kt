@@ -660,7 +660,7 @@ class HomeViewModel(
 
     /**
      * Identity of the current browsing context, bumped whenever the whole read-state pin set is dropped
-     * for a fresh one ([selectFilter], and a query change in [setSearchQuery]).
+     * for a fresh one ([selectFilter]; a query change in [setSearchQuery] deliberately does not).
      *
      * [selectionCursorId] cannot stand in for this: it carries no scope identity, so a selection
      * made under the new scope puts a non-null id back, and a hydration still in flight from the old
@@ -703,7 +703,7 @@ class HomeViewModel(
             .stateIn(viewModelScope, started, SearchSnapshot("", _filter.value, emptyList()))
 
     // True while the live query has usable terms but its results haven't arrived yet — still
-    // inside the 250ms debounce, the FTS query is running, or the filter it should be scoped to has
+    // inside the SEARCH_DEBOUNCE_MS debounce, the FTS query is running, or the filter it should be scoped to has
     // moved on since the snapshot was taken. Lets the search pane hold instead of flashing "no
     // results" between keystrokes (or right after switching filters) before the real results land.
     val searching: StateFlow<Boolean> =
@@ -1665,10 +1665,10 @@ class HomeViewModel(
      * Deliberately does not touch [_pinnedReadStates] or [browsingEpoch] — unlike a filter
      * switch, a query change doesn't start a fresh browsing context, it narrows the *same* one.
      * `_pinnedReadStates` is shared between the underlying filter's own list and search results
-     * over it (see [searchResults]' own combine), so clearing it here would drop a just-read
+     * over it (see [searchResultsSnapshot]'s own combine), so clearing it here would drop a just-read
      * article from the filter's list the instant the user types a character into an
-     * always-visible field ([PaneLayout.Triple]'s sidebar). [searchResults] never merges a pinned
-     * id back in that the fresh query no longer matches (see its own KDoc), so nothing pinned
+     * always-visible field ([PaneLayout.Triple]'s sidebar). [searchResultsSnapshot] never merges a
+     * pinned id back in that the fresh query no longer matches (see its own comment), so nothing pinned
      * under a previous query can leak into results that don't match it.
      *
      * @param query The new search query.

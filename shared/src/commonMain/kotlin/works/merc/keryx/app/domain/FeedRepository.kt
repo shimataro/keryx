@@ -567,8 +567,9 @@ class FeedRepository(
             articleRepository.insertPrepared(prepared)
         }
 
-        // Notifications are emitted after the commit: `notify` suspends, which a transaction block
-        // cannot host, and a listener must not observe a half-applied feed anyway.
+        // Notifications are emitted after the commit, so a listener never observes a half-applied
+        // feed. `notify` is declared `suspend` so it cannot be called from inside the transaction
+        // block by mistake.
         if (redirectTarget != null) {
             notify(
                 NotificationText.FeedUrlChanged(feed.displayTitle()),
