@@ -76,18 +76,21 @@ class FeedRepository(
     private val clock: Clock,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val faviconMisses: FaviconMissStore,
+    // Guards subscribe placement — see the "[subscribePlacementMutex] guards" comment below. A constructor parameter only so
+    // FeedRepositoryTest can wrap it and observe a second subscribe waiting on it.
+    private val subscribePlacementMutex: Mutex = Mutex(),
 ) {
     private val feeds get() = db.feedsQueries
 
-    // Guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
+    // [subscribePlacementMutex] guards subscribeFeedWrite's sort-order allocation + upsert + folder assignment. A
     // db.transaction alone isn't enough: SQLite's deferred BEGIN means the nextSortOrderInGroup
     // SELECT below doesn't take a write lock, so two overlapping transactions could still both
     // read the same stale MAX before either writes. This mutex is the piece that actually
     // serializes that read-then-write, the same way OpmlImporter's own mutex serializes concurrent
     // import() runs against each other — but that lock doesn't cover a concurrent call through
     // this class's other entry point (AddFeedPreviewResolver's "Add Feed" dialog path), so the
-    // two need their own shared guard here where they converge.
-    private val subscribePlacementMutex = Mutex()
+    // two need their own shared guard here where they converge. (Injected — see the constructor's
+    // subscribePlacementMutex parameter.)
 
     // Per-feed reference count of in-flight refreshes. A count rather than a set membership because a
     // single-feed refresh can overlap a refresh of every feed, and the feed must stay marked until both end.
