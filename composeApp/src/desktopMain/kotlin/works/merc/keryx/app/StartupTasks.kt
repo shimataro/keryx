@@ -47,9 +47,10 @@ internal suspend fun handleOpenedOpmlFile(koin: Koin, path: String) {
 /**
  * Warns the user when the application is running from a translocated path that may prevent
  * `keryx://` OAuth callbacks from reaching the application.
+ *
+ * @param exePath The running executable's path; a parameter only so a test can supply one.
  */
-private suspend fun warnIfAppTranslocated(koin: Koin) {
-    val exePath = currentExecutablePath()
+internal suspend fun warnIfAppTranslocated(koin: Koin, exePath: String? = currentExecutablePath()) {
     if (!isTranslocatedPath(exePath)) return
     Log.warn(LOG_TAG, "App is running from a translocated path ($exePath); keryx:// OAuth linking may fail")
     koin.get<NotificationCenter>().add(
