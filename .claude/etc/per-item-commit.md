@@ -10,8 +10,8 @@ verified, reverted and committed.
 - The caller's approval gate is the **one-time run confirmation**: every approved item proceeds
   through apply → verify → commit with no further per-item approval. This is what satisfies the
   repo's "don't commit unless asked" convention.
-- Before the first commit, if the current branch is a version branch (`v*`), run
-  `/feature-branch <type>` (the caller names `<type>`) to create and switch to a feature branch.
+- Before the run's first commit, if the current branch is a version branch (`v*`), §4 moves the
+  work onto a feature branch with `/feature-branch`.
 - The tree must have no uncommitted changes when the first item starts — `git status --porcelain`
   prints nothing, untracked files included; that clean state is the **baseline** §3 returns to.
   The caller says where it checked.
@@ -66,9 +66,14 @@ When the item fails verification and the caller's own retry (if any) cannot fix 
 1. Review `git status --porcelain` / `git diff`, then run the marker check from
    `.claude/etc/temporary-instrumentation.md` §3 and confirm it prints nothing **before staging
    anything**.
-2. Stage **only the files, and only the hunks, belonging to this item** (including anything the
+2. If this is the run's first commit and the current branch is a version branch (`v*`), run
+   `/feature-branch` now, with this item's changes still uncommitted. The skill infers the branch
+   name from those changes, which do not exist yet at the start of the run; `git switch -c` carries
+   them onto the new branch. Do not run it before the first item has been applied and verified.
+3. Stage **only the files, and only the hunks, belonging to this item** (including anything the
    caller says rides along, such as a doc fix). Verify the staged diff contains nothing beyond
    this item, so an unrelated edit or residue from an earlier item's revert never rides along.
-3. Create **exactly one commit** with a **single-line** message only (no body, no trailer), in
-   the repo's Conventional Commits style. Never batch several items into one commit, never amend
-   a commit made earlier in the same run, and never push.
+4. Create **exactly one commit** in the repo's Conventional Commits style. The message is a
+   single-line subject (`<type>(<scope>): <subject>`) with no body; the only addition allowed is
+   the attribution trailer that the harness or the user's instructions require. Never batch several
+   items into one commit, never amend a commit made earlier in the same run, and never push.

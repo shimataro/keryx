@@ -217,8 +217,8 @@ confirm or narrow what to apply (e.g. all of it, only `domain/`, or exclude
 `ui/`). Proceed with only the approved batches.
 
 This approval is also the **one-time run confirmation**
-(`.claude/etc/per-item-commit.md` §1, where each batch is an item). Branch
-type is `refactor`; Step 1's worktree check is the clean baseline.
+(`.claude/etc/per-item-commit.md` §1, where each batch is an item). Step 1's
+worktree check is the clean baseline.
 
 ### Step 4 — Apply batches (behavior-preserving, verified)
 
