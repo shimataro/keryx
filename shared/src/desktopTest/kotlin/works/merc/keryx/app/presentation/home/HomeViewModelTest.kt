@@ -4,6 +4,7 @@ import androidx.lifecycle.viewModelScope
 import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.MockRequestHandler
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
@@ -190,8 +191,19 @@ class HomeViewModelTest {
     }
 
     /** A [FeedFetcher] backed by [handler] (mirrors production DI: followRedirects off, HttpTimeout on). */
-    private fun fetcherWith(handler: MockRequestHandler): FeedFetcher {
-        val client = HttpClient(MockEngine(handler)) {
+    private fun fetcherWith(
+        // Optional: run the engine on a test dispatcher so advanceUntilIdle() drains a wrongly started
+        // request deterministically instead of leaving it on MockEngine's real IO dispatcher.
+        engineDispatcher: CoroutineDispatcher? = null,
+        handler: MockRequestHandler,
+    ): FeedFetcher {
+        val engine = MockEngine(
+            MockEngineConfig().apply {
+                engineDispatcher?.let { dispatcher = it }
+                addHandler(handler)
+            },
+        )
+        val client = HttpClient(engine) {
             followRedirects = false
             expectSuccess = false
             install(HttpTimeout)
@@ -962,7 +974,10 @@ class HomeViewModelTest {
         try {
             val cloud = CountingNoCloud()
             val vm = newViewModel(
-                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) {
+                    fetches.incrementAndGet()
+                    respond("", HttpStatusCode.NotFound)
+                },
                 activityCenter = activityCenter,
                 cloudProvider = cloud,
             )
@@ -976,11 +991,8 @@ class HomeViewModelTest {
             assertFalse(vm.activity.value.feedRefreshing)
 
             vm.refreshAll()
-            // Give a wrongly started refresh time to reach the (real-dispatcher) MockEngine.
-            repeat(5) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(50)
-            }
+            // The engine runs on the test scheduler, so one drain runs a wrongly started fetch to completion.
+            testScheduler.advanceUntilIdle()
             assertEquals(0, fetches.get(), "refreshAll must not refresh while a cycle is running")
             assertEquals(0, cloud.syncs.get(), "refreshAll must not sync while a cycle is running")
 
@@ -1226,7 +1238,10 @@ class HomeViewModelTest {
         try {
             val cloud = CountingNoCloud()
             val vm = newViewModel(
-                feedFetcher = fetcherWith { fetches.incrementAndGet(); respond("", HttpStatusCode.NotFound) },
+                feedFetcher = fetcherWith(StandardTestDispatcher(testScheduler)) {
+                    fetches.incrementAndGet()
+                    respond("", HttpStatusCode.NotFound)
+                },
                 activityCenter = activityCenter,
                 cloudProvider = cloud,
             )
@@ -1237,10 +1252,8 @@ class HomeViewModelTest {
             val sync = activityScope.launch { activityCenter.trackSync { gate.await() } }
 
             vm.refreshAll()
-            repeat(5) {
-                testScheduler.advanceUntilIdle()
-                Thread.sleep(50)
-            }
+            // The engine runs on the test scheduler, so one drain runs a wrongly started fetch to completion.
+            testScheduler.advanceUntilIdle()
             gate.complete(Unit)
             sync.join()
             testScheduler.advanceUntilIdle()
