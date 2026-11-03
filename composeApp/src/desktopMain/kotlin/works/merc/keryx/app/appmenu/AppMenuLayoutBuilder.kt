@@ -89,7 +89,7 @@ internal fun buildAppMenuLayout(root: AppMenuRoot): AppMenuLayout {
         val id = assign()
         val childIds = when (node) {
             is AppMenuNode.Menu -> node.items.map { visit(it) }
-            else -> emptyList()
+            is AppMenuNode.Item, is AppMenuNode.CheckboxItem, AppMenuNode.Separator -> emptyList()
         }
         nodesById[id] = AppMenuLayout.LayoutNode(id, propertiesFor(node), childIds)
         if (node is AppMenuNode.Item || node is AppMenuNode.CheckboxItem) dispatch[id] = node

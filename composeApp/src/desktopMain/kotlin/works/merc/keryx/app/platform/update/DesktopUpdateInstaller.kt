@@ -179,7 +179,7 @@ class DesktopUpdateInstaller internal constructor(
             return InstallLaunchResult.Failed("Not enough free disk space to extract the downloaded update")
         }
 
-        val extractDir = File(workDir, "extracted")
+        val extractDir = File(workDir, EXTRACT_DIR_NAME)
         // A previous attempt killed mid-extraction leaves a partial tree here, and both extractors
         // merge into an existing destination rather than replacing it — so without this the next
         // attempt blends two versions into one bundle, which on Windows/Linux passes every gate
@@ -260,7 +260,7 @@ class DesktopUpdateInstaller internal constructor(
         // rather than being reconstructed a second time to do the latter.
         return when (assetKind) {
             UpdateAssetKind.MAC_APP_ZIP, UpdateAssetKind.LINUX_ZIP -> {
-                val scriptFile = File(workDir, "apply.sh")
+                val scriptFile = File(workDir, POSIX_UPDATE_SCRIPT_NAME)
                 launchScript(
                     scriptFile = scriptFile,
                     scriptText = if (assetKind == UpdateAssetKind.MAC_APP_ZIP) {
@@ -410,6 +410,12 @@ private const val UPDATE_SCRIPT_LOG_NAME = "apply.log"
 
 /** The hand-off script `cmd` runs on Windows (self-replace and MSI install alike). */
 private const val WINDOWS_UPDATE_SCRIPT_NAME = "apply.cmd"
+
+/** The hand-off script `sh` runs on macOS and Linux to swap in the extracted app. */
+private const val POSIX_UPDATE_SCRIPT_NAME = "apply.sh"
+
+/** The directory under the work dir the downloaded archive is extracted into. */
+private const val EXTRACT_DIR_NAME = "extracted"
 
 /** This process's id, as the hand-off script's argument it waits on to exit. */
 private fun currentPid(): String = ProcessHandle.current().pid().toString()

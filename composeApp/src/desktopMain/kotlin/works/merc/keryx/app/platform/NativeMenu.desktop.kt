@@ -429,6 +429,14 @@ internal fun defaultPopupHandle(
 ): NativePopupHandle =
     if (macOs) AwtPopupHandle(items, shownItems) else SwingPopupHandle(items, shownItems)
 
+/** A [LazyNativePopup] for [window], disposed once it leaves composition or [window] changes. */
+@Composable
+private fun rememberLazyNativePopup(window: NativeWindowHandle?): LazyNativePopup {
+    val popup = remember(window) { LazyNativePopup(window = window) }
+    DisposableEffect(popup) { onDispose { popup.dispose() } }
+    return popup
+}
+
 /**
  * Owns one call site's native menu and builds it **on the first right-click**, not on composition.
  *
@@ -521,10 +529,7 @@ actual fun Modifier.nativeContextMenu(
     val elementPosition = remember { FloatArray(2) }
 
     // Nothing native is built until the first right-click — see LazyNativePopup.
-    val popup = remember(window) {
-        LazyNativePopup(window = window)
-    }
-    DisposableEffect(popup) { onDispose { popup.dispose() } }
+    val popup = rememberLazyNativePopup(window)
 
     return this
         .onGloballyPositioned { coordinates ->
@@ -574,8 +579,7 @@ actual fun NativeMenuAnchor(
     val currentItems by rememberUpdatedState(items)
     // Bottom-left corner in window pixels; a plain holder for the same reason as nativeContextMenu's.
     val anchorCorner = remember { FloatArray(2) }
-    val popup = remember(window) { LazyNativePopup(window = window) }
-    DisposableEffect(popup) { onDispose { popup.dispose() } }
+    val popup = rememberLazyNativePopup(window)
 
     Box(
         Modifier.onGloballyPositioned { coordinates ->
