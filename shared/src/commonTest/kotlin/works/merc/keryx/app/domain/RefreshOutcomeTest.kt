@@ -14,6 +14,7 @@ import works.merc.keryx.app.core.Result
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -94,8 +95,10 @@ class RefreshOutcomeTest {
         assertEquals(AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED), n.action)
         assertEquals(1000L, n.timestampMillis)
 
-        reportRefreshOutcome(mapOf("b" to noResponse), center, clock)
-        assertEquals(1, center.items.value.size)
+        reportRefreshOutcome(mapOf("b" to noResponse), center, Clock { 2000L })
+        val repeated = center.items.value.single()
+        assertEquals(2000L, repeated.timestampMillis)
+        assertNotEquals(n.id, repeated.id)
     }
 
     @Test
