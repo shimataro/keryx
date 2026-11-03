@@ -1684,13 +1684,13 @@ class HomeViewModel(
 
     /** @see AddFeedPreviewResolver.subscribeFeeds */
     suspend fun subscribeFeeds(urls: List<String>): SubscribeOutcome {
-        val folderId = folderIdForNewFeed()
+        val placement = newFeedPlacement(_filter.value, _selectedRowInstance.value, feeds.value)
         val outcome = addFeedPreviewResolver.subscribeFeeds(
             urls,
-            folderId,
-            afterFeedIdForNewFeed(),
-            beforeFeedIdForNewFeed(folderId),
-            tagIdForNewFeed(),
+            placement.folderId,
+            placement.afterFeedId,
+            placement.beforeFeedId,
+            placement.tagId,
         )
         // Subscribing is the user's own action, and whatever it fetched is right there in front of
         // them — it was never "missed". Acknowledge exactly the subscribed feeds' articles instead
@@ -1704,54 +1704,6 @@ class HomeViewModel(
             _newArticleTracking.update { it.withAcknowledged(ids) }
         }
         return outcome
-    }
-
-    /**
-     * The folder a newly subscribed feed should be filed into, derived from the feed list's
-     * current selection: the selected folder itself, or the folder of the selected feed. Any
-     * other selection (all/starred/tag) yields `null` (no folder).
-     */
-    private fun folderIdForNewFeed(): String? = when (val f = _filter.value) {
-        is ArticleFilter.Folder -> f.folderId
-        is ArticleFilter.Feed -> feeds.value.firstOrNull { it.id == f.feedId }?.folder_id
-        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Tag -> null
-    }
-
-    /**
-     * The feed a newly subscribed feed should be inserted directly after, derived from the feed
-     * list's current selection: the selected feed itself, whether it's filed in a folder or
-     * unfiled. Any other selection (folder/all/starred/tag) yields `null`, which appends
-     * the new feed to the end of its target group instead (unchanged from before this feature).
-     */
-    private fun afterFeedIdForNewFeed(): String? = when (val f = _filter.value) {
-        is ArticleFilter.Feed -> f.feedId
-        ArticleFilter.All, ArticleFilter.Starred, is ArticleFilter.Folder, is ArticleFilter.Tag -> null
-    }
-
-    /**
-     * The feed a newly subscribed feed should be inserted directly before: the current first feed
-     * in the target group [folderId] (the selected folder, the selected feed's folder, or the
-     * "no folder" group when no folder/feed context is selected — see [folderIdForNewFeed]), or
-     * `null` if that group is empty. Only consulted when
-     * [afterFeedIdForNewFeed] is null or its target isn't in the group (see
-     * [FeedRepository.insertionSortOrderForNewFeed]), so this doesn't affect the "insert directly
-     * after the selected feed" behavior.
-     */
-    private fun beforeFeedIdForNewFeed(folderId: String?): String? =
-        feeds.value.filter { it.folder_id == folderId }.minByOrNull { it.sort_order }?.id
-
-    /**
-     * The tag a newly subscribed feed should be tagged with: the currently selected tag, whether
-     * selected directly or via a feed selected within an expanded tag's feed sub-list. `null` for
-     * any other selection (folder, feed outside a tag, starred, or nothing selected) — no tag is
-     * applied.
-     */
-    private fun tagIdForNewFeed(): String? = when (val selection = _selectedRowInstance.value) {
-        is FeedListRowSelection.Tag -> selection.tagId
-        is FeedListRowSelection.FeedInTag -> selection.tagId
-        FeedListRowSelection.All, FeedListRowSelection.Starred,
-        is FeedListRowSelection.FeedInFolderGroup, is FeedListRowSelection.Folder,
-        -> null
     }
 
     /**
