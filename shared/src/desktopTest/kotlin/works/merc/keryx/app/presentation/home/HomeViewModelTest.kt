@@ -4036,9 +4036,10 @@ class HomeViewModelTest {
         gate.complete(Unit)
 
         // The fetch resumes off the virtual scheduler (real MockEngine dispatch, see docs/testing.md),
-        // so poll until the whole cycle settles — not just its feed-refresh stage, which ends before
-        // the sync stage and the final re-trim on Main.
-        pumpUntil { activityCenter.activity.value.idle }
+        // so poll until the cycle has ended on Main. Not on ActivityCenter going idle: that happens on
+        // the fetch thread, before the final re-trim back on Main has even been queued. The Finished
+        // status is set on Main, and the final re-trim follows it there without suspending.
+        pumpUntil { vm.manualRefreshStatus.value is ManualRefreshStatus.Finished }
 
         // Only a2 (the current selection) should remain pinned; a1 must not survive the refresh.
         assertEquals(listOf("a2"), vm.articles.value.map { it.id })
