@@ -17,6 +17,7 @@ class DesktopShellTest {
 
     private class FakeRegistry(private val supported: Set<Desktop.Action>) : AppEventRegistry {
         var openFiles: ((List<File>) -> Unit)? = null
+        var openUri: ((URI) -> Unit)? = null
 
         override fun isSupported(action: Desktop.Action): Boolean = action in supported
 
@@ -24,7 +25,9 @@ class DesktopShellTest {
 
         override fun onPreferences(handler: () -> Unit) = Unit
 
-        override fun onOpenUri(handler: (URI) -> Unit) = Unit
+        override fun onOpenUri(handler: (URI) -> Unit) {
+            openUri = handler
+        }
 
         override fun onOpenFiles(handler: (List<File>) -> Unit) {
             openFiles = handler
@@ -33,10 +36,14 @@ class DesktopShellTest {
         override fun onReopened(handler: () -> Unit) = Unit
     }
 
-    private fun install(registry: AppEventRegistry?, opened: MutableList<String>) {
+    private fun install(
+        registry: AppEventRegistry?,
+        opened: MutableList<String>,
+        callbacks: MutableList<String> = mutableListOf(),
+    ) {
         installAppEventHandlers(
             menuController = MenuController(),
-            onOAuthCallback = {},
+            onOAuthCallback = { callbacks += it },
             onOpmlFile = { opened += it },
             onReopen = {},
             registry = registry,
@@ -56,12 +63,27 @@ class DesktopShellTest {
     }
 
     @Test
-    fun `no open-file handler is registered where the action is unsupported`() {
+    fun `an open-uri event passes only the custom-scheme callback on`() {
+        val registry = FakeRegistry(setOf(Desktop.Action.APP_OPEN_URI))
+        val callbacks = mutableListOf<String>()
+        install(registry, mutableListOf(), callbacks)
+
+        val handler = assertNotNull(registry.openUri, "the open-uri handler was registered")
+        val callback = "$CUSTOM_URI_SCHEME://oauth?code=c"
+        handler(URI(callback))
+        handler(URI("https://example.com/"))
+
+        assertEquals(listOf(callback), callbacks)
+    }
+
+    @Test
+    fun `no open-file or open-uri handler is registered where the action is unsupported`() {
         val registry = FakeRegistry(supported = emptySet())
 
         install(registry, mutableListOf())
 
         assertNull(registry.openFiles)
+        assertNull(registry.openUri)
     }
 
     @Test
