@@ -191,11 +191,18 @@ First, determine the situation:
 To detect whether the current feature branch has been pushed:
 
 ```bash
-git for-each-ref --merged=HEAD --format='%(refname:short)' "refs/remotes/*/<current branch>"
+git for-each-ref --format='%(refname)' "refs/remotes/*/<current branch>"
+git merge-base "<ref>" HEAD   # for each ref listed above
 ```
 
+The branch counts as pushed when at least one listed ref shares history with `HEAD` (`merge-base`
+prints a commit). Do not require the ref to be an ancestor of `HEAD` (`--merged=HEAD`): after an
+amend or rebase of a pushed branch the remote ref is no longer an ancestor, yet the branch has still
+been pushed. A same-named ref on another remote with unrelated history (`merge-base` prints nothing)
+is ignored.
+
 (Do not use `@{u}`: a branch created from `origin/v0` tracks it, which says nothing about whether
-this branch was pushed. A matching ref on another remote with unrelated history is ignored.)
+this branch was pushed.)
 
 Present the candidates via `AskUserQuestion` with an additional **"Other"** option so the user can
 type their own. For creation on `v*`, include a brief explanation of why a feature branch is needed
