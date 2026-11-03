@@ -5046,6 +5046,10 @@ class HomeViewModelTest {
         testScheduler.runCurrent()
         assertEquals(0, counting.matchQueries)
 
+        // One millisecond short of the debounce window, the search still must not have run.
+        testScheduler.advanceTimeBy(SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS - 1)
+        assertEquals(0, counting.matchQueries)
+
         advanceForArticleChangeDebounce()
         assertEquals(1, counting.matchQueries)
     }
