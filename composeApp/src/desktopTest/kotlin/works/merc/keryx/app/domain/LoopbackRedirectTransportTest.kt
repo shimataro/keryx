@@ -5,9 +5,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -122,5 +124,26 @@ class LoopbackRedirectTransportTest {
         // is pinned where it can actually be reached: OAuthUriParserTest.
         assertTrue(code == 400 || code == 500, "rejected, was $code")
         assertNull(params, "a malformed callback never completes the wait")
+    }
+
+    @Test
+    fun `the callback is reachable at 127_0_0_1 even when the JVM prefers IPv6`() {
+        // java.net.preferIPv6Addresses is read at JVM startup, so run the capture in a child JVM with it set:
+        // InetAddress.getLoopbackAddress() is then ::1, and a server bound to it refuses the 127.0.0.1 redirect.
+        val java = File(System.getProperty("java.home"), "bin/java").path
+        val child = ProcessBuilder(
+            java,
+            "-Djava.net.preferIPv6Addresses=true",
+            "-cp", System.getProperty("java.class.path"),
+            LoopbackChildJvm::class.java.name,
+        ).redirectErrorStream(true).start()
+
+        val finished = child.waitFor(30, TimeUnit.SECONDS)
+        val output = if (finished) child.inputStream.readBytes().decodeToString() else ""
+        if (!finished) child.destroyForcibly()
+
+        assertTrue(finished, "the child JVM did not finish in time")
+        assertEquals(0, child.exitValue(), output)
+        assertTrue(output.contains("code=${LoopbackChildJvm.CODE}"), output)
     }
 }
