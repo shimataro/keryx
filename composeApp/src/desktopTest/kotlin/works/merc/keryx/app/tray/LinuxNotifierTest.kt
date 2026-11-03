@@ -120,6 +120,21 @@ class LinuxNotifierTest {
     }
 
     @Test
+    fun `a replacement daemon receives later notifications`() {
+        val first = FakeNotifications()
+        val second = FakeNotifications()
+        var available: FreedesktopNotifications? = first
+        val notifier = LinuxNotifier({ available }, null)
+
+        notifier.notify("first", "b")
+        available = second
+        notifier.notify("second", "b")
+
+        assertEquals(listOf("first"), first.calls.map { it.summary })
+        assertEquals(listOf("second"), second.calls.map { it.summary })
+    }
+
+    @Test
     fun `the daemon is looked up on each notify`() {
         val daemon = FakeNotifications()
         var available: FreedesktopNotifications? = null
