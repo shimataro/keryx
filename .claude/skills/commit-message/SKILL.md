@@ -51,6 +51,13 @@ convention (see `.claude/CLAUDE.md` → "Commit messages"):
   non-obvious *what*). Separate it from the subject with a blank line. Keep it
   short.
 
+End the message with the attribution trailer, separated from the subject (or
+body, if present) by a blank line:
+
+```text
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+```
+
 ## Step 5 — Branching
 
 If the current branch is a version branch (`v*`), run `/feature-branch <type>`
