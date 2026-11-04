@@ -140,8 +140,8 @@ private struct SelectsOnContextMenuModifier: ViewModifier {
 }
 #else
 extension View {
-    /// No-op on iOS: there is no right-click, and the long-press gesture that would open a context
-    /// menu there is deferred to the iOS port (`external-spec.md`'s "iOS / iPadOS: Planned").
+    /// No-op on iOS: there is no right-click, and a long-press context menu leaves the selection
+    /// as it is.
     /// `pointerIsOver` is never set: iOS has no hover that selects anything.
     func selectsOnContextMenu(
         id: AnyHashable,

@@ -25,6 +25,7 @@ A local-first, cross-platform RSS reader
 
 <a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on.svg" alt="Get it on F-Droid" height="80"></a>
 <a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/en/snap-store-black.svg" alt="Get it from the Snap Store" height="56"></a>
+<a href="https://apps.apple.com/app/keryx-rss-reader/id6821582850"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us" alt="Download on the App Store" height="56"></a>
 
 | Platform | Requirements | Get it |
 | --- | --- | --- |
@@ -32,10 +33,11 @@ A local-first, cross-platform RSS reader
 | macOS (native app) | macOS 14 (Sonoma) or later on Apple Silicon | `.dmg` from the [Releases page][releases] |
 | Linux | x86_64 / arm64 | [Snap Store](https://snapcraft.io/keryx), or `.deb` / `.rpm` / portable ZIP from the [Releases page][releases] |
 | Android | Android 8.0 or later | [F-Droid](https://f-droid.org/packages/works.merc.keryx/), or `.apk` from the [Releases page][releases] |
+| iOS / iPadOS | iOS / iPadOS 17 or later | [App Store](https://apps.apple.com/app/keryx-rss-reader/id6821582850) |
 
 [releases]: https://github.com/shimataro/keryx/releases
 
-iOS/iPadOS support is planned. The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
+The F-Droid build has no Google Drive sync (Dropbox and OneDrive work as usual).
 
 > [!IMPORTANT]
 > **Windows**: Until a code-signing certificate is in place, the `.msi` is unsigned, so
@@ -60,7 +62,8 @@ and an Android `.apk` from the Releases page. A Linux `.deb`/`.rpm` or Snap inst
 release page — Keryx still tells you a new version exists, just not by installing it itself there.
 Update a `.deb`/`.rpm` install through your package manager; a Snap install is updated automatically
 by the Snap Store, so there is nothing to download from that page. The F-Droid build leaves updates
-entirely to the F-Droid client, so it has no in-app update at all.
+entirely to the F-Droid client, so it has no in-app update at all. The iOS/iPadOS app is updated by the
+App Store, so it has no in-app update either.
 
 ## Development Documentation
 
@@ -73,3 +76,5 @@ entirely to the F-Droid client, so it has no in-app update at all.
 - [Privacy Policy](PRIVACY.md)
 - [Terms of Service](TERMS.md)
 - [License (MIT)](LICENSE)
+
+Apple, the Apple logo, and App Store are trademarks of Apple Inc.

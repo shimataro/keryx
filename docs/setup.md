@@ -32,8 +32,8 @@
   JetBrains'
   [Kotlin Multiplatform plugin](https://plugins.jetbrains.com/plugin/14936-kotlin-multiplatform)
   is installable on Community Edition too, but it is mainly aimed at iOS preview/run/debug
-  support — not needed yet, since this project doesn't target iOS (see
-  [external-spec.md](external-spec.md) §2, "Planned"). Android-specific tooling (deploying to a
+  support — not needed here, since the iOS app is the SwiftUI app in `appleApp/`, built with Xcode
+  (see [external-spec.md](external-spec.md) §2). Android-specific tooling (deploying to a
   device/emulator, layout preview, etc.) is weaker than in Android Studio, so prefer Android
   Studio when the work is mainly on the Android side.
 - **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains' official "Kotlin by JetBrains"

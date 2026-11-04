@@ -23,13 +23,11 @@ expect val isTouchPrimary: Boolean
  * currently Settings and About (see `FeedListPane`'s settings footer row / `GeneralTab`), and
  * (`FeedListToolbarRow`) an `app_name` title in the header space a settings icon used to occupy.
  *
- * **iOS will also resolve `false` here** — it has no menu bar either — so this flag is currently
- * an Android-specific stand-in for "no native app menu", not a true "does this platform have one"
- * predicate. The two decisions it drives today (the header title, the settings footer) both need
- * their own, more specific flag once iOS lands, since iOS's own conventions for reaching Settings
- * and naming a screen are not the same as Android's. `isTouchPrimary` (below) has no such problem:
- * its uses (swipe, row height, Snackbar, bottom sheets) are genuinely about touch vs. a precise
- * pointer, which iOS shares with Android.
+ * **iOS also resolves `false` here** — it has no menu bar either — but nothing reads it there:
+ * every consumer is in the Compose UI, and the iOS app is SwiftUI. In practice this flag is an
+ * Android-specific stand-in for "no native app menu", not a true "does this platform have one"
+ * predicate. `isTouchPrimary` (below) is different: its uses (swipe, row height, Snackbar, bottom
+ * sheets) are genuinely about touch vs. a precise pointer.
  */
 expect val hasNativeAppMenu: Boolean
 
