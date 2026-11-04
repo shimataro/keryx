@@ -25,6 +25,7 @@
 
 <a href="https://f-droid.org/packages/works.merc.keryx/"><img src="https://f-droid.org/badge/get-it-on-ja.svg" alt="F-Droid で入手" height="80"></a>
 <a href="https://snapcraft.io/keryx"><img src="https://snapcraft.io/static/images/badges/jp/snap-store-black.svg" alt="Snap Store から入手" height="56"></a>
+<a href="https://apps.apple.com/jp/app/keryx-rss-reader/id6821582850"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/ja-jp" alt="App Store からダウンロード" height="56"></a>
 
 | プラットフォーム | 動作要件 | 入手先 |
 | --- | --- | --- |
@@ -32,10 +33,11 @@
 | macOS（ネイティブアプリ） | Apple Silicon 搭載の Mac、macOS 14（Sonoma）以降 | [リリースページ][releases] の `.dmg` |
 | Linux | x86_64 / arm64 | [Snap Store](https://snapcraft.io/keryx)、または [リリースページ][releases] の `.deb`／`.rpm`／ポータブル版 ZIP |
 | Android | Android 8.0 以降 | [F-Droid](https://f-droid.org/packages/works.merc.keryx/)、または [リリースページ][releases] の `.apk` |
+| iOS / iPadOS | iOS / iPadOS 17 以降 | [App Store](https://apps.apple.com/jp/app/keryx-rss-reader/id6821582850) |
 
 [releases]: https://github.com/shimataro/keryx/releases
 
-iOS/iPadOS への対応は今後の予定です。F-Droid 版は Google Drive 同期に対応していません（Dropbox・OneDrive は通常どおり使えます）。
+F-Droid 版は Google Drive 同期に対応していません（Dropbox・OneDrive は通常どおり使えます）。
 
 > [!IMPORTANT]
 > **Windows**: コード署名証明書を用意するまでの間、`.msi` は未署名のため、初回実行時に
@@ -58,7 +60,8 @@ Keryx は起動した後、通知ベル・タスクトレイ・設定の「ア�
 教えてくれますが、その場でのインストールまでは行いません。`.deb`／`.rpm` はパッケージマネージャで
 更新してください。Snap は Snap Store によって自動で更新されるので、リリースページから何かを
 ダウンロードする必要はありません。F-Droid 版はアップデートを F-Droid クライアントに任せており、
-アプリ内のアップデート機能そのものを持ちません。
+アプリ内のアップデート機能そのものを持ちません。iOS/iPadOS 版も App Store がアップデートを行うため、
+アプリ内アップデート機能はありません。
 
 ## 開発用ドキュメント
 
@@ -71,3 +74,5 @@ Keryx は起動した後、通知ベル・タスクトレイ・設定の「ア�
 - [プライバシーポリシー](PRIVACY.ja.md)
 - [利用規約](TERMS.ja.md)
 - [ライセンス（MIT）](LICENSE)
+
+Apple、Apple ロゴ、App Store は Apple Inc. の商標です。
