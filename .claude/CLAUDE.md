@@ -3,9 +3,8 @@
 A cross-platform RSS reader (Kotlin Multiplatform / Compose Multiplatform).
 Local-first, Dropbox / OneDrive / Google Drive sync, no account required.
 
-Windows, Linux and Android run the Compose Multiplatform UI; macOS runs a native
-SwiftUI app that shares its logic through `:shared`, and the iOS SwiftUI app is in
-development (see `docs/external-spec.md` §2).
+Windows, Linux and Android run the Compose Multiplatform UI; macOS and iOS run a native
+SwiftUI app that shares its logic through `:shared` (see `docs/external-spec.md` §2).
 
 ## Working language
 

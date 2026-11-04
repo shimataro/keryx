@@ -26,8 +26,8 @@ import kotlinx.coroutines.flow.collectLatest
 // This composable is platform-independent Compose code (no Android-only API), but only Android's
 // PlatformScrollbar.android.kt calls it — desktop keeps its own draggable VerticalScrollbar (see
 // PlatformScrollbar.desktop.kt). It lives here rather than in androidMain so a future Compose
-// target that needs the same non-interactive fading idiom (e.g. iOS, per external-spec.md §2's
-// "planned") can reuse it without copying ~100 lines across source sets first.
+// target that needs the same non-interactive fading idiom can reuse it without copying ~100 lines
+// across source sets first.
 //
 // Android has no equivalent of desktop's draggable androidx.compose.foundation.VerticalScrollbar
 // (that API is desktop-only), so this draws a thin, non-interactive overlay indicator instead: the

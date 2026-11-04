@@ -1293,32 +1293,8 @@ WebView をホストするペインを含む3ペインすべてがアプリの�
 
 #### iOS
 
-`external-spec.md` は iOS/iPadOS をまず Compose、のちにネイティブ SwiftUI と計画している。
-本節のモデルはそのまま持ち越せない箇所がある:
-
-- **ドロワーは Android のイディオムであり、狭いレイアウト全般に普遍的なものではない。**
-  iOS/iPadOS は compact 幅で `NavigationSplitView` のサイドバーを押し込まれたナビゲーション
-  スタックに畳む（Mail.app、NetNewsWire、Reeder）——これはドロワーが存在する以前にこのアプリが
-  していたことであり、`git log` にも今なお残っている: `Single` の depth 1 で `visiblePanes` が
-  `[FeedList]` を返していたこと、`FeedListPane` 自身の通知ベル、`onEnterArticleList`——これらは
-  ドロワーと引き換えに削除された（戻りリップル自体はこれとは無関係で、現在も
-  `HomePaneLayout.kt` の `shouldFlashReturnedArticle` として存在する）。`paneLayoutFor` と `visiblePanes` の
-  `Triple`/`Dual` の場合分けは iPadOS にそのまま持ち越せる（`NavigationSplitView` の3カラム・
-  2カラムモードにそのまま対応し、`Dual` の常設の閲覧ペインは iPad 自身のスプリットビューとも
-  一致する）——持ち越せないのは `Single` の見せ方だけである。
-- **`hasNativeAppMenu`（`platform/PlatformOs.kt` 参照）は「ネイティブなアプリメニューバーが
-  無い」ことを表す Android 側の代用であって、iOS 用ではない**——iOS もそこでは `false` になる
-  ため、このフラグが今新たに担っているヘッダーの `app_name`/設定フッターの判断は、iOS が
-  実装される前にプラットフォームごとに分割する必要がある。
-- **`HomeBackAction.None` が OS へフォールスルーする挙動には iOS の対応物が無い**——
-  `OnBackPressedDispatcher` に相当する戻るジェスチャーも、「アプリを終了する」という概念自体も
-  無い。iOS 自身の戻るナビゲーションは、このコードベース自身が描く UI 要素である。
-- **ドロワーのエッジスワイプで開くジェスチャー（`gesturesEnabled`）は iOS 自身の
-  `interactivePopGestureRecognizer`（左端スワイプ ＝ 戻る）と衝突する**——ドロワー自体を
-  Android 限定に留めておく限りは問題にならない。
-- edge-to-edge レイアウト（root の `Box` が `WindowInsets.safeDrawing` の水平方向のみを適用し、
-  各ペインが残りの方向を自分で適用する）はそのまま持ち越せる——これは iOS 自身のセーフエリア
-  対応（ノッチ／Dynamic Island／ホームインジケータ）が必要とするのと同じ形である。
+iOS / iPadOS アプリは SwiftUI アプリなので、この Compose のレイアウトは適用されない。iOS のレイアウトは
+後述の「Apple ネイティブアプリ（SwiftUI）」を参照。
 
 ### 楽観的な既読/スターピン留め
 

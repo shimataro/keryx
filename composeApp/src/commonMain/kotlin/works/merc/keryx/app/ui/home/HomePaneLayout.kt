@@ -43,12 +43,9 @@ fun paneLayoutFor(availableWidth: Dp): PaneLayout = when {
 /**
  * Whether [layout] hosts the feed list as a modal navigation drawer rather than an on-screen pane.
  *
- * This is the seam a future iOS target branches at, and the reason it is a named function rather
- * than an inlined `layout != Triple`. A drawer is Android's idiom, not a universal narrow-layout
- * one: iOS/iPadOS collapse a NavigationSplitView's sidebar into a pushed navigation stack at a
- * compact width instead (Mail.app, NetNewsWire, Reeder). `paneLayoutFor` and `visiblePanes`'
- * Triple/Dual cases carry over to iPadOS unchanged (they map onto NavigationSplitView's three- and
- * two-column modes); only Single's presentation does not.
+ * It is a named function rather than an inlined `layout != Triple` because the drawer is a choice
+ * of presentation, not something the layout implies: it is Android's idiom, not a universal
+ * narrow-layout one.
  */
 fun feedListIsDrawer(layout: PaneLayout): Boolean = layout != PaneLayout.Triple
 

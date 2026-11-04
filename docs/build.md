@@ -187,9 +187,8 @@ not just iOS/iPadOS).
    Apple app see the same sync file as every other device. The Drive API and OAuth consent
    screen/scope from the "Google Drive" section above are shared too; nothing new to set up there.
 2. "Google Auth Platform" → "Clients" → "Create client" → application type **"iOS"**.
-   - Bundle ID: `works.merc.keryx` (the macOS app's; a future iOS app can reuse this client if it
-     ships under the same bundle ID, otherwise register a second "iOS" client for it once that's
-     decided).
+   - Bundle ID: `works.merc.keryx` (the macOS and iOS apps share this bundle ID, so one client
+     serves both).
    - App Store ID / Team ID are optional and can be filled in later.
 3. Copy the **Client ID** shown after creation (`NNNN-xxxx.apps.googleusercontent.com`) into
    `local.properties` (copy of [local.properties.example](../local.properties.example)) as

@@ -189,9 +189,8 @@ Dropbox と OneDrive は上記と同じ `local.properties` のキーを使う。
    画面／スコープの設定も共有されるので、新たに設定することはない。
 2. 「Google Auth Platform」→「クライアント」→「クライアントを作成」からアプリケーションの種類
    **「iOS」**を選ぶ。
-   - バンドル ID：`works.merc.keryx`（macOS 版のもの。将来の iOS 版も同じバンドル ID にするなら
-     このクライアントを共用できる。別のバンドル ID にする場合は、その時点で「iOS」クライアントを
-     もう一つ登録する）。
+   - バンドル ID：`works.merc.keryx`（macOS 版と iOS 版は同じバンドル ID なので、
+     1 つのクライアントを共用する）。
    - App Store ID・チーム ID は省略可（あとから追記できる）。
 3. 作成後に表示される **クライアント ID**（`NNNN-xxxx.apps.googleusercontent.com`）を
    `local.properties`（[local.properties.example](../local.properties.example) のコピー）の
