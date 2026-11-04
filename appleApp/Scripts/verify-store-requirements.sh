@@ -4,11 +4,20 @@
 # the iOS Simulator build and the macOS Release archive. See docs/build.md's "App Store submission
 # materials" for why each one is there.
 #
-# Usage: verify-store-requirements.sh <path to Keryx.app>
+# Usage: verify-store-requirements.sh [--mac-app-store] <path to Keryx.app>
+#
+# --mac-app-store also checks that a macOS app carries no self-updater, which App Review does not
+# allow (guideline 2.4.5(vii)). The entitlements are checked where the app is signed, since CI's
+# archive is unsigned and has none to read.
 set -euo pipefail
 
+mac_app_store=false
+if [ "${1:-}" = "--mac-app-store" ]; then
+    mac_app_store=true
+    shift
+fi
 if [ $# -ne 1 ] || [ ! -d "$1" ]; then
-    echo "usage: $0 <path to Keryx.app>" >&2
+    echo "usage: $0 [--mac-app-store] <path to Keryx.app>" >&2
     exit 2
 fi
 app="$1"
@@ -97,6 +106,15 @@ if [ "$platform" = "iOS" ]; then
     done
     [ -n "$(read_json "$info" "UISupportedInterfaceOrientations~iphone")" ] ||
         fail "iOS: UISupportedInterfaceOrientations~iphone is missing"
+fi
+
+if [ "$mac_app_store" = "true" ]; then
+    [ "$platform" = "macOS" ] || fail "--mac-app-store was given an iOS app"
+    for key in SUFeedURL SUPublicEDKey SUEnableInstallerLauncherService; do
+        [ -z "$(read_raw "$info" "$key")" ] || fail "$platform: Sparkle's $key must not be set"
+    done
+    [ ! -e "$app/Contents/Frameworks/Sparkle.framework" ] ||
+        fail "$platform: Sparkle.framework must not be embedded"
 fi
 
 if [ "$failures" -gt 0 ]; then

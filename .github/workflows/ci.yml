@@ -439,6 +439,17 @@ jobs:
           fi
           Scripts/verify-store-requirements.sh "$archive/Products/Applications/Keryx.app"
 
+      # The Mac App Store build is a target of its own that leaves Sparkle out, so a call site left
+      # outside its `#if` breaks only this one. Archived for the same reason as the step above.
+      - name: Verify SwiftUI Mac App Store archive
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/KeryxMacAppStore.xcarchive"
+          cd appleApp
+          xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 'generic/platform=macOS' \
+            -archivePath "$archive" CODE_SIGNING_ALLOWED=NO
+          Scripts/verify-store-requirements.sh --mac-app-store "$archive/Products/Applications/Keryx.app"
+
       - name: Upload test reports
         uses: actions/upload-artifact@v7
         if: always()
