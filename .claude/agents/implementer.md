@@ -12,7 +12,7 @@ RSS reader, Kotlin Multiplatform / Compose Multiplatform).
 - Local-first, no account required, multi-device sync via the user's own cloud
   storage (Dropbox / OneDrive / Google Drive — one connected at a time)
 - Targets: Compose Multiplatform UI on Windows / Linux / Android; a native SwiftUI app
-  (`appleApp/`) on macOS, with iOS in development. Both UIs share `:shared`.
+  (`appleApp/`) on macOS and iOS. Both UIs share `:shared`.
 - State management: androidx.lifecycle ViewModel + Koin, DB: SQLDelight (SQLite, FTS5),
   HTTP: Ktor, i18n: Compose Resources, HTML/XML parsing: ksoup.
 
