@@ -1309,30 +1309,8 @@ springing back, so the boundary is felt rather than the gesture simply doing not
 
 #### iOS
 
-`external-spec.md` plans iOS/iPadOS as Compose first, then native SwiftUI later. This section's
-model does not carry over unchanged:
-
-- **The drawer is Android's idiom, not a universal narrow-layout one.** iOS/iPadOS collapse a
-  `NavigationSplitView`'s sidebar into a pushed navigation stack at a compact width (Mail.app,
-  NetNewsWire, Reeder) instead — which is what this app did before the drawer, and what `git log`
-  still holds: `visiblePanes` returning `[FeedList]` at `Single` depth 1, `FeedListPane`'s own
-  notification bell, and `onEnterArticleList`, removed alongside it (the return ripple itself is unrelated and
-still exists today, at `HomePaneLayout.kt`'s `shouldFlashReturnedArticle`).
-  `paneLayoutFor` and `visiblePanes`' `Triple`/`Dual` cases carry over to iPadOS unchanged (they map
-  onto `NavigationSplitView`'s three- and two-column modes, and `Dual`'s permanent reading pane
-  matches iPad's own split view); only `Single`'s presentation does not.
-- **`hasNativeAppMenu` (see `platform/PlatformOs.kt`) is Android's own stand-in for "no native app
-  menu bar", not iOS's** — iOS is `false` there too, so the header `app_name`/settings-footer
-  decisions this flag now also drives need to be split out per-platform before iOS lands.
-- **`HomeBackAction.None` falling through to the OS has no iOS equivalent** — there is no
-  `OnBackPressedDispatcher`-like back gesture to fall through to, and no "exit the app" concept;
-  iOS's own back navigation is a UI element this codebase draws itself.
-- **The drawer's edge-swipe-to-open gesture (`gesturesEnabled`) would conflict with iOS's own
-  `interactivePopGestureRecognizer`** (left-edge swipe = back) — not a concern as long as the
-  drawer itself stays Android-only.
-- The edge-to-edge layout (root `Box` applying only `WindowInsets.safeDrawing`'s horizontal side,
-  each pane applying its own remaining side) is a clean carryover — it's the same shape iOS's own
-  safe-area handling needs (notch / Dynamic Island / home indicator).
+The iOS / iPadOS app is the SwiftUI app, so this Compose layout does not apply to it. See "Apple Native
+Apps (SwiftUI)" below for its own layout.
 
 ### Optimistic read/star pins
 

@@ -30,8 +30,8 @@
   開発には十分。JetBrains の
   [「Kotlin Multiplatform」プラグイン](https://plugins.jetbrains.com/plugin/14936-kotlin-multiplatform)
   は Community Edition でも導入できるが、その主眼は iOS 向けのプレビュー/実行/デバッグ支援
-  であり、本プロジェクトは iOS 未対応（[external-spec.ja.md](external-spec.ja.md) §2 参照）
-  のため現時点では必須ではない。Android 実機/エミュレータへのデプロイやレイアウトプレビュー
+  であり、本プロジェクトの iOS アプリは `appleApp/` の SwiftUI アプリで Xcode でビルドする
+  （[external-spec.ja.md](external-spec.ja.md) §2 参照）ため必須ではない。Android 実機/エミュレータへのデプロイやレイアウトプレビュー
   など Android 特化のツールは Android Studio に比べて弱いので、Android 側の作業が中心なら
   Android Studio を使う方がよい。
 - **[Visual Studio Code](https://code.visualstudio.com/)**: JetBrains 公式の "Kotlin by JetBrains" 拡張は、

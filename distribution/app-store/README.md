@@ -35,6 +35,7 @@ Two metadata rules (App Review Guidelines 2.3.7 and 2.3.10) shape the text:
 
 | Field | Value |
 | --- | --- |
+| App Store listing | <https://apps.apple.com/app/keryx-rss-reader/id6821582850> (Japan: <https://apps.apple.com/jp/app/keryx-rss-reader/id6821582850>) |
 | Support URL | <https://github.com/shimataro/keryx/issues> |
 | Marketing URL | <https://keryx.merc.works/> (Japanese: <https://keryx.merc.works/ja/>) |
 | Privacy Policy URL | <https://keryx.merc.works/privacy> (Japanese: <https://keryx.merc.works/ja/privacy>) |
