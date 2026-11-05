@@ -4,15 +4,16 @@
 # (optionally) submits it for review.
 #
 # Subcommands:
-#   next-build-number  Prints the next free CFBundleVersion for VERSION on iOS (one more than the
-#                      highest build already uploaded for it, or 1), and writes it to $GITHUB_OUTPUT
-#                      as `build_number` when that is set. Build numbers come from App Store Connect
-#                      rather than from a workflow run number, which restarts with every workflow.
+#   next-build-number  Prints the next free CFBundleVersion for VERSION on ASC_PLATFORM (one more
+#                      than the highest build already uploaded for it, or 1), and writes it to
+#                      $GITHUB_OUTPUT as `build_number` when that is set. Build numbers come from
+#                      App Store Connect rather than from a workflow run number, which restarts
+#                      with every workflow.
 #                      It runs before the build, so a bad API key, or a version already in review
 #                      or approved but not released, fails the job within a minute.
-#   submit             Waits for BUILD_NUMBER to finish processing, points the iOS App Store version
-#                      VERSION at it (creating or renaming the one editable version as needed, with
-#                      the release type RELEASE asks for), fills in "What's New" once a version has
+#   submit             Waits for BUILD_NUMBER to finish processing, points ASC_PLATFORM's App Store
+#                      version VERSION at it (creating or renaming the one editable version as
+#                      needed, with the release type RELEASE asks for), fills in "What's New" once a version has
 #                      already been released, and submits it for review when SUBMIT is true.
 #
 # Nothing here releases the app directly: with RELEASE=automatic App Store Connect releases the
@@ -23,6 +24,9 @@
 #   ASC_KEY_PATH    App Store Connect API key (.p8, App Manager role).
 #   ASC_KEY_ID      Its key ID.
 #   ASC_ISSUER_ID   The team's issuer ID.
+#   ASC_PLATFORM    IOS or MAC_OS. Every call below is limited to it, so each platform has its own
+#                   versions, build numbers and review submissions, and a version in review on one
+#                   does not hold back the other.
 #   VERSION         Marketing version, x.y.z (CFBundleShortVersionString).
 #   BUILD_NUMBER    submit only: the CFBundleVersion that was uploaded.
 #   SUBMIT          submit only: "true" to submit for review, "false" to stop once the build is
@@ -44,7 +48,6 @@ set -euo pipefail
 
 HOST="https://api.appstoreconnect.apple.com"
 BUNDLE_ID="works.merc.keryx"
-PLATFORM="IOS"
 PROCESSING_TIMEOUT_SECONDS=$((45 * 60))
 POLL_INTERVAL_SECONDS=30
 # altool's tokens live about five minutes; renew well before that.
@@ -71,11 +74,13 @@ esac
 : "${ASC_KEY_PATH:?ASC_KEY_PATH is not set}"
 : "${ASC_KEY_ID:?ASC_KEY_ID is not set}"
 : "${ASC_ISSUER_ID:?ASC_ISSUER_ID is not set}"
+: "${ASC_PLATFORM:?ASC_PLATFORM is not set}"
 : "${VERSION:?VERSION is not set}"
 [ -s "$ASC_KEY_PATH" ] || fail "App Store Connect API key not found: $ASC_KEY_PATH"
 [[ "$ASC_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || fail "Invalid App Store Connect key ID."
 [[ "$ASC_ISSUER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
   || fail "Invalid App Store Connect issuer ID."
+[[ "$ASC_PLATFORM" == "IOS" || "$ASC_PLATFORM" == "MAC_OS" ]] || fail "ASC_PLATFORM must be IOS or MAC_OS."
 # App Store versions take no pre-release suffix.
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Invalid version: '$VERSION' (expected x.y.z)."
 
@@ -155,13 +160,13 @@ app_id=$(jq -er --arg bundle "$BUNDLE_ID" \
   'first(.data[] | select(.attributes.bundleId == $bundle) | .id)' <<< "$RESPONSE") \
   || fail "No App Store Connect app with bundle ID $BUNDLE_ID (or the API key cannot see it)."
 
-# Reads the app's iOS App Store versions and fails if one is in review or approved but not yet
-# released (App Store Connect then takes no other version). Leaves the editable version, if any, in
+# Reads the app's App Store versions on ASC_PLATFORM and fails if one is in review or approved but
+# not yet released (App Store Connect then takes no other version). Leaves the editable version, if any, in
 # version_id / version_state / editable_version, preferring one named VERSION, and sets
 # released_before when some version has already been released.
 load_versions() {
   local id version state
-  api_all "/v1/apps/$app_id/appStoreVersions?filter[platform]=$PLATFORM&fields[appStoreVersions]=versionString,appVersionState,appStoreState&limit=200"
+  api_all "/v1/apps/$app_id/appStoreVersions?filter[platform]=$ASC_PLATFORM&fields[appStoreVersions]=versionString,appVersionState,appStoreState&limit=200"
   version_id=""
   version_state=""
   editable_version=""
@@ -189,7 +194,7 @@ load_versions() {
     (.attributes.appVersionState // .attributes.appStoreState)] | @tsv' <<< "$ALL")
 }
 
-builds_url="/v1/builds?filter[app]=$app_id&filter[preReleaseVersion.version]=$VERSION&filter[preReleaseVersion.platform]=$PLATFORM&fields[builds]=version,processingState&limit=200"
+builds_url="/v1/builds?filter[app]=$app_id&filter[preReleaseVersion.version]=$VERSION&filter[preReleaseVersion.platform]=$ASC_PLATFORM&fields[builds]=version,processingState&limit=200"
 
 if [ "$command" = "next-build-number" ]; then
   # Checked before the build too, so a version stuck in review fails the job in seconds.
@@ -247,7 +252,7 @@ load_versions
 
 if [ -z "$version_id" ]; then
   echo "Creating App Store version $VERSION."
-  api POST /v1/appStoreVersions "$(jq -cn --arg app "$app_id" --arg version "$VERSION" --arg platform "$PLATFORM" \
+  api POST /v1/appStoreVersions "$(jq -cn --arg app "$app_id" --arg version "$VERSION" --arg platform "$ASC_PLATFORM" \
     --arg release "$release_type" \
     '{data: {type: "appStoreVersions",
       attributes: {platform: $platform, versionString: $version, releaseType: $release},
@@ -315,10 +320,10 @@ fi
 # 5. Submit for review.
 submitted=false
 if [ "$SUBMIT" = "true" ]; then
-  api_all "/v1/reviewSubmissions?filter[app]=$app_id&filter[platform]=$PLATFORM&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES&limit=200"
+  api_all "/v1/reviewSubmissions?filter[app]=$app_id&filter[platform]=$ASC_PLATFORM&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES&limit=200"
   submission=$(jq -c 'first(.[]) // empty' <<< "$ALL")
   if [ -z "$submission" ]; then
-    api POST /v1/reviewSubmissions "$(jq -cn --arg app "$app_id" --arg platform "$PLATFORM" \
+    api POST /v1/reviewSubmissions "$(jq -cn --arg app "$app_id" --arg platform "$ASC_PLATFORM" \
       '{data: {type: "reviewSubmissions", attributes: {platform: $platform},
         relationships: {app: {data: {type: "apps", id: $app}}}}}')"
     submission_id=$(jq -er '.data.id' <<< "$RESPONSE")
@@ -354,7 +359,7 @@ fi
 # 6. Job summary.
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
-    echo "## App Store: Keryx $VERSION ($BUILD_NUMBER)"
+    echo "## App Store ($ASC_PLATFORM): Keryx $VERSION ($BUILD_NUMBER)"
     echo
     echo "- Built from: \`$SOURCE_SHA\`"
     if [ "$submitted" = "true" ]; then

@@ -19,7 +19,7 @@ A lightweight, simple RSS reader that provides the same feed subscription experi
 | Windows / Linux | ✅ Compose Multiplatform (current) |
 | Android | ✅ Compose Multiplatform (current; cloud sync supports Dropbox / OneDrive, plus Google Drive on any device with working Google Play services — installed, enabled and up to date — see §4 and [sync-architecture.md](sync-architecture.md); the F-Droid build contains no Play services and so has no Google Drive at all, and no in-app update — see §4 and §7) |
 | iOS / iPadOS | ✅ Native SwiftUI app (current; iOS / iPadOS 17 or later, distributed through the App Store), sharing its logic with the other platforms via `:shared` — no interim Compose build; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md) |
-| macOS | ✅ Native SwiftUI app (current; Apple Silicon, macOS 14 or later), sharing its logic via `:shared`. It replaced the Compose macOS build, which is no longer released and remains for internal verification only; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md) |
+| macOS | ✅ Native SwiftUI app (current; Apple Silicon, macOS 14 or later, distributed through the Mac App Store and as a Developer ID build on GitHub Releases), sharing its logic via `:shared`. It replaced the Compose macOS build, which is no longer released and remains for internal verification only; see "Apple Native Apps (SwiftUI)" in [app-architecture.md](app-architecture.md) |
 
 ## 3. Supported Formats
 
@@ -90,7 +90,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
   find the drawer themselves
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update on Windows, Linux, and Android (download and install, not just a link to the release
-  page), and through Sparkle on macOS. Updates are surfaced via the notification-center bell, desktop
+  page), and through Sparkle in the macOS build from GitHub Releases; the Mac App Store build has no
+  update controls, since the App Store updates it. Updates are surfaced via the notification-center bell, desktop
   task tray, and application menu; clicking any of those routes opens Settings ▸ Updates. Every
   download and install is an explicit user action; downloaded files are verified against the GitHub
   release's SHA-256 digest (EdDSA signature on macOS) before installation. Install forms the app
@@ -312,7 +313,8 @@ the menu bar, context menus, tray menu, and file dialogs. Platform-specific choi
 
 - No server operated by the developer, no account registration required. Keryx contacts only
   servers directly relevant to the feature in use (each subscribed feed and its favicon, GitHub
-  for update checks/downloads, and — only if connected — Dropbox/OneDrive/Google Drive), always
+  for update checks/downloads except in the builds a store updates — App Store, Mac App Store,
+  Google Play, F-Droid — and, only if connected, Dropbox/OneDrive/Google Drive), always
   straight from the device; see [PRIVACY.md](../PRIVACY.md)'s "Network requests this app makes"
   for the full list. Keryx's own communication
   (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched

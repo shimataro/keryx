@@ -4,7 +4,7 @@
 
 ---
 
-**発効日:** 2026-10-11 · **対象：** Keryx（デスクトップ版・Android 版・iOS / iPadOS 版）
+**発効日:** 2026-11-05 · **対象：** Keryx（Mac App Store 版を含むデスクトップ版・Android 版・iOS / iPadOS 版）
 
 Keryx はローカルファーストの RSS リーダーです。このドキュメントでは、アプリが扱う
 データの内容と行き先を明確に説明します。Keryx はオープンソースであり、以下の内容は
@@ -151,8 +151,9 @@ Keryx が通信する相手は、使用している機能に直接関係する�
   ダウンロードする際は `github.com` および `*.githubusercontent.com`） — アップデートの有無を
   通知し、インストールを選んだ場合はその取得のために使用します。アカウント情報・テレメトリ・
   識別子は一切送信しません。Android で Google Play からインストールされた場合、この確認は
-  行われません（自己更新チェックは GitHub 配布版にのみ意味があるためです）。iOS / iPadOS では
-  Keryx が GitHub に通信することは一切なく、アップデートは App Store が届けます。macOS では代わりに、
+  行われません（自己更新チェックは GitHub 配布版にのみ意味があるためです）。iOS / iPadOS と
+  Mac App Store の macOS アプリでは Keryx が更新の確認や取得のために GitHub へ通信することはなく、アップデートは App Store が
+  届けます。GitHub Releases の macOS アプリでは代わりに、
   最新リリースのアップデートフィード（`appcast.xml`、`github.com` から）を読みます——設定の「一般」で
   オフにしない限り自動的に、または「アップデートを確認…」を選んだときに——そして、インストールを
   選んだ場合にのみ、そこに示されたアップデートを `github.com` / `*.githubusercontent.com` から

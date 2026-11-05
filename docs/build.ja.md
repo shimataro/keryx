@@ -338,11 +338,14 @@ xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGN
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
+xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 'generic/platform=macOS' \
+  -archivePath "$RUNNER_TEMP/KeryxMacAppStore.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
 
 Debug ビルドはアクティブなアーキテクチャしかコンパイルせず、Release 限定の設定も通らない。そのため、
 それらをリリースより前に通すのは署名なしの Release archive の役目になる：macOS の x86_64 除外と
-`SPARKLE_PUBLIC_ED_KEY`（アーカイブしたアプリの `SUPublicEDKey` が空ならジョブは失敗する）。署名と公証は
+`SPARKLE_PUBLIC_ED_KEY`（アーカイブしたアプリの `SUPublicEDKey` が空ならジョブは失敗する）。`KeryxMacAppStore` の
+アーカイブがあるのは、このターゲットが Sparkle を含まず、`#if` の外に残った updater の呼び出しがこのビルドだけを壊すため。署名と公証は
 引き続きリリースジョブでのみ行う（「リリース（CD）」の「SwiftUI macOS アプリ」を参照）。
 
 `KeryxTests`（Swift Testing、単体で完結するテストバンドル）も macOS 上で同じ `CODE_SIGNING_ALLOWED=NO` の
@@ -358,6 +361,8 @@ iOS / Mac App Store 版の掲載文、App Store Connect への回答、審査メ
 ビルドしたアプリにプライバシーマニフェストの Required Reason API の宣言、ATS の例外（`NSAllowsArbitraryLoads`。
 `NSAllowsArbitraryLoadsInWebContent` は無いこと）、`ITSAppUsesNonExemptEncryption = NO`、（iOS では）iPad の 4 方向が
 そろっていなければ失敗する。`build-apple` ジョブが、iOS シミュレーター向けのビルドと macOS の Release アーカイブに対して実行する。
+`--mac-app-store` を付けると、Sparkle の Info.plist キーや埋め込まれた `Sparkle.framework` があっても失敗する。同ジョブは
+`KeryxMacAppStore` のアーカイブに対してこの形で実行する。
 
 ## パッケージング
 
@@ -1342,12 +1347,10 @@ Play Console の UI 操作（または自前の API 呼び出し）になる。
 
 ### App Store への公開
 
-iOS アプリは `.github/workflows/publish-app-store.yml` を手動で実行して App Store の審査に出す
-（Actions → "Publish iOS app to the App Store" → Run workflow）。`release.yml` は App Store には何もしない。
-Mac App Store は対象外である。そのビルドでは、先に自己アップデーターを取り除く必要がある
-（[`distribution/app-store/README.md`](../distribution/app-store/README.md) を参照）。
+iOS アプリと Mac App Store ビルドは、`.github/workflows/publish-app-store.yml` をプラットフォームごとに手動で実行して
+App Store の審査に出す（Actions → "Publish to the App Store" → Run workflow）。`release.yml` は App Store には何もしない。
 
-**GitHub Release が先。** App Store の審査には 1 週間以上かかることがあるので、待つのは iOS だけにする:
+**GitHub Release が先。** App Store の審査には 1 週間以上かかることがあるので、待つのはそのストアだけにする:
 
 1. いつもどおり GitHub Release `v<version>` を公開する。ほかのプラットフォームは `release.yml` が出す。
 2. `version` にそのバージョンを指定してワークフローを実行する。`ref` を空のままにすると、tag `v<version>` を
@@ -1361,14 +1364,15 @@ Mac App Store は対象外である。そのビルドでは、先に自己アッ
 環境で動くため、フィーチャーブランチやプルリクエストから始めた実行や、それらをビルドしようとする実行は、
 何もビルドしないうちに拒否する。
 
-審査待ち、審査中、または承認済みで未公開のバージョンがある間は、App Store Connect はほかの iOS のバージョンを
-受け付けないので、次のバージョンはそのバージョンが公開されるまで待つ。GitHub Release はそのあいだも先に進めてよく、
-iOS は今のバージョンが出てから最新のものに追いつく。
+審査待ち、審査中、または承認済みで未公開のバージョンがある間は、App Store Connect はそのプラットフォームのほかの
+バージョンを受け付けないので、次のバージョンはそのバージョンが公開されるまで待つ。もう一方のプラットフォームは止まらない。
+GitHub Release はそのあいだも先に進めてよく、そのプラットフォームは今のバージョンが出てから最新のものに追いつく。
 
 入力:
 
 | 入力 | 意味 |
 | --- | --- |
+| `platform` | `ios`（既定）または `macos`（Mac App Store ビルド） |
 | `ref` | ビルドするブランチ、tag、またはコミット。バージョンブランチ上にあること。空（既定）なら tag `v<version>` をビルドする |
 | `version` | App Store のバージョン（x.y.z）。`ref` が空のときにビルドする tag の名前にもなる |
 | `submit` | オン（既定）: 審査に提出する。オフ: ビルドのアップロードと関連付けだけを行い、提出は App Store Connect で行う |
@@ -1378,12 +1382,14 @@ iOS は今のバージョンが出てから最新のものに追いつく。
 API 呼び出しを確かめる方法は本番の実行しかない。`submit` がオフなら誤りがあっても審査の手前で止まり、`manual` なら
 承認されたビルドも App Store Connect で公開するまで出ない。App Store Connect でバージョンとそのビルドを確認してから、
 そこで提出する（または `submit` をオンにしてもう一度実行する）。
+`ref` を `v0` にすれば、GitHub Release を作る前にこのリハーサルができる。
 
 **1 回の実行で行うこと**（スクリプトは `.github/scripts/` にあり、`ref` ではなくワークフロー自身の ref から取る）:
 
 1. `ref` のコードを一切実行しない最初のジョブが、`ref` がバージョンブランチ上にあること（`ref` が空なら
    tag `v<version>` があること）を確認し、そのコミットに対する GitHub のリリースノートを生成する（後述の
-   「新機能」に使う）。ビルドするジョブは、そのコミットをそのままチェックアウトする。
+   「新機能」に使う）。`macos` では `ref` に `KeryxMacAppStore` ターゲットがあることも確認し、Mac App Store 版より
+   前の tag は何もビルドしないうちに拒否する。ビルドするジョブは、そのコミットをそのままチェックアウトする。
 2. 下記の Secrets がすべて設定されているかを確認し（`check-release-config.sh`）、証明書を使い捨てのキーチェーンに
    取り込み、プロファイルと API キーをランナーの一時ディレクトリに書く（どれも最後に削除する）。
 3. `app-store-connect.sh next-build-number` がビルド番号を決める: そのバージョンについて App Store Connect にある
@@ -1393,9 +1399,12 @@ API 呼び出しを確かめる方法は本番の実行しかない。`submit` �
 4. `package-ios-app-store.sh` が手動署名でアプリを archive・export し（Release、`generic/platform=iOS`、
    `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` は入力から設定）、export したアプリを
    `verify-store-requirements.sh` と署名（Team ID、Apple Distribution）で確認し、`altool --validate-app` を
-   実行してからアップロードする。
-5. `app-store-connect.sh submit` が、App Store Connect でのビルドの処理が終わるのを待ち（最長 45 分）、iOS の
-   App Store バージョンをそのビルドに向ける: `version` という名前のバージョンが編集可能ならそれを、なければ
+   実行してからアップロードする。`macos` では `package-mac-app-store.sh` が `KeryxMacAppStore` スキームと
+   `generic/platform=macOS` で同じことを行う: export するのはインストーラ証明書で署名した `.pkg` なので、その署名を確認し、
+   パッケージ内のアプリを `--mac-app-store` 付きで確認し、さらにサンドボックスが有効で temporary-exception の
+   エンタイトルメントがないことも確認する。
+5. `app-store-connect.sh submit` が、App Store Connect でのビルドの処理が終わるのを待ち（最長 45 分）、その
+   プラットフォームの App Store バージョンをそのビルドに向ける: `version` という名前のバージョンが編集可能ならそれを、なければ
    編集可能な唯一のバージョン（App Store Connect では 1 つしか持てない）を `version` に改名して、それもなければ
    新しく作って使う。それまで関連付けられていたビルドは置き換わる。「新機能」は、すでに公開したバージョンが
    ある場合にだけ入れる（App Store Connect では、アプリの最初のバージョンにこの欄がない）。文面は最初のジョブが
@@ -1425,13 +1434,20 @@ API 呼び出しを確かめる方法は本番の実行しかない。`submit` �
 3. developer.apple.com → Profiles で、その証明書を使う `works.merc.keryx` 向けの iOS **App Store Connect** 配布用
    プロファイルを作り（例: "Keryx iOS App Store"。スクリプトが名前に受け付けるのは英数字、空白、`.`、`_`、`-`）、
    `.mobileprovision` をダウンロードする。
-4. リポジトリの Secrets を設定する:
+4. Mac App Store 向けには、**Mac Installer Distribution** 証明書も同じ手順で作って `.p12` に書き出し、Apple Distribution
+   証明書を使う `works.merc.keryx` 向けの **Mac App Store Connect** 配布用プロファイルも作る（名前の規則は同じ。
+   `.provisionprofile` をダウンロードする）。Apple Distribution 証明書と API キーは iOS と共用する。
+   App Store Connect のアプリに macOS を先に追加しておくこと。追加するとユニバーサル購入になり、macOS だけを外せなくなる。
+5. リポジトリの Secrets を設定する:
 
 | Secret | 内容 |
 | --- | --- |
 | `APPLE_DISTRIBUTION_CERT_P12` | Apple Distribution 証明書（秘密鍵つき）の `.p12` を base64 にしたもの（`base64 -i certificate.p12`） |
 | `APPLE_DISTRIBUTION_CERT_PASSWORD` | `.p12` を書き出したときのパスワード |
 | `APPLE_APP_STORE_PROVISIONING_PROFILE` | iOS の App Store Connect 配布用プロファイルを base64 にしたもの |
+| `APPLE_MAC_APP_STORE_PROVISIONING_PROFILE` | Mac の App Store Connect 配布用プロファイルを base64 にしたもの（`macos` のみ） |
+| `APPLE_MAC_INSTALLER_CERT_P12` | Mac Installer Distribution 証明書（秘密鍵つき）の `.p12` を base64 にしたもの（`macos` のみ） |
+| `APPLE_MAC_INSTALLER_CERT_PASSWORD` | その `.p12` を書き出したときのパスワード（`macos` のみ） |
 | `APP_STORE_CONNECT_KEY` | App Manager キーの `AuthKey_<id>.p8` のテキスト（`APPLE_NOTARY_KEY` と同じく、崩れた改行は復元する） |
 | `APP_STORE_CONNECT_KEY_ID` | そのキーの ID |
 

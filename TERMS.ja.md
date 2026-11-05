@@ -2,7 +2,7 @@
 
 [English](TERMS.md)
 
-**発効日:** 2026-10-11 · **対象：** Keryx（デスクトップ版・Android 版・iOS / iPadOS 版）
+**発効日:** 2026-11-05 · **対象：** Keryx（Mac App Store 版を含むデスクトップ版・Android 版・iOS / iPadOS 版）
 
 この利用規約（以下「本規約」）は、無料・オープンソース・ローカルファーストな RSS
 リーダー「Keryx」の利用条件を定めるものです。データの扱いについては
@@ -57,7 +57,7 @@ Inc.、Microsoft Corporation、Google LLC）の商標です。これらは接続
 
 ## Apple の App Store から入手した場合
 
-Keryx を Apple の App Store（iOS・iPadOS）からダウンロードした場合、本規約はあなたと開発者の
+Keryx を Apple の App Store（iOS・iPadOS・macOS）からダウンロードした場合、本規約はあなたと開発者の
 間のものであり、Apple は当事者ではありません。あわせて次の事項が適用されます。
 
 - Apple は Keryx およびそのコンテンツについて責任を負わず、保守やサポートを提供する義務も

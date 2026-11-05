@@ -17,8 +17,10 @@ handles and where it goes.
 Keryx is still pre-1.0 and under active development. Only the **latest released
 version** receives security fixes; there are no long-term support branches, and
 older releases are not patched. If you are affected by a security issue, first
-update to the newest release from the
-[Releases page](https://github.com/shimataro/keryx/releases).
+update to the newest release: through the store you installed Keryx from (such as the App Store,
+the Mac App Store, Google Play or F-Droid), otherwise from the
+[Releases page](https://github.com/shimataro/keryx/releases). A store can offer a new release
+later than the Releases page, while it is reviewed or built there.
 
 | Version | Supported |
 | --- | --- |
@@ -106,12 +108,13 @@ Keryx is designed to minimize its attack surface:
   your device and the provider — no credentials pass through any developer server.
 - **Local data** (subscriptions, cached articles, settings) stays on your device
   unless you explicitly enable cloud sync.
-- **The macOS app is signed with a Developer ID certificate and notarized by Apple**, and runs in
-  the App Sandbox with the Hardened Runtime. Its updates come from an update feed attached to each
-  GitHub release (the Sparkle framework): before installing one, the app checks the archive's EdDSA
+- **The macOS app from GitHub Releases is signed with a Developer ID certificate and notarized by
+  Apple**, and runs in the App Sandbox with the Hardened Runtime. Its updates come from an update
+  feed attached to each GitHub release (the Sparkle framework): before installing one, the app checks the archive's EdDSA
   signature against the public key built into the app, so an update is accepted only if it was
   signed with the release signing key — a compromised GitHub account alone cannot substitute one.
-  The bullets below describe the in-app updater of the other builds (Windows, Linux, Android, and
+  The Mac App Store build also runs in the App Sandbox, but contains no updater: the App Store
+  delivers its updates. The bullets below describe the in-app updater of the other builds (Windows, Linux, Android, and
   the earlier non-native macOS app, which last uses it to replace itself with the native one).
 - **In-app update downloads are verified, but not authenticated to a publisher
   identity.** When Keryx offers to download and install an update in-app (see

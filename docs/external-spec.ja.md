@@ -19,7 +19,7 @@
 | Windows / Linux | ✅ Compose Multiplatform（現行） |
 | Android | ✅（Compose Multiplatform、現行。クラウド同期は Dropbox / OneDrive に対応。Google Play 開発者サービスがインストール済みかつ有効かつ最新の端末では Google Drive も利用可能。§4 および [sync-architecture.ja.md](sync-architecture.ja.md) 参照。F-Droid 版は Play 開発者サービスを含まないため Google Drive が一切無く、アプリ内アップデートも無い — §4 と §7 参照） |
 | iOS / iPadOS | ✅ ネイティブ SwiftUI アプリ（現行。iOS / iPadOS 17 以降、App Store で配布）。ロジックは `:shared` で他プラットフォームと共有し、Compose 版は挟まない。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照 |
-| macOS | ✅ ネイティブ SwiftUI アプリ（現行。Apple Silicon、macOS 14 以降）。ロジックは `:shared` で共有する。Compose 版 macOS ビルドに代わるもので、Compose 版はもうリリースせず内部の確認用としてのみ残す。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照 |
+| macOS | ✅ ネイティブ SwiftUI アプリ（現行。Apple Silicon、macOS 14 以降、Mac App Store と GitHub Releases（Developer ID 署名）で配布）。ロジックは `:shared` で共有する。Compose 版 macOS ビルドに代わるもので、Compose 版はもうリリースせず内部の確認用としてのみ残す。[app-architecture.ja.md](app-architecture.ja.md) の「Apple ネイティブアプリ（SwiftUI）」参照 |
 
 ## 3. 対応フォーマット
 
@@ -89,7 +89,8 @@ Google Play 開発者サービスがインストール済みかつ有効かつ�
 - フィード健全性管理: 301/308 は購読 URL を自動更新（通知）、410 Gone は通知センターに警告、
   連続エラーはフィード一覧にインジケータ表示
 - アプリ内アップデート（リリースページへのリンクだけでなく、ダウンロード＋インストールまで）。
-  Windows / Linux / Android に対応し、macOS では Sparkle 経由で更新する。更新は通知センターのベル、
+  Windows / Linux / Android に対応し、GitHub Releases の macOS ビルドでは Sparkle 経由で更新する。Mac App Store
+  ビルドは App Store が更新するので、更新の操作を持たない。更新は通知センターのベル、
   デスクトップのタスクトレイ、アプリメニューから提示され、いずれの経路を選んでも設定 ▸ アップデートを
   開く。ダウンロードとインストールは常に個別の明示的なユーザー操作であり、ダウンロードしたファイルは
   インストール前に GitHub リリースの SHA-256 ダイジェスト（macOS では EdDSA 署名）で検証する。
@@ -305,8 +306,9 @@ macOS のフラットな見た目を共有する。Android 12+ では Material Y
 ## 10. プライバシー・セキュリティ
 
 - 開発者が運営するサーバーはなく、アカウント登録も不要。Keryx が通信するのは利用中の機能に直接
-  関係するサーバーのみ（購読中の各フィードとその favicon、更新チェック/ダウンロード用の
-  GitHub、接続している場合のみ Dropbox / OneDrive / Google Drive）で、常に端末から直接行う——
+  関係するサーバーのみ（購読中の各フィードとその favicon、更新チェック/ダウンロード用の GitHub（ストアが
+  更新するビルド — App Store・Mac App Store・Google Play・F-Droid — を除く）、接続している場合のみ
+  Dropbox / OneDrive / Google Drive）で、常に端末から直接行う——
   完全な一覧は [PRIVACY.ja.md](../PRIVACY.ja.md)「アプリが行う通信」を参照。
   Keryx 自身の通信（クラウド同期・更新チェック・
   更新ダウンロード）は常に HTTPS を使用する。購読フィードは、URL が明示的に `http://` である場合

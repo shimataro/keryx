@@ -112,8 +112,8 @@ func feedListInsertTarget(
 /// the user changes the setting, so an absent key means the system default (enabled, 0.5 s). iOS
 /// has no such setting, so it always gets that default without reading anything: these keys are
 /// written by the system, not the app, which the privacy manifest's UserDefaults reason (CA92.1)
-/// does not cover. macOS still reads them — see the Mac App Store item in
-/// `distribution/app-store/README.md`.
+/// does not cover. The Mac App Store build skips the read for the same reason and uses the same
+/// default; only the macOS build from GitHub Releases reads them.
 ///
 /// - Parameter lookup: Reads one defaults key — injectable because every `UserDefaults` instance,
 ///   even a throwaway suite, also searches the global domain this reads, so a test could not
@@ -128,9 +128,10 @@ func springLoadingDelay(lookup: (String) -> Any? = systemSpringLoadingDefault) -
     return .milliseconds(Int((seconds * 1000).rounded()))
 }
 
-/// `springLoadingDelay`'s default lookup: the global defaults domain on macOS, nothing on iOS.
+/// `springLoadingDelay`'s default lookup: the global defaults domain on the macOS build from GitHub
+/// Releases, nothing on iOS or the Mac App Store build.
 private func systemSpringLoadingDefault(_ key: String) -> Any? {
-    #if os(macOS)
+    #if os(macOS) && !MAC_APP_STORE
     UserDefaults.standard.object(forKey: key)
     #else
     nil

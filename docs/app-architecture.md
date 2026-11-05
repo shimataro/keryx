@@ -1815,7 +1815,9 @@ only the feedback is per UI, and on macOS it follows the source-list conventions
   never taken for a reorder.
 - Feedback: an insertion line between rows (indented by the outline itself), an accent highlight on
   a folder, "No folder" or tag row a feed is dropped onto, `.forbidden` wherever the shared rules
-  resolve no action, and spring-loaded folders that follow the system's spring-loading setting.
+  resolve no action, and spring-loaded folders that follow the system's spring-loading setting (the
+  Mac App Store build always uses the system default, 0.5 s — reading that setting is not covered by
+  its privacy manifest).
 
 ### Sidebar (iOS)
 
