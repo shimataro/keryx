@@ -1712,7 +1712,8 @@ override, stays out of the template.
   (`$(AppIdentifierPrefix)works.merc.keryx`, the Data Protection Keychain access group — see
   "Distribution and coexistence" above). iOS and `KeryxMacAppStore` sign with it; the `Keryx`
   target's macOS build signs with `Keryx/Keryx-macOS.entitlements` instead. **A sandboxed
-  entitlement can only be signed by a real Apple Development/Developer ID identity and team** —
+  entitlement can only be signed by a real identity and team** — Apple Development (local builds),
+  Apple Distribution (the App Store builds) or Developer ID Application (the Developer ID build);
   ad-hoc signing (`CODE_SIGN_IDENTITY=-`) fails even under `CODE_SIGN_STYLE=Manual` ("requires a
   provisioning profile"), so there is no way to produce a runnable, entitled build without one.
   `Config/Shared.xcconfig` sets ad-hoc/no-team defaults and then `#include?`s a gitignored

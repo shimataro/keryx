@@ -1653,8 +1653,9 @@ App Store ビルドへ渡ってはならない設定は、テンプレートに�
   Data Protection Keychain のアクセスグループ。上の「配布と共存」参照）を宣言する。iOS と
   `KeryxMacAppStore` はこのファイルで署名し、`Keryx` ターゲットの macOS ビルドは代わりに
   `Keryx/Keryx-macOS.entitlements` で署名する。**サンドボックスの
-  エンタイトルメントは、実在する Apple Development / Developer ID の証明書とチームでしか署名できない**
-  ——アドホック署名（`CODE_SIGN_IDENTITY=-`）は `CODE_SIGN_STYLE=Manual` にしても失敗する
+  エンタイトルメントは、実在する証明書とチームでしか署名できない**——Apple Development（ローカルビルド）・
+  Apple Distribution（App Store ビルド）・Developer ID Application（Developer ID ビルド）のいずれかで、
+  アドホック署名（`CODE_SIGN_IDENTITY=-`）は `CODE_SIGN_STYLE=Manual` にしても失敗する
   （「requires a provisioning profile」）ので、チームが無い状態で実行可能なエンタイトルメント付きビルドを
   作る方法は無い。`Config/Shared.xcconfig` がアドホック・チーム無しの既定値を設定したうえで、Git 管理外の
   `Local.xcconfig`（見本は `Local.xcconfig.example`）を `#include?` するので、開発者自身のチームは
