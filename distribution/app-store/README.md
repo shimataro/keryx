@@ -157,7 +157,34 @@ To retake them:
 ### Mac
 
 Three per locale in `screenshots/<en-US|ja>/mac/`. App Store Connect takes 16:10 images only: 2880×1800, 2560×1600,
-1440×900 or 1280×800. Use the same feeds and the same content checks as above.
+1440×900 or 1280×800. These are 2880×1800: the main window alone, sized to 1440×900 points on a Retina display.
+
+| File | en-US | ja |
+| --- | --- | --- |
+| `1.png` | All Feeds, light, a NASA article with its photo open | All Feeds, light, a NAOJ news article with its photo open |
+| `2.png` | All Feeds, light, the Wikipedia featured article open | All Feeds, light, the Japanese Wikipedia featured article open |
+| `3.png` | All Feeds, dark, the Wikipedia picture of the day open | The Wikipedia feed, dark, a featured article open |
+
+To retake them:
+
+- Use the same kind of feeds and the same content checks as above, minus NASA's Image of the Day feed (it repeats the
+  NASA feed's posts without their pictures). The Mac's web view draws Japanese correctly, so the ja shots use
+  Japanese articles throughout. Check the article list as well as the opened article: JAXA's and NAOJ's lists carry
+  third-party brands now and then (a fashion label, a game), so pick a list that shows none.
+- Build the `KeryxMacAppStore` scheme in Release, so the shots show the Mac App Store build.
+- Never point it at your own data. Quit any running Keryx, then launch the build with a scratch data directory
+  inside the app's container (the sandbox allows nothing else), plus the language and theme:
+  `open -n --env "KERYX_DATA_DIR=$HOME/Library/Containers/works.merc.keryx/Data/tmp/keryx-screenshots" <Keryx.app> --args -AppleLanguages "(ja)" -AppleLocale ja_JP`,
+  after writing `{"notificationEnabled":false,"themeMode":"light"}` (or `"dark"`) to `local_settings.json` there.
+  Use the theme setting rather than the system appearance. Delete the directory when done.
+- Import the OPML through File ▸ Import OPML…; handing the file to `open` did not import it. Wait about 40 s for
+  the favicons, and click the new-articles pill to scroll to the top.
+- Set the window to 1440×900 points with System Events, and capture it without its shadow with
+  `screencapture -o -l <window id>` (the window id from `CGWindowListCopyWindowInfo`). Sidebar rows need a real mouse
+  click (a `CGEvent` posted to the HID tap); System Events' `click at` doesn't select them.
+- Take each shot from fresh data, so rows read for an earlier shot don't show up dimmed.
+- The capture keeps the window's transparent rounded corners. Flatten them before `optipng`:
+  `magick in.png -background white -alpha remove -alpha off PNG24:out.png`, with `black` for the dark shot.
 
 ## Before submitting
 
@@ -192,9 +219,8 @@ Three per locale in `screenshots/<en-US|ja>/mac/`. App Store Connect takes 16:10
   archive needs `dropbox.app.key`, `onedrive.client.id` and `googledrive.apple.client.id` in `local.properties`,
   or the matching environment variables (see [`docs/build.md`](../../docs/build.md)). Either way, check in the
   TestFlight build that Settings ▸ Cloud sync offers all three.
-- [ ] Screenshots: iPhone, iPhone Duo and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: take
-  them from the TestFlight build (see "Mac" under "Screenshots"), and upload them under the version's App Previews and
-  Screenshots ▸ macOS in App Store Connect.
+- [ ] Screenshots: iPhone, iPhone Duo, iPad and Mac are in `screenshots/` (see above). Upload the Mac ones under the
+  version's App Previews and Screenshots ▸ macOS in App Store Connect.
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
   2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first. The workflow pins
   its Xcode (`DEVELOPER_DIR` in `publish-app-store.yml`, kept in step with `release.yml`), so raise the pin when
