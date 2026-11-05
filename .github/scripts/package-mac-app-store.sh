@@ -30,8 +30,11 @@
 #                             keychain holds a single such certificate (as publish-app-store.yml's
 #                             does).
 #   INSTALLER_SIGNING_IDENTITY
-#                             The same for the installer package; defaults to "Mac Installer
-#                             Distribution".
+#                             The same for the installer package; defaults to "3rd Party Mac
+#                             Developer Installer", the name a Mac Installer Distribution
+#                             certificate carries. `xcodebuild -help` also lists a "Mac Installer
+#                             Distribution" selector, but with such a certificate in the keychain
+#                             the export fails with "No certificate for team ... matching".
 #   OAuth client ids (DROPBOX_APP_KEY, ONEDRIVE_CLIENT_ID, GOOGLE_DRIVE_APPLE_CLIENT_ID) are read
 #   from the environment by the Gradle build.
 #
@@ -53,7 +56,7 @@ fail() {
 : "${ASC_KEY_ID:?ASC_KEY_ID is not set}"
 : "${ASC_ISSUER_ID:?ASC_ISSUER_ID is not set}"
 signing_identity="${SIGNING_IDENTITY:-Apple Distribution}"
-installer_signing_identity="${INSTALLER_SIGNING_IDENTITY:-Mac Installer Distribution}"
+installer_signing_identity="${INSTALLER_SIGNING_IDENTITY:-3rd Party Mac Developer Installer}"
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Invalid version: '$VERSION' (expected x.y.z)."
 [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail "Invalid build number: '$BUILD_NUMBER'."
