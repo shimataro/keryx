@@ -2,7 +2,7 @@
 
 [日本語](PRIVACY.ja.md)
 
-**Effective date:** 2026-11-05 · **Applies to:** Keryx (desktop, Android, and iOS / iPadOS)
+**Effective date:** 2026-11-05 · **Applies to:** Keryx (desktop, including the Mac App Store build, Android, and iOS / iPadOS)
 
 Keryx is a local-first RSS reader. This document explains, plainly and completely,
 what data the app handles and where it goes. Keryx is open source — every claim
