@@ -1558,9 +1558,14 @@ around.
     and the app would fail to launch with "Library not loaded: Sparkle.framework".
 - **The Mac App Store and Developer ID builds are the same app to the system.** They share the
   bundle ID (`works.merc.keryx`, which App Store Connect also requires for iOS and macOS to share one
-  app record) and so the sandbox container, including the database. A new schema a Developer ID
-  build migrated that database to therefore stops an App Store build still waiting on review from
-  opening it (`DatabaseTooNewException`) until that build catches up.
+  app record) and so the sandbox container, including the database. Since macOS 14 the system
+  admits an app to its container by its code signature's designated requirement, and Xcode signs
+  the App Store and Developer ID variants with designated requirements that accept each other, so
+  either build opens that container without a prompt. A new schema a Developer ID build migrated
+  that database to therefore stops an App Store build still waiting on review from opening it
+  (`DatabaseTooNewException`) until that build catches up. A local Apple Development build has a
+  different designated requirement, so macOS asks before letting it into the container, and
+  denying that at launch keeps the build from launching.
 - **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
   share the bundle ID (`works.merc.keryx`) and the OPML document types. Launching one through
   LaunchServices (Finder, `open`) while the other is running just activates the running one.

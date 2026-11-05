@@ -1522,8 +1522,12 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
     iOS にしか合わず、そのままだと「Library not loaded: Sparkle.framework」で起動に失敗する。
 - **Mac App Store ビルドと Developer ID ビルドは、システムから見て同じアプリである。** Bundle ID（`works.merc.keryx`。
   App Store Connect で iOS と macOS を 1 つのアプリレコードにまとめるためにも必要）が同じなので、DB を含むサンドボックスの
-  コンテナも共有する。そのため Developer ID ビルドが DB を新しいスキーマへマイグレーションすると、審査待ちで古いままの
-  App Store ビルドは、追いつくまでその DB を開けない（`DatabaseTooNewException`）。
+  コンテナも共有する。macOS 14 以降、システムはコード署名の designated requirement によってアプリをコンテナへ入れるが、
+  Xcode は App Store 版と Developer ID 版を互いに受け入れ合う designated requirement で署名するので、どちらのビルドも
+  確認なしでそのコンテナを開ける。そのため Developer ID ビルドが DB を新しいスキーマへマイグレーションすると、審査待ちで
+  古いままの App Store ビルドは、追いつくまでその DB を開けない（`DatabaseTooNewException`）。ローカルの Apple Development
+  ビルドは designated requirement が異なるので、macOS はコンテナへ入れる前に確認を求め、起動時にそれを拒否するとそのビルドは
+  起動しない。
 - **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）と OPML の
   ドキュメントタイプを共有する。一方の起動中に LaunchServices（Finder、`open`）経由でもう一方を起動しても、起動中の
   アプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI アプリを検知できないので、
