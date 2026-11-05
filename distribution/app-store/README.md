@@ -174,7 +174,7 @@ To retake them:
 - Build the `KeryxMacAppStore` scheme in Release, so the shots show the Mac App Store build.
 - Never point it at your own data. Quit any running Keryx, then launch the build with a scratch data directory
   inside the app's container (the sandbox allows nothing else), plus the language and theme:
-  `open -n --env KERYX_DATA_DIR=~/Library/Containers/works.merc.keryx/Data/tmp/keryx-screenshots <Keryx.app> --args -AppleLanguages "(ja)" -AppleLocale ja_JP`,
+  `open -n --env "KERYX_DATA_DIR=$HOME/Library/Containers/works.merc.keryx/Data/tmp/keryx-screenshots" <Keryx.app> --args -AppleLanguages "(ja)" -AppleLocale ja_JP`,
   after writing `{"notificationEnabled":false,"themeMode":"light"}` (or `"dark"`) to `local_settings.json` there.
   Use the theme setting rather than the system appearance. Delete the directory when done.
 - Import the OPML through File ▸ Import OPML…; handing the file to `open` did not import it. Wait about 40 s for
