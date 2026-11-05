@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- macOS-only counterpart of Keryx.entitlements: keep the entries above the Sparkle block
-	     identical to it. The mach-lookup exception below is what lets a sandboxed Sparkle talk to
-	     its installer (https://sparkle-project.org/documentation/sandboxing/); iOS never links
-	     Sparkle, so it keeps the plain file. -->
+	<!-- The GitHub Release macOS build's counterpart of Keryx.entitlements: keep the entries above
+	     the Sparkle block identical to it. The mach-lookup exception below is what lets a sandboxed
+	     Sparkle talk to its installer (https://sparkle-project.org/documentation/sandboxing/); the
+	     iOS and Mac App Store builds never link Sparkle, so they keep the plain file. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 	<key>com.apple.security.network.client</key>

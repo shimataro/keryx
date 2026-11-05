@@ -65,7 +65,9 @@ struct KeryxApp: App {
                     oauthCoordinator: model.oauthCoordinator, opmlTransfer: opmlTransfer,
                     settingsNavigation: model.settingsNavigation
                 )
+                #if !MAC_APP_STORE
                 .environment(model.updater)
+                #endif
             }
         }
         .windowResizability(.contentSize)

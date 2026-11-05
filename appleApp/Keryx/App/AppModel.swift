@@ -33,7 +33,7 @@ final class AppModel {
     let oauthCoordinator = OAuthSessionCoordinator()
     /// The Settings window's selected tab — see `SettingsNavigation`'s own doc for why it lives here.
     let settingsNavigation = SettingsNavigation()
-    #if os(macOS)
+    #if os(macOS) && !MAC_APP_STORE
     /// Not behind `sdk`: it must work on the startup-failure screen too (a newer build having
     /// migrated the database is fixed by updating).
     let updater = AppUpdater()

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct GeneralSettingsTab: View {
     let preferences: PreferencesObservable
-    #if os(macOS)
+    #if os(macOS) && !MAC_APP_STORE
     @Environment(AppUpdater.self) private var updater
     #endif
 
@@ -37,7 +37,9 @@ struct GeneralSettingsTab: View {
             // app cannot launch hidden at all — the same gate as Compose's own `hasSystemTray`.
             #if os(macOS)
             Toggle(L("settings_start_minimized"), isOn: startMinimizedBinding(preferences.startMinimized))
+            #endif
 
+            #if os(macOS) && !MAC_APP_STORE
             // Sparkle keeps this setting itself (not `LocalSettings`); off the table while the
             // updater is unconfigured (no release key in this build).
             Toggle(L("apple_settings_auto_check_updates"), isOn: Binding(

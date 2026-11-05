@@ -13,6 +13,7 @@
 /appleApp/*.xcodeproj/
 /appleApp/Local.xcconfig
 /appleApp/Generated-Info.plist
+/appleApp/Generated-Info-MacAppStore.plist
 /appleApp/build/
 xcuserdata/
 DerivedData/

@@ -1496,10 +1496,14 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
   取得し（アセット名は変わっておらず、バンドルは Compose 版の更新機構の検査を通る——
   [background-update.ja.md](background-update.ja.md) の「アプリ内アップデート」参照）、SwiftUI アプリへ自分自身を置き換える。
   以降は Sparkle で更新する。データは元の場所に残り、引き継がれない（下記「両者はデータを共有しない」参照）。
-- SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも同じエンタイトルメントで
-  サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない。
-  - **Sparkle の現在の位置づけ。** macOS ビルドにのみリンクする（`project.yml` の package 依存は macOS に絞ってあり、iOS
-    ビルドからは見えない）。`Update/AppUpdater.swift` が包み、アプリが持つ 2 つの操作に使う：アプリメニューの
+- SwiftUI アプリは **Mac App Store と Developer ID**（GitHub Releases + Sparkle）の**両方**で配布する。両ビルドとも Sparkle の例外を除いて同じエンタイトルメントで
+  サンドボックス化し、コードパスを 1 本にする。Developer ID ビルドには Sparkle を加えるが、App Store ビルドには含めてはならない
+  （ガイドライン 2.4.5(vii)）。リンクはターゲット単位で決まり、ビルド構成では Sparkle を外せないので、App Store ビルドは
+  独立したターゲット `KeryxMacAppStore` とする（定義の共有方法は下記「`appleApp/` の Xcode プロジェクト」参照）。
+  - **Sparkle の現在の位置づけ。** `Keryx` ターゲットの macOS ビルドにのみリンクする（`project.yml` の package 依存は macOS に
+    絞ってあり、iOS ビルドからは見えず、`KeryxMacAppStore` は依存を宣言しない）。同ターゲットはソースから `Update/` を除外し、
+    コンパイル条件 `MAC_APP_STORE` が updater の呼び出し箇所を取り除くので、App Store ビルドに下記の 2 つの操作は無い。
+    `Update/AppUpdater.swift` が包み、アプリが持つ 2 つの操作に使う：アプリメニューの
     「アップデートを確認…」と、一般タブの自動確認トグル（設定そのものは `LocalSettings` ではなく Sparkle 自身の
     `UserDefaults` に置く）。`AppModel` は SDK の外で保持するので、起動失敗画面でもメニュー項目が使える——新しいビルドが
     すでにマイグレーションした DB は、更新すれば解決するため。
@@ -1511,10 +1515,19 @@ Kotlin コードとこれらのドキュメントを準備するうえで前提�
     `SUPublicEDKey`）を Release 構成にだけ設定する。これが空の間（Debug ビルド。`Local.xcconfig` で設定した場合を除く）は
     updater を開始しないので、アプリは更新確認のリクエストを一切出さず、2 つの操作はどちらも無効になる。フィードは最新の
     GitHub Release の `appcast.xml` アセット（`SUFeedURL`）。
-  - **サンドボックス。** macOS ビルドは `Keryx-macOS.entitlements` で署名する——iOS 用ファイルに、サンドボックス下の Sparkle が
-    インストーラーへ到達するための mach-lookup 例外を足したもの（Info.plist の `SUEnableInstallerLauncherService`）。2 つの
-    ファイルに共通する項目は揃えておくこと。macOS ビルドは実行時検索パスも `Contents/Frameworks` に設定している。既定値は
+  - **サンドボックス。** Developer ID ビルドは `Keryx-macOS.entitlements` で署名する——iOS 用ファイルに、サンドボックス下の Sparkle が
+    インストーラーへ到達するための mach-lookup 例外を足したもの（Info.plist の `SUEnableInstallerLauncherService`）。App Store
+    ビルドには例外が必要な Sparkle が無いので、iOS 用ファイルそのもので署名する。2 つの
+    ファイルに共通する項目は揃えておくこと。Developer ID ビルドは実行時検索パスも `Contents/Frameworks` に設定している。既定値は
     iOS にしか合わず、そのままだと「Library not loaded: Sparkle.framework」で起動に失敗する。
+- **Mac App Store ビルドと Developer ID ビルドは、システムから見て同じアプリである。** Bundle ID（`works.merc.keryx`。
+  App Store Connect で iOS と macOS を 1 つのアプリレコードにまとめるためにも必要）が同じなので、DB を含むサンドボックスの
+  コンテナも共有する。macOS 14 以降、システムはコード署名の designated requirement によってアプリをコンテナへ入れるが、
+  Xcode は App Store 版と Developer ID 版を互いに受け入れ合う designated requirement で署名するので、どちらのビルドも
+  確認なしでそのコンテナを開ける。そのため Developer ID ビルドが DB を新しいスキーマへマイグレーションすると、審査待ちで
+  古いままの App Store ビルドは、追いつくまでその DB を開けない（`DatabaseTooNewException`）。ローカルの Apple Development
+  ビルドは designated requirement が異なるので、macOS はコンテナへ入れる前に確認を求め、起動時にそれを拒否するとそのビルドは
+  起動しない。
 - **内部用の Compose macOS ビルドと SwiftUI アプリは同時に起動しない。** 両者は Bundle ID（`works.merc.keryx`）と OPML の
   ドキュメントタイプを共有する。一方の起動中に LaunchServices（Finder、`open`）経由でもう一方を起動しても、起動中の
   アプリがアクティブになるだけ。`./gradlew :composeApp:run` は LaunchServices を経由せず SwiftUI アプリを検知できないので、
@@ -1617,8 +1630,11 @@ Android は影響を受けない（`AuthorizationLauncher` の既定はシステ
 `appleApp/` は SwiftUI アプリを収め、`composeApp/`/`androidApp/` と並んで置かれている。`.xcodeproj` は
 コミットしない——**XcodeGen** が `appleApp/project.yml` から生成する（`xcodegen generate`）。これは
 SQLDelight・Compose Resources がリポジトリの他の場所で自分のソースファイルからコードを生成するのと
-同じ考え方である。ターゲットは `Keryx` の 1 つだけで両プラットフォームをカバーし
+同じ考え方である。`Keryx` の 1 ターゲットで iOS と Developer ID の macOS ビルドをカバーし
 （`supportedDestinations: [macOS, iOS]`）、同期を保つべき別の iOS ターゲットは存在しない。
+`KeryxMacAppStore` は同じ macOS アプリから Sparkle を除いたものである（上記「配布と共存」参照）。どちらも `project.yml` の
+ターゲットテンプレート `KeryxApp` から作り、自分だけのものを足す。そのため `[sdk=macosx*]` のエンタイトルメント指定のように
+App Store ビルドへ渡ってはならない設定は、テンプレートに置かない。
 
 - **`:shared` の取り込み**：`project.yml` の `dependencies:` が、あらかじめビルドした
   `KeryxShared.xcframework` をリンクする（`embed: false, link: true`——静的フレームワークには実行時に
@@ -1634,9 +1650,12 @@ SQLDelight・Compose Resources がリポジトリの他の場所で自分のソ�
   も同様で、`project.yml` に別の Debug 用スライスは配線していない。
 - **署名とエンタイトルメント**：`Keryx/Keryx.entitlements` は `app-sandbox`・`network.client`・
   `files.user-selected.read-write`・`keychain-access-groups`（`$(AppIdentifierPrefix)works.merc.keryx`。
-  Data Protection Keychain のアクセスグループ。上の「配布と共存」参照）を宣言する。**サンドボックスの
-  エンタイトルメントは、実在する Apple Development / Developer ID の証明書とチームでしか署名できない**
-  ——アドホック署名（`CODE_SIGN_IDENTITY=-`）は `CODE_SIGN_STYLE=Manual` にしても失敗する
+  Data Protection Keychain のアクセスグループ。上の「配布と共存」参照）を宣言する。iOS と
+  `KeryxMacAppStore` はこのファイルで署名し、`Keryx` ターゲットの macOS ビルドは代わりに
+  `Keryx/Keryx-macOS.entitlements` で署名する。**サンドボックスの
+  エンタイトルメントは、実在する証明書とチームでしか署名できない**——Apple Development（ローカルビルド）・
+  Apple Distribution（App Store ビルド）・Developer ID Application（Developer ID ビルド）のいずれかで、
+  アドホック署名（`CODE_SIGN_IDENTITY=-`）は `CODE_SIGN_STYLE=Manual` にしても失敗する
   （「requires a provisioning profile」）ので、チームが無い状態で実行可能なエンタイトルメント付きビルドを
   作る方法は無い。`Config/Shared.xcconfig` がアドホック・チーム無しの既定値を設定したうえで、Git 管理外の
   `Local.xcconfig`（見本は `Local.xcconfig.example`）を `#include?` するので、開発者自身のチームは
