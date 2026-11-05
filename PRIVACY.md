@@ -2,7 +2,7 @@
 
 [日本語](PRIVACY.ja.md)
 
-**Effective date:** 2026-10-11 · **Applies to:** Keryx (desktop, Android, and iOS / iPadOS)
+**Effective date:** 2026-11-05 · **Applies to:** Keryx (desktop, Android, and iOS / iPadOS)
 
 Keryx is a local-first RSS reader. This document explains, plainly and completely,
 what data the app handles and where it goes. Keryx is open source — every claim
@@ -149,8 +149,9 @@ developer:
   `*.githubusercontent.com` when you actually download an update) — so the app can tell you when an
   update is available, and fetch it if you choose to install it. No account information, telemetry, or
   identifiers are sent. On Android, this is skipped entirely when Keryx was installed through Google Play
-  (self-update only makes sense for the GitHub-distributed build); on iOS and iPadOS, Keryx never contacts
-  GitHub at all — the App Store delivers updates. On macOS, the check instead reads
+  (self-update only makes sense for the GitHub-distributed build); on iOS and iPadOS, and in the macOS app
+  from the Mac App Store, Keryx never contacts GitHub at all — the App Store delivers updates. In the macOS
+  app from GitHub Releases, the check instead reads
   the latest release's update feed (`appcast.xml`, from `github.com`) — automatically, unless you turn
   that off in Settings → General, or when you choose **Check for Updates…** — and downloads the update
   it lists from `github.com` / `*.githubusercontent.com` only if you choose to install it.

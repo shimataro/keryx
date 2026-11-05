@@ -2,7 +2,7 @@
 
 [日本語](TERMS.ja.md)
 
-**Effective date:** 2026-10-11 · **Applies to:** Keryx (desktop, Android, and iOS / iPadOS)
+**Effective date:** 2026-11-05 · **Applies to:** Keryx (desktop, including the Mac App Store build, Android, and iOS / iPadOS)
 
 These Terms of Service ("Terms") govern your use of Keryx, a free, open-source,
 local-first RSS reader. Please read them together with the
@@ -57,7 +57,7 @@ their use does not imply endorsement, sponsorship, or affiliation.
 
 ## If you got Keryx from Apple's App Store
 
-If you downloaded Keryx from Apple's App Store (iOS, iPadOS), these Terms are between you and the
+If you downloaded Keryx from Apple's App Store (iOS, iPadOS, macOS), these Terms are between you and the
 developer only, not Apple, and the following also apply:
 
 - Apple is not responsible for Keryx or its content, and has no obligation to provide maintenance

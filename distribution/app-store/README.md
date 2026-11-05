@@ -17,7 +17,7 @@ listing/
 └── ja/
     └── (same five files)
 screenshots/
-└── <en-US|ja>/<iphone|iphone-duo|ipad>/{1,2,3}.png   # see "Screenshots" below
+└── <en-US|ja>/<iphone|iphone-duo|ipad|mac>/{1,2,3}.png   # see "Screenshots" below
 ```
 
 Content derives from [`README.md`](../../README.md) and [`PRIVACY.md`](../../PRIVACY.md) (and their
@@ -154,11 +154,17 @@ To retake them:
   folder if the tags would otherwise fall off the bottom.
 - Shrink every file losslessly with `optipng -o7 -strip all` before committing.
 
+### Mac
+
+Three per locale in `screenshots/<en-US|ja>/mac/`. App Store Connect takes 16:10 images only: 2880×1800, 2560×1600,
+1440×900 or 1280×800. Use the same feeds and the same content checks as above.
+
 ## Before submitting
 
 - [ ] Publish the updated privacy policy and terms on <https://keryx.merc.works/privacy> and
   `/terms` (and the `/ja/` pages) — the repo's [`PRIVACY.md`](../../PRIVACY.md) /
-  [`TERMS.md`](../../TERMS.md) now cover iOS / iPadOS, the website copies live outside this repo.
+  [`TERMS.md`](../../TERMS.md) now cover iOS / iPadOS and the Mac App Store build, the website copies
+  live outside this repo.
 - [ ] Check that <https://keryx.merc.works/> does not push other platforms' downloads in a way that
   would make the App Store listing look like it promotes them (guideline 2.3.10).
 - [x] Brand names (guideline 5.2.1): checked against each company's terms on 2026-10-11. The app shows no
@@ -170,7 +176,7 @@ To retake them:
   and a trademark attribution in the description, which both descriptions carry
   (<https://developers.google.com/drive/branding>).
 - [x] Marketing version: the same number as the GitHub release (0.26.0 for the first App Store build) — not the
-  `0.1.0` left in `appleApp/project.yml`, which no release uses. The iOS build is uploaded and submitted by the
+  `0.1.0` left in `appleApp/project.yml`, which no release uses. Each platform's build is uploaded and submitted by the
   `publish-app-store.yml` workflow, given that number as its `version` input: it sets `MARKETING_VERSION`, picks
   an unused `CURRENT_PROJECT_VERSION`, and creates or renames the App Store Connect version to match (see
   "Publishing to the App Store" in [`docs/build.md`](../../docs/build.md)). The GitHub release is published
@@ -186,25 +192,21 @@ To retake them:
   archive needs `dropbox.app.key`, `onedrive.client.id` and `googledrive.apple.client.id` in `local.properties`,
   or the matching environment variables (see [`docs/build.md`](../../docs/build.md)). Either way, check in the
   TestFlight build that Settings ▸ Cloud sync offers all three.
-- [ ] Screenshots: iPhone, iPhone Duo and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: they are
-  listing assets, not part of the Mac App Store build, so take them when that build is ready, keep them in
-  `screenshots/<en-US|ja>/mac/`, and upload them under the version's App Previews and Screenshots ▸ macOS in
-  App Store Connect. The required sizes change with App Store Connect.
+- [ ] Screenshots: iPhone, iPhone Duo and iPad are in `screenshots/` (see above). The Mac ones are not taken yet: take
+  them from the TestFlight build (see "Mac" under "Screenshots"), and upload them under the version's App Previews and
+  Screenshots ▸ macOS in App Store Connect.
 - [ ] Build with the Xcode version App Store Connect currently requires — Xcode 26 or later since
   2026-04-28; Apple raises it periodically, so check its "Upcoming requirements" news first. The workflow pins
   its Xcode (`DEVELOPER_DIR` in `publish-app-store.yml`, kept in step with `release.yml`), so raise the pin when
   the requirement moves. The workflow validates every build with `altool --validate-app` before uploading it;
   for a hand-made archive, run **Validate App** in Organizer instead. Either must report no ITMS-90474
   (orientations) and no ITMS-91053 (privacy manifest) problems.
-- [ ] Mac App Store build only: remove the self-updater first — Sparkle, its `SU*` Info.plist keys,
-  the "Check for Updates…" menu item and automatic-check toggle, and the `mach-lookup` temporary
-  exception in `Keryx-macOS.entitlements` (guideline 2.4.5(vii)). When that lands, also note in
-  [`PRIVACY.md`](../../PRIVACY.md) that the Mac App Store build never contacts GitHub.
+- [x] Mac App Store build only: no self-updater (guideline 2.4.5(vii)). The `KeryxMacAppStore` target leaves out
+  Sparkle, its `SU*` Info.plist keys, the "Check for Updates…" menu item, the automatic-check toggle and the
+  `mach-lookup` temporary exception; [`PRIVACY.md`](../../PRIVACY.md) notes that this build never contacts GitHub.
 - [ ] Mac App Store build only: `springLoadingDelay` (`appleApp/Keryx/Home/FeedListDropPresentation.swift`)
   reads the system's spring-loading preference from the global defaults domain, which the privacy
   manifest's UserDefaults reason `CA92.1` (the app's own data) does not cover. If App Store Connect
   enforces required-reason declarations for the macOS upload, drop that read (use the 0.5 s default,
   as iOS does) rather than declaring a reason that does not fit.
-- [ ] Mac App Store build only: extend [`TERMS.md`](../../TERMS.md) / `TERMS.ja.md` to cover macOS —
-  their **Applies to** line and the "If you got Keryx from Apple's App Store" section name only
-  iOS / iPadOS — and update their effective date.
+- [x] Mac App Store build only: [`TERMS.md`](../../TERMS.md) / `TERMS.ja.md` cover macOS.

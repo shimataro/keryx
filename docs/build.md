@@ -340,13 +340,16 @@ xcodebuild -scheme Keryx -destination 'generic/platform=iOS Simulator' CODE_SIGN
 xcodebuild -scheme Keryx -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 xcodebuild archive -scheme Keryx -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$RUNNER_TEMP/Keryx.xcarchive" CODE_SIGNING_ALLOWED=NO
+xcodebuild archive -scheme KeryxMacAppStore -configuration Release -destination 'generic/platform=macOS' \
+  -archivePath "$RUNNER_TEMP/KeryxMacAppStore.xcarchive" CODE_SIGNING_ALLOWED=NO
 ```
 
 The Debug builds compile only the active architecture and never take the Release-only settings, so
 the unsigned Release archive is what exercises them before a release does: the macOS x86_64
 exclusion and `SPARKLE_PUBLIC_ED_KEY` (the job also fails if the archived app's `SUPublicEDKey` is
-empty). Signing and notarization still only run in the release job (see "SwiftUI macOS app" under
-"Release (CD)").
+empty). The `KeryxMacAppStore` archive is there because that target leaves Sparkle out, so an updater
+call site left outside its `#if` breaks only that build. Signing and notarization still only run in
+the release job (see "SwiftUI macOS app" under "Release (CD)").
 
 `KeryxTests` (Swift Testing, standalone/non-hosted) runs with the same `CODE_SIGNING_ALLOWED=NO` on
 macOS: it produces a `.xctest` bundle rather than a sandboxed app, so nothing needs signing.
@@ -361,7 +364,8 @@ CI guards the build settings those materials rely on: `appleApp/Scripts/verify-s
 fails when the built app lacks the privacy manifest's required-reason declarations, the ATS exception
 (`NSAllowsArbitraryLoads`, with `NSAllowsArbitraryLoadsInWebContent` absent), `ITSAppUsesNonExemptEncryption = NO`, or
 (iOS) the four iPad orientations. The `build-apple` job runs it on the iOS Simulator build and on the macOS Release
-archive.
+archive. With `--mac-app-store` it also fails on Sparkle's Info.plist keys or an embedded `Sparkle.framework`; the job
+runs it that way on the `KeryxMacAppStore` archive.
 
 ## Packaging
 
@@ -1347,13 +1351,12 @@ existing release once published.
 
 ### Publishing to the App Store
 
-The iOS app goes to App Store review through `.github/workflows/publish-app-store.yml`, run by hand
-(Actions → "Publish iOS app to the App Store" → Run workflow). `release.yml` does nothing for the App
-Store. The Mac App Store is not covered: that build needs the self-updater removed first (see
-[`distribution/app-store/README.md`](../distribution/app-store/README.md)).
+The iOS app and the Mac App Store build go to App Store review through
+`.github/workflows/publish-app-store.yml`, run by hand once per platform (Actions → "Publish to the
+App Store" → Run workflow). `release.yml` does nothing for the App Store.
 
 **The GitHub Release comes first.** App Store review can take a week or more, so it holds back only
-iOS:
+that store:
 
 1. Publish the GitHub Release `v<version>` as usual; `release.yml` ships every other platform.
 2. Run the workflow with `version` set to that version. With `ref` left empty it builds the tag
@@ -1368,13 +1371,15 @@ certificate and the App Manager key, so a run started from, or building, a featu
 request is refused before anything is built.
 
 While a version is waiting for review, in review, or approved but not released, App Store Connect
-takes no other iOS version, so the next one waits until that version is released. GitHub Releases go
-ahead meanwhile; iOS catches up with the latest one once the current version is out.
+takes no other version for that platform, so the next one waits until that version is released. The
+other platform is not held back. GitHub Releases go ahead meanwhile; the platform catches up with the
+latest one once the current version is out.
 
 Inputs:
 
 | Input | Meaning |
 | --- | --- |
+| `platform` | `ios` (default) or `macos`, the Mac App Store build |
 | `ref` | Branch, tag or commit to build; must be on a version branch. Empty (the default) builds the tag `v<version>` |
 | `version` | App Store version, x.y.z — also the name of the release tag built when `ref` is empty |
 | `submit` | On (default): submit for review. Off: upload and attach the build only, and leave the submission to App Store Connect |
@@ -1384,6 +1389,7 @@ Run the first one with `submit` off and `release` set to `manual`: nothing but a
 the build, the upload and the App Store Connect calls, so with `submit` off a mistake stops before
 review, and with `manual` an approved build still waits for a release in App Store Connect. Check the
 version and its build in App Store Connect, then submit it there (or run again with `submit` on).
+Setting `ref` to `v0` makes such a rehearsal possible before the GitHub Release exists.
 
 **What a run does** (scripts under `.github/scripts/`, taken from the workflow's own ref rather than
 from `ref`):
@@ -1401,9 +1407,13 @@ from `ref`):
 4. `package-ios-app-store.sh` archives and exports the app with manual signing (Release,
    `generic/platform=iOS`, `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` set from the inputs),
    checks the exported app with `verify-store-requirements.sh` and its signature (Team ID, Apple
-   Distribution), runs `altool --validate-app`, then uploads it.
+   Distribution), runs `altool --validate-app`, then uploads it. For `macos`,
+   `package-mac-app-store.sh` does the same with the `KeryxMacAppStore` scheme and
+   `generic/platform=macOS`: the export is a `.pkg` signed with the installer certificate, so it
+   checks that signature, then the app inside the package with `--mac-app-store`, and also that the
+   app is sandboxed and has no temporary-exception entitlement.
 5. `app-store-connect.sh submit` waits (up to 45 minutes) for App Store Connect to finish processing
-   the build, then points the iOS App Store version at it: the version named `version` if it is
+   the build, then points the platform's App Store version at it: the version named `version` if it is
    editable, otherwise the one editable version renamed to `version` (App Store Connect allows one),
    otherwise a new one. Whatever build was attached before is replaced. "What's New" is filled in
    only once some version has been released — App Store Connect has no such field for an app's
@@ -1436,13 +1446,22 @@ attached build.
 3. developer.apple.com → Profiles: create an iOS **App Store Connect** distribution profile for
    `works.merc.keryx` with that certificate (e.g. "Keryx iOS App Store"; the scripts accept letters,
    digits, spaces, `.`, `_` and `-` in its name) and download the `.mobileprovision`.
-4. Set the repository secrets:
+4. For the Mac App Store, also create a **Mac Installer Distribution** certificate the same way and
+   export it as `.p12`, and create a **Mac App Store Connect** distribution profile for
+   `works.merc.keryx` with the Apple Distribution certificate (the same naming rule applies; download
+   the `.provisionprofile`). The Apple Distribution certificate and the API key are shared with iOS.
+   macOS must have been added to the app in App Store Connect first; once it has, it cannot be removed
+   on its own, since the app becomes a universal purchase.
+5. Set the repository secrets:
 
 | Secret | Content |
 | --- | --- |
 | `APPLE_DISTRIBUTION_CERT_P12` | The Apple Distribution certificate with its private key, as `.p12`, base64-encoded (`base64 -i certificate.p12`) |
 | `APPLE_DISTRIBUTION_CERT_PASSWORD` | The password the `.p12` was exported with |
 | `APPLE_APP_STORE_PROVISIONING_PROFILE` | The iOS App Store Connect profile, base64-encoded |
+| `APPLE_MAC_APP_STORE_PROVISIONING_PROFILE` | The Mac App Store Connect profile, base64-encoded (`macos` only) |
+| `APPLE_MAC_INSTALLER_CERT_P12` | The Mac Installer Distribution certificate with its private key, as `.p12`, base64-encoded (`macos` only) |
+| `APPLE_MAC_INSTALLER_CERT_PASSWORD` | The password that `.p12` was exported with (`macos` only) |
 | `APP_STORE_CONNECT_KEY` | The text of the App Manager key's `AuthKey_<id>.p8` (line breaks are restored, as for `APPLE_NOTARY_KEY`) |
 | `APP_STORE_CONNECT_KEY_ID` | That key's ID |
 
