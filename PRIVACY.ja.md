@@ -152,7 +152,7 @@ Keryx が通信する相手は、使用している機能に直接関係する�
   通知し、インストールを選んだ場合はその取得のために使用します。アカウント情報・テレメトリ・
   識別子は一切送信しません。Android で Google Play からインストールされた場合、この確認は
   行われません（自己更新チェックは GitHub 配布版にのみ意味があるためです）。iOS / iPadOS と
-  Mac App Store の macOS アプリでは Keryx が GitHub に通信することは一切なく、アップデートは App Store が
+  Mac App Store の macOS アプリでは Keryx が更新の確認や取得のために GitHub へ通信することはなく、アップデートは App Store が
   届けます。GitHub Releases の macOS アプリでは代わりに、
   最新リリースのアップデートフィード（`appcast.xml`、`github.com` から）を読みます——設定の「一般」で
   オフにしない限り自動的に、または「アップデートを確認…」を選んだときに——そして、インストールを

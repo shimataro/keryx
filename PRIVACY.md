@@ -150,7 +150,7 @@ developer:
   update is available, and fetch it if you choose to install it. No account information, telemetry, or
   identifiers are sent. On Android, this is skipped entirely when Keryx was installed through Google Play
   (self-update only makes sense for the GitHub-distributed build); on iOS and iPadOS, and in the macOS app
-  from the Mac App Store, Keryx never contacts GitHub at all — the App Store delivers updates. In the macOS
+  from the Mac App Store, Keryx makes no update requests to GitHub — the App Store delivers updates. In the macOS
   app from GitHub Releases, the check instead reads
   the latest release's update feed (`appcast.xml`, from `github.com`) — automatically, unless you turn
   that off in Settings → General, or when you choose **Check for Updates…** — and downloads the update

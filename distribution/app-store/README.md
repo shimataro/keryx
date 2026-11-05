@@ -203,7 +203,7 @@ Three per locale in `screenshots/<en-US|ja>/mac/`. App Store Connect takes 16:10
   (orientations) and no ITMS-91053 (privacy manifest) problems.
 - [x] Mac App Store build only: no self-updater (guideline 2.4.5(vii)). The `KeryxMacAppStore` target leaves out
   Sparkle, its `SU*` Info.plist keys, the "Check for Updates…" menu item, the automatic-check toggle and the
-  `mach-lookup` temporary exception; [`PRIVACY.md`](../../PRIVACY.md) notes that this build never contacts GitHub.
+  `mach-lookup` temporary exception; [`PRIVACY.md`](../../PRIVACY.md) notes that this build makes no update requests to GitHub.
 - [x] Mac App Store build only: `springLoadingDelay` (`appleApp/Keryx/Home/FeedListDropPresentation.swift`)
   does not read the system's spring-loading preference from the global defaults domain, which the privacy
   manifest's UserDefaults reason `CA92.1` (the app's own data) does not cover; like iOS, it uses the 0.5 s
