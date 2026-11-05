@@ -126,6 +126,19 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+      # A release tag from before the Mac App Store target has no KeryxMacAppStore scheme, so its
+      # build would fail only after the Gradle build and a build number were spent. Read as text,
+      # so this job still runs none of `ref`'s code.
+      - name: Check that ref has the Mac App Store target
+        if: inputs.platform == 'macos'
+        env:
+          REF: ${{ inputs.ref || format('v{0}', inputs.version) }}
+        run: |
+          if ! grep -Eq '^  KeryxMacAppStore:$' appleApp/project.yml; then
+            echo "::error::'$REF' has no Mac App Store target (KeryxMacAppStore in appleApp/project.yml). Set ref to a release that includes the Mac App Store build, or a later commit."
+            exit 1
+          fi
+
       # Generated here rather than in the build job, which has no write access. The notes come from
       # generate-notes for the commit rather than from the GitHub Release, so a run does not depend
       # on the Release existing or on its body.

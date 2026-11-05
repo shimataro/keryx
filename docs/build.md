@@ -1396,7 +1396,9 @@ from `ref`):
 
 1. A first job, which runs none of `ref`'s code, checks that `ref` is on a version branch (and,
    with `ref` empty, that the tag `v<version>` exists) and generates GitHub's release notes for that
-   commit (for "What's New" below). The build job then checks out exactly that commit.
+   commit (for "What's New" below). For `macos` it also checks that `ref` has the `KeryxMacAppStore`
+   target, so a tag from before the Mac App Store build is refused before anything is built. The
+   build job then checks out exactly that commit.
 2. Checks that every secret below is set (`check-release-config.sh`), imports the certificate into a
    throwaway keychain, and writes the profile and the API key into the runner's temp directory (all
    removed at the end).
