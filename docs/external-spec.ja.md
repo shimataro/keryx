@@ -306,8 +306,9 @@ macOS のフラットな見た目を共有する。Android 12+ では Material Y
 ## 10. プライバシー・セキュリティ
 
 - 開発者が運営するサーバーはなく、アカウント登録も不要。Keryx が通信するのは利用中の機能に直接
-  関係するサーバーのみ（購読中の各フィードとその favicon、アプリ自身が更新する場合の更新チェック/
-  ダウンロード用の GitHub、接続している場合のみ Dropbox / OneDrive / Google Drive）で、常に端末から直接行う——
+  関係するサーバーのみ（購読中の各フィードとその favicon、更新チェック/ダウンロード用の GitHub（ストアが
+  更新するビルド — App Store・Mac App Store・Google Play・F-Droid — を除く）、接続している場合のみ
+  Dropbox / OneDrive / Google Drive）で、常に端末から直接行う——
   完全な一覧は [PRIVACY.ja.md](../PRIVACY.ja.md)「アプリが行う通信」を参照。
   Keryx 自身の通信（クラウド同期・更新チェック・
   更新ダウンロード）は常に HTTPS を使用する。購読フィードは、URL が明示的に `http://` である場合

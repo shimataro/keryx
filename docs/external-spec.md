@@ -313,7 +313,8 @@ the menu bar, context menus, tray menu, and file dialogs. Platform-specific choi
 
 - No server operated by the developer, no account registration required. Keryx contacts only
   servers directly relevant to the feature in use (each subscribed feed and its favicon, GitHub
-  for update checks/downloads where the app updates itself, and — only if connected — Dropbox/OneDrive/Google Drive), always
+  for update checks/downloads except in the builds a store updates — App Store, Mac App Store,
+  Google Play, F-Droid — and, only if connected, Dropbox/OneDrive/Google Drive), always
   straight from the device; see [PRIVACY.md](../PRIVACY.md)'s "Network requests this app makes"
   for the full list. Keryx's own communication
   (cloud sync, update checks, update downloads) always uses HTTPS; a subscribed feed is fetched
