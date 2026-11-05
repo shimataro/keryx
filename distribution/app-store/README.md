@@ -204,9 +204,8 @@ Three per locale in `screenshots/<en-US|ja>/mac/`. App Store Connect takes 16:10
 - [x] Mac App Store build only: no self-updater (guideline 2.4.5(vii)). The `KeryxMacAppStore` target leaves out
   Sparkle, its `SU*` Info.plist keys, the "Check for Updates…" menu item, the automatic-check toggle and the
   `mach-lookup` temporary exception; [`PRIVACY.md`](../../PRIVACY.md) notes that this build never contacts GitHub.
-- [ ] Mac App Store build only: `springLoadingDelay` (`appleApp/Keryx/Home/FeedListDropPresentation.swift`)
-  reads the system's spring-loading preference from the global defaults domain, which the privacy
-  manifest's UserDefaults reason `CA92.1` (the app's own data) does not cover. If App Store Connect
-  enforces required-reason declarations for the macOS upload, drop that read (use the 0.5 s default,
-  as iOS does) rather than declaring a reason that does not fit.
+- [x] Mac App Store build only: `springLoadingDelay` (`appleApp/Keryx/Home/FeedListDropPresentation.swift`)
+  does not read the system's spring-loading preference from the global defaults domain, which the privacy
+  manifest's UserDefaults reason `CA92.1` (the app's own data) does not cover; like iOS, it uses the 0.5 s
+  default. Only the macOS build from GitHub Releases reads it.
 - [x] Mac App Store build only: [`TERMS.md`](../../TERMS.md) / `TERMS.ja.md` cover macOS.
