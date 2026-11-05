@@ -17,8 +17,10 @@ handles and where it goes.
 Keryx is still pre-1.0 and under active development. Only the **latest released
 version** receives security fixes; there are no long-term support branches, and
 older releases are not patched. If you are affected by a security issue, first
-update to the newest release from the
-[Releases page](https://github.com/shimataro/keryx/releases).
+update to the newest release: through the store you installed Keryx from (such as the App Store,
+the Mac App Store, Google Play or F-Droid), otherwise from the
+[Releases page](https://github.com/shimataro/keryx/releases). A store can offer a new release
+later than the Releases page, while it is reviewed or built there.
 
 | Version | Supported |
 | --- | --- |
