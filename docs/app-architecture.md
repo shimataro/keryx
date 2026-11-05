@@ -1526,29 +1526,41 @@ around.
   replaces itself with the SwiftUI app, which then updates through Sparkle. Its data is left where it
   was and not carried over (see "The two apps do not share data" below).
 - The SwiftUI app ships through **both the Mac App Store and Developer ID** (GitHub Releases +
-  Sparkle). Both builds are sandboxed with the same entitlements, so there is one code path; the
-  Developer ID build adds Sparkle, which the App Store build must not contain.
-  - **Where Sparkle sits today.** It is linked into the macOS build only (`project.yml`'s package
-    dependency is filtered to macOS, so the iOS build never sees it). `Update/AppUpdater.swift`
-    wraps it for the two controls the app has: the app menu's "Check for Updates…" and the General
-    tab's automatic-check toggle (the setting itself lives in Sparkle's own `UserDefaults`, not in
-    `LocalSettings`). `AppModel` holds it outside the SDK, so the menu item also works on the
-    startup-failure screen — a database that a newer build already migrated is cured by updating.
-    It builds `SPUUpdater` itself, with a user driver that is Sparkle's standard one except for one
-    message: when a check the user started cannot read the feed (a 404 in the window after a release
-    is published and before its macOS job attaches `appcast.xml`, or being offline), it says so and
-    what to do (`UpdateCheckFailure`), instead of Sparkle's generic error. A scheduled check shows
-    nothing on failure — Sparkle only reports errors to a user who knows a check is running.
+  Sparkle). Both builds are sandboxed with the same entitlements apart from Sparkle's exception, so
+  there is one code path; the Developer ID build adds Sparkle, which the App Store build must not
+  contain (guideline 2.4.5(vii)). The App Store build is therefore a target of its own,
+  `KeryxMacAppStore`, since linking is decided per target and a build configuration could not drop
+  Sparkle (see "The `appleApp/` Xcode project" below for how the two share their definition).
+  - **Where Sparkle sits today.** It is linked into the `Keryx` target's macOS build only
+    (`project.yml`'s package dependency is filtered to macOS, so the iOS build never sees it, and
+    `KeryxMacAppStore` does not declare it). That target leaves `Update/` out of its sources, and
+    the `MAC_APP_STORE` compilation condition removes the updater's call sites, so the App Store
+    build has neither control below. `Update/AppUpdater.swift` wraps it for the two controls the app
+    has: the app menu's "Check for Updates…" and the General tab's automatic-check toggle (the
+    setting itself lives in Sparkle's own `UserDefaults`, not in `LocalSettings`). `AppModel` holds
+    it outside the SDK, so the menu item also works on the startup-failure screen — a database that
+    a newer build already migrated is cured by updating. It builds `SPUUpdater` itself, with a user
+    driver that is Sparkle's standard one except for one message: when a check the user started
+    cannot read the feed (a 404 in the window after a release is published and before its macOS job
+    attaches `appcast.xml`, or being offline), it says so and what to do (`UpdateCheckFailure`),
+    instead of Sparkle's generic error. A scheduled check shows nothing on failure — Sparkle only
+    reports errors to a user who knows a check is running.
   - **It is on in Release builds only.** `Config/Shared.xcconfig` sets `SPARKLE_PUBLIC_ED_KEY`
     (the Info.plist's `SUPublicEDKey`) for the Release configuration alone. While it is empty — a
     Debug build, unless `Local.xcconfig` sets it — the updater never starts, so the app makes no
     update request and both controls are disabled. The feed is the `appcast.xml` asset of the
     latest GitHub Release (`SUFeedURL`).
-  - **Sandbox.** The macOS build signs with `Keryx-macOS.entitlements` — the iOS file plus the
-    mach-lookup exception a sandboxed Sparkle needs to reach its installer
-    (`SUEnableInstallerLauncherService` in the Info.plist). Keep the two files' shared entries in
-    step. The macOS build also sets its run path to `Contents/Frameworks`; the default only fits iOS
+  - **Sandbox.** The Developer ID build signs with `Keryx-macOS.entitlements` — the iOS file plus
+    the mach-lookup exception a sandboxed Sparkle needs to reach its installer
+    (`SUEnableInstallerLauncherService` in the Info.plist). The App Store build has no Sparkle to
+    need it, so it signs with the iOS file itself. Keep the two files' shared entries in step. The
+    Developer ID build also sets its run path to `Contents/Frameworks`; the default only fits iOS
     and the app would fail to launch with "Library not loaded: Sparkle.framework".
+- **The Mac App Store and Developer ID builds are the same app to the system.** They share the
+  bundle ID (`works.merc.keryx`, which App Store Connect also requires for iOS and macOS to share one
+  app record) and so the sandbox container, including the database. A new schema a Developer ID
+  build migrated that database to therefore stops an App Store build still waiting on review from
+  opening it (`DatabaseTooNewException`) until that build catches up.
 - **The internal Compose macOS build and the SwiftUI app are never run at the same time.** They
   share the bundle ID (`works.merc.keryx`) and the OPML document types. Launching one through
   LaunchServices (Finder, `open`) while the other is running just activates the running one.
@@ -1671,8 +1683,12 @@ without the exception the Darwin engine (feeds), the favicon fetch and the reade
 `appleApp/` holds the SwiftUI app, sitting beside `composeApp/`/`androidApp/`. The `.xcodeproj` is
 never committed — **XcodeGen** generates it from `appleApp/project.yml` (`xcodegen generate`), the
 same way SQLDelight/Compose Resources generate code from their own source files elsewhere in the
-repo. One target, `Keryx`, covers both platforms (`supportedDestinations: [macOS, iOS]`); there is
-no separate iOS target to keep in sync.
+repo. One target, `Keryx`, covers iOS and the Developer ID macOS build
+(`supportedDestinations: [macOS, iOS]`); there is no separate iOS target to keep in sync.
+`KeryxMacAppStore` is the same macOS app without Sparkle (see "Distribution and coexistence"
+above). Both are built from `project.yml`'s `KeryxApp` target template and add only what is theirs
+alone, so a setting that must not reach the App Store build, such as a `[sdk=macosx*]` entitlements
+override, stays out of the template.
 
 - **Consuming `:shared`**: `project.yml`'s `dependencies:` links the prebuilt
   `KeryxShared.xcframework` (`embed: false, link: true` — appropriate for a *static* framework,
@@ -1686,18 +1702,19 @@ no separate iOS target to keep in sync.
   `:composeApp:generateStringCatalog` before every build, so the Xcode project always links the
   current Kotlin source — **always the Release XCFramework variant**, even for an Xcode Debug
   build of the Swift app, since there is no separate debug slice wired in `project.yml`.
-- **Signing and entitlements**: `Keryx/Keryx.entitlements` declares `app-sandbox`,
-  `network.client`, `files.user-selected.read-write`, and `keychain-access-groups`
+- **Signing and entitlements**: `Keryx/Keryx.entitlements` declares `app-sandbox`, `network.client`,
+  `files.user-selected.read-write`, and `keychain-access-groups`
   (`$(AppIdentifierPrefix)works.merc.keryx`, the Data Protection Keychain access group — see
-  "Distribution and coexistence" above). **A sandboxed entitlement can only be signed by a real
-  Apple Development/Developer ID identity and team** — ad-hoc signing (`CODE_SIGN_IDENTITY=-`)
-  fails even under `CODE_SIGN_STYLE=Manual` ("requires a provisioning profile"), so there is no way
-  to produce a runnable, entitled build without one. `Config/Shared.xcconfig` sets ad-hoc/no-team
-  defaults and then `#include?`s a gitignored `Local.xcconfig` (templated by
-  `Local.xcconfig.example`), so a developer's own team overrides cleanly without touching the
-  committed config. CI has no team available, so it builds with `CODE_SIGNING_ALLOWED=NO` instead —
-  this compiles and links but never codesigns, so it verifies the build only, not a runnable
-  sandboxed app (see `docs/testing.md`).
+  "Distribution and coexistence" above). iOS and `KeryxMacAppStore` sign with it; the `Keryx`
+  target's macOS build signs with `Keryx/Keryx-macOS.entitlements` instead. **A sandboxed
+  entitlement can only be signed by a real Apple Development/Developer ID identity and team** —
+  ad-hoc signing (`CODE_SIGN_IDENTITY=-`) fails even under `CODE_SIGN_STYLE=Manual` ("requires a
+  provisioning profile"), so there is no way to produce a runnable, entitled build without one.
+  `Config/Shared.xcconfig` sets ad-hoc/no-team defaults and then `#include?`s a gitignored
+  `Local.xcconfig` (templated by `Local.xcconfig.example`), so a developer's own team overrides
+  cleanly without touching the committed config. CI has no team available, so it builds with
+  `CODE_SIGNING_ALLOWED=NO` instead — this compiles and links but never codesigns, so it verifies
+  the build only, not a runnable sandboxed app (see `docs/testing.md`).
 - **Where About lives.** macOS shows it as the app menu's About window (`App/AboutView.swift`); iOS has
   no such menu, so Settings carries an About row (`Settings/AboutSettingsPage.swift`) — the version plus
   the website, project page, contact, terms, privacy policy and licenses links, which App Review
