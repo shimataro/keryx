@@ -14,8 +14,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -432,17 +434,30 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
     }
 
+    /** The coroutines [HomeViewModel.viewModelScope] has running right now — a baseline for [pumpUntilSettled]. */
+    private fun HomeViewModel.launchedJobs(): Set<Job> = viewModelScope.coroutineContext.job.children.toSet()
+
     /**
-     * Runs [HomeViewModel.refreshAll] and waits until its cycle has settled, including the hop back
-     * to Main that follows it. The fetch resumes on MockEngine's real dispatcher, so a test that ends
-     * while it is still in flight has that hop land after tearDown's resetMain(), failing whichever
-     * test runs next with "Dispatchers.Main was accessed when ... the test dispatcher was unset".
+     * Waits until nothing is in flight and every coroutine [vm] launched in its viewModelScope since
+     * [baseline] was taken ([launchedJobs]) has completed — a refresh or pull's own coroutine, the
+     * ones it hands its refresh stage to, and so their hops back to Main.
+     *
+     * Idleness alone is not enough: the fetch resumes on MockEngine's real dispatcher, and the cycle
+     * goes idle on that thread before `withContext(dispatcher)` hands the refresh coroutine back to
+     * Main. A test that ends in between has that hop land after tearDown's resetMain(), failing
+     * whichever test runs next with "Dispatchers.Main was accessed when ... the test dispatcher was
+     * unset". Every coroutine launched after the baseline here is finite; the long-lived ones (the
+     * eager StateFlows, the article-change reconcile) start with the ViewModel.
      */
+    private fun TestScope.pumpUntilSettled(vm: HomeViewModel, baseline: Set<Job>) {
+        pumpUntil { vm.activity.value.idle && vm.launchedJobs().all { it in baseline } }
+    }
+
+    /** Runs [HomeViewModel.refreshAll] and waits until its cycle has settled ([pumpUntilSettled]). */
     private fun TestScope.refreshAllAndSettle(vm: HomeViewModel) {
+        val baseline = vm.launchedJobs()
         vm.refreshAll()
-        // Starts the launched cycle so it has registered itself (activity no longer idle) before polling.
-        testScheduler.runCurrent()
-        pumpUntil { vm.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
     }
 
     /** Whether any pull-to-refresh is still pending, whichever selection it was started on. */
@@ -471,6 +486,7 @@ class HomeViewModelTest {
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
+        val baseline = vm.launchedJobs()
         vm.pullToRefresh()
         // Raised synchronously, before the refresh coroutine has even started running.
         assertTrue(vm.pulling)
@@ -484,7 +500,7 @@ class HomeViewModelTest {
         assertFalse(vm.pulling)
         assertFalse(activityCenter.activity.value.feedRefreshing)
         // The indicator ends with the refresh stage; the cycle's sync may still be running.
-        pumpUntil { activityCenter.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
         assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
         assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
     }
@@ -503,6 +519,7 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
 
+        val baseline = vm.launchedJobs()
         vm.refreshAll()
         pumpUntil { activityCenter.activity.value.feedRefreshing }
         assertIs<ManualRefreshStatus.Checking>(vm.manualRefreshStatus.value)
@@ -515,7 +532,7 @@ class HomeViewModelTest {
             assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value).outcome,
         )
         // The status ends with the refresh stage; the cycle's sync may still be running.
-        pumpUntil { activityCenter.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
     }
 
     @Test
@@ -826,6 +843,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Folder("d1"))
         testScheduler.advanceUntilIdle()
 
+        val baseline = vm.launchedJobs()
         vm.pullToRefreshAll()
         // Keyed by All, not by the folder the article list happens to show.
         assertEquals(setOf<ArticleFilter>(ArticleFilter.All), vm.pullRefreshingFilters.value)
@@ -835,7 +853,7 @@ class HomeViewModelTest {
 
         assertEquals(setOf("https://feed/f1", "https://feed/f2"), requested.toSet())
         // The indicator ends with the refresh stage; the cycle's sync may still be running.
-        pumpUntil { vm.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
         assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
     }
 
@@ -850,6 +868,7 @@ class HomeViewModelTest {
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
+        val baseline = vm.launchedJobs()
         vm.refreshAll()
         vm.pullToRefreshAll()
         pumpUntil { fetches.get() >= 1 }
@@ -860,7 +879,7 @@ class HomeViewModelTest {
 
         assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
         // The indicator ends with the refresh stage; the cycle's sync may still be running.
-        pumpUntil { vm.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
         assertEquals(1, cloud.syncs.get())
     }
 
@@ -1064,11 +1083,12 @@ class HomeViewModelTest {
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
+        val baseline = vm.launchedJobs()
         vm.refreshAll()
         vm.refreshAll()
 
         gate.complete(Unit)
-        pumpUntil { vm.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
 
         assertTrue(vm.activity.value.idle)
         assertEquals(1, fetches.get(), "the second refreshAll() must be a no-op while the first runs")
@@ -1091,6 +1111,7 @@ class HomeViewModelTest {
         subscribeAll(vm)
         testScheduler.advanceUntilIdle()
 
+        val baseline = vm.launchedJobs()
         vm.refreshAll()
         vm.pullToRefresh()
         pumpUntil { fetches.get() >= 1 }
@@ -1101,7 +1122,7 @@ class HomeViewModelTest {
 
         assertFalse(vm.pulling)
         // The indicator ends with the refresh stage; the cycle's sync may still be running.
-        pumpUntil { vm.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
         assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
         assertEquals(1, cloud.syncs.get())
     }
@@ -1203,6 +1224,7 @@ class HomeViewModelTest {
         vm.selectFilter(ArticleFilter.Feed("f1"))
         testScheduler.advanceUntilIdle()
 
+        val baseline = vm.launchedJobs()
         vm.pullToRefresh()
         pumpUntil { fetches.get() >= 1 }
         vm.selectFilter(ArticleFilter.Feed("f2"))
@@ -1220,7 +1242,7 @@ class HomeViewModelTest {
 
         assertEquals(emptySet(), vm.pullRefreshingFilters.value)
         // The indicators end with the refresh stage; the cycle's sync may still be running.
-        pumpUntil { vm.activity.value.idle }
+        pumpUntilSettled(vm, baseline)
         assertEquals(1, fetches.get(), "the second pull must wait for the first, not start its own")
         assertEquals(1, cloud.syncs.get())
     }
