@@ -514,7 +514,8 @@ class HomeViewModelTest {
             RefreshOutcome(newArticleCount = 1, unreachable = false),
             assertIs<ManualRefreshStatus.Finished>(vm.manualRefreshStatus.value).outcome,
         )
-        assertTrue(activityCenter.activity.value.idle, "the status finishes only after the sync, with the cycle")
+        // The status ends with the refresh stage; the cycle's sync may still be running.
+        pumpUntil { activityCenter.activity.value.idle }
     }
 
     @Test
