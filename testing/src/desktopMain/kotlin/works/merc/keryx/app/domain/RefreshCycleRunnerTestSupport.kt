@@ -70,6 +70,11 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
         db: KeryxDatabase,
         connected: Boolean = true,
         fetchGate: CompletableDeferred<Unit>? = null,
+        /**
+         * Holds a fetch of one URL until the returned gate is completed (`null`: not held), on top of
+         * [fetchGate]. Asked as each request arrives, so a test can start holding a URL part-way through.
+         */
+        fetchGateFor: (url: String) -> CompletableDeferred<Unit>? = { null },
         /** The status each feed URL answers with, or `null` for a request that gets no response. */
         fetchStatus: (url: String) -> HttpStatusCode? = { HttpStatusCode.OK },
         fetchBody: String = REFRESH_CYCLE_TEST_RSS,
@@ -91,6 +96,7 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
             httpClient { request ->
                 log += "fetch:${request.url}"
                 fetchGate?.await()
+                fetchGateFor(request.url.toString())?.await()
                 val status = fetchStatus(request.url.toString()) ?: throw IOException("unreachable")
                 respond(fetchBody, status)
             },

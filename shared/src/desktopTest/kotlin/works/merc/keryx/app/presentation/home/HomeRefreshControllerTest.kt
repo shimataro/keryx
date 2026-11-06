@@ -66,6 +66,7 @@ class HomeRefreshControllerTest {
     private fun withController(
         currentFilter: () -> ArticleFilter = { ArticleFilter.All },
         fetchGate: CompletableDeferred<Unit>? = null,
+        fetchGateFor: (url: String) -> CompletableDeferred<Unit>? = { null },
         syncGate: CompletableDeferred<Unit>? = null,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         block: suspend CoroutineScope.(Harness, SqlDriver, KeryxDatabase) -> Unit,
@@ -77,7 +78,7 @@ class HomeRefreshControllerTest {
             val scope = CoroutineScope(coroutineContext + job + CoroutineExceptionHandler { _, e -> uncaught += e })
             db.insertFeed("f1", url = "https://ex.com/f1")
             db.insertFeed("f2", url = "https://ex.com/f2")
-            val fixture = fixtures.create(driver, db, fetchGate = fetchGate, syncGate = syncGate)
+            val fixture = fixtures.create(driver, db, fetchGate = fetchGate, fetchGateFor = fetchGateFor, syncGate = syncGate)
             var retrims = 0
             val controller = HomeRefreshController(
                 scope = scope,
@@ -406,6 +407,41 @@ class HomeRefreshControllerTest {
             h.controller.refreshAll()
             h.settle()
             assertEquals(2L, assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value).generation)
+        }
+    }
+    @Test
+    fun aSecondJoinWhileAnotherRefreshKeepsTheCheckGoingIsNotCountedAgain() {
+        val syncGate = CompletableDeferred<Unit>()
+        val f1Gate = CompletableDeferred<Unit>()
+        val holdF1 = java.util.concurrent.atomic.AtomicBoolean(false)
+        withController(
+            fetchGateFor = { url -> f1Gate.takeIf { holdF1.get() && url == "https://ex.com/f1" } },
+            syncGate = syncGate,
+            dispatcher = Dispatchers.Default,
+        ) { h, _, _ ->
+            val automatic = async(Dispatchers.Default) { h.fixture.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            h.fixture.awaitSyncing()
+
+            // A feed's own refresh, held mid-fetch, keeps the check going across both joins.
+            holdF1.set(true)
+            h.controller.refreshFeed("f1")
+            withTimeout(5_000) { while (h.fixture.log.count { it == "fetch:https://ex.com/f1" } < 2) yield() }
+
+            h.controller.pullToRefresh(ArticleFilter.All)
+            withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+            h.controller.pullToRefresh(ArticleFilter.Feed("f2"))
+            withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+            val checking = assertIs<ManualRefreshStatus.Checking>(h.controller.manualRefreshStatus.value)
+            assertEquals(RefreshOutcome(newArticleCount = 2, unreachable = false), checking.pending, "the cycle folded in once")
+
+            f1Gate.complete(Unit)
+            val finished = h.controller.awaitFinished()
+            // The automatic cycle's two new articles once; the feed's refresh adds none (already stored).
+            assertEquals(RefreshOutcome(newArticleCount = 2, unreachable = false), finished.outcome)
+
+            syncGate.complete(Unit)
+            automatic.await()
+            h.settle()
         }
     }
 }

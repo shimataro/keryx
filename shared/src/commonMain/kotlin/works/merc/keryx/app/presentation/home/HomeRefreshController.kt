@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
@@ -67,8 +68,9 @@ internal class HomeRefreshController(
     val manualRefreshStatus: StateFlow<ManualRefreshStatus> = _manualRefreshStatus.asStateFlow()
 
     /**
-     * The [ManualRefreshStatus.Finished.generation] source. A plain var: every end is counted from a
-     * `finally` running on [scope], which is Main-confined ([refreshFeed], [trackRefresh]).
+     * The [ManualRefreshStatus.Finished.generation] source. A plain var: every end is counted by
+     * [endRefresh], from a `finally` running on [scope], which is Main-confined ([refreshFeed],
+     * [trackRefresh]).
      */
     private var endCount = 0L
 
@@ -80,9 +82,7 @@ internal class HomeRefreshController(
             try {
                 outcome = withContext(dispatcher) { runner.refreshFeed(feedId) }
             } finally {
-                // Numbered outside update(), so a retried update stamps the same generation.
-                val generation = ++endCount
-                _manualRefreshStatus.update { it.ended(outcome, generation) }
+                endRefresh(outcome)
             }
         }
     }
@@ -205,15 +205,21 @@ internal class HomeRefreshController(
     }
 
     /**
-     * The refresh stages [trackRefresh] is currently counting. Main-confined like [endCount].
+     * The refresh stages [trackRefresh] has counted in the current [ManualRefreshStatus.Checking] —
+     * still running, or already ended and folded into its pending outcome. Kept until the status
+     * leaves [ManualRefreshStatus.Checking] ([endRefresh]), so an outcome already folded in is never
+     * folded in again. Main-confined like [endCount].
      */
     private val trackedRefreshes = mutableSetOf<Deferred<RefreshOutcome?>>()
 
     /**
      * Counts the cycle behind [refreshEnded] (started here, or an automatic one joined) in
      * [manualRefreshStatus] until its refresh stage has ended, then reports its outcome. One already
-     * tracked (a pull, then Refresh All, during the same automatic cycle) is counted once, so its
-     * new-article count is not doubled. Runs on [scope], like every other start and end, so
+     * counted in the current check (a pull, then Refresh All, during the same automatic cycle — or a
+     * second join after its stage ended while another refresh keeps the check going) is counted
+     * once, so its new-article count is not doubled; that action's result is the check's combined
+     * outcome. Once the check has finished, a join of the same cycle starts a new check, so that
+     * action still gets its own result. Runs on [scope], like every other start and end, so
      * [endCount] stays Main-confined; awaiting does no IO, so nothing moves to [dispatcher].
      */
     private suspend fun trackRefresh(refreshEnded: Deferred<RefreshOutcome?>) {
@@ -223,9 +229,18 @@ internal class HomeRefreshController(
         try {
             refresh = refreshEnded.await()
         } finally {
-            trackedRefreshes.remove(refreshEnded)
-            val generation = ++endCount
-            _manualRefreshStatus.update { it.ended(refresh, generation) }
+            endRefresh(refresh)
         }
+    }
+
+    /**
+     * Ends one refresh in [manualRefreshStatus] with [outcome], stamping a fresh generation, and
+     * forgets [trackedRefreshes] once no check is running any more. Called on [scope] only.
+     */
+    private fun endRefresh(outcome: RefreshOutcome?) {
+        // Numbered outside update(), so a retried update stamps the same generation.
+        val generation = ++endCount
+        val status = _manualRefreshStatus.updateAndGet { it.ended(outcome, generation) }
+        if (status !is ManualRefreshStatus.Checking) trackedRefreshes.clear()
     }
 }
