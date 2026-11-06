@@ -1911,6 +1911,18 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
 同じくタッチ主体の Android も薄くしない（`external-spec.md` §9）。
 
+### 記事一覧のスクロール（iOS）
+
+iOS の記事一覧は SwiftUI の `List` で、`ScrollViewProxy.scrollTo` でスクロールする。フィルタを切り替えると
+先頭に戻るが、それは画面上の行が新しいフィルタのものになってからに限る（`Home/ArticleListTopReset.swift`、
+`KeryxTests` でテスト）。`HomeObservable.filter` と行は別々のフローで、どちらが先とも限らずに届くため、
+切り替えた直後の一覧はまだ前のフィルタの行を持っていることがある。その行を狙ったスクロールは実行時点の
+行に対して行われ、新しい行が同じ更新で着地して目標がその範囲外になる（前の一覧の先頭行を、空のフォルダに
+対して）と、`UICollectionView` が例外を投げてアプリがクラッシュする。そこで行はそれを生んだフィルタと
+対で届き（`HomeViewModel.articlesWithFilter` / `searchResultsWithFilter`）、画面上の行が現在のフィルタの
+ものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの対応は
+一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。
+
 ### iPhone Duo（iOS）
 
 iPhone Duo の外側ディスプレイと、横向きの内側ディスプレイでは、ナビゲーションバー・ツールバー・タブバーが

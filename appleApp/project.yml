@@ -219,6 +219,7 @@ targets:
       - path: Keryx/Home/ReaderRebuildThrottle.swift
       - path: Keryx/Home/ReaderPageInputs.swift
       - path: Keryx/Home/ArticleTableRevealTracker.swift
+      - path: Keryx/Home/ArticleListTopReset.swift
       - path: Keryx/Home/ReaderProcessRecovery.swift
       - path: Keryx/Home/ReaderScrollPosition.swift
       - path: Keryx/Home/ReaderScrollIndicator.swift
