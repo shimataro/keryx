@@ -25,6 +25,7 @@ import works.merc.keryx.app.inMemoryDb
 import works.merc.keryx.app.insertFeed
 import works.merc.keryx.app.platform.AppDirs
 import works.merc.keryx.app.platform.FileIO
+import works.merc.keryx.app.testThreadDispatcher
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -123,16 +124,28 @@ class HomeRefreshControllerTest {
     }
 
     @Test
-    fun aCycleThatRanRetrimsBeforeAndAfter() = withController { h, _, _ ->
-        h.controller.refreshAll()
-        h.settle()
+    fun aCycleThatRanRetrimsBeforeItsRefreshAndAgainWhenItsRefreshEndsNotAfterItsSync() {
+        val syncGate = CompletableDeferred<Unit>()
+        testThreadDispatcher("refresh-controller-io").use { io ->
+            withController(syncGate = syncGate, dispatcher = io) { h, _, _ ->
+                h.controller.refreshAll()
+                h.fixture.awaitSyncing()
 
-        assertEquals("retrim", h.fixture.log.first(), "the first re-trim precedes the fetches")
-        assertEquals("retrim", h.fixture.log.last(), "the second re-trim follows the notify and the sync")
-        assertTrue(h.fixture.log.indexOf("sync") < h.fixture.log.lastIndexOf("retrim"))
-        assertEquals(2, h.retrimCount)
-        val finished = assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value)
-        assertEquals(1L, finished.generation)
+                withTimeout(5_000) { while (h.retrimCount < 2) yield() }
+                assertEquals("retrim", h.fixture.log.first(), "the first re-trim precedes the fetches")
+                assertTrue(
+                    h.fixture.log.indexOfLast { it.startsWith("fetch:") } < h.fixture.log.lastIndexOf("retrim"),
+                    "the second re-trim follows the fetches",
+                )
+                assertTrue(h.fixture.activityCenter.activity.value.syncing, "re-trimmed while the sync is still running")
+
+                syncGate.complete(Unit)
+                h.settle()
+                assertEquals(2, h.retrimCount, "the sync's end re-trims nothing more")
+                val finished = assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value)
+                assertEquals(1L, finished.generation)
+            }
+        }
     }
 
     @Test
@@ -289,11 +302,12 @@ class HomeRefreshControllerTest {
 
             withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
             assertIs<ManualRefreshStatus.Finished>(h.controller.awaitFinished())
+            withTimeout(5_000) { while (h.retrimCount < 2) yield() }
             assertTrue(h.fixture.activityCenter.activity.value.syncing, "the sync is still running")
 
             syncGate.complete(Unit)
             h.settle()
-            assertEquals(2, h.retrimCount, "the cycle's re-trim still follows its sync")
+            assertEquals(2, h.retrimCount, "the cycle's second re-trim came with its refresh's end, not its sync's")
         }
     }
 

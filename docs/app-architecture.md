@@ -1390,7 +1390,9 @@ selection's pin is then dropped, but only if it is still the very pin the re-tri
 
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
-(`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
+(`HomeRefreshController`: before the cycle starts, and as soon as its refresh stage ends — not after
+the sync that follows, so an article read while that sync is still running keeps its pin) or of a
+manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the View menu's explicit "Hide Read Articles"
 command (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`

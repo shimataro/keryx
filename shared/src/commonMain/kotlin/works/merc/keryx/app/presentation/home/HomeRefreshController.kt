@@ -32,7 +32,8 @@ import works.merc.keryx.app.domain.SyncTrigger
  * @param dispatcher Where the blocking work (feed resolution, fetch, sync) runs.
  * @param currentFilter The article list's current selection, read when a pull starts.
  * @param retrimPins Re-trims the ViewModel's read-state pins to its unread pins plus the selection,
- *   before a refresh starts and again once it finishes (see `HomeViewModel.retrimPinnedReadStates`).
+ *   before a cycle starts and again once its refresh stage has ended — not after the sync that
+ *   follows (see `HomeViewModel.retrimPinnedReadStates`).
  */
 internal class HomeRefreshController(
     private val scope: CoroutineScope,
@@ -152,9 +153,15 @@ internal class HomeRefreshController(
 
     /**
      * One [RefreshCycleRunner.runIfIdle] call for [filter], with the pinned-article re-trim around
-     * it. Only the IO moves to [dispatcher]; the caller's coroutine stays on the ViewModel's
-     * Main-confined scope, so the re-trims stay confined there too. Returns once the whole cycle,
-     * sync included, has ended.
+     * its refresh stage: once before the call, and once more, for a cycle that started, as soon as
+     * its refresh stage has ended. Only the IO moves to [dispatcher]; both re-trims run on the
+     * ViewModel's Main-confined [scope]. Returns once the whole cycle, sync included, has ended.
+     *
+     * The second re-trim does not wait for the sync: the refresh looks finished to the user by then
+     * (the pull indicator and the status have ended), so an article read while the sync is still
+     * running keeps its pin like any other read in Unread mode. A pin whose article the sync's merge
+     * tombstones is dropped by the ViewModel's reconcile, which the merge's `articles` change signal
+     * triggers.
      *
      * [manualRefreshStatus] counts the cycle from its start until its refresh stage has ended — not
      * through the sync that follows, whose progress the sync control shows — then reports its
@@ -181,6 +188,11 @@ internal class HomeRefreshController(
                 scope.launch {
                     onRefreshStarted(refreshEnded)
                     trackRefresh(refreshEnded)
+                    // Re-trim using the selection as it stands now: it may have changed while the
+                    // refresh ran, and the stale pre-refresh selection must not outlive it. Right
+                    // after the status has ended, with no suspension in between, so whoever sees the
+                    // Finished status sees the re-trim done too.
+                    retrimPins()
                 }
             }
         }
@@ -189,9 +201,6 @@ internal class HomeRefreshController(
             // Already tracked by an earlier action (it returned at once): still wait it out.
             outcome.cycle.join()
         }
-        // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
-        // and the stale pre-refresh selection must not outlive it.
-        if (outcome is CycleOutcome.Ran) retrimPins()
         return outcome
     }
 
