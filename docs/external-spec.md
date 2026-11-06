@@ -293,10 +293,12 @@ the full table and platform differences.
 
 **iOS refresh status.** With no Refresh All button to spin, iOS shows a refresh the user started (a
 pull, Refresh All, or a feed's own Refresh) in the centre of the bottom bar: "Checking for new
-articles…" with a spinner while it runs (through the cloud sync that follows), then the result for
+articles…" with a spinner while its feeds are being checked, then the result for
 about two and a half seconds — "N new articles", "No new articles", or, when no feed could be
-reached, a failure message behind a warning symbol that also stays in the notification center. An
-automatic refresh and a sync on their own show nothing there; idle shows nothing. See "Refresh
+reached, a failure message behind a warning symbol that also stays in the notification center. The
+result shows as soon as the feeds have been checked, without waiting for the cloud sync that
+follows; the sync button's spinner shows that sync. An automatic refresh and a sync on their own
+show nothing there; idle shows nothing. See "Refresh
 feedback" above, and "Refresh indicators and pull-to-refresh" in [app-architecture.md](app-architecture.md).
 
 **Per-feed refresh spinner.** While feeds refresh, whatever started it, every feed the refresh

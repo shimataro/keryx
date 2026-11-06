@@ -1462,12 +1462,16 @@ Refresh All, a pull refreshes only the feeds behind the list currently on screen
   and syncing nothing. The gesture works on an empty list too, but is disabled while search results are
   showing — pulling a result list isn't a request to refresh the feeds behind it — and while there are
   no feeds at all.
-- As with Refresh All, a pull is followed by a cloud sync when one is connected, and the indicator
-  stays up until that sync has finished too. On iOS, where the system starts the refresh the moment the
-  pull crosses its threshold, the indicator also stays up for at least about a second.
-- A pull made while a refresh or sync is already running starts nothing new; the indicator stays up
-  until the running one finishes. When what is running is an automatic refresh, the pull joins it, so on
-  iOS its result still appears in the status described below. Selecting another item in the feed list
+- As with Refresh All, a pull is followed by a cloud sync when one is connected, but the indicator
+  stays up only until the feeds have been refreshed — not through that sync, whose progress the sync
+  button's spinner shows. On iOS, where the system starts the refresh the moment the pull crosses its
+  threshold, the indicator also stays up for at least about a second.
+- A pull made while a refresh or sync is already running starts nothing new. While feeds are being
+  refreshed the indicator stays up until that refresh finishes; while only a sync is running it ends at
+  once. When what is running is an automatic refresh, the pull joins it, so on iOS its result still
+  appears in the status described below. A pull that joins the startup cycle while it is still syncing
+  (that cycle syncs first and refreshes second) keeps its indicator until the cycle's refresh has
+  finished, since that refresh is the one answering the pull. Selecting another item in the feed list
   while a pull's indicator is up leaves no indicator over the newly selected list; the refresh itself
   carries on.
 - On Android the same refresh is also reachable as a TalkBack custom action on the list ("Refresh this
@@ -1479,7 +1483,7 @@ Refresh All, a pull refreshes only the feeds behind the list currently on screen
   selected feed alone) instead — likewise different actions.
 - On iOS the sidebar can be pulled down as well, and that pull is Refresh All: it refreshes every feed
   whatever is selected, followed by a cloud sync when one is connected, with the indicator staying up
-  until both have finished; it is disabled while there are no feeds. It takes the place of a Refresh All
+  until the refresh has finished (not through the sync); it is disabled while there are no feeds. It takes the place of a Refresh All
   button in the iOS navigation bar, as Mail's mailbox list is refreshed. Android's feed-list drawer has
   no pull (it is a modal surface laid over the article list and keeps its refresh button in its
   header), and neither does the macOS sidebar, which keeps its toolbar button.
@@ -1887,7 +1891,8 @@ list forward (`CompactSearchNavigation`).
   of `SidebarRowContent`, so a reorder that changes a neighbour's options reconfigures that row.
 - **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl`, present only while there are feeds)
   refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
-  tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until both finish. It
+  tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until the refresh
+  finishes, not through the sync that follows. It
   replaces the navigation bar's Refresh All button on iOS (which keeps Sync, Add and Settings); an iPad
   keyboard still has ⌘R from the Feed menu.
 - **Swipe actions.** A feed row swipes to "Unsubscribe" and "Rename", a folder or tag row to "Delete" and
