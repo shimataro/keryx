@@ -28,7 +28,7 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.singleProviderCloudSession
 import java.io.IOException
-import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** A one-item RSS 2.0 document, the default body every feed URL answers with in [RefreshCycleRunnerFixtures]. */
 const val REFRESH_CYCLE_TEST_RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
@@ -89,7 +89,7 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
         syncGate: CompletableDeferred<Unit>? = null,
     ): RefreshCycleRunnerFixture {
         val clock = Clock { 1000L }
-        val log = Collections.synchronizedList(mutableListOf<String>())
+        val log = CopyOnWriteArrayList<String>()
         val activityCenter = ActivityCenter()
         val notificationCenter = NotificationCenter()
         val fetcher = FeedFetcher(
