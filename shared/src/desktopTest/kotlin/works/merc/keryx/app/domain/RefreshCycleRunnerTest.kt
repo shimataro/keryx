@@ -6,7 +6,10 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -691,5 +694,153 @@ class RefreshCycleRunnerTest {
         }
 
         assertEquals(listOf("fetch:https://ex.com/f1", "notify:new:1", "sync"), f.log.toList())
+    }
+
+    private suspend fun RefreshCycleRunnerFixture.awaitSyncing() {
+        withTimeout(5_000) { activityCenter.activity.first { it.syncing } }
+    }
+
+    @Test
+    fun aManualCycleEndsItsRefreshBeforeItsSyncAndReturnsOnlyAfterIt() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, syncGate = syncGate)
+        val refreshEnded = CompletableDeferred<Deferred<RefreshOutcome?>>()
+        try {
+            val cycle = async(Dispatchers.Default) {
+                f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL) { refreshEnded.complete(it) }
+            }
+            f.awaitSyncing()
+            val deferred = withTimeout(5_000) { refreshEnded.await() }
+
+            assertTrue(deferred.isCompleted, "the refresh stage has ended while the sync is still running")
+            assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), deferred.await())
+            assertFalse(cycle.isCompleted, "runIfIdle itself returns only after the sync")
+
+            syncGate.complete(Unit)
+            assertEquals(
+                RefreshCycleRunner.CycleOutcome.Ran(Result.Ok(Unit), RefreshOutcome(newArticleCount = 1, unreachable = false)),
+                withTimeout(5_000) { cycle.await() },
+            )
+        } finally {
+            syncGate.complete(Unit)
+        }
+    }
+
+    @Test
+    fun anUnreachableRefreshIsReportedBeforeTheSyncStarts() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, fetchStatus = { null }, syncGate = syncGate)
+        val refreshEnded = CompletableDeferred<Deferred<RefreshOutcome?>>()
+        try {
+            val cycle = async(Dispatchers.Default) {
+                f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL) { refreshEnded.complete(it) }
+            }
+            f.awaitSyncing()
+
+            assertEquals(NotificationText.RefreshFailed, f.notificationCenter.items.value.single().text)
+            assertEquals(RefreshOutcome(newArticleCount = 0, unreachable = true), withTimeout(5_000) { refreshEnded.await() }.await())
+
+            syncGate.complete(Unit)
+            withTimeout(5_000) { cycle.await() }
+            assertEquals(1, f.notificationCenter.items.value.size, "reported once, not again at the cycle's end")
+        } finally {
+            syncGate.complete(Unit)
+        }
+    }
+
+    @Test
+    fun aJoinableAutomaticCycleIsCompleteDuringItsSyncButStaysJoinableUntilTheSyncEnds() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, syncGate = syncGate)
+        try {
+            val cycle = async(Dispatchers.Default) { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            f.awaitSyncing()
+
+            val joinable = assertNotNull(f.runner.joinableAutomaticCycle(), "still joinable while it syncs")
+            assertTrue(joinable.isCompleted)
+            assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), joinable.await())
+
+            // A manual action during that sync joins the automatic cycle and gets its result at once.
+            val joined = f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL)
+            val outcome = assertIs<RefreshCycleRunner.CycleOutcome.Joined>(joined)
+            assertTrue(outcome.cycle.isCompleted)
+            assertEquals(RefreshOutcome(newArticleCount = 1, unreachable = false), outcome.cycle.await())
+            assertFalse(cycle.isCompleted)
+
+            syncGate.complete(Unit)
+            withTimeout(5_000) { cycle.await() }
+            assertNull(f.runner.joinableAutomaticCycle())
+        } finally {
+            syncGate.complete(Unit)
+        }
+    }
+
+    @Test
+    fun aStageFailingAfterTheRefreshCompletesTheDeferredOnceAndReportsOnce() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val f = fixtures.create(driver, db, fetchStatus = { null })
+        var joinable: Deferred<RefreshOutcome?>? = null
+
+        assertFailsWith<IllegalStateException> {
+            f.runner.run(trigger = SyncTrigger.AUTOMATIC) { name, block ->
+                joinable = f.runner.joinableAutomaticCycle()
+                block()
+                check(name != "feedRefresh") { "failed after the refresh" }
+            }
+        }
+
+        val deferred = assertNotNull(joinable)
+        assertEquals(RefreshOutcome(newArticleCount = 0, unreachable = true), withTimeout(5_000) { deferred.await() })
+        assertEquals(NotificationText.RefreshFailed, f.notificationCenter.items.value.single().text)
+        assertFalse("sync" in f.log, "the sync stage never ran")
+    }
+
+    @Test
+    fun aCycleCancelledMidRefreshCompletesTheDeferredWithNullAndReportsNothing() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val gate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, fetchGate = gate)
+        val refreshEnded = CompletableDeferred<Deferred<RefreshOutcome?>>()
+
+        val cycle = launch { f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL) { refreshEnded.complete(it) } }
+        withTimeout(5_000) { f.activityCenter.activity.first { it.feedRefreshing } }
+        val deferred = refreshEnded.await()
+        assertFalse(deferred.isCompleted)
+
+        cycle.cancelAndJoin()
+
+        assertTrue(deferred.isCompleted, "a waiter on the deferred must never hang")
+        assertNull(deferred.await())
+        assertTrue(f.notificationCenter.items.value.isEmpty())
+        assertFalse("sync" in f.log)
+        assertTrue(f.activityCenter.activity.value.idle)
+    }
+
+    @Test
+    fun aDataSaverSkippedAutomaticRefreshCompletesTheDeferredWithNullBeforeTheSync() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, network = NetworkCondition(metered = true, dataSaver = true), syncGate = syncGate)
+        val refreshEnded = CompletableDeferred<Deferred<RefreshOutcome?>>()
+        try {
+            val cycle = async(Dispatchers.Default) {
+                f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.AUTOMATIC) { refreshEnded.complete(it) }
+            }
+            f.awaitSyncing()
+            val deferred = withTimeout(5_000) { refreshEnded.await() }
+
+            assertTrue(deferred.isCompleted)
+            assertNull(deferred.await())
+            assertTrue(f.notificationCenter.items.value.isEmpty())
+
+            syncGate.complete(Unit)
+            assertIs<RefreshCycleRunner.CycleOutcome.Ran>(withTimeout(5_000) { cycle.await() })
+            assertEquals(listOf("sync"), f.log.toList())
+        } finally {
+            syncGate.complete(Unit)
+        }
     }
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
@@ -27,7 +28,7 @@ import works.merc.keryx.app.data.remote.FeedFetcher
 import works.merc.keryx.app.ftsManagerIndexed
 import works.merc.keryx.app.singleProviderCloudSession
 import java.io.IOException
-import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** A one-item RSS 2.0 document, the default body every feed URL answers with in [RefreshCycleRunnerFixtures]. */
 const val REFRESH_CYCLE_TEST_RSS = """<?xml version="1.0"?><rss version="2.0"><channel>
@@ -69,21 +70,33 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
         db: KeryxDatabase,
         connected: Boolean = true,
         fetchGate: CompletableDeferred<Unit>? = null,
+        /**
+         * Holds a fetch of one URL until the returned gate is completed (`null`: not held), on top of
+         * [fetchGate]. Asked as each request arrives, so a test can start holding a URL part-way through.
+         */
+        fetchGateFor: (url: String) -> CompletableDeferred<Unit>? = { null },
         /** The status each feed URL answers with, or `null` for a request that gets no response. */
         fetchStatus: (url: String) -> HttpStatusCode? = { HttpStatusCode.OK },
         fetchBody: String = REFRESH_CYCLE_TEST_RSS,
         notifySink: OsNotificationSink? = null,
         network: NetworkCondition = NetworkCondition.UNRESTRICTED,
         appForeground: AppForeground = AppForeground(),
+        /**
+         * Holds each sync (after its "sync" log entry, while the sync is in flight) until completed. It
+         * blocks the calling thread, since the provider lookup is not suspending: run the cycle on
+         * `Dispatchers.Default`, never on the test's own event loop.
+         */
+        syncGate: CompletableDeferred<Unit>? = null,
     ): RefreshCycleRunnerFixture {
         val clock = Clock { 1000L }
-        val log = Collections.synchronizedList(mutableListOf<String>())
+        val log = CopyOnWriteArrayList<String>()
         val activityCenter = ActivityCenter()
         val notificationCenter = NotificationCenter()
         val fetcher = FeedFetcher(
             httpClient { request ->
                 log += "fetch:${request.url}"
                 fetchGate?.await()
+                fetchGateFor(request.url.toString())?.await()
                 val status = fetchStatus(request.url.toString()) ?: throw IOException("unreachable")
                 respond(fetchBody, status)
             },
@@ -100,7 +113,11 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = { log += "sync"; null },
+            cloudProvider = {
+                log += "sync"
+                if (syncGate != null) runBlocking { syncGate.await() }
+                null
+            },
             clock = clock,
             scope = syncScope,
             activityCenter = activityCenter,
