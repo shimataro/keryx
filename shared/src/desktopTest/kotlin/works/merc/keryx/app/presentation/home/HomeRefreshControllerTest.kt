@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import works.merc.keryx.app.core.ArticleFilter
@@ -331,25 +332,32 @@ class HomeRefreshControllerTest {
     fun aPullWhileAnotherManualCycleRefreshesStaysUntilThatRefreshEnds() {
         val fetchGate = CompletableDeferred<Unit>()
         val syncGate = CompletableDeferred<Unit>()
-        withController(fetchGate = fetchGate, syncGate = syncGate, dispatcher = Dispatchers.Default) { h, _, _ ->
-            h.controller.refreshAll()
-            h.fixture.awaitFeedRefreshing()
+        // One thread of its own, so the barrier below runs strictly after the pull's runIfIdle.
+        testThreadDispatcher("refresh-controller-io").use { io ->
+            withController(fetchGate = fetchGate, syncGate = syncGate, dispatcher = io) { h, _, _ ->
+                h.controller.refreshAll()
+                h.fixture.awaitFeedRefreshing()
 
-            h.controller.pullToRefresh(ArticleFilter.All)
-            withTimeout(5_000) { while (h.retrimCount < 2) yield() }
-            // Let the pull reach its Busy wait before the refresh ends.
-            repeat(50) { yield(); kotlinx.coroutines.delay(2) }
-            assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
+                h.controller.pullToRefresh(ArticleFilter.All)
+                // The pull's pre-retrim and its dispatch of runIfIdle onto io happen in one step, so
+                // once the retrim shows, runIfIdle is queued there; it returns Busy without suspending,
+                // so it has returned once this barrier has run behind it.
+                withTimeout(5_000) { while (h.retrimCount < 2) yield() }
+                withContext(io) {}
+                // Lets the pull, resumed on this thread ahead of the test, reach its Busy wait.
+                yield()
+                assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
 
-            fetchGate.complete(Unit)
-            h.fixture.awaitSyncing()
+                fetchGate.complete(Unit)
+                h.fixture.awaitSyncing()
 
-            withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
-            assertTrue(h.fixture.activityCenter.activity.value.syncing, "released at the refresh's end, with the sync still running")
-            assertEquals(1, h.fixture.log.count { it == "fetch:https://ex.com/f1" }, "the pull started no cycle of its own")
+                withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+                assertTrue(h.fixture.activityCenter.activity.value.syncing, "released at the refresh's end, with the sync still running")
+                assertEquals(1, h.fixture.log.count { it == "fetch:https://ex.com/f1" }, "the pull started no cycle of its own")
 
-            syncGate.complete(Unit)
-            h.settle()
+                syncGate.complete(Unit)
+                h.settle()
+            }
         }
     }
 
