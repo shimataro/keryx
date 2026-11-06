@@ -94,7 +94,7 @@ struct ArticleListView: View {
     /// `attachedToWindow` too: its first change rebuilds the list, and a scroll carried out before
     /// that would be lost with the list it was aimed at.
     private var scrollGateInput: ArticleListScrollGate.Input {
-        ArticleListScrollGate.Input(isVisible: listVisible && attachedToWindow, remountGeneration: remountGeneration)
+        ArticleListScrollGate.Input(canScroll: listVisible && attachedToWindow, remountGeneration: remountGeneration)
     }
     #endif
 
@@ -151,20 +151,12 @@ struct ArticleListView: View {
                         guard !didShowFirstRows, !isEmpty else { return }
                         didShowFirstRows = true
                         guard let id = home.selectedArticleId else { return }
-                        Task {
-                            await Task.yield()
-                            requestScroll(ArticleListScrollGate.Target(rowId: id), proxy)
-                        }
+                        requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id), proxy)
                     }
                     // After the current update, so the rows coming back with the list have reported
                     // themselves (`onlyIfOffScreen`).
                     .onChange(of: scrollGateInput, initial: true) { _, input in
-                        guard let target = scrollGate.update(input, rowExists: rowExists) else { return }
-                        Task {
-                            await Task.yield()
-                            guard rowExists(target.rowId) else { return }
-                            carryOut(target, proxy)
-                        }
+                        if let target = scrollGate.update(input) { requestScrollAfterUpdate(target, proxy) }
                     }
             }
             #endif
@@ -712,6 +704,13 @@ struct ArticleListView: View {
     private func requestScroll(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
         guard let target = scrollGate.request(target, rowExists: rowExists) else { return }
         carryOut(target, proxy)
+    }
+
+    private func requestScrollAfterUpdate(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        Task {
+            await Task.yield()
+            requestScroll(target, proxy)
+        }
     }
 
     private func carryOut(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {

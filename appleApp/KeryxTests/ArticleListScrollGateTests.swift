@@ -6,15 +6,15 @@ import Testing
 struct ArticleListScrollGateTests {
     private typealias Target = ArticleListScrollGate.Target
 
-    private func input(visible: Bool, generation: Int = 0) -> ArticleListScrollGate.Input {
-        ArticleListScrollGate.Input(isVisible: visible, remountGeneration: generation)
+    private func input(canScroll: Bool, generation: Int = 0) -> ArticleListScrollGate.Input {
+        ArticleListScrollGate.Input(canScroll: canScroll, remountGeneration: generation)
     }
 
     private func anyRow(_: String) -> Bool { true }
 
     private func visibleGate() -> ArticleListScrollGate {
         var gate = ArticleListScrollGate()
-        _ = gate.update(input(visible: true), rowExists: anyRow)
+        _ = gate.update(input(canScroll: true))
         return gate
     }
 
@@ -43,11 +43,11 @@ struct ArticleListScrollGateTests {
     @Test
     func aHiddenListHoldsTheScrollUntilItComesBack() {
         var gate = visibleGate()
-        _ = gate.update(input(visible: false), rowExists: anyRow)
+        _ = gate.update(input(canScroll: false))
 
         #expect(gate.request(Target(rowId: "a"), rowExists: anyRow) == nil)
-        #expect(gate.update(input(visible: false), rowExists: anyRow) == nil)
-        #expect(gate.update(input(visible: true), rowExists: anyRow) == Target(rowId: "a"))
+        #expect(gate.update(input(canScroll: false)) == nil)
+        #expect(gate.update(input(canScroll: true)) == Target(rowId: "a"))
     }
 
     @Test
@@ -56,36 +56,39 @@ struct ArticleListScrollGateTests {
         _ = gate.request(Target(rowId: "a"), rowExists: anyRow)
         _ = gate.request(Target(rowId: "b", onlyIfOffScreen: true), rowExists: anyRow)
 
-        #expect(gate.update(input(visible: true), rowExists: anyRow) == Target(rowId: "b", onlyIfOffScreen: true))
+        #expect(gate.update(input(canScroll: true)) == Target(rowId: "b", onlyIfOffScreen: true))
     }
 
     @Test
     func aHeldScrollIsCarriedOutOnce() {
         var gate = ArticleListScrollGate()
         _ = gate.request(Target(rowId: "a"), rowExists: anyRow)
-        _ = gate.update(input(visible: true), rowExists: anyRow)
+        _ = gate.update(input(canScroll: true))
 
-        #expect(gate.update(input(visible: false), rowExists: anyRow) == nil)
-        #expect(gate.update(input(visible: true), rowExists: anyRow) == nil)
+        #expect(gate.update(input(canScroll: false)) == nil)
+        #expect(gate.update(input(canScroll: true)) == nil)
     }
 
     @Test
-    func aHeldScrollWhoseRowIsGoneIsDropped() {
+    func aReleasedScrollWhoseRowIsGoneIsDropped() {
         var gate = ArticleListScrollGate()
         _ = gate.request(Target(rowId: "a"), rowExists: anyRow)
 
-        #expect(gate.update(input(visible: true), rowExists: { _ in false }) == nil)
-        #expect(gate.update(input(visible: false), rowExists: anyRow) == nil)
-        #expect(gate.update(input(visible: true), rowExists: anyRow) == nil)
+        let released = gate.update(input(canScroll: true))
+
+        #expect(released == Target(rowId: "a"))
+        #expect(gate.request(Target(rowId: "a"), rowExists: { _ in false }) == nil)
+        #expect(gate.update(input(canScroll: false)) == nil)
+        #expect(gate.update(input(canScroll: true)) == nil)
     }
 
     @Test
     func aRebuiltListDropsTheHeldScroll() {
         var gate = ArticleListScrollGate()
-        _ = gate.update(input(visible: false, generation: 1), rowExists: anyRow)
+        _ = gate.update(input(canScroll: false, generation: 1))
         _ = gate.request(Target(rowId: "a"), rowExists: anyRow)
 
-        #expect(gate.update(input(visible: true, generation: 2), rowExists: anyRow) == nil)
+        #expect(gate.update(input(canScroll: true, generation: 2)) == nil)
     }
 
     @Test
@@ -93,6 +96,6 @@ struct ArticleListScrollGateTests {
         var gate = ArticleListScrollGate()
         _ = gate.request(Target(rowId: "a"), rowExists: anyRow)
 
-        #expect(gate.update(input(visible: true, generation: 3), rowExists: anyRow) == Target(rowId: "a"))
+        #expect(gate.update(input(canScroll: true, generation: 3)) == Target(rowId: "a"))
     }
 }

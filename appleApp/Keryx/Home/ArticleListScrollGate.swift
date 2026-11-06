@@ -17,13 +17,14 @@ struct ArticleListScrollGate {
 
     /// What decides whether the list can be scrolled, as far as this decision needs it.
     struct Input: Equatable {
-        /// Whether the list is on screen, in its final form (`ArticleListView.scrollGateInput`).
-        var isVisible: Bool
+        /// Whether the list is on screen and past the rebuild that follows its window attachment, as
+        /// a scroll carried out before that rebuild is lost (`ArticleListView.scrollGateInput`).
+        var canScroll: Bool
         /// `ArticleListView.remountGeneration`.
         var remountGeneration: Int
     }
 
-    private var isVisible = false
+    private var canScroll = false
     /// nil until the first update.
     private var remountGeneration: Int?
     private var held: Target?
@@ -31,7 +32,7 @@ struct ArticleListScrollGate {
     /// A scroll was asked for.
     /// - Returns: The scroll to carry out now, or nil when it is held (or its row is gone).
     mutating func request(_ target: Target, rowExists: (String) -> Bool) -> Target? {
-        guard isVisible else {
+        guard canScroll else {
             held = target
             return nil
         }
@@ -39,15 +40,16 @@ struct ArticleListScrollGate {
     }
 
     /// What the list can do changed.
-    /// - Returns: The held scroll to carry out now, or nil to leave the scroll position alone.
-    mutating func update(_ input: Input, rowExists: (String) -> Bool) -> Target? {
+    /// - Returns: The held scroll to ask for again through `request`, which checks its row, or nil to
+    ///   leave the scroll position alone.
+    mutating func update(_ input: Input) -> Target? {
         // A rebuilt list starts at the top by design, and scrolling it right after the rebuild makes
         // the row touched next jump (`ArticleListView.body`).
         if let remountGeneration, remountGeneration != input.remountGeneration { held = nil }
         remountGeneration = input.remountGeneration
-        isVisible = input.isVisible
-        guard isVisible, let target = held else { return nil }
-        held = nil
-        return rowExists(target.rowId) ? target : nil
+        canScroll = input.canScroll
+        guard canScroll else { return nil }
+        defer { held = nil }
+        return held
     }
 }
