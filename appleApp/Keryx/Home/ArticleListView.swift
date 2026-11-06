@@ -676,7 +676,7 @@ struct ArticleListView: View {
 }
 
 /// Pull-to-refresh on iOS (`external-spec.md` §9), scoped to the current selection's feeds and held
-/// up until the refresh and its sync finish — see `HomeObservable.pullToRefresh`. macOS has no pull
+/// up until the refresh itself finishes (not the sync that follows) — see `HomeObservable.pullToRefresh`. macOS has no pull
 /// gesture, as Compose's desktop list has none.
 private struct PullToRefreshModifier: ViewModifier {
     let home: HomeObservable

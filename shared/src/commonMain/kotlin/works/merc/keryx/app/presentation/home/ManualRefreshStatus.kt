@@ -10,6 +10,10 @@ import works.merc.keryx.app.domain.RefreshOutcome
  * flight), which then appears so that action gets its result (`external-spec.md` §9 "Refresh
  * feedback"). The iOS toolbar's status area shows it (`external-spec.md` §9).
  *
+ * A refresh counts as running only through its refresh stage: a cycle's [Checking] ends, and its
+ * outcome is reported, as soon as its feeds have been fetched — not after the cloud sync that
+ * follows, whose progress the sync control shows on its own.
+ *
  * Overlapping refreshes count as one check: it stays [Checking] until the last of them has finished,
  * and then reports their outcomes combined ([RefreshOutcome.plus]).
  */
