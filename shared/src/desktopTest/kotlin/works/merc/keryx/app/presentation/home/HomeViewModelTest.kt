@@ -458,7 +458,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun pullToRefreshKeepsTheIndicatorUpThroughRefreshAndSync() = runTest {
+    fun pullToRefreshKeepsTheIndicatorUpThroughTheRefreshThenSyncs() = runTest {
         db.insertFeed("f1")
         val gate = CompletableDeferred<Unit>()
         val activityCenter = ActivityCenter()
@@ -483,6 +483,8 @@ class HomeViewModelTest {
 
         assertFalse(vm.pulling)
         assertFalse(activityCenter.activity.value.feedRefreshing)
+        // The indicator ends with the refresh stage; the cycle's sync may still be running.
+        pumpUntil { activityCenter.activity.value.idle }
         assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
         assertEquals(1, db.articlesQueries.watchAll().executeAsList().size)
     }
@@ -831,6 +833,8 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
 
         assertEquals(setOf("https://feed/f1", "https://feed/f2"), requested.toSet())
+        // The indicator ends with the refresh stage; the cycle's sync may still be running.
+        pumpUntil { vm.activity.value.idle }
         assertEquals(1, cloud.syncs.get(), "the pull must sync after refreshing, like refreshAll()")
     }
 
@@ -854,6 +858,8 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
 
         assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
+        // The indicator ends with the refresh stage; the cycle's sync may still be running.
+        pumpUntil { vm.activity.value.idle }
         assertEquals(1, cloud.syncs.get())
     }
 
@@ -1093,7 +1099,8 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
 
         assertFalse(vm.pulling)
-        assertTrue(vm.activity.value.idle, "the pull only finishes once the refresh and its sync have")
+        // The indicator ends with the refresh stage; the cycle's sync may still be running.
+        pumpUntil { vm.activity.value.idle }
         assertEquals(1, fetches.get(), "the pull must join the running refresh, not start its own")
         assertEquals(1, cloud.syncs.get())
     }
@@ -1184,7 +1191,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun aPullOnAnotherSelectionWaitsAndStaysUpUntilEverythingFinishes() = runTest {
+    fun aPullOnAnotherSelectionWaitsForTheFirstAndEndsWithItsRefresh() = runTest {
         db.insertFeed("f1")
         db.insertFeed("f2")
         val gate = CompletableDeferred<Unit>()
@@ -1211,7 +1218,8 @@ class HomeViewModelTest {
         pumpUntil { !vm.pulling }
 
         assertEquals(emptySet(), vm.pullRefreshingFilters.value)
-        assertTrue(vm.activity.value.idle)
+        // The indicators end with the refresh stage; the cycle's sync may still be running.
+        pumpUntil { vm.activity.value.idle }
         assertEquals(1, fetches.get(), "the second pull must wait for the first, not start its own")
         assertEquals(1, cloud.syncs.get())
     }
