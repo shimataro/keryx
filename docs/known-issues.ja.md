@@ -908,3 +908,49 @@ inset に追従させる SwiftUI 側の修正。サポートする全 iOS バー
 
 サポートする全 iOS バージョンで両方とも満たせば、上のとおり回避策を外してこのエントリを削除する。
 どちらかが満たせなければ `.id` を戻し、このエントリの最後に確認した環境を更新する。
+
+## iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした
+
+**状況**: 緩和済み、原因は未確定。画面にない一覧にはスクロールを届けないようにした
+（`Home/ArticleListScrollGate.swift`）が、クラッシュは再現できていないので、これで止まるかは分かっていない。
+
+### 症状
+
+v0.27.0、iPhone SE（第3世代）、iOS 26.5 で、プロセス起動の 32 秒後に
+`-[UICollectionView _validateScrollingTargetIndexPath:raisingExceptionIfNecessary:]` の
+`NSInternalInconsistencyException` で異常終了した。Reader からのナビゲーションの pop を始めるレイアウトの中で、
+SwiftUI の `UpdateCoalescingCollectionView.updateContent()` が `layoutSubviews` からスクロールを要求している。
+スタック上の Keryx のフレームは `main` のみで、レポートに例外メッセージがないため、index path と行数は不明。
+Kotlin の GC スレッドは待機中だった。
+
+v0.26.0 も同じ形でクラッシュし、Reader の page 型 `TabView` が原因とされて #303 で置き換えられた。その修正は
+v0.27.0 に含まれ、v0.27.0 にこの `TabView` はないので、このレイアウトに残る SwiftUI の collection view は記事一覧の
+`List` である。
+
+### 除外できたこと
+
+iOS 26.3 シミュレータで計測した。pop はスワイプではなくコードから行った。
+
+| シナリオ | 結果 |
+| --- | --- |
+| 一覧が Reader の下にある間の `scrollTo` | 発生する（選択の移動、復元した選択） |
+| 51 行目への scroll が保留の状態で行を 60→9 に減らして戻る | クラッシュしない |
+| 起動時に Reader を復元して戻る | クラッシュしない |
+| 起動時に Reader を復元し、行を 59→34 に減らして戻る | クラッシュしない |
+
+したがって、行の減少で保留の scroll が古くなるだけでは足りない。
+
+### 未検証のこと
+
+画面端のスワイプによるインタラクティブな操作（レポートのスタックに `UIPercentDrivenInteractiveTransition` がある）、
+iOS 26.5、一覧が隠れている間の行の増加。
+
+### 残るリスク
+
+画面上の一覧では、`scrollTo` と行の変更が同じ更新に重なることがまだある。`scrollTo` の完了を知るコールバックが
+ないので、両者を厳密には分けられない。
+
+### 本当の修正に必要なこと
+
+記事一覧を SwiftUI の `List` から、サイドバーと同じ `UICollectionView` に移す。`scrollToItem` はアプリが把握している
+行に対して同期実行され、保留が残らない。行、スワイプ操作、pull-to-refresh を移す必要があるので、別タスクとする。
