@@ -1414,7 +1414,7 @@ reported as on screen, and the crash itself (see "iOS: going back to the article
 feed of a few dozen articles:
 
 - No crash: open an article, swipe through a few, and edge-swipe back to the list; repeat with the back
-  button, and while a refresh or sync is landing.
+  button, and while a refresh or sync is landing. Also start an edge swipe, cancel it, and go back afterwards.
 - After swiping past the rows that were on screen, going back shows the selected row, without the list
   jumping a long way once it is back.
 - Open an article, send the app to the background and have iOS terminate it, relaunch into the reader, and go

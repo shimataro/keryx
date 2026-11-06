@@ -926,13 +926,13 @@ process launched. SwiftUI's `UpdateCoalescingCollectionView.updateContent()` ask
 stack but `main`, and the report does not hold the exception's message, so the index path and row count are
 unknown. The Kotlin GC threads were idle.
 
-v0.26.0 crashed the same way and was attributed to the reader's page-style `TabView`, which #303 replaced.
-That fix is in v0.27.0, which has no such `TabView`, so the `List` of the article list is the remaining
-SwiftUI collection view in this layout.
+The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` of the article list
+is the only SwiftUI collection view in this layout.
 
 ### What was ruled out
 
-Measured on the iOS 26.3 simulator, with the pop made from code rather than by a swipe:
+Measured on the iOS 26.3 simulator. The first four rows made the pop from code, the last two with an edge swipe
+driven by a UI test:
 
 | Scenario | Result |
 | --- | --- |
@@ -940,18 +940,25 @@ Measured on the iOS 26.3 simulator, with the pop made from code rather than by a
 | Pending scroll to row 51, rows shrink from 60 to 9, go back | No crash |
 | Reader restored at launch, go back | No crash |
 | Reader restored at launch, rows shrink from 59 to 34, go back | No crash |
+| Scroll held, edge swipe back to the list | No crash |
+| Scroll held, edge swipe cancelled | No crash |
 
 So a pending scroll made stale by rows shrinking is not enough on its own.
 
 ### Not yet tried
 
-An interactive edge swipe (the report's stack has `UIPercentDrivenInteractiveTransition`), iOS 26.5, and
-rows growing while the list is hidden.
+iOS 26.5, a device, and rows growing while the list is hidden.
 
 ### Remaining risk
 
 On a list that is on screen, a `scrollTo` and a row change can still land in the same update: there is no
 callback for when a `scrollTo` has been carried out, so the two cannot be strictly kept apart.
+
+The gate also opens as the pop starts, not when it ends. On the simulator, a held scroll was carried out about
+half a second before the pop finished, and in a cancelled edge swipe it was carried out and the list then left
+the screen again. So a held scroll can still reach the list during the transition the crash happened in. Waiting
+for the transition to finish would close this, but a row swiped off screen would then jump after the pop, with
+its return flash mostly over, so it is left to the real fix below.
 
 ### What a real fix would need
 
