@@ -2003,6 +2003,20 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
 
+### Article list scrolling (iOS)
+
+The iOS article list is a SwiftUI `List`, scrolled with `ScrollViewProxy.scrollTo`. A filter switch
+goes back to the top, but only once the rows on screen belong to the new filter
+(`Home/ArticleListTopReset.swift`, tested in `KeryxTests`): `HomeObservable.filter` and the rows arrive
+on separate flows, in either order, so right after a switch the list can still hold the previous
+filter's rows. A scroll aimed at one of them is carried out against the rows the list has by then, and
+when the new rows land in the same update with the target past their end (the previous list's first
+row, into an empty folder), `UICollectionView` raises an exception and the app crashes. The rows
+therefore come paired with the filter that produced them — `HomeViewModel.articlesWithFilter` /
+`searchResultsWithFilter` — and `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter`
+say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
+landing later never scrolls the list.
+
 ### iPhone Duo (iOS)
 
 iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and

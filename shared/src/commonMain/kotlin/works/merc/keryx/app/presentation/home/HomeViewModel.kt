@@ -90,6 +90,18 @@ private data class ListScope(val filter: ArticleFilter, val narrowing: ListNarro
 private data class ScopedRows<T>(val rows: List<T>, val scope: ListScope)
 
 /**
+ * [HomeViewModel.articles] together with the filter its rows were produced from (null before the
+ * list first loads). `filter` and `articles` are separate flows whose emissions can reach a UI in
+ * either order, so a UI that acts on a filter switch against the rows — the iOS list scrolling back
+ * to the top — waits for rows whose [filter] is the new one rather than acting on the previous
+ * filter's rows.
+ */
+class FilteredArticleRows internal constructor(val filter: ArticleFilter?, val rows: List<ArticleListRow>)
+
+/** [HomeViewModel.searchResults] together with the filter the search was scoped to — see [FilteredArticleRows]. */
+class FilteredSearchResults internal constructor(val filter: ArticleFilter, val rows: List<ArticleSearchResult>)
+
+/**
  * What the article list shows for a search — its rows and their title highlights — built from one
  * snapshot so the two never disagree. Compared by identity: a new instance is a new snapshot.
  */
@@ -427,6 +439,16 @@ class HomeViewModel(
         areEquivalent = ::sameListOrBothEmpty,
     )
 
+    /** [articles] paired with the filter its rows belong to — see [FilteredArticleRows]. */
+    val articlesWithFilter: StateFlow<FilteredArticleRows> = DerivedStateFlow(
+        { articlesSnapshot.value.toFilteredArticleRows() },
+        articlesSnapshot.map { it.toFilteredArticleRows() },
+        areEquivalent = { old, new -> old.filter == new.filter && sameListOrBothEmpty(old.rows, new.rows) },
+    )
+
+    private fun ScopedRows<ArticleListRow>?.toFilteredArticleRows() =
+        FilteredArticleRows(this?.scope?.filter, this?.rows.orEmpty())
+
     /**
      * Whether the article list the ViewModel holds has any rows — a flag a UI collects alongside
      * [articles], so it can tell "still catching up" from "no articles" ([articleListCatchingUp]).
@@ -735,6 +757,15 @@ class HomeViewModel(
         { searchResultsSnapshot.value.rows },
         searchResultsSnapshot.map { it.rows },
     )
+
+    /** [searchResults] paired with the filter the search was scoped to — see [FilteredSearchResults]. */
+    val searchResultsWithFilter: StateFlow<FilteredSearchResults> = DerivedStateFlow(
+        { searchResultsSnapshot.value.toFilteredSearchResults() },
+        searchResultsSnapshot.map { it.toFilteredSearchResults() },
+        areEquivalent = { old, new -> old.filter == new.filter && sameListOrBothEmpty(old.rows, new.rows) },
+    )
+
+    private fun ScopedSearchResults.toFilteredSearchResults() = FilteredSearchResults(scope.filter, rows)
 
     /**
      * The article rows of [searchResults] and their title highlights, from the same snapshot — one

@@ -763,6 +763,86 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun articlesWithFilterNeverPairsANewFilterWithThePreviousFiltersRows() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFolder("empty", "Empty")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertFeed("f2")
+        db.insertArticle("a1", "f1")
+        db.insertArticle("a2", "f2")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        val seen = mutableListOf<FilteredArticleRows>()
+        backgroundScope.launch { vm.articlesWithFilter.collect { seen += it } }
+        testScheduler.advanceUntilIdle()
+        assertEquals(ArticleFilter.All, vm.articlesWithFilter.value.filter)
+        assertEquals(setOf("a1", "a2"), vm.articlesWithFilter.value.rows.map { it.id }.toSet())
+
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+        vm.selectFilter(ArticleFilter.Folder("empty"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Folder("empty"), vm.articlesWithFilter.value.filter)
+        assertEquals(emptyList(), vm.articlesWithFilter.value.rows)
+        val expected = mapOf(
+            ArticleFilter.All to setOf("a1", "a2"),
+            ArticleFilter.Folder("d1") to setOf("a1"),
+            ArticleFilter.Folder("empty") to emptySet(),
+        )
+        seen.filter { it.filter != null }.forEach { emission ->
+            assertEquals(expected[emission.filter], emission.rows.map { it.id }.toSet(), "rows of ${emission.filter}")
+        }
+        assertEquals(
+            listOf(ArticleFilter.All, ArticleFilter.Folder("d1"), ArticleFilter.Folder("empty")),
+            seen.mapNotNull { it.filter }.distinct(),
+        )
+    }
+
+    @Test
+    fun articlesWithFilterFollowsAFilterSwitchThatLeavesTheRowsUnchanged() = runTest {
+        // Every feed is in the folder, so the folder's rows are All's rows: only the filter moves.
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertArticle("a1", "f1")
+        val vm = newViewModel()
+        subscribeAll(vm)
+        backgroundScope.launch { vm.articlesWithFilter.collect {} }
+        testScheduler.advanceUntilIdle()
+
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(ArticleFilter.Folder("d1"), vm.articlesWithFilter.value.filter)
+        assertEquals(listOf("a1"), vm.articlesWithFilter.value.rows.map { it.id })
+    }
+
+    @Test
+    fun searchResultsWithFilterCarriesTheFilterTheSearchWasScopedTo() = runTest {
+        db.insertFolder("d1", "Folder")
+        db.insertFeed("f1", folderId = "d1")
+        db.insertFeed("f2")
+        db.insertArticle("a1", "f1", title = "Kotlin One", content = "kotlin content")
+        db.insertArticle("a2", "f2", title = "Kotlin Two", content = "kotlin content")
+        ftsManagerIndexed(driver)
+        val vm = newViewModel()
+        subscribeAll(vm)
+        backgroundScope.launch { vm.searchResultsWithFilter.collect {} }
+
+        vm.setSearchBarVisible(true)
+        vm.setSearchQuery("Kotlin")
+        advanceForSearchDebounce()
+        assertEquals(ArticleFilter.All, vm.searchResultsWithFilter.value.filter)
+        assertEquals(setOf("a1", "a2"), vm.searchResultsWithFilter.value.rows.map { it.article.id }.toSet())
+
+        vm.selectFilter(ArticleFilter.Folder("d1"))
+        advanceForSearchDebounce()
+
+        assertEquals(ArticleFilter.Folder("d1"), vm.searchResultsWithFilter.value.filter)
+        assertEquals(listOf("a1"), vm.searchResultsWithFilter.value.rows.map { it.article.id })
+    }
+
+    @Test
     fun aPullThatStartsNoCycleLeavesTheStatusIdle() = runTest {
         db.insertFolder("empty", "Empty")
         db.insertFeed("f1")
