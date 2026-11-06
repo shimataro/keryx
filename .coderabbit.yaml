@@ -128,6 +128,9 @@ reviews:
 
   auto_review:
     enabled: true
+    # Review PRs against any base branch, not just the default branch (v0).
+    base_branches:
+      - ".*"
 
   finishing_touches:
     docstrings:
