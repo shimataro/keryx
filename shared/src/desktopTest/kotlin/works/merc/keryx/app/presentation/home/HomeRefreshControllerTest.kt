@@ -2,11 +2,13 @@ package works.merc.keryx.app.presentation.home
 
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -27,6 +29,7 @@ import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -61,6 +64,8 @@ class HomeRefreshControllerTest {
     private fun withController(
         currentFilter: () -> ArticleFilter = { ArticleFilter.All },
         fetchGate: CompletableDeferred<Unit>? = null,
+        syncGate: CompletableDeferred<Unit>? = null,
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         block: suspend CoroutineScope.(Harness, SqlDriver, KeryxDatabase) -> Unit,
     ): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
@@ -70,17 +75,22 @@ class HomeRefreshControllerTest {
             val scope = CoroutineScope(coroutineContext + job + CoroutineExceptionHandler { _, e -> uncaught += e })
             db.insertFeed("f1", url = "https://ex.com/f1")
             db.insertFeed("f2", url = "https://ex.com/f2")
-            val fixture = fixtures.create(driver, db, fetchGate = fetchGate)
+            val fixture = fixtures.create(driver, db, fetchGate = fetchGate, syncGate = syncGate)
             var retrims = 0
             val controller = HomeRefreshController(
                 scope = scope,
-                dispatcher = Dispatchers.Unconfined,
+                dispatcher = dispatcher,
                 runner = fixture.runner,
                 activityCenter = fixture.activityCenter,
                 currentFilter = currentFilter,
                 retrimPins = { retrims++; fixture.log += "retrim" },
             )
-            block(Harness(controller, fixture, job, uncaught) { retrims }, driver, db)
+            try {
+                block(Harness(controller, fixture, job, uncaught) { retrims }, driver, db)
+            } finally {
+                // A gated sync blocks a thread until released; never leave one behind.
+                syncGate?.complete(Unit)
+            }
         } finally {
             job.cancelAndJoin()
             driver.close()
@@ -199,8 +209,10 @@ class HomeRefreshControllerTest {
             h.fixture.awaitFeedRefreshing()
             assertEquals(1, h.retrimCount)
 
+            // The pull's own coroutine, plus the ones it handed its cycle's refresh-stage end to.
+            val launched = h.job.children.count()
             h.controller.pullToRefresh(ArticleFilter.All)
-            h.job.children.count().let { assertEquals(1, it, "the repeated pull launched nothing") }
+            assertEquals(launched, h.job.children.count(), "the repeated pull launched nothing")
             assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
 
             gate.complete(Unit)
@@ -240,6 +252,138 @@ class HomeRefreshControllerTest {
             assertEquals(3, h.retrimCount)
             assertEquals(1, h.fixture.log.count { it == "fetch:https://ex.com/f1" })
             assertEquals(0, h.fixture.log.count { it == "fetch:https://ex.com/f2" })
+        }
+    }
+
+    private suspend fun RefreshCycleRunnerFixture.awaitSyncing() {
+        withTimeout(5_000) { activityCenter.activity.first { it.syncing } }
+    }
+
+    private suspend fun HomeRefreshController.awaitFinished(): ManualRefreshStatus.Finished =
+        withTimeout(5_000) { manualRefreshStatus.first { it is ManualRefreshStatus.Finished } } as ManualRefreshStatus.Finished
+
+    @Test
+    fun theStatusFinishesWhileTheSyncIsStillRunning() {
+        val syncGate = CompletableDeferred<Unit>()
+        withController(syncGate = syncGate, dispatcher = Dispatchers.Default) { h, _, _ ->
+            h.controller.refreshAll()
+            h.fixture.awaitSyncing()
+
+            val finished = h.controller.awaitFinished()
+            assertEquals(RefreshOutcome(newArticleCount = 2, unreachable = false), finished.outcome)
+            assertEquals(1L, finished.generation)
+            assertTrue(h.fixture.activityCenter.activity.value.syncing, "the sync is still running")
+
+            syncGate.complete(Unit)
+            h.settle()
+            assertEquals(finished, h.controller.manualRefreshStatus.value, "the sync's end changes nothing")
+        }
+    }
+
+    @Test
+    fun aPullReleasesItsFilterWhenTheRefreshEndsNotTheSync() {
+        val syncGate = CompletableDeferred<Unit>()
+        withController(syncGate = syncGate, dispatcher = Dispatchers.Default) { h, _, _ ->
+            h.controller.pullToRefresh(ArticleFilter.All)
+            h.fixture.awaitSyncing()
+
+            withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+            assertIs<ManualRefreshStatus.Finished>(h.controller.awaitFinished())
+            assertTrue(h.fixture.activityCenter.activity.value.syncing, "the sync is still running")
+
+            syncGate.complete(Unit)
+            h.settle()
+            assertEquals(2, h.retrimCount, "the cycle's re-trim still follows its sync")
+        }
+    }
+
+    @Test
+    fun aPullWhileOnlyASyncRunsReleasesAtOnce() = withController { h, _, _ ->
+        val syncGate = CompletableDeferred<Unit>()
+        val sync = launch { h.fixture.activityCenter.trackSync { syncGate.await() } }
+        withTimeout(5_000) { h.fixture.activityCenter.activity.first { it.syncing } }
+
+        h.controller.pullToRefresh()
+
+        withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+        assertFalse(syncGate.isCompleted, "released while that sync is still running")
+        assertEquals(ManualRefreshStatus.Idle, h.controller.manualRefreshStatus.value)
+        syncGate.complete(Unit)
+        sync.join()
+        h.settle()
+    }
+
+    @Test
+    fun aPullWhileAnotherManualCycleRefreshesStaysUntilThatRefreshEnds() {
+        val fetchGate = CompletableDeferred<Unit>()
+        val syncGate = CompletableDeferred<Unit>()
+        withController(fetchGate = fetchGate, syncGate = syncGate, dispatcher = Dispatchers.Default) { h, _, _ ->
+            h.controller.refreshAll()
+            h.fixture.awaitFeedRefreshing()
+
+            h.controller.pullToRefresh(ArticleFilter.All)
+            withTimeout(5_000) { while (h.retrimCount < 2) yield() }
+            // Let the pull reach its Busy wait before the refresh ends.
+            repeat(50) { yield(); kotlinx.coroutines.delay(2) }
+            assertEquals(setOf<ArticleFilter>(ArticleFilter.All), h.controller.pullRefreshingFilters.value)
+
+            fetchGate.complete(Unit)
+            h.fixture.awaitSyncing()
+
+            withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+            assertTrue(h.fixture.activityCenter.activity.value.syncing, "released at the refresh's end, with the sync still running")
+            assertEquals(1, h.fixture.log.count { it == "fetch:https://ex.com/f1" }, "the pull started no cycle of its own")
+
+            syncGate.complete(Unit)
+            h.settle()
+        }
+    }
+
+    @Test
+    fun aPullJoiningAnAutomaticCycleDuringItsSyncGetsTheResultAtOnce() {
+        val syncGate = CompletableDeferred<Unit>()
+        withController(syncGate = syncGate, dispatcher = Dispatchers.Default) { h, _, _ ->
+            val automatic = async(Dispatchers.Default) { h.fixture.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            h.fixture.awaitSyncing()
+
+            h.controller.pullToRefresh(ArticleFilter.All)
+
+            val finished = h.controller.awaitFinished()
+            assertEquals(RefreshOutcome(newArticleCount = 2, unreachable = false), finished.outcome)
+            withTimeout(5_000) { h.controller.pullRefreshingFilters.first { it.isEmpty() } }
+            assertFalse(automatic.isCompleted, "the automatic cycle is still syncing")
+
+            syncGate.complete(Unit)
+            automatic.await()
+            h.settle()
+        }
+    }
+
+    @Test
+    fun overlappingRefreshesStillCountAsOneCheckAndGenerationStillIncreases() {
+        val gate = CompletableDeferred<Unit>()
+        withController(fetchGate = gate) { h, _, _ ->
+            val automatic = launch { h.fixture.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            h.fixture.awaitFeedRefreshing()
+
+            h.controller.refreshAll()
+            h.controller.pullToRefresh(ArticleFilter.All)
+            withTimeout(5_000) { while (h.retrimCount < 2) yield() }
+            repeat(50) { yield() }
+            assertIs<ManualRefreshStatus.Checking>(h.controller.manualRefreshStatus.value)
+
+            gate.complete(Unit)
+            automatic.join()
+            h.settle()
+
+            val first = assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value)
+            assertEquals(RefreshOutcome(newArticleCount = 2, unreachable = false), first.outcome, "counted once, not doubled")
+            assertEquals(1L, first.generation)
+            assertTrue(h.controller.pullRefreshingFilters.value.isEmpty())
+
+            h.controller.refreshAll()
+            h.settle()
+            assertEquals(2L, assertIs<ManualRefreshStatus.Finished>(h.controller.manualRefreshStatus.value).generation)
         }
     }
 }

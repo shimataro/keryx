@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.domain.ActivityCenter
+import works.merc.keryx.app.domain.ActivitySnapshot
 import works.merc.keryx.app.domain.RefreshCycleRunner
 import works.merc.keryx.app.domain.RefreshOutcome
 import works.merc.keryx.app.domain.RefreshCycleRunner.CycleOutcome
@@ -44,9 +45,10 @@ internal class HomeRefreshController(
     private val _pullRefreshingFilters = MutableStateFlow<Set<ArticleFilter>>(emptySet())
 
     /**
-     * The selections whose pull-to-refresh ([pullToRefresh]) is still running — through the refresh
-     * itself *and* the sync that follows it, or while it is waiting on an already in-flight
-     * refresh/sync to finish. Keyed by the filter that was showing when the pull started, so the
+     * The selections whose pull-to-refresh ([pullToRefresh]) is still refreshing — until the refresh
+     * stage of the cycle it started or joined has ended, not through the sync that follows it (the
+     * sync control shows that), or while it is waiting on another refresh already in flight to
+     * finish. Keyed by the filter that was showing when the pull started, so the
      * indicator belongs to that list alone: switching to another selection mid-pull shows that
      * list as not refreshing, and switching back shows the pull again.
      *
@@ -58,14 +60,14 @@ internal class HomeRefreshController(
     private val _manualRefreshStatus = MutableStateFlow<ManualRefreshStatus>(ManualRefreshStatus.Idle)
 
     /**
-     * What the refreshes started here are doing — see [ManualRefreshStatus]. Updated with
-     * [MutableStateFlow.update], since a cycle starts on [dispatcher] rather than on [scope].
+     * What the refreshes started here are doing — see [ManualRefreshStatus]. Every start and end is
+     * written on [scope].
      */
     val manualRefreshStatus: StateFlow<ManualRefreshStatus> = _manualRefreshStatus.asStateFlow()
 
     /**
      * The [ManualRefreshStatus.Finished.generation] source. A plain var: every end is counted from a
-     * `finally` running on [scope], which is Main-confined.
+     * `finally` running on [scope], which is Main-confined ([refreshFeed], [trackRefresh]).
      */
     private var endCount = 0L
 
@@ -95,12 +97,14 @@ internal class HomeRefreshController(
 
     /**
      * Pull-to-refresh on the article list: refreshes only the feeds the current selection covers
-     * ([FeedRepository.feedsCoveredBy]), then syncs, exactly like [refreshAll] otherwise. A
-     * selection that covers no subscribed feed finishes at once without fetching or syncing. When a
-     * refresh or sync is already in flight, no new one is started; the pull instead waits for it,
-     * keeping its filter in [pullRefreshingFilters] until everything in flight has finished (and,
-     * when that is an automatic cycle, reports its result — see [runCycle]). A
-     * second pull on a selection whose pull is still pending is ignored; a pull on another
+     * ([FeedRepository.feedsCoveredBy]), then syncs, exactly like [refreshAll] otherwise. The pull
+     * keeps its filter in [pullRefreshingFilters] until the refresh stage of its cycle has ended; the
+     * cycle's sync carries on after that. A selection that covers no subscribed feed finishes at once
+     * without fetching or syncing. When something is already in flight, no new cycle is started:
+     * an automatic cycle is joined, and the pull ends with that cycle's refresh stage (reporting its
+     * result — see [runCycle]); otherwise ([CycleOutcome.Busy]) the pull ends once no refresh is
+     * shown in progress ([ActivitySnapshot.refreshIndicatorShown]) — at once when a sync alone is
+     * running. A second pull on a selection whose pull is still pending is ignored; a pull on another
      * selection is tracked independently.
      */
     fun pullToRefresh() = pullToRefresh(currentFilter())
@@ -118,13 +122,30 @@ internal class HomeRefreshController(
         }
         if (!added) return
         scope.launch {
-            try {
-                val outcome = runCycle(filter)
-                if (outcome == CycleOutcome.Busy || outcome is CycleOutcome.Joined) {
-                    activityCenter.activity.first { it.idle }
-                }
-            } finally {
+            // Released once: when a started cycle's refresh stage ends (it then goes on to sync), or
+            // otherwise once runCycle and the wait below have returned.
+            var released = false
+            fun release() {
+                if (released) return
+                released = true
                 _pullRefreshingFilters.update { it - filter }
+            }
+            try {
+                val outcome = runCycle(filter) { refreshEnded ->
+                    scope.launch {
+                        try {
+                            refreshEnded.join()
+                        } finally {
+                            release()
+                        }
+                    }
+                }
+                // What is in flight is a sync alone (released at once), or another manual cycle,
+                // whose refresh the pull waits out. A joined cycle's refresh stage has already ended
+                // by the time runCycle returns.
+                if (outcome == CycleOutcome.Busy) activityCenter.activity.first { !it.refreshIndicatorShown }
+            } finally {
+                release()
             }
         }
     }
@@ -132,35 +153,42 @@ internal class HomeRefreshController(
     /**
      * One [RefreshCycleRunner.runIfIdle] call for [filter], with the pinned-article re-trim around
      * it. Only the IO moves to [dispatcher]; the caller's coroutine stays on the ViewModel's
-     * Main-confined scope, so the re-trims stay confined there too.
+     * Main-confined scope, so the re-trims stay confined there too. Returns once the whole cycle,
+     * sync included, has ended.
+     *
+     * [manualRefreshStatus] counts the cycle from its start until its refresh stage has ended — not
+     * through the sync that follows, whose progress the sync control shows — then reports its
+     * outcome ([trackRefresh]). [onRefreshStarted] is handed that same refresh-stage end, on [scope],
+     * for a cycle that started (a pull's indicator ends with it).
      *
      * When the call finds an automatic cycle in flight, it joins it in the same step
-     * ([CycleOutcome.Joined]), and the action awaits that cycle here: [manualRefreshStatus]
-     * counts it as one more refresh until that cycle has ended, then reports its outcome, and the
-     * cycle posts its new-article notification as a manual one would, so the user's action still gets
-     * a result (`external-spec.md` §9 "Refresh feedback"). Anything else in
-     * flight ([CycleOutcome.Busy]: a sync alone, or another manual refresh already counted) leaves
-     * the status alone.
+     * ([CycleOutcome.Joined]) and tracks that cycle's refresh stage the same way — returning once it
+     * has ended (at once if the cycle is already syncing) — and the cycle posts
+     * its new-article notification as a manual one would, so the user's action still gets a result
+     * (`external-spec.md` §9 "Refresh feedback"). Anything else in flight ([CycleOutcome.Busy]: a sync
+     * alone, or another manual refresh already counted) leaves the status alone.
      */
-    private suspend fun runCycle(filter: ArticleFilter): CycleOutcome {
+    private suspend fun runCycle(
+        filter: ArticleFilter,
+        onRefreshStarted: (Deferred<RefreshOutcome?>) -> Unit = {},
+    ): CycleOutcome {
         retrimPins()
-        // A cycle that never starts (busy, or nothing to refresh) leaves the status alone.
-        var started = false
-        var outcome: CycleOutcome? = null
-        try {
-            outcome = withContext(dispatcher) {
-                runner.runIfIdle(filter, SyncTrigger.MANUAL) {
-                    started = true
-                    _manualRefreshStatus.update { it.started() }
+        val outcome = withContext(dispatcher) {
+            runner.runIfIdle(filter, SyncTrigger.MANUAL) { refreshEnded ->
+                // Called on dispatcher: hand off to scope, so the status writes and endCount stay
+                // Main-confined. refreshEnded completes exactly once whatever happens to the cycle
+                // (failure, cancellation), so the started() always gets its ended().
+                scope.launch {
+                    onRefreshStarted(refreshEnded)
+                    trackRefresh(refreshEnded)
                 }
             }
-        } finally {
-            if (started) {
-                val generation = ++endCount
-                _manualRefreshStatus.update { it.ended((outcome as? CycleOutcome.Ran)?.refresh, generation) }
-            }
         }
-        if (outcome is CycleOutcome.Joined) joinAutomaticCycle(outcome.cycle)
+        if (outcome is CycleOutcome.Joined) {
+            trackRefresh(outcome.cycle)
+            // Already tracked by an earlier action (it returned at once): still wait it out.
+            outcome.cycle.join()
+        }
         // Re-trim using the selection as it stands now: it may have changed while the cycle ran,
         // and the stale pre-refresh selection must not outlive it.
         if (outcome is CycleOutcome.Ran) retrimPins()
@@ -168,25 +196,25 @@ internal class HomeRefreshController(
     }
 
     /**
-     * The automatic cycles [joinAutomaticCycle] is currently counting. Main-confined like [endCount].
+     * The refresh stages [trackRefresh] is currently counting. Main-confined like [endCount].
      */
-    private val joinedCycles = mutableSetOf<Deferred<RefreshOutcome?>>()
+    private val trackedRefreshes = mutableSetOf<Deferred<RefreshOutcome?>>()
 
     /**
-     * Counts the automatic cycle behind [cycle] in [manualRefreshStatus] until it has ended, then
-     * reports its outcome. A cycle already joined (a pull, then Refresh All, during the same automatic
-     * cycle) is counted once, so its new-article count is not doubled. Runs on [scope], like every
-     * other start and end, so [endCount] stays Main-confined; awaiting does no IO, so nothing moves
-     * to [dispatcher].
+     * Counts the cycle behind [refreshEnded] (started here, or an automatic one joined) in
+     * [manualRefreshStatus] until its refresh stage has ended, then reports its outcome. One already
+     * tracked (a pull, then Refresh All, during the same automatic cycle) is counted once, so its
+     * new-article count is not doubled. Runs on [scope], like every other start and end, so
+     * [endCount] stays Main-confined; awaiting does no IO, so nothing moves to [dispatcher].
      */
-    private suspend fun joinAutomaticCycle(cycle: Deferred<RefreshOutcome?>) {
-        if (!joinedCycles.add(cycle)) return
+    private suspend fun trackRefresh(refreshEnded: Deferred<RefreshOutcome?>) {
+        if (!trackedRefreshes.add(refreshEnded)) return
         _manualRefreshStatus.update { it.started() }
         var refresh: RefreshOutcome? = null
         try {
-            refresh = cycle.await()
+            refresh = refreshEnded.await()
         } finally {
-            joinedCycles.remove(cycle)
+            trackedRefreshes.remove(refreshEnded)
             val generation = ++endCount
             _manualRefreshStatus.update { it.ended(refresh, generation) }
         }

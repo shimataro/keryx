@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import works.merc.keryx.app.FakeTokenStorage
 import works.merc.keryx.app.InMemoryFaviconMissStore
 import works.merc.keryx.app.core.Clock
@@ -75,6 +76,12 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
         notifySink: OsNotificationSink? = null,
         network: NetworkCondition = NetworkCondition.UNRESTRICTED,
         appForeground: AppForeground = AppForeground(),
+        /**
+         * Holds each sync (after its "sync" log entry, while the sync is in flight) until completed. It
+         * blocks the calling thread, since the provider lookup is not suspending: run the cycle on
+         * `Dispatchers.Default`, never on the test's own event loop.
+         */
+        syncGate: CompletableDeferred<Unit>? = null,
     ): RefreshCycleRunnerFixture {
         val clock = Clock { 1000L }
         val log = Collections.synchronizedList(mutableListOf<String>())
@@ -100,7 +107,11 @@ class RefreshCycleRunnerFixtures(private val settingsDir: String) : AutoCloseabl
             driver = driver,
             db = db,
             ftsManager = FtsManager(driver),
-            cloudProvider = { log += "sync"; null },
+            cloudProvider = {
+                log += "sync"
+                if (syncGate != null) runBlocking { syncGate.await() }
+                null
+            },
             clock = clock,
             scope = syncScope,
             activityCenter = activityCenter,

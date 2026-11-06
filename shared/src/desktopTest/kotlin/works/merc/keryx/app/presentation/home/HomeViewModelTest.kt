@@ -730,12 +730,12 @@ class HomeViewModelTest {
             testScheduler.advanceUntilIdle()
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
-            assertTrue(vm.pulling)
+            assertFalse(vm.pulling, "a sync alone is no refresh for the pull to wait out")
             assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value, "a sync alone is not joinable")
 
             gate.complete(Unit)
             job.join()
-            pumpUntil { !vm.pulling }
+            testScheduler.advanceUntilIdle()
             assertEquals(ManualRefreshStatus.Idle, vm.manualRefreshStatus.value)
         } finally {
             activityScope.cancel()
@@ -892,7 +892,7 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun pullToRefreshDuringASyncWaitsForItWithoutRefreshing() = runTest {
+    fun pullToRefreshDuringASyncAloneEndsAtOnceWithoutRefreshing() = runTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
@@ -911,7 +911,7 @@ class HomeViewModelTest {
 
             vm.pullToRefresh()
             testScheduler.advanceUntilIdle()
-            assertTrue(vm.pulling)
+            assertFalse(vm.pulling, "the sync control shows the sync; the pull has no refresh to wait out")
             assertFalse(vm.activity.value.feedRefreshing)
 
             gate.complete(Unit)
@@ -928,11 +928,12 @@ class HomeViewModelTest {
     /**
      * Regression: a refresh-then-sync cycle (e.g. the background loop) has a gap between its
      * refresh and its sync where neither [ActivitySnapshot.feedRefreshing] nor
-     * [ActivitySnapshot.syncing] is up. A pull that joined the cycle used to treat that gap as
-     * "done" and drop its indicator before the sync had even started.
+     * [ActivitySnapshot.syncing] is up. A pull that found the cycle busy used to treat that gap as
+     * "done" and drop its indicator early. It stays up through the gap (the refresh indicator still
+     * shows there) and ends once the sync starts, which the sync control shows instead.
      */
     @Test
-    fun pullToRefreshJoiningARefreshCycleStaysUpAcrossTheGapBeforeItsSync() = runTest {
+    fun pullToRefreshWaitingOnARefreshCycleStaysUpAcrossTheGapUntilItsSyncStarts() = runTest {
         db.insertFeed("f1")
         val fetches = java.util.concurrent.atomic.AtomicInteger(0)
         val activityScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
@@ -965,12 +966,12 @@ class HomeViewModelTest {
             testScheduler.advanceUntilIdle()
             assertFalse(activityCenter.activity.value.feedRefreshing)
             assertFalse(activityCenter.activity.value.syncing)
-            assertTrue(vm.pulling, "the pull must wait for the cycle's sync, not just its refresh")
+            assertTrue(vm.pulling, "the gap still shows the refresh indicator, so the pull waits it out")
 
             gap.complete(Unit)
             testScheduler.advanceUntilIdle()
             assertTrue(activityCenter.activity.value.syncing)
-            assertTrue(vm.pulling)
+            assertFalse(vm.pulling, "the pull does not wait through the sync")
 
             syncGate.complete(Unit)
             cycle.join()
