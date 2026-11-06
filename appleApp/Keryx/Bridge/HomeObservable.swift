@@ -99,6 +99,19 @@ final class HomeObservable: ObservableAssignment {
     /// be the previous emission's, so the list shows no "no articles" message until it lands.
     private(set) var articleRowsBuilding = false
     private(set) var searchRows = ArticleRowList.empty
+    /// The filter the latest `articles` / `searchResults` emission belongs to (`FilteredArticleRows`):
+    /// `filter` and the rows arrive on separate flows, in either order.
+    @ObservationIgnored private var articlesFilter: ArticleFilter?
+    @ObservationIgnored private var searchResultsFilter: ArticleFilter?
+    /// The filter `articleRows` / `searchRows` were built for — assigned together with them.
+    @ObservationIgnored private var articleRowsFilter: ArticleFilter?
+    @ObservationIgnored private var searchRowsFilter: ArticleFilter?
+    /// Whether `articleRows` / `searchRows` belong to the current `filter` rather than still to the
+    /// previous one. The iOS list scrolls back to the top after a filter switch only once this holds
+    /// (`ArticleListTopReset`): a scroll aimed at the previous filter's rows is out of range once the
+    /// new rows land in the same update, which UIKit answers by raising an exception.
+    private(set) var articleRowsMatchFilter = false
+    private(set) var searchRowsMatchFilter = false
     /// The in-flight background build of each list. A newer request cancels the older one, and a
     /// result is applied only if it is still the latest request's (`rowListGeneration`), so an
     /// older emission's rows can never land over a newer one's.
@@ -458,6 +471,7 @@ final class HomeObservable: ObservableAssignment {
     private func assignFilter(_ v: ArticleFilter) -> Bool {
         guard !articleFiltersEqual(filter, v) else { return false }
         filter = v
+        updateRowsMatchFilter()
         articleListPull.abandon()
         return true
     }
@@ -528,8 +542,9 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeSearchResults() async {
-        for await v in viewModel.searchResults {
-            searchResults = v
+        for await v in viewModel.searchResultsWithFilter {
+            searchResults = v.rows
+            searchResultsFilter = v.filter
             rebuildSearchRows()
         }
     }
@@ -563,8 +578,9 @@ final class HomeObservable: ObservableAssignment {
     }
 
     private func observeArticles() async {
-        for await v in viewModel.articles {
-            articles = v
+        for await v in viewModel.articlesWithFilter {
+            articles = v.rows
+            articlesFilter = v.filter
             rebuildArticleRows()
         }
     }
@@ -595,10 +611,15 @@ final class HomeObservable: ObservableAssignment {
         updateFeedListSelectionTarget()
     }
 
+    private func updateRowsMatchFilter() {
+        assignIfChanged(\.articleRowsMatchFilter, articleRowsFilter.map { articleFiltersEqual($0, filter) } ?? false)
+        assignIfChanged(\.searchRowsMatchFilter, searchRowsFilter.map { articleFiltersEqual($0, filter) } ?? false)
+    }
+
     private func rebuildArticleRows() {
         articleRowsBuild?.task.cancel()
         let generation = nextRowListGeneration()
-        let (entries, feedInfo, previous) = (articles, feedRowInfo, articleRows)
+        let (entries, feedInfo, previous, rowsFilter) = (articles, feedRowInfo, articleRows, articlesFilter)
         let zoneId = TimeZone.current.identifier
         let task = Task { [weak self] in
             let list = await ArticleRowList.buildInBackground(
@@ -607,6 +628,8 @@ final class HomeObservable: ObservableAssignment {
             guard let self, !Task.isCancelled, articleRowsBuild?.generation == generation else { return }
             articleRowsBuild = nil
             if list.generation != articleRows.generation { articleRows = list }
+            articleRowsFilter = rowsFilter
+            updateRowsMatchFilter()
             assignIfChanged(\.articleRowsBuilding, false)
         }
         articleRowsBuild = (task, generation)
@@ -616,7 +639,7 @@ final class HomeObservable: ObservableAssignment {
     private func rebuildSearchRows() {
         searchRowsBuild?.task.cancel()
         let generation = nextRowListGeneration()
-        let (entries, feedInfo, previous) = (searchResults, feedRowInfo, searchRows)
+        let (entries, feedInfo, previous, rowsFilter) = (searchResults, feedRowInfo, searchRows, searchResultsFilter)
         let zoneId = TimeZone.current.identifier
         let task = Task { [weak self] in
             let list = await ArticleRowList.buildInBackground(
@@ -625,6 +648,8 @@ final class HomeObservable: ObservableAssignment {
             guard let self, !Task.isCancelled, searchRowsBuild?.generation == generation else { return }
             searchRowsBuild = nil
             if list.generation != searchRows.generation { searchRows = list }
+            searchRowsFilter = rowsFilter
+            updateRowsMatchFilter()
             assignIfChanged(\.hasSearchResults, !list.rows.isEmpty)
         }
         searchRowsBuild = (task, generation)

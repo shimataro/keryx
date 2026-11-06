@@ -45,6 +45,9 @@ struct ArticleListView: View {
     @State private var visibleRows = VisibleRowTracker()
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
+    #if os(iOS)
+    @State private var topReset = ArticleListTopReset()
+    #endif
     /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
     @State private var emptyListHeaderHeight: CGFloat = 0
     /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
@@ -76,6 +79,16 @@ struct ArticleListView: View {
         }
     }
 
+    #if os(iOS)
+    private var topResetInput: ArticleListTopReset.Input {
+        ArticleListTopReset.Input(
+            filterKey: filterKey,
+            rowsMatchFilter: home.searchActive ? home.searchRowsMatchFilter : home.articleRowsMatchFilter,
+            firstRowId: displayedRows.first?.id
+        )
+    }
+    #endif
+
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
@@ -105,11 +118,12 @@ struct ArticleListView: View {
                 }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
                     // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
-                    // vs. `NewArticlesPill`'s own "fresh end"). `initial: false` keeps the first
-                    // composition — including a restored `lastArticleId` selection — from being
-                    // scrolled out from under it.
-                    .onChange(of: filterKey, initial: false) { _, _ in
-                        if let first = displayedRows.first?.id { proxy.scrollTo(first) }
+                    // vs. `NewArticlesPill`'s own "fresh end") — once the new filter's rows are on
+                    // screen, never at the previous filter's (`ArticleListTopReset`). The first
+                    // composition — including a restored `lastArticleId` selection — is not a switch
+                    // and is not scrolled out from under.
+                    .onChange(of: topResetInput, initial: true) { _, input in
+                        if let first = topReset.update(input) { proxy.scrollTo(first) }
                     }
                     // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
                     // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
