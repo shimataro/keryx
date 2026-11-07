@@ -308,7 +308,7 @@ final class HomeObservable: ObservableAssignment {
     /// Starts a pull-to-refresh of the current selection's feeds and returns once its refresh — or
     /// a refresh already in flight — has finished, without waiting for the sync that follows (the
     /// sync button shows that), so a
-    /// `.refreshable` indicator stays up as long as Compose's own `pullRefreshing` does
+    /// pull indicator stays up as long as Compose's own `pullRefreshing` does
     /// (`ArticleListPane.kt`): while this filter is in `HomeViewModel.pullRefreshingFilters`, and
     /// for at least `PullRefreshHold.defaultMinimum`.
     ///

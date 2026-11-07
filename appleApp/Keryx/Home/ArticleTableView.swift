@@ -20,7 +20,8 @@ struct ArticleTableScrollRequest: Equatable {
 /// reloads on a change, and keeps the top visible row in place from its index alone
 /// (`ArticleTableLayout`).
 ///
-/// The rows are the same `ArticleRowView`s the iOS `List` shows, hosted one per visible cell.
+/// The rows are the same `ArticleRowView`s the iOS article list (`ArticleCollectionView`) shows, hosted
+/// one per visible cell.
 /// Selection, clicks and context menus stay the row's own. The table takes the first responder for
 /// the pane focus, as the `List`'s own table did, but passes every key on, so `HomeView`'s key
 /// handling remains SwiftUI's (`ArticleNSTableView`).
@@ -271,8 +272,7 @@ struct ArticleTableView: NSViewRepresentable {
 
         // MARK: - Visible rows
 
-        /// Coalesces a scroll's worth of changes into one report, like the `List`'s own
-        /// `onAppear`/`onDisappear` debounce on iOS.
+        /// Coalesces a scroll's worth of changes into one report, like the iOS article list's own.
         private func scheduleReport() {
             reportTask?.cancel()
             reportTask = Task { [weak self] in

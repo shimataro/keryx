@@ -842,6 +842,15 @@ put into a window (`ArticleListView.attachedToWindow`). The cost is that a list 
 sidebar starts at the top rather than where it was scrolled to — as NetNewsWire's article list does
 on the same route.
 
+**Since the article list became a `UICollectionView`** (`Home/ArticleCollectionView.swift`), its rows
+pull through the list's own `UIRefreshControl` rather than SwiftUI's `.refreshable`, so neither symptom
+below should show there any more; only the empty state (`noArticlesView`) is still a `.refreshable`
+scroll view. Measured on the iOS 26.3 simulator: after a pull started from code, the list came to rest
+at the top (offset −116, the inset), and the spinner sat above the header. Not re-checked: pulling after
+returning from the sidebar, which is why the workaround stays. Once it has been (remove `ListIdentity`
+from the `.id` and run the two steps of "Re-checking after an iOS or Xcode update" below), the rebuild
+can go for the article list and stay only where the empty state needs it.
+
 ### Symptom
 
 On an iPhone, pull the article list to refresh, wait for it to finish, go back to the feed list, and
@@ -926,9 +935,10 @@ If either fails, restore the `.id` and update the version this entry was last se
 
 ## iOS: going back to the article list crashed in `UICollectionView`
 
-**Status**: mitigated, cause not confirmed. Scrolls no longer reach a list that is not on screen
-(`Home/ArticleListScrollGate.swift`), but the crash was never reproduced, so whether that stops it is
-unknown.
+**Status**: mitigated, cause not confirmed. The article list is now a `UICollectionView` of its own
+(`Home/ArticleCollectionView.swift`): a scroll is a content offset set synchronously against the rows the
+list holds, never an index path that SwiftUI validates in a later layout, and `ScrollViewProxy.scrollTo` is
+no longer used for it. The crash was never reproduced, so whether that stops it is unknown.
 
 ### Symptom
 
@@ -940,11 +950,12 @@ stack but `main`, and the report does not hold the exception's message, so the i
 unknown. The Kotlin GC threads were idle.
 
 The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` of the article list
-is the only SwiftUI collection view in this layout.
+was the only SwiftUI collection view in this layout.
 
 ### What was ruled out
 
-Measured on the iOS 26.3 simulator. The first four rows made the pop from code, the last two with an edge swipe
+Measured on the iOS 26.3 simulator, with the SwiftUI `List` and `ArticleListScrollGate` holding scrolls asked
+for while the list was hidden. The first four rows made the pop from code, the last two with an edge swipe
 driven by a UI test:
 
 | Scenario | Result |
@@ -958,23 +969,21 @@ driven by a UI test:
 
 So a pending scroll made stale by rows shrinking is not enough on its own.
 
+### After the move to a collection view
+
+Measured on the iOS 26.3 simulator, popping from code: the selection moved twice while the list was under the
+reader (the list then shows the last one's row once it is back); the reader restored at launch and popped
+back, with 59 rows, with the rows shrunk to 34 first, and with 30 more rows than at the previous launch; a
+refresh adding five rows while the list was scrolled down (the visible rows stay, the new-articles pill
+shows); a change of the search term. None crashed, and each landed where it should. Re-sorting 10,000 rows
+took about 65 and 110 ms.
+
 ### Not yet tried
 
-iOS 26.5, a device, and rows growing while the list is hidden.
+iOS 26.5, a device, rows growing while the list is hidden, iOS 17 and 18 (the search field and the
+navigation bar following the list's scrolling), and edge swipes on the new list.
 
 ### Remaining risk
 
-On a list that is on screen, a `scrollTo` and a row change can still land in the same update: there is no
-callback for when a `scrollTo` has been carried out, so the two cannot be strictly kept apart.
-
-The gate also opens as the pop starts, not when it ends. On the simulator, a held scroll was carried out about
-half a second before the pop finished, and in a cancelled edge swipe it was carried out and the list then left
-the screen again. So a held scroll can still reach the list during the transition the crash happened in. Waiting
-for the transition to finish would close this, but a row swiped off screen would then jump after the pop, with
-its return flash mostly over, so it is left to the real fix below.
-
-### What a real fix would need
-
-Moving the article list from a SwiftUI `List` to a `UICollectionView`, as the sidebar already is:
-`scrollToItem` then runs synchronously against rows the app knows, with nothing left pending. It has to carry
-over the rows, swipe actions and pull-to-refresh, so it is a task of its own.
+If the crash did not come from SwiftUI's list validating a scroll target, this change does not stop it. On a
+recurrence, start from the new report's stack rather than from this entry's conclusion.

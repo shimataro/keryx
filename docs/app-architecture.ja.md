@@ -1885,7 +1885,7 @@ HIG が「表示中のビューの検索」に勧める位置であり、メー�
 ### 記事一覧（macOS）
 
 macOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定した `NSTableView` である
-（`Home/ArticleTableView.swift`、`NSViewRepresentable`）。iOS は `List` のまま。
+（`Home/ArticleTableView.swift`、`NSViewRepresentable`）。iOS には別に専用の collection view がある（下の「記事一覧（iOS）」）。
 
 - **理由。** macOS の `List` も中身は `NSTableView` だが、行の高さは自動計算で、変更を反映するときに、先頭に
   見えている行より上に挿入された行をすべて計測する（`_keepTopRowStableAtLeastOnce` の中の
@@ -1931,25 +1931,62 @@ regular 幅（iPad、横向きの大きい iPhone）では、サイドバーと�
 暗くした。macOS と違い、別のペインにフォーカスがあっても薄くしない。タッチ操作ではフォーカスが副次的に移るだけで、
 同じくタッチ主体の Android も薄くしない（`external-spec.md` §9）。
 
-### 記事一覧のスクロール（iOS）
+### 記事一覧（iOS）
 
-iOS の記事一覧は SwiftUI の `List` で、`ScrollViewProxy.scrollTo` でスクロールする。フィルタを切り替えると
-先頭に戻るが、それは画面上の行が新しいフィルタのものになってからに限る（`Home/ArticleListTopReset.swift`、
-`KeryxTests` でテスト）。`HomeObservable.filter` と行は別々のフローで、どちらが先とも限らずに届くため、
-切り替えた直後の一覧はまだ前のフィルタの行を持っていることがある。その行を狙ったスクロールは実行時点の
-行に対して行われ、新しい行が同じ更新で着地して目標がその範囲外になる（前の一覧の先頭行を、空のフォルダに
-対して）と、`UICollectionView` が例外を投げてアプリがクラッシュする。そこで行はそれを生んだフィルタと
-対で届き（`HomeViewModel.articlesWithFilter` / `searchResultsWithFilter`）、画面上の行が現在のフィルタの
-ものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの対応は
-一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。
+iOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定した UIKit の `UICollectionView` である
+（`Home/ArticleCollectionView.swift`、`UIViewControllerRepresentable`）。土台の UIKit を除けば、上の macOS の
+テーブルと同じ考え方で動く。
 
-画面にない一覧にスクロールを頼むこともしない（`Home/ArticleListScrollGate.swift`、`KeryxTests` でテスト）。
-`scrollTo` は一覧の次のレイアウトで実行され、Reader の下にある一覧はレイアウトされない。
-Reader のスワイプで選択が動いたときや、復元した選択が届いたときは一覧が隠れているので、そのスクロールは戻る操作の
-最初のレイアウトまで待つことになる。gate はこれらを保持し、一覧が画面に戻ったら最新の 1 件だけを、その行がまだ
-あれば実行する。サイドバーから戻る途中で再構築された一覧は先頭から始まるので、保持分を捨てる。「画面に戻った」とは
-pop の終わりではなく始まりを指す。ピルのジャンプは画面上でしかタップできないので対象外。これは再現できていないクラッシュへの防御的な変更である。
-[known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」を参照。
+- **理由。** `List` は `ScrollViewProxy.scrollTo` でスクロールする。これは一覧の次のレイアウトで、その時点で一覧が
+  持っている行に対して実行される。Reader の下にある一覧はレイアウトされないので、そこで頼んだスクロールは戻る操作の
+  最初のレイアウトまで待つことになり、その間に行が変わっていると、`UICollectionView` が目標の index path に対して
+  例外を投げる。v0.27.0 はこの形でクラッシュした（再現はできていない。
+  [known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」を参照）。
+  ここでのスクロールは、その時点で一覧が持っている行から `ArticleTableLayout` が求めた content offset で、
+  同期的に設定し、スクロールできる範囲に収める。待たされるものはなく、index path を検証する API
+  （`scrollToItem`）も使わない。
+- **固定の高さ。** 行の高さはすべて同じ（タイトルは常に 2 行分を確保する）。一覧がウィンドウに載った時点で
+  `ArticleRowModel.measurementSample` を一度だけ測り、一覧自身の trait 環境で測るので Dynamic Type が反映される。
+  値は画面の 1 ピクセル単位に切り上げる（1 ポイントの端数でも、長い一覧では積み上がるため）。Dynamic Type が
+  変わったときは測り直し、先頭に見えていた行を同じ位置に保つ。位置は先頭行の上端から測る。固定ヘッダーとバーは
+  offset ではなく、表示領域の高さから差し引く。
+- **行とヘッダー。** 行はこれまでと同じ、ホストした `ArticleRowView` である（`UIHostingConfiguration`、上下 2pt は
+  `List` の行の inset と同じで、左右には独自の余白を付けない）。変わっていない行は再描画しない。選択、タップ、
+  コンテキストメニューは行の側が持つので、collection view 自体は何も選択しない。`ArticleListHeader` は、一覧自身の
+  不透明な背景を持つ、固定表示の boundary supplementary item で、行はその下をスクロールする。Reader から戻ったときに
+  読んでいた行を光らせるフェードは、`HomeView` の `withAnimation` がホストしたセルに届かないので、行自身の
+  アニメーションで行う。
+- **更新。** 行の集合や順序が変わると、一覧を再読み込みして、先頭に見えていた行を id で同じ画面位置に保つ
+  （`ArticleTableLayout.scrollOffset`）。そのため先頭より上に届いた記事は画面外に入り、新着ピルはこれを前提にしている
+  （`freshSideUnseenCount`）。検索語が変わると先頭に戻る（バックグラウンドの書き込みで検索が再実行されても戻らない）。
+  Reader の下にある間、一覧は window を持たず、UIKit の inset と offset は信用できない。その間に着地した行の変更は、
+  一覧が戻ったときに、最初の変更の前にあった位置を基準に位置を決める。UIKit が勝手に offset を動かした場合は、
+  ユーザーが最後に置いた位置に戻す。
+- **スクロール。** `ArticleListView` はスクロールを `ArticleListScrollRequest`（世代と、行の `reveal` またはピルの
+  `freshEnd`）として渡す。コントローラは、その時点の行に対して実行し、行が消えていれば捨てる。サイズも window も
+  まだないときは最新の 1 件だけを持ち、最初のレイアウトの後に実行する。キーボード操作などで記事を画面に入れるだけの
+  `reveal` は、一部でも画面に出ている行を動かさない。
+- **どのスクロールを頼むか。** フィルタを切り替えると先頭に戻るが、それは画面上の行が新しいフィルタのものになってから
+  に限る（`Home/ArticleListTopReset.swift`、`KeryxTests` でテスト）。`HomeObservable.filter` と行は別々のフローで、
+  どちらが先とも限らずに届くため、切り替えた直後の一覧はまだ前のフィルタの行を持っていることがある。そこで行は
+  それを生んだフィルタと対で届き（`HomeViewModel.articlesWithFilter` / `searchResultsWithFilter`）、画面上の行が
+  現在のフィルタのものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの
+  対応は一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。一覧が画面にないときに頼まれた
+  スクロール（Reader のスワイプで選択が動いた、復元した選択が届いた）は保持し
+  （`Home/ArticleListScrollGate.swift`、`KeryxTests` でテスト）、一覧が受けられるようになったら最新の 1 件だけを、
+  その行がまだあれば渡す。サイドバーから戻る途中で再構築された一覧は先頭から始まるので、保持分を捨てる。ピルの
+  ジャンプは画面上でしかタップできないので対象外。
+- **可視行。** 新着の件数に使う可視行は、スクロール位置から求める（これまでどおりデバウンスする）。画面にない一覧は
+  何も報告しない。`List` の行が消えて報告が空になっていたのと同じで、そうしないと Reader の下に届いた記事が
+  既読扱いになる。
+- **Pull to refresh** は `UIRefreshControl`（`PullToRefreshAvailability` が許すときだけ）で、
+  `HomeObservable.pullToRefresh()` を実行し、それが終わると止まる。別の項目を選んで待ちを打ち切った場合も同様。
+  空の状態（`noArticlesView`）は今も `.refreshable` のスクロールビューなので、サイドバーから戻る途中の一覧の再構築も
+  残っている（`remountGeneration`、`attachedToWindow`。[known-issues.ja.md](known-issues.ja.md) の
+  「iOS: サイドバーから戻ると記事一覧の pull-to-refresh のスピナーが出ない」を参照）。
+- **フォーカス** はサイドバーと同じで、representable に `.focusable()`、`.focusEffectDisabled()`、`.focused(…)` を
+  付け、矢印キーを `HomeView` に残すため `allowsFocus = false` にする。
+- **計測。** iOS 26.3 シミュレータで、1 万行の並び替えの反映に約 65 ms と 110 ms かかった。
 
 ### iPhone Duo（iOS）
 

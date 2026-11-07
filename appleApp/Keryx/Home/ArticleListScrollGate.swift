@@ -1,12 +1,13 @@
-/// Keeps the iOS article list's scrolls (`ArticleListView`) away from a list that is not on screen.
+/// Holds the iOS article list's scrolls (`ArticleListView`) while the list cannot carry them out.
 ///
-/// `ScrollViewProxy.scrollTo` does not scroll at once: SwiftUI carries it out in the list's next
-/// layout. A list under the reader is not laid out, so a scroll asked for there (a swipe in the reader
-/// moves the selection, a restored selection lands) would wait until the back navigation's first
-/// layout, which is where v0.27.0 crashed in `UICollectionView`'s scroll target validation. So a
-/// scroll asked for while the list is hidden is held, and only the latest one is carried out when the
-/// list comes back, provided its row still exists. See "Article list scrolling (iOS)" in
-/// `docs/app-architecture.md`.
+/// A scroll asked for while the list is under the reader (a swipe in the reader moves the selection, a
+/// restored selection lands) is not for the list to act on then — it is not on screen, and a list
+/// built before its window attachment is rebuilt, which would lose the scroll with it. So it is held,
+/// and only the latest one is passed on when the list can take it, provided its row still exists.
+/// (v0.27.0 crashed in `UICollectionView`'s scroll target validation when such a scroll waited for
+/// the back navigation's first layout; `ArticleCollectionView` no longer leaves a scroll waiting on
+/// SwiftUI, but a scroll to the row the user just left still belongs to the moment the list returns.)
+/// See "Article list (iOS)" in `docs/app-architecture.md`.
 struct ArticleListScrollGate {
     /// A scroll to carry out.
     struct Target: Equatable {
