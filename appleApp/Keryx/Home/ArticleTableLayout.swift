@@ -21,6 +21,11 @@ struct ScrollAnchor: Equatable {
 /// above the top visible one to keep that row in place, which froze the app for as long as thousands
 /// of read articles took to lay out when "unread only" was turned off.
 enum ArticleTableLayout {
+    /// How long the visible rows settle before they are reported, coalescing a scroll's worth of changes.
+    static let visibleRowsReportDelay: Duration = .milliseconds(50)
+    /// The space above and below each row's content (the `List`'s row insets).
+    static let rowVerticalInset: CGFloat = 2
+
     /// The vertical scroll offset that keeps `anchor` where it was on screen.
     ///
     /// The top visible row stays put by id, so rows inserted above it (turning "unread only" off, new
