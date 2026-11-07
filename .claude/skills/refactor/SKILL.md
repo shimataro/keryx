@@ -88,7 +88,9 @@ Pick the items that genuinely apply; don't churn code that is already clean.
   sealed types, immutability (`val`, immutable collections). Leave
   already-idiomatic code alone.
 - **Comment / KDoc hygiene** → drop stale/redundant comments; ensure English
-  (constraint #9). **Keep** the "why" comments that document the FTS / merge /
+  (constraint #9 — except a comment in a localized message file such as
+  `values-ja/strings.xml`, which follows that file's own language; never translate it).
+  **Keep** the "why" comments that document the FTS / merge /
   `expect`-`actual` invariants — those are load-bearing.
 - **Type / contract clarity** → a nullable used where the value is always
   present (or the reverse), a non-exhaustive `when` over a sealed type papered
@@ -157,7 +159,8 @@ These are hard stops — see `.claude/CLAUDE.md` "Critical constraints" #1–#10
 6. **No new architecture / patterns** (#6, `docs/app-architecture.md`): keep the
    layered UI → ViewModel → Repository → DataSource shape, use SQLDelight
    generated classes as-is (no separate domain model classes), no Riverpod.
-7. **English source** (#9) for comments, KDoc, and non-UI string literals.
+7. **English source** (#9) for comments, KDoc, and non-UI string literals (comments in a localized
+   message file follow that file's own language).
 8. **License attribution** (#8): only relevant if a shipped runtime dependency is
    removed as dead — then update `THIRD-PARTY-LICENSES.md`.
 

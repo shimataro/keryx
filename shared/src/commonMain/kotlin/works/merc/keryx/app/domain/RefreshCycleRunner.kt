@@ -116,6 +116,11 @@ class RefreshCycleRunner(
      * automatic cycle holds back while the app is in front: one joined before its refresh finishes
      * posts it as a manual one would, and one joined after it was held back posts it now. Joining
      * the same cycle again posts nothing more. See `external-spec.md` §9 "Refresh feedback".
+     *
+     * A cycle whose refresh already ended unreachable has long since posted its notification-center
+     * warning, which the user may have dismissed while it synced. The joining action shows that
+     * failure as its own result, so the warning — the way to its explanation — is posted again here,
+     * coalesced with whatever is still there. A cycle still refreshing posts it when it ends.
      */
     internal suspend fun joinAutomaticCycle(): Deferred<RefreshOutcome?>? {
         val cycle = runningAutomaticCycles.value.lastOrNull() ?: return null
@@ -127,7 +132,10 @@ class RefreshCycleRunner(
             }
         }
         if (before is NotifyState.HeldBack) postNewArticles(before.results)
-        return cycle.refreshEnded
+        val ended = cycle.refreshEnded
+        // Already complete here, so this never suspends; it is only read once the refresh has ended.
+        if (ended.isCompleted && ended.await()?.unreachable == true) reportRefreshFailed(notificationCenter, clock)
+        return ended
     }
 
     /**
