@@ -20,7 +20,8 @@ struct ArticleTableScrollRequest: Equatable {
 /// reloads on a change, and keeps the top visible row in place from its index alone
 /// (`ArticleTableLayout`).
 ///
-/// The rows are the same `ArticleRowView`s the iOS `List` shows, hosted one per visible cell.
+/// The rows are the same `ArticleRowView`s the iOS article list (`ArticleCollectionView`) shows, hosted
+/// one per visible cell.
 /// Selection, clicks and context menus stay the row's own. The table takes the first responder for
 /// the pane focus, as the `List`'s own table did, but passes every key on, so `HomeView`'s key
 /// handling remains SwiftUI's (`ArticleNSTableView`).
@@ -211,8 +212,9 @@ struct ArticleTableView: NSViewRepresentable {
 
         private func scrollToFreshEnd(newestFirst: Bool) {
             guard let table else { return }
-            let end = max(0, CGFloat(rows.rows.count) * table.rowHeight - viewportHeight)
-            scroll(toContentOffset: newestFirst ? 0 : end)
+            scroll(toContentOffset: ArticleTableLayout.freshEndOffset(
+                newestFirst: newestFirst, count: rows.rows.count, rowHeight: table.rowHeight, viewportHeight: viewportHeight
+            ))
         }
 
         /// Scrolls the selected row fully into view, as little as possible — a row already on
@@ -225,25 +227,10 @@ struct ArticleTableView: NSViewRepresentable {
         }
 
         /// Sizes one row once: every row has this height, since the title always reserves two lines
-        /// and the feed/timestamp line one.
-        ///
-        /// Measured on a sample row rather than a real one: a line of Japanese text or an emoji can
-        /// be taller than a Latin one, so a row measured on Latin text could be too short for a
-        /// Japanese title's two lines. The sample fills both title lines (and the feed line) with
-        /// that mix, at the narrowest width the pane allows so they do wrap.
+        /// and the feed/timestamp line one — measured on `ArticleRowModel.measurementSample`.
         private func measureRowHeight() -> CGFloat {
             guard let parent else { return 0 }
-            let tallText = String(repeating: "Keryx 漢字かなカナ 😀 ", count: 12)
-            let sample = ArticleRowModel(
-                row: ArticleListRow(
-                    id: "", feed_id: "", title: tallText, url: "", published_at: KotlinLong(value: 0),
-                    created_at: 0, is_read: 0, is_starred: 1
-                ),
-                markedTitle: nil,
-                feedTitle: tallText,
-                faviconUrl: nil,
-                zone: Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault()
-            )
+            let sample = ArticleRowModel.measurementSample(zone: Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault())
             let host = NSHostingView(rootView: ArticleCellContent(row: parent.makeRow(sample), tracker: parent.contextMenuSelectionTracker))
             // Width pinned, height left to the content: an unbounded height proposal would let the
             // row's flexible star slot grow without limit.
@@ -267,10 +254,13 @@ struct ArticleTableView: NSViewRepresentable {
 
         /// The top visible row and how far past its top edge the list is scrolled.
         private func currentAnchor(in list: ArticleRowList) -> ScrollAnchor? {
-            guard let table, !list.rows.isEmpty, table.rowHeight > 0 else { return nil }
-            let top = max(0, contentVisibleRect.minY)
-            let index = min(Int(top / table.rowHeight), list.rows.count - 1)
-            return ScrollAnchor(id: list.rows[index].id, offset: top - CGFloat(index) * table.rowHeight)
+            guard let table else { return nil }
+            return ArticleTableLayout.anchor(
+                count: list.rows.count,
+                id: { list.rows[$0].id },
+                visibleTop: contentVisibleRect.minY,
+                rowHeight: table.rowHeight
+            )
         }
 
         /// Scrolls so that `offset` (measured from the first row's top edge) sits right under the
@@ -282,12 +272,11 @@ struct ArticleTableView: NSViewRepresentable {
 
         // MARK: - Visible rows
 
-        /// Coalesces a scroll's worth of changes into one report, like the `List`'s own
-        /// `onAppear`/`onDisappear` debounce on iOS.
+        /// Coalesces a scroll's worth of changes into one report, like the iOS article list's own.
         private func scheduleReport() {
             reportTask?.cancel()
             reportTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(50))
+                try? await Task.sleep(for: ArticleTableLayout.visibleRowsReportDelay)
                 guard !Task.isCancelled else { return }
                 self?.reportVisibleIds()
             }
@@ -400,7 +389,7 @@ private struct ArticleCellContent: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+            .padding(.vertical, ArticleTableLayout.rowVerticalInset)
             .environment(\.contextMenuSelectionTracker, tracker)
             // A cell scrolled under the toolbar must not give up any of its fixed height to the
             // window's safe area.

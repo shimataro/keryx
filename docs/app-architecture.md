@@ -1952,7 +1952,8 @@ item gets overwritten. As in Notes, the collection view therefore takes the dele
 ### Article list (macOS)
 
 The macOS article list is an `NSTableView` with one fixed row height
-(`Home/ArticleTableView.swift`, an `NSViewRepresentable`), not SwiftUI's `List`; iOS keeps its `List`.
+(`Home/ArticleTableView.swift`, an `NSViewRepresentable`), not SwiftUI's `List`; iOS has a collection view of its
+own, see "Article list (iOS)" below.
 
 - **Why.** The macOS `List` is itself an `NSTableView`, but with automatic row heights, and applying a
   change measures every row inserted above the top visible one (`_doAutomaticRowHeightsForInsertedAndVisibleRows`
@@ -2005,29 +2006,65 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
 
-### Article list scrolling (iOS)
+### Article list (iOS)
 
-The iOS article list is a SwiftUI `List`, scrolled with `ScrollViewProxy.scrollTo`. A filter switch
-goes back to the top, but only once the rows on screen belong to the new filter
-(`Home/ArticleListTopReset.swift`, tested in `KeryxTests`): `HomeObservable.filter` and the rows arrive
-on separate flows, in either order, so right after a switch the list can still hold the previous
-filter's rows. A scroll aimed at one of them is carried out against the rows the list has by then, and
-when the new rows land in the same update with the target past their end (the previous list's first
-row, into an empty folder), `UICollectionView` raises an exception and the app crashes. The rows
-therefore come paired with the filter that produced them — `HomeViewModel.articlesWithFilter` /
-`searchResultsWithFilter` — and `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter`
-say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
-landing later never scrolls the list.
+The iOS article list is a UIKit `UICollectionView` with one fixed row height
+(`Home/ArticleCollectionView.swift`, a `UIViewControllerRepresentable`), not SwiftUI's `List`. It works the
+way the macOS table does (above), apart from the UIKit it is built from.
 
-A scroll is also never asked of a list that is not on screen (`Home/ArticleListScrollGate.swift`, tested
-in `KeryxTests`). `scrollTo` is carried out in the list's next layout, and a list under the reader is
-not laid out: a swipe in the reader moves the selection and a restored selection lands while the list is
-hidden, so their scrolls would wait for the back navigation's first layout. The gate holds them instead
-and, when the list is back on screen, carries out only the latest, provided its row still exists; a list
-rebuilt on the way back from the sidebar drops it, since that list starts at the top. "Back on screen"
-means as the pop starts, not when it ends. The pill's jump is exempt: it can only be tapped on screen.
-This is a defensive change for a crash that was not reproduced — see "iOS: going back to the article
-list crashed in `UICollectionView`" in [known-issues.md](known-issues.md).
+- **Why.** A `List` scrolls through `ScrollViewProxy.scrollTo`, which SwiftUI carries out in the list's next
+  layout, against whatever rows the list holds by then. A list under the reader is not laid out, so a scroll
+  asked for there waited for the back navigation's first layout, and when the rows had changed meanwhile
+  `UICollectionView` raised an exception on the target index path: v0.27.0 crashed that way (not reproduced —
+  see "iOS: going back to the article list crashed in `UICollectionView`" in
+  [known-issues.md](known-issues.md)). Here a scroll is a content offset that `ArticleTableLayout` works out
+  from the rows the list holds at that moment, set synchronously and clamped to the scrollable range: nothing
+  waits, and no API that validates an index path (`scrollToItem`) is used.
+- **Fixed height.** Every row has the same height (the title always reserves two lines), measured once on
+  `ArticleRowModel.measurementSample` when the list is in a window, in the list's own trait environment, and
+  rounded up to a whole pixel (a fraction of a point too tall adds up over a long list). It is measured again
+  when Dynamic Type changes, keeping the top visible row where it was. Positions are measured from the first
+  row's top edge; the pinned header and the bars take their share of the viewport, not of the offset.
+- **Rows and header.** The rows are hosted `ArticleRowView`s (`UIHostingConfiguration`, 2pt
+  above and below, `ArticleTableLayout.rowVerticalInset`, and none at the sides); a row that did not change
+  is not re-rendered. Selection, taps and context menus are the row's own, so the collection view itself
+  selects nothing. `ArticleListHeader` is a pinned boundary supplementary item on the list's own opaque
+  background, which the rows scroll under. Popping back from the reader flashes the row just read: the fade is
+  the row's own animation, since `HomeView`'s `withAnimation` does not reach a hosted cell.
+- **Updates.** A change to the set or order of rows reloads the list and keeps the top visible row where it was
+  on screen by its id (`ArticleTableLayout.scrollOffset`), so articles that arrive above it land out of view,
+  which the new-articles pill relies on (`freshSideUnseenCount`). A change of the search query goes back to the
+  top (a background write re-running the search does not). While the list is under the reader it has no
+  window, so UIKit's insets, and with them the offset, cannot be trusted: a row change that lands then is
+  positioned when the list returns, against where it stood before the first such change, and the position the
+  user last left it at is put back if UIKit moved the offset on its own.
+- **Scrolling.** `ArticleListView` hands a scroll over as an `ArticleListScrollRequest` (a generation and a
+  `reveal` of a row, or the pill's `freshEnd`); the controller carries it out against its current rows, drops
+  one whose row is gone, and — with no size or window yet — keeps only the latest and runs it after the first
+  layout. A `reveal` of an article that is only to be brought into view (keyboard navigation) does not move a
+  row that is partly on screen.
+- **Which scrolls are asked for.** A filter switch goes back to the top, but only once the rows on screen belong
+  to the new filter (`Home/ArticleListTopReset.swift`, tested in `KeryxTests`): `HomeObservable.filter` and the
+  rows arrive on separate flows, in either order, so right after a switch the list can still hold the previous
+  filter's rows. The rows therefore come paired with the filter that produced them —
+  `HomeViewModel.articlesWithFilter` / `searchResultsWithFilter` — and `HomeObservable.articleRowsMatchFilter` /
+  `searchRowsMatchFilter` say whether the rows on screen are the current filter's. The switch is carried out
+  once; a refresh landing later never scrolls the list. A scroll asked for while the list is not on screen — a
+  swipe in the reader moves the selection, a restored selection lands — is held
+  (`Home/ArticleListScrollGate.swift`, tested in `KeryxTests`), and only the latest is passed on when the list can
+  take it, provided its row still exists; a list rebuilt on the way back from the sidebar drops it, since that
+  list starts at the top. The pill's jump is exempt: it can only be tapped on screen.
+- **Visible rows** for the new-articles count are worked out from the scroll position, debounced
+  (`ArticleTableLayout.visibleRowsReportDelay`). A list that is off screen reports none; otherwise an article arriving
+  under the reader would count as seen.
+- **Pull to refresh** is a `UIRefreshControl` (only where `PullToRefreshAvailability` allows it) that runs
+  `HomeObservable.pullToRefresh()` and ends with it, also when the wait is abandoned because another item was
+  selected. The empty state (`noArticlesView`) is still a `.refreshable` scroll view, which is why the list is
+  still rebuilt on the way back from the sidebar (`remountGeneration`, `attachedToWindow` — see "iOS: the article
+  list's pull-to-refresh spinner is missing after returning from the sidebar" in
+  [known-issues.md](known-issues.md)).
+- **Focus** is the sidebar's: `.focusable()`, `.focusEffectDisabled()` and `.focused(…)` on the representable,
+  and `allowsFocus = false` so that the arrow keys stay with `HomeView`.
 
 ### iPhone Duo (iOS)
 
