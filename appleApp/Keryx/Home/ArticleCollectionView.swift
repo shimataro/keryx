@@ -112,6 +112,14 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// its safe area, and with it the offset, is not to be trusted there; this is what it is put back
     /// to when it returns.
     private var logicalTop: CGFloat = 0
+    /// Whether the list has been laid out, and its position put back, since it last came into a window.
+    /// Until then UIKit moves the offset on its own (the insets change with the window), and such a move
+    /// must not overwrite `logicalTop`.
+    private var positionSettled = false
+    /// The size and top inset of the last active layout pass: a scroll at any other size or inset is
+    /// UIKit adjusting the offset to a resize, not a position to keep.
+    private var lastLayoutSize: CGSize = .zero
+    private var lastLayoutInsetTop: CGFloat = 0
     /// What a row change that landed while the list was off screen has to be positioned against once
     /// it is back: the position it had before the first such change.
     private var deferredPosition: DeferredPosition?
@@ -300,22 +308,31 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private func updateRefreshControl(enabled: Bool) {
         guard enabled else {
             collectionView.refreshControl = nil
+            // The control is gone, so a refresh it started has no spinner left to end.
+            refreshTask?.cancel()
+            refreshTask = nil
             return
         }
         guard collectionView.refreshControl == nil else { return }
         let control = UIRefreshControl()
-        control.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        control.addAction(
+            UIAction { [weak self] action in self?.pullToRefresh(from: action.sender as? UIRefreshControl) },
+            for: .valueChanged
+        )
         collectionView.refreshControl = control
     }
 
-    /// The indicator stays up for as long as the refresh runs, and ends with it — also when the wait
-    /// is abandoned because another item was selected (`AbandonableRefresh`).
-    private func pullToRefresh() {
+    /// The indicator of `control` — the one that was pulled — stays up for as long as the refresh runs,
+    /// and ends with it, also when the wait is abandoned because another item was selected
+    /// (`AbandonableRefresh` cancels only its inner wait, not this task). A task cancelled by a newer
+    /// pull or by the control's removal ends nothing: the spinner is no longer this task's.
+    private func pullToRefresh(from control: UIRefreshControl?) {
         refreshTask?.cancel()
         refreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await input?.onRefresh()
-            collectionView.refreshControl?.endRefreshing()
+            guard !Task.isCancelled else { return }
+            control?.endRefreshing()
         }
     }
 
@@ -436,10 +453,16 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             position(after: deferred)
         } else if abs(currentTop - logicalTop) > 0.5, !collectionView.isTracking, !collectionView.isDecelerating {
             // UIKit moved the offset on its own when the list came back (its insets changed with the
-            // window); put it back where the list was left. Never from above the start of the list.
-            setVisibleTop(max(0, logicalTop))
+            // window); put it back where the list was left, within the range the list can scroll at
+            // its current size — a position left at another size (before a rotation) can lie past the end.
+            setVisibleTop(ArticleTableLayout.clamped(
+                max(0, logicalTop), count: rows.rows.count, rowHeight: rowHeight, viewportHeight: viewportHeight
+            ))
         }
         performPendingScroll()
+        positionSettled = true
+        lastLayoutSize = collectionView.bounds.size
+        lastLayoutInsetTop = collectionView.adjustedContentInset.top
     }
 
     /// The list was put into a window or taken out of one: out of one (under the reader), it reports no
@@ -447,6 +470,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private func windowChanged() {
         lastReportedIds = nil
         measuredRowHeight = measuredRowHeight && collectionView.window != nil
+        if collectionView.window != nil { positionSettled = false }
         // A list coming back keeps its size, so nothing would lay it out again: ask, since the row height is
         // measured, the position put back and a pending scroll carried out in that pass.
         if collectionView.window != nil { view.setNeedsLayout() }
@@ -460,9 +484,14 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // Only the user's own scrolling moves the remembered position: UIKit's own offset changes
-        // while the list is attached or detached are not the user's.
+        // The user's own scrolling always moves the remembered position. Any other scroll (UIKit's
+        // `scrollRectToVisible` for VoiceOver focus, say) moves it only once the list is settled at the
+        // size and inset of its last layout: UIKit's own offset changes while the list is attached,
+        // detached or resized are not a position to keep.
         if isActive, scrollView.isTracking || scrollView.isDecelerating {
+            logicalTop = currentTop
+        } else if isActive, positionSettled, scrollView.bounds.size == lastLayoutSize,
+                  scrollView.adjustedContentInset.top == lastLayoutInsetTop {
             logicalTop = currentTop
         }
         scheduleReport()
