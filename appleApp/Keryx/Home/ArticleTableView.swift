@@ -276,7 +276,7 @@ struct ArticleTableView: NSViewRepresentable {
         private func scheduleReport() {
             reportTask?.cancel()
             reportTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(50))
+                try? await Task.sleep(for: ArticleTableLayout.visibleRowsReportDelay)
                 guard !Task.isCancelled else { return }
                 self?.reportVisibleIds()
             }
@@ -389,7 +389,7 @@ private struct ArticleCellContent: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+            .padding(.vertical, ArticleTableLayout.rowVerticalInset)
             .environment(\.contextMenuSelectionTracker, tracker)
             // A cell scrolled under the toolbar must not give up any of its fixed height to the
             // window's safe area.

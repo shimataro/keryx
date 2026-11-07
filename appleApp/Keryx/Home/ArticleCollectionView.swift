@@ -3,19 +3,6 @@ import KeryxShared
 import SwiftUI
 import UIKit
 
-/// A scroll `ArticleListView` asks `ArticleCollectionView` for, carried out once per `generation`.
-struct ArticleListScrollRequest: Equatable {
-    enum Kind: Equatable {
-        /// Bring a row into view with the least scrolling (`ArticleListScrollGate.Target`).
-        case reveal(ArticleListScrollGate.Target)
-        /// The new-articles pill's jump to the fresh end.
-        case freshEnd(newestFirst: Bool)
-    }
-
-    var generation = 0
-    var kind: Kind?
-}
-
 /// The iOS article list: a `UICollectionView` with one fixed row height, rather than SwiftUI's
 /// `List`, so that no scroll is ever left pending against rows that may have changed by the time it
 /// runs.
@@ -79,7 +66,7 @@ struct ArticleCollectionCellContent: View {
             // height as a proposal instead, a title that fits in exactly two lines is set on one.
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: .infinity, alignment: .top)
-            .padding(.vertical, 2)
+            .padding(.vertical, ArticleTableLayout.rowVerticalInset)
             // Fully on at once, fading out when it ends: the list's own idiom (`HomeView.returnFlashId`).
             .animation(row.isReturnFlashing ? nil : .easeOut(duration: HomeView.returnFlashFadeSeconds), value: row.isReturnFlashing)
             .ignoresSafeArea()
@@ -92,13 +79,15 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private var rows = ArticleRowList.empty
     private var collectionView: ArticleScrollingCollectionView!
     private var lastResetGeneration: Int
-    private var lastScrollGeneration: Int
+    private var scrollRequests: ScrollRequestTracker
 
     /// The height of every row, measured once the list is on screen; until then a stand-in.
     private var rowHeight: CGFloat = ArticleCollectionViewController.fallbackRowHeight
-    private var measuredRowHeight = false
-    private var measuredContentSize: UIContentSizeCategory?
+    private var rowHeightPolicy = RowHeightMeasurePolicy()
     private static let fallbackRowHeight: CGFloat = 90
+    private static let estimatedHeaderHeight: CGFloat = 44
+    /// How far the offset may sit from `logicalTop` before it counts as moved.
+    private static let offsetTolerance: CGFloat = 0.5
 
     /// A scroll asked for before the list could carry it out (no size yet, or not in a window): only
     /// the latest is kept.
@@ -122,12 +111,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private var lastLayoutInsetTop: CGFloat = 0
     /// What a row change that landed while the list was off screen has to be positioned against once
     /// it is back: the position it had before the first such change.
-    private var deferredPosition: DeferredPosition?
-    private struct DeferredPosition {
-        var anchor: ScrollAnchor?
-        var oldIds: [String]
-        var reset: Bool
-    }
+    private var deferredPosition = DeferredPositionKeeper()
 
     private var reportTask: Task<Void, Never>?
     private var lastReportedIds: [String]?
@@ -135,7 +119,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private var shownHeader: (title: String, icon: SidebarRowIcon)?
 
     init(scrollGeneration: Int, resetGeneration: Int) {
-        lastScrollGeneration = scrollGeneration
+        scrollRequests = ScrollRequestTracker(generation: scrollGeneration)
         lastResetGeneration = resetGeneration
         super.init(nibName: nil, bundle: nil)
     }
@@ -184,7 +168,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             let section = NSCollectionLayoutSection(group: group)
             // Pinned while the rows scroll under it, as the `List`'s section header was.
             let header = NSCollectionLayoutBoundarySupplementaryItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(44)),
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(Self.estimatedHeaderHeight)),
                 elementKind: UICollectionView.elementKindSectionHeader,
                 alignment: .top
             )
@@ -196,11 +180,12 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     }
 
     /// Made in `viewDidLoad`: UIKit rejects a registration first created while a cell is being dequeued.
-    private var cellRegistration: UICollectionView.CellRegistration<ArticleCell, Int>!
+    /// (A `lazy var` would be created first inside `cellForItemAt`, which crashes.)
+    private var cellRegistration: UICollectionView.CellRegistration<ArticleCell, Void>!
     private var headerRegistration: UICollectionView.SupplementaryRegistration<ArticleHeaderView>!
 
     private func makeRegistrations() {
-        cellRegistration = UICollectionView.CellRegistration<ArticleCell, Int> { [weak self] cell, indexPath, _ in
+        cellRegistration = UICollectionView.CellRegistration<ArticleCell, Void> { [weak self] cell, indexPath, _ in
             guard let self, let input, rows.rows.indices.contains(indexPath.item) else { return }
             cell.show(input.makeRow(rows.rows[indexPath.item]))
         }
@@ -243,9 +228,8 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             refreshVisibleCells()
         }
 
-        if new.scrollRequest.generation != lastScrollGeneration {
-            lastScrollGeneration = new.scrollRequest.generation
-            pendingScroll = new.scrollRequest.kind
+        if let kind = scrollRequests.take(new.scrollRequest) {
+            pendingScroll = kind
             performPendingScroll()
         }
         scheduleReport()
@@ -254,21 +238,17 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// Reloads for a new set or order of rows, keeping the top visible row where it was on screen — or
     /// going to the top after a search reset. Off screen, the position is put back once the list returns.
     private func applyStructureChange(from old: ArticleRowList) {
-        let source = deferredPosition ?? DeferredPosition(
+        deferredPosition.record(
             anchor: ArticleTableLayout.anchor(
                 count: old.rows.count, id: { old.rows[$0].id }, visibleTop: currentTop, rowHeight: rowHeight
             ),
             oldIds: old.rows.map(\.id),
-            reset: false
+            reset: resetPending
         )
-        let reset = source.reset || resetPending
         collectionView.reloadData()
-        if isActive {
-            deferredPosition = nil
+        if isActive, let change = deferredPosition.take() {
             collectionView.layoutIfNeeded()
-            position(after: DeferredPosition(anchor: source.anchor, oldIds: source.oldIds, reset: reset))
-        } else {
-            deferredPosition = DeferredPosition(anchor: source.anchor, oldIds: source.oldIds, reset: reset)
+            position(after: change)
         }
         resetPending = false
     }
@@ -280,7 +260,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             newCount: rows.rows.count,
             anchor: change.anchor,
             rowHeight: rowHeight,
-            viewportHeight: viewportHeight,
+            viewportHeight: viewportHeight(),
             resetToTop: change.reset
         ))
     }
@@ -350,7 +330,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// The pinned header's height, read off the header on screen — the layout is never asked for its
     /// attributes, which raises an exception before the first rows have loaded. The last height seen
     /// stands in while there is no header on screen.
-    private var headerHeight: CGFloat {
+    private func refreshHeaderHeight() -> CGFloat {
         if let view = collectionView.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionHeader).first,
            view.bounds.height > 0 {
             lastHeaderHeight = view.bounds.height
@@ -360,9 +340,9 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private var lastHeaderHeight: CGFloat = 0
 
     /// The height of the rows' share of the screen: under the pinned header and the bars, not counted.
-    private var viewportHeight: CGFloat {
+    private func viewportHeight() -> CGFloat {
         let inset = collectionView.adjustedContentInset
-        return max(0, collectionView.bounds.height - inset.top - inset.bottom - headerHeight)
+        return max(0, collectionView.bounds.height - inset.top - inset.bottom - refreshHeaderHeight())
     }
 
     private func setVisibleTop(_ top: CGFloat) {
@@ -401,13 +381,12 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// row where it was on screen.
     private func rowHeightMayHaveChanged() {
         guard isActive else {
-            measuredRowHeight = false
+            rowHeightPolicy.windowLost()
             return
         }
-        let category = traitCollection.preferredContentSizeCategory
-        guard !measuredRowHeight || measuredContentSize != category, let height = measureRowHeight() else { return }
-        measuredRowHeight = true
-        measuredContentSize = category
+        let category = traitCollection.preferredContentSizeCategory.rawValue
+        guard rowHeightPolicy.needsMeasure(isActive: true, category: category), let height = measureRowHeight() else { return }
+        rowHeightPolicy.didMeasure(category: category)
         guard height != rowHeight else { return }
         let anchor = ArticleTableLayout.anchor(
             count: rows.rows.count, id: { rows.rows[$0].id }, visibleTop: currentTop, rowHeight: rowHeight
@@ -421,7 +400,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     // MARK: - Scrolling
 
     private func performPendingScroll() {
-        guard let kind = pendingScroll, isActive, measuredRowHeight else { return }
+        guard let kind = pendingScroll, isActive, rowHeightPolicy.measured else { return }
         pendingScroll = nil
         collectionView.layoutIfNeeded()
         let offset: CGFloat?
@@ -433,12 +412,12 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
                 count: rows.rows.count,
                 rowHeight: rowHeight,
                 visibleTop: currentTop,
-                viewportHeight: viewportHeight,
+                viewportHeight: viewportHeight(),
                 anyPartCounts: target.onlyIfOffScreen
             )
         case .freshEnd(let newestFirst):
             offset = ArticleTableLayout.freshEndOffset(
-                newestFirst: newestFirst, count: rows.rows.count, rowHeight: rowHeight, viewportHeight: viewportHeight
+                newestFirst: newestFirst, count: rows.rows.count, rowHeight: rowHeight, viewportHeight: viewportHeight()
             )
         }
         if let offset { setVisibleTop(offset) }
@@ -448,15 +427,14 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         super.viewDidLayoutSubviews()
         guard isActive else { return }
         rowHeightMayHaveChanged()
-        if let deferred = deferredPosition {
-            deferredPosition = nil
+        if let deferred = deferredPosition.take() {
             position(after: deferred)
-        } else if abs(currentTop - logicalTop) > 0.5, !collectionView.isTracking, !collectionView.isDecelerating {
+        } else if abs(currentTop - logicalTop) > Self.offsetTolerance, !collectionView.isTracking, !collectionView.isDecelerating {
             // UIKit moved the offset on its own when the list came back (its insets changed with the
             // window); put it back where the list was left, within the range the list can scroll at
             // its current size — a position left at another size (before a rotation) can lie past the end.
             setVisibleTop(ArticleTableLayout.clamped(
-                max(0, logicalTop), count: rows.rows.count, rowHeight: rowHeight, viewportHeight: viewportHeight
+                max(0, logicalTop), count: rows.rows.count, rowHeight: rowHeight, viewportHeight: viewportHeight()
             ))
         }
         performPendingScroll()
@@ -469,7 +447,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// rows on screen, as the `List`'s rows did by disappearing.
     private func windowChanged() {
         lastReportedIds = nil
-        measuredRowHeight = measuredRowHeight && collectionView.window != nil
+        if collectionView.window == nil { rowHeightPolicy.windowLost() }
         if collectionView.window != nil { positionSettled = false }
         // A list coming back keeps its size, so nothing would lay it out again: ask, since the row height is
         // measured, the position put back and a pending scroll carried out in that pass.
@@ -512,7 +490,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     private func scheduleReport() {
         reportTask?.cancel()
         reportTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: ArticleTableLayout.visibleRowsReportDelay)
             guard !Task.isCancelled else { return }
             self?.reportVisibleIds()
         }
@@ -520,9 +498,9 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
 
     private func reportVisibleIds() {
         let ids: [String]
-        if isActive, measuredRowHeight {
+        if isActive, rowHeightPolicy.measured {
             ids = ArticleTableLayout.visibleRows(
-                count: rows.rows.count, rowHeight: rowHeight, visibleTop: currentTop, viewportHeight: viewportHeight
+                count: rows.rows.count, rowHeight: rowHeight, visibleTop: currentTop, viewportHeight: viewportHeight()
             ).map { rows.rows[$0].id }
         } else {
             ids = []
@@ -539,7 +517,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: indexPath.item)
+        collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: ())
     }
 
     func collectionView(

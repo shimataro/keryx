@@ -207,8 +207,24 @@ struct ArticleTableLayoutTests {
     func aRevealIsClampedToTheScrollableRange() {
         // The last row of a list that barely overflows: its bottom edge is the end of the list.
         #expect(reveal(index: 14, top: 0, anyPartCounts: true, count: 15) == 15 * rowHeight - viewportHeight)
-        // A short list never scrolls.
-        #expect(reveal(index: 3, top: 0, anyPartCounts: false, count: 5) == nil)
+        // A short list never scrolls: a row out of view goes to the top, not its bottom edge (280).
+        #expect(reveal(index: 4, top: 400, anyPartCounts: false, count: 5) == 0)
+    }
+
+    @Test
+    func aListShorterThanTheViewportHasNoScrollableRange() {
+        #expect(ArticleTableLayout.maxOffset(count: 5, rowHeight: rowHeight, viewportHeight: viewportHeight) == 0)
+        #expect(ArticleTableLayout.clamped(280, count: 5, rowHeight: rowHeight, viewportHeight: viewportHeight) == 0)
+        #expect(ArticleTableLayout.clamped(-30, count: 5, rowHeight: rowHeight, viewportHeight: viewportHeight) == 0)
+    }
+
+    @Test
+    func anOffsetPastEitherEndIsClampedToIt() {
+        let end = ArticleTableLayout.maxOffset(count: 15, rowHeight: rowHeight, viewportHeight: viewportHeight)
+        #expect(end == 15 * rowHeight - viewportHeight)
+        #expect(ArticleTableLayout.clamped(end + 100, count: 15, rowHeight: rowHeight, viewportHeight: viewportHeight) == end)
+        #expect(ArticleTableLayout.clamped(-1, count: 15, rowHeight: rowHeight, viewportHeight: viewportHeight) == 0)
+        #expect(ArticleTableLayout.clamped(140, count: 15, rowHeight: rowHeight, viewportHeight: viewportHeight) == 140)
     }
 
     @Test
