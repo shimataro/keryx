@@ -4,8 +4,9 @@ import SwiftUI
 /// The toolbar status area's text about a feed refresh, as Mail's "Checking for Mail…" and "Updated
 /// Just Now": a small spinner and "Checking for new articles…" while it runs, then its result with no
 /// spinner — or, when no feed could be reached, a warning symbol, so a failure reads as one at a glance
-/// without relying on its color alone. VoiceOver reads it as a plain label and is not told when it
-/// changes, so background work never interrupts what is being read.
+/// without relying on its color alone. VoiceOver reads it as a plain label — for a failure, the longer
+/// sentence that also gives the next step (`spokenText`) — and is not told when it changes, so
+/// background work never interrupts what is being read.
 struct RefreshStatusLabel: View {
     let status: RefreshStatus
 
@@ -39,6 +40,18 @@ struct RefreshStatusLabel: View {
         // the label claims its own width.
         .fixedSize()
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(spokenText)
+    }
+
+    /// What VoiceOver reads. The failure's visible text is as short as the bar's width forces and gives
+    /// no next step, and the warning symbol is hidden from VoiceOver, so it hears the notification
+    /// center's sentence instead — which says the check failed and what to do. VoiceOver has no width
+    /// to fit; every other status reads as it shows.
+    private var spokenText: String {
+        switch status {
+        case .refreshFailed: return L("notification_refresh_failed")
+        case .checking, .newArticles, .noNewArticles: return text
+        }
     }
 
     private var text: String {
