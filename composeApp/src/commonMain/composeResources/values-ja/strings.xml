@@ -99,7 +99,7 @@
     <string name="home_refreshing">新着を確認中…</string>
     <string name="home_no_new_articles">新着記事はありません</string>
     <!-- docs/error-design.md の「次にやることの省略」の例外に該当する。 -->
-    <string name="home_refresh_failed">ネットに接続できません</string>
+    <string name="home_refresh_failed">接続できません</string>
     <string name="home_feed_refreshing">更新中</string>
     <string name="home_refresh_this_list">この一覧を更新</string>
     <plurals name="home_new_articles">

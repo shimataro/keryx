@@ -103,7 +103,7 @@
     <string name="home_refreshing">Checking for new articles…</string>
     <string name="home_no_new_articles">No new articles</string>
     <!-- Falls under the "Omitting the next step" exception in docs/error-design.md. -->
-    <string name="home_refresh_failed">No internet connection</string>
+    <string name="home_refresh_failed">Couldn’t connect</string>
     <string name="home_feed_refreshing">Refreshing</string>
     <string name="home_refresh_this_list">Refresh this list</string>
     <plurals name="home_new_articles">
