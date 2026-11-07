@@ -438,6 +438,11 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         }
         performPendingScroll()
         positionSettled = true
+        // A resize (rotation, an iPad window resize, a bar changing height) can change which rows are on
+        // screen without moving the offset, so no scroll callback would report them.
+        if collectionView.bounds.size != lastLayoutSize || collectionView.adjustedContentInset.top != lastLayoutInsetTop {
+            scheduleReport()
+        }
         lastLayoutSize = collectionView.bounds.size
         lastLayoutInsetTop = collectionView.adjustedContentInset.top
     }
