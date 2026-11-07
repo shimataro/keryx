@@ -751,6 +751,75 @@ class RefreshCycleRunnerTest {
     }
 
     @Test
+    fun joiningAnUnreachableAutomaticCycleDuringItsSyncRestoresAWarningDismissedMeanwhile() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, fetchStatus = { null }, syncGate = syncGate)
+        try {
+            val cycle = async(Dispatchers.Default) { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            f.awaitSyncing()
+            val posted = f.notificationCenter.items.value.single()
+            assertEquals(NotificationText.RefreshFailed, posted.text)
+            f.notificationCenter.dismiss(posted.id)
+            assertTrue(f.notificationCenter.items.value.isEmpty())
+
+            val joined = assertIs<RefreshCycleRunner.CycleOutcome.Joined>(
+                f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL),
+            )
+
+            assertEquals(RefreshOutcome(newArticleCount = 0, unreachable = true), joined.cycle.await())
+            val restored = f.notificationCenter.items.value.single()
+            assertEquals(NotificationText.RefreshFailed, restored.text)
+            assertEquals(AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED), restored.action)
+
+            syncGate.complete(Unit)
+            withTimeout(5_000) { cycle.await() }
+        } finally {
+            syncGate.complete(Unit)
+        }
+    }
+
+    @Test
+    fun joiningAnUnreachableAutomaticCycleKeepsASingleWarningThatWasNotDismissed() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, fetchStatus = { null }, syncGate = syncGate)
+        try {
+            val cycle = async(Dispatchers.Default) { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            f.awaitSyncing()
+
+            assertIs<RefreshCycleRunner.CycleOutcome.Joined>(f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL))
+
+            assertEquals(NotificationText.RefreshFailed, f.notificationCenter.items.value.single().text)
+
+            syncGate.complete(Unit)
+            withTimeout(5_000) { cycle.await() }
+        } finally {
+            syncGate.complete(Unit)
+        }
+    }
+
+    @Test
+    fun joiningAReachableAutomaticCycleRestoresNoWarning() = withDb { driver, db ->
+        db.insertFeed("f1", url = "https://ex.com/f1")
+        val syncGate = CompletableDeferred<Unit>()
+        val f = fixtures.create(driver, db, syncGate = syncGate)
+        try {
+            val cycle = async(Dispatchers.Default) { f.runner.run(trigger = SyncTrigger.AUTOMATIC) }
+            f.awaitSyncing()
+
+            assertIs<RefreshCycleRunner.CycleOutcome.Joined>(f.runner.runIfIdle(ArticleFilter.All, SyncTrigger.MANUAL))
+
+            assertTrue(f.notificationCenter.items.value.none { it.text == NotificationText.RefreshFailed })
+
+            syncGate.complete(Unit)
+            withTimeout(5_000) { cycle.await() }
+        } finally {
+            syncGate.complete(Unit)
+        }
+    }
+
+    @Test
     fun aJoinableAutomaticCycleIsCompleteDuringItsSyncButStaysJoinableUntilTheSyncEnds() = withDb { driver, db ->
         db.insertFeed("f1", url = "https://ex.com/f1")
         val syncGate = CompletableDeferred<Unit>()

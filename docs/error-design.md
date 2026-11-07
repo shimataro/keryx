@@ -100,7 +100,8 @@ notification center, snackbars/toasts, tooltips — in both locales and both UIs
   (`home_sync_auth_failed`) and "Check your internet connection and try again."
   (`apple_update_check_failed_offline`) are the model.
 - **A message that only states the failure is not allowed** — "Import failed", "Couldn't X",
-  "An error occurred" leave the user with nothing to do.
+  "An error occurred" leave the user with nothing to do. Except as described in "Omitting the next
+  step" below.
 - **When the cause is unknown, still give a next step** (try again later, check the connection,
   check the URL).
 - **No technical detail.** HTTP status codes, exception class names, and raw exception text
@@ -111,6 +112,25 @@ notification center, snackbars/toasts, tooltips — in both locales and both UIs
 - **The category must be fine-grained enough to explain.** One `ErrorKind` / `NotificationText`
   that covers causes needing different next steps leaves the UI unable to say why; split it rather
   than writing a vaguer message.
+- **Omitting the next step.** A message may leave out what to do next only when **both** hold: the
+  next step is obvious — reading the message already tells the user what to do ("Couldn't
+  connect" means check the connection) — **and** there is no room to write it: the display is too
+  narrow, checked against the narrowest place the message appears. "It reads better shorter" is not
+  a lack of room. Even then the failure must be recognizable without the text (a warning icon, say),
+  and the explanation and the next step must stay available somewhere else, such as the notification
+  center. The exceptions today:
+  - `home_refresh_failed` ("Couldn't connect"): the iOS refresh status in the bottom bar
+    (`RefreshStatusLabel`) claims its own width. The wording that gave a next step measured about
+    290pt in ja at the standard size (about 334pt at xLarge) and about 296pt in en at xLarge, and did
+    not fit the narrowest place it appears, an iPad mini's article-list column (about 279pt).
+    The wording does not say whether the device is offline or the feeds' servers are down, since a
+    refresh is judged unreachable on timeouts and empty responses alone (`isUnreachable`), and a
+    single feed's server timing out looks the same as being offline. Checking the connection is the
+    obvious next step, the warning icon marks the failure, and the notification center keeps the
+    full explanation (`notification_refresh_failed_detail`).
+
+  A new exception is added to this list, with its reason, and its key gets a short comment in each
+  locale's `strings.xml`, written in that file's language, pointing here.
 
 Status labels that are not messages (a notification's level, such as "Error") are out of scope.
 
@@ -160,7 +180,7 @@ Status labels that are not messages (a notification's level, such as "Error") ar
 | `ShowFeedDetail(feedId)` | Feed gone (410) / URL changed (301/308). The 410 entry is coalesced, since a gone feed is still refreshed every cycle: it stays one entry per feed (keyed on its title, so a rename starts a new one). A URL change is reported once, as it happens | Selects that feed in the feed list (same as clicking it there). At a narrow width the feed list is a modal navigation drawer rather than a pane, and opening it unprompted would be a surprising side effect of a background notification, so this advances to that feed's article list without touching the drawer — see `ui/home/HomePaneLayout.kt`'s `paneForFeedDetail` |
 | `ShowSettingsTab(tabId)` | Sync errors (`SchemaVersionException` → `updates`, everything else → `cloud_sync`); a new-version notification when an in-app update path applies here (`updates`) | Opens the settings dialog on that tab (on Android, directly on that category's screen rather than the category list). The `cloud_sync` tab shows `SyncRepository.lastSyncError` as the failure reason, and — when that reason is an authentication failure (`SyncRepository.lastSyncAuthFailed`) — offers the connected provider a **reconnect** action in place of its reset-sync-data one; the `updates` tab auto-checks for an update when opened |
 | `ShowInfoDialog(detail)` | macOS translocated warning | Shows an explanatory dialog (cause + fix) without navigating |
-| `ShowInfoDialog(detail)` | A feed refresh that reached none of the feeds it covered — every one timed out or got no response at all (`RefreshCycleRunner`, via `reportRefreshOutcome`'s `isUnreachable`) — most likely offline. A feed that answered with an error (an HTTP status, 404/410, an unreadable body) does not count: checking the connection would not help, and the feed list already flags it. Coalesced, so a refresh that keeps failing stays one entry | Shows an explanatory dialog (cause + fix) without navigating |
+| `ShowInfoDialog(detail)` | A feed refresh that reached none of the feeds it covered — every one timed out or got no response at all (`RefreshCycleRunner`, via `reportRefreshOutcome`'s `isUnreachable`) — most likely offline. A feed that answered with an error (an HTTP status, 404/410, an unreadable body) does not count: checking the connection would not help, and the feed list already flags it. Coalesced, so a refresh that keeps failing stays one entry. A manual refresh that joins an automatic cycle whose refresh already ended unreachable (`RefreshCycleRunner.joinAutomaticCycle`) posts it again, since the entry may have been dismissed while that cycle synced and the joining action shows the same failure as its result | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save left the tokens in the plaintext file (`CloudSession`) — `TokenStorage.save()` returned `TokenSaveOutcome.PLAINTEXT_FILE`, because the OS secure credential store was unreachable or (Android) because a secure write succeeded but a stale plaintext copy could not be deleted | Shows an explanatory dialog (cause + fix) without navigating |
 | `ShowInfoDialog(detail)` | Token save persisted nothing (`CloudSession`) — neither the secure store nor the plaintext fallback file accepted the write (`TokenSaveOutcome.NOT_PERSISTED`), so the account has to be connected again after a restart | Shows an explanatory dialog (cause + fix) without navigating |
 | `ResetCloudData` | `CloudDataIncompatibleException` | Dedicated inline button → confirmation dialog → archives the cloud DB under a timestamped name, then recreates it (see "Resetting (Archiving) Cloud Data" in [sync-architecture.md](sync-architecture.md)) |

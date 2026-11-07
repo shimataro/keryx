@@ -72,7 +72,12 @@ responsibility instead of extracted subviews. Match the surrounding Swift files'
   literals — in English? Non-English here is a finding. Exceptions: UI-facing
   strings go through Compose Resources and are localized there (English is the
   default, plus Japanese); and test assertions matching real rendered UI text may
-  legitimately contain the localized (e.g. Japanese) string being asserted against. (CLAUDE.md constraint #9)
+  legitimately contain the localized (e.g. Japanese) string being asserted against; and a
+  comment added or changed inside a localized message file
+  (`composeResources/values*/strings.xml`) is written in that file's own language (English in
+  `values/`, Japanese in `values-ja/`, and so on) — do not flag it, and do not flag the existing
+  English comments in `values-ja/` either. Comments in every other source file stay English.
+  (CLAUDE.md constraint #9)
 
 ## Restraint
 
