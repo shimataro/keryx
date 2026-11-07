@@ -27,6 +27,12 @@ struct RefreshStatusLabel: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        // Claiming its own width has a cost: the label can no longer shrink to the bar, so its width is
+        // the text's width. The failure sentence at xLarge spans about 340pt, leaving room on either side
+        // of a 390pt screen; from xxLarge up the system's own text scaling fills it edge to edge (about
+        // 380pt), and a 375pt-wide iPhone has no room left. Capping the label's own scaling keeps it
+        // inside the bar, and one step down on a footnote caption is a small price.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         // iOS 26 sizes a toolbar item to its glass capsule and truncates the caption to "…" unless
         // the label claims its own width.
         .fixedSize()
