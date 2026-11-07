@@ -102,7 +102,15 @@
     <string name="home_refresh">Refresh</string>
     <string name="home_refreshing">Checking for new articles…</string>
     <string name="home_no_new_articles">No new articles</string>
-    <string name="home_refresh_failed">Couldn’t connect. Check your network.</string>
+    <!--
+      The refresh status in the iOS bottom bar (RefreshStatusLabel) claims its own width, and the
+      narrowest place it appears is the 279pt article-list column of an iPad mini. So this text has to
+      stay short (about 190pt at the xLarge size cap), which leaves no room for a next step.
+      That breaks the "say what to do next" rule of docs/error-design.md on purpose: "no internet"
+      already implies reconnecting, the warning icon beside it marks the failure, and the notification
+      center keeps the full explanation (notification_refresh_failed_detail).
+    -->
+    <string name="home_refresh_failed">No internet connection</string>
     <string name="home_feed_refreshing">Refreshing</string>
     <string name="home_refresh_this_list">Refresh this list</string>
     <plurals name="home_new_articles">
