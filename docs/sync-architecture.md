@@ -328,7 +328,8 @@ On desktop startup, `FtsManager.ensureIndexed()` (initial creation + unindexed r
 from a `runBlocking` in `main.kt` — the window must not open on an absent index. The writer mutex is
 coroutine-based and, that early, can only be held briefly by an `.opml` import dispatched moments before, so
 blocking the main thread on it cannot deadlock. Android instead calls the cheaper `ensureIndexedIfTableAbsent()`
-on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `articles_fts` section for why).
+on every process start (see "On startup" in [db-schema.md](db-schema.md)'s `articles_fts` section for why). The
+Apple SDK creates the table in `KeryxSdk.start` (best effort) and backfills it from `prepareSearchIndex()`.
 
 ## Cloud Authentication (OAuth PKCE + Offline Access)
 

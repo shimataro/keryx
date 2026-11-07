@@ -372,7 +372,9 @@ Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not inc
   Android's startup path), which re-indexes content that incremental indexing left stale.
 - **Startup.** On desktop startup, `FtsManager.ensureIndexed()` creates the table on first run and
   backfills any missing rows; Android calls the cheaper `ensureIndexedIfTableAbsent()` instead on
-  every process start (see db-schema.md's `articles_fts` section for why).
+  every process start (see db-schema.md's `articles_fts` section for why). The Apple SDK creates the table in
+  `KeryxSdk.start` and backfills it from `prepareSearchIndex()`, so the table does not depend on the scene
+  becoming active.
 - **Concurrency.** `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather
   than error on, the brief write lock of an incremental insert or a rebuild.
 
@@ -1390,7 +1392,9 @@ selection's pin is then dropped, but only if it is still the very pin the re-tri
 
 Every call site that runs it is a moment the read-state pins are expected to have accumulated
 entries worth dropping: turning unread-only on (`setUnreadOnly`), either side of a refresh
-(`HomeRefreshController`) or of a manual sync (each `ManualSync.runs` edge, so a sync
+(`HomeRefreshController`: before the cycle starts, and as soon as its refresh stage ends — not after
+the sync that follows, so an article read while that sync is still running keeps its pin) or of a
+manual sync (each `ManualSync.runs` edge, so a sync
 started from the settings screen counts too), and the View menu's explicit "Hide Read Articles"
 command (`HomeViewModel.hideRead`) — the one call site the user triggers directly, for pulling
 a list that's drifted from strictly-unread back to it without leaving unread-only itself. `hideRead`
@@ -1462,12 +1466,16 @@ Refresh All, a pull refreshes only the feeds behind the list currently on screen
   and syncing nothing. The gesture works on an empty list too, but is disabled while search results are
   showing — pulling a result list isn't a request to refresh the feeds behind it — and while there are
   no feeds at all.
-- As with Refresh All, a pull is followed by a cloud sync when one is connected, and the indicator
-  stays up until that sync has finished too. On iOS, where the system starts the refresh the moment the
-  pull crosses its threshold, the indicator also stays up for at least about a second.
-- A pull made while a refresh or sync is already running starts nothing new; the indicator stays up
-  until the running one finishes. When what is running is an automatic refresh, the pull joins it, so on
-  iOS its result still appears in the status described below. Selecting another item in the feed list
+- As with Refresh All, a pull is followed by a cloud sync when one is connected, but the indicator
+  stays up only until the feeds have been refreshed — not through that sync, whose progress the sync
+  button's spinner shows. On iOS, where the system starts the refresh the moment the pull crosses its
+  threshold, the indicator also stays up for at least about a second.
+- A pull made while a refresh or sync is already running starts nothing new. While feeds are being
+  refreshed the indicator stays up until that refresh finishes; while only a sync is running it ends at
+  once. When what is running is an automatic refresh, the pull joins it, so on iOS its result still
+  appears in the status described below. A pull that joins the startup cycle while it is still syncing
+  (that cycle syncs first and refreshes second) keeps its indicator until the cycle's refresh has
+  finished, since that refresh is the one answering the pull. Selecting another item in the feed list
   while a pull's indicator is up leaves no indicator over the newly selected list; the refresh itself
   carries on.
 - On Android the same refresh is also reachable as a TalkBack custom action on the list ("Refresh this
@@ -1479,7 +1487,7 @@ Refresh All, a pull refreshes only the feeds behind the list currently on screen
   selected feed alone) instead — likewise different actions.
 - On iOS the sidebar can be pulled down as well, and that pull is Refresh All: it refreshes every feed
   whatever is selected, followed by a cloud sync when one is connected, with the indicator staying up
-  until both have finished; it is disabled while there are no feeds. It takes the place of a Refresh All
+  until the refresh has finished (not through the sync); it is disabled while there are no feeds. It takes the place of a Refresh All
   button in the iOS navigation bar, as Mail's mailbox list is refreshed. Android's feed-list drawer has
   no pull (it is a modal surface laid over the article list and keeps its refresh button in its
   header), and neither does the macOS sidebar, which keeps its toolbar button.
@@ -1887,7 +1895,8 @@ list forward (`CompactSearchNavigation`).
   of `SidebarRowContent`, so a reorder that changes a neighbour's options reconfigures that row.
 - **Pull to refresh.** Pulling the sidebar down (`UIRefreshControl`, present only while there are feeds)
   refreshes every feed and syncs, through `HomeViewModel.pullToRefreshAll()` — the same cycle as Refresh All,
-  tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until both finish. It
+  tracked as the `All` filter in `pullRefreshingFilters` — and the indicator stays up until the refresh
+  finishes, not through the sync that follows. It
   replaces the navigation bar's Refresh All button on iOS (which keeps Sync, Add and Settings); an iPad
   keyboard still has ⌘R from the Feed menu.
 - **Swipe actions.** A feed row swipes to "Unsubscribe" and "Rename", a folder or tag row to "Delete" and
@@ -1996,6 +2005,20 @@ light mode, the same as the Compose app's selection — but `#00796B` in dark mo
 dimmed when another pane holds the focus: touch input moves the focus as a side effect, and Android,
 touch-first too, does not dim either (`external-spec.md` §9).
 
+### Article list scrolling (iOS)
+
+The iOS article list is a SwiftUI `List`, scrolled with `ScrollViewProxy.scrollTo`. A filter switch
+goes back to the top, but only once the rows on screen belong to the new filter
+(`Home/ArticleListTopReset.swift`, tested in `KeryxTests`): `HomeObservable.filter` and the rows arrive
+on separate flows, in either order, so right after a switch the list can still hold the previous
+filter's rows. A scroll aimed at one of them is carried out against the rows the list has by then, and
+when the new rows land in the same update with the target past their end (the previous list's first
+row, into an empty folder), `UICollectionView` raises an exception and the app crashes. The rows
+therefore come paired with the filter that produced them — `HomeViewModel.articlesWithFilter` /
+`searchResultsWithFilter` — and `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter`
+say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
+landing later never scrolls the list.
+
 ### iPhone Duo (iOS)
 
 iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and
@@ -2082,7 +2105,8 @@ and joins every coroutine that can still read the database before closing it, fl
 the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
 `dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the
 redirect, when no connect flow is collecting it. `prepareSearchIndex()` (once per foreground
-launch: create the FTS table and backfill missing rows) and `prepareSearchIndexIfAbsent()` (cheap,
+launch: backfill missing rows, creating the FTS table first if `start()` could not — a failure is logged, not
+thrown; `start()` itself creates the table, best effort) and `prepareSearchIndexIfAbsent()` (cheap,
 for every process start or background wake) both run on the SDK's own background scope, never on
 the Swift caller's thread. The Koin modules
 are functions, not `val`s, because a Koin module caches its singletons inside its definitions.

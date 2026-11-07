@@ -68,15 +68,23 @@ internal suspend fun reportRefreshOutcome(
 ): RefreshOutcome? {
     if (results.isEmpty()) return null
     val unreachable = isUnreachable(results)
-    if (unreachable) {
-        notificationCenter.addCoalescing(
-            newNotification(
-                level = AppNotificationLevel.WARNING,
-                text = NotificationText.RefreshFailed,
-                nowMillis = clock.nowMillis(),
-                action = AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED),
-            ),
-        )
-    }
+    if (unreachable) reportRefreshFailed(notificationCenter, clock)
     return RefreshOutcome(newArticleCount(results), unreachable)
+}
+
+/**
+ * Posts the (coalesced) notification-center warning for a refresh that reached none of its feeds,
+ * whose next action explains what to do. Coalesced, so posting it again for the same failure only
+ * brings the entry back to the top — or back at all, once it was dismissed (see
+ * [RefreshCycleRunner.joinAutomaticCycle]).
+ */
+internal fun reportRefreshFailed(notificationCenter: NotificationCenter, clock: Clock) {
+    notificationCenter.addCoalescing(
+        newNotification(
+            level = AppNotificationLevel.WARNING,
+            text = NotificationText.RefreshFailed,
+            nowMillis = clock.nowMillis(),
+            action = AppNotificationAction.ShowInfoDialog(InfoDialogText.REFRESH_FAILED),
+        ),
+    )
 }

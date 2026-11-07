@@ -278,7 +278,12 @@ The package root is `works.merc.keryx.app` (reverse-DNS of `keryx.merc.works`).
    test assertions that must match actual rendered UI text (e.g.
    `onNodeWithText("...")` against a real `strings.xml` string) legitimately
    contain the Japanese string being asserted against — that's not a
-   violation.
+   violation; (c) a comment inside a localized message file
+   (`composeResources/values*/strings.xml`) is written in that file's own
+   language — English in `values/`, Japanese in `values-ja/`, and likewise
+   for any locale added later. This applies to comments added or changed from
+   now on; existing comments are not rewritten. Comments in every other source
+   file stay English.
 10. **One action, one implementation — never a separate implementation per
     route or per UI.** An action with more than one route (toolbar button, menu
     bar, context menu, keyboard shortcut, gesture, accessibility action, tray)
