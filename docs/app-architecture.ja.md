@@ -1932,8 +1932,8 @@ iOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定
   値は画面の 1 ピクセル単位に切り上げる（1 ポイントの端数でも、長い一覧では積み上がるため）。Dynamic Type が
   変わったときは測り直し、先頭に見えていた行を同じ位置に保つ。位置は先頭行の上端から測る。固定ヘッダーとバーは
   offset ではなく、表示領域の高さから差し引く。
-- **行とヘッダー。** 行はこれまでと同じ、ホストした `ArticleRowView` である（`UIHostingConfiguration`、上下 2pt は
-  `List` の行の inset と同じで、左右には独自の余白を付けない）。変わっていない行は再描画しない。選択、タップ、
+- **行とヘッダー。** 行はホストした `ArticleRowView` である（`UIHostingConfiguration`、上下 2pt
+  （`ArticleTableLayout.rowVerticalInset`）、左右には余白を付けない）。変わっていない行は再描画しない。選択、タップ、
   コンテキストメニューは行の側が持つので、collection view 自体は何も選択しない。`ArticleListHeader` は、一覧自身の
   不透明な背景を持つ、固定表示の boundary supplementary item で、行はその下をスクロールする。Reader から戻ったときに
   読んでいた行を光らせるフェードは、`HomeView` の `withAnimation` がホストしたセルに届かないので、行自身の
@@ -1958,8 +1958,8 @@ iOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定
   （`Home/ArticleListScrollGate.swift`、`KeryxTests` でテスト）、一覧が受けられるようになったら最新の 1 件だけを、
   その行がまだあれば渡す。サイドバーから戻る途中で再構築された一覧は先頭から始まるので、保持分を捨てる。ピルの
   ジャンプは画面上でしかタップできないので対象外。
-- **可視行。** 新着の件数に使う可視行は、スクロール位置から求める（これまでどおりデバウンスする）。画面にない一覧は
-  何も報告しない。`List` の行が消えて報告が空になっていたのと同じで、そうしないと Reader の下に届いた記事が
+- **可視行。** 新着の件数に使う可視行は、スクロール位置から求め、デバウンスする（`ArticleTableLayout.visibleRowsReportDelay`）。
+  画面にない一覧は何も報告しない。そうしないと Reader の下に届いた記事が
   既読扱いになる。
 - **Pull to refresh** は `UIRefreshControl`（`PullToRefreshAvailability` が許すときだけ）で、
   `HomeObservable.pullToRefresh()` を実行し、それが終わると止まる。別の項目を選んで待ちを打ち切った場合も同様。
@@ -1968,7 +1968,6 @@ iOS の記事一覧は、SwiftUI の `List` ではなく、行の高さを固定
   「iOS: サイドバーから戻ると記事一覧の pull-to-refresh のスピナーが出ない」を参照）。
 - **フォーカス** はサイドバーと同じで、representable に `.focusable()`、`.focusEffectDisabled()`、`.focused(…)` を
   付け、矢印キーを `HomeView` に残すため `allowsFocus = false` にする。
-- **計測。** iOS 26.3 シミュレータで、1 万行の並び替えの反映に約 65 ms と 110 ms かかった。
 
 ### iPhone Duo（iOS）
 

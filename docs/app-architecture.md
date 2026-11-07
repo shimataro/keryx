@@ -2025,8 +2025,8 @@ way the macOS table does (above), apart from the UIKit it is built from.
   rounded up to a whole pixel (a fraction of a point too tall adds up over a long list). It is measured again
   when Dynamic Type changes, keeping the top visible row where it was. Positions are measured from the first
   row's top edge; the pinned header and the bars take their share of the viewport, not of the offset.
-- **Rows and header.** The rows are the same hosted `ArticleRowView`s as before (`UIHostingConfiguration`, 2pt
-  above and below as the `List`'s row insets were, and none of its own at the sides); a row that did not change
+- **Rows and header.** The rows are hosted `ArticleRowView`s (`UIHostingConfiguration`, 2pt
+  above and below, `ArticleTableLayout.rowVerticalInset`, and none at the sides); a row that did not change
   is not re-rendered. Selection, taps and context menus are the row's own, so the collection view itself
   selects nothing. `ArticleListHeader` is a pinned boundary supplementary item on the list's own opaque
   background, which the rows scroll under. Popping back from the reader flashes the row just read: the fade is
@@ -2054,8 +2054,8 @@ way the macOS table does (above), apart from the UIKit it is built from.
   (`Home/ArticleListScrollGate.swift`, tested in `KeryxTests`), and only the latest is passed on when the list can
   take it, provided its row still exists; a list rebuilt on the way back from the sidebar drops it, since that
   list starts at the top. The pill's jump is exempt: it can only be tapped on screen.
-- **Visible rows** for the new-articles count are worked out from the scroll position (debounced, as before). A
-  list that is off screen reports none, as the `List`'s rows did by disappearing; otherwise an article arriving
+- **Visible rows** for the new-articles count are worked out from the scroll position, debounced
+  (`ArticleTableLayout.visibleRowsReportDelay`). A list that is off screen reports none; otherwise an article arriving
   under the reader would count as seen.
 - **Pull to refresh** is a `UIRefreshControl` (only where `PullToRefreshAvailability` allows it) that runs
   `HomeObservable.pullToRefresh()` and ends with it, also when the wait is abandoned because another item was
@@ -2065,7 +2065,6 @@ way the macOS table does (above), apart from the UIKit it is built from.
   [known-issues.md](known-issues.md)).
 - **Focus** is the sidebar's: `.focusable()`, `.focusEffectDisabled()` and `.focused(…)` on the representable,
   and `allowsFocus = false` so that the arrow keys stay with `HomeView`.
-- **Measured** on the iOS 26.3 simulator, 10,000 rows: applying a re-sort took about 65 and 110 ms.
 
 ### iPhone Duo (iOS)
 

@@ -17,7 +17,7 @@ import UIKit
 /// always reserves two lines), so one sample row measures them all and a position is a row index
 /// times that height.
 ///
-/// The rows are the same `ArticleRowView`s the `List` showed, hosted one per visible cell
+/// The rows are `ArticleRowView`s (as in the macOS table), hosted one per visible cell
 /// (`UIHostingConfiguration`): selection, taps and context menus are theirs. See "Article list (iOS)"
 /// in `docs/app-architecture.md`.
 struct ArticleCollectionView: UIViewControllerRepresentable {
@@ -53,7 +53,7 @@ struct ArticleCollectionView: UIViewControllerRepresentable {
     }
 }
 
-/// A row as a cell shows it: its own 2pt above and below (the `List`'s row insets), the flash fade the
+/// A row as a cell shows it: `ArticleTableLayout.rowVerticalInset` above and below, the flash fade the
 /// hosted row cannot get from `HomeView`'s `withAnimation`, and nothing taken from the window's safe
 /// area, so a cell scrolled under the navigation bar keeps its fixed height.
 struct ArticleCollectionCellContent: View {
@@ -62,7 +62,7 @@ struct ArticleCollectionCellContent: View {
     var body: some View {
         row
             .equatable()
-            // Laid out at its own ideal height, as the `List` laid it out: given the cell's fixed
+            // Laid out at its own ideal height: given the cell's fixed
             // height as a proposal instead, a title that fits in exactly two lines is set on one.
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -147,8 +147,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
 
     override func didMove(toParent parent: UIViewController?) {
         super.didMove(toParent: parent)
-        // Lets the navigation bar (and its search field) follow this list's scrolling, as it does for a
-        // SwiftUI `List`.
+        // Lets the navigation bar (and its search field) follow this list's scrolling.
         parent?.setContentScrollView(collectionView)
     }
 
@@ -166,7 +165,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             )
             let group = NSCollectionLayoutGroup.vertical(layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)])
             let section = NSCollectionLayoutSection(group: group)
-            // Pinned while the rows scroll under it, as the `List`'s section header was.
+            // Pinned while the rows scroll under it.
             let header = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(Self.estimatedHeaderHeight)),
                 elementKind: UICollectionView.elementKindSectionHeader,
@@ -444,7 +443,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     }
 
     /// The list was put into a window or taken out of one: out of one (under the reader), it reports no
-    /// rows on screen, as the `List`'s rows did by disappearing.
+    /// rows on screen, so an article arriving under the reader is not counted as seen.
     private func windowChanged() {
         lastReportedIds = nil
         if collectionView.window == nil { rowHeightPolicy.windowLost() }
@@ -485,8 +484,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
 
     // MARK: - Visible rows
 
-    /// Coalesces a scroll's worth of changes into one report, like the `List`'s own
-    /// `onAppear`/`onDisappear` debounce did.
+    /// Coalesces a scroll's worth of changes into one report (`ArticleTableLayout.visibleRowsReportDelay`).
     private func scheduleReport() {
         reportTask?.cancel()
         reportTask = Task { [weak self] in
