@@ -1,5 +1,8 @@
 package works.merc.keryx.app.sdk
 
+import app.cash.sqldelight.db.QueryResult
+import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.db.SqlPreparedStatement
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -27,6 +30,7 @@ import platform.posix.usleep
 import works.merc.keryx.app.core.DB_FILE_NAME
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.data.local.DatabaseTooNewException
+import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.KeryxDatabase
 import works.merc.keryx.app.domain.OAuthCallbackParams
 import works.merc.keryx.app.platform.AppDirs
@@ -47,6 +51,19 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val FEED_URL = "https://example.com/feed.xml"
+
+/** A driver that refuses to create the search index's virtual table and passes everything else through. */
+private class FtsCreateFailingDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    override fun execute(
+        identifier: Int?,
+        sql: String,
+        parameters: Int,
+        binders: (SqlPreparedStatement.() -> Unit)?,
+    ): QueryResult<Long> {
+        check(!sql.contains("CREATE VIRTUAL TABLE")) { "simulated table creation failure" }
+        return delegate.execute(identifier, sql, parameters, binders)
+    }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class KeryxSdkTest {
@@ -121,6 +138,54 @@ class KeryxSdkTest {
             sdk.prepareSearchIndex()
             assertTrue(sdk.homeViewModel.feeds.value.isEmpty())
             assertTrue(sdk.newAddFeedController().state.value.url.isEmpty())
+        } finally {
+            sdk.close()
+        }
+    }
+
+    private fun tableNames(): List<String> = RawSqliteConnection.open(FileIO.join(dir, DB_FILE_NAME)).use {
+        it.queryColumn("SELECT name FROM sqlite_master WHERE type = 'table'", "name")
+    }
+
+    /** An SDK whose search index table cannot be created, as if the statement failed at run time. */
+    private fun startWithFailingFtsTable() = KeryxSdk.startWithModules(
+        newArticlesText = { count -> "$count new" },
+        postOsNotification = { _, _ -> },
+        dataDirectory = dir,
+        extraModules = listOf(module { single { FtsManager(FtsCreateFailingDriver(get<SqlDriver>())) } }),
+    )
+
+    /**
+     * The table exists as soon as the SDK has started, not only once the UI calls
+     * prepareSearchIndex(): a launch whose scene never becomes active (a permission alert in front)
+     * must still be able to index a subscription's articles.
+     */
+    @Test
+    fun startCreatesTheSearchIndexTableWithoutPrepareSearchIndex() = runTest {
+        val sdk = start()
+        try {
+            assertTrue("articles_fts" in tableNames())
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun startSucceedsWhenTheSearchIndexTableCannotBeCreated() = runTest {
+        val sdk = startWithFailingFtsTable()
+        try {
+            assertFalse("articles_fts" in tableNames())
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun prepareSearchIndexDoesNotThrowWhenTheIndexCannotBeBuilt() = runTest {
+        val sdk = startWithFailingFtsTable()
+        try {
+            sdk.prepareSearchIndex()
+            assertFalse("articles_fts" in tableNames())
         } finally {
             sdk.close()
         }

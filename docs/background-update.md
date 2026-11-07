@@ -77,7 +77,7 @@ connected). Like every automatic cycle, it holds the notification back while the
 on iOS, while the scene phase is `active` (see `AppForeground` above), which a background run never is. It does nothing before setup completes — without even flushing settings, since the
 settings file's existence is the setup-complete marker. It skips the startup sequence, the update
 check and the FTS full rebuild (a background slot lasts about 30 seconds); only
-`ensureIndexedIfTableAbsent` runs. `runIfIdle` makes it a no-op while a foreground cycle is running;
+`ensureIndexedIfTableAbsent` runs, which does nothing once `KeryxSdk.start` has created the table. `runIfIdle` makes it a no-op while a foreground cycle is running;
 conversely, a pull or Refresh All made while this automatic cycle runs joins it and shows its outcome
 (`joinAutomaticCycle`). Cancelling the task at the end of its slot cancels the shared work with it.
 
@@ -597,6 +597,9 @@ runs once per process, before `runStartupTasks`/`runAndroidStartupTasks` is even
   fire-and-forget on the shared app-scope `CoroutineScope` — blocking `Application.onCreate` would
   delay every Android cold start instead of just the first window, and a search performed in the
   brief window before it completes just returns fewer/no hits rather than failing.
+- **Apple.** `KeryxSdk.start` creates the table (`FtsManager.createTable()`, best effort, logged on failure),
+  so it exists even for a launch whose scene never becomes active — a permission alert in front of it, say.
+  `AppModel` then calls `prepareSearchIndex()` once the scene is active, which backfills the missing rows.
 - **Why the cheaper variant.** `Application.onCreate` also runs on every `WorkManager` wakeup that
   starts the process to run `FeedRefreshWorker` (up to ~96 times/day at the platform's 15-minute
   minimum interval, see "Android Implementation" above) — `ensureIndexed()`'s `indexMissing()`

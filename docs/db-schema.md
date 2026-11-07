@@ -141,6 +141,9 @@ External content mode keeps only the index, referencing `articles.search_text` f
 Android instead calls the cheaper `ensureIndexedIfTableAbsent()` on every process start (including a `WorkManager`
 wakeup, up to ~96 times/day) — it skips straight to a no-op once the table already exists, instead of re-running
 `indexMissing()`'s `O(articles)` scan on every wakeup.
+The Apple SDK creates the table in `KeryxSdk.start` (`createTable()`, best effort) so it exists whatever the UI
+does — `prepareSearchIndex()` runs only once the scene is active, and a subscription made before that must still
+have a table to index into — and `prepareSearchIndex()` then backfills the missing rows.
 
 `tokenize='trigram'` needs SQLite ≥3.34, which AOSP's own SQLite build never provides (it omits
 FTS5 entirely, at any API level) — Android's `DatabaseDriverFactory` actual uses a bundled SQLite

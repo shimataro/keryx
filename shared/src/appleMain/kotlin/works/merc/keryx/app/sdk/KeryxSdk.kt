@@ -19,6 +19,8 @@ import org.koin.dsl.koinApplication
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.CloudStorageAvailability
 import works.merc.keryx.app.core.CloudStorageType
+import works.merc.keryx.app.core.Log
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.findDatabaseTooNew
 import works.merc.keryx.app.di.applePlatformModule
@@ -59,6 +61,8 @@ import works.merc.keryx.app.presentation.settings.requestOpenedOpmlImport
 import works.merc.keryx.app.presentation.settings.PreferencesController
 import works.merc.keryx.app.presentation.setup.SetupController
 import kotlin.coroutines.cancellation.CancellationException
+
+private const val TAG = "KeryxSdk"
 
 /**
  * The native Apple app's one entry point into the shared code: builds the object graph (without
@@ -326,13 +330,19 @@ class KeryxSdk private constructor(private val koin: Koin) {
     }
 
     /**
-     * Creates the full-text search index on first run and backfills every row missing from it — an
-     * `O(articles)` scan. Call once per foreground app launch. Runs on the app's background scope,
-     * so a main-actor caller only awaits it.
+     * Backfills every row missing from the full-text search index — an `O(articles)` scan — creating
+     * the table first if [start] could not. Call once per foreground app launch. Runs on the app's
+     * background scope, so a main-actor caller only awaits it.
+     *
+     * Best effort: a failure is logged, not thrown, because it only leaves search without the rows
+     * that are missing — the next refresh or launch indexes them again.
      */
     @Throws(Exception::class, CancellationException::class)
     suspend fun prepareSearchIndex() {
-        koin.get<CoroutineScope>().async { koin.get<FtsManager>().ensureIndexed() }.await()
+        koin.get<CoroutineScope>().async {
+            runCatchingUnlessCancelled { koin.get<FtsManager>().ensureIndexed() }
+                .onFailure { Log.warn(TAG, "Preparing the search index failed", it) }
+        }.await()
     }
 
     /**
@@ -449,6 +459,14 @@ class KeryxSdk private constructor(private val koin: Koin) {
                 AppDirs.rootOverride = null
                 throw findDatabaseTooNew(e) ?: e
             }
+            // The search index's table is created here, with the database, rather than by the UI's
+            // prepareSearchIndex(): that waits for the scene to become active, and a launch that
+            // never gets there (a permission alert in front, say) would leave a feed subscription
+            // indexing into a table that does not exist. Best effort — a failure must not turn into
+            // a start failure (the app shows that as "database too new"); prepareSearchIndex() and
+            // the background refresh create the table again.
+            runCatchingUnlessCancelled { koin.get<FtsManager>().createTable() }
+                .onFailure { Log.warn(TAG, "Creating the search index failed", it) }
             return KeryxSdk(koin)
         }
     }
