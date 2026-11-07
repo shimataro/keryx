@@ -28,11 +28,13 @@ struct RefreshStatusLabel: View {
                 .lineLimit(1)
         }
         // Claiming its own width has a cost: the label can no longer shrink to the bar, so its width is
-        // the text's width. The failure sentence at xLarge spans about 340pt, leaving room on either side
-        // of a 390pt screen; from xxLarge up the system's own text scaling fills it edge to edge (about
-        // 380pt), and a 375pt-wide iPhone has no room left. Capping the label's own scaling keeps it
-        // inside the bar, and one step down on a footnote caption is a small price.
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        // the text's width. The widest status ("Checking for new articles…" in en, "新着記事が N 件あります"
+        // in ja) spans about 250pt at xxxLarge including the spinner, inside the narrowest place the
+        // label appears (an iPad mini's 279pt article-list column). The accessibility sizes do not fit
+        // it: en alone passes 285pt at the first of them. Capping the label's own scaling at the
+        // largest standard size keeps it inside the bar; the notification center and VoiceOver carry
+        // the status for anyone who needs it larger.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         // iOS 26 sizes a toolbar item to its glass capsule and truncates the caption to "…" unless
         // the label claims its own width.
         .fixedSize()
