@@ -11,6 +11,7 @@ paths:
   - "**/StartupMaintenanceTasks.kt" # maybeRebuildFtsIndex itself (daily idle heal, commonMain)
   - "**/main.kt"                   # ensureIndexed() called at startup, before application {}
   - "**/KeryxApplication.kt"       # ensureIndexedIfTableAbsent() called on every Android process start
+  - "**/KeryxSdk.kt"               # Apple: createTable() in start(), prepareSearchIndex()
   - "**/*.sq"                      # do NOT add articles_fts to a .sq file
 ---
 
@@ -30,7 +31,9 @@ whole index is only rebuilt in the rare healing pass: a once-per-24h idle pass
 refresh-then-sync cycle (`refreshCycleRunning`) in flight — reached at startup through `runStartupMaintenance` (desktop's `StartupTasks.kt`,
 `AndroidStartupTasks.kt`), and from `BackgroundRefreshLoop` and Android's `FeedRefreshWorker`),
 which re-indexes content that incremental indexing left stale. On startup, `FtsManager.ensureIndexed()` creates the table on first
-run and backfills any missing rows. Android's `KeryxApplication.onCreate` calls the
+run and backfills any missing rows. The Apple SDK's `KeryxSdk.start` creates the table (best effort, logged on
+failure) so it exists even when the scene never becomes active, and `prepareSearchIndex()` backfills the rows
+once it is. Android's `KeryxApplication.onCreate` calls the
 cheaper `FtsManager.ensureIndexedIfTableAbsent()` instead — it also runs on every
 `WorkManager` wakeup, not just once per app launch like desktop's `main.kt`, so it
 skips `indexMissing()`'s `O(articles)` scan entirely (a single `sqlite_master` check)

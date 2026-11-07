@@ -164,6 +164,10 @@ INSERT INTO articles_fts(articles_fts) VALUES('rebuild');
 Android はこれより軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ（`WorkManager` の
 ウェイクアップ含め1日最大約96回）— テーブルが既に存在すれば毎回 `indexMissing()` の `O(記事数)` スキャンを
 再実行せず、即座に no-op で返る。
+Apple の SDK は、UI の状態に関係なくテーブルがあるように、`KeryxSdk.start` でテーブルを作る
+（`createTable()`、best effort）。`prepareSearchIndex()` はシーンが active になってからしか走らず、それより
+前に行った購読にも索引を入れる先のテーブルが必要だからである。欠けている行の補完は、そのあとの
+`prepareSearchIndex()` が行う。
 
 `tokenize='trigram'` は SQLite ≥3.34 を必要とするが、AOSP 自身の SQLite ビルドはこれを提供しない
 （どの API レベルでも FTS5 自体を含んでいない）— Android の `DatabaseDriverFactory` actual はバンドル
