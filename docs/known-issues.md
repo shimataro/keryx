@@ -928,7 +928,11 @@ the probe and the generation in place), build, and on an iPhone simulator check 
 2. Launch, pull the article list once, and let the refresh finish, five times over: does the list
    always come back to rest at the top, its header fully below the navigation bar?
 
-If both hold on every supported iOS version, remove the workaround as above and delete this entry.
+Run both steps twice: once with articles in the list, and once on an empty list (for example Unread
+mode with nothing unread). Only the empty state (`noArticlesView`) is a `.refreshable` scroll view, so
+the populated list alone exercises the list's own `UIRefreshControl`, not the SwiftUI defect.
+
+If both hold in both cases on every supported iOS version, remove the workaround as above and delete this entry.
 If either fails, restore the `.id` and update the version this entry was last seen on.
 
 ## iOS: going back to the article list crashed in `UICollectionView`
