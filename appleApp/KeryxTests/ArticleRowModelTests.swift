@@ -47,6 +47,7 @@ struct ArticleRowModelTests {
         let sample = ArticleRowModel.measurementSample(zone: utc)
         #expect(sample.isStarred)
         #expect(sample.title?.contains("漢字かなカナ") == true)
+        #expect(sample.title?.contains("😀") == true)
         #expect(sample.title == sample.feedTitle)
         // Long enough to wrap past two lines at the narrowest pane width.
         #expect((sample.title?.count ?? 0) > 100)
