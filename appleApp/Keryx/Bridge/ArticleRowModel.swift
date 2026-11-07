@@ -70,6 +70,25 @@ struct ArticleRowModel: Identifiable, Equatable, Sendable {
         canOpenInBrowser = ArticleListModelKt.canOpenInBrowser(url: url)
     }
 
+    /// The row the fixed-height article lists (`ArticleTableView`, `ArticleCollectionView`) measure
+    /// their one row height on, rather than a real row: a line of Japanese text or an emoji can be
+    /// taller than a Latin one, so a row measured on Latin text could be too short for a Japanese
+    /// title's two lines. It fills both title lines and the feed line with that mix (and is starred,
+    /// to fill the star slot), so they wrap at the narrowest width the pane allows.
+    static func measurementSample(zone: Kotlinx_datetimeTimeZone) -> ArticleRowModel {
+        let tallText = String(repeating: "Keryx 漢字かなカナ 😀 ", count: 12)
+        return ArticleRowModel(
+            row: ArticleListRow(
+                id: "", feed_id: "", title: tallText, url: "", published_at: KotlinLong(value: 0),
+                created_at: 0, is_read: 0, is_starred: 1
+            ),
+            markedTitle: nil,
+            feedTitle: tallText,
+            faviconUrl: nil,
+            zone: zone
+        )
+    }
+
     /// Splits `marked` at its `\u{0002}`/`\u{0003}` markers into an `AttributedString` whose matched
     /// runs carry `highlightColor` as their background.
     static func highlighted(_ marked: String) -> AttributedString {
