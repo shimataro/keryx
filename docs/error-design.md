@@ -100,7 +100,8 @@ notification center, snackbars/toasts, tooltips — in both locales and both UIs
   (`home_sync_auth_failed`) and "Check your internet connection and try again."
   (`apple_update_check_failed_offline`) are the model.
 - **A message that only states the failure is not allowed** — "Import failed", "Couldn't X",
-  "An error occurred" leave the user with nothing to do.
+  "An error occurred" leave the user with nothing to do. Except as described in "Omitting the next
+  step" below.
 - **When the cause is unknown, still give a next step** (try again later, check the connection,
   check the URL).
 - **No technical detail.** HTTP status codes, exception class names, and raw exception text
@@ -111,6 +112,22 @@ notification center, snackbars/toasts, tooltips — in both locales and both UIs
 - **The category must be fine-grained enough to explain.** One `ErrorKind` / `NotificationText`
   that covers causes needing different next steps leaves the UI unable to say why; split it rather
   than writing a vaguer message.
+- **Omitting the next step.** A message may leave out what to do next only when **both** hold: the
+  next step is obvious — reading the message already tells the user what to do ("No internet
+  connection" means get back online) — **and** there is no room to write it: the display is too
+  narrow, checked against the narrowest place the message appears. "It reads better shorter" is not
+  a lack of room. Even then the failure must be recognizable without the text (a warning icon, say),
+  and the explanation and the next step must stay available somewhere else, such as the notification
+  center. The exceptions today:
+  - `home_refresh_failed` ("No internet connection"): the iOS refresh status in the bottom bar
+    (`RefreshStatusLabel`) claims its own width. The wording that gave a next step measured about
+    290pt in ja at the standard size (about 334pt at xLarge) and about 296pt in en at xLarge, and did
+    not fit the narrowest place it appears, an iPad mini's article-list column (about 279pt).
+    Reconnecting is the obvious next step, the warning icon marks the failure, and the notification
+    center keeps the full explanation (`notification_refresh_failed_detail`).
+
+  A new exception is added to this list, with its reason, and its key gets a short comment in each
+  locale's `strings.xml`, written in that file's language, pointing here.
 
 Status labels that are not messages (a notification's level, such as "Error") are out of scope.
 

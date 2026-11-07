@@ -122,7 +122,11 @@ reached from `errorMessage(ErrorKind)`, `notificationText` / `infoDialogText`, a
   the control shown beside it (a button, a link, the notification's next action) before judging
   the text alone incomplete — check the call site.
 - A message that only states the failure ("Import failed", "〜できません", "An error occurred") with
-  no next step anywhere in its presentation is a `Medium` finding.
+  no next step anywhere in its presentation is a `Medium` finding. Do not flag it when its key is
+  listed under "Omitting the next step" in `docs/error-design.md` and carries the short comment in
+  `strings.xml` that points there. A key that is not listed, or has no comment, is still `Medium`;
+  and a diff that adds such an exception must also add it to that list in both `error-design.md`
+  and `error-design.ja.md`.
 - Technical detail in the text — an HTTP status code, an exception name, an internal term — is a
   `Medium` finding.
 - ja and en give the same cause and the same next step.
