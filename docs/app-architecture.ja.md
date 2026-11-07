@@ -355,7 +355,9 @@ Android の `actual` は `AndroidSqliteDriver` を生成する。こちらは `o
   増分投入では古いままの内容を再索引する。
 - **起動時。** desktop の起動時は `FtsManager.ensureIndexed()` がテーブルを初回作成し未索引行を
   バックフィルする。Android は軽量版 `ensureIndexedIfTableAbsent()` をプロセス起動のたびに呼ぶ
-  （理由は db-schema.md の `articles_fts` 節参照）。
+  （理由は db-schema.md の `articles_fts` 節参照）。Apple の SDK は `KeryxSdk.start` でテーブルを作り、
+  欠けている行は `prepareSearchIndex()` が補完するので、テーブルの有無はシーンが active になるかどうかに
+  左右されない。
 - **並行性。** `DatabaseDriverFactory` で設定する `busy_timeout` により、検索は増分投入や rebuild の
   短い書き込みロックをエラーにせず待ち抜ける。`FtsSearch.search()` は語の長さで
 分岐する — 3 文字以上の語は `articles_fts MATCH`（ランク順）を実行するが、trigram トークナイザはそれより
@@ -2007,7 +2009,8 @@ Swift の `@MainActor` 呼び出し元がメインスレッド外へのディス
 まだ DB を読みうるコルーチンをすべて止めて完了を待ってから DB を閉じ、設定の書き込み処理をフラッシュして停止し、
 HTTP クライアントを閉じる。`start()` が失敗した場合も、同じようにグラフと `dataDirectory` の上書きを解放する。
 `handleOAuthRedirect` は、接続フローがリダイレクトを待ち受けていなければ `false` を返し、そのリダイレクトは破棄する。
-`prepareSearchIndex()`（フォアグラウンド起動ごとに 1 回：FTS テーブルを作成し欠けている行を補完）と
+`prepareSearchIndex()`（フォアグラウンド起動ごとに 1 回：欠けている行を補完し、`start()` が作れていなければ
+先に FTS テーブルを作る。失敗はログに残し、投げない。`start()` 自身も best effort でテーブルを作る）と
 `prepareSearchIndexIfAbsent()`（軽量。プロセス起動やバックグラウンドでの起床のたびに呼ぶ用）は、どちらも
 Swift の呼び出し元スレッドではなく SDK 自身のバックグラウンドスコープで動く。Koin モジュールが `val` ではなく関数なのは、
 Koin のモジュールがシングルトンを定義の中にキャッシュするため。

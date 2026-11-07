@@ -499,7 +499,8 @@ desktop の起動時は `main.kt` の `runBlocking` から `FtsManager.ensureInd
 投入）を呼ぶ（索引不在のままウィンドウを開かせないため）。ライタ mutex はコルーチンベースで、この時点では
 直前にディスパッチされた `.opml` インポートが短時間だけ保持し得るのみなので、メインスレッドで待っても
 デッドロックしない。Android は代わりに、より軽い `ensureIndexedIfTableAbsent()` をプロセス起動のたびに
-呼ぶ（理由は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節「起動時」を参照）。
+呼ぶ（理由は [db-schema.ja.md](db-schema.ja.md) の `articles_fts` 節「起動時」を参照）。Apple の SDK は
+`KeryxSdk.start` でテーブルを作り（best effort）、欠けている行は `prepareSearchIndex()` が補完する。
 
 ## クラウド認証（OAuth PKCE + オフラインアクセス）
 

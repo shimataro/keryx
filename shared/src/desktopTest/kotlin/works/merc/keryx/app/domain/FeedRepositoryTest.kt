@@ -246,6 +246,32 @@ class FeedRepositoryTest {
         )
     }
 
+    /**
+     * The search-index catch-up after a subscription is best effort: the feed and its articles are
+     * already stored, so an index failure must not turn the subscription into an error — or, for a
+     * caller that does not catch it, into a crash.
+     */
+    @Test
+    fun subscribeFeedStillSucceedsWhenTheSearchIndexUpdateFails(): Unit = runBlocking {
+        val (rawDriver, _) = inMemoryDb()
+        val driver = FaultInjectingDriver(rawDriver)
+        try {
+            val db = works.merc.keryx.app.data.local.db.KeryxDatabase(driver)
+            val repo = newRepo(db, driver, fetcherWith { respond(RSS, HttpStatusCode.OK) })
+            driver.failIndexing = true
+            val indexAttemptsBefore = driver.ftsInserts
+
+            val subscription = repo.subscribeFeedTracked("https://ex.com/feed")
+
+            assertIs<Result.Ok<Feeds>>(subscription.result)
+            assertTrue(subscription.wasNewlyCreated)
+            assertEquals(indexAttemptsBefore + 1, driver.ftsInserts, "the index update was attempted, and failed")
+            assertTrue(db.articlesQueries.watchByFeed(subscription.result.value.id).executeAsList().isNotEmpty())
+        } finally {
+            driver.close()
+        }
+    }
+
     @Test
     fun subscribeFeedHappyPathInsertsFeedAndArticlesAndSchedulesSync(): Unit = runBlocking {
         val (driver, db) = inMemoryDb()
