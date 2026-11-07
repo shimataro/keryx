@@ -72,7 +72,7 @@ struct HomeView: View {
     /// article list — the iOS idiom of a list row fading out its highlight on return, and the role
     /// Android's own neutral ripple pulse (`ripplePulseFor`) plays there. `nil` otherwise.
     @State private var returnFlashId: String?
-    private static let returnFlashFadeSeconds = 0.35
+    static let returnFlashFadeSeconds = 0.35
 
     /// The ideal widths of the sidebar and article list columns. macOS restores the widths the user
     /// last dragged the dividers to. iOS asks for the defaults every time, as Android's touch layouts

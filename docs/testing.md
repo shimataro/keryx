@@ -1406,23 +1406,36 @@ orientations), with a feed of a few dozen articles whose bodies are longer than 
   article near the end of the list while the refresh is landing, and edge-swipe back to the list straight
   away; repeat, also opening and going back immediately, without a refresh.
 
-### (iOS) Going back to the article list
+### (iOS) The article list and going back to it
 
-`ArticleListScrollGateTests` covers when a scroll is held and carried out, but whether the list is
-reported as on screen, and the crash itself (see "iOS: going back to the article list crashed in
-`UICollectionView`" in [known-issues.md](known-issues.md)), need a simulator or device. On an iPhone, with a
-feed of a few dozen articles:
+`ArticleTableLayoutTests` covers the scroll arithmetic (positions, reveals, the visible rows) and
+`ArticleListScrollGateTests` when a scroll is held and passed on, but whether the list is in a window, how UIKit
+moves its insets, the crash itself (see "iOS: going back to the article list crashed in `UICollectionView`" in
+[known-issues.md](known-issues.md)) and the gestures need a simulator or device. On an iPhone, with a feed of a
+few dozen articles:
 
 - No crash: open an article, swipe through a few, and edge-swipe back to the list; repeat with the back
   button, and while a refresh or sync is landing. Also start an edge swipe, cancel it, and go back afterwards.
 - After swiping past the rows that were on screen, going back shows the selected row, without the list
-  jumping a long way once it is back.
+  jumping a long way once it is back. A list scrolled partway and left under the reader comes back at the same
+  place.
 - Open an article, send the app to the background and have iOS terminate it, relaunch into the reader, and go
   back: the selected row is shown, and the row touched next does not jump.
 - A list opened from the sidebar starts at the top, and switching the filter goes back to the top.
-- Going back still flashes the row just read.
-- On an iPad, selecting an article off screen with a hardware keyboard and switching the filter still scroll
-  the list, in the three-pane layout and in portrait.
+- Going back still flashes the row just read, and the flash fades out.
+- New articles: with the list scrolled down, a refresh that brings new ones keeps the visible rows in place and
+  shows the pill, whose tap jumps to them. Ones that arrive while the reader is open count too, once back.
+- Search: typing or changing a term shows the results from the top, and opening and closing the field leaves
+  the list intact. The rows show the highlight.
+- Pull to refresh: the spinner shows above the header, the list comes back to rest at the top, and it works
+  again after going to the sidebar and back. Selecting another item mid-pull ends the spinner. Rows landing
+  while the list is being scrolled do not make it jump.
+- Rows: tap, long-press menu (star, read, open, copy), and VoiceOver (each row is read with its unread and
+  starred state) behave as before. Changing the text size in Settings keeps the list in place.
+- On iOS 17 and 18 the search field and the navigation bar still follow the list's scrolling.
+- On an iPad, selecting an article off screen with a hardware keyboard (J/K, the arrow keys) and switching the
+  filter still scroll the list, in the three-pane layout and in portrait.
+- With a feed of several thousand articles, turning "unread only" off and re-sorting stay responsive.
 
 ### (iOS) Restoring Home after termination
 

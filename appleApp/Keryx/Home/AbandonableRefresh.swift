@@ -1,4 +1,4 @@
-/// A pull-to-refresh wait that can be given up from outside: the article list's `.refreshable`
+/// A pull-to-refresh wait that can be given up from outside: the article list's pull
 /// indicator stays up for as long as `run` has not returned, and that wait belongs to the selection
 /// it was made for. Once the selection moves elsewhere, the list on screen is another one's, and an
 /// indicator left spinning over it would claim a refresh that is not happening there (Compose's own
