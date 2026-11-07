@@ -52,15 +52,25 @@ import kotlin.test.assertTrue
 
 private const val FEED_URL = "https://example.com/feed.xml"
 
-/** A driver that refuses to create the search index's virtual table and passes everything else through. */
+/**
+ * A driver that fails every attempt to create the search index's virtual table with [failure],
+ * counting them in [createAttempts], and passes everything else through.
+ */
 private class FtsCreateFailingDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    var createAttempts = 0
+        private set
+    var failure: Throwable = IllegalStateException("simulated table creation failure")
+
     override fun execute(
         identifier: Int?,
         sql: String,
         parameters: Int,
         binders: (SqlPreparedStatement.() -> Unit)?,
     ): QueryResult<Long> {
-        check(!sql.contains("CREATE VIRTUAL TABLE")) { "simulated table creation failure" }
+        if (sql.contains("CREATE VIRTUAL TABLE")) {
+            createAttempts++
+            throw failure
+        }
         return delegate.execute(identifier, sql, parameters, binders)
     }
 }
@@ -147,12 +157,19 @@ class KeryxSdkTest {
         it.queryColumn("SELECT name FROM sqlite_master WHERE type = 'table'", "name")
     }
 
+    /** The driver behind [startWithFailingFtsTable]'s search index, set once that SDK has started. */
+    private lateinit var failingFtsDriver: FtsCreateFailingDriver
+
     /** An SDK whose search index table cannot be created, as if the statement failed at run time. */
     private fun startWithFailingFtsTable() = KeryxSdk.startWithModules(
         newArticlesText = { count -> "$count new" },
         postOsNotification = { _, _ -> },
         dataDirectory = dir,
-        extraModules = listOf(module { single { FtsManager(FtsCreateFailingDriver(get<SqlDriver>())) } }),
+        extraModules = listOf(
+            module {
+                single { FtsManager(FtsCreateFailingDriver(get<SqlDriver>()).also { failingFtsDriver = it }) }
+            },
+        ),
     )
 
     /**
@@ -184,8 +201,22 @@ class KeryxSdkTest {
     fun prepareSearchIndexDoesNotThrowWhenTheIndexCannotBeBuilt() = runTest {
         val sdk = startWithFailingFtsTable()
         try {
+            val attemptsAtStart = failingFtsDriver.createAttempts
             sdk.prepareSearchIndex()
+            assertTrue(failingFtsDriver.createAttempts > attemptsAtStart)
             assertFalse("articles_fts" in tableNames())
+        } finally {
+            sdk.close()
+        }
+    }
+
+    @Test
+    fun prepareSearchIndexPropagatesCancellation() = runTest {
+        val sdk = startWithFailingFtsTable()
+        try {
+            // Only now: start() rethrows a cancellation too, so failing with one earlier would fail the start.
+            failingFtsDriver.failure = CancellationException("simulated cancellation")
+            assertFailsWith<CancellationException> { sdk.prepareSearchIndex() }
         } finally {
             sdk.close()
         }
