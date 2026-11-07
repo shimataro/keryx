@@ -372,7 +372,9 @@ Manages `articles_fts` (FTS5 trigram, `content='articles'`) via raw SQL. Not inc
   Android's startup path), which re-indexes content that incremental indexing left stale.
 - **Startup.** On desktop startup, `FtsManager.ensureIndexed()` creates the table on first run and
   backfills any missing rows; Android calls the cheaper `ensureIndexedIfTableAbsent()` instead on
-  every process start (see db-schema.md's `articles_fts` section for why).
+  every process start (see db-schema.md's `articles_fts` section for why). The Apple SDK creates the table in
+  `KeryxSdk.start` and backfills it from `prepareSearchIndex()`, so the table does not depend on the scene
+  becoming active.
 - **Concurrency.** `busy_timeout` (set in `DatabaseDriverFactory`) lets a search wait out, rather
   than error on, the brief write lock of an incremental insert or a rebuild.
 
@@ -2103,7 +2105,8 @@ and joins every coroutine that can still read the database before closing it, fl
 the settings writer, and closes the HTTP client; a failed `start()` releases its graph and the
 `dataDirectory` override the same way. `handleOAuthRedirect` returns `false`, and drops the
 redirect, when no connect flow is collecting it. `prepareSearchIndex()` (once per foreground
-launch: create the FTS table and backfill missing rows) and `prepareSearchIndexIfAbsent()` (cheap,
+launch: backfill missing rows, creating the FTS table first if `start()` could not — a failure is logged, not
+thrown; `start()` itself creates the table, best effort) and `prepareSearchIndexIfAbsent()` (cheap,
 for every process start or background wake) both run on the SDK's own background scope, never on
 the Swift caller's thread. The Koin modules
 are functions, not `val`s, because a Koin module caches its singletons inside its definitions.

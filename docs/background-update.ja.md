@@ -73,7 +73,7 @@ SwiftUI の `.backgroundTask(.appRefresh(…))` ハンドラが `AppModel.runBac
 （上の `AppForeground` を参照）で、バックグラウンド実行中は決してそうならない。セットアップ完了前は何もしない——
 設定ファイルの存在がセットアップ完了の目印なので、設定の flush もしない。起動時シーケンス、アップデート確認、
 FTS の full rebuild は省く（バックグラウンドの実行枠は約 30 秒）。実行するのは
-`ensureIndexedIfTableAbsent` だけ。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もしない。
+`ensureIndexedIfTableAbsent` だけで、`KeryxSdk.start` がテーブルを作っていれば何もしない。フォアグラウンドでサイクルが走っている間は `runIfIdle` により何もしない。
 逆に、この自動のサイクルの実行中に引っ張るかすべて更新を実行すると、それに相乗りしてその結果を表示する
 （`joinAutomaticCycle`）。枠の終了でタスクがキャンセルされると、共有している処理もキャンセルされる。
 
@@ -618,6 +618,9 @@ self-replace 成果物の掃除——を足すだけで、残りは `runStartupM
   fire-and-forget で起動する — `Application.onCreate` をブロックすると Android の全コールド
   スタートが遅延してしまうため。完了前の短い間に検索が実行された場合は、失敗するのではなく
   ヒット件数が少なめ（0件を含む）になるだけである。
+- **Apple。** `KeryxSdk.start` がテーブルを作る（`FtsManager.createTable()`。best effort で、失敗はログに
+  残す）ので、前面に許可アラートが出るなどしてシーンが active にならない起動でもテーブルはある。そのあと
+  シーンが active になると `AppModel` が `prepareSearchIndex()` を呼び、欠けている行を補完する。
 - **より軽量な版を呼ぶ理由。** ここで呼ぶのは `ensureIndexed()` ではなく、より軽量な
   `FtsManager.ensureIndexedIfTableAbsent()` である: `Application.onCreate` は `FeedRefreshWorker`
   を走らせるための `WorkManager` の起床でも実行される（プラットフォームの最短間隔 15 分なら
