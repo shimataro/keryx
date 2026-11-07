@@ -1925,6 +1925,14 @@ iOS の記事一覧は SwiftUI の `List` で、`ScrollViewProxy.scrollTo` で�
 ものかを `HomeObservable.articleRowsMatchFilter` / `searchRowsMatchFilter` が示す。切り替えへの対応は
 一度きりで、後から届いたリフレッシュで一覧がスクロールすることはない。
 
+画面にない一覧にスクロールを頼むこともしない（`Home/ArticleListScrollGate.swift`、`KeryxTests` でテスト）。
+`scrollTo` は一覧の次のレイアウトで実行され、Reader の下にある一覧はレイアウトされない。
+Reader のスワイプで選択が動いたときや、復元した選択が届いたときは一覧が隠れているので、そのスクロールは戻る操作の
+最初のレイアウトまで待つことになる。gate はこれらを保持し、一覧が画面に戻ったら最新の 1 件だけを、その行がまだ
+あれば実行する。サイドバーから戻る途中で再構築された一覧は先頭から始まるので、保持分を捨てる。「画面に戻った」とは
+pop の終わりではなく始まりを指す。ピルのジャンプは画面上でしかタップできないので対象外。これは再現できていないクラッシュへの防御的な変更である。
+[known-issues.ja.md](known-issues.ja.md) の「iOS: 記事一覧に戻ると `UICollectionView` でクラッシュした」を参照。
+
 ### iPhone Duo（iOS）
 
 iPhone Duo の外側ディスプレイと、横向きの内側ディスプレイでは、ナビゲーションバー・ツールバー・タブバーが

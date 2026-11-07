@@ -910,3 +910,58 @@ the probe and the generation in place), build, and on an iPhone simulator check 
 
 If both hold on every supported iOS version, remove the workaround as above and delete this entry.
 If either fails, restore the `.id` and update the version this entry was last seen on.
+
+## iOS: going back to the article list crashed in `UICollectionView`
+
+**Status**: mitigated, cause not confirmed. Scrolls no longer reach a list that is not on screen
+(`Home/ArticleListScrollGate.swift`), but the crash was never reproduced, so whether that stops it is
+unknown.
+
+### Symptom
+
+v0.27.0 on an iPhone SE (3rd generation), iOS 26.5, aborted on an `NSInternalInconsistencyException` from
+`-[UICollectionView _validateScrollingTargetIndexPath:raisingExceptionIfNecessary:]`, 32 seconds after the
+process launched. SwiftUI's `UpdateCoalescingCollectionView.updateContent()` asked for the scroll, in
+`layoutSubviews`, during the layout that starts the navigation pop from the reader. No Keryx frame is on the
+stack but `main`, and the report does not hold the exception's message, so the index path and row count are
+unknown. The Kotlin GC threads were idle.
+
+The reader's swipe pager is a `UIPageViewController`, not a collection view, so the `List` of the article list
+is the only SwiftUI collection view in this layout.
+
+### What was ruled out
+
+Measured on the iOS 26.3 simulator. The first four rows made the pop from code, the last two with an edge swipe
+driven by a UI test:
+
+| Scenario | Result |
+| --- | --- |
+| `scrollTo` asked while the list is under the reader | Happens (selection moves, restored selection) |
+| Pending scroll to row 51, rows shrink from 60 to 9, go back | No crash |
+| Reader restored at launch, go back | No crash |
+| Reader restored at launch, rows shrink from 59 to 34, go back | No crash |
+| Scroll held, edge swipe back to the list | No crash |
+| Scroll held, edge swipe cancelled | No crash |
+
+So a pending scroll made stale by rows shrinking is not enough on its own.
+
+### Not yet tried
+
+iOS 26.5, a device, and rows growing while the list is hidden.
+
+### Remaining risk
+
+On a list that is on screen, a `scrollTo` and a row change can still land in the same update: there is no
+callback for when a `scrollTo` has been carried out, so the two cannot be strictly kept apart.
+
+The gate also opens as the pop starts, not when it ends. On the simulator, a held scroll was carried out about
+half a second before the pop finished, and in a cancelled edge swipe it was carried out and the list then left
+the screen again. So a held scroll can still reach the list during the transition the crash happened in. Waiting
+for the transition to finish would close this, but a row swiped off screen would then jump after the pop, with
+its return flash mostly over, so it is left to the real fix below.
+
+### What a real fix would need
+
+Moving the article list from a SwiftUI `List` to a `UICollectionView`, as the sidebar already is:
+`scrollToItem` then runs synchronously against rows the app knows, with nothing left pending. It has to carry
+over the rows, swipe actions and pull-to-refresh, so it is a task of its own.
