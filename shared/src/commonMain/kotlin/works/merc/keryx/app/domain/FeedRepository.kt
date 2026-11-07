@@ -33,6 +33,7 @@ import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.NotificationText
 import works.merc.keryx.app.core.Result
 import works.merc.keryx.app.core.map
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.valueOrElse
 import works.merc.keryx.app.data.local.FtsManager
 import works.merc.keryx.app.data.local.db.Feeds
@@ -171,7 +172,13 @@ class FeedRepository(
         beforeFeedId: String? = null,
     ): FeedSubscription {
         val outcome = subscribeFeedWrite(url, folderId, afterFeedId, beforeFeedId)
-        if (outcome.hadArticles) ftsManager.indexMissing()
+        // Best effort: the feed and its articles are already stored, and the next indexMissing()
+        // indexes them. Letting an index failure escape would turn a subscription that worked into a
+        // crash for the caller (see docs/error-design.md's best-effort accesses).
+        if (outcome.hadArticles) {
+            runCatchingUnlessCancelled { ftsManager.indexMissing() }
+                .onFailure { Log.warn(TAG, "Indexing a new subscription's articles failed", it) }
+        }
         return FeedSubscription(outcome.result, outcome.wasNewlyCreated)
     }
 

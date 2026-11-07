@@ -28,6 +28,9 @@ and lose more than the access itself is worth. The accesses that are, today:
   applied.
 - The FTS search query (`ArticleRepository.search`): a failing index returns no hits rather than an error.
 - The "last synced" read for the Cloud Sync settings tab (`CloudSyncController`): UI state only.
+- The search index's catch-up after a subscription (`FeedRepository.subscribeFeedTracked`'s
+  `indexMissing()`). The feed and its articles are already stored, and the next `indexMissing()` indexes
+  them; propagating the failure would turn a subscription that worked into an error for the caller.
 - The Apple SDK's search-index setup (`KeryxSdk.start`'s `createTable()` and `prepareSearchIndex()`). A
   failure leaves search without the missing rows until the next launch or refresh creates and fills the
   table again; propagating it from `start` would be shown as the "database too new" screen.

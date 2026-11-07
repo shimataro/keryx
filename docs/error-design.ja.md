@@ -27,6 +27,9 @@
   保存する。例外を伝播させると、取得済みでまだ反映していないフィードを含めて、更新全体がキャンセルされる。
 - FTS の検索クエリ（`ArticleRepository.search`）。インデックスが失敗したときは、エラーではなく検索結果なしを返す。
 - クラウド同期設定タブの「最終同期時刻」の読み取り（`CloudSyncController`）。UI の状態にしか使わない。
+- 購読直後の検索インデックスへの追いつき（`FeedRepository.subscribeFeedTracked` の `indexMissing()`）。
+  フィードと記事はすでに保存済みで、次の `indexMissing()` が索引に入れる。失敗を伝播させると、成功した
+  購読が呼び出し元にはエラーとして見えてしまう。
 - Apple SDK の検索インデックスの準備（`KeryxSdk.start` の `createTable()` と `prepareSearchIndex()`）。
   失敗しても、次の起動か更新がテーブルを作り直して補完するまで、検索に欠ける行が出るだけである。
   `start` から伝播させると、「データベースが新しすぎる」画面として表示されてしまう。
