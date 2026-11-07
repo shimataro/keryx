@@ -842,14 +842,12 @@ put into a window (`ArticleListView.attachedToWindow`). The cost is that a list 
 sidebar starts at the top rather than where it was scrolled to — as NetNewsWire's article list does
 on the same route.
 
-**Since the article list became a `UICollectionView`** (`Home/ArticleCollectionView.swift`), its rows
-pull through the list's own `UIRefreshControl` rather than SwiftUI's `.refreshable`, so neither symptom
-below should show there any more; only the empty state (`noArticlesView`) is still a `.refreshable`
-scroll view. Measured on the iOS 26.3 simulator: after a pull started from code, the list came to rest
-at the top (offset −116, the inset), and the spinner sat above the header. Not re-checked: pulling after
-returning from the sidebar, which is why the workaround stays. Once it has been (remove `ListIdentity`
-from the `.id` and run the two steps of "Re-checking after an iOS or Xcode update" below), the rebuild
-can go for the article list and stay only where the empty state needs it.
+**The article list's rows** (`Home/ArticleCollectionView.swift`) pull through the list's own
+`UIRefreshControl`, not SwiftUI's `.refreshable`, so neither symptom below is expected there; only the
+empty state (`noArticlesView`) is a `.refreshable` scroll view. Pulling the rows after returning from the
+sidebar has not been re-checked, which is why `ListIdentity` stays. Once it has been (remove `ListIdentity`
+from the `.id` and run the two steps of "Re-checking after an iOS or Xcode update" below), the rebuild can
+be limited to the empty state.
 
 ### Symptom
 

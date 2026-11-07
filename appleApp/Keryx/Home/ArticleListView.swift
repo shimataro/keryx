@@ -591,7 +591,7 @@ struct ArticleListView: View {
         // SwiftUI hands a representable's focus to its AppKit views — the table takes the first
         // responder and passes every key on to `HomeView`'s handler (`ArticleNSTableView`). The
         // focus binding sits here rather than on the container in `body`, which is only focusable
-        // through a focusable child such as iOS's `List`. `.edit`, because the default (`.activate`)
+        // through a focusable child. `.edit`, because the default (`.activate`)
         // follows the system's keyboard-navigation setting, off by default.
         .focusable(interactions: .edit)
         .focusEffectDisabled()
@@ -611,8 +611,7 @@ struct ArticleListView: View {
             makeRow: { rowView($0, selectedId: selectedId, paneFocused: paneFocused) },
             onVisibleIdsChanged: { reportVisible($0) }
         )
-        // Under the navigation bar and the search field, as the `List` ran; the collection view insets
-        // its own content by them.
+        // Under the navigation bar and the search field; the collection view insets its own content by them.
         .ignoresSafeArea()
         // SwiftUI hands a representable's focus to its UIKit view, as the sidebar's: the pane's `.focused`
         // sits on the representable itself, with `.focusable()`, since a container above it only gets

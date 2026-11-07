@@ -842,13 +842,11 @@ detach する。同じログに残っているオーファンプロセスの後�
 自分を作り直す（`ArticleListView.attachedToWindow`）。代償として、サイドバーから戻った一覧は
 スクロールしていた位置ではなく先頭から表示される — NetNewsWire の記事一覧も同じ経路で同じ動きをする。
 
-**記事一覧を `UICollectionView` にしてから**（`Home/ArticleCollectionView.swift`）、その行のプルは SwiftUI の
-`.refreshable` ではなく一覧自身の `UIRefreshControl` で行うので、下の 2 つの症状はそこでは出ないはずである。
-今も `.refreshable` のスクロールビューなのは空の状態（`noArticlesView`）だけ。iOS 26.3 シミュレータで計測した
-ところ、コードから始めたプルのあと、一覧は先頭で止まり（offset −116、inset と同じ）、スピナーはヘッダーの上に
-出ていた。まだ確認していないのはサイドバーから戻った後のプルで、回避策を残しているのはそのためである。確認できたら
-（`.id` から `ListIdentity` を外し、下の「iOS や Xcode の更新後の再確認」の 2 つの手順を実行する）、記事一覧の
-作り直しは外して、空の状態に必要なところだけに残せる。
+**記事一覧の行**（`Home/ArticleCollectionView.swift`）のプルは、SwiftUI の `.refreshable` ではなく一覧自身の
+`UIRefreshControl` で行うので、下の 2 つの症状はそこでは出ないはずである。`.refreshable` のスクロールビューなのは
+空の状態（`noArticlesView`）だけ。サイドバーから戻った後に行をプルする操作はまだ再確認しておらず、`ListIdentity` を
+残しているのはそのためである。確認できたら（`.id` から `ListIdentity` を外し、下の「iOS や Xcode の更新後の再確認」の
+2 つの手順を実行する）、作り直しは空の状態だけに絞れる。
 
 ### 症状
 
