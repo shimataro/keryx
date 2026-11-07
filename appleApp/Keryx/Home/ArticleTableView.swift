@@ -211,8 +211,9 @@ struct ArticleTableView: NSViewRepresentable {
 
         private func scrollToFreshEnd(newestFirst: Bool) {
             guard let table else { return }
-            let end = max(0, CGFloat(rows.rows.count) * table.rowHeight - viewportHeight)
-            scroll(toContentOffset: newestFirst ? 0 : end)
+            scroll(toContentOffset: ArticleTableLayout.freshEndOffset(
+                newestFirst: newestFirst, count: rows.rows.count, rowHeight: table.rowHeight, viewportHeight: viewportHeight
+            ))
         }
 
         /// Scrolls the selected row fully into view, as little as possible — a row already on
@@ -225,25 +226,10 @@ struct ArticleTableView: NSViewRepresentable {
         }
 
         /// Sizes one row once: every row has this height, since the title always reserves two lines
-        /// and the feed/timestamp line one.
-        ///
-        /// Measured on a sample row rather than a real one: a line of Japanese text or an emoji can
-        /// be taller than a Latin one, so a row measured on Latin text could be too short for a
-        /// Japanese title's two lines. The sample fills both title lines (and the feed line) with
-        /// that mix, at the narrowest width the pane allows so they do wrap.
+        /// and the feed/timestamp line one — measured on `ArticleRowModel.measurementSample`.
         private func measureRowHeight() -> CGFloat {
             guard let parent else { return 0 }
-            let tallText = String(repeating: "Keryx 漢字かなカナ 😀 ", count: 12)
-            let sample = ArticleRowModel(
-                row: ArticleListRow(
-                    id: "", feed_id: "", title: tallText, url: "", published_at: KotlinLong(value: 0),
-                    created_at: 0, is_read: 0, is_starred: 1
-                ),
-                markedTitle: nil,
-                feedTitle: tallText,
-                faviconUrl: nil,
-                zone: Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault()
-            )
+            let sample = ArticleRowModel.measurementSample(zone: Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault())
             let host = NSHostingView(rootView: ArticleCellContent(row: parent.makeRow(sample), tracker: parent.contextMenuSelectionTracker))
             // Width pinned, height left to the content: an unbounded height proposal would let the
             // row's flexible star slot grow without limit.
@@ -267,10 +253,13 @@ struct ArticleTableView: NSViewRepresentable {
 
         /// The top visible row and how far past its top edge the list is scrolled.
         private func currentAnchor(in list: ArticleRowList) -> ScrollAnchor? {
-            guard let table, !list.rows.isEmpty, table.rowHeight > 0 else { return nil }
-            let top = max(0, contentVisibleRect.minY)
-            let index = min(Int(top / table.rowHeight), list.rows.count - 1)
-            return ScrollAnchor(id: list.rows[index].id, offset: top - CGFloat(index) * table.rowHeight)
+            guard let table else { return nil }
+            return ArticleTableLayout.anchor(
+                count: list.rows.count,
+                id: { list.rows[$0].id },
+                visibleTop: contentVisibleRect.minY,
+                rowHeight: table.rowHeight
+            )
         }
 
         /// Scrolls so that `offset` (measured from the first row's top edge) sits right under the
