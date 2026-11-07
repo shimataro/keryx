@@ -40,6 +40,14 @@ struct ArticleListScrollGate {
         return rowExists(target.rowId) ? target : nil
     }
 
+    /// Whether `ArticleListView` is showing its rows in the collection view right now — the only time
+    /// a scroll sent to it reaches a controller. The rows and `listBody` arrive separately, so rows can
+    /// be there while the body is still pending; a search shows the list only once its query has terms
+    /// and results.
+    static func listShowsRows(bodyIsContent: Bool, rowCount: Int, searchActive: Bool, searchShowsList: Bool) -> Bool {
+        bodyIsContent && rowCount > 0 && (!searchActive || searchShowsList)
+    }
+
     /// What the list can do changed.
     /// - Returns: The held scroll to ask for again through `request`, which checks its row, or nil to
     ///   leave the scroll position alone.
