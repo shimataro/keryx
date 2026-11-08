@@ -53,6 +53,13 @@ struct DeferredPositionKeeper {
         }
     }
 
+    /// Makes a pending position go to the top (a search reset while off screen); nothing pending stays
+    /// nothing pending, since the reset is then applied on its own.
+    mutating func markReset() {
+        guard let pending else { return }
+        self.pending = DeferredPosition(anchor: pending.anchor, oldIds: pending.oldIds, reset: true)
+    }
+
     /// The pending position, clearing it.
     mutating func take() -> DeferredPosition? {
         defer { pending = nil }

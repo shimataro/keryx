@@ -212,6 +212,8 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
                 setVisibleTop(0)
             } else {
                 logicalTop = 0
+                // A row change already waiting for the list's return must not put back its old anchor.
+                deferredPosition.markReset()
             }
         }
 

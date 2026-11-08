@@ -48,6 +48,22 @@ struct ArticleCollectionStateTests {
     }
 
     @Test
+    func aResetMarksThePendingPositionWithoutReplacingItsAnchor() {
+        var keeper = DeferredPositionKeeper()
+        let anchor = ScrollAnchor(id: "a1", offset: 10)
+        keeper.record(anchor: anchor, oldIds: ["a0", "a1"], reset: false)
+        keeper.markReset()
+        #expect(keeper.take() == DeferredPosition(anchor: anchor, oldIds: ["a0", "a1"], reset: true))
+    }
+
+    @Test
+    func aResetWithNothingPendingLeavesNothingPending() {
+        var keeper = DeferredPositionKeeper()
+        keeper.markReset()
+        #expect(keeper.take() == nil)
+    }
+
+    @Test
     func theRowHeightIsMeasuredOnceOnScreenAndAgainForANewCategory() {
         var policy = RowHeightMeasurePolicy()
         #expect(!policy.needsMeasure(isActive: false, category: "L"))
