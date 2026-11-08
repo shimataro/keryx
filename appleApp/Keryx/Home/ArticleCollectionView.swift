@@ -237,9 +237,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// going to the top after a search reset. Off screen, the position is put back once the list returns.
     private func applyStructureChange(from old: ArticleRowList) {
         deferredPosition.record(
-            anchor: ArticleTableLayout.anchor(
-                count: old.rows.count, id: { old.rows[$0].id }, visibleTop: currentTop, rowHeight: rowHeight
-            ),
+            anchor: anchor(in: old),
             oldIds: old.rows.map(\.id),
             reset: resetPending
         )
@@ -249,6 +247,13 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             position(after: change)
         }
         resetPending = false
+    }
+
+    /// The top visible row of `list` laid out at the current row height and position.
+    private func anchor(in list: ArticleRowList) -> ScrollAnchor? {
+        ArticleTableLayout.anchor(
+            count: list.rows.count, id: { list.rows[$0].id }, visibleTop: currentTop, rowHeight: rowHeight
+        )
     }
 
     private func position(after change: DeferredPosition) {
@@ -400,9 +405,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
               let height = measureRowHeight(category: sizeCategory) else { return }
         rowHeightPolicy.didMeasure(category: category)
         guard height != rowHeight else { return }
-        let anchor = ArticleTableLayout.anchor(
-            count: rows.rows.count, id: { rows.rows[$0].id }, visibleTop: currentTop, rowHeight: rowHeight
-        )
+        let anchor = anchor(in: rows)
         rowHeight = height
         collectionView.collectionViewLayout.invalidateLayout()
         collectionView.layoutIfNeeded()
