@@ -46,6 +46,14 @@ struct ArticleListView: View {
     /// Whether the first real rows have been shown — see the restored-selection scroll in `body`.
     @State private var didShowFirstRows = false
     #if os(iOS)
+    /// The row `.scrollPosition(id:)` keeps the list at: the list writes the top visible row back as it
+    /// scrolls, and a scroll is asked for by writing the target row. Nothing is validated later, so a
+    /// row that is gone by then is simply not scrolled to.
+    @State private var scrolledRowId: String?
+    /// Where the target row lands: nil brings it into view, `.top`/`.bottom` pins it to that edge.
+    @State private var scrollAnchor: UnitPoint?
+    #endif
+    #if os(iOS)
     @State private var topReset = ArticleListTopReset()
     @State private var scrollGate = ArticleListScrollGate()
     /// Whether this list is on screen rather than under the reader.
@@ -113,7 +121,7 @@ struct ArticleListView: View {
                 tableResetGeneration += 1
             }
             #else
-            ScrollViewReader { proxy in
+            Group {
                 // Rebuilt whenever a phone-width split view brings this list forward from the
                 // sidebar. SwiftUI hangs a `.refreshable` list's refresh control from the navigation
                 // bar and drops it once the column is popped, but never re-attaches it to the list it
@@ -123,7 +131,7 @@ struct ArticleListView: View {
                 // as NetNewsWire's does on the same route: scrolling it back right after the rebuild
                 // made a row touched next jump for a moment.
                 withNewArticlesPill(content.id(ListIdentity(remountGeneration: remountGeneration, attachedToWindow: attachedToWindow))) {
-                    scrollToFreshEnd(proxy)
+                    scrollToFreshEnd()
                 }
                     // Resets to the top on every filter switch, whatever the sort order — unlike
                     // the new-articles pill's own jump, which follows it (`ArticleListPane.kt:205-213`
@@ -133,7 +141,7 @@ struct ArticleListView: View {
                     // and is not scrolled out from under.
                     .onChange(of: topResetInput, initial: true) { _, input in
                         if let first = topReset.update(input) {
-                            requestScroll(ArticleListScrollGate.Target(rowId: first), proxy)
+                            requestScroll(ArticleListScrollGate.Target(rowId: first))
                         }
                     }
                     // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
@@ -142,7 +150,7 @@ struct ArticleListView: View {
                     // (a selection found tombstoned), which must not scroll the list.
                     .onChange(of: home.selectionRevealRequests) { _, _ in
                         guard let id = home.selectedArticleId else { return }
-                        requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true), proxy)
+                        requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true))
                     }
                     .onChange(of: showsRows) { _, shows in
                         // The article restored from the previous session is already selected before
@@ -153,12 +161,12 @@ struct ArticleListView: View {
                         guard !didShowFirstRows, shows else { return }
                         didShowFirstRows = true
                         guard let id = home.selectedArticleId else { return }
-                        requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id), proxy)
+                        requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id))
                     }
                     // After the current update, so the rows coming back with the list have reported
                     // themselves (`onlyIfOffScreen`).
                     .onChange(of: scrollGateInput, initial: true) { _, input in
-                        if let target = scrollGate.update(input) { requestScrollAfterUpdate(target, proxy) }
+                        if let target = scrollGate.update(input) { requestScrollAfterUpdate(target) }
                     }
             }
             #endif
@@ -609,21 +617,23 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-        return List {
-            Section {
-                ForEach(displayedRows) { article in
-                    articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
+        return ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                Section {
+                    ForEach(displayedRows) { article in
+                        articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
+                    }
+                } header: {
+                    // Pinned while the rows scroll, so it needs the list's own opaque background.
+                    listHeader
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(uiColor: .systemBackground))
+                        .foregroundStyle(.primary)
                 }
-            } header: {
-                // Pinned while the rows scroll, so it needs the list's own opaque background.
-                listHeader
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(uiColor: .systemBackground))
-                    .listRowInsets(EdgeInsets())
-                    .foregroundStyle(.primary)
             }
+            .scrollTargetLayout()
         }
-        .listStyle(.plain)
+        .scrollPosition(id: $scrolledRowId, anchor: scrollAnchor)
         // No extra gap above the header, so it sits where it does over an empty list.
         .contentMargins(.top, 0, for: .scrollContent)
     }
@@ -631,11 +641,7 @@ struct ArticleListView: View {
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
         rowView(article, selectedId: selectedId, paneFocused: paneFocused)
             .equatable()
-            // No horizontal inset of our own: the List's own row padding already supplies the
-            // card's gap from the pane edge (on macOS, where this list used to run too, 8pt —
-            // Compose's `listRowHorizontalMargin()`); adding 8 on top of it doubled that gap.
-            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-            .listRowSeparator(.hidden)
+            .padding(.vertical, 2)
             .onAppear {
                 visibleRows.appearedIds.insert(article.id)
                 scheduleReportVisible()
@@ -714,26 +720,35 @@ struct ArticleListView: View {
     private func rowExists(_ id: String) -> Bool { showsRows && displayed.indexById[id] != nil }
 
     /// Every scroll but the pill's goes through here: the pill can only be tapped on screen.
-    private func requestScroll(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+    private func requestScroll(_ target: ArticleListScrollGate.Target) {
         guard let target = scrollGate.request(target, rowExists: rowExists) else { return }
-        carryOut(target, proxy)
+        carryOut(target)
     }
 
-    private func requestScrollAfterUpdate(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+    private func requestScrollAfterUpdate(_ target: ArticleListScrollGate.Target) {
         Task {
             await Task.yield()
-            requestScroll(target, proxy)
+            requestScroll(target)
         }
     }
 
-    private func carryOut(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+    private func carryOut(_ target: ArticleListScrollGate.Target) {
         guard !target.onlyIfOffScreen || !visibleRows.appearedIds.contains(target.rowId) else { return }
-        proxy.scrollTo(target.rowId)
+        scroll(to: target.rowId, anchor: nil)
     }
 
-    private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
+    private func scrollToFreshEnd() {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
-        proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
+        scroll(to: target, anchor: home.newestFirst ? .top : .bottom)
+    }
+
+    /// Writes the scroll position. Only a row the list shows is written; and since writing the id the
+    /// list already holds moves nothing, that one is cleared first.
+    private func scroll(to rowId: String, anchor: UnitPoint?) {
+        guard rowExists(rowId) else { return }
+        scrollAnchor = anchor
+        if scrolledRowId == rowId { scrolledRowId = nil }
+        scrolledRowId = rowId
     }
     #endif
 }
