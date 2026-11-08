@@ -429,15 +429,48 @@ Directly after the detail block, output a suggested reply for the reviewer as a 
 Compose it from the Step 7 Reasoning as plain, polite prose for a public PR reply (no internal
 labels like "Confidence: Low"), opening with a brief nod to what the item pointed out. Write it
 in the language of the reviewer's own `body`; if that cannot be confidently identified, use
-English. For example:
+English.
+
+**Every suggested reply is paired with the URL it answers** — never output a reply block on its
+own. Put a `**Reply to**: <url>` line directly above the code block, where `<url>` is the item's
+Comment URL from 8.1 (if that fell back to `path`:`line`, show that instead; the pairing still
+holds):
+
+- **Thread-capable target** (`#discussion_r…`, a line-comment item) — the reply is posted in that
+  thread, which already identifies what it answers, so the reply body does not repeat the URL.
+- **Any other target** (`#pullrequestreview-…` for a review-body item, `#issuecomment-…`, and
+  anything else that is not `#discussion_r…`) — GitHub has no thread reply for it, so the reply
+  lands in the PR's conversation. Also open the reply body itself with the target URL, phrased in
+  the reply's language: `In reply to <url>:` in English, `<url> への返信です：` in Japanese, and an
+  equally natural lead-in for any other language.
+
+For example:
+
+````markdown
+**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
 
 ```markdown
 Thanks for the review. After checking, I've concluded no change is needed here because 〈reason〉.
 ```
+````
+
+````markdown
+**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>
 
 ```markdown
 ご指摘ありがとうございます。確認した結果、〈理由〉のため、現状のコードに変更は不要と判断しました。
 ```
+````
+
+````markdown
+**Reply to**: https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>
+
+```markdown
+In reply to https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>:
+
+Thanks for the review. 〈Which part is being fixed, and why the rest is left as-is.〉
+```
+````
 
 #### 8.3 — Nothing to fix
 
