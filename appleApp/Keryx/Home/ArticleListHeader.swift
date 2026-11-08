@@ -6,6 +6,7 @@ import SwiftUI
 /// left once the toolbar buttons fill the bar, and a large one is too big and takes no icon.
 /// Before iOS 26 only: under iOS 26's translucent toolbar this opaque band stands out, so the list
 /// takes the standard large title there instead (`ArticleListView.titleDisplayMode`).
+/// It scrolls away with the rows, and the bar then shows the title in its place.
 struct ArticleListHeader: View {
     let title: String
     let icon: SidebarRowIcon

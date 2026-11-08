@@ -47,6 +47,9 @@ struct ArticleListView: View {
     @State private var didShowFirstRows = false
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
+    /// Whether `articleList`'s heading row is on screen, before iOS 26 only. While it has scrolled
+    /// away, the bar's principal item names the list in its place (`toolbarContent`).
+    @State private var listHeaderVisible = true
     #endif
     /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
     @State private var emptyListHeaderHeight: CGFloat = 0
@@ -122,8 +125,15 @@ struct ArticleListView: View {
                     // screen, never at the previous filter's (`ArticleListTopReset`). The first
                     // composition — including a restored `lastArticleId` selection — is not a switch
                     // and is not scrolled out from under.
+                    // Before iOS 26 the reset goes to the heading row above the first article, so the
+                    // new filter's name is on screen again.
                     .onChange(of: topResetInput, initial: true) { _, input in
-                        if let first = topReset.update(input) { proxy.scrollTo(first) }
+                        guard let first = topReset.update(input) else { return }
+                        if Self.showsListHeader {
+                            proxy.scrollTo(Self.listHeaderRowId, anchor: .top)
+                        } else {
+                            proxy.scrollTo(first)
+                        }
                     }
                     // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
                     // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
@@ -269,10 +279,19 @@ struct ArticleListView: View {
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
         // Before iOS 26 the title feeds the next column's back button and its long-press menu; the
-        // heading is `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
+        // heading is `ArticleListHeader`, so the bar's own centered title is replaced by nothing —
+        // until the heading scrolls away with the rows, when the bar names the list in its place.
         // From iOS 26 the large title names the list itself (`titleDisplayMode`).
         if #unavailable(iOS 26) {
-            ToolbarItem(placement: .principal) { Color.clear }
+            ToolbarItem(placement: .principal) {
+                if listHeaderVisible {
+                    // Zero-sized: once the title has been shown, a flexible `Color.clear` keeps the
+                    // room it took and leaves Sort and Mark All as Read in the overflow menu.
+                    Color.clear.frame(width: 0, height: 0)
+                } else {
+                    Text(home.articleListTitle).font(.headline).lineLimit(1)
+                }
+            }
         }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
@@ -313,6 +332,29 @@ struct ArticleListView: View {
         // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
         // into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
+        #if os(iOS)
+        if #unavailable(iOS 26) {
+            // Before iOS 26 there is no flexible spacer, and once the principal item has shown the
+            // title (`listHeaderVisible`) the bar places a `.navigation` item around it — beside the
+            // back button on one layout, beside the trailing cluster on the next. Leading the
+            // trailing cluster keeps the mode menu in one place.
+            ToolbarItemGroup(placement: .primaryAction) {
+                listModeMenu
+                notificationBellButton
+                sortButton
+                markAllReadButton
+            }
+        } else {
+            leadingModeMenuItems
+        }
+        #else
+        leadingModeMenuItems
+        #endif
+    }
+
+    /// The mode menu at the leading edge, with the actions pushed to the trailing edge.
+    @ToolbarContentBuilder
+    private var leadingModeMenuItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) { listModeMenu }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
@@ -412,6 +454,9 @@ struct ArticleListView: View {
     private static var titleDisplayMode: NavigationBarItem.TitleDisplayMode {
         if #available(iOS 26, *) { .large } else { .inline }
     }
+
+    /// The id of `articleList`'s heading row, for the reset to the top on a filter switch.
+    private static let listHeaderRowId = "articleListHeader"
 
     /// Whether `listHeader` heads the list — before iOS 26 only (`titleDisplayMode`).
     private static var showsListHeader: Bool {
@@ -619,22 +664,24 @@ struct ArticleListView: View {
         return Group {
             if Self.showsListHeader {
                 List {
-                    Section {
-                        ForEach(displayedRows) { article in
-                            articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
-                        }
-                    } header: {
-                        // Pinned while the rows scroll, so it needs the list's own opaque background.
-                        listHeader
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(uiColor: .systemBackground))
-                            .listRowInsets(EdgeInsets())
-                            .foregroundStyle(.primary)
+                    // The first row, scrolling away with the rows; `listHeaderVisible` tracks it.
+                    listHeader
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .id(Self.listHeaderRowId)
+                        .onAppear { listHeaderVisible = true }
+                        .onDisappear { listHeaderVisible = false }
+                    ForEach(displayedRows) { article in
+                        articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
                     }
                 }
                 .listStyle(.plain)
                 // No extra gap above the header, so it sits where it does over an empty list.
                 .contentMargins(.top, 0, for: .scrollContent)
+                // Every other state of `content` shows its heading through `headed`, so the bar
+                // goes back to naming nothing once this list leaves the screen.
+                .onDisappear { listHeaderVisible = true }
             } else {
                 List {
                     ForEach(displayedRows) { article in
