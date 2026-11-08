@@ -47,11 +47,9 @@ struct ArticleListView: View {
     @State private var didShowFirstRows = false
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
-    /// Whether the large title is collapsed, before iOS 26 only (`NavigationBarCollapseProbe`). The
-    /// bar's principal item is blanked there, so a collapsed title would leave the list unnamed —
-    /// e.g. after a filter switch, whose reset to the first row does not expand it again.
-    @State private var titleCollapsed = false
     #endif
+    /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
+    @State private var emptyListHeaderHeight: CGFloat = 0
     /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
     /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
     /// hung under the navigation bar, and after its first pull that control leaves the list resting
@@ -164,7 +162,7 @@ struct ArticleListView: View {
         .toolbar { toolbarContent }
         #if os(iOS)
         .navigationTitle(home.articleListTitle)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(Self.titleDisplayMode)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
         // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
         // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
@@ -270,19 +268,11 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
-        // Before iOS 26 an inline title in this crowded bar pushes Mark All as Read into the
-        // overflow menu (iOS 18) or lands between the buttons (iOS 17); the large title names the
-        // list instead. From iOS 26 the bar fits the title in, or drops it, on its own. Zero-sized,
-        // since a flexible `Color.clear` takes the room the buttons need and overflows them anyway.
-        // While the large title is collapsed, the principal item names the list in its place.
+        // Before iOS 26 the title feeds the next column's back button and its long-press menu; the
+        // heading is `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
+        // From iOS 26 the large title names the list itself (`titleDisplayMode`).
         if #unavailable(iOS 26) {
-            ToolbarItem(placement: .principal) {
-                if titleCollapsed {
-                    Text(home.articleListTitle).font(.headline).lineLimit(1)
-                } else {
-                    Color.clear.frame(width: 0, height: 0)
-                }
-            }
+            ToolbarItem(placement: .principal) { Color.clear }
         }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
@@ -323,29 +313,6 @@ struct ArticleListView: View {
         // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
         // into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
-        #if os(iOS)
-        if #unavailable(iOS 26) {
-            // Before iOS 26 there is no flexible spacer, so the bar places a `.navigation` item
-            // around the zero-width principal item itself — beside the back button on one layout,
-            // beside the trailing cluster after the next (a pull to refresh). Leading the trailing
-            // cluster keeps it in one place.
-            ToolbarItemGroup(placement: .primaryAction) {
-                listModeMenu
-                notificationBellButton
-                sortButton
-                markAllReadButton
-            }
-        } else {
-            leadingModeMenuItems
-        }
-        #else
-        leadingModeMenuItems
-        #endif
-    }
-
-    /// The mode menu at the leading edge, with the actions pushed to the trailing edge.
-    @ToolbarContentBuilder
-    private var leadingModeMenuItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) { listModeMenu }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what
@@ -426,18 +393,61 @@ struct ArticleListView: View {
 
     // MARK: - Content / empty states
 
+    #if os(iOS)
+    /// Names the selection being shown (and, during a search, the one being narrowed). Not a
+    /// navigation title: see `ArticleListHeader`. Each state of `content` places it itself: a
+    /// scrolling list (`articleList`, `noArticlesView`) carries it inside itself, since SwiftUI hangs
+    /// a `.refreshable` list's refresh control from the navigation bar, and a header between the two
+    /// leaves the control overlapping the header and flickering in and out as the list is pulled
+    /// (iOS 26); every other state goes through `headed`.
+    private var listHeader: some View {
+        ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
+    }
+
+    /// Large from iOS 26, inline before it. iOS 26's toolbar is translucent, with a scroll-edge
+    /// effect, and `listHeader`'s opaque band stands out under it, so the standard large title names
+    /// the list there instead — collapsing into the bar, or dropped by it when the column is too
+    /// narrow. Before iOS 26 the bar is opaque on scroll and `listHeader` sits under it unremarked,
+    /// while a large title collapses out of sight in a bar too crowded for an inline one.
+    private static var titleDisplayMode: NavigationBarItem.TitleDisplayMode {
+        if #available(iOS 26, *) { .large } else { .inline }
+    }
+
+    /// Whether `listHeader` heads the list — before iOS 26 only (`titleDisplayMode`).
+    private static var showsListHeader: Bool {
+        if #available(iOS 26, *) { false } else { true }
+    }
+    #endif
+
+    /// A state of `content` that does not scroll, with `listHeader` above it on iOS.
+    @ViewBuilder
+    private func headed(_ state: some View) -> some View {
+        #if os(iOS)
+        if Self.showsListHeader {
+            VStack(spacing: 0) {
+                listHeader
+                state
+            }
+        } else {
+            state
+        }
+        #else
+        state
+        #endif
+    }
+
     @ViewBuilder
     private var content: some View {
         // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
         // before the first emission (`ArticleListBody.pending`).
         if home.listBody == .pending {
-            Color.clear
+            headed(Color.clear)
         } else if home.listBody == .noFeeds {
-            ContentUnavailableView {
+            headed(ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
-            }
+            })
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
@@ -448,7 +458,7 @@ struct ArticleListView: View {
                 || ArticleListModelKt.articleListCatchingUp(
                     displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
                 ) {
-                Color.clear
+                headed(Color.clear)
             } else {
                 noArticlesView
             }
@@ -493,7 +503,18 @@ struct ArticleListView: View {
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
-                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
+                if Self.showsListHeader {
+                    VStack(spacing: 0) {
+                        listHeader
+                            .onSizeChanged { emptyListHeaderHeight = $0.height }
+                        emptyState.frame(
+                            width: geometry.size.width,
+                            height: max(0, geometry.size.height - emptyListHeaderHeight)
+                        )
+                    }
+                } else {
+                    emptyState.frame(width: geometry.size.width, height: geometry.size.height)
+                }
             }
             .modifier(PullToRefreshModifier(home: home))
         }
@@ -510,14 +531,14 @@ struct ArticleListView: View {
     @ViewBuilder
     private var searchContent: some View {
         if !home.searchQueryHasTerms {
-            ContentUnavailableView(
+            headed(ContentUnavailableView(
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"
-            )
+            ))
         } else if home.searching && !home.hasSearchResults {
-            Color.clear
+            headed(Color.clear)
         } else if !home.hasSearchResults {
-            noSearchResultsView
+            headed(noSearchResultsView)
         } else {
             articleList
         }
@@ -595,19 +616,34 @@ struct ArticleListView: View {
     private var articleList: some View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
-        return List {
-            ForEach(displayedRows) { article in
-                articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
+        return Group {
+            if Self.showsListHeader {
+                List {
+                    Section {
+                        ForEach(displayedRows) { article in
+                            articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
+                        }
+                    } header: {
+                        // Pinned while the rows scroll, so it needs the list's own opaque background.
+                        listHeader
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(uiColor: .systemBackground))
+                            .listRowInsets(EdgeInsets())
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .listStyle(.plain)
+                // No extra gap above the header, so it sits where it does over an empty list.
+                .contentMargins(.top, 0, for: .scrollContent)
+            } else {
+                List {
+                    ForEach(displayedRows) { article in
+                        articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
+                    }
+                }
+                .listStyle(.plain)
             }
         }
-        .listStyle(.plain)
-        #if os(iOS)
-        .background {
-            if #unavailable(iOS 26) {
-                NavigationBarCollapseProbe { titleCollapsed = $0 }
-            }
-        }
-        #endif
     }
 
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
