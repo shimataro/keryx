@@ -361,7 +361,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     }
 
     private func setVisibleTop(_ top: CGFloat) {
-        logicalTop = top
+        recordTop(top)
         let y = top - collectionView.adjustedContentInset.top
         guard collectionView.contentOffset.y != y else { return }
         collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: y), animated: false)
@@ -517,7 +517,16 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// Records where the list is now as the position to keep — only while it is in a window, where its
     /// offset means anything (`isActive`).
     private func rememberCurrentTop() {
-        if isActive { logicalTop = currentTop }
+        if isActive { recordTop(currentTop) }
+    }
+
+    /// Keeps `top` as the list's position. A position away from the top supersedes a pending search
+    /// reset, whatever moved the list there (a drag, a reveal scroll, VoiceOver): results arriving
+    /// later — or a later, unrelated row change when the new results kept the old ids — are then
+    /// anchored rather than sent back to the top.
+    private func recordTop(_ top: CGFloat) {
+        logicalTop = top
+        if top > Self.offsetTolerance { resetPending = false }
     }
 
     // MARK: - Visible rows
