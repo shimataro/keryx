@@ -48,8 +48,6 @@ struct ArticleListView: View {
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
     #endif
-    /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
-    @State private var emptyListHeaderHeight: CGFloat = 0
     /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
     /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
     /// hung under the navigation bar, and after its first pull that control leaves the list resting
@@ -162,7 +160,7 @@ struct ArticleListView: View {
         .toolbar { toolbarContent }
         #if os(iOS)
         .navigationTitle(home.articleListTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         // The system search field. iOS keeps it here, on the column whose contents it narrows (the
         // HIG's placement for searching the current view, as Mail does), rather than on the sidebar
         // macOS uses — at a compact width the sidebar's results would land in a column not on screen.
@@ -268,9 +266,6 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
-        // The title feeds the next column's back button and its long-press menu; the heading is
-        // `ArticleListHeader`, so the bar's own centered title is replaced by nothing.
-        ToolbarItem(placement: .principal) { Color.clear }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
         #endif
@@ -390,43 +385,18 @@ struct ArticleListView: View {
 
     // MARK: - Content / empty states
 
-    #if os(iOS)
-    /// Names the selection being shown (and, during a search, the one being narrowed). Not a
-    /// navigation title: see `ArticleListHeader`. Each state of `content` places it itself: a
-    /// scrolling list (`articleList`, `noArticlesView`) carries it inside itself, since SwiftUI hangs
-    /// a `.refreshable` list's refresh control from the navigation bar, and a header between the two
-    /// leaves the control overlapping the header and flickering in and out as the list is pulled
-    /// (iOS 26); every other state goes through `headed`.
-    private var listHeader: some View {
-        ArticleListHeader(title: home.articleListTitle, icon: home.articleListIcon)
-    }
-    #endif
-
-    /// A state of `content` that does not scroll, with `listHeader` above it on iOS.
-    @ViewBuilder
-    private func headed(_ state: some View) -> some View {
-        #if os(iOS)
-        VStack(spacing: 0) {
-            listHeader
-            state
-        }
-        #else
-        state
-        #endif
-    }
-
     @ViewBuilder
     private var content: some View {
         // Nothing until the lists have loaded, rather than flashing "no feeds" / "no articles"
         // before the first emission (`ArticleListBody.pending`).
         if home.listBody == .pending {
-            headed(Color.clear)
+            Color.clear
         } else if home.listBody == .noFeeds {
-            headed(ContentUnavailableView {
+            ContentUnavailableView {
                 Label(L("home_no_feeds"), systemImage: "tray")
             } actions: {
                 Button(L("home_add_feed")) { dialogs.isAddingFeed = true }
-            })
+            }
         } else if home.searchActive {
             searchContent
         } else if displayedRows.isEmpty {
@@ -437,7 +407,7 @@ struct ArticleListView: View {
                 || ArticleListModelKt.articleListCatchingUp(
                     displayedRows: Int32(displayedRows.count), viewModelHasRows: home.listHasRows
                 ) {
-                headed(Color.clear)
+                Color.clear
             } else {
                 noArticlesView
             }
@@ -482,14 +452,7 @@ struct ArticleListView: View {
         #if os(iOS)
         GeometryReader { geometry in
             ScrollView {
-                VStack(spacing: 0) {
-                    listHeader
-                        .onSizeChanged { emptyListHeaderHeight = $0.height }
-                    emptyState.frame(
-                        width: geometry.size.width,
-                        height: max(0, geometry.size.height - emptyListHeaderHeight)
-                    )
-                }
+                emptyState.frame(width: geometry.size.width, height: geometry.size.height)
             }
             .modifier(PullToRefreshModifier(home: home))
         }
@@ -506,14 +469,14 @@ struct ArticleListView: View {
     @ViewBuilder
     private var searchContent: some View {
         if !home.searchQueryHasTerms {
-            headed(ContentUnavailableView(
+            ContentUnavailableView(
                 L("home_search_too_short"),
                 systemImage: "magnifyingglass"
-            ))
+            )
         } else if home.searching && !home.hasSearchResults {
-            headed(Color.clear)
+            Color.clear
         } else if !home.hasSearchResults {
-            headed(noSearchResultsView)
+            noSearchResultsView
         } else {
             articleList
         }
@@ -592,22 +555,11 @@ struct ArticleListView: View {
         let selectedId = displayedSelectedId
         let paneFocused = focusedPane.wrappedValue == .articleList && windowIsKey
         return List {
-            Section {
-                ForEach(displayedRows) { article in
-                    articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
-                }
-            } header: {
-                // Pinned while the rows scroll, so it needs the list's own opaque background.
-                listHeader
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(uiColor: .systemBackground))
-                    .listRowInsets(EdgeInsets())
-                    .foregroundStyle(.primary)
+            ForEach(displayedRows) { article in
+                articleRow(article, selectedId: selectedId, paneFocused: paneFocused)
             }
         }
         .listStyle(.plain)
-        // No extra gap above the header, so it sits where it does over an empty list.
-        .contentMargins(.top, 0, for: .scrollContent)
     }
 
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
