@@ -479,20 +479,24 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         // `scrollRectToVisible` for VoiceOver focus, say) moves it only once the list is settled at the
         // size and inset of its last layout: UIKit's own offset changes while the list is attached,
         // detached or resized are not a position to keep.
-        if isActive, scrollView.isTracking || scrollView.isDecelerating {
-            logicalTop = currentTop
-        } else if isActive, positionSettled, scrollView.bounds.size == lastLayoutSize,
-                  scrollView.adjustedContentInset.top == lastLayoutInsetTop {
-            logicalTop = currentTop
-        }
+        let userScrolled = scrollView.isTracking || scrollView.isDecelerating
+        let settledAtLastLayout = positionSettled && scrollView.bounds.size == lastLayoutSize
+            && scrollView.adjustedContentInset.top == lastLayoutInsetTop
+        if userScrolled || settledAtLastLayout { rememberCurrentTop() }
         scheduleReport()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        if isActive { logicalTop = currentTop }
+        rememberCurrentTop()
     }
 
     func scrollViewDidScrollToTop(_ scrollView: UIScrollView) {
+        rememberCurrentTop()
+    }
+
+    /// Records where the list is now as the position to keep — only while it is in a window, where its
+    /// offset means anything (`isActive`).
+    private func rememberCurrentTop() {
         if isActive { logicalTop = currentTop }
     }
 
