@@ -253,10 +253,13 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         resetPending = false
     }
 
-    /// The top visible row of `list` laid out at the current row height and position.
+    /// The top visible row of `list` laid out at the current row height and position. Until the position
+    /// is settled after coming back into a window, the offset is UIKit's own adjustment to the attach, not
+    /// the position to keep, so the saved one stands in.
     private func anchor(in list: ArticleRowList) -> ScrollAnchor? {
         ArticleTableLayout.anchor(
-            count: list.rows.count, id: { list.rows[$0].id }, visibleTop: currentTop, rowHeight: rowHeight
+            count: list.rows.count, id: { list.rows[$0].id },
+            visibleTop: positionSettled ? currentTop : logicalTop, rowHeight: rowHeight
         )
     }
 
