@@ -351,14 +351,21 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: y), animated: false)
     }
 
-    /// Measures a row on the sample row (`ArticleRowModel.measurementSample`), in the list's own trait
-    /// environment, so Dynamic Type applies.
-    private func measureRowHeight() -> CGFloat? {
+    /// Measures a row on the sample row (`ArticleRowModel.measurementSample`) at `category`. The size is
+    /// handed to the sample explicitly: inside a trait-change callback, a view freshly added to the
+    /// hierarchy still inherits the previous content size category, so the sample would otherwise be
+    /// measured one Dynamic Type step behind.
+    private func measureRowHeight(category: UIContentSizeCategory) -> CGFloat? {
         guard let input else { return nil }
         let sample = ArticleRowModel.measurementSample(zone: Kotlinx_datetimeTimeZone.Companion.shared.currentSystemDefault())
-        let probe = UIHostingConfiguration { ArticleCollectionCellContent(row: input.makeRow(sample)) }
+        let dynamicTypeSize = DynamicTypeSize(category) ?? .large
+        let probe = UIHostingConfiguration {
+            ArticleCollectionCellContent(row: input.makeRow(sample))
+                .environment(\.dynamicTypeSize, dynamicTypeSize)
+        }
             .margins(.all, 0)
             .makeContentView()
+        probe.traitOverrides.preferredContentSizeCategory = category
         probe.translatesAutoresizingMaskIntoConstraints = false
         collectionView.insertSubview(probe, at: 0)
         defer { probe.removeFromSuperview() }
@@ -383,8 +390,10 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
             rowHeightPolicy.windowLost()
             return
         }
-        let category = traitCollection.preferredContentSizeCategory.rawValue
-        guard rowHeightPolicy.needsMeasure(isActive: true, category: category), let height = measureRowHeight() else { return }
+        let sizeCategory = traitCollection.preferredContentSizeCategory
+        let category = sizeCategory.rawValue
+        guard rowHeightPolicy.needsMeasure(isActive: true, category: category),
+              let height = measureRowHeight(category: sizeCategory) else { return }
         rowHeightPolicy.didMeasure(category: category)
         guard height != rowHeight else { return }
         let anchor = ArticleTableLayout.anchor(
