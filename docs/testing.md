@@ -1432,7 +1432,8 @@ few dozen articles:
   again after going to the sidebar and back. Selecting another item mid-pull ends the spinner. Rows landing
   while the list is being scrolled do not make it jump.
 - Rows: tap, long-press menu (star, read, open, copy), and VoiceOver (each row is read with its unread and
-  starred state) behave as before. Changing the text size in Settings keeps the list in place.
+  starred state) behave as before. Changing the text size in Settings keeps the list in place, and with the
+  list on screen, enlarging the text and setting it back fits the row height to the text both times.
 - On iOS 17 and 18 the search field and the navigation bar still follow the list's scrolling.
 - On an iPad, selecting an article off screen with a hardware keyboard (J/K, the arrow keys) and switching the
   filter still scroll the list, in the three-pane layout and in portrait.
