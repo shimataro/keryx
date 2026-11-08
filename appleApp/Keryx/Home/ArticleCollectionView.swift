@@ -185,8 +185,7 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
 
     private func makeRegistrations() {
         cellRegistration = UICollectionView.CellRegistration<ArticleCell, Void> { [weak self] cell, indexPath, _ in
-            guard let self, let input, rows.rows.indices.contains(indexPath.item) else { return }
-            cell.show(input.makeRow(rows.rows[indexPath.item]))
+            self?.configure(cell, at: indexPath.item)
         }
         headerRegistration = UICollectionView.SupplementaryRegistration<ArticleHeaderView>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -267,11 +266,16 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// Re-renders only the rows on screen whose content changed (a read or star toggle, the selection
     /// moving) — nothing off screen has a cell to update.
     private func refreshVisibleCells() {
-        guard let input else { return }
         for case let cell as ArticleCell in collectionView.visibleCells {
-            guard let indexPath = collectionView.indexPath(for: cell), rows.rows.indices.contains(indexPath.item) else { continue }
-            cell.show(input.makeRow(rows.rows[indexPath.item]))
+            guard let indexPath = collectionView.indexPath(for: cell) else { continue }
+            configure(cell, at: indexPath.item)
         }
+    }
+
+    /// Shows the row at `index` in `cell`, if there is one.
+    private func configure(_ cell: ArticleCell, at index: Int) {
+        guard let input, rows.rows.indices.contains(index) else { return }
+        cell.show(input.makeRow(rows.rows[index]))
     }
 
     private func updateHeader(_ header: ArticleListHeader) {
