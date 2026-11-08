@@ -144,11 +144,13 @@ struct ArticleListView: View {
                         guard let id = home.selectedArticleId else { return }
                         requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true), proxy)
                     }
-                    .onChange(of: displayedRows.isEmpty) { _, isEmpty in
+                    .onChange(of: showsRows) { _, shows in
                         // The article restored from the previous session is already selected before
                         // any row exists, so the selection-change scroll above never sees it; bring it
-                        // into view once, when the first rows land (after they are laid out).
-                        guard !didShowFirstRows, !isEmpty else { return }
+                        // into view once, when the list first shows rows (after they are laid out).
+                        // Not on the rows alone: they and `listBody` arrive separately, and rows
+                        // behind a pending body have no list to take the scroll.
+                        guard !didShowFirstRows, shows else { return }
                         didShowFirstRows = true
                         guard let id = home.selectedArticleId else { return }
                         requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id), proxy)
@@ -698,7 +700,18 @@ struct ArticleListView: View {
     }
 
     #if os(iOS)
-    private func rowExists(_ id: String) -> Bool { displayed.indexById[id] != nil }
+    /// Whether the list is showing rows — see `ArticleListScrollGate.listShowsRows`.
+    private var showsRows: Bool {
+        ArticleListScrollGate.listShowsRows(
+            bodyIsContent: home.listBody == .content,
+            rowCount: displayedRows.count,
+            searchActive: home.searchActive,
+            searchShowsList: home.searchQueryHasTerms && home.hasSearchResults
+        )
+    }
+
+    /// Only a row the list shows: a scroll sent while it does not exist would be lost.
+    private func rowExists(_ id: String) -> Bool { showsRows && displayed.indexById[id] != nil }
 
     /// Every scroll but the pill's goes through here: the pill can only be tapped on screen.
     private func requestScroll(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
