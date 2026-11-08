@@ -109,6 +109,8 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// UIKit adjusting the offset to a resize, not a position to keep.
     private var lastLayoutSize: CGSize = .zero
     private var lastLayoutInsetTop: CGFloat = 0
+    /// The bottom inset of the last active layout pass: it changes the rows on screen, not the offset.
+    private var lastLayoutInsetBottom: CGFloat = 0
     /// What a row change that landed while the list was off screen has to be positioned against once
     /// it is back: the position it had before the first such change.
     private var deferredPosition = DeferredPositionKeeper()
@@ -456,13 +458,16 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
         }
         performPendingScroll()
         positionSettled = true
-        // A resize (rotation, an iPad window resize, a bar changing height) can change which rows are on
-        // screen without moving the offset, so no scroll callback would report them.
-        if collectionView.bounds.size != lastLayoutSize || collectionView.adjustedContentInset.top != lastLayoutInsetTop {
+        // A resize (rotation, an iPad window resize, a bar changing height, a bottom bar coming or going)
+        // can change which rows are on screen without moving the offset, so no scroll callback would
+        // report them.
+        let inset = collectionView.adjustedContentInset
+        if collectionView.bounds.size != lastLayoutSize || inset.top != lastLayoutInsetTop || inset.bottom != lastLayoutInsetBottom {
             scheduleReport()
         }
         lastLayoutSize = collectionView.bounds.size
-        lastLayoutInsetTop = collectionView.adjustedContentInset.top
+        lastLayoutInsetTop = inset.top
+        lastLayoutInsetBottom = inset.bottom
     }
 
     /// The list was put into a window or taken out of one: out of one (under the reader), it reports no
