@@ -98,4 +98,25 @@ struct ArticleListScrollGateTests {
 
         #expect(gate.update(input(canScroll: true, generation: 3)) == Target(rowId: "a"))
     }
+
+    @Test
+    func rowsBehindAPendingBodyAreNotShown() {
+        #expect(!ArticleListScrollGate.listShowsRows(bodyIsContent: false, rowCount: 3, searchActive: false, searchShowsList: false))
+    }
+
+    @Test
+    func rowsUnderAContentBodyAreShown() {
+        #expect(ArticleListScrollGate.listShowsRows(bodyIsContent: true, rowCount: 3, searchActive: false, searchShowsList: false))
+    }
+
+    @Test
+    func noRowsAreNotShown() {
+        #expect(!ArticleListScrollGate.listShowsRows(bodyIsContent: true, rowCount: 0, searchActive: false, searchShowsList: false))
+    }
+
+    @Test
+    func searchRowsAreNotShownUntilTheSearchShowsTheList() {
+        #expect(!ArticleListScrollGate.listShowsRows(bodyIsContent: true, rowCount: 3, searchActive: true, searchShowsList: false))
+        #expect(ArticleListScrollGate.listShowsRows(bodyIsContent: true, rowCount: 3, searchActive: true, searchShowsList: true))
+    }
 }
