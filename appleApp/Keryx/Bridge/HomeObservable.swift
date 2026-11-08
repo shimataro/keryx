@@ -231,6 +231,8 @@ final class HomeObservable: ObservableAssignment {
         // start the list on `All` and then switch it to the restored filter, which `ArticleListTopReset`
         // takes for the user's switch and answers with a scroll to the top, over the restored selection.
         assignFilter(viewModel.filter.value)
+        // The first delivery then finds the filter unchanged and would not set the header from it.
+        updateFeedListSelectionTarget()
     }
 
     /// Selects a filter and mirrors the result into the observed state at once. The `for await`
