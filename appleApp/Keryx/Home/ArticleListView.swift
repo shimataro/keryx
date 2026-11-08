@@ -266,6 +266,13 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
+        // Before iOS 26 an inline title in this crowded bar pushes Mark All as Read into the
+        // overflow menu (iOS 18) or lands between the buttons (iOS 17); the large title names the
+        // list instead. From iOS 26 the bar fits the title in, or drops it, on its own. Zero-sized,
+        // since a flexible `Color.clear` takes the room the buttons need and overflows them anyway.
+        if #unavailable(iOS 26) {
+            ToolbarItem(placement: .principal) { Color.clear.frame(width: 0, height: 0) }
+        }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
         #endif
@@ -305,6 +312,29 @@ struct ArticleListView: View {
         // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
         // into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
+        #if os(iOS)
+        if #unavailable(iOS 26) {
+            // Before iOS 26 there is no flexible spacer, so the bar places a `.navigation` item
+            // around the zero-width principal item itself — beside the back button on one layout,
+            // beside the trailing cluster after the next (a pull to refresh). Leading the trailing
+            // cluster keeps it in one place.
+            ToolbarItemGroup(placement: .primaryAction) {
+                listModeMenu
+                notificationBellButton
+                sortButton
+                markAllReadButton
+            }
+        } else {
+            leadingModeMenuItems
+        }
+        #else
+        leadingModeMenuItems
+        #endif
+    }
+
+    /// The mode menu at the leading edge, with the actions pushed to the trailing edge.
+    @ToolbarContentBuilder
+    private var leadingModeMenuItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) { listModeMenu }
 
         // `.primaryAction` still flows from the column's leading edge; a flexible spacer is what

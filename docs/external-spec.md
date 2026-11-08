@@ -101,7 +101,8 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - Article list / article view (reader view). **Articles are marked as read the instant they are selected**. An action to mark as unread is available, and the reader toolbar's button for it is a read/unread toggle that shows the article's state (a filled dot while it is unread, like the article list's own unread dot) — so a tap on a reader shown alone, with the list out of sight, is visibly acknowledged and can be undone. Where the reader is swiped between articles (see §9), "selected" means the moment the swipe comes to rest on an article — the neighbouring articles the reader keeps ready are loaded but not selected, and stay unread until one is actually swiped to.
 - **The article list shows one of three modes: All, Unread, or Starred.** They are mutually exclusive
   rather than two independent filters, since almost every starred article is already read. The
-  current mode names a pop-up button at the start of the article list's toolbar, and the View menu
+  current mode names a pop-up button that leads the article list's toolbar actions — ahead of the bell, Sort
+  and Mark All as Read, wherever the platform's toolbar places that group — and the View menu
   lists the three as check items chosen with ⌘/Ctrl+1, 2 and 3. **Starred** narrows whatever is
   selected (a feed, folder, tag or All Feeds, including search results) to its starred articles and
   lasts for the session only; while the subscription list's own Starred item is selected it is shown
