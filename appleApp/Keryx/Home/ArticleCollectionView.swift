@@ -460,11 +460,14 @@ final class ArticleCollectionViewController: UIViewController, UICollectionViewD
     /// rows on screen, so an article arriving under the reader is not counted as seen.
     private func windowChanged() {
         lastReportedIds = nil
-        if collectionView.window == nil { rowHeightPolicy.windowLost() }
-        if collectionView.window != nil { positionSettled = false }
-        // A list coming back keeps its size, so nothing would lay it out again: ask, since the row height is
-        // measured, the position put back and a pending scroll carried out in that pass.
-        if collectionView.window != nil { view.setNeedsLayout() }
+        if collectionView.window == nil {
+            rowHeightPolicy.windowLost()
+        } else {
+            positionSettled = false
+            // A list coming back keeps its size, so nothing would lay it out again: ask, since the row
+            // height is measured, the position put back and a pending scroll carried out in that pass.
+            view.setNeedsLayout()
+        }
         scheduleReport()
     }
 
