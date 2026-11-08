@@ -47,6 +47,10 @@ struct ArticleListView: View {
     @State private var didShowFirstRows = false
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
+    /// Whether the large title is collapsed, before iOS 26 only (`NavigationBarCollapseProbe`). The
+    /// bar's principal item is blanked there, so a collapsed title would leave the list unnamed —
+    /// e.g. after a filter switch, whose reset to the first row does not expand it again.
+    @State private var titleCollapsed = false
     #endif
     /// Whether this list has been put into a window yet, which rebuilds `content` once more (its
     /// `.id`). The list a phone-width split view pushes for the first time has its refresh control
@@ -270,8 +274,15 @@ struct ArticleListView: View {
         // overflow menu (iOS 18) or lands between the buttons (iOS 17); the large title names the
         // list instead. From iOS 26 the bar fits the title in, or drops it, on its own. Zero-sized,
         // since a flexible `Color.clear` takes the room the buttons need and overflows them anyway.
+        // While the large title is collapsed, the principal item names the list in its place.
         if #unavailable(iOS 26) {
-            ToolbarItem(placement: .principal) { Color.clear.frame(width: 0, height: 0) }
+            ToolbarItem(placement: .principal) {
+                if titleCollapsed {
+                    Text(home.articleListTitle).font(.headline).lineLimit(1)
+                } else {
+                    Color.clear.frame(width: 0, height: 0)
+                }
+            }
         }
         // The same status as the sidebar's, for the column an iPhone mostly shows.
         RefreshStatusToolbarItem(home: home)
@@ -590,6 +601,13 @@ struct ArticleListView: View {
             }
         }
         .listStyle(.plain)
+        #if os(iOS)
+        .background {
+            if #unavailable(iOS 26) {
+                NavigationBarCollapseProbe { titleCollapsed = $0 }
+            }
+        }
+        #endif
     }
 
     private func articleRow(_ article: ArticleRowModel, selectedId: String?, paneFocused: Bool) -> some View {
