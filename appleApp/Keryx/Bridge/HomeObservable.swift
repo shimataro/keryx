@@ -234,6 +234,9 @@ final class HomeObservable: ObservableAssignment {
         // start the list on `All` and then switch it to the restored filter, which `ArticleListTopReset`
         // takes for the user's switch and answers with a scroll to the top, over the restored selection.
         assignFilter(viewModel.filter.value)
+        // The sidebar's selected row is restored with it; mirroring only the filter would leave the
+        // two disagreeing (the highlight follows both) until the first delivery.
+        assignSelectedRowInstance(viewModel.selectedRowInstance.value)
         // The first delivery then finds the filter unchanged and would not set the header from it.
         updateFeedListSelectionTarget()
     }
