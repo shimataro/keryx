@@ -34,6 +34,15 @@ and lose more than the access itself is worth. The accesses that are, today:
 - The Apple SDK's search-index setup (`KeryxSdk.start`'s `createTable()` and `prepareSearchIndex()`). A
   failure leaves search without the missing rows until the next launch or refresh creates and fills the
   table again; propagating it from `start` would be shown as the "database too new" screen.
+- The selected article's body lookup (`HomeViewModel.applyHydratedSelection`). A failure — the
+  lookup's connection waited out the whole `busy_timeout`, say — shows the selection's header
+  (`ReaderContent.Header`) without its body, so the article list, the toolbar and the reader all stay
+  on the selection, and choosing it again retries the lookup. Propagating it would end the app on
+  Android and Apple, and on desktop leave the previous article in the reader under the new selection.
+- The launch-time restore of the previously selected article (`HomeViewModel`'s `init`). A failure
+  restores no article, as if none had been saved. A selection whose body lookup failed is saved for the
+  next launch too, so a lookup that fails every time (a row too large for Android's `CursorWindow`, say)
+  would otherwise throw out of the ViewModel's construction on every launch, and Home would never open.
 
 Any other DB access propagates as before; a new best-effort one is added to this list, with its reason. (An
 operation the user started — an OPML import or export — that fails is not an exception to this: it is reported

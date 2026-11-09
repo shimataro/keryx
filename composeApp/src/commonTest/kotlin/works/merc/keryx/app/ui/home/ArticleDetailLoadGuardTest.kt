@@ -3,6 +3,7 @@ package works.merc.keryx.app.ui.home
 import io.github.kdroidfilter.webview.web.LoadingState
 import kotlin.test.Test
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -17,8 +18,15 @@ class ArticleDetailLoadGuardTest {
     }
 
     @Test
-    fun neverLoadsWhileLoading() {
-        assertFalse(shouldLoadArticleHtml(LoadingState.Loading(0.5f), loadedHtml = null, html = "<html>a</html>"))
+    fun loadsANewDocumentWhileAnotherIsStillLoading() {
+        // The article on screen can keep the view loading indefinitely (its script setting
+        // `location`); the newer document must still be pushed.
+        assertTrue(shouldLoadArticleHtml(LoadingState.Loading(0.5f), loadedHtml = "<html>a</html>", html = "<html>b</html>"))
+    }
+
+    @Test
+    fun skipsAnIdenticalRepeatWhileLoading() {
+        assertFalse(shouldLoadArticleHtml(LoadingState.Loading(0.5f), loadedHtml = "<html>a</html>", html = "<html>a</html>"))
     }
 
     @Test
@@ -50,5 +58,40 @@ class ArticleDetailLoadGuardTest {
     @Test
     fun loadsSwitchingBetweenTwoDifferentArticles() {
         assertTrue(shouldLoadArticleHtml(LoadingState.Finished, loadedHtml = "<html>article-a</html>", html = "<html>article-b</html>"))
+    }
+
+    @Test
+    fun aMarkedDocumentCarriesItsMarkerInItsHead() {
+        val html = "<html><head><style></style></head><body>a</body></html>"
+        val marked = markReaderDocument(html, marker = "7")
+        assertTrue(marked.startsWith("<html><head><meta name=\"keryx-document\" content=\"7\">"))
+        assertTrue(marked.endsWith("<style></style></head><body>a</body></html>"))
+    }
+
+    @Test
+    fun aDocumentWithoutAHeadIsStillMarked() {
+        assertTrue(markReaderDocument("<p>a</p>", marker = "1").startsWith("<meta name=\"keryx-document\""))
+    }
+
+    @Test
+    fun eachPushGetsItsOwnMarker() {
+        assertNotEquals(readerDocumentMarker(1), readerDocumentMarker(2))
+    }
+
+    @Test
+    fun theProbedMarkerIsRecognizedWhetherOrNotThePlatformQuotesIt() {
+        val marker = readerDocumentMarker(3)
+        assertTrue(isReaderDocumentOnScreen("\"$marker\"", marker))
+        assertTrue(isReaderDocumentOnScreen(marker, marker))
+    }
+
+    @Test
+    fun anotherPushOrNoneIsNotOnScreen() {
+        // An older push of the very same HTML is still another push: identity never comes from the
+        // document's content, so a newer document cannot be taken for an older one whose hash matches.
+        val marker = readerDocumentMarker(3)
+        assertFalse(isReaderDocumentOnScreen("\"${readerDocumentMarker(2)}\"", marker))
+        assertFalse(isReaderDocumentOnScreen("\"\"", marker))
+        assertFalse(isReaderDocumentOnScreen("null", marker))
     }
 }
