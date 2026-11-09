@@ -255,7 +255,8 @@ struct ArticleWebView {
             Task { @MainActor [weak self, weak webView] in
                 guard let self else { return }
                 reloadScheduled = false
-                guard let webView, loadedHtml == html else { return }
+                // The load may have committed after all since this was scheduled: leave it alone.
+                guard let webView, documentLoad.isPending, loadedHtml == html else { return }
                 load(html, in: webView)
             }
         }
