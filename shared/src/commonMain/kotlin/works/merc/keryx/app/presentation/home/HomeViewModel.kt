@@ -1134,7 +1134,12 @@ class HomeViewModel(
             withContext(dispatcher) { articleRepository.getArticleById(article.id) }
         }.getOrElse { e ->
             Log.warn(TAG, "Loading the selected article's body failed", e)
-            if (token == latestSelectionToken && selectionCursorId == article.id) _headerArticleId.value = article.id
+            if (token == latestSelectionToken && selectionCursorId == article.id) {
+                _headerArticleId.value = article.id
+                // It is still the selection on screen, so it is the one the next launch restores. Whether
+                // it was tombstoned is unknown here, but the launch-time restore filters tombstones itself.
+                settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
+            }
             return
         }
         // A null (or tombstoned) row means a sync merge deleted it between the emission the user

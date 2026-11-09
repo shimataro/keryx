@@ -2218,6 +2218,24 @@ class HomeViewModelTest {
         assertEquals("a2", vm.selectedArticleRow.value?.id)
     }
 
+    /**
+     * A selection whose body lookup failed is still the one the list, the toolbar and the reader show,
+     * so it is the one the next launch restores — not the article selected before it.
+     */
+    @Test
+    fun aBodyLookupThatFailsStillPersistsTheNewSelectionForTheNextLaunch() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+        assertEquals("a1", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
+
+        lookups.failGetById = true
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+
+        assertEquals("a2", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
+    }
+
     /** Choosing the article again after a failed lookup loads its body. */
     @Test
     fun choosingTheArticleAgainAfterAFailedLookupLoadsItsBody() = runTest {
