@@ -2096,6 +2096,65 @@ class HomeViewModelTest {
     }
 
     /**
+     * Two selections of different articles whose lookups finish in the opposite order (the first
+     * one's body is slower to load): once the newer selection is on screen, the older lookup
+     * landing late must neither replace it nor touch the toolbar's row.
+     */
+    @Test
+    fun aSlowerEarlierSelectionFinishingAfterTheNewerOneDoesNotReplaceIt() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+
+        parking.hold()
+        vm.selectArticle(vm.row("a1"))
+        val older = parking.parkLast()
+        vm.selectArticle(vm.row("a2"))
+        val newer = parking.parkLast()
+        // The newer lookup lands inside the grace period, before the older one.
+        parking.run(newer)
+        testScheduler.runCurrent()
+        assertEquals("a2", vm.readerArticleId())
+        parking.run(older)
+        settle(parking)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /**
+     * [aSlowerEarlierSelectionFinishingAfterTheNewerOneDoesNotReplaceIt] with both lookups held past
+     * the grace period, so the newer selection's header is shown first: the older lookup landing
+     * after the newer one's body must not replace it either.
+     */
+    @Test
+    fun aSlowerEarlierSelectionLandingAfterTheNewerOnesHeaderAndBodyDoesNotReplaceIt() = runTest {
+        val parking = ParkingDispatcher()
+        val vm = newViewModelWithHydrationOn(parking, "a1", "a2")
+
+        parking.hold()
+        vm.selectArticle(vm.row("a1"))
+        val older = parking.parkLast()
+        vm.selectArticle(vm.row("a2"))
+        val newer = parking.parkLast()
+        settle(parking)
+        assertEquals("header:a2", vm.readerArticleId())
+        parking.run(newer)
+        settle(parking)
+        assertEquals("a2", vm.readerArticleId())
+        parking.run(older)
+        settle(parking)
+        parking.release()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /**
      * The reader's own "mark as unread" ([HomeViewModel.toggleReadSelected] on a read article) made while a
      * re-selection of the displayed article is still loading wins, just like [HomeViewModel.setRead].
      */
