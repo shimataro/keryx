@@ -1,7 +1,8 @@
 import KeryxShared
 import SwiftUI
 
-/// The center pane: toolbar (list mode, sort, mark-all-read, the notification bell),
+/// The center pane: toolbar (the list mode menu, which also holds the sort order; mark-all-read;
+/// the notification bell),
 /// the article rows themselves (search-highlighted when a query is active), the "new articles"
 /// pill, and the four empty states — see `external-spec.md` §7's article-list bullets and the M2
 /// research notes.
@@ -306,8 +307,6 @@ struct ArticleListView: View {
             // Separate items, since a priority applies to a whole item or group.
             ToolbarItem(placement: .primaryAction) { notificationBellButton }
                 .visibilityPriority(.high)
-            ToolbarItem(placement: .primaryAction) { sortButton }
-                .visibilityPriority(.low)
             ToolbarItem(placement: .primaryAction) { markAllReadButton }
                 .visibilityPriority(.high)
         } else {
@@ -322,9 +321,8 @@ struct ArticleListView: View {
     /// visibility priorities are unavailable.
     @ToolbarContentBuilder
     private var groupedToolbarItems: some ToolbarContent {
-        // Every item's label is a `Label`, not a bare icon (except the mode menu's on iOS — see
-        // `listModeMenu`): the toolbar still renders icon-only, but the overflow menu it collapses
-        // into at a narrow width takes each row's title from it.
+        // Every item's label is a `Label`, not a bare icon: the toolbar still renders icon-only, but
+        // the overflow menu it collapses into at a narrow width takes each row's title from it.
         // Separate items of one group (not an `HStack` in one item) so each gets its own row there.
         ToolbarItem(placement: .navigation) { listModeMenu }
 
@@ -334,17 +332,17 @@ struct ArticleListView: View {
 
         ToolbarItemGroup(placement: .primaryAction) {
             notificationBellButton
-            sortButton
             markAllReadButton
         }
     }
 
     private var listModeMenu: some View {
-        // A pop-up button (HIG): the current mode names the button, the menu offers all three.
-        // Each mode has its own icon (`listModeSymbol`), filled whenever it narrows the list, on the
-        // button and beside each item. Toggles rather than an inline Picker:
-        // a Picker option's own `.disabled` is not honored inside a menu, so Starred stayed
-        // choosable under the Starred filter. Same items as the View menu (`HomeCommands`).
+        // The view options menu: the list mode, then the sort order in a section of its own (as
+        // Photos' filter button holds both). The button wears the filter symbol, filled whenever the
+        // mode narrows the list (`listModeButtonSymbol`); each mode keeps its own icon beside its item
+        // (`listModeSymbol`). Toggles rather than an inline Picker: a Picker option's own `.disabled`
+        // is not honored inside a menu, so Starred stayed choosable under the Starred filter. The mode
+        // items match the View menu (`HomeCommands`), which also keeps its own sort toggle.
         Menu {
             ForEach(Self.listModes, id: \.self) { mode in
                 Toggle(L(Self.listModeLabelKey(mode)), systemImage: Self.listModeSymbol(mode), isOn: Binding(
@@ -353,23 +351,26 @@ struct ArticleListView: View {
                 ))
                 .disabled(mode == .starred && !home.starredModeEnabled)
             }
-        } label: {
-            #if os(iOS)
-            // iOS draws a toolbar menu as a bare icon and ignores `menuIndicator`, so the label carries
-            // the pop-up button's own chevrons: a tap opens a choice rather than acting at once
-            // (macOS's toolbar adds an indicator by itself). Not a `Label`: the toolbar keeps only the
-            // first image of a `Label`'s icon, dropping the chevrons.
-            HStack(spacing: 1) {
-                Image(systemName: Self.listModeSymbol(home.listMode))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            Section(L("home_sort_section")) {
+                ForEach([true, false], id: \.self) { newestFirst in
+                    Toggle(L(newestFirst ? "home_sort_newest" : "home_sort_oldest"), isOn: Binding(
+                        get: { home.newestFirst == newestFirst },
+                        set: { if $0 { home.viewModel.setNewestFirst(newestFirst: newestFirst) } }
+                    ))
+                }
             }
-            #else
+            // Search results keep their own fixed order (FTS rank), as the View menu's toggle does.
+            .disabled(home.searchActive)
+        } label: {
             Label(
                 L(Self.listModeLabelKey(home.listMode)),
-                systemImage: Self.listModeSymbol(home.listMode)
+                systemImage: Self.listModeButtonSymbol(home.listMode)
             )
+            #if os(iOS)
+            // A filter symbol reads as a menu by itself, so no chevrons; still a `Label` so the
+            // overflow menu at a narrow width gets the row's title.
+            .labelStyle(.iconOnly)
+            #else
             .labelStyle(.titleAndIcon)
             #endif
         }
@@ -380,19 +381,6 @@ struct ArticleListView: View {
 
     private var notificationBellButton: some View {
         NotificationBell(home: home, notifications: notifications, settingsNavigation: settingsNavigation, focusedPane: focusedPane)
-    }
-
-    private var sortButton: some View {
-        Button {
-            home.viewModel.toggleSort()
-        } label: {
-            Label(
-                L(home.newestFirst ? "home_sort_oldest" : "home_sort_newest"),
-                systemImage: home.newestFirst ? "arrow.down" : "arrow.up"
-            )
-        }
-        .disabled(home.searchActive)
-        .help(L(home.searchActive ? "home_sort_disabled_search" : (home.newestFirst ? "home_sort_oldest" : "home_sort_newest")))
     }
 
     private var markAllReadButton: some View {
@@ -474,7 +462,20 @@ struct ArticleListView: View {
         }
     }
 
-    /// The icon for `mode`: the app's unread dot and star, in the same circle as All's filter icon.
+    /// The list mode menu button's icon: the filter symbol, filled while `mode` narrows the list
+    /// (as Mail's filter button). Unfiltered, iOS drops the circle, since its toolbar already draws
+    /// the button inside a glass circle; macOS's toolbar draws no such shape, so it keeps it.
+    static func listModeButtonSymbol(_ mode: ArticleListMode) -> String {
+        guard mode == .all else { return "line.3.horizontal.decrease.circle.fill" }
+        #if os(iOS)
+        return "line.3.horizontal.decrease"
+        #else
+        return "line.3.horizontal.decrease.circle"
+        #endif
+    }
+
+    /// The icon for `mode`'s menu item: the app's unread dot and star, in the same circle as All's
+    /// filter icon.
     private static func listModeSymbol(_ mode: ArticleListMode) -> String {
         switch mode {
         case .all: "line.3.horizontal.decrease.circle"

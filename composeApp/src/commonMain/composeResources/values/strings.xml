@@ -122,6 +122,7 @@
     <string name="home_list_mode_starred">Starred</string>
     <string name="home_no_starred_articles">No starred articles here</string>
     <string name="home_show_all_articles">Show all articles</string>
+    <string name="home_sort_section">Sort Order</string>
     <string name="home_sort_newest">Newest first</string>
     <string name="home_sort_oldest">Oldest first</string>
     <string name="home_sort_disabled_search">Sorting is unavailable during search</string>
