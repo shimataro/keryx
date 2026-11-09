@@ -31,7 +31,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.Clock
+import works.merc.keryx.app.core.Log
 import works.merc.keryx.app.core.READER_HEADER_FIRST_GRACE_MS
+import works.merc.keryx.app.core.runCatchingUnlessCancelled
 import works.merc.keryx.app.core.SEARCH_DEBOUNCE_MS
 import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.core.decodeArticleFilter
@@ -68,6 +70,8 @@ import works.merc.keryx.app.presentation.sameListOrBothEmpty
  * a refresh's per-feed commits.
  */
 internal const val SEARCH_ARTICLE_CHANGE_DEBOUNCE_MS = 100L
+
+private const val TAG = "HomeViewModel"
 
 /**
  * Debounced FTS results tagged with the query/filter that produced them (see
@@ -1121,7 +1125,18 @@ class HomeViewModel(
         // thread: this pulls the whole row including `content`, and the JVM driver opens a fresh
         // connection per statement, so under a sync merge's or refresh's write lock it can wait out
         // the whole busy_timeout. Held arrow keys would do that ~30 times a second.
-        val full = withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+        //
+        // Best effort (docs/error-design.md): a lookup that fails — its connection waited out the whole
+        // busy_timeout, say — shows this selection's header instead of the body, so the list, the toolbar
+        // and the reader all stay on it and choosing it again tries again. Propagated, it would end the
+        // app on Android and Apple, and leave the previous article in the reader on desktop.
+        val full = runCatchingUnlessCancelled {
+            withContext(dispatcher) { articleRepository.getArticleById(article.id) }
+        }.getOrElse { e ->
+            Log.warn(TAG, "Loading the selected article's body failed", e)
+            if (token == latestSelectionToken && selectionCursorId == article.id) _headerArticleId.value = article.id
+            return
+        }
         // A null (or tombstoned) row means a sync merge deleted it between the emission the user
         // clicked and the click itself: leave the selection and the persisted id entirely alone, and
         // take back the pin selectArticle added, rather than resurrecting deleted content into the

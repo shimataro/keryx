@@ -135,6 +135,27 @@ private fun KeryxDatabase.insertArticle(
     )
 }
 
+/**
+ * Fails the article-by-id lookup (`articles.getById`, the body a selection loads) while [failGetById]
+ * is set — standing in for a lookup whose connection waited out the whole `busy_timeout`.
+ */
+private class GetByIdFailingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
+    @kotlin.concurrent.Volatile var failGetById = false
+
+    override fun <R> executeQuery(
+        identifier: Int?,
+        sql: String,
+        mapper: (app.cash.sqldelight.db.SqlCursor) -> app.cash.sqldelight.db.QueryResult<R>,
+        parameters: Int,
+        binders: (app.cash.sqldelight.db.SqlPreparedStatement.() -> Unit)?,
+    ): app.cash.sqldelight.db.QueryResult<R> {
+        if (failGetById && sql.startsWith("SELECT articles.") && sql.endsWith("FROM articles WHERE id = ?")) {
+            throw IllegalStateException("database is locked")
+        }
+        return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
+    }
+}
+
 /** Counts the FTS `MATCH` queries run through it — one per search that reached the index. */
 private class SearchCountingSqlDriver(private val delegate: SqlDriver) : SqlDriver by delegate {
     var matchQueries = 0
@@ -161,6 +182,7 @@ private const val PUMP_UNTIL_YIELD_MS = 5L
 class HomeViewModelTest {
 
     private lateinit var driver: CountingSqlDriver
+    private lateinit var lookups: GetByIdFailingSqlDriver
     private lateinit var db: KeryxDatabase
     private val dir = FileIO.join(AppDirs.tempDir(), "home-vm-test-${Random.nextInt()}")
 
@@ -182,7 +204,8 @@ class HomeViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher(mainScheduler))
         val (d, _) = inMemoryDb()
         // Wrapped so a test can assert which actions re-execute the article-list query.
-        driver = CountingSqlDriver(d)
+        lookups = GetByIdFailingSqlDriver(d)
+        driver = CountingSqlDriver(lookups)
         db = KeryxDatabase(driver)
     }
 
@@ -2152,6 +2175,63 @@ class HomeViewModelTest {
         assertEquals("a2", vm.readerArticleId())
         assertEquals("a2", vm.selectedArticleId.value)
         assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /**
+     * A body lookup that fails inside the grace period (its connection waited out the whole
+     * busy_timeout) must not leave the previous article in the reader under the new selection: the
+     * reader shows the new selection's header, matching the list and the toolbar, and the failure is
+     * not thrown out of the ViewModel (where it would end the app on Android and Apple).
+     */
+    @Test
+    fun aBodyLookupThatFailsShowsTheNewSelectionsHeaderNotThePreviousArticle() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        lookups.failGetById = true
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+
+        assertEquals("header:a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /** [aBodyLookupThatFailsShowsTheNewSelectionsHeaderNotThePreviousArticle] after the grace period. */
+    @Test
+    fun aBodyLookupThatFailsAfterTheGracePeriodKeepsTheNewSelectionsHeader() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        holding.hold()
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceTimeBy(READER_HEADER_FIRST_GRACE_MS + 1)
+        assertEquals("header:a2", vm.readerArticleId())
+        lookups.failGetById = true
+        holding.release()
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+
+        assertEquals("header:a2", vm.readerArticleId())
+        assertEquals("a2", vm.selectedArticleId.value)
+        assertEquals("a2", vm.selectedArticleRow.value?.id)
+    }
+
+    /** Choosing the article again after a failed lookup loads its body. */
+    @Test
+    fun choosingTheArticleAgainAfterAFailedLookupLoadsItsBody() = runTest {
+        val holding = HoldingDispatcher()
+        val vm = newViewModelShowing("a1", holding, "a1", "a2")
+
+        lookups.failGetById = true
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+        lookups.failGetById = false
+        vm.selectArticle(vm.row("a2"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a2", vm.readerArticleId())
     }
 
     /**
