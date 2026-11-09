@@ -600,7 +600,8 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 遷移を始め続けている間（スクリプトが `location` を設定する場合）はネイティブビューが読み込み中のままになり、
 `Finished` を待つ判定では次の文書をまったく読み込ませなかったため。こうした遷移は進行中の文書の読み込みも
 止めるが、ライブラリはそれを何も報告しない（読み込み中のフラグは立ったままで、URL はどちらも `about:blank`）。
-そこで `ArticleWebView` は各文書に `readerDocumentKey` を入れた `<meta name="keryx-document">` を付け、
+そこで `ArticleWebView` は各文書に、その読み込みごとに一意のマーカー（`readerDocumentMarker`。画面上の文書と
+衝突しうる HTML のハッシュではない）を入れた `<meta name="keryx-document">` を付け、
 読み込ませてから 1 秒ごとにページからその値を読み戻す。まだ画面に出ていない文書は、`:shared` の
 `READER_DOCUMENT_RELOAD_LIMIT` 回まで読み込ませ直す（`presentation/article/ReaderDocumentLoad.kt`。SwiftUI の
 リーダーも同じ規則に従う）。1 ミリ秒ごとに `location` を設定するスクリプトを含む記事でデスクトップ版を実測した

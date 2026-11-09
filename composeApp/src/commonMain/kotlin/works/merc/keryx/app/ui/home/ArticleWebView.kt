@@ -184,14 +184,15 @@ private fun ReaderWebViewHost(
             loadedHtml.value = html
             documentLoad.documentRequested()
             pushGeneration++
-            navigator.loadHtml(markReaderDocument(html))
+            navigator.loadHtml(markReaderDocument(html, readerDocumentMarker(pushGeneration)))
         } else if (webViewState.loadingState is LoadingState.Finished && loadedHtml.value == html) {
             nativePanel.value?.let { restoreReaderScroll(it, scrollRestoration) }
         }
     }
     LaunchedEffect(pushGeneration) {
         val pushed = loadedHtml.value ?: return@LaunchedEffect
-        verifyReaderDocument(pushed, documentLoad, navigator) { loadedHtml.value == pushed }
+        val marker = readerDocumentMarker(pushGeneration)
+        verifyReaderDocument(pushed, marker, documentLoad, navigator) { loadedHtml.value == pushed }
     }
 
     // The native webview (a heavyweight AWT component wrapping a real OS-native browser
@@ -305,30 +306,39 @@ internal const val READER_DOCUMENT_KEY_PROBE =
     "(document.querySelector('meta[name=\"$READER_DOCUMENT_META_NAME\"]')||{}).content||''"
 
 /**
- * [html] tagged with its [readerDocumentKey], so [verifyReaderDocument] can tell from the page itself
- * whether it is the one on screen — the library's own state cannot: the loading flag stays set
- * while the previous page keeps navigating, and the URL is `about:blank` either way.
+ * The marker a document pushed as the reader's [pushGeneration]-th push carries. Unique to each push
+ * rather than derived from the HTML, so a newer document can never be taken for an older one still on
+ * screen (two documents' hashes can collide); its retries reuse it.
  */
-internal fun markReaderDocument(html: String): String {
-    val tag = "<meta name=\"$READER_DOCUMENT_META_NAME\" content=\"${readerDocumentKey(html)}\">"
+internal fun readerDocumentMarker(pushGeneration: Int): String = pushGeneration.toString()
+
+/**
+ * [html] tagged with [marker], so [verifyReaderDocument] can tell from the page itself whether it is
+ * the one on screen — the library's own state cannot: the loading flag stays set while the previous
+ * page keeps navigating, and the URL is `about:blank` either way.
+ */
+internal fun markReaderDocument(html: String, marker: String): String {
+    val tag = "<meta name=\"$READER_DOCUMENT_META_NAME\" content=\"$marker\">"
     val head = html.indexOf("<head>")
     return if (head < 0) tag + html else html.substring(0, head + "<head>".length) + tag + html.substring(head + "<head>".length)
 }
 
 /**
  * Whether [probeResult] — what [READER_DOCUMENT_KEY_PROBE] evaluated to, which the platforms hand
- * back JSON-encoded (quoted) — names [html]'s document.
+ * back JSON-encoded (quoted) — names the document tagged with [marker].
  */
-internal fun isReaderDocumentOnScreen(probeResult: String, html: String): Boolean =
-    probeResult.trim().removeSurrounding("\"") == readerDocumentKey(html)
+internal fun isReaderDocumentOnScreen(probeResult: String, marker: String): Boolean =
+    probeResult.trim().removeSurrounding("\"") == marker
 
 /**
- * Checks, every [READER_DOCUMENT_CHECK_INTERVAL_MS], that the [pushed] document is the one on screen,
- * and pushes it again when it is not, while [documentLoad] allows it. Stops once it is shown, the
- * reload budget is spent, or [isCurrent] says a newer document took over.
+ * Checks, every [READER_DOCUMENT_CHECK_INTERVAL_MS], that the [pushed] document (tagged with
+ * [marker]) is the one on screen, and pushes it again when it is not, while [documentLoad] allows
+ * it. Stops once it is shown, the reload budget is spent, or [isCurrent] says a newer document took
+ * over.
  */
 private suspend fun verifyReaderDocument(
     pushed: String,
+    marker: String,
     documentLoad: ReaderDocumentLoad,
     navigator: WebViewNavigator,
     isCurrent: () -> Boolean,
@@ -340,13 +350,13 @@ private suspend fun verifyReaderDocument(
         navigator.evaluateJavaScript(READER_DOCUMENT_KEY_PROBE) { probed.complete(it) }
         val result = withTimeoutOrNull(READER_DOCUMENT_PROBE_TIMEOUT_MS) { probed.await() }
         if (!isCurrent()) return
-        if (result != null && isReaderDocumentOnScreen(result, pushed)) {
+        if (result != null && isReaderDocumentOnScreen(result, marker)) {
             documentLoad.documentConfirmed()
             return
         }
         if (!documentLoad.documentMayBeLost()) return
         documentLoad.retryStarted()
-        navigator.loadHtml(markReaderDocument(pushed))
+        navigator.loadHtml(markReaderDocument(pushed, marker))
     }
 }
 

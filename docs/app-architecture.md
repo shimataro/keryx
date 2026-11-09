@@ -611,7 +611,8 @@ setting `location`), the native view stays loading and a guard that waited for `
 pushed the next document at all. Such a navigation also drops a document load still in flight, and
 the library reports nothing about it — the loading flag stays set and the URL is `about:blank`
 either way — so `ArticleWebView` tags each document with a `<meta name="keryx-document">` carrying
-its `readerDocumentKey` and, every second after a push, reads that tag back from the page; a document
+a marker unique to that push (`readerDocumentMarker`, not a hash of the HTML, which could collide
+with the document still on screen) and, every second after a push, reads that tag back from the page; a document
 not yet on screen is pushed again, up to `:shared`'s `READER_DOCUMENT_RELOAD_LIMIT` times
 (`presentation/article/ReaderDocumentLoad.kt`, the rule the SwiftUI reader follows too). Measured on
 desktop with an article whose script sets `location` every millisecond: the previous article stayed
