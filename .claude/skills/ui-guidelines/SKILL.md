@@ -113,14 +113,17 @@ not in global chrome:
   row. There is no separate "Search" filter or sidebar row any more — typing
   into the field narrows whichever feed/folder/tag is already selected (see
   "Adaptive pane layout & touch affordances" below).
-- Sort / mark all read — header row of `ArticleListPane`, unchanged at every
-  layout.
-- List mode — the same header row, leading: a `MenuChip` naming the current
-  `ArticleListMode` (All / Unread / Starred) inside a `NativeMenuAnchor`, whose
-  native menu offers all three. A pop-up button rather than a
-  `SegmentedControl`, because three labelled segments do not fit the pane's
-  240dp minimum width beside the other controls; the chip is filled whenever
-  the mode narrows the list.
+- Mark all read — header row of `ArticleListPane`, unchanged at every layout.
+- List mode and sort order — the same header row, leading: a `MenuChip`
+  wearing `KeryxIcons.FilterList` and naming the current `ArticleListMode`
+  (All / Unread / Starred) inside a `NativeMenuAnchor`, whose native menu
+  offers all three, then a separator and "Newest first" / "Oldest first"
+  (`sortOrderMenuEntries`; `NativeMenu` has no section header). A pop-up
+  button rather than a `SegmentedControl`, because three labelled segments do
+  not fit the pane's 240dp minimum width beside the other controls; the chip
+  is filled whenever the mode narrows the list. The sort order has no toolbar
+  button of its own (it is rarely changed — `external-spec.md` §7); the
+  SwiftUI app puts it in the same menu, in a titled `Section`.
 - Hide read — not in the header row: a View-menu command only (`AppMenuTree`,
   the SwiftUI `HomeCommands`), since a manual refresh or sync, a filter switch
   and choosing Unread already clear the kept read rows (`external-spec.md` §7).
@@ -1369,7 +1372,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   section above; don't use `OutlinedTextField`/`BasicTextField` directly at a
   call site.
 - **Icon set — chrome vs. semantic state**: action/chrome icons (add, refresh,
-  cloud sync, settings, folder/tag management, search, notifications, sort,
+  cloud sync, settings, folder/tag management, search, notifications, filter,
   mark-all-read, open-in-browser, back, close) use the
   `KeryxIcons.XOutlined` (or bare-name, single-variant) entry. Icons that
   encode persistent state rather than an action — `Star`/`StarBorder`,
@@ -1402,8 +1405,9 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   two-state icon (as the folder/tag expand chevron already does, picking
   between `ExpandMore`/`ChevronRight`) over transforming one shared asset —
   it's immune to this class of mistake by construction.
-  **`ArticleListPane.kt`'s sort button is the case that proves the rule.** It
-  used to flip a single `KeryxIcons.Sort` vertically for
+  **`ArticleListPane.kt`'s former sort button is the case that proved the
+  rule** (the button has since been replaced by check items in the list mode
+  menu, so the assets below are gone; the lesson stands). It used to flip a single `KeryxIcons.Sort` vertically for
   ascending/descending, and this document previously recorded that as
   "confirmed still safe" on Android because Material Symbols' `sort` is the
   same three-bar shape. That reasoning was wrong: desktop's Tabler
@@ -1411,33 +1415,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   (whose own lengths are 9/7/7, not a staircase), and Material Symbols' `sort`
   has no arrow at all, so the flip was effectively invisible on Android —
   where, with no menu bar and a tooltip that only appears on long-press,
-  nothing else showed the current order either. It now uses
+  nothing else showed the current order either. It then used
   `KeryxIcons.SortDescending`/`SortAscending`, while retaining the selected directional glyph
   when the button is disabled (the search
-  scope). Desktop's two directional entries are Tabler's own
-  `sort-descending`/`sort-ascending`; Android's are **local composites** —
-  Material Symbols ships no directional sort glyph
-  (google/material-design-icons#189), so `ic_sort_{ascending,descending}_material.xml`
-  place the stock `sort` and `arrow_downward`/`arrow_upward` paths side by side
-  via `<group>` transforms rather than redrawing either by hand. **On both
-  platforms the bar staircase reverses along with the arrow**, so direction is
-  carried twice over: desktop gets that for free (Tabler ships `sort-descending`
-  and `sort-ascending` as two glyphs, 9/7/7 vs 7/7/9), and the Android
-  ascending composite mirrors the stock `sort` bars vertically to match.
-  Three things about those two files are load-bearing and easy to undo by
-  accident, so each carries its own comment saying so: both groups take the
-  **same uniform scale** (scaling only one, or scaling either non-uniformly,
-  leaves the bars and the arrow's shaft at different stroke weights inside one
-  glyph); the source paths are the **wght 700** variants, not the default
-  weight — at 125 units thick instead of 80, they land at roughly the 2px of
-  the default-weight icons beside them in the toolbar once scaled down to fit
-  two glyphs in one 24dp box; and the ascending file's bars are that mirror,
-  which reads as a swap of the outer two bar widths because the three bar bands
-  are symmetric about y 480.5. Diffing either file's path data against the
-  stock default-weight glyph will therefore show differences on all three
-  counts — none of them is a defect to "correct". They are also the repo's only
-  `<group>`-using vector assets; Compose Multiplatform's own `XmlVectorParser`
-  supports the full `pivot`/`scale`/`translate`/`rotation` set on every target. `KeryxIcons.ArrowBack`
+  scope) — on Android a local composite of the stock `sort` and
+  `arrow_downward`/`arrow_upward` paths, since Material Symbols ships no
+  directional sort glyph (google/material-design-icons#189). `KeryxIcons.ArrowBack`
   is the other concrete instance of this fix: `ChevronRight` used to double as
   a flipped (`scaleX = -1f`) "back" icon at three call sites
   (`ArticleListPane`/`ArticleDetailPane`'s back buttons,
@@ -1512,7 +1495,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   already separates the dialog), but Android's `actual` **ignores both** and lets `AlertDialogDefaults`'
   own values apply, for the same reason `KeryxRaisedSurface` does.
 - **Icon grouping — `ToolbarIconGroup`** (`ui/common/TooltipIconButton.kt`, expect/actual): related
-  toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications, sort/mark-all-read,
+  toolbar icons (e.g. add feed/refresh/cloud sync, search/notifications/mark-all-read,
   the article reader's star / read-unread / open-in-browser / copy-url / share, which is one cluster) are clustered via `ToolbarIconGroup`, separated from
   other clusters in the same row by an 8dp `Spacer`. Desktop's `actual` renders the cluster as a
   rounded capsule with the flat surface pattern's tokens (`surfaceContainerHighest` fill +
