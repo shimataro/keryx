@@ -192,7 +192,13 @@ private fun ReaderWebViewHost(
     LaunchedEffect(pushGeneration) {
         val pushed = loadedHtml.value ?: return@LaunchedEffect
         val marker = readerDocumentMarker(pushGeneration)
-        verifyReaderDocument(pushed, marker, documentLoad, navigator) { loadedHtml.value == pushed }
+        verifyReaderDocument(
+            marker = marker,
+            documentLoad = documentLoad,
+            probe = { onResult -> navigator.evaluateJavaScript(READER_DOCUMENT_KEY_PROBE, onResult) },
+            reload = { navigator.loadHtml(markReaderDocument(pushed, marker)) },
+            isCurrent = { loadedHtml.value == pushed },
+        )
     }
 
     // The native webview (a heavyweight AWT component wrapping a real OS-native browser
@@ -331,23 +337,25 @@ internal fun isReaderDocumentOnScreen(probeResult: String, marker: String): Bool
     probeResult.trim().removeSurrounding("\"") == marker
 
 /**
- * Checks, every [READER_DOCUMENT_CHECK_INTERVAL_MS], that the [pushed] document (tagged with
- * [marker]) is the one on screen, and pushes it again when it is not, while [documentLoad] allows
- * it. Stops once it is shown, the reload budget is spent, or [isCurrent] says a newer document took
- * over.
+ * Checks, every [READER_DOCUMENT_CHECK_INTERVAL_MS], that the document tagged with [marker] is the
+ * one on screen, and pushes it again ([reload]) when it is not, while [documentLoad] allows it. Stops
+ * once it is shown, the reload budget is spent, or [isCurrent] says a newer document took over.
+ *
+ * @param probe evaluates [READER_DOCUMENT_KEY_PROBE] in the page and hands its result to the callback
+ *   (the web view's `evaluateJavaScript`).
  */
-private suspend fun verifyReaderDocument(
-    pushed: String,
+internal suspend fun verifyReaderDocument(
     marker: String,
     documentLoad: ReaderDocumentLoad,
-    navigator: WebViewNavigator,
+    probe: (onResult: (String) -> Unit) -> Unit,
+    reload: () -> Unit,
     isCurrent: () -> Boolean,
 ) {
     while (documentLoad.isPending) {
         delay(READER_DOCUMENT_CHECK_INTERVAL_MS)
         if (!isCurrent()) return
         val probed = CompletableDeferred<String>()
-        navigator.evaluateJavaScript(READER_DOCUMENT_KEY_PROBE) { probed.complete(it) }
+        probe { probed.complete(it) }
         val result = withTimeoutOrNull(READER_DOCUMENT_PROBE_TIMEOUT_MS) { probed.await() }
         if (!isCurrent()) return
         if (result != null && isReaderDocumentOnScreen(result, marker)) {
@@ -356,7 +364,7 @@ private suspend fun verifyReaderDocument(
         }
         if (!documentLoad.documentMayBeLost()) return
         documentLoad.retryStarted()
-        navigator.loadHtml(markReaderDocument(pushed, marker))
+        reload()
     }
 }
 
