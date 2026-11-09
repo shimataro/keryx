@@ -604,6 +604,20 @@ to the host executable, which fails with Access Denied whenever that location is
 running forever, which was the cause of an
 app-wide freeze on click).
 
+**A pushed document is pushed as soon as the view is ready, and checked until it is on screen.**
+`shouldLoadArticleHtml` pushes a new document whenever the view is past `Initializing`, without
+waiting for `Finished`: while the article on screen keeps starting navigations of its own (its script
+setting `location`), the native view stays loading and a guard that waited for `Finished` never
+pushed the next document at all. Such a navigation also drops a document load still in flight, and
+the library reports nothing about it — the loading flag stays set and the URL is `about:blank`
+either way — so `ArticleWebView` tags each document with a `<meta name="keryx-document">` carrying
+a marker unique to that push (`readerDocumentMarker`, not a hash of the HTML, which could collide
+with the document still on screen) and, every second after a push, reads that tag back from the page; a document
+not yet on screen is pushed again, up to `:shared`'s `READER_DOCUMENT_RELOAD_LIMIT` times
+(`presentation/article/ReaderDocumentLoad.kt`, the rule the SwiftUI reader follows too). Measured on
+desktop with an article whose script sets `location` every millisecond: the previous article stayed
+on screen under the new selection in 4 of 150 quick switches before, 0 after.
+
 **The reading position survives Android killing the process in the background.** `ArticleWebView`
 records the native view's vertical scroll position as a fraction of its scrollable height
 (`platform/NativeWebViewScroll.kt`'s `observeNativeWebViewScroll`, through `android.webkit.WebView`'s
@@ -1749,7 +1763,12 @@ override, stays out of the template.
   guard has a known gap (an anchor inside a closed shadow root); see "A feed body's own JavaScript
   runs inside the article reader" in [known-issues.md](known-issues.md). This keeps the app from
   being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
-  access. The Compose readers do not apply the main-frame rule.
+  access. The Compose readers do not apply the main-frame rule. Because WebKit drops a document load
+  still in flight when another top-level navigation starts (one the gate refuses included), the
+  reader tracks its own load until it commits and loads the document again when a top-level
+  navigation is refused or its load fails before then, up to a fixed number of times per document
+  (`:shared`'s `presentation/article/ReaderDocumentLoad.kt`) — otherwise the previous article stayed
+  on screen while the list showed the new selection.
 - **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
   the `WKWebView`'s WebContent process while the app is in the background — while the external
   browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s

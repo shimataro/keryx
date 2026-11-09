@@ -45,10 +45,13 @@ import works.merc.keryx.app.platform.setNativeWebViewScrollbarColor
 import works.merc.keryx.app.platform.setNativeWebViewVisible
 import works.merc.keryx.app.presentation.home.isHttpOrHttpsUrl
 import works.merc.keryx.app.ui.article.ArticleContentView
+import works.merc.keryx.app.presentation.article.ReaderDocumentLoad
 import works.merc.keryx.app.presentation.article.ReaderScrollRestoration
 import works.merc.keryx.app.presentation.article.extractLinks
 import works.merc.keryx.app.presentation.article.wrapArticleHtml
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Displays a prebuilt HTML [html] document in a native web view.
@@ -164,20 +167,38 @@ private fun ReaderWebViewHost(
 
     // Workaround: this (beta) library's rememberWebViewStateWithHTMLData doesn't reliably
     // navigate past its initial "about:blank" on desktop — confirmed during the spike. Push
-    // the HTML manually once the WebView reports it's idle. Guarded on the rendered *document*
+    // the HTML manually once the WebView is ready (see shouldLoadArticleHtml). Guarded on the rendered *document*
     // rather than an article id: this one WebView also renders the "no article selected"
     // placeholder and the "no content" notice, which have no article id, and comparing the HTML
     // also picks up a theme/font-scale change for an otherwise-unchanged article.
     val loadedHtml = remember { mutableStateOf<String?>(null) }
     val nativePanel = remember { mutableStateOf<NativeWebView?>(null) }
+    // The pushed document is checked until it is on screen: a top-level navigation the previous
+    // article's own script starts while it is loading drops the load, without the library reporting
+    // anything — see ReaderDocumentLoad (`:shared`) and verifyReaderDocument.
+    val documentLoad = remember { ReaderDocumentLoad() }
+    var pushGeneration by remember { mutableIntStateOf(0) }
     LaunchedEffect(webViewState.loadingState, html) {
         if (shouldLoadArticleHtml(webViewState.loadingState, loadedHtml.value, html)) {
             scrollRestoration.documentReplaced(readerDocumentKey(html))
             loadedHtml.value = html
-            navigator.loadHtml(html)
+            documentLoad.documentRequested()
+            pushGeneration++
+            navigator.loadHtml(markReaderDocument(html, readerDocumentMarker(pushGeneration)))
         } else if (webViewState.loadingState is LoadingState.Finished && loadedHtml.value == html) {
             nativePanel.value?.let { restoreReaderScroll(it, scrollRestoration) }
         }
+    }
+    LaunchedEffect(pushGeneration) {
+        val pushed = loadedHtml.value ?: return@LaunchedEffect
+        val marker = readerDocumentMarker(pushGeneration)
+        verifyReaderDocument(
+            marker = marker,
+            documentLoad = documentLoad,
+            probe = { onResult -> navigator.evaluateJavaScript(READER_DOCUMENT_KEY_PROBE, onResult) },
+            reload = { navigator.loadHtml(markReaderDocument(pushed, marker)) },
+            isCurrent = { loadedHtml.value == pushed },
+        )
     }
 
     // The native webview (a heavyweight AWT component wrapping a real OS-native browser
@@ -268,9 +289,84 @@ private suspend fun restoreReaderScroll(webView: NativeWebView, restoration: Rea
  * document pushed ([loadedHtml]) and the view's [loadingState]. Compared by document rather than
  * by article id: the placeholder and the "no content" notice share the same WebView, and a
  * theme or font-scale change produces a new document for an otherwise-unchanged article.
+ *
+ * Pushed as soon as the WebView is ready, whether or not a load is in progress — a newer document
+ * replaces one still loading. Waiting for [LoadingState.Finished] instead never pushed it at all
+ * while the article on screen kept starting navigations of its own (its script setting `location`
+ * keeps the native view loading), leaving that article on screen under the new selection.
  */
 internal fun shouldLoadArticleHtml(loadingState: LoadingState, loadedHtml: String?, html: String): Boolean =
-    loadingState is LoadingState.Finished && loadedHtml != html
+    loadingState !is LoadingState.Initializing && loadedHtml != html
+
+/** How long after pushing a document, and between checks, [verifyReaderDocument] looks for it. */
+private const val READER_DOCUMENT_CHECK_INTERVAL_MS = 1_000L
+
+/** How long one check waits for the WebView to answer before counting it as not shown. */
+private const val READER_DOCUMENT_PROBE_TIMEOUT_MS = 1_000L
+
+/** The `<meta>` name [markReaderDocument] tags a document with. */
+private const val READER_DOCUMENT_META_NAME = "keryx-document"
+
+/** Evaluates to the tag [markReaderDocument] put on the document on screen, or "" for none. */
+internal const val READER_DOCUMENT_KEY_PROBE =
+    "(document.querySelector('meta[name=\"$READER_DOCUMENT_META_NAME\"]')||{}).content||''"
+
+/**
+ * The marker a document pushed as the reader's [pushGeneration]-th push carries. Unique to each push
+ * rather than derived from the HTML, so a newer document can never be taken for an older one still on
+ * screen (two documents' hashes can collide); its retries reuse it.
+ */
+internal fun readerDocumentMarker(pushGeneration: Int): String = pushGeneration.toString()
+
+/**
+ * [html] tagged with [marker], so [verifyReaderDocument] can tell from the page itself whether it is
+ * the one on screen — the library's own state cannot: the loading flag stays set while the previous
+ * page keeps navigating, and the URL is `about:blank` either way.
+ */
+internal fun markReaderDocument(html: String, marker: String): String {
+    val tag = "<meta name=\"$READER_DOCUMENT_META_NAME\" content=\"$marker\">"
+    val head = html.indexOf("<head>")
+    return if (head < 0) tag + html else html.substring(0, head + "<head>".length) + tag + html.substring(head + "<head>".length)
+}
+
+/**
+ * Whether [probeResult] — what [READER_DOCUMENT_KEY_PROBE] evaluated to, which the platforms hand
+ * back JSON-encoded (quoted) — names the document tagged with [marker].
+ */
+internal fun isReaderDocumentOnScreen(probeResult: String, marker: String): Boolean =
+    probeResult.trim().removeSurrounding("\"") == marker
+
+/**
+ * Checks, every [READER_DOCUMENT_CHECK_INTERVAL_MS], that the document tagged with [marker] is the
+ * one on screen, and pushes it again ([reload]) when it is not, while [documentLoad] allows it. Stops
+ * once it is shown, the reload budget is spent, or [isCurrent] says a newer document took over.
+ *
+ * @param probe evaluates [READER_DOCUMENT_KEY_PROBE] in the page and hands its result to the callback
+ *   (the web view's `evaluateJavaScript`).
+ */
+internal suspend fun verifyReaderDocument(
+    marker: String,
+    documentLoad: ReaderDocumentLoad,
+    probe: (onResult: (String) -> Unit) -> Unit,
+    reload: () -> Unit,
+    isCurrent: () -> Boolean,
+) {
+    while (documentLoad.isPending) {
+        delay(READER_DOCUMENT_CHECK_INTERVAL_MS)
+        if (!isCurrent()) return
+        val probed = CompletableDeferred<String>()
+        probe { probed.complete(it) }
+        val result = withTimeoutOrNull(READER_DOCUMENT_PROBE_TIMEOUT_MS) { probed.await() }
+        if (!isCurrent()) return
+        if (result != null && isReaderDocumentOnScreen(result, marker)) {
+            documentLoad.documentConfirmed()
+            return
+        }
+        if (!documentLoad.documentMayBeLost()) return
+        documentLoad.retryStarted()
+        reload()
+    }
+}
 
 /**
  * The directory the reader's native WebView should store its browsing data (cookies, local
