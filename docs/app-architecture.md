@@ -2058,9 +2058,10 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
 - **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
   outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
   circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
-  badged item) and Mark All as Read (a frequent action) `.high`, the sort button and the list mode
-  menu `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (the
-  inner display's 360pt article list column in landscape still overflows sort and Mark All as Read),
+  badged item) and Mark All as Read (a frequent action) `.high`, the list mode menu (which also holds
+  the sort order) `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (measured
+  while the bar still held a sort button, the inner display's 360pt article list column in landscape
+  overflowed sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
   `visibilityPriority` exists only in the iOS 27 SDK, so this branch compiles only under
   `#if compiler(>=6.4)` (Xcode 27); a release built with the pinned Xcode 26.6 keeps the two groups
