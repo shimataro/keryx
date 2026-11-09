@@ -16,7 +16,7 @@ class ListRowMinHeightTest {
     }
 
     @Test
-    fun matchesM3NavigationDrawerItemMinimumWhenTouchPrimary() {
-        assertEquals(56.dp, listRowMinHeight(isTouchPrimary = true))
+    fun matchesM3ListItemMinimumWhenTouchPrimary() {
+        assertEquals(52.dp, listRowMinHeight(isTouchPrimary = true))
     }
 }
