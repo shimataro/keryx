@@ -1,13 +1,16 @@
 package works.merc.keryx.app.ui.common
 
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import org.jetbrains.compose.resources.DrawableResource
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.semantics.Role
@@ -118,11 +121,14 @@ actual fun <T> SegmentedControl(options: List<Pair<T, String>>, selected: T, onS
 }
 
 @Composable
-actual fun MenuChip(label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit) {
+actual fun MenuChip(icon: DrawableResource, label: String, accessibilityLabel: String, highlighted: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = highlighted,
         onClick = onClick,
         label = { Text(label) },
+        // Kept while selected rather than swapped for a checkmark: the selected container already
+        // says the mode narrows the list, and the menu also holds the sort order.
+        leadingIcon = { KeryxIcon(icon, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) },
         trailingIcon = { KeryxIcon(KeryxIcons.ExpandMore, contentDescription = null) },
         modifier = Modifier.semantics {
             role = Role.DropdownList

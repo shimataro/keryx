@@ -57,7 +57,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
@@ -66,6 +65,7 @@ import works.merc.keryx.app.core.searchTerms
 import works.merc.keryx.app.domain.ArticleListRow
 import works.merc.keryx.app.domain.displayTitle
 import works.merc.keryx.app.platform.NativeCheckMenuItem
+import works.merc.keryx.app.platform.NativeMenuSeparator
 import works.merc.keryx.app.platform.NativeMenuAnchor
 import works.merc.keryx.app.platform.NativeMenuEntry
 import works.merc.keryx.app.platform.NativeMenuShortcut
@@ -98,7 +98,6 @@ import works.merc.keryx.app.resources.home_search_placeholder
 import works.merc.keryx.app.resources.home_search_too_short
 import works.merc.keryx.app.resources.home_search_try_all_feeds
 import works.merc.keryx.app.resources.home_show_all_articles
-import works.merc.keryx.app.resources.home_sort_disabled_search
 import works.merc.keryx.app.resources.home_search
 import works.merc.keryx.app.resources.home_sort_newest
 import works.merc.keryx.app.resources.home_sort_oldest
@@ -413,13 +412,12 @@ fun ArticleListPane(
         revealRequest = revealRequest,
         listMode = listMode,
         starredModeEnabled = starredModeEnabled,
-        // Deliberately the real sort direction even while search disables the button — search
-        // order is always FTS5 relevance rank, but sortDirectionIcon's own KDoc says the button
-        // still reflects the current direction while disabled, it just can't be toggled.
+        // Deliberately the real sort direction even while search disables the sort items — search
+        // order is always FTS5 relevance rank, but the menu still checks the current direction.
         newestFirst = newestFirst,
         focused = focused,
         onSelectListMode = vm::setMode,
-        onToggleSort = { vm.toggleSort() },
+        onSetNewestFirst = vm::setNewestFirst,
         onMarkAllRead = { vm.markAllRead() },
         onSelectArticle = { vm.selectArticle(it); onActivated(); onSelectionAdvance() },
         onSetRead = { article, read -> vm.setRead(article, read) },
@@ -481,31 +479,19 @@ private fun NoSearchResultsHint(scopedBelowAllFeeds: Boolean) {
 }
 
 /**
- * Picks the sort button's icon for the current direction. Each direction gets its own asset rather
- * than one asset transformed at the call site: this button used to flip a single glyph vertically,
- * which reads as a direction only on an icon set whose sort glyph carries an arrow — Material
- * Symbols' does not, so the flip was invisible on Android. See `KeryxIcons`' own KDoc.
- *
- * Always reflects the current sort direction, even while disabled during a search (results stay
- * pinned to FTS5 relevance rank) — [ArticleListTopBar] conveys "disabled" through
- * `TooltipIconButton`'s own dimmed styling, not through swapping the glyph itself.
- */
-internal fun sortDirectionIcon(newestFirst: Boolean): DrawableResource =
-    if (newestFirst) KeryxIcons.SortDescending else KeryxIcons.SortAscending
-
-/**
  * The top bar shared by every mode [ArticleListPaneContent] renders (the current filter's own list,
- * or its search results): list-mode chip, notifications bell, sort, mark-all-read. Hide read is a
+ * or its search results): list-mode chip, notifications bell, mark-all-read. Hide read is a
  * View-menu command rather than a toolbar button: it is rarely needed, since a manual refresh or
  * sync, a filter switch and choosing Unread all clear the read rows the same way.
- * When [sortEnabled] is false (search is active, where the result order is fixed — FTS5 relevance
- * rank, or recency when every term is too short to be ranked, see FtsSearch), the sort button is
- * disabled and its tooltip explains why instead of showing the usual "sort by ...".
  *
- * The list mode ([listMode]) is a pop-up button — a [MenuChip] naming the current mode, opening a
- * native menu of all three ([listModeMenuEntries]) — rather than a segmented control: three labelled
- * segments do not fit the pane's 240dp minimum width beside the other controls. The chip is filled
- * whenever the mode narrows the list, so a narrowed list never looks like the whole filter.
+ * The list mode ([listMode]) is a pop-up button — a [MenuChip] wearing the filter icon and naming
+ * the current mode, opening a native menu ([listModeMenuEntries]) — rather than a segmented control:
+ * three labelled segments do not fit the pane's 240dp minimum width beside the other controls. The
+ * chip is filled whenever the mode narrows the list, so a narrowed list never looks like the whole
+ * filter. The same menu holds the sort order below a separator (as the Apple app's menu does) rather
+ * than a toolbar button of its own, since the order is rarely changed; when [sortEnabled] is false
+ * (search is active, where the result order is fixed — FTS5 relevance rank, or recency when every
+ * term is too short to be ranked, see FtsSearch) those items are disabled.
  *
  * When [onOpenDrawer] is non-null (this pane is shown at a narrow [PaneLayout], where the feed
  * list is a modal navigation drawer rather than an on-screen pane — see `ArticleListPane`'s KDoc),
@@ -530,7 +516,7 @@ internal fun ArticleListTopBar(
     listMode: ArticleListMode,
     onSelectListMode: (ArticleListMode) -> Unit,
     newestFirst: Boolean,
-    onToggleSort: () -> Unit,
+    onSetNewestFirst: (Boolean) -> Unit,
     onMarkAllRead: () -> Unit,
     starredModeEnabled: Boolean = true,
     sortEnabled: Boolean = true,
@@ -565,10 +551,18 @@ internal fun ArticleListTopBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val modeLabels = ArticleListMode.entries.associateWith { stringResource(listModeLabel(it)) }
+                val sortLabels = SortOrderLabels(
+                    newestFirst = stringResource(Res.string.home_sort_newest),
+                    oldestFirst = stringResource(Res.string.home_sort_oldest),
+                )
                 NativeMenuAnchor(
-                    items = { listModeMenuEntries(listMode, starredModeEnabled, modeLabels, onSelectListMode) },
+                    items = {
+                        listModeMenuEntries(listMode, starredModeEnabled, modeLabels, onSelectListMode) +
+                            sortOrderMenuEntries(newestFirst, sortEnabled, sortLabels, onSetNewestFirst)
+                    },
                 ) { open ->
                     MenuChip(
+                        icon = KeryxIcons.FilterList,
                         label = modeLabels.getValue(listMode),
                         accessibilityLabel = stringResource(Res.string.home_list_mode),
                         highlighted = listMode != ArticleListMode.All,
@@ -579,14 +573,6 @@ internal fun ArticleListTopBar(
                 ToolbarIconGroup {
                     if (notifVm != null) {
                         NotificationsBell(notifVm)
-                    }
-                    val sortTooltip = if (sortEnabled) {
-                        stringResource(if (newestFirst) Res.string.home_sort_oldest else Res.string.home_sort_newest)
-                    } else {
-                        stringResource(Res.string.home_sort_disabled_search)
-                    }
-                    TooltipIconButton(tooltip = sortTooltip, onClick = onToggleSort, enabled = sortEnabled) {
-                        KeryxIcon(sortDirectionIcon(newestFirst), contentDescription = sortTooltip)
                     }
                     val markAllReadTooltip = stringResource(Res.string.home_mark_all_read)
                     TooltipIconButton(tooltip = markAllReadTooltip, onClick = onMarkAllRead) {
@@ -623,6 +609,27 @@ internal fun listModeMenuEntries(
         enabled = entry != ArticleListMode.Starred || starredModeEnabled,
     ) { onSelect(entry) }
 }
+
+/** The localized labels of [sortOrderMenuEntries]' two items. */
+internal data class SortOrderLabels(val newestFirst: String, val oldestFirst: String)
+
+/**
+ * The sort order's part of the mode chip's menu: a separator, then "Newest first" / "Oldest first"
+ * as check items, both disabled while [enabled] is false (search results keep their own order).
+ * `NativeMenu` has no section header, so the separator alone sets them apart from the modes; the
+ * labels say what they are. Choosing the order already in effect is a no-op
+ * (`HomeViewModel.setNewestFirst`).
+ */
+internal fun sortOrderMenuEntries(
+    newestFirst: Boolean,
+    enabled: Boolean,
+    labels: SortOrderLabels,
+    onSetNewestFirst: (Boolean) -> Unit,
+): List<NativeMenuEntry> = listOf(
+    NativeMenuSeparator,
+    NativeCheckMenuItem(labels.newestFirst, checked = newestFirst, enabled = enabled) { onSetNewestFirst(true) },
+    NativeCheckMenuItem(labels.oldestFirst, checked = !newestFirst, enabled = enabled) { onSetNewestFirst(false) },
+)
 
 /** The key of the View menu's Ctrl/⌘ accelerator for [mode] (`AppMenuShortcut.ListMode*`). */
 private fun listModeShortcutKey(mode: ArticleListMode): Key = when (mode) {
@@ -665,8 +672,8 @@ internal fun ripplePulseFor(articleId: String, selectedId: String?, returnRipple
  * @param starredModeEnabled Whether [ArticleListMode.Starred] can be chosen (not under the Starred filter).
  * @param newestFirst Whether to sort articles from newest to oldest.
  * @param focused Whether the list has focus.
- * @param sortEnabled Whether the sort button in [ArticleListTopBar] can be toggled — `false` while
- *   search is active, where the result order is fixed to FTS5 relevance rank.
+ * @param sortEnabled Whether the sort order items in [ArticleListTopBar]'s mode menu can be chosen —
+ *   `false` while search is active, where the result order is fixed to FTS5 relevance rank.
  * @param titleMarkedById Search-highlight markup (see `FtsSearch`/`markedToAnnotatedString`) keyed
  *   by article id, applied as each row's title override instead of its plain title. `null` (the
  *   default) renders every row's own title unmodified — the current filter's own list has no
@@ -711,7 +718,7 @@ internal fun ArticleListPaneContent(
     listMode: ArticleListMode,
     onSelectListMode: (ArticleListMode) -> Unit,
     starredModeEnabled: Boolean = true,
-    onToggleSort: () -> Unit,
+    onSetNewestFirst: (Boolean) -> Unit,
     newestFirst: Boolean = true,
     onMarkAllRead: () -> Unit,
     onSelectArticle: (ArticleListRow) -> Unit,
@@ -774,7 +781,7 @@ internal fun ArticleListPaneContent(
             onSelectListMode = onSelectListMode,
             starredModeEnabled = starredModeEnabled,
             newestFirst = newestFirst,
-            onToggleSort = onToggleSort,
+            onSetNewestFirst = onSetNewestFirst,
             onMarkAllRead = onMarkAllRead,
             sortEnabled = sortEnabled,
             notifVm = notifVm,

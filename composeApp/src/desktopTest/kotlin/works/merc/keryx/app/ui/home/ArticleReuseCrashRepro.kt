@@ -77,7 +77,7 @@ class ArticleReuseCrashRepro {
                         selectedId = selected?.id,
                         listMode = ArticleListMode.All,
                         onSelectListMode = {},
-                        onToggleSort = {},
+                        onSetNewestFirst = {},
                         onMarkAllRead = {},
                         onSelectArticle = {},
                         modifier = Modifier.size(360.dp, 400.dp),
