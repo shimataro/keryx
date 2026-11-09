@@ -1749,7 +1749,12 @@ override, stays out of the template.
   guard has a known gap (an anchor inside a closed shadow root); see "A feed body's own JavaScript
   runs inside the article reader" in [known-issues.md](known-issues.md). This keeps the app from
   being an in-app browser, which Apple's age-rating questionnaire would count as unrestricted web
-  access. The Compose readers do not apply the main-frame rule.
+  access. The Compose readers do not apply the main-frame rule. Because WebKit drops a document load
+  still in flight when another top-level navigation starts (one the gate refuses included), the
+  reader tracks its own load until it commits and loads the document again when a top-level
+  navigation is refused or its load fails before then, up to a fixed number of times per document
+  (`:shared`'s `presentation/article/ReaderDocumentLoad.kt`) — otherwise the previous article stayed
+  on screen while the list showed the new selection.
 - **The SwiftUI reader reloads its document when WebKit's content process dies.** iOS may terminate
   the `WKWebView`'s WebContent process while the app is in the background — while the external
   browser a link opened is in front, say — which leaves the reader blank. `ArticleWebView`'s

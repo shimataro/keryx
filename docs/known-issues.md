@@ -645,6 +645,16 @@ readers (desktop, Android) keep their own link interception and do not have this
 rating counts in-app browsing of arbitrary pages as "unrestricted web access" (16+), which this keeps
 the SwiftUI app clear of.
 
+A script's top-level navigation can also cost the *next* article its load. WebKit stops a document
+load still in flight as soon as another top-level navigation starts, even one the gate then refuses,
+and often reports nothing about the dropped load — so an article whose script keeps setting
+`location` (measured: one doing so every millisecond lost the next article's load in 12 of 150 quick
+switches) left itself on screen while the list showed the newly selected article. The SwiftUI
+reader therefore tracks its own load until it commits and loads the document again when a
+top-level navigation is refused or its load fails while it is still in flight, up to
+`READER_DOCUMENT_RELOAD_LIMIT` times per document (`:shared`'s
+`presentation/article/ReaderDocumentLoad.kt`; 0 of 150 after the change).
+
 ### What a real fix would need
 
 Treating the body as untrusted markup rather than only containing its effects — stripping
