@@ -177,8 +177,9 @@ struct ArticleWebView {
         /// Tracks the document's own load until it commits, and decides when a load lost to another
         /// top-level navigation is loaded again — see `ReaderDocumentLoad` (`:shared`).
         let documentLoad = ReaderDocumentLoad()
-        /// Whether a reload of a lost document load is already on its way (`reloadIfDocumentLoadLost`).
-        private var reloadScheduled = false
+        /// The reload of a lost document load already on its way (`reloadIfDocumentLoadLost`), if any.
+        /// Any `load` cancels it: whatever that load starts replaces the document it would have reloaded.
+        private var pendingReload: Task<Void, Never>?
         var scrollRestoration = ReaderScrollRestoration(restored: nil)
         var loadedHtml: String?
         var onScroll: ((Double) -> Void)?
@@ -211,6 +212,9 @@ struct ArticleWebView {
         /// - Parameter isNewDocument: Whether `html` replaces the document (a new article, theme or
         ///   size), rather than loading the same one again (a retry or a recovery).
         func load(_ html: String, in webView: WKWebView, isNewDocument: Bool = false) {
+            // A reload scheduled for the previous document must not hold back this one's own recovery.
+            pendingReload?.cancel()
+            pendingReload = nil
             if isNewDocument {
                 documentLoad.documentRequested()
             } else {
@@ -250,11 +254,11 @@ struct ArticleWebView {
         /// again (outside the navigation callback) while `documentLoad` allows it.
         /// Refusals arrive in bursts (a page retrying its navigation); one reload answers them all.
         private func reloadIfDocumentLoadLost(in webView: WKWebView) {
-            guard !reloadScheduled, documentLoad.documentMayBeLost(), let html = loadedHtml else { return }
-            reloadScheduled = true
-            Task { @MainActor [weak self, weak webView] in
-                guard let self else { return }
-                reloadScheduled = false
+            guard pendingReload == nil, documentLoad.documentMayBeLost(), let html = loadedHtml else { return }
+            pendingReload = Task { @MainActor [weak self, weak webView] in
+                // Cancelled by a later `load`, which may already have scheduled a reload of its own.
+                guard let self, !Task.isCancelled else { return }
+                pendingReload = nil
                 // The load may have committed after all since this was scheduled: leave it alone.
                 guard let webView, documentLoad.isPending, loadedHtml == html else { return }
                 load(html, in: webView)
