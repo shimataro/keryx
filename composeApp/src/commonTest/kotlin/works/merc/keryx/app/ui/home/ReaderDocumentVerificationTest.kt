@@ -36,6 +36,27 @@ class ReaderDocumentVerificationTest {
         assertFalse(load.isPending)
     }
 
+    /**
+     * A probe the web view never answers counts as the document not being shown: a page whose script
+     * keeps navigating may never answer, and that is the case the reloads exist to recover from.
+     */
+    @Test
+    fun anUnansweredProbeIsPushedAgainUpToTheLimitThenGivenUpOn() = runTest {
+        val load = pendingLoad()
+        var reloads = 0
+
+        verifyReaderDocument(
+            marker = marker,
+            documentLoad = load,
+            probe = { _ -> },
+            reload = { reloads++ },
+            isCurrent = { true },
+        )
+
+        assertEquals(READER_DOCUMENT_RELOAD_LIMIT, reloads)
+        assertFalse(load.isPending)
+    }
+
     @Test
     fun aDocumentOnScreenIsConfirmedWithoutBeingPushedAgain() = runTest {
         val load = pendingLoad()

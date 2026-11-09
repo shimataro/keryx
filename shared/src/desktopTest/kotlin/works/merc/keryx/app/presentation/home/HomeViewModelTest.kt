@@ -2233,6 +2233,8 @@ class HomeViewModelTest {
         testScheduler.advanceUntilIdle()
         lookups.failGetById = false
 
+        // A successful lookup persists a2 as well, so check this went through the failure path.
+        assertEquals("header:a2", vm.readerArticleId())
         assertEquals("a2", LocalSettingsStore(dirOverride = dir).load().lastArticleId)
     }
 
