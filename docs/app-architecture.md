@@ -2019,6 +2019,16 @@ therefore come paired with the filter that produced them — `HomeViewModel.arti
 say whether the rows on screen are the current filter's. The switch is carried out once; a refresh
 landing later never scrolls the list.
 
+A scroll is also never asked of a list that is not on screen (`Home/ArticleListScrollGate.swift`, tested
+in `KeryxTests`). `scrollTo` is carried out in the list's next layout, and a list under the reader is
+not laid out: a swipe in the reader moves the selection and a restored selection lands while the list is
+hidden, so their scrolls would wait for the back navigation's first layout. The gate holds them instead
+and, when the list is back on screen, carries out only the latest, provided its row still exists; a list
+rebuilt on the way back from the sidebar drops it, since that list starts at the top. "Back on screen"
+means as the pop starts, not when it ends. The pill's jump is exempt: it can only be tapped on screen.
+This is a defensive change for a crash that was not reproduced — see "iOS: going back to the article
+list crashed in `UICollectionView`" in [known-issues.md](known-issues.md).
+
 ### iPhone Duo (iOS)
 
 iPhone Duo's outer display, and its inner display in landscape, show the navigation bar, toolbar and

@@ -1406,6 +1406,24 @@ orientations), with a feed of a few dozen articles whose bodies are longer than 
   article near the end of the list while the refresh is landing, and edge-swipe back to the list straight
   away; repeat, also opening and going back immediately, without a refresh.
 
+### (iOS) Going back to the article list
+
+`ArticleListScrollGateTests` covers when a scroll is held and carried out, but whether the list is
+reported as on screen, and the crash itself (see "iOS: going back to the article list crashed in
+`UICollectionView`" in [known-issues.md](known-issues.md)), need a simulator or device. On an iPhone, with a
+feed of a few dozen articles:
+
+- No crash: open an article, swipe through a few, and edge-swipe back to the list; repeat with the back
+  button, and while a refresh or sync is landing. Also start an edge swipe, cancel it, and go back afterwards.
+- After swiping past the rows that were on screen, going back shows the selected row, without the list
+  jumping a long way once it is back.
+- Open an article, send the app to the background and have iOS terminate it, relaunch into the reader, and go
+  back: the selected row is shown, and the row touched next does not jump.
+- A list opened from the sidebar starts at the top, and switching the filter goes back to the top.
+- Going back still flashes the row just read.
+- On an iPad, selecting an article off screen with a hardware keyboard and switching the filter still scroll
+  the list, in the three-pane layout and in portrait.
+
 ### (iOS) Restoring Home after termination
 
 `HomeRestorationTests` covers when the restored column and reader position are used and withdrawn, and

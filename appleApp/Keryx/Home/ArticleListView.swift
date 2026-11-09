@@ -47,6 +47,9 @@ struct ArticleListView: View {
     @State private var didShowFirstRows = false
     #if os(iOS)
     @State private var topReset = ArticleListTopReset()
+    @State private var scrollGate = ArticleListScrollGate()
+    /// Whether this list is on screen rather than under the reader.
+    @State private var listVisible = false
     #endif
     /// `noArticlesView`'s header height, so the empty state below it fills exactly the rest.
     @State private var emptyListHeaderHeight: CGFloat = 0
@@ -87,6 +90,12 @@ struct ArticleListView: View {
             firstRowId: displayedRows.first?.id
         )
     }
+
+    /// `attachedToWindow` too: its first change rebuilds the list, and a scroll carried out before
+    /// that would be lost with the list it was aimed at.
+    private var scrollGateInput: ArticleListScrollGate.Input {
+        ArticleListScrollGate.Input(canScroll: listVisible && attachedToWindow, remountGeneration: remountGeneration)
+    }
     #endif
 
     var body: some View {
@@ -123,15 +132,17 @@ struct ArticleListView: View {
                     // composition — including a restored `lastArticleId` selection — is not a switch
                     // and is not scrolled out from under.
                     .onChange(of: topResetInput, initial: true) { _, input in
-                        if let first = topReset.update(input) { proxy.scrollTo(first) }
+                        if let first = topReset.update(input) {
+                            requestScroll(ArticleListScrollGate.Target(rowId: first), proxy)
+                        }
                     }
                     // Only when the user selected an article (`selectionRevealRequests`) and it is off-screen
                     // (keyboard navigation) — a row already visible (e.g. just clicked) never jumps.
                     // Not on `selectedArticleId` itself: it also moves back without the user acting
                     // (a selection found tombstoned), which must not scroll the list.
                     .onChange(of: home.selectionRevealRequests) { _, _ in
-                        guard let id = home.selectedArticleId, !visibleRows.appearedIds.contains(id) else { return }
-                        proxy.scrollTo(id)
+                        guard let id = home.selectedArticleId else { return }
+                        requestScroll(ArticleListScrollGate.Target(rowId: id, onlyIfOffScreen: true), proxy)
                     }
                     .onChange(of: displayedRows.isEmpty) { _, isEmpty in
                         // The article restored from the previous session is already selected before
@@ -140,10 +151,12 @@ struct ArticleListView: View {
                         guard !didShowFirstRows, !isEmpty else { return }
                         didShowFirstRows = true
                         guard let id = home.selectedArticleId else { return }
-                        Task {
-                            await Task.yield()
-                            proxy.scrollTo(id)
-                        }
+                        requestScrollAfterUpdate(ArticleListScrollGate.Target(rowId: id), proxy)
+                    }
+                    // After the current update, so the rows coming back with the list have reported
+                    // themselves (`onlyIfOffScreen`).
+                    .onChange(of: scrollGateInput, initial: true) { _, input in
+                        if let target = scrollGate.update(input) { requestScrollAfterUpdate(target, proxy) }
                     }
             }
             #endif
@@ -157,6 +170,9 @@ struct ArticleListView: View {
                 Task { @MainActor in attachedToWindow = true }
             }
         }
+        // Outside the rebuilt `content` too, so a rebuild does not read as the list leaving the screen.
+        .onAppear { listVisible = true }
+        .onDisappear { listVisible = false }
         .focused(focusedPane, equals: .articleList)
         #endif
         .toolbar { toolbarContent }
@@ -682,6 +698,26 @@ struct ArticleListView: View {
     }
 
     #if os(iOS)
+    private func rowExists(_ id: String) -> Bool { displayed.indexById[id] != nil }
+
+    /// Every scroll but the pill's goes through here: the pill can only be tapped on screen.
+    private func requestScroll(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        guard let target = scrollGate.request(target, rowExists: rowExists) else { return }
+        carryOut(target, proxy)
+    }
+
+    private func requestScrollAfterUpdate(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        Task {
+            await Task.yield()
+            requestScroll(target, proxy)
+        }
+    }
+
+    private func carryOut(_ target: ArticleListScrollGate.Target, _ proxy: ScrollViewProxy) {
+        guard !target.onlyIfOffScreen || !visibleRows.appearedIds.contains(target.rowId) else { return }
+        proxy.scrollTo(target.rowId)
+    }
+
     private func scrollToFreshEnd(_ proxy: ScrollViewProxy) {
         guard let target = home.newestFirst ? displayedRows.first?.id : displayedRows.last?.id else { return }
         proxy.scrollTo(target, anchor: home.newestFirst ? .top : .bottom)
