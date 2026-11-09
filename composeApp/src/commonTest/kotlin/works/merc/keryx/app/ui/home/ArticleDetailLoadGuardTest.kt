@@ -17,8 +17,15 @@ class ArticleDetailLoadGuardTest {
     }
 
     @Test
-    fun neverLoadsWhileLoading() {
-        assertFalse(shouldLoadArticleHtml(LoadingState.Loading(0.5f), loadedHtml = null, html = "<html>a</html>"))
+    fun loadsANewDocumentWhileAnotherIsStillLoading() {
+        // The article on screen can keep the view loading indefinitely (its script setting
+        // `location`); the newer document must still be pushed.
+        assertTrue(shouldLoadArticleHtml(LoadingState.Loading(0.5f), loadedHtml = "<html>a</html>", html = "<html>b</html>"))
+    }
+
+    @Test
+    fun skipsAnIdenticalRepeatWhileLoading() {
+        assertFalse(shouldLoadArticleHtml(LoadingState.Loading(0.5f), loadedHtml = "<html>a</html>", html = "<html>a</html>"))
     }
 
     @Test
@@ -50,5 +57,34 @@ class ArticleDetailLoadGuardTest {
     @Test
     fun loadsSwitchingBetweenTwoDifferentArticles() {
         assertTrue(shouldLoadArticleHtml(LoadingState.Finished, loadedHtml = "<html>article-a</html>", html = "<html>article-b</html>"))
+    }
+
+    @Test
+    fun aMarkedDocumentCarriesItsKeyInItsHead() {
+        val html = "<html><head><style></style></head><body>a</body></html>"
+        val marked = markReaderDocument(html)
+        assertTrue(marked.startsWith("<html><head><meta name=\"keryx-document\" content=\"${readerDocumentKey(html)}\">"))
+        assertTrue(marked.endsWith("<style></style></head><body>a</body></html>"))
+    }
+
+    @Test
+    fun aDocumentWithoutAHeadIsStillMarked() {
+        assertTrue(markReaderDocument("<p>a</p>").startsWith("<meta name=\"keryx-document\""))
+    }
+
+    @Test
+    fun theProbedKeyIsRecognizedWhetherOrNotThePlatformQuotesIt() {
+        val html = "<html><head></head><body>a</body></html>"
+        val key = readerDocumentKey(html)
+        assertTrue(isReaderDocumentOnScreen("\"$key\"", html))
+        assertTrue(isReaderDocumentOnScreen(key, html))
+    }
+
+    @Test
+    fun anotherDocumentOrNoneIsNotOnScreen() {
+        val html = "<html><head></head><body>a</body></html>"
+        assertFalse(isReaderDocumentOnScreen("\"${readerDocumentKey("<html>b</html>")}\"", html))
+        assertFalse(isReaderDocumentOnScreen("\"\"", html))
+        assertFalse(isReaderDocumentOnScreen("null", html))
     }
 }

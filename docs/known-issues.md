@@ -653,7 +653,10 @@ switches) left itself on screen while the list showed the newly selected article
 reader therefore tracks its own load until it commits and loads the document again when a
 top-level navigation is refused or its load fails while it is still in flight, up to
 `READER_DOCUMENT_RELOAD_LIMIT` times per document (`:shared`'s
-`presentation/article/ReaderDocumentLoad.kt`; 0 of 150 after the change).
+`presentation/article/ReaderDocumentLoad.kt`; 0 of 150 after the change). The Compose readers, which
+let such a navigation through rather than refusing it, lost loads the same way (4 of 150 on desktop)
+and follow the same rule, checking a tag the document carries — see "A pushed document is pushed as
+soon as the view is ready" in [app-architecture.md](app-architecture.md).
 
 ### What a real fix would need
 

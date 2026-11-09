@@ -595,6 +595,17 @@ Android（API 29 以降のみ——`setVerticalScrollbarThumbDrawable`／
 まま伝播し、ライブラリの生成リトライタイマが止まらなくなることが、クリック時にアプリ全体がフリーズする
 原因でもあった）。
 
+**文書はビューの準備ができしだい読み込ませ、画面に出るまで確かめる。** `shouldLoadArticleHtml` は、
+ビューが `Initializing` を過ぎていれば `Finished` を待たずに新しい文書を読み込ませる。表示中の記事が自分で
+遷移を始め続けている間（スクリプトが `location` を設定する場合）はネイティブビューが読み込み中のままになり、
+`Finished` を待つ判定では次の文書をまったく読み込ませなかったため。こうした遷移は進行中の文書の読み込みも
+止めるが、ライブラリはそれを何も報告しない（読み込み中のフラグは立ったままで、URL はどちらも `about:blank`）。
+そこで `ArticleWebView` は各文書に `readerDocumentKey` を入れた `<meta name="keryx-document">` を付け、
+読み込ませてから 1 秒ごとにページからその値を読み戻す。まだ画面に出ていない文書は、`:shared` の
+`READER_DOCUMENT_RELOAD_LIMIT` 回まで読み込ませ直す（`presentation/article/ReaderDocumentLoad.kt`。SwiftUI の
+リーダーも同じ規則に従う）。1 ミリ秒ごとに `location` を設定するスクリプトを含む記事でデスクトップ版を実測した
+ところ、素早い切り替え 150 回中、新しい選択の下に前の記事が残ったのは修正前 4 回、修正後 0 回だった。
+
 **Android がバックグラウンドでプロセスを終了させても、読んでいた位置は残る。** `ArticleWebView` は
 ネイティブビューの縦スクロール位置をスクロール可能な高さに対する割合として記録し
 （`platform/NativeWebViewScroll.kt` の `observeNativeWebViewScroll`。`android.webkit.WebView` 自身のスクロール・

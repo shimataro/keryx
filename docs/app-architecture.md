@@ -604,6 +604,19 @@ to the host executable, which fails with Access Denied whenever that location is
 running forever, which was the cause of an
 app-wide freeze on click).
 
+**A pushed document is pushed as soon as the view is ready, and checked until it is on screen.**
+`shouldLoadArticleHtml` pushes a new document whenever the view is past `Initializing`, without
+waiting for `Finished`: while the article on screen keeps starting navigations of its own (its script
+setting `location`), the native view stays loading and a guard that waited for `Finished` never
+pushed the next document at all. Such a navigation also drops a document load still in flight, and
+the library reports nothing about it — the loading flag stays set and the URL is `about:blank`
+either way — so `ArticleWebView` tags each document with a `<meta name="keryx-document">` carrying
+its `readerDocumentKey` and, every second after a push, reads that tag back from the page; a document
+not yet on screen is pushed again, up to `:shared`'s `READER_DOCUMENT_RELOAD_LIMIT` times
+(`presentation/article/ReaderDocumentLoad.kt`, the rule the SwiftUI reader follows too). Measured on
+desktop with an article whose script sets `location` every millisecond: the previous article stayed
+on screen under the new selection in 4 of 150 quick switches before, 0 after.
+
 **The reading position survives Android killing the process in the background.** `ArticleWebView`
 records the native view's vertical scroll position as a fraction of its scrollable height
 (`platform/NativeWebViewScroll.kt`'s `observeNativeWebViewScroll`, through `android.webkit.WebView`'s

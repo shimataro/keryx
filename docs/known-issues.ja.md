@@ -651,6 +651,9 @@ SwiftUI アプリのリーダー（`ReaderNavigationGate`）は、さらにブ�
 自分を表示したまま残っていた。SwiftUI のリーダーはそこで、自分の読み込みをコミットまで追跡し、読み込み中に
 最上位の遷移を拒否したとき、または読み込みが失敗したときに、文書を読み直す。読み直しは文書 1 つにつき
 `READER_DOCUMENT_RELOAD_LIMIT` 回まで（`:shared` の `presentation/article/ReaderDocumentLoad.kt`。修正後は 150 回中 0 回）。
+Compose のリーダーは、こうした遷移を拒否せず通すが、同じように読み込みを失っていた（デスクトップで 150 回中 4 回）。
+こちらも同じ規則に従い、文書に付けた目印を確かめる——[app-architecture.ja.md](app-architecture.ja.md) の
+「文書はビューの準備ができしだい読み込ませ」を参照。
 
 ### 本当の修正に必要なこと
 
