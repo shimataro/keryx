@@ -120,7 +120,6 @@
     <string name="home_sort_section">表示順</string>
     <string name="home_sort_newest">新しい順</string>
     <string name="home_sort_oldest">古い順</string>
-    <string name="home_sort_disabled_search">検索中は並び替えできません</string>
     <string name="home_already_subscribed">このフィードはすでに購読済みです</string>
     <string name="home_sync">同期</string>
     <string name="home_syncing">同期中…</string>

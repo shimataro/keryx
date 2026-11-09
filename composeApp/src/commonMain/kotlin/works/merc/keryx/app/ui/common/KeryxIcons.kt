@@ -26,10 +26,10 @@ import org.jetbrains.compose.resources.painterResource
  * later, don't just match each icon by semantic name** — grep for
  * `graphicsLayer`/`rotate`/`scaleX`/`scaleY` modifiers applied around each `KeryxIcon(...)` call
  * site first; see `ui-guidelines`' "Native-feel restyle" section for the concrete incident this
- * warning comes from (Tabler's `arrows-sort` silently breaking `ArticleListPane`'s sort-direction
+ * warning comes from (Tabler's `arrows-sort` silently breaking the former sort button's direction
  * flip). A two-state icon therefore gets a dedicated asset per state rather than one asset
- * transformed at the call site: [SortAscending]/[SortDescending] and [ArrowBack] (as opposed to a
- * flipped [ChevronRight]) both exist for that reason.
+ * transformed at the call site: [ArrowBack] (as opposed to a flipped [ChevronRight]) and the
+ * [ExpandMore]/[ChevronRight] pair exist for that reason.
  */
 expect object KeryxIcons {
     // Chrome / actions (Outlined)
@@ -50,6 +50,7 @@ expect object KeryxIcons {
     val ExpandMore: DrawableResource
     val FileDownload: DrawableResource
     val FileUpload: DrawableResource
+    val FilterList: DrawableResource
     val Info: DrawableResource
     val Link: DrawableResource
     val LinkOff: DrawableResource
@@ -59,8 +60,6 @@ expect object KeryxIcons {
     val Refresh: DrawableResource
     val Search: DrawableResource
     val Share: DrawableResource
-    val SortAscending: DrawableResource
-    val SortDescending: DrawableResource
     val Storage: DrawableResource
     val ThisDevice: DrawableResource
     val Tune: DrawableResource

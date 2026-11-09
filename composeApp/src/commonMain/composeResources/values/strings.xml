@@ -125,7 +125,6 @@
     <string name="home_sort_section">Sort Order</string>
     <string name="home_sort_newest">Newest first</string>
     <string name="home_sort_oldest">Oldest first</string>
-    <string name="home_sort_disabled_search">Sorting is unavailable during search</string>
     <string name="home_already_subscribed">You’re already subscribed to this feed</string>
     <string name="home_sync">Sync</string>
     <string name="home_syncing">Syncing…</string>
