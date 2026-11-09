@@ -1712,11 +1712,20 @@ class HomeViewModel(
     }
 
     /**
-     * Toggles between newest-first and oldest-first article ordering.
+     * Toggles between newest-first and oldest-first article ordering (the View menu's route).
      */
     fun toggleSort() {
-        _newestFirst.value = !_newestFirst.value
-        settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = _newestFirst.value) }
+        setNewestFirst(!_newestFirst.value)
+    }
+
+    /**
+     * Sets the article ordering explicitly (the list mode menu's check items) and saves it for the
+     * next launch. Choosing the order already in effect changes nothing and writes nothing.
+     */
+    fun setNewestFirst(newestFirst: Boolean) {
+        if (_newestFirst.value == newestFirst) return
+        _newestFirst.value = newestFirst
+        settingsRepository.mutateLocalSettings { it.copy(lastNewestFirst = newestFirst) }
     }
 
     // --- Search controls ---

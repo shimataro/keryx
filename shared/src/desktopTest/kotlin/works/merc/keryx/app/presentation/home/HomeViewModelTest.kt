@@ -5958,6 +5958,47 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun setNewestFirstUpdatesTheOrderAndPersistsIt() = runTest {
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setNewestFirst(false)
+        assertFalse(vm.newestFirst.value)
+        assertEquals(false, store.load().lastNewestFirst)
+
+        vm.setNewestFirst(true)
+        assertTrue(vm.newestFirst.value)
+        assertEquals(true, store.load().lastNewestFirst)
+    }
+
+    @Test
+    fun setNewestFirstToTheCurrentOrderWritesNothing() = runTest {
+        val store = LocalSettingsStore(dirOverride = dir)
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setNewestFirst(true)
+
+        assertTrue(vm.newestFirst.value)
+        assertNull(store.load().lastNewestFirst)
+    }
+
+    @Test
+    fun toggleSortAndSetNewestFirstShareOneState() = runTest {
+        val vm = newViewModel()
+        subscribeAll(vm)
+
+        vm.setNewestFirst(false)
+        vm.toggleSort()
+        assertTrue(vm.newestFirst.value)
+
+        vm.toggleSort()
+        vm.setNewestFirst(false)
+        assertFalse(vm.newestFirst.value)
+    }
+
+    @Test
     fun unreadOnlyAndNewestFirstFallBackToDefaultsWhenNothingSaved() = runTest {
         val vm = newViewModel()
         subscribeAll(vm)
