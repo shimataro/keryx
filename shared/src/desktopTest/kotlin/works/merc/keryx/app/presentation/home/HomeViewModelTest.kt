@@ -5856,6 +5856,29 @@ class HomeViewModelTest {
         assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
     }
 
+    /**
+     * A selection whose body lookup failed is persisted for the next launch, so a lookup that fails
+     * every time (a row too large for Android's CursorWindow, say) must not throw out of the
+     * ViewModel's construction there — Home would never open, on every launch. It is restored as
+     * nothing instead.
+     */
+    @Test
+    fun restartRestoresNothingWhenTheSavedArticlesLookupFails() = runTest {
+        db.insertFeed("f1")
+        db.insertArticle("a1", "f1")
+        val store = LocalSettingsStore(dirOverride = dir)
+        store.save(store.load().copy(lastFilter = "feed:f1", lastArticleId = "a1", lastFocusedPane = "ArticleDetail"))
+
+        lookups.failGetById = true
+        val vm = newViewModel()
+        lookups.failGetById = false
+
+        assertEquals(ArticleFilter.Feed("f1"), vm.filter.value)
+        assertFalse(vm.articleRestoredOnLaunch)
+        assertNull(vm.selectedArticleId.value)
+        assertEquals(InitialHomePane.FeedList, vm.initialHomePane)
+    }
+
     @Test
     fun restartPinsRestoredReadArticleSoItStaysVisibleInUnreadOnlyList() = runTest {
         db.insertFeed("f1")

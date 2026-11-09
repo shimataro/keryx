@@ -908,8 +908,17 @@ class HomeViewModel(
         // A tombstone can land while the app is closed, so the restored row is filtered the same way
         // selectArticle filters a concurrently-deleted one — otherwise the next launch would select
         // and pin deleted content.
+        //
+        // Best effort (docs/error-design.md): a failing lookup restores nothing. A selection whose body
+        // lookup failed is persisted too (see applyHydratedSelection), so a lookup that fails every time
+        // would otherwise throw out of this constructor on every launch and Home would never open.
         val restoredArticle = settingsRepository.getLocalSettings().lastArticleId
-            ?.let { articleRepository.getArticleById(it) }
+            ?.let { id ->
+                runCatchingUnlessCancelled { articleRepository.getArticleById(id) }.getOrElse { e ->
+                    Log.warn(TAG, "Restoring the last selected article failed", e)
+                    null
+                }
+            }
             ?.takeIf { it.deleted_at == null }
         if (restoredArticle != null) {
             if (restoredArticle.is_read == 1L) {
@@ -1137,7 +1146,8 @@ class HomeViewModel(
             if (token == latestSelectionToken && selectionCursorId == article.id) {
                 _headerArticleId.value = article.id
                 // It is still the selection on screen, so it is the one the next launch restores. Whether
-                // it was tombstoned is unknown here, but the launch-time restore filters tombstones itself.
+                // it was tombstoned is unknown here, but the launch-time restore filters tombstones itself,
+                // and restores nothing if its own lookup of this article fails again.
                 settingsRepository.mutateLocalSettings { it.copy(lastArticleId = article.id) }
             }
             return
