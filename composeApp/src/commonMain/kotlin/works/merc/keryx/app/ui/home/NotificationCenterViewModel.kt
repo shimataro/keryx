@@ -29,7 +29,7 @@ class NotificationCenterViewModel(
     val alertToSurface: StateFlow<AppNotification?> = alerts.alertToSurface
 
     /** See [NotificationAlerts.markAlertsSurfaced]. */
-    fun markAlertsSurfaced() = alerts.markAlertsSurfaced()
+    fun markAlertsSurfaced(shown: AppNotification) = alerts.markAlertsSurfaced(shown)
 
     /** Requests [notification]'s own action (a no-op for a notification with none). */
     fun requestAction(notification: AppNotification) {
