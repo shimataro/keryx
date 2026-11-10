@@ -16,10 +16,10 @@ import works.merc.keryx.app.domain.NotificationCenter
 
 /**
  * Which warning/error notification still needs announcing in a transient surface with no queue of
- * its own — Android's foreground Snackbar and the iOS alert toast (`AlertToastAnnouncement.swift`). Split out of what was `ui/home/NotificationCenterViewModel.kt` (Compose-only); the rest of
- * that class — `pendingAction`/`requestAction`/`clearPendingAction` — stays per UI, since which
- * notification-center row is awaiting a host to resolve its action is a UI-navigation concern, not
- * shared behavior.
+ * its own — Android's foreground Snackbar and the iOS alert toast (`AlertToastAnnouncement.swift`).
+ * Which notification-center row is awaiting a host to resolve its action
+ * (`pendingAction`/`requestAction`/`clearPendingAction`) stays per UI, since that is a UI-navigation
+ * concern, not shared behavior.
  */
 class NotificationAlerts(
     private val center: NotificationCenter,

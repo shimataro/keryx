@@ -17,9 +17,9 @@ import works.merc.keryx.app.core.Result
  * same call as the emit. [sink] defaults to a no-op so desktop and the 8 existing
  * `NewArticleNotifier()` call sites in tests stay unchanged.
  *
- * Deliberately NOT recorded in the in-app notification center (the bell): new articles are already
- * durably visible in the article list and the unread badges, so a bell entry would only be noise —
- * the bell is reserved for things worth looking back at (warnings, errors, a new app version), each
+ * Deliberately NOT recorded in the in-app notification center: new articles are already durably
+ * visible in the article list and the unread badges, so an entry would only be noise — the
+ * notification center is reserved for things worth looking back at (warnings, errors, a new app version), each
  * of which offers a next action.
  */
 class NewArticleNotifier(private val sink: OsNotificationSink = OsNotificationSink { _, _ -> }) {

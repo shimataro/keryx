@@ -1,6 +1,6 @@
 import Testing
 
-/// `SettingsNavigation` decides which Settings tab a bell-row `ShowSettingsTab` action lands on —
+/// `SettingsNavigation` decides which Settings tab a notification-center row's `ShowSettingsTab` action lands on —
 /// including the ids this app has no tab for.
 @MainActor
 @Suite

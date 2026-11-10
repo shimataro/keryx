@@ -170,9 +170,7 @@ internal fun FeedListPane(
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
     hasNativeAppMenu: Boolean = works.merc.keryx.app.platform.hasNativeAppMenu,
 ) {
-    // notifVm is fixed per call site (HomeScreen always passes one; tests may not), so this
-    // conditional collect never changes shape between recompositions.
-    val notificationCount = notifVm?.let { it.items.collectAsState().value.size } ?: 0
+    val notificationCount = notificationCountOf(notifVm)
     val feeds by vm.structuralFeeds.collectAsState()
     val tags by vm.tags.collectAsState()
     val feedTagMap by vm.feedTagMap.collectAsState()
@@ -804,15 +802,16 @@ internal fun FeedListPane(
             VerticalScrollbarIfNeeded(listState)
         }
 
-        // The fixed footer: the notification center's entry point and, on a platform with no native application menu bar (Android — see
-        // hasNativeAppMenu's own KDoc), the in-pane entry point to Settings; this pane's header
-        // carries the app's title instead (FeedListToolbarRow). No HorizontalDivider above it: the
-        // ui-guidelines skill's divider policy reserves that for semantic section breaks within the
-        // scrolling list, not for a fixed-row/scroll-area boundary, which the shared
-        // surfaceContainerLow tone already reads clearly enough on its own (see FeedListToolbarRow
-        // just above, which gets the same treatment at the opposite edge). The notification row is
-        // always there, empty or not, so the footer never changes height under the list; its count
-        // (SidebarRow draws it only when > 0) is what says something has arrived.
+        // The fixed footer: the notification center's entry point and, on a platform with no
+        // native application menu bar (Android — see hasNativeAppMenu's own KDoc), the in-pane entry
+        // point to Settings; this pane's header carries the app's title instead
+        // (FeedListToolbarRow). No HorizontalDivider above it: the ui-guidelines skill's divider
+        // policy reserves that for semantic section breaks within the scrolling list, not for a
+        // fixed-row/scroll-area boundary, which the shared surfaceContainerLow tone already reads
+        // clearly enough on its own (see FeedListToolbarRow just above, which gets the same
+        // treatment at the opposite edge). The notification row is always there, empty or not, so
+        // the footer never changes height under the list; its count (SidebarRow draws it only when
+        // > 0) is what says something has arrived.
         val showNotificationRow = notifVm != null
         if (showNotificationRow || !hasNativeAppMenu) {
             // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see

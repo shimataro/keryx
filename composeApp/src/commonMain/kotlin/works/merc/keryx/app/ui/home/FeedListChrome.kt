@@ -56,13 +56,9 @@ import works.merc.keryx.app.ui.common.TooltipIconButton
  * Reads [vm]'s refreshing/syncing state itself (rather than taking it as a parameter) so a
  * refresh/sync toggle only invalidates this row's own restart scope, not the whole pane.
  *
- * The bell lives on `ArticleListPane`'s own header at every layout/depth this pane can be on
- * screen at (Triple's permanent pane, or the narrow drawer, which never displaces the article
- * list the way the old sliding-window Dual/depth-1-Single narrow layouts used to) — see
- * `HomePaneLayout.kt`'s `feedListIsDrawer`/`visiblePanes` — so this row never has to host one.
- *
- * Settings, this pane's other in-pane entry point on such a platform, is *not* rendered here —
- * see [FeedListPane]'s own settings footer row, below its drag-host `Box`.
+ * The notification center's entry point is *not* rendered here either: it is [NotificationCenterRow]
+ * in [FeedListPane]'s fixed footer, as is Settings, this pane's other in-pane entry point on such a
+ * platform — both below its drag-host `Box`.
  *
  * @param hasNativeAppMenu See [FeedListPane]'s own KDoc.
  */

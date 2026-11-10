@@ -186,8 +186,9 @@ struct HomeView: View {
         .task {
             await home.startObserving()
         }
-        // Here rather than in the sidebar's notification row, which only exists while there is
-        // something to show — it needs the items to decide that.
+        // Here, for Home's whole lifetime, rather than in the sidebar's notification row: the alert
+        // toast below reads the same notification center, and a compact width can show Home
+        // without the sidebar (and so without the row) on screen.
         .task {
             await notifications.startObserving()
         }

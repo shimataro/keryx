@@ -70,7 +70,7 @@ import works.merc.keryx.app.ui.i18n.notificationText
 
 /**
  * Notification panel, hosted by [works.merc.keryx.app.ui.common.KeryxAnchoredPanel] from
- * `ArticleListPane`'s bell icon — a non-modal anchored popover on desktop, a `ModalBottomSheet` on
+ * [NotificationCenterRow] at the bottom of the feed list — a non-modal anchored popover on desktop, a `ModalBottomSheet` on
  * Android (see that composable's own KDoc, and `.claude/skills/ui-guidelines/SKILL.md`'s
  * Popup-vs-Dialog section for why this is a popover, not an `AlertDialog`, in the first place).
  *

@@ -7,7 +7,7 @@ enum class AppNotificationLevel { INFO, WARNING, ERROR }
  * UI). `action` is nullable — `null` means the notification row has no next action.
  *
  * Two families:
- * - Self-contained in the bell popover: [OpenUrl] (hands off to the external browser).
+ * - Self-contained in the notification panel: [OpenUrl] (hands off to the external browser).
  * - Needs another screen's state changed, so the host (`HomeScreen` / `App`) resolves it through
  *   `NotificationCenterViewModel.pendingAction`: [ShowFeedDetail], [ShowSettingsTab],
  *   [ShowInfoDialog], [ResetCloudData].
@@ -34,7 +34,7 @@ sealed interface AppNotificationAction {
 }
 
 /**
- * An in-session notification shown in the notification center (bell icon).
+ * An in-session notification shown in the notification center.
  * Session-only — never persisted. Warnings/errors plus INFO notices worth looking back at (e.g. a
  * new app version). [action] is the notification's "next action": either an inline action button
  * ([AppNotificationAction.ResetCloudData]) or what clicking the row does. [text] is what it says,

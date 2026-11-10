@@ -40,7 +40,7 @@ class NotificationAlertsTest {
         advanceUntilIdle()
         assertNull(alerts.alertToSurface.value)
 
-        // INFO is a new-version notice or a finished OPML import — the bell's badge, not a Snackbar.
+        // INFO is a new-version notice or a finished OPML import — the notification center's row, not a Snackbar.
         center.add(alert("i", AppNotificationLevel.INFO))
         advanceUntilIdle()
         assertNull(alerts.alertToSurface.value)

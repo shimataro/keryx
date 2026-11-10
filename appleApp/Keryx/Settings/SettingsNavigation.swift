@@ -1,7 +1,7 @@
 import Observation
 
 /// Which Settings tab is selected — owned by `AppModel` rather than by `SettingsView` itself, so a
-/// bell-row `ShowSettingsTab` action (`NotificationBell.swift`) can pick the tab *before* the
+/// notification-center row's `ShowSettingsTab` action (`NotificationCenterRow.swift`) can pick the tab *before* the
 /// Settings window exists. A request made while that window was closed would otherwise be lost: a
 /// view created after the request has no change to observe, and would open on its own default tab.
 /// Matches Compose's own `SettingsDialog.kt`, which opens on the requested `initialTab`.
@@ -48,7 +48,7 @@ final class SettingsNavigation {
     }
 
     /// The navigation path the iOS Settings sheet opens with: its tab list alone for General,
-    /// otherwise that tab pushed onto it — so a bell-row `ShowSettingsTab` lands directly on the
+    /// otherwise that tab pushed onto it — so a notification-center row's `ShowSettingsTab` lands directly on the
     /// requested tab rather than on the list.
     static func initialPath(_ tab: String, cloudSyncAvailable: Bool) -> [String] {
         let visible = visibleTab(tab, cloudSyncAvailable: cloudSyncAvailable)

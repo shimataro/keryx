@@ -182,7 +182,7 @@ class CloudSessionTest {
     }
 
     /**
-     * A connect followed by a refresh that also falls back must leave one bell entry, not two:
+     * A connect followed by a refresh that also falls back must leave one notification-center entry, not two:
      * the refresh path recurs on every expiry, so the warning has to coalesce.
      */
     @Test
