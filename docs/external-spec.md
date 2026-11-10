@@ -91,7 +91,7 @@ data exists in the cloud it is automatically merged (imported) during the initia
 - Feed health management: 301/308 auto-updates the subscription URL (notification), 410 Gone shows a warning in the notification center, consecutive errors show an indicator in the feed list
 - In-app update on Windows, Linux, and Android (download and install, not just a link to the release
   page), and through Sparkle in the macOS build from GitHub Releases; the Mac App Store build has no
-  update controls, since the App Store updates it. Updates are surfaced via the notification-center bell, desktop
+  update controls, since the App Store updates it. Updates are surfaced via the notification center, desktop
   task tray, and application menu; clicking any of those routes opens Settings ▸ Updates. Every
   download and install is an explicit user action; downloaded files are verified against the GitHub
   release's SHA-256 digest (EdDSA signature on macOS) before installation. Install forms the app

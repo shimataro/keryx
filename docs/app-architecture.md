@@ -199,10 +199,10 @@ Tests live next to the code they test: `shared/src/{commonTest,desktopTest,andro
     macOS-toolbar-style capsule, and M3's own `PlainTooltip`, respectively), KeryxRaisedSurface (a distinctly-tinted
     `colorScheme.surfaceContainerHigh` tonal container instead of desktop's hairline-bordered flat
     card), KeryxBadgedIcon (M3's own `BadgedBox`/`Badge` instead of desktop's hand-rolled pill —
-    used by `NotificationsBell`), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
+    used by the drawer button's notification count), KeryxSettingRow (a real M3 `ListItem`, whose own tap target covers
     the whole row — backs `SettingsComponents.kt`'s `LinkRow`/`ActionLinkRow`/`SwitchRow`),
-    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationsBell`'s notification
-    popover and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
+    KeryxAnchoredPanel (a real M3 `ModalBottomSheet` — backs `NotificationCenterRow`'s notification
+    panel and `TagColorPickerPopup`; necessary, not just idiomatic, since a bare `Popup` there
     would composite behind the article reader's `WebView` the same way a bare Compose overlay does
     on desktop, see "Article Reader" below), KeryxPaneTopBar (a real M3 `TopAppBar` — backs each of
     the 3 panes' own header row, not a shared app-wide bar), DatabaseMerger/DatabaseSnapshot
@@ -450,7 +450,7 @@ resolves the live DB's real path per platform (see `db-schema.md`).
 ### In-App Update
 
 `domain/UpdateRepository` is the same kind of app-lifetime, Koin-`single` orchestrator as
-`SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, bell)
+`SyncRepository` above — a `StateFlow<UpdateState>` every UI surface (Updates tab, tray, notification center)
 reads, so a closed settings dialog doesn't cancel an in-flight download. It composes three seams:
 `domain/UpdateChecker` (candidate selection and version-comparison policy only — the GitHub
 Releases HTTP request and JSON parsing live in `data/remote/ReleaseFeedSource`, which
@@ -2057,9 +2057,9 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
 
 - **Toolbar priorities.** A vertical bar overflows its items into "…" from the bottom up, which on the
   outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
-  circle. From iOS 27 the article list's items carry `visibilityPriority`: the notification bell (a
-  badged item) and Mark All as Read (a frequent action) `.high`, the list mode menu (which also holds
-  the sort order) `.low` — the order the HIG asks for. A horizontal bar ignores these priorities (measured
+  circle. From iOS 27 the article list's items carry `visibilityPriority`: Mark All as Read (a frequent
+  action) `.high`, the list mode menu (which also holds the sort order) `.low` — the order the HIG
+  asks for. (The notification bell that used to sit here moved to the bottom of the sidebar.) A horizontal bar ignores these priorities (measured
   while the bar still held a sort button, the inner display's 360pt article list column in landscape
   overflowed sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.

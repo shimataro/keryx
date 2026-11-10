@@ -122,9 +122,9 @@ class KeryxSdk private constructor(private val koin: Koin) {
 
     private var notificationAlertsCreated = false
 
-    /** Which warning/error still needs announcing in a transient surface with no queue of its own
-     * (Android's foreground Snackbar equivalent — a future SwiftUI surface could use the same
-     * signal instead of reimplementing the recurrence-dedup rule). */
+    /** Which warning/error still needs announcing in a transient surface with no queue of its own —
+     * the iOS alert toast (`AlertToastAnnouncement.swift`), Android's foreground Snackbar
+     * equivalent, which uses this rather than reimplementing the recurrence-dedup rule. */
     val notificationAlerts: NotificationAlerts
         get() = koin.get<NotificationAlerts>().also { notificationAlertsCreated = true }
 

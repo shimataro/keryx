@@ -127,17 +127,17 @@ not in global chrome:
 - Hide read — not in the header row: a View-menu command only (`AppMenuTree`,
   the SwiftUI `HomeCommands`), since a manual refresh or sync, a filter switch
   and choosing Unread already clear the kept read rows (`external-spec.md` §7).
-- Notifications (the bell) — `ArticleListPane`'s own header row, at every
-  layout and every reachable depth: the article list is visible everywhere
-  except `PaneLayout.Single`'s article-detail depth (see `visiblePanes` in
-  `app-architecture.md`), so unlike before the feed list became a drawer,
-  there is no narrow-layout screen the bell would otherwise be unreachable
-  from, and `FeedListPane` never has to host a second one. It is a single
-  icon and therefore stays bare (no `ToolbarIconGroup` capsule), separated
-  from the add/refresh/sync cluster by the standard 8dp and placed ahead of
-  it. `ArticleDetailPane` deliberately has none at any layout — a reading
-  screen carries no notification entry point, matching how Android's own
-  apps treat a detail destination.
+- Notifications — not in any toolbar: `NotificationCenterRow`, a `SidebarRow`
+  in `FeedListPane`'s fixed footer (above Android's settings row), shown only
+  while the notification center holds something. The history is empty most of
+  the time, so a permanent toolbar slot for it was wasted room. The bell lived
+  in the feed list once before and moved to `ArticleListPane`'s header when the
+  feed list became a drawer at narrower widths, where it could no longer be
+  seen; that gap is now covered by a count badge on `ArticleListTopBar`'s
+  drawer button (`KeryxBadgedIcon`), plus Android's `ForegroundAlertSnackbar`
+  for the moment an alert arrives. `ArticleListPane` and `ArticleDetailPane`
+  have no entry point of their own (`NotificationCenterPlacementTest` pins
+  this). The SwiftUI app puts the same row at the bottom of its sidebar.
 
 Panes are tinted left-to-right with increasingly bright Material3 tonal
 surface roles, so boundaries read from tone alone rather than requiring a
@@ -1313,7 +1313,7 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   confirmation dialog behind it.
   **That confirmation dialog passes `KeryxAlertDialog(destructive = true)`** — as
   does every confirmation whose action deletes or resets something (delete
-  folder/tag, unsubscribe, reset sync data, from Settings or the bell). Android's
+  folder/tag, unsubscribe, reset sync data, from Settings or the notification center). Android's
   `actual` paints the confirm `TextButton`'s *text* in `colorScheme.error` (a
   text button has no container, so `errorContainer` has nothing to tint; this is
   M3's own treatment of a destructive dialog action); desktop's `actual` ignores
@@ -1354,8 +1354,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
   when checked. The Android `actual`s delegate to M3's own `Switch`/`Checkbox`
   — see the `KeryxTextField` bullet below for why that's the right call on
   that platform. `KeryxBadgedIcon` (`ui/common/KeryxBadge.kt`, expect/actual) —
-  the count badge overlaid on an icon (currently only the notification bell,
-  in `ArticleListPane` and — at a single-pane width — `FeedListPane`) — follows
+  the count badge overlaid on an icon (currently only `ArticleListTopBar`'s
+  drawer button, carrying the notification center's count) — follows
   the same split: desktop's `actual` draws a
   hand-rolled `Box`/`Text` pill (`error` fill, `onError` text), Android's
   `actual` uses M3's own `BadgedBox`/`Badge`. Don't add a raw `Box`/`Text` pill
@@ -1561,8 +1561,8 @@ side, Android's own Material 3 ripple/shapes/components on the other:
     URL-copied confirmation — see `ArticleUrlCopier`'s own KDoc: reported via a real M3 `Snackbar`,
     from the shared copy handler on every route, below API 33 only, where the OS itself doesn't
     already show a clipboard-copy confirmation. The second is `HomeScreen`'s `ForegroundAlertSnackbar`,
-    which announces a warning/error the moment it is raised — the bell's badge alone only reaches a
-    user already looking at the pane hosting it, and these alerts are raised asynchronously by the
+    which announces a warning/error the moment it is raised — the notification center's footer row
+    (or the drawer button's badge) only reaches a user already looking at it, and these alerts are raised asynchronously by the
     startup tasks and the background worker with no OS notification behind them; see
     `docs/error-design.md`. OPML import/export results are not among them: they are shown inline in
     Settings ▸ Data on every route. Desktop has no snackbar at all, per this app's
@@ -1637,11 +1637,12 @@ side, Android's own Material 3 ripple/shapes/components on the other:
 - **Popup vs. Dialog**: non-modal, anchored info panels (no scrim, dismiss on
   outside click, positioned relative to the control that opened them) use
   `KeryxAnchoredPanel` (see above) — `NotificationCenterSheet`, opened from
-  whichever pane currently hosts the bell (see "Pane structure & tonal roles"
-  above), is the first example (a `Box` around the
-  `TooltipIconButton` holds local `showNotifications` state and anchors the
-  panel with `alignment = Alignment.TopEnd` + a small `anchorOffsetY`, desktop-only
-  positioning — see `KeryxAnchoredPanel`'s own KDoc). The tag
+  `NotificationCenterRow` at the bottom of the feed list (see "Pane structure &
+  tonal roles" above), is the first example (a `Box` around the row holds local
+  `showNotifications` state and anchors the panel with `alignment =
+  Alignment.BottomStart` + minus the row's measured height as `anchorOffsetY`, so
+  it opens above the row rather than off the bottom of the window — desktop-only
+  positioning, see `KeryxAnchoredPanel`'s own KDoc). The tag
   color picker is the second: `TagColorPickerPopup`
   (`ui/home/TagColorPicker.kt`), anchored to the tag row's own color dot, which
   is clickable at all times and independent of whether that row is being

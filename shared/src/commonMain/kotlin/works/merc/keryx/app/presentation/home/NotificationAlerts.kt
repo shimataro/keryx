@@ -16,8 +16,7 @@ import works.merc.keryx.app.domain.NotificationCenter
 
 /**
  * Which warning/error notification still needs announcing in a transient surface with no queue of
- * its own — Android's foreground Snackbar today; a future SwiftUI equivalent could use the same
- * signal. Split out of what was `ui/home/NotificationCenterViewModel.kt` (Compose-only); the rest of
+ * its own — Android's foreground Snackbar and the iOS alert toast (`AlertToastAnnouncement.swift`). Split out of what was `ui/home/NotificationCenterViewModel.kt` (Compose-only); the rest of
  * that class — `pendingAction`/`requestAction`/`clearPendingAction` — stays per UI, since which
  * notification-center row is awaiting a host to resolve its action is a UI-navigation concern, not
  * shared behavior.
@@ -48,7 +47,7 @@ class NotificationAlerts(
      * A `StateFlow` instead holds the alert until a collector is there to show it.
      *
      * `INFO` is excluded: a new-version notice or a finished OPML import is not an alert, and the
-     * bell's badge is the right weight for them.
+     * notification center's footer row is the right weight for them.
      */
     val alertToSurface: StateFlow<AppNotification?> =
         combine(center.items, surfacedAlerts) { notifications, surfaced ->
@@ -60,7 +59,7 @@ class NotificationAlerts(
      * Marks every alert currently in the notification center as announced.
      *
      * Deliberately all of them, not just the one that was shown: when several arrive at once only
-     * the newest is announced (a transient surface shows one at a time, and the bell's badge
+     * the newest is announced (a transient surface shows one at a time, and the notification center's row
      * already carries the count), so marking one at a time would walk backwards through the queue
      * and end on the *oldest*.
      */
