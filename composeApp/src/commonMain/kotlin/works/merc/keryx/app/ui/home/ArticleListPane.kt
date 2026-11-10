@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.core.ArticleFilter
 import works.merc.keryx.app.core.encode
@@ -91,6 +92,7 @@ import works.merc.keryx.app.resources.home_no_articles
 import works.merc.keryx.app.resources.home_no_feeds
 import works.merc.keryx.app.resources.home_no_starred_articles
 import works.merc.keryx.app.resources.home_open_feed_list
+import works.merc.keryx.app.resources.home_open_feed_list_with_notifications
 import works.merc.keryx.app.resources.home_refresh_this_list
 import works.merc.keryx.app.resources.home_search_clear
 import works.merc.keryx.app.resources.home_search_no_results
@@ -542,7 +544,12 @@ internal fun ArticleListTopBar(
                         TooltipIconButton(tooltip = openDrawerLabel, onClick = onOpenDrawer) {
                             // The notification center lives in the drawer's footer, so while the
                             // drawer is closed its count rides on the button that opens it.
-                            KeryxBadgedIcon(KeryxIcons.Menu, contentDescription = openDrawerLabel, count = notificationCount)
+                            val drawerDescription = if (notificationCount > 0) {
+                                pluralStringResource(Res.plurals.home_open_feed_list_with_notifications, notificationCount, notificationCount)
+                            } else {
+                                openDrawerLabel
+                            }
+                            KeryxBadgedIcon(KeryxIcons.Menu, contentDescription = drawerDescription, count = notificationCount)
                         }
                     },
                 ) {

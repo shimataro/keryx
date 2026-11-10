@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.DrawableResource
@@ -23,6 +24,8 @@ internal actual fun KeryxBadgedIcon(icon: DrawableResource, contentDescription: 
         if (count > 0) {
             Box(
                 Modifier
+                    // The count is in the icon's contentDescription; see the expect's KDoc.
+                    .clearAndSetSemantics {}
                     .offset(x = 6.dp, y = (-4).dp)
                     .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
                     .clip(CircleShape)
