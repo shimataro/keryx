@@ -19,10 +19,11 @@ import works.merc.keryx.app.ui.common.KeryxIcon
 import works.merc.keryx.app.ui.common.KeryxIcons
 
 /**
- * The notification center's entry point: a row fixed to the bottom of `FeedListPane`, shown only
- * while the notification center holds something ([count] > 0 — the caller decides, since an empty
- * history has nothing to open). It replaced the bell in the article list's toolbar, so the toolbar
- * no longer gives a permanent slot to a list that is empty most of the time.
+ * The notification center's entry point: a row fixed to the bottom of `FeedListPane`, always shown so
+ * it stays in one place (an empty center opens to [NotificationCenterSheet]'s own empty state). The
+ * [count] is drawn only when it is above zero (`SidebarRow`'s own rule). It replaced the bell in the
+ * article list's toolbar, so the toolbar no longer gives a slot to a list that is empty most of the
+ * time.
  *
  * Opening it shows [NotificationCenterSheet] in a [KeryxAnchoredPanel] — on desktop a `Popup`
  * opening *above* the row (it sits at the bottom of the window, so opening downward would run off

@@ -37,7 +37,7 @@ import kotlin.test.assertEquals
 
 /**
  * The notification center's entry point is a row in the feed list's footer ([NotificationCenterRow]),
- * shown only while the center holds something. The article list no longer carries any entry point of
+ * always shown (with its count only while the center holds something). The article list no longer carries any entry point of
  * its own: at a layout where the feed list is a drawer, the count rides on the drawer button instead.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -45,6 +45,9 @@ class NotificationCenterPlacementTest {
 
     /** The label of the footer row (`Res.string.home_notifications`). */
     private val rowLabel = "通知"
+
+    /** `Res.string.notification_empty`. */
+    private val emptyText = "通知はありません"
 
     private val notificationText = NotificationText.FeedGone("placement-test-feed")
 
@@ -166,8 +169,35 @@ class NotificationCenterPlacementTest {
     }
 
     @Test
-    fun theFeedListShowsNoRowWhenTheCenterIsEmpty() {
-        runWithHost(PaneLayout.Triple, 1, notifications = 0) { assertEquals(0, it) }
+    fun theFeedListShowsOneRowWithoutACountWhenTheCenterIsEmpty() = runDesktopComposeUiTest {
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(0)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
+            waitForIdle()
+            assertEquals(1, onAllNodesWithText(rowLabel).fetchSemanticsNodes().size)
+            assertEquals(0, onAllNodesWithText("0").fetchSemanticsNodes().size)
+        }
+    }
+
+    @Test
+    fun openingTheRowWhenEmptyShowsTheEmptyState() = runDesktopComposeUiTest {
+        withGlobalClock {
+            val (driver, db) = inMemoryDb()
+            val center = newCenter(0)
+            val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+            useHomeViewModel(driver, db) { fixture ->
+                setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
+                waitForIdle()
+                onAllNodesWithText(emptyText).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+
+                onNodeWithText(rowLabel).performClick()
+                waitForIdle()
+
+                onNodeWithText(emptyText).assertExists()
+            }
+        }
     }
 
     @Test
@@ -175,19 +205,25 @@ class NotificationCenterPlacementTest {
         runWithHost(PaneLayout.Triple, 1, notifications = 3, passNotifVmToFeedList = false) { assertEquals(0, it) }
     }
 
-    @Test
-    fun theRowShowsTheCountAndOpensThePanelOnClick() = runDesktopComposeUiTest {
-        // The panel is hosted in a Popup, whose content resolves Koin from the global context rather
-        // than the test's KoinApplication, so the Clock it injects is registered globally here.
+    /**
+     * The panel is hosted in a Popup, whose content resolves Koin from the global context rather
+     * than the test's KoinApplication, so the Clock it injects is registered globally around [block].
+     */
+    private suspend fun withGlobalClock(block: suspend () -> Unit) {
         val clockModule = module { single<Clock> { Clock { 0L } } }
         // Another test may have left a global Koin started; load into it, or start one, then undo.
         val startedHere = GlobalContext.getOrNull() == null
         if (startedHere) startKoin { modules(clockModule) } else loadKoinModules(clockModule)
         try {
-            runPanelScenario()
+            block()
         } finally {
             if (startedHere) stopKoin() else unloadKoinModules(clockModule)
         }
+    }
+
+    @Test
+    fun theRowShowsTheCountAndOpensThePanelOnClick() = runDesktopComposeUiTest {
+        withGlobalClock { runPanelScenario() }
     }
 
     private suspend fun androidx.compose.ui.test.ComposeUiTest.runPanelScenario() {
