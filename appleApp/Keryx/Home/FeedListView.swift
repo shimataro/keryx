@@ -59,22 +59,20 @@ struct FeedListView: View {
 
     var body: some View {
         rows
-        // The notification center's entry point, pinned below the rows only while it holds
-        // something: it shortens the list's viewport without moving any row already on screen.
+        // The notification center's entry point, pinned below the rows and always there, so it
+        // stays in one place; its count is what says something has arrived.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !notifications.items.isEmpty {
-                VStack(spacing: 0) {
-                    Divider()
-                    NotificationCenterRow(
-                        home: home,
-                        notifications: notifications,
-                        settingsNavigation: settingsNavigation,
-                        focusedPane: focusedPane,
-                        onShowFeed: onOpenArticleList
-                    )
-                }
-                .background(.bar)
+            VStack(spacing: 0) {
+                Divider()
+                NotificationCenterRow(
+                    home: home,
+                    notifications: notifications,
+                    settingsNavigation: settingsNavigation,
+                    focusedPane: focusedPane,
+                    onShowFeed: onOpenArticleList
+                )
             }
+            .background(.bar)
         }
         .toolbar { toolbarContent }
         #if os(iOS)

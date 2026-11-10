@@ -2,9 +2,10 @@ import KeryxShared
 import SwiftUI
 
 /// The notification center's entry point: a row pinned to the bottom of the sidebar (`FeedListView`),
-/// shown only while the notification center holds something — the caller decides, as Compose's own
-/// `NotificationCenterRow` (`NotificationCenterRow.kt`) does — so it takes no toolbar slot for a list
-/// that is empty most of the time (see `error-design.md`'s "Notification Center"). Tapping it opens the
+/// always shown so it stays in one place, with the count only while the notification center holds
+/// something — as Compose's own `NotificationCenterRow` (`NotificationCenterRow.kt`) — so it takes no
+/// toolbar slot for a list that is empty most of the time (see `error-design.md`'s "Notification
+/// Center"). An empty center opens to the popover's own empty state. Tapping it opens the
 /// list in a popover (a sheet at a compact width). Only `ResetCloudData` is excluded from row-clicking
 /// (destructive, own inline confirm); every other row's action runs on tap and closes the popover
 /// afterward, matching Compose's own `onNavigated` (`NotificationCenterSheet.kt`).
@@ -36,9 +37,12 @@ struct NotificationCenterRow: View {
             HStack {
                 Label(L("home_notifications"), systemImage: "bell")
                 Spacer(minLength: 8)
-                Text("\(unreadCount)")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                // Only above zero, like the feed rows' unread counts.
+                if unreadCount > 0 {
+                    Text("\(unreadCount)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -48,7 +52,7 @@ struct NotificationCenterRow: View {
         .help(L("home_notifications"))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L("home_notifications"))
-        .accessibilityValue("\(unreadCount)")
+        .accessibilityValue(unreadCount > 0 ? "\(unreadCount)" : "")
         .accessibilityAddTraits(.isButton)
         .popover(isPresented: $isShowingPopover) {
             popoverContent

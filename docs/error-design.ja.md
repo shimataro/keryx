@@ -178,10 +178,10 @@ SwiftUI アプリは String Catalog で。唯一の例外は新着記事の OS �
   アプリを見ているユーザーには新着が届く様子が既に見えており、頼んでいない更新のために割り込む価値は
   ないため（[external-spec.ja.md](external-spec.ja.md) §9 の「更新のフィードバック」を参照）。いずれの場合も
   共有ゲート `NewArticleNotifier.notifyIfEnabled`（新着件数 > 0 かつ `notificationEnabled` 設定）を経由する。
-- **入口は、フィード一覧の下端の行で、通知センターに何かあるときだけ表示する。** 行には通知センターの名前と
-  件数を表示し（Compose は `ui/home/NotificationCenterRow.kt`、SwiftUI は `NotificationCenterRow.swift`）、押すと
+- **入口は、フィード一覧の下端の行で、常に表示する。** 行には通知センターの名前と、通知があるときは
+  件数を表示し（0 件のときは件数を出さず、開くと「通知はありません」と表示）（Compose は `ui/home/NotificationCenterRow.kt`、SwiftUI は `NotificationCenterRow.swift`）、押すと
   行の上に一覧を開く（Android はボトムシート、iPhone の狭い幅ではシート）。履歴はほとんどの時間空なので、
-  ツールバーの枠は使わない。フィード一覧がドロワーになる幅（Compose の狭い幅）では、ドロワーを開くボタンに
+  ツールバーの枠は使わない。また、出たり消えたりせず同じ場所にあるので、上のフィード一覧の高さも変わらない。フィード一覧がドロワーになる幅（Compose の狭い幅）では、ドロワーを開くボタンに
   件数をバッジで表示する。記事一覧と `ArticleDetailPane` には入口を置かない（正確な規則は `ui-guidelines`
   スキルを参照）。
 - バックグラウンド更新中の警告は UI コンテキストが無いため通知センターにのみ記録し、

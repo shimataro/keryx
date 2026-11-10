@@ -128,9 +128,11 @@ not in global chrome:
   the SwiftUI `HomeCommands`), since a manual refresh or sync, a filter switch
   and choosing Unread already clear the kept read rows (`external-spec.md` §7).
 - Notifications — not in any toolbar: `NotificationCenterRow`, a `SidebarRow`
-  in `FeedListPane`'s fixed footer (above Android's settings row), shown only
-  while the notification center holds something. The history is empty most of
-  the time, so a permanent toolbar slot for it was wasted room. The bell lived
+  in `FeedListPane`'s fixed footer (above Android's settings row), always
+  shown so it stays in one place, its count drawn only above zero. The history
+  is empty most of the time, so a permanent toolbar slot for it was wasted room;
+  a sidebar row costs little and, unlike a row that comes and goes, never
+  changes the list's height. The bell lived
   in the feed list once before and moved to `ArticleListPane`'s header when the
   feed list became a drawer at narrower widths, where it could no longer be
   seen; that gap is now covered by a count badge on `ArticleListTopBar`'s

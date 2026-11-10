@@ -139,8 +139,9 @@ internal const val FEED_LIST_DRAG_HOST_TEST_TAG = "feed-list-drag-host"
  *   has no entry point of its own on this pane at all: the field the user actually types into
  *   lives in `ArticleListPane`'s own expanded search bar alongside the results (see that
  *   composable's own KDoc), reachable through the article list's own search icon.
- * @param notifVm Backs the footer's notification center row ([NotificationCenterRow]), shown only
- *   while the notification center holds something. `null` (tests only) leaves the row out.
+ * @param notifVm Backs the footer's notification center row ([NotificationCenterRow]), always shown
+ *   (its count only while the notification center holds something). `null` (tests only) leaves the
+ *   row out.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  * @param hasNativeAppMenu Overridable for tests only — see `platform/PlatformOs.kt`'s own KDoc.
  *   Gates this pane's header (an `app_name` title instead of none) and its settings footer row
@@ -797,17 +798,16 @@ internal fun FeedListPane(
             VerticalScrollbarIfNeeded(listState)
         }
 
-        // The fixed footer: the notification center's entry point (only while it holds something)
-        // and, on a platform with no native application menu bar (Android — see
+        // The fixed footer: the notification center's entry point and, on a platform with no native application menu bar (Android — see
         // hasNativeAppMenu's own KDoc), the in-pane entry point to Settings; this pane's header
         // carries the app's title instead (FeedListToolbarRow). No HorizontalDivider above it: the
         // ui-guidelines skill's divider policy reserves that for semantic section breaks within the
         // scrolling list, not for a fixed-row/scroll-area boundary, which the shared
         // surfaceContainerLow tone already reads clearly enough on its own (see FeedListToolbarRow
-        // just above, which gets the same treatment at the opposite edge). The rows sit below the
-        // list, so the notification row appearing shortens the list's viewport without moving any
-        // row already on screen.
-        val showNotificationRow = notifVm != null && notificationCount > 0
+        // just above, which gets the same treatment at the opposite edge). The notification row is
+        // always there, empty or not, so the footer never changes height under the list; its count
+        // (SidebarRow draws it only when > 0) is what says something has arrived.
+        val showNotificationRow = notifVm != null
         if (showNotificationRow || !hasNativeAppMenu) {
             // The bottom inset clears the navigation bar on Android's edge-to-edge layout (see
             // HomeScreen's Scaffold) — this footer, not the scrolling list above it, is the pane's
@@ -816,7 +816,7 @@ internal fun FeedListPane(
             Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
                 if (showNotificationRow) {
                     NotificationCenterRow(
-                        notifVm = notifVm!!,
+                        notifVm = notifVm,
                         count = notificationCount,
                         // In the narrow layout's drawer this closes it, so the destination shows.
                         onNavigated = { onSelectionAdvance?.invoke() },
