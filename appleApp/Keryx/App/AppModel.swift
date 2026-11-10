@@ -63,7 +63,7 @@ final class AppModel {
             // The one observation of the shared OPML state, for the app's lifetime: the File menu,
             // the Settings window and Home's request presenter all read it.
             Task { await opmlTransfer.startObserving(sdk.opmlController) }
-            self.notifications = NotificationCenterObservable(center: sdk.notificationCenter)
+            self.notifications = NotificationCenterObservable(center: sdk.notificationCenter, alerts: sdk.notificationAlerts)
             self.needsSetup = !sdk.settingsRepository.isSetupComplete()
             // Requesting authorization is `KeryxApp`'s job now, gated on `notificationEnabled`
             // (both at startup and whenever the setting is switched on) — see its own
