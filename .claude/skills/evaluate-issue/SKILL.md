@@ -313,9 +313,12 @@ your recommendation first and its grounds. **Adopt** → Fix & commit; **Decline
 
 #### 8.3 — Reply drafts
 
-Output a suggested reply for every item — including `Needs info` (what is missing), and the items
-to fix (that the point is accepted and will be addressed). Several items of one issue may share
-one reply, covering each of them.
+Output a suggested reply for every item that is not Fix & commit — including `Needs info` (what
+is missing). Several items of one issue may share one reply, covering each of them.
+
+A Fix & commit item gets no reply here: until its plan is approved and its fix verified, a reply
+promising the change could turn out false. Its reply is drafted once its outcome is known
+(Step 9), in the same form.
 
 - Write it in the language of the author's own text; if that cannot be confidently identified,
   use English.
@@ -350,22 +353,25 @@ If no item is Fix & commit, output `No implementation plan is needed.` and go to
 3. **Refine and approve** — invoke the `refine-plan` skill with the plan file path, resolve any
    question it asks, then call `ExitPlanMode`. This approval is the URL's one-time run
    confirmation (`.claude/etc/per-item-commit.md` §1). If the user rejects it, implement and
-   commit nothing (`Plan rejected`); revise the plan instead if they ask for changes.
+   commit nothing (`Plan rejected`) and draft a reply (8.3's form) for each Fix & commit item
+   saying it is not being addressed this time; revise the plan instead if they ask for changes.
 4. **Fix, verify, commit each item** — right before the first edit, re-run
    `git status --porcelain` and confirm it still matches 9.1's baseline; if not, commit nothing
-   and end this URL (`Working tree not clean`). Then, for each Fix & commit item in order (one
+   and end this URL (`Working tree not clean`) — with no reply drafts, since nothing has been
+   decided; tell the user to clean the tree and re-run. Then, for each Fix & commit item in order (one
    item's failure never stops the rest):
    1. Implement that item's section of the plan only, following `.claude/CLAUDE.md`.
    2. Verify per `.claude/etc/per-item-commit.md` §2 — re-measuring first when the plan says so
       (`.claude/etc/temporary-instrumentation.md` §4) — then the item's planned Verification, at
       minimum `./gradlew build` or the narrowest test target that clearly covers the change.
-   3. On failure, revert per `.claude/etc/per-item-commit.md` §3 and record
-      `Verification failed: <reason>`.
+   3. On failure, revert per `.claude/etc/per-item-commit.md` §3, record
+      `Verification failed: <reason>`, and draft a reply (8.3's form) saying the change was
+      attempted but is not included yet and remains under consideration.
    4. On success, commit per `.claude/etc/per-item-commit.md` §4 (on a `v*` branch it runs
       `/feature-branch` before the first commit).
 5. **Hand-off** — output the line to put in the pull request's body (`Closes #{number}`, or
-   `Refs #{number}` when only part of the issue was done) and a reply draft for the issue
-   reporting what was done, in the same form as 8.3. Never push and never post.
+   `Refs #{number}` when only part of the issue was done) and a reply draft (8.3's form) for
+   each committed item reporting what was done. Never push and never post.
 
 ### Step 10 — Closing summary
 
