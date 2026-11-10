@@ -251,7 +251,7 @@ so it and any in-flight download outlive a closed settings dialog) drives it pas
 `VERIFY`, `INSTALL` — see below for the one Android install failure that never reaches `Failed` at
 all). Every surface — the Updates settings
 tab, the one update menu item the desktop tray and the Help menu share (both resolved by
-`tray/UpdateMenuEntry.kt`'s `updateMenuEntry`), the notification-center bell — reads this same
+`tray/UpdateMenuEntry.kt`'s `updateMenuEntry`), the notification center — reads this same
 state, so they can never disagree about what's currently true. **No step ever runs unattended**: a
 check never auto-downloads, and a downloaded file never auto-installs — download and install are
 each a separate, explicit click (Updates tab button, or that menu item).
@@ -516,14 +516,14 @@ app (whose `.zip` passes those same checks) and internal builds.
   (`LinkRow`, always present once a release is known, whether or not it's installable) as the
   manual alternative. The tab's own "Check for updates" button is a separate element entirely,
   underneath the check-interval control at the bottom of the tab — always present regardless of
-  `plan`, not something the headline row's own button "falls back" to. The notification-center bell
+  `plan`, not something the headline row's own button "falls back" to. The notification center
   gets one row per meaningful moment —
   "a new version is available" when `check()` finds one, then that same row is dismissed and
   replaced (never left to accumulate alongside it) by "ready to install" once a download finishes —
   reusing the existing `ShowSettingsTab("updates")`/`OpenUrl(releaseUrl)` actions rather than adding
   a dedicated one (see "Notification Center" in [error-design.md](error-design.md)). A download
-  failure itself is deliberately **not** posted to the bell — the tray item and the Updates tab
-  (with its own "Retry" button) already surface it, and a `postNotification` call for every
+  failure itself is deliberately **not** posted to the notification center — the tray item and the
+  Updates tab (with its own "Retry" button) already surface it, and a `postNotification` call for every
   transient network hiccup would be noisier than useful.
 
 **Integrity verification** relies entirely on the GitHub Releases API's own `assets[].digest`

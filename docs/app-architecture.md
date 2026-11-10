@@ -2059,7 +2059,7 @@ exists. What was measured on the iOS 27.1 simulator, and what follows from it:
   outer display in landscape hid Mark All as Read first and squeezed the search button into an empty
   circle. From iOS 27 the article list's items carry `visibilityPriority`: Mark All as Read (a frequent
   action) `.high`, the list mode menu (which also holds the sort order) `.low` — the order the HIG
-  asks for. (The notification bell that used to sit here moved to the bottom of the sidebar.) A horizontal bar ignores these priorities (measured
+  asks for. A horizontal bar ignores these priorities (measured
   while the bar still held a sort button, the inner display's 360pt article list column in landscape
   overflowed sort and Mark All as Read),
   so this changes vertical bars only. Before iOS 27 the items stay in their two groups.
