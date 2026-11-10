@@ -147,6 +147,11 @@ internal fun FeedListToolbarRow(
  * @param selected Whether the row is selected.
  * @param focused Whether the sidebar is focused.
  * @param onClick The action invoked when the row is clicked.
+ * @param clickModifier Replaces the row's default click handling ([listRowClickable]: a selectable
+ *   tab, kept out of focus traversal because its pane moves through its rows by keyboard) — for a
+ *   row that is a button rather than a destination, such as [NotificationCenterRow]. Given the
+ *   row's own interaction source, so hover and press still reach [listRowSurface]. [onClick] is
+ *   then unused.
  * @param isTouchPrimary Overridable for tests only — see `feedListReorderDrag`'s own KDoc.
  */
 @Composable
@@ -157,12 +162,13 @@ internal fun SidebarRow(
     selected: Boolean,
     focused: Boolean,
     onClick: () -> Unit,
+    clickModifier: ((MutableInteractionSource) -> Modifier)? = null,
     isTouchPrimary: Boolean = works.merc.keryx.app.platform.isTouchPrimary,
 ) {
     val rowInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth()
-            .listRowClickable(rowInteraction, selected, onClick)
+            .then(clickModifier?.invoke(rowInteraction) ?: Modifier.listRowClickable(rowInteraction, selected, onClick))
             .listRowSurface(
                 selectionBackground(selected, focused),
                 ListRowKind.NavItem,

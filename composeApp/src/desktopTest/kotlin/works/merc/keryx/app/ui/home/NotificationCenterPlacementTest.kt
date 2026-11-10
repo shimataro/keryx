@@ -7,6 +7,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -249,6 +256,32 @@ class NotificationCenterPlacementTest {
             assertEquals(1, navigated)
             assertEquals(0, advanced)
         }
+    }
+
+    @Test
+    fun theRowIsAFocusableButtonThatReportsWhetherItsPanelIsOpen() = runDesktopComposeUiTest {
+        // Not a selectable tab like the feed rows: a button that opens the panel, reachable with Tab.
+        val center = newCenter(1)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        setContent {
+            KoinIsolatedContext(context = remember { isolatedKoin() }) {
+                NotificationCenterRow(notifVm = notifVm, count = 1)
+            }
+        }
+        waitForIdle()
+        val row = onNodeWithText(rowLabel)
+
+        row.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+        row.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
+        row.assert(SemanticsMatcher.keyIsDefined(SemanticsActions.Expand))
+
+        row.requestFocus()
+        waitForIdle()
+        row.assertIsFocused()
+
+        row.performClick()
+        waitForIdle()
+        onNodeWithText(rowLabel).assert(SemanticsMatcher.keyIsDefined(SemanticsActions.Collapse))
     }
 
     @Test

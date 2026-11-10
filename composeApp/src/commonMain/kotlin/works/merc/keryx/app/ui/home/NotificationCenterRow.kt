@@ -1,5 +1,6 @@
 package works.merc.keryx.app.ui.home
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -8,8 +9,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.stringResource
 import works.merc.keryx.app.resources.Res
@@ -41,14 +47,29 @@ internal fun NotificationCenterRow(
     var showNotifications by remember { mutableStateOf(false) }
     var rowHeightPx by remember { mutableStateOf(0) }
     val density = LocalDensity.current
+    var keyboardFocused by remember { mutableStateOf(false) }
+    val toggle = { showNotifications = !showNotifications }
     Box(Modifier.onSizeChanged { rowHeightPx = it.height }) {
         SidebarRow(
             icon = { KeryxIcon(KeryxIcons.Notifications, null) },
             label = stringResource(Res.string.home_notifications),
             count = count.toLong(),
-            selected = false,
-            focused = false,
-            onClick = { showNotifications = !showNotifications },
+            // Highlighted while it holds keyboard focus (reached with Tab), the way a list row shows
+            // the keyboard's position; never otherwise, since this row is not a destination.
+            selected = keyboardFocused && LocalKeyboardEngaged.current,
+            focused = true,
+            onClick = toggle,
+            // A button that opens a panel, not a selectable destination: announced as a button with
+            // its open/closed state, and reachable with Tab, unlike the feed rows (whose pane moves
+            // through them with the arrow keys instead).
+            clickModifier = { interaction ->
+                Modifier
+                    .onFocusChanged { keyboardFocused = it.isFocused }
+                    .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = toggle)
+                    .semantics {
+                        if (showNotifications) collapse { toggle(); true } else expand { toggle(); true }
+                    }
+            },
             isTouchPrimary = isTouchPrimary,
         )
         if (showNotifications) {
