@@ -15,13 +15,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.runBlocking
-import org.koin.compose.KoinApplication
-import org.koin.core.context.GlobalContext
-import org.koin.core.context.loadKoinModules
-import org.koin.core.context.startKoin
-import org.koin.core.context.unloadKoinModules
-import org.koin.core.context.stopKoin
-import org.koin.dsl.koinConfiguration
+import org.koin.compose.KoinIsolatedContext
+import org.koin.dsl.koinApplication
 import org.koin.dsl.module
 import works.merc.keryx.app.core.AppNotification
 import works.merc.keryx.app.core.AppNotificationLevel
@@ -42,6 +37,19 @@ import kotlin.test.assertEquals
  */
 @OptIn(ExperimentalTestApi::class)
 class NotificationCenterPlacementTest {
+
+    /**
+     * A Koin context of this test's own, provided through `KoinIsolatedContext`. Not the
+     * `KoinApplication` composable: that starts a *global* Koin only when none exists, and otherwise
+     * reuses the existing global one and ignores its own modules, so what these tests resolved
+     * depended on whichever test class had left a global Koin behind.
+     */
+    private fun isolatedKoin() = koinApplication {
+        modules(module {
+            single { testMenuController }
+            single<Clock> { Clock { 0L } }
+        })
+    }
 
     /** The label of the footer row (`Res.string.home_notifications`). */
     private val rowLabel = "通知"
@@ -82,14 +90,7 @@ class NotificationCenterPlacementTest {
         layout: PaneLayout,
         depth: Int,
     ) {
-        KoinApplication(
-            configuration = koinConfiguration {
-                modules(module {
-                    single { testMenuController }
-                    single<Clock> { Clock { 0L } }
-                })
-            },
-        ) {
+        KoinIsolatedContext(context = remember { isolatedKoin() }) {
             val visible = visiblePanes(layout, depth)
             Box(Modifier.size(1000.dp, 600.dp)) {
                 Row(Modifier.fillMaxSize()) {
@@ -183,20 +184,18 @@ class NotificationCenterPlacementTest {
 
     @Test
     fun openingTheRowWhenEmptyShowsTheEmptyState() = runDesktopComposeUiTest {
-        withGlobalClock {
-            val (driver, db) = inMemoryDb()
-            val center = newCenter(0)
-            val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
-            useHomeViewModel(driver, db) { fixture ->
-                setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
-                waitForIdle()
-                onAllNodesWithText(emptyText).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+        val (driver, db) = inMemoryDb()
+        val center = newCenter(0)
+        val notifVm = NotificationCenterViewModel(center, NotificationAlerts(center))
+        useHomeViewModel(driver, db) { fixture ->
+            setContent { ContentAreaTestHost(fixture.vm, notifVm, notifVm, PaneLayout.Triple, 1) }
+            waitForIdle()
+            onAllNodesWithText(emptyText).fetchSemanticsNodes().let { assertEquals(0, it.size) }
 
-                onNodeWithText(rowLabel).performClick()
-                waitForIdle()
+            onNodeWithText(rowLabel).performClick()
+            waitForIdle()
 
-                onNodeWithText(emptyText).assertExists()
-            }
+            onNodeWithText(emptyText).assertExists()
         }
     }
 
@@ -205,25 +204,9 @@ class NotificationCenterPlacementTest {
         runWithHost(PaneLayout.Triple, 1, notifications = 3, passNotifVmToFeedList = false) { assertEquals(0, it) }
     }
 
-    /**
-     * The panel is hosted in a Popup, whose content resolves Koin from the global context rather
-     * than the test's KoinApplication, so the Clock it injects is registered globally around [block].
-     */
-    private suspend fun withGlobalClock(block: suspend () -> Unit) {
-        val clockModule = module { single<Clock> { Clock { 0L } } }
-        // Another test may have left a global Koin started; load into it, or start one, then undo.
-        val startedHere = GlobalContext.getOrNull() == null
-        if (startedHere) startKoin { modules(clockModule) } else loadKoinModules(clockModule)
-        try {
-            block()
-        } finally {
-            if (startedHere) stopKoin() else unloadKoinModules(clockModule)
-        }
-    }
-
     @Test
     fun theRowShowsTheCountAndOpensThePanelOnClick() = runDesktopComposeUiTest {
-        withGlobalClock { runPanelScenario() }
+        runPanelScenario()
     }
 
     private suspend fun androidx.compose.ui.test.ComposeUiTest.runPanelScenario() {
